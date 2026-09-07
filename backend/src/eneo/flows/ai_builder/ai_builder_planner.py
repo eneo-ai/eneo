@@ -273,6 +273,7 @@ class AIBuilderPlanner:
         review_context: AIBuilderReviewReference | None = None,
         review_evidence: FlowReviewEvidence | None = None,
         evidence_floor: int = 0,
+        acts_on_review: bool = False,
         ui_language: str | None = None,
         completion_model_route: ResolvedCompletionModelRoute,
         available_models: list[AIBuilderAvailableModelResource] | None = None,
@@ -359,6 +360,7 @@ class AIBuilderPlanner:
                 else None
             ),
             evidence_floor=evidence_floor,
+            acts_on_review=acts_on_review,
         )
         if review_metadata:
             initial_metadata = {**(initial_metadata or {}), **review_metadata}

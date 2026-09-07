@@ -130,6 +130,10 @@ EDIT_CONTEXT_METADATA_KEY = "edit_context"
 REVIEW_CONTEXT_METADATA_KEY = "review_context"
 _REVIEW_REFERENCE_KINDS = ("flow_review", "flow_review_suggestion")
 EVIDENCE_FLOOR_METADATA_KEY = "evidence_floor"
+# Written on every accepted turn of a session that acts on a review, the way
+# the evidence floor is: the review reference lives on one message that
+# compaction may drop, and the review permission must outlive it.
+REVIEW_SESSION_METADATA_KEY = "acts_on_review"
 ASSISTANT_QUESTION_ID_METADATA_KEY = "question_id"
 ASSISTANT_QUESTION_INDEX_METADATA_KEY = "question_index"
 SLOT_CLASSIFICATION_METADATA_KEY = "slot_classification"
@@ -2343,17 +2347,27 @@ def is_server_authored_review_command(metadata: object) -> bool:
 def conversation_acts_on_a_review(
     conversation: Sequence[_ConversationMetadataMessage],
 ) -> bool:
-    """Whether any user turn of this session named a flow review.
+    """Whether this session acts on a flow review.
 
     The review permission is decided from this, not from a parsed reference:
     a session that read run evidence stays the review feature even when the
-    reference itself was written by an older build.
+    reference itself was written by an older build, and even after the
+    message that carried it was compacted away, because every accepted turn
+    since re-wrote the marker into the tail compaction keeps.
     """
 
-    return any(
-        message.role == "user" and names_a_review(message.metadata)
-        for message in conversation
-    )
+    for message in conversation:
+        if message.role != "user":
+            continue
+        if names_a_review(message.metadata):
+            return True
+        metadata_map = _metadata_mapping(message.metadata)
+        if (
+            metadata_map is not None
+            and metadata_map.get(REVIEW_SESSION_METADATA_KEY) is True
+        ):
+            return True
+    return False
 
 
 def semantic_conversation(
@@ -2484,6 +2498,7 @@ def metadata_for_user_message(
     review_context: AIBuilderReviewReference | None = None,
     review_evidence_level: int | None = None,
     evidence_floor: int | None = None,
+    acts_on_review: bool = False,
 ) -> FlowPersistedJsonObject | None:
     metadata: FlowPersistedJsonObject = {}
     if question_answer is not None:
@@ -2524,6 +2539,11 @@ def metadata_for_user_message(
         # evidence entered it, so the bounded tail that compaction keeps
         # always carries it.
         metadata[EVIDENCE_FLOOR_METADATA_KEY] = evidence_floor
+    if acts_on_review:
+        # The session's own fact, written on every accepted turn for the
+        # same reason as the floor. The floor cannot stand in for it: a
+        # review over level-0 evidence writes no floor.
+        metadata[REVIEW_SESSION_METADATA_KEY] = True
     return metadata or None
 
 

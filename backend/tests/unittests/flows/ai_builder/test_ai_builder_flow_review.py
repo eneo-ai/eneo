@@ -677,6 +677,51 @@ async def test_the_evidence_floor_persists_with_the_turn_and_never_drops(user):
     assert metadata_for_user_message(evidence_floor=0) is None
 
 
+def test_the_review_marker_survives_the_real_compactor_dropping_the_review_message(
+    user,
+):
+    """The review permission is decided from the retained conversation. The
+    reference lives on one message compaction drops; every accepted turn
+    since re-wrote the marker, so the tail still says the session acts on a
+    review. Over level-0 evidence no floor is written, so the floor cannot
+    stand in for it."""
+    from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+        conversation_acts_on_a_review,
+    )
+
+    review = metadata_for_user_message(
+        review_context=AIBuilderReviewContext(
+            flow_version=1, definition_checksum="a", finding_ids=["0" * 16]
+        ),
+        review_evidence_level=0,
+    )
+    assert review is not None and "evidence_floor" not in review
+    conversation = [
+        ConversationMessage(role="user", content="Förbered ändring", metadata=review),
+        ConversationMessage(role="assistant", content="Här är ett förslag."),
+    ]
+    for index in range(30):
+        conversation.append(
+            ConversationMessage(
+                role="user",
+                content=f"Mer {index}",
+                metadata=metadata_for_user_message(acts_on_review=True),
+            )
+        )
+        conversation.append(ConversationMessage(role="assistant", content="Ok."))
+    compacted = compact_ai_builder_conversation(
+        conversation, max_messages=12, tail_messages=8
+    )
+    assert len(compacted) < len(conversation)
+    assert all("review_context" not in (m.metadata or {}) for m in compacted)
+    assert conversation_acts_on_a_review(compacted)
+    # A plain turn of an ordinary session writes nothing.
+    assert metadata_for_user_message(acts_on_review=False) is None
+    assert not conversation_acts_on_a_review(
+        [ConversationMessage(role="user", content="Hej", metadata=None)]
+    )
+
+
 def test_the_floor_survives_the_real_compactor_dropping_the_review_message(user):
     """Compaction keeps a bounded tail; because every accepted turn since the
     review re-wrote the floor, the tail still carries it once the review

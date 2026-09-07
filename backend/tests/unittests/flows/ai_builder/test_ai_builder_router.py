@@ -420,6 +420,7 @@ def _make_container(
         review_context=None,
         review_evidence=None,
         evidence_floor=0,
+        acts_on_review=False,
         planner_context=SimpleNamespace(
             available_models=[],
             available_kbs=[],
@@ -2316,6 +2317,7 @@ class TestSendMessageEndpoint:
             review_context=None,
             review_evidence=None,
             evidence_floor=0,
+            acts_on_review=False,
             planner_context=SimpleNamespace(
                 available_models=[
                     {"id": str(model.id), "name": "GPT-4", "provider": "openai"}
@@ -2722,6 +2724,7 @@ class TestSendMessageEndpoint:
             review_context=None,
             review_evidence=None,
             evidence_floor=0,
+            acts_on_review=False,
             planner_context=SimpleNamespace(
                 available_models=[
                     {"id": str(model.id), "name": "GPT-4", "provider": "azure"}

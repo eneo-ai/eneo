@@ -1268,6 +1268,47 @@ async def test_accepted_turn_persists_the_evidence_floor_it_was_held_to(
     assert "review_context" not in (accepted.metadata or {})
 
 
+@pytest.mark.asyncio
+async def test_accepted_turn_persists_that_the_session_acts_on_a_review(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A later turn of a review session names no review itself; the accepted
+    message still carries the session's marker so the next turn is held to
+    the review permission once the opening message is compacted away."""
+    planner = _make_planner()
+    planner.repo.get_session.return_value = SimpleNamespace(
+        conversation=[],
+        status=SessionStatus.CHATTING,
+        planning_state_version=1,
+        latest_plan_id=None,
+    )
+    prepare = AsyncMock(side_effect=RuntimeError("accepted"))
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_planner.prepare_planner_request",
+        prepare,
+    )
+    stream = planner.send_message(
+        session_id=uuid4(),
+        client_turn_id=_TEST_CLIENT_TURN_ID,
+        request_fingerprint=_TEST_REQUEST_FINGERPRINT,
+        request_snapshot=_test_request_snapshot("Fortsätt"),
+        message="Fortsätt",
+        acts_on_review=True,
+        completion_model_route=_route(),
+        flow=cast(Any, SimpleNamespace(id=uuid4())),
+        max_input_tokens=4096,
+        max_output_tokens=1024,
+        budget_policy=_budget_policy(),
+    )
+    with pytest.raises(RuntimeError, match="accepted"):
+        async for _ in stream:
+            pass
+    accepted = planner.repo.get_session.return_value.conversation[-1]
+    assert accepted.role == "user"
+    assert (accepted.metadata or {}).get("acts_on_review") is True
+    assert "review_context" not in (accepted.metadata or {})
+
+
 def test_prepare_user_question_metadata_ingests_structured_slot_answer() -> None:
     result = prepare_user_question_metadata(
         conversation=[],
