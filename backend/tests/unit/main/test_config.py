@@ -11,6 +11,20 @@ def _with_worker_capacity(settings: Settings, **updates: int | None) -> Settings
     return settings.model_copy(update=updates)
 
 
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("db_pool_size", 0),
+        ("db_pool_max_overflow", -1),
+        ("db_pool_timeout", 0),
+        ("db_pool_recycle", -2),
+    ],
+)
+def test_invalid_database_pool_policy_is_rejected(field, value):
+    with pytest.raises(ValidationError, match=field):
+        Settings.model_validate({**get_settings().model_dump(), field: value})
+
+
 def test_crawl_capacity_defaults_to_the_dedicated_worker_capacity() -> None:
     settings = _with_worker_capacity(
         get_settings(),

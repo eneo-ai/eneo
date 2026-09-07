@@ -280,17 +280,13 @@ class Settings(BaseSettings):
     # See pool exhaustion analysis in plans/fuzzy-skipping-cray.md
     # NOTE: Defaults preserve current behavior (20/10/30). Change via env vars:
     #   DB_POOL_SIZE=25 DB_POOL_TIMEOUT=60 DB_POOL_PRE_PING=true DB_POOL_RECYCLE=3600
-    db_pool_size: int = (
-        20  # Base pool size (permanent connections) - default: current behavior
-    )
-    db_pool_max_overflow: int = 10  # Extra connections above pool_size (total max = 30)
-    db_pool_timeout: int = 30  # Seconds to wait for connection before raising error - default: SQLAlchemy default
+    db_pool_size: int = Field(default=20, gt=0)
+    db_pool_max_overflow: int = Field(default=10, ge=0)
+    db_pool_timeout: float = Field(default=30, gt=0)
     db_pool_pre_ping: bool = (
         True  # Verify connections before use - prevents stale connection errors
     )
-    db_pool_recycle: int = (
-        -1
-    )  # Recycle connections after N seconds (-1 = never) - default: SQLAlchemy default
+    db_pool_recycle: int = Field(default=-1, ge=-1)
     db_pool_debug: bool = (
         False  # Enable checkout duration logging (overhead; use for debugging only)
     )
