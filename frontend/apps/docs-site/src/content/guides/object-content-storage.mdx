@@ -12,8 +12,10 @@ import { Callout, Steps, Tabs } from "nextra/components";
 - A policy change affects new writes only. Existing content never moves
   implicitly.
 - The one-time [File and Icon storage
-  upgrade](/guides/file-icon-storage-upgrade) runs online after schema expansion
-  and is required for PostgreSQL-only installations too.
+  upgrade](/guides/file-icon-storage-upgrade) consolidates legacy bytes and their
+  storage rules in the shared module. It applies to PostgreSQL-only installations
+  too. Follow its numbered preparation, maintenance-window upgrade, online
+  adoption, and verification steps before optional S3 moves.
 - You can change to another S3-compatible service later: copy the bucket with
   your own tooling, then switch destination in **Admin > Storage**. The previous
   destination stays available so you can switch back.

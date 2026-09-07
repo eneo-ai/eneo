@@ -175,9 +175,8 @@ def postgres_container() -> Generator[PostgresContainer, None, None]:
     """
     Start a PostgreSQL container with pgvector extension for the test session.
     """
-    # Use postgres:16 with pgvector pre-installed
     postgres = PostgresContainer(
-        image="pgvector/pgvector:pg16",
+        image=os.environ.get("ENEO_TEST_POSTGRES_IMAGE", "pgvector/pgvector:pg16"),
         username="integration_test_user",
         password="integration_test_password",
         dbname="integration_test_db",

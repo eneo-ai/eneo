@@ -641,6 +641,24 @@ guide](https://docs.eneo.ai/guides/file-icon-storage-upgrade) for its operator
 checklist, disk and duration estimates, pause/rollback decisions, and cleanup.
 This section is the detailed SQL and recovery reference.
 
+The File/Icon upgrade consolidates durable bytes, integrity, storage policy and
+cleanup in the shared object-content module. It is a one-time migration for all
+installations with legacy content, including PostgreSQL-only installations.
+S3-compatible storage is optional and is not the reason the migration is required.
+
+The organizational sequence is:
+
+1. Restore and test the intended release with representative data. Measure legacy
+   payload size, reserve PostgreSQL/WAL headroom, and keep PostgreSQL inline selected.
+2. Drain old jobs, stop all old backend/worker processes, take the coordinated
+   recovery point, and run `db-init` with the API closed.
+3. Start the new release. Let bounded online adoption run, or acknowledge the
+   reported cumulative capacity above the default 5 GiB threshold.
+4. Monitor status, disk, WAL and request latency. Verify old/new content and a
+   restore of the new release after adoption completes.
+5. Optionally select S3-compatible storage and queue verified moves. Preserve the
+   old columns until the separate contract release; space reclamation is separate.
+
 Before an Eneo or object-store upgrade, take a paired backup and retain the old
 image digests. Upgrade the byte plane without changing endpoint semantics,
 credentials, bucket, or deployment ID. Verify liveness, readiness, single and
@@ -738,9 +756,8 @@ reported exact logical-byte requirement and recreate the worker. The
 acknowledgement does not reserve disk and the requirement is not peak
 allocation; it records that the operator has accepted the capacity plan. When the current
 Admin storage policy selects object storage, this inline worker does not start
-or silently redirect the campaign. Remote adoption requires the verified
-object-store adapter and changes the coordinated backup contract. Selecting
-PostgreSQL inline instead changes the deployment-wide target for eligible new
+or silently redirect the campaign. This release adopts legacy bytes into
+PostgreSQL inline. Selecting inline changes the deployment-wide target for eligible new
 writes; keep it selected until the campaign is complete, then reselect object
 storage and queue verified moves if required.
 Set `FILE_ICON_BACKFILL_AUTO_INLINE_MAX_BYTES=0` in `env_backend.env` when every
@@ -749,6 +766,48 @@ Waiting for capacity is non-fatal: the upgrade is complete, the application
 continues serving frozen legacy File/Icon content, and the worker emits a
 structured warning with the requirement and required acknowledgement on startup
 and every scheduled tick.
+
+### Inspect or pause the one-time File/Icon migration
+
+Run these commands inside the maintenance worker, using the deployment's Compose
+files, profiles and service name (`worker` in the reference deployment):
+
+```bash
+docker compose exec worker python -m eneo.object_content.file_icon_migration status
+docker compose exec worker python -m eneo.object_content.file_icon_migration pause
+docker compose exec worker python -m eneo.object_content.file_icon_migration resume
+```
+
+`status` reads a consistent, read-only snapshot of the temporary ledger/campaign
+and the command's environment settings. It never admits work, creates a campaign,
+or reads legacy payload bytes. Before campaign creation it checks for pending
+admission and, once admission has finished, may sum ready ledger metadata for
+`capacity_required_bytes`. This is an on-demand metadata scan, not a polling API.
+After creation, `capacity_required_bytes` is null and `capacity_admitted_bytes`
+reports the accepted cumulative exposure. The configured acknowledgement is not
+a measurement of free disk.
+
+`state` reports `preparing`, `waiting_for_capacity`, `waiting_for_object_store`,
+`active`, `halted` or `complete`; `detail` explains a wait or halt. `paused` is
+separate so a pause does not hide the underlying condition. Preparation and waits
+can exist without a campaign row. Run status in the worker container so its
+`configured_*` fields match the worker's environment; changing the env file alone
+does not update a running container.
+
+Pause updates one flag in `file_icon_backfill_admission_state` and serializes
+with new admission/claims through the existing admission lock. Once it commits,
+all replicas stop claiming migration work. A previously claimed bounded batch
+may finish, so retain headroom for that batch. The flag survives restarts and
+does not affect ordinary moves or other worker jobs. `resume` clears only that
+flag: it never changes the storage target, acknowledges capacity, clears a halt,
+increments the recovery revision, or rewrites ledger state. Use the recovery
+procedure below for a halted campaign. Stop the worker as well if its ongoing
+work must be interrupted.
+
+The command and pause field are temporary upgrade tooling and leave with the
+File/Icon ledger in the later contract release.
+
+### Bound throughput and recover a halted campaign
 
 Large installations can tune bounded throughput without changing application
 or tenant policy:
@@ -800,6 +859,36 @@ throughput. Before changing the batch limits, run a canary under representative
 traffic and monitor foreground p95/p99 latency, errors, database CPU and I/O,
 WAL/checkpoints, and batch duration. Restore the defaults if that traffic
 regresses.
+
+A repeatable PostgreSQL 13 check on 2026-09-07 copied about 1 GiB in 1,639 items
+with the default bounds: 36.49 seconds active time, 28.07 MiB/s, 17 runs
+(16.01 minutes at the normal cadence), 140 MiB worker peak RSS, 1.08 GiB
+generated WAL, 1.04 GiB additional database allocation, no temporary files,
+no failed items or digest mismatches, and all legacy rows preserved. The
+concurrent metadata SQL probe recorded p95 4.58 ms and p99 13.33 ms. This was
+a shared local Docker host with six CPUs and about 16 GiB assigned to Docker.
+It is a measurement of this workload, not a claimed speedup or production SLA.
+
+A separate authenticated ASGI test used the production upload, signed-download,
+and original-download routes against PostgreSQL 13 during bounded adoption.
+It passed 19 foreground rounds while adopting 20 legacy text items (983,040
+bytes) in ten copy batches, then verified every old and new payload again. It
+completed the concurrent phase in 4.71 seconds with no request or byte-check
+failure. This is API correctness evidence with a small fixture, not a latency
+benchmark for real users. It does not qualify ingestion, model providers,
+offline expansion, replicas, backup retention, or full restore behavior.
+
+The [raw results and frozen profile](benchmarks/file-icon-migration-pg13-20260907.json)
+record image, PostgreSQL settings, workload and source hashes. Reproduce the
+resource check with `ENEO_RUN_FILE_ICON_BACKFILL_BENCHMARK=1`,
+`ENEO_FILE_ICON_BENCHMARK_TOTAL_MIB=1024`, and
+`ENEO_FILE_ICON_BENCHMARK_FOREGROUND_PROBE=1` when running
+`tests/integration/object_content/test_file_icon_backfill_benchmark.py`.
+The API check is `test_file_icon_migration_traffic.py` in the same directory;
+set `ENEO_TEST_POSTGRES_IMAGE` to the profile's pinned PostgreSQL 13 image when
+running it. This optional test-fixture override leaves deployment images and
+the broader integration fixture's existing default unchanged.
+
 Only one worker replica may run a batch at a time. A PostgreSQL advisory lock
 prevents minute jobs from overlapping and multiplying the configured byte and
 memory bounds. Memory is bounded by one item rather than the campaign or batch

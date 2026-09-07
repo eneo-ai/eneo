@@ -1,0 +1,152 @@
+{
+  "measured_at": "2026-09-07",
+  "scope": "Local PostgreSQL 13 copy/resource measurement and a separate authenticated in-process ASGI correctness check. Not production-load or full-upgrade qualification.",
+  "profile": {
+    "base_head": "e42ad3b4d582beaa1049a7a4eaf8f4fe56f56432",
+    "files_sha256": {
+      "src/eneo/object_content/file_icon_backfill.py": "ef43d8f55cc956db3221fc60914b604e3f4631d62009f7da50d6eec8bd39ed19",
+      "src/eneo/database/tables/file_icon_backfill_table.py": "705481df43d5a14504219c7f31ca99556ed53660018fc2730e3eeddf669beebd",
+      "tests/integration/object_content/test_file_icon_backfill_benchmark.py": "f286f7730b5ade2844e07627136bef6260d84a2a86214660fa0a7a9d12289596"
+    },
+    "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+    "postgres_image": "pgvector/pgvector:pg13@sha256:751a89c96f7c32cb8133472f711c274853378fb5f8b55dd9fa0e9d3f1471bfc3",
+    "target_mib": 1024,
+    "item_kib": 640,
+    "batch_rows": 200,
+    "batch_mib": 128,
+    "foreground": "metadata SELECT every 50ms; separate authenticated ASGI correctness test",
+    "acceptance": "all seeded items done, zero failures/digest mismatches, legacy rows preserved; report measured wall time/resources without asserting production throughput",
+    "environment": "local Docker, shared developer host; no production traffic, replicas, backups or offline upgrade timing",
+    "docker_resources": "6 CPUs; 16820240384 memory bytes"
+  },
+  "copy_resource_measurement": {
+    "backfill": {
+      "active_mib_per_second": 28.072946351806486,
+      "active_seconds": 36.48975733300904,
+      "admitted_count": 1639,
+      "batch_count": 17,
+      "batch_current_rss_bytes": [
+        145571840,
+        145670144,
+        145735680,
+        145784832,
+        145801216,
+        145850368,
+        145850368,
+        145850368,
+        146554880,
+        140476416,
+        133840896,
+        133971968,
+        134037504,
+        134152192,
+        134168576,
+        134316032,
+        134332416
+      ],
+      "batch_max_rss_bytes": [
+        145588224,
+        145686528,
+        145752064,
+        145801216,
+        145817600,
+        145866752,
+        145866752,
+        145866752,
+        146571264,
+        146833408,
+        146833408,
+        146833408,
+        146833408,
+        146833408,
+        146833408,
+        146833408,
+        146833408
+      ],
+      "batch_seconds_max": 6.385331208992284,
+      "batch_seconds_mean": 2.1390208187684254,
+      "batch_seconds_p50": 0.8729033750132658,
+      "batch_seconds_p95": 5.169783791992813,
+      "claimed_count": 1639,
+      "completed_count": 1639,
+      "projected_minute_cron_seconds": 960.8729033750133
+    },
+    "config": {
+      "batch_mib": 128,
+      "batch_rows": 200,
+      "item_kib": 640,
+      "seed_rows_per_transaction": 64,
+      "total_mib": 1024
+    },
+    "environment": {
+      "object_content_inline_io_chunk_bytes": 262144,
+      "object_content_inline_maximum_bytes": 209715200,
+      "platform": "macOS-26.5.2-arm64-arm-64bit",
+      "postgres": {
+        "checkpoint_completion_target": "0.5",
+        "max_wal_size": "1GB",
+        "server_version": "13.23 (Debian 13.23-1.pgdg12+1)",
+        "shared_buffers": "128MB",
+        "synchronous_commit": "on",
+        "wal_compression": "off",
+        "work_mem": "4MB"
+      },
+      "python": "3.11.14"
+    },
+    "foreground_latency": {
+      "sample_count": 728,
+      "seconds_max": 0.023749458021484315,
+      "seconds_p50": 0.0016789170040283352,
+      "seconds_p95": 0.004584375012200326,
+      "seconds_p99": 0.013333667011465877
+    },
+    "resources": {
+      "database_bytes_after": 2253967919,
+      "database_bytes_before": 1133384239,
+      "files_bytes_after": 1115824128,
+      "files_bytes_before": 1115824128,
+      "inline_bytes_after": 1115471872,
+      "inline_bytes_before": 16384,
+      "postgres_blocks_hit": 2315497,
+      "postgres_blocks_read": 277760,
+      "postgres_temp_bytes": 0,
+      "process_cpu_seconds": 10.654034999999999,
+      "process_cpu_utilization_percent": 29.197330370740065,
+      "process_system_seconds": 1.424748,
+      "process_user_seconds": 9.229287,
+      "wal_bytes": 1162983200,
+      "worker_current_rss_bytes_after": 134348800,
+      "worker_current_rss_bytes_before": 133578752,
+      "worker_max_rss_bytes_after": 146833408,
+      "worker_max_rss_bytes_before": 133775360,
+      "worker_rss_growth_limit_bytes": 67108864
+    },
+    "seed": {
+      "item_count": 1639,
+      "mib_per_second": 172.70735428441537,
+      "seconds": 5.931276084011188,
+      "seeded_bytes": 1074135040
+    },
+    "verification": {
+      "campaign_state": "complete",
+      "content_bytes": 1074135040,
+      "digest_mismatch_count": 0,
+      "done_count": 1639,
+      "failed_count": 0,
+      "inline_count": 1639,
+      "preserved_legacy_count": 1639,
+      "reference_count": 1639
+    }
+  },
+  "authenticated_api_check": {
+    "active_copy_rounds": 10,
+    "elapsed_seconds": 4.7075112919847015,
+    "failed_requests_or_byte_mismatches": 0,
+    "foreground_rounds": 19,
+    "legacy_bytes": 983040,
+    "legacy_items": 20,
+    "max_foreground_round_seconds": 0.9553203750110697,
+    "postgres_version": "13.23 (Debian 13.23-1.pgdg12+1)",
+    "transport": "in-process ASGI; real authenticated production routes"
+  }
+}
