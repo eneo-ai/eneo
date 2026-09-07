@@ -43,6 +43,43 @@ def migration_database(request):
         yield database_url, config
 
 
+@pytest.mark.parametrize("migration_database", ["3eb6a34b6733"], indirect=True)
+def test_preflight_inspects_released_schema_before_page_parent_column(
+    migration_database,
+):
+    database_url, config = migration_database
+    tenant_id, user_id, file_id = (str(uuid4()) for _ in range(3))
+    with _connect(database_url) as connection, connection.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO tenants (id, name, quota_limit, state) "
+            "VALUES (%s, %s, 1000000, 'active')",
+            (tenant_id, f"released-preflight-{tenant_id}"),
+        )
+        cursor.execute(
+            "INSERT INTO users (id, tenant_id, username, email, used_tokens, state) "
+            "VALUES (%s, %s, 'legacy', %s, 0, 'active')",
+            (user_id, tenant_id, f"{user_id}@example.test"),
+        )
+        cursor.execute(
+            "INSERT INTO files (id, name, blob, checksum, size, mimetype, "
+            "file_type, user_id, tenant_id) "
+            "VALUES (%s, 'old.png', %s, 'old', 5, 'image/png', 'image', %s, %s)",
+            (file_id, b"image", user_id, tenant_id),
+        )
+    result = asyncio.run(run_file_icon_preflight(database_url))
+    assert result.outcome == "ready", result.blockers
+    assert [(row.variant, row.remaining_bytes) for row in result.variants] == [
+        ("legacy_image", 5)
+    ]
+
+    command.upgrade(config, "202607231745")
+    expanded = asyncio.run(run_file_icon_preflight(database_url))
+    assert expanded.outcome == "ready", expanded.blockers
+    assert [asdict(row) for row in expanded.variants] == [
+        asdict(row) for row in result.variants
+    ]
+
+
 def test_preflight_matches_frozen_inventory_without_changing_legacy_database(
     migration_database,
 ):

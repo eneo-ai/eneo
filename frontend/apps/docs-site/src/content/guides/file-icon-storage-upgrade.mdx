@@ -598,6 +598,11 @@ Worker completion opens a verification period; it does not delete the old
 bytes. This preserves a recovery source while operators test real files and a
 current restore.
 
+Keep the bridge release running through this period. Existing installations must
+finish its online work before installing the later contraction release. The
+published bridge version, supported upgrade sources, and verification window
+must be part of that release's instructions.
+
 1. Confirm campaign state `complete` and no `pending`, `ready`, `leased`, or
    `failed` ledger rows.
 2. Download representative old text, PDF/image, audio/transcription, and Icon
@@ -607,9 +612,10 @@ current restore.
 4. Keep the pre-upgrade recovery point until the restore succeeds and your
    retention policy permits removal.
 5. Install the later contract release during a planned window. Its migration
-   must lock and recheck every surviving File/Icon reference as `available` in
-   the same transaction that drops legacy columns. Ledger completion alone is
-   not enough.
+   must fence writers and verify every remaining legacy source and exact
+   surviving File/Icon reference in the same transaction that drops legacy
+   columns. Matching available content must cover the actual sources; ledger
+   completion alone is not enough. This closes direct rollback to the old image.
 6. Reclaim filesystem space only if measurements justify it.
 
 Dropping legacy columns is metadata-only in PostgreSQL. It does not rewrite the
