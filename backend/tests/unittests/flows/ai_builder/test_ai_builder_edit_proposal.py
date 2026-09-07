@@ -50,7 +50,10 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     build_schema_evidence,
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
-from eneo.flows.ai_builder.ai_builder_tools import build_native_strict_tool_schema
+from eneo.flows.ai_builder.ai_builder_tools import (
+    admit_propose_flow_tool_arguments,
+    build_native_strict_tool_schema,
+)
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
     ConfirmedRuntimeMetadataField,
@@ -3184,7 +3187,12 @@ def _admitted_by_the_review_schema(
     if "removed_existing_step_refs" in parameters["properties"]:
         arguments["removed_existing_step_refs"] = []
     jsonschema.validate(arguments, parameters)
-    return arguments
+    # What production admits is what is processed: the strict check above is
+    # the provider's, this is the server's.
+    return admit_propose_flow_tool_arguments(
+        arguments=arguments,
+        tool_schema=schema,  # type: ignore[arg-type]
+    )
 
 
 def test_the_models_own_changes_are_the_diff_net_of_the_housekeeping() -> None:
