@@ -181,7 +181,7 @@ def test_turn_call_records_are_the_usage_and_call_count_owner() -> None:
     request_budget = AIBuilderRequestBudget(
         context_window_tokens=32_000,
         model_output_ceiling_tokens=16_000,
-        target_output_tokens=8_000,
+        output_reserve_tokens=8_000,
         minimum_output_tokens=1_024,
         safety_buffer_tokens=2_000,
         timeout_seconds=180.0,
@@ -218,8 +218,8 @@ def test_turn_call_records_are_the_usage_and_call_count_owner() -> None:
         "token_usage_estimated": False,
         "context_window_tokens": 32_000,
         "model_output_ceiling_tokens": 16_000,
-        "target_output_tokens": 8_000,
-        "effective_output_tokens": 8_000,
+        "output_reserve_tokens": 8_000,
+        "effective_output_tokens": 16_000,
         "fixed_input_tokens": 6_000,
         "safety_buffer_tokens": 2_000,
         "timeout_seconds": 180.0,
@@ -238,7 +238,7 @@ def test_turn_call_records_are_the_usage_and_call_count_owner() -> None:
     assert metadata is not None
     assert (
         metadata["planner_telemetry"]["call_records"][0]["effective_output_tokens"]
-        == 8_000
+        == 16_000
     )
     summary = metadata["session_telemetry"]
     assert summary["prompt_tokens_total"] == 7

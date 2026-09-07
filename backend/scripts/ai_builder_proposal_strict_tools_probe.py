@@ -1004,7 +1004,7 @@ async def run_probe_call(
             + measured.max_output_tokens
         ),
         model_output_ceiling_tokens=measured.max_output_tokens,
-        target_output_tokens=measured.max_output_tokens,
+        output_reserve_tokens=measured.max_output_tokens,
         minimum_output_tokens=1,
         safety_buffer_tokens=0,
         timeout_seconds=_PROBE_TIMEOUT_SECONDS,

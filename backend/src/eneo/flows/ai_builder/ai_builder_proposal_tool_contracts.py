@@ -296,7 +296,20 @@ def fit_proposal_request_budget(
         model_name=model_name,
     )
     assert fitted is not None, "resolved protected proposal context must fit"
-    return fitted, resolved
+    # The cap the provider is told belongs to the request that is sent, not
+    # to its protected core: whatever room the fitted input leaves is the
+    # model's, up to its ceiling. One more measurement of the fitted messages
+    # buys that.
+    sent = budget.resolve(
+        input_tokens=tool_tokens
+        + measure_provider_input_reserve(
+            [dict(message) for message in flatten_proposal_message_groups(fitted)],
+            [],
+            model_name,
+        ).tokens
+    )
+    assert sent is not None, "a fitted proposal request keeps its reserved room"
+    return fitted, sent
 
 
 @dataclass(frozen=True)

@@ -210,8 +210,8 @@ def _call_record_metadata(record: ProposalCallRecord) -> PlannerCallRecordMetada
         model_output_ceiling_tokens=(
             budget.model_output_ceiling_tokens if budget is not None else None
         ),
-        target_output_tokens=(
-            budget.target_output_tokens if budget is not None else None
+        output_reserve_tokens=(
+            budget.output_reserve_tokens if budget is not None else None
         ),
         effective_output_tokens=(
             budget.resolved_output_tokens if budget is not None else None

@@ -19,12 +19,15 @@ from eneo.flows.flow_ai_builder_budget_settings import (
 )
 from eneo.main.config import get_settings
 
-# Model-agnostic product targets. Capability remains a ceiling; the proposal
-# target retains headroom above observed successful Builder calls without
-# permitting runaway malformed output. Minimums are usefulness floors.
-AI_BUILDER_CLASSIFICATION_OUTPUT_TARGET_TOKENS = 4_096
+# What a model may write is bounded by its declared output ceiling and by the
+# room the request leaves in its window, nothing else. The reserves below are
+# for input planning: while history, attachments and evidence are packed, this
+# much room is kept free for the answer, so the input never crowds it out.
+# Minimums are usefulness floors; a request that cannot keep them is refused
+# rather than sent to be cut off.
+AI_BUILDER_CLASSIFICATION_OUTPUT_RESERVE_TOKENS = 4_096
 AI_BUILDER_CLASSIFICATION_MINIMUM_OUTPUT_TOKENS = 256
-AI_BUILDER_PROPOSAL_OUTPUT_TARGET_TOKENS = 6_144
+AI_BUILDER_PROPOSAL_OUTPUT_RESERVE_TOKENS = 6_144
 AI_BUILDER_PROPOSAL_MINIMUM_OUTPUT_TOKENS = 1_024
 AI_BUILDER_CLASSIFICATION_TIMEOUT_SECONDS = 60.0
 AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS = 180.0
@@ -34,7 +37,8 @@ AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS = 180.0
 class AIBuilderRequestBudget:
     context_window_tokens: int
     model_output_ceiling_tokens: int
-    target_output_tokens: int
+    # The answer room input planning keeps free; see the module constants.
+    output_reserve_tokens: int
     minimum_output_tokens: int
     safety_buffer_tokens: int
     timeout_seconds: float
@@ -44,53 +48,76 @@ class AIBuilderRequestBudget:
         positive_values = {
             "context window": self.context_window_tokens,
             "model output ceiling": self.model_output_ceiling_tokens,
-            "output target": self.target_output_tokens,
+            "output reserve": self.output_reserve_tokens,
             "minimum output": self.minimum_output_tokens,
         }
         for name, value in positive_values.items():
             if value < 1:
                 raise ValueError(f"AI Builder {name} must be positive")
-        if self.minimum_output_tokens > self.target_output_tokens:
-            raise ValueError("AI Builder minimum output cannot exceed its target")
+        if self.minimum_output_tokens > self.output_reserve_tokens:
+            raise ValueError("AI Builder minimum output cannot exceed its reserve")
         if self.safety_buffer_tokens < 0:
             raise ValueError("AI Builder safety buffer cannot be negative")
         if self.timeout_seconds <= 0:
             raise ValueError("AI Builder request timeout must be positive")
 
-    def preferred_output_tokens(self, *, input_tokens: int) -> int:
-        if input_tokens < 0:
-            raise ValueError("AI Builder input tokens cannot be negative")
+    def output_reserve_for(self, *, input_tokens: int) -> int:
+        """The answer room input planning protects beside this input.
+
+        The reserve, or less when the model's ceiling or the room this input
+        leaves is smaller. Callers that decide how much history, evidence or
+        attachment text to pack plan against this number.
+        """
+
         return max(
             0,
             min(
-                self.target_output_tokens,
+                self.output_reserve_tokens,
                 self.model_output_ceiling_tokens,
-                self.context_window_tokens - self.safety_buffer_tokens - input_tokens,
+                self._room_after(input_tokens),
             ),
         )
 
-    def resolve(self, *, input_tokens: int) -> AIBuilderResolvedRequestBudget | None:
-        effective_output_tokens = self.preferred_output_tokens(
-            input_tokens=input_tokens
+    def provider_output_cap(self, *, input_tokens: int) -> int:
+        """What the model is told it may write: its ceiling within the room
+        this input leaves. A fixed number below the ceiling cut a proposal off
+        on a route that could have finished it, so no such number exists here.
+        """
+
+        return max(
+            0, min(self.model_output_ceiling_tokens, self._room_after(input_tokens))
         )
-        if effective_output_tokens < self.minimum_output_tokens:
+
+    def _room_after(self, input_tokens: int) -> int:
+        if input_tokens < 0:
+            raise ValueError("AI Builder input tokens cannot be negative")
+        return self.context_window_tokens - self.safety_buffer_tokens - input_tokens
+
+    def resolve(self, *, input_tokens: int) -> AIBuilderResolvedRequestBudget | None:
+        reserved_output_tokens = self.output_reserve_for(input_tokens=input_tokens)
+        if reserved_output_tokens < self.minimum_output_tokens:
             return None
         return AIBuilderResolvedRequestBudget(
             context_window_tokens=self.context_window_tokens,
             model_output_ceiling_tokens=self.model_output_ceiling_tokens,
-            target_output_tokens=self.target_output_tokens,
+            output_reserve_tokens=self.output_reserve_tokens,
             minimum_output_tokens=self.minimum_output_tokens,
             safety_buffer_tokens=self.safety_buffer_tokens,
             timeout_seconds=self.timeout_seconds,
             request_id=self.request_id,
             fixed_input_tokens=input_tokens,
-            effective_output_tokens=effective_output_tokens,
+            reserved_output_tokens=reserved_output_tokens,
+            effective_output_tokens=self.provider_output_cap(input_tokens=input_tokens),
         )
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class AIBuilderResolvedRequestBudget(AIBuilderRequestBudget):
     fixed_input_tokens: int
+    # What input planning keeps free beside `fixed_input_tokens`, and what the
+    # provider is told the model may write. The second is never below the
+    # first while the input stays within `available_input_tokens`.
+    reserved_output_tokens: int
     effective_output_tokens: int
 
     @property
@@ -103,7 +130,7 @@ class AIBuilderResolvedRequestBudget(AIBuilderRequestBudget):
             0,
             self.context_window_tokens
             - self.safety_buffer_tokens
-            - self.effective_output_tokens,
+            - self.reserved_output_tokens,
         )
 
 
@@ -140,7 +167,7 @@ class AIBuilderBudgetPolicy:
         return AIBuilderRequestBudget(
             context_window_tokens=context_window_tokens,
             model_output_ceiling_tokens=model_output_ceiling_tokens,
-            target_output_tokens=AI_BUILDER_CLASSIFICATION_OUTPUT_TARGET_TOKENS,
+            output_reserve_tokens=AI_BUILDER_CLASSIFICATION_OUTPUT_RESERVE_TOKENS,
             minimum_output_tokens=AI_BUILDER_CLASSIFICATION_MINIMUM_OUTPUT_TOKENS,
             safety_buffer_tokens=self.conversation_safety_buffer_tokens,
             timeout_seconds=self.classification_timeout_seconds,
@@ -164,7 +191,7 @@ class AIBuilderBudgetPolicy:
         return AIBuilderRequestBudget(
             context_window_tokens=self.review_evidence_window(context_window_tokens),
             model_output_ceiling_tokens=model_output_ceiling_tokens,
-            target_output_tokens=AI_BUILDER_CLASSIFICATION_OUTPUT_TARGET_TOKENS,
+            output_reserve_tokens=AI_BUILDER_CLASSIFICATION_OUTPUT_RESERVE_TOKENS,
             minimum_output_tokens=AI_BUILDER_CLASSIFICATION_MINIMUM_OUTPUT_TOKENS,
             safety_buffer_tokens=self.conversation_safety_buffer_tokens,
             timeout_seconds=self.proposal_timeout_seconds,
@@ -196,14 +223,14 @@ class AIBuilderBudgetPolicy:
                 else context_window_tokens
             ),
             model_output_ceiling_tokens=model_output_ceiling_tokens,
-            target_output_tokens=AI_BUILDER_PROPOSAL_OUTPUT_TARGET_TOKENS,
+            output_reserve_tokens=AI_BUILDER_PROPOSAL_OUTPUT_RESERVE_TOKENS,
             minimum_output_tokens=AI_BUILDER_PROPOSAL_MINIMUM_OUTPUT_TOKENS,
             safety_buffer_tokens=self.conversation_safety_buffer_tokens,
             timeout_seconds=self.proposal_timeout_seconds,
             request_id=request_id,
         )
 
-    def preferred_proposal_output_tokens(
+    def reserved_proposal_output_tokens(
         self,
         *,
         context_window_tokens: int,
@@ -213,7 +240,7 @@ class AIBuilderBudgetPolicy:
         return self.proposal_request_budget(
             context_window_tokens=context_window_tokens,
             model_output_ceiling_tokens=model_output_ceiling_tokens,
-        ).preferred_output_tokens(input_tokens=fixed_input_tokens)
+        ).output_reserve_for(input_tokens=fixed_input_tokens)
 
 
 def _default_policy(defaults: Any | None = None) -> AIBuilderBudgetPolicy:

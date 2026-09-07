@@ -131,7 +131,7 @@ def _completion_request(
         AIBuilderRequestBudget(
             context_window_tokens=100_000,
             model_output_ceiling_tokens=max_output_tokens,
-            target_output_tokens=max_output_tokens,
+            output_reserve_tokens=max_output_tokens,
             minimum_output_tokens=1,
             safety_buffer_tokens=0,
             timeout_seconds=180.0,
@@ -163,7 +163,7 @@ def _request_budget(
     return AIBuilderRequestBudget(
         context_window_tokens=context_window_tokens,
         model_output_ceiling_tokens=output_tokens,
-        target_output_tokens=output_tokens,
+        output_reserve_tokens=output_tokens,
         minimum_output_tokens=minimum_output_tokens,
         safety_buffer_tokens=safety_buffer_tokens,
         timeout_seconds=timeout_seconds,
@@ -1454,6 +1454,66 @@ def test_request_budget_evicts_oldest_optional_groups_and_preserves_repair_conte
         tool_feedback,
     ]
     assert resolved.resolved_output_tokens == 1
+
+
+def test_the_provider_cap_follows_the_request_that_is_sent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system_message = {"role": "system", "content": "system"}
+    history = {"role": "user", "content": "older turn"}
+    current_turn = {"role": "user", "content": "current turn"}
+    groups = (
+        ProposalMessageGroup(
+            messages=(system_message,),  # type: ignore[arg-type]
+            kind="system",
+            protected=True,
+        ),
+        ProposalMessageGroup(
+            messages=(history,),  # type: ignore[arg-type]
+            kind="history",
+            protected=False,
+        ),
+        ProposalMessageGroup(
+            messages=(current_turn,),  # type: ignore[arg-type]
+            kind="current_turn",
+            protected=True,
+        ),
+    )
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_proposal_tool_contracts.measure_provider_input_reserve",
+        lambda candidate, _tools, _model: SimpleNamespace(tokens=len(candidate) * 10),
+    )
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_proposal_tool_contracts.count_tool_tokens",
+        lambda _tools, _model: 0,
+    )
+
+    def budget(context_window_tokens: int) -> AIBuilderRequestBudget:
+        return AIBuilderRequestBudget(
+            context_window_tokens=context_window_tokens,
+            model_output_ceiling_tokens=60,
+            output_reserve_tokens=10,
+            minimum_output_tokens=1,
+            safety_buffer_tokens=0,
+            timeout_seconds=180.0,
+        )
+
+    # The history fits beside the reserve; the model may then write into the
+    # room the whole request leaves, up to its ceiling.
+    fitted, resolved = fit_proposal_request_budget(
+        budget=budget(100), message_groups=groups, tool_schemas=[], model_name="test"
+    )
+    assert len(flatten_proposal_message_groups(fitted)) == 3
+    assert resolved.fixed_input_tokens == 30
+    assert resolved.resolved_output_tokens == 60
+
+    # A tighter window leaves less, never less than the reserve the input was
+    # planned against.
+    fitted, resolved = fit_proposal_request_budget(
+        budget=budget(50), message_groups=groups, tool_schemas=[], model_name="test"
+    )
+    assert len(flatten_proposal_message_groups(fitted)) == 3
+    assert resolved.resolved_output_tokens == 20
 
 
 @pytest.mark.asyncio

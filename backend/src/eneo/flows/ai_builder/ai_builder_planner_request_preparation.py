@@ -271,7 +271,7 @@ async def prepare_planner_request(
             policy=request.attachment_context_policy,
             model_name=request.completion_model_route.litellm_model,
             max_input_tokens=request.max_input_tokens,
-            max_output_tokens=request.budget_policy.preferred_proposal_output_tokens(
+            max_output_tokens=request.budget_policy.reserved_proposal_output_tokens(
                 context_window_tokens=request.max_input_tokens,
                 model_output_ceiling_tokens=request.max_output_tokens,
                 fixed_input_tokens=(
@@ -909,7 +909,7 @@ def _proposal_system_prompt_token_limit(
     """What the model can actually carry as a system prompt this turn."""
 
     tool_tokens = count_tool_tokens(turn_tool_schemas, litellm_model)
-    output_tokens = request_budget.preferred_output_tokens(
+    output_tokens = request_budget.output_reserve_for(
         input_tokens=(tool_tokens + budget_policy.minimum_conversation_budget_tokens)
     )
     return max(
@@ -1075,7 +1075,7 @@ def _prepare_prompt_messages(
         [{"role": "system", "content": system_prompt}],
         litellm_model,
     )
-    output_tokens = request_budget.preferred_output_tokens(
+    output_tokens = request_budget.output_reserve_for(
         input_tokens=(prompt_tokens + budget_policy.minimum_conversation_budget_tokens)
     )
     conversation_budget = compute_conversation_token_budget(

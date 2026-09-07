@@ -7,6 +7,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorCode,
 )
 from eneo.flows.ai_builder.ai_builder_settings import (
+    AI_BUILDER_PROPOSAL_OUTPUT_RESERVE_TOKENS,
     AIBuilderBudgetPolicy,
     apply_ai_builder_budget_policy_patch,
     resolve_ai_builder_budget_policy,
@@ -76,29 +77,47 @@ def test_ai_builder_policy_rejects_operating_limits_above_system_ceiling(
     assert exc_info.value.code is AIBuilderErrorCode.INVALID_AI_BUILDER_SETTINGS
 
 
-def test_proposal_budget_clamps_capabilities_without_model_specific_rules() -> None:
+def test_the_provider_cap_is_the_models_ceiling_within_the_room_left() -> None:
     policy = AIBuilderBudgetPolicy(
         conversation_safety_buffer_tokens=2_000,
         minimum_conversation_budget_tokens=4_000,
     )
 
-    resolved_outputs = []
-    for output_ceiling in (32_768, 131_072):
+    def cap(output_ceiling: int, *, input_tokens: int = 20_000) -> int:
         budget = policy.proposal_request_budget(
             context_window_tokens=131_072,
             model_output_ceiling_tokens=output_ceiling,
-        ).resolve(input_tokens=20_000)
+        ).resolve(input_tokens=input_tokens)
         assert budget is not None
-        resolved_outputs.append(budget.resolved_output_tokens)
+        return budget.resolved_output_tokens
 
-    smaller_budget = policy.proposal_request_budget(
+    # The ceiling is the model's own, never a fixed number below it.
+    assert cap(32_768) == 32_768
+    assert cap(131_072) == 131_072 - 2_000 - 20_000
+    assert cap(4_096) == 4_096
+    # A nearly full window leaves the model what remains.
+    assert cap(131_072, input_tokens=131_072 - 2_000 - 8_000) == 8_000
+
+
+def test_input_planning_keeps_the_answer_reserve_free() -> None:
+    policy = AIBuilderBudgetPolicy(
+        conversation_safety_buffer_tokens=2_000,
+        minimum_conversation_budget_tokens=4_000,
+    )
+    budget = policy.proposal_request_budget(
         context_window_tokens=131_072,
-        model_output_ceiling_tokens=4_096,
-    ).resolve(input_tokens=20_000)
+        model_output_ceiling_tokens=131_072,
+    )
 
-    assert resolved_outputs == [6_144, 6_144]
-    assert smaller_budget is not None
-    assert smaller_budget.resolved_output_tokens == 4_096
+    resolved = budget.resolve(input_tokens=20_000)
+    assert resolved is not None
+    assert resolved.reserved_output_tokens == AI_BUILDER_PROPOSAL_OUTPUT_RESERVE_TOKENS
+    assert (
+        resolved.available_input_tokens
+        == 131_072 - 2_000 - AI_BUILDER_PROPOSAL_OUTPUT_RESERVE_TOKENS
+    )
+    # Below the usefulness floor the request is refused, not sent to be cut off.
+    assert budget.resolve(input_tokens=131_072 - 2_000 - 1_000) is None
 
 
 def test_review_evidence_cap_is_the_models_window_unless_the_tenant_caps_it() -> None:

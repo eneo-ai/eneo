@@ -615,11 +615,11 @@ async def generate_review_suggestions(
             + response_format_tokens
         )
 
-    # The answer keeps its target size (or the model's ceiling when that is
+    # The answer keeps its reserve (or the model's ceiling when that is
     # lower): the evidence may fill the window only up to where it would
     # start eroding the answer, and a scaffold that already does is refused.
     answer_tokens = min(
-        request_budget.target_output_tokens, request_budget.model_output_ceiling_tokens
+        request_budget.output_reserve_tokens, request_budget.model_output_ceiling_tokens
     )
 
     def fits(candidate: FlowReviewSample) -> bool:
