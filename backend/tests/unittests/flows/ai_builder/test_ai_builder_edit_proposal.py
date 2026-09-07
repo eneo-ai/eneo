@@ -2978,6 +2978,129 @@ async def test_a_review_turn_may_not_change_a_step_the_findings_do_not_name():
 
 
 @pytest.mark.asyncio
+async def test_a_review_turn_is_not_blamed_for_the_compilers_housekeeping():
+    """The compiler normalises a persisted shape on every edit.
+
+    A transcription step ahead of a bare audio input and a document step's
+    output mode are the compiler's doing, not the model reaching past the
+    findings; held against them the bounded turn could never be admitted and
+    the model could not undo them. The scope is held to the model's own
+    changes, and the plan the user approves still shows all of them.
+    """
+    flow = _audio_document_flow()
+
+    result = await _process(
+        flow=flow,
+        arguments={
+            "plan_rationale": "Steg 1 får tydligare instruktioner.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "assistant_spec": {
+                        "instructions": "Fånga mötets syfte, deltagare och beslut."
+                    },
+                },
+                {"kind": "keep", "existing_step_ref": "existing_step_2"},
+                {"kind": "keep", "existing_step_ref": "existing_step_3"},
+                {"kind": "keep", "existing_step_ref": "existing_step_4"},
+            ],
+        },
+        conversation=_review_command_conversation(),
+    )
+
+    assert isinstance(result, ProposalReady), getattr(result, "feedback", result)
+    steps = result.compiled.content.spec.steps
+    assert steps[0].existing_step_ref is None  # the compiler's transcription step
+    assert steps[1].existing_step_ref == "existing_step_1"
+    assert steps[1].assistant_spec.instructions == (
+        "Fånga mötets syfte, deltagare och beslut."
+    )
+    edit = result.compiled.content.edit
+    assert edit is not None
+    by_kind = {
+        kind: [
+            c.step_ref or c.step_name for c in edit.diff.step_changes if c.kind == kind
+        ]
+        for kind in ("added", "modified", "unchanged")
+    }
+    assert by_kind["added"] == ["Transkribera ljud"]
+    assert by_kind["modified"] == ["existing_step_1", "existing_step_4"]
+    assert by_kind["unchanged"] == ["existing_step_2", "existing_step_3"]
+
+
+def test_the_models_own_changes_are_the_diff_net_of_the_housekeeping() -> None:
+    from eneo.flows.ai_builder.ai_builder_edit_preview_models import (
+        FlowEditDiff,
+        StepChange,
+        StepFieldChange,
+    )
+    from eneo.flows.ai_builder.ai_builder_flow_review import (
+        review_edit_changes_of_the_model,
+    )
+
+    housekeeping = FlowEditDiff(
+        step_changes=[
+            StepChange(kind="added", step_name="Transkribera ljud"),
+            StepChange(
+                kind="modified",
+                step_name="Skapa PDF",
+                step_ref="existing_step_4",
+                field_changes=[
+                    StepFieldChange(
+                        field="output_mode",
+                        previous="pass_through",
+                        current="render_verbatim",
+                    )
+                ],
+            ),
+        ]
+    )
+    diff = FlowEditDiff(
+        step_changes=[
+            StepChange(kind="added", step_name="Transkribera ljud"),
+            StepChange(
+                kind="modified",
+                step_name="Etablera",
+                step_ref="existing_step_1",
+                field_changes=[
+                    StepFieldChange(field="instructions", previous=None, current="Ny.")
+                ],
+            ),
+            StepChange(
+                kind="modified",
+                step_name="Skapa PDF",
+                step_ref="existing_step_4",
+                field_changes=[
+                    StepFieldChange(
+                        field="output_mode",
+                        previous="pass_through",
+                        current="render_verbatim",
+                    ),
+                    StepFieldChange(field="name", previous="Skapa PDF", current="PDF"),
+                ],
+            ),
+        ]
+    )
+
+    own = review_edit_changes_of_the_model(diff, housekeeping=housekeeping)
+
+    assert [(c.kind, c.step_ref) for c in own.step_changes] == [
+        ("modified", "existing_step_1"),
+        ("modified", "existing_step_4"),
+    ]
+    # Only the rename is the model's; the output mode was the compiler's.
+    assert [f.field for f in own.step_changes[1].field_changes] == ["name"]
+    # A step the compiler alone touched counts as unchanged.
+    only_housekeeping = review_edit_changes_of_the_model(
+        FlowEditDiff(step_changes=housekeeping.step_changes), housekeeping=housekeeping
+    )
+    assert [(c.kind, c.step_ref) for c in only_housekeeping.step_changes] == [
+        ("unchanged", "existing_step_4")
+    ]
+
+
+@pytest.mark.asyncio
 async def test_an_investigation_that_finds_nothing_to_change_ends_the_turn():
     """Finding nothing is a real answer, and the only honest one sometimes.
 

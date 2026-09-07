@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
@@ -26,13 +27,17 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
 from eneo.flows.ai_builder.ai_builder_edit_admission import (
     lower_edit_tool_arguments,
 )
-from eneo.flows.ai_builder.ai_builder_edit_compiler import compile_edit_proposal
+from eneo.flows.ai_builder.ai_builder_edit_compiler import (
+    EditCompilationResult,
+    compile_edit_proposal,
+)
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorCode,
     AIBuilderErrorPhase,
 )
 from eneo.flows.ai_builder.ai_builder_flow_review import (
     review_edit_changed_nothing,
+    review_edit_changes_of_the_model,
     review_edit_renamed_outside_the_scope,
     validate_review_edit_effect,
     validate_review_edit_proposal,
@@ -45,7 +50,10 @@ from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
 from eneo.flows.ai_builder.ai_builder_proposal_capture import (
     capture_rejected_proposal_arguments,
 )
-from eneo.flows.ai_builder.ai_builder_proposal_intent import OrderedEditProposal
+from eneo.flows.ai_builder.ai_builder_proposal_intent import (
+    ModifyExistingStep,
+    OrderedEditProposal,
+)
 from eneo.flows.ai_builder.ai_builder_proposal_policy import (
     evaluate_edit_topology_policy,
     terminal_output_type_for_edit_conversation,
@@ -69,6 +77,7 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from eneo.flows.ai_builder.planning_state import PlanningState
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
+from eneo.flows.domain.flow import FlowStep
 from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
 from eneo.flows.step_lineage import existing_step_ref_for_order
 from eneo.main.exceptions import BadRequestException
@@ -91,6 +100,21 @@ _REVIEW_FOUND_NOTHING_TO_CHANGE = {
         "that justifies a change. The flow stays as it is."
     ),
 }
+
+
+def _unchanged_edit_proposal(current_steps: Sequence[FlowStep]) -> OrderedEditProposal:
+    """Every current step kept as it is: what the compiler does on its own."""
+
+    return OrderedEditProposal(
+        plan_rationale="Flow kept as it is.",
+        steps=[
+            ModifyExistingStep(
+                existing_step_ref=existing_step_ref_for_order(step.step_order)
+            )
+            for step in sorted(current_steps, key=lambda step: step.step_order)
+        ],
+    )
+
 
 PROPOSE_FLOW_EDIT_FORCED_TOOL_PROMPT = (
     "Return one valid propose_flow tool call that keeps the flow coherent. "
@@ -170,9 +194,12 @@ async def process_edit_arguments(
     if scoped_proposal_feedback is not None:
         return CorrectableFailure(feedback=scoped_proposal_feedback, kind="quality")
     ui_language = compile_context.ui_language if compile_context is not None else None
-    try:
-        edit_result = compile_edit_proposal(
-            proposal,
+
+    def compile_against_the_flow(
+        candidate: OrderedEditProposal,
+    ) -> EditCompilationResult:
+        return compile_edit_proposal(
+            candidate,
             current_steps=list(flow.steps),
             base_flow_revision=flow.draft_revision,
             flow_name=flow.name,
@@ -196,6 +223,18 @@ async def process_edit_arguments(
                 if compile_context is not None
                 else None
             ),
+        )
+
+    try:
+        edit_result = compile_against_the_flow(proposal)
+        # The compiler also normalises persisted shapes on every edit. On a
+        # bounded turn those changes are not the model reaching past the
+        # findings, so the scope is held to the difference between what the
+        # proposal compiles to and what the flow unchanged compiles to.
+        housekeeping = (
+            compile_against_the_flow(_unchanged_edit_proposal(flow.steps))
+            if review_scope is not None
+            else None
         )
     except BadRequestException as exc:
         return CorrectableFailure(
@@ -221,13 +260,17 @@ async def process_edit_arguments(
             details={"resource_kind": str(exc.kind)},
         )
 
-    if review_scope is not None:
+    if review_scope is not None and housekeeping is not None:
+        own_changes = review_edit_changes_of_the_model(
+            edit_result.authored_approval.diff,
+            housekeeping=housekeeping.authored_approval.diff,
+        )
         effect_feedback = validate_review_edit_effect(
-            scope=review_scope, diff=edit_result.authored_approval.diff
+            scope=review_scope, diff=own_changes
         )
         if effect_feedback is not None:
             return CorrectableFailure(feedback=effect_feedback, kind="validation")
-        if review_edit_changed_nothing(edit_result.authored_approval.diff.step_changes):
+        if review_edit_changed_nothing(own_changes.step_changes):
             # Finding nothing to change is a real answer to an investigation,
             # and the only honest one when the runs do not support the
             # suggestion. Asking the model to try again would loop: the repair

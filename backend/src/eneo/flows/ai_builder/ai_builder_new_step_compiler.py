@@ -875,8 +875,9 @@ def _require_resolvable_previous_refs(
                 )
                 + ". Its declared fields are: "
                 + (", ".join(declared) if declared else "none")
-                + ". Reference one of those in uses_previous_fields, or add the "
-                "field to that step's output_fields.",
+                + ". Reference one of those in uses_previous_fields, or drop the "
+                "reference; what a step declares changes only by editing that "
+                "step.",
                 code=AIBuilderErrorCode.INVALID_PLAN_STEP_REF,
                 context={
                     "ref_kind": ref_kind,

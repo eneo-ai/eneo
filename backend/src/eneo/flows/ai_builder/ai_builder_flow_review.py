@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Awaitable, Callable, Collection, Mapping
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Annotated, Literal, Protocol, Sequence
@@ -724,6 +724,76 @@ def review_edit_renamed_outside_the_scope(
                 "with another step's."
             )
     return None
+
+
+def review_edit_changes_of_the_model(
+    diff: "FlowEditDiff", *, housekeeping: "FlowEditDiff"
+) -> "FlowEditDiff":
+    """The compiled diff net of what compiling the flow unchanged changes.
+
+    The compiler normalises persisted shapes on every edit: a transcription
+    step ahead of a bare audio input, a document step's output mode. On a
+    bounded turn those are not the model reaching past the findings, and a
+    model told to undo them could not. The scope is held to what remains;
+    the plan the user approves still shows every change.
+    """
+
+    added_by_housekeeping = Counter(
+        change.step_name
+        for change in housekeeping.step_changes
+        if change.kind == "added"
+    )
+    removed_by_housekeeping = {
+        change.step_ref
+        for change in housekeeping.step_changes
+        if change.kind == "removed"
+    }
+    fields_by_housekeeping: dict[str | None, set[tuple[str, str | None]]] = {
+        change.step_ref: {
+            (field.field, field.current) for field in change.field_changes
+        }
+        for change in housekeeping.step_changes
+        if change.kind == "modified"
+    }
+    step_changes: list["StepChange"] = []
+    for change in diff.step_changes:
+        if change.kind == "added" and added_by_housekeeping[change.step_name] > 0:
+            added_by_housekeeping[change.step_name] -= 1
+            continue
+        if change.kind == "removed" and change.step_ref in removed_by_housekeeping:
+            continue
+        if change.kind == "modified":
+            own_fields = [
+                field
+                for field in change.field_changes
+                if (field.field, field.current)
+                not in fields_by_housekeeping.get(change.step_ref, set())
+            ]
+            step_changes.append(
+                change.model_copy(
+                    update={
+                        "kind": "modified" if own_fields else "unchanged",
+                        "field_changes": own_fields,
+                    }
+                )
+            )
+            continue
+        step_changes.append(change)
+    return diff.model_copy(
+        update={
+            "step_changes": step_changes,
+            "form_changes": [
+                change
+                for change in diff.form_changes
+                if change not in housekeeping.form_changes
+            ],
+            "flow_property_changes": {
+                name: values
+                for name, values in diff.flow_property_changes.items()
+                if housekeeping.flow_property_changes.get(name) != values
+            },
+        }
+    )
 
 
 def review_edit_changed_nothing(step_changes: Sequence["StepChange"]) -> bool:

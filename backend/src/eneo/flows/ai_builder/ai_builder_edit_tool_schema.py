@@ -44,8 +44,10 @@ def build_edit_flow_tool_schema(
     schema offers exactly that: the findings' steps take a full modify, every
     other step is listed with a bare ``keep``, adding and removing appear
     only where the findings allow them, and the flow-level fields are absent.
-    Whatever the schema does not offer, a strict provider cannot write, so
-    the admission checks refuse nothing the model was invited to write.
+    Whatever the schema does not offer, a strict provider cannot write. The
+    same scope governs the authored-proposal admission; what the compiler
+    and the plan preparation make of an admitted proposal is held to it by
+    their own final guards.
     """
 
     valid_refs = [existing_step_ref_for_order(s.step_order) for s in current_steps]
