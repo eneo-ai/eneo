@@ -117,6 +117,11 @@ function pageData(items: ReturnType<typeof source>[]) {
 function show(items: ReturnType<typeof source>[] = []) {
   return render(ToolsPage, { data: pageData(items) });
 }
+
+async function activation(name: string, label: string) {
+  await page.getByRole("button", { name: `${m.actions()}: ${name}` }).click();
+  return page.getByRole("menuitem", { name: label, exact: true });
+}
 describe("Tools capability configuration", () => {
   beforeEach(() => vi.clearAllMocks());
 
@@ -210,7 +215,7 @@ describe("Tools capability configuration", () => {
     await page.getByRole("menuitem", { name: m.tools_change(), exact: true }).click();
     await expect.element(page.getByRole("dialog")).toBeVisible();
     await page.getByRole("button", { name: m.cancel(), exact: true }).click();
-    await page.getByRole("button", { name: m.deactivate(), exact: true }).click();
+    await (await activation("Image Studio", m.deactivate())).click();
     await vi.waitFor(() =>
       expect(api.mcpServers.deactivate).toHaveBeenCalledWith({ id: "images" })
     );
@@ -241,7 +246,7 @@ describe("Tools capability configuration", () => {
     await expect
       .element(page.getByText(m.tools_replace_default({ name: "Image Studio" })))
       .toBeVisible();
-    await page.getByRole("button", { name: m.activate(), exact: true }).click();
+    await (await activation("Replacement", m.activate())).click();
     await vi.waitFor(() =>
       expect(api.mcpServers.activate).toHaveBeenCalledWith({ id: "replacement" })
     );
@@ -260,9 +265,9 @@ describe("Tools capability configuration", () => {
   it("keeps failed activation visible with a retry", async () => {
     api.mcpServers.activate.mockRejectedValueOnce(new Error("Connection unavailable"));
     show([source({ is_enabled: false })]);
-    await page.getByRole("button", { name: m.activate(), exact: true }).click();
+    await (await activation("Image Studio", m.activate())).click();
     await expect.element(page.getByRole("alert")).toBeVisible();
-    await page.getByRole("button", { name: m.activate(), exact: true }).click();
+    await (await activation("Image Studio", m.activate())).click();
     await vi.waitFor(() => expect(api.mcpServers.activate).toHaveBeenCalledTimes(2));
   });
 
@@ -414,9 +419,8 @@ describe("Tools capability configuration", () => {
         ]
       })
     ]);
-    await expect
-      .element(page.getByRole("button", { name: m.activate(), exact: true }))
-      .toBeDisabled();
+    await expect.element(await activation("Image Studio", m.activate())).toBeDisabled();
+    await userEvent.keyboard("{Escape}");
     await page
       .getByRole("button", { name: `${m.governance_mcp_show_tools()}: Image Studio` })
       .click();

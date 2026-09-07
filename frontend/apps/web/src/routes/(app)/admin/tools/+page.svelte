@@ -228,20 +228,6 @@
                     <div
                       class="col-start-2 flex flex-wrap items-center gap-2 sm:col-start-3 sm:row-start-1"
                     >
-                      <Button
-                        size="sm"
-                        variant={source.is_enabled ? "warning-outlined" : "positive"}
-                        disabled={busy !== null ||
-                          (!source.is_enabled && !!source.readiness_reason)}
-                        onclick={() => toggle(source)}
-                      >
-                        {#if source.is_enabled}
-                          <Pause class="h-4 w-4" aria-hidden="true" />
-                        {:else}
-                          <Power class="h-4 w-4" aria-hidden="true" />
-                        {/if}
-                        {source.is_enabled ? m.deactivate() : m.activate()}
-                      </Button>
                       <Dropdown.Root>
                         <Dropdown.Trigger let:trigger asFragment>
                           <Button
@@ -254,6 +240,20 @@
                           </Button>
                         </Dropdown.Trigger>
                         <Dropdown.Menu let:item>
+                          <Button
+                            is={item}
+                            padding="icon-leading"
+                            disabled={busy !== null ||
+                              (!source.is_enabled && !!source.readiness_reason)}
+                            onclick={() => toggle(source)}
+                          >
+                            {#if source.is_enabled}
+                              <Pause class="h-4 w-4" aria-hidden="true" />
+                            {:else}
+                              <Power class="h-4 w-4" aria-hidden="true" />
+                            {/if}
+                            {source.is_enabled ? m.deactivate() : m.activate()}
+                          </Button>
                           <Button
                             is={item}
                             padding="icon-leading"
