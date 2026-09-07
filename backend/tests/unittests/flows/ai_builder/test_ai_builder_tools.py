@@ -417,6 +417,14 @@ class TestBuildToolSchema:
         assert admitted_tail["steps"][-1]["input_type"] == "json"
         assert admitted_tail["steps"][-1]["output_type"] == "json"
         assert "input_type" not in admitted_tail and "name" not in admitted_tail
+        # An explicit `output_fields: null` is the model keeping the contract;
+        # a field object after it is not re-homed into a replacement list.
+        explicit_null = deepcopy(arguments)
+        explicit_null["steps"][2] = {**explicit_null["steps"][2], "output_fields": None}
+        with pytest.raises(ProposalToolArgumentsError):
+            admit_propose_flow_tool_arguments(
+                arguments=explicit_null, tool_schema=schema
+            )
         # A whole step re-emitted at the root beside its partial copy conflicts
         # on output_fields once the spill is re-homed: that stays invalid
         # rather than guessing which copy is meant.

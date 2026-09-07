@@ -309,10 +309,10 @@ def admit_propose_flow_tool_arguments(
 
     Some non-strict tool implementations occasionally close the adjacent
     ``steps`` and ``output_fields`` arrays at the wrong boundary or emit a
-    punctuation-only property while closing them. The prepared create schema
-    makes those cases unambiguous. Normalize
-    only those lossless shapes, then apply the unchanged proposal schema to the
-    full payload.
+    punctuation-only property while closing them. The prepared schema (the
+    create tool's step object, or the edit tool's modify branch) makes those
+    cases unambiguous. Normalize only those lossless shapes, then apply the
+    unchanged proposal schema to the full payload.
     """
 
     admitted = _discard_punctuation_serialization_artifacts(
@@ -410,7 +410,7 @@ def _discard_punctuation_serialization_artifacts(
     arguments: dict[str, Any],
     tool_schema: ProposalToolSchema,
 ) -> dict[str, Any]:
-    """Discard unknown punctuation-only properties at create object boundaries."""
+    """Discard unknown punctuation-only properties at step object boundaries."""
 
     parameters = tool_schema["function"]["parameters"]
     raw_root_properties = parameters.get("properties")
@@ -634,8 +634,11 @@ def _rehome_misplaced_create_children(
             and previous_map is not None
             and required_step_keys.issubset(previous_map)
         ):
+            # An explicit null is the model's own word (an edit reads it as
+            # "keep the contract"); only an absent or listed output_fields may
+            # take the spilled field.
             existing_fields = previous_map.get("output_fields")
-            if existing_fields is None or isinstance(existing_fields, list):
+            if "output_fields" not in previous_map or isinstance(existing_fields, list):
                 admitted_steps[-1] = {
                     **previous_map,
                     "output_fields": [

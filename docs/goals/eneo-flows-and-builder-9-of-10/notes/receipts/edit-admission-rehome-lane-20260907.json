@@ -1,0 +1,159 @@
+{
+  "purpose": "eneo-f43 landing evidence: the review chain on the parent lane with the branch-aware admission normaliser",
+  "generated_at": "2026-09-07T10:03:23+00:00",
+  "route": {
+    "model_id": "69ea7ad9-19e1-4dac-bcbe-9eb715e12644",
+    "name": "gpt-5.6-luna"
+  },
+  "tenant_bound": "review_investigation_evidence_max_tokens=16000 as shipped",
+  "foci": {
+    "flow_version": 1,
+    "definition_checksum": "c724c7cba95b53f104f3ed178ac579cc2761c3668f86eff40845e4eca2a65530",
+    "sample_run_ids": [
+      "70db2fa1-40b1-4aab-adaa-18b85392b5a4",
+      "09bdf9c9-73b8-4c2e-b7d7-0d02e9ed8ce4",
+      "0e081264-be71-49b4-962c-caf84ada3d05"
+    ],
+    "suggestions": [
+      {
+        "suggestion_kind": "instruction_outcome_drift",
+        "step_orders": [
+          4
+        ]
+      },
+      {
+        "suggestion_kind": "missing_check",
+        "step_orders": [
+          3,
+          4
+        ]
+      },
+      {
+        "suggestion_kind": "duplicated_work",
+        "step_orders": [
+          1,
+          2
+        ]
+      }
+    ]
+  },
+  "arms": {
+    "rehome_strict_off (tree 2ca17c7b6, strict flag false)": [
+      {
+        "rep": 1,
+        "session_id": "b85e690d-b28f-4542-9913-225b746ff34b",
+        "duration_s": 27.1,
+        "outcome": "plan",
+        "error_code": null,
+        "failure_codes": null,
+        "llm_calls": 2,
+        "repairs": 1,
+        "completion_tokens": 2908,
+        "last_finish_reason": "tool_calls"
+      },
+      {
+        "rep": 2,
+        "session_id": "105f3487-6770-47de-9023-344ae642e04b",
+        "duration_s": 32.0,
+        "outcome": "error",
+        "error_code": "self_correction_invalid_payload",
+        "failure_codes": "proposal_parse_schema",
+        "llm_calls": null,
+        "repairs": null,
+        "completion_tokens": null,
+        "last_finish_reason": null
+      },
+      {
+        "rep": 3,
+        "session_id": "9f22bbd4-92c1-4e20-858d-1734b2a6f072",
+        "duration_s": 27.2,
+        "outcome": "plan",
+        "error_code": null,
+        "failure_codes": null,
+        "llm_calls": 2,
+        "repairs": 1,
+        "completion_tokens": 3210,
+        "last_finish_reason": "tool_calls"
+      }
+    ],
+    "rehome_strict_on (tree 2ca17c7b6, strict flag true)": [
+      {
+        "rep": 1,
+        "session_id": "e9c11c1b-052a-44a0-a0e4-e2e6dcddc694",
+        "duration_s": 20.0,
+        "outcome": "plan",
+        "error_code": null,
+        "failure_codes": null,
+        "llm_calls": 1,
+        "repairs": 0,
+        "completion_tokens": 2232,
+        "last_finish_reason": "tool_calls"
+      },
+      {
+        "rep": 2,
+        "session_id": "a24aef17-d126-4dfa-ab0e-530b15b375af",
+        "duration_s": 27.1,
+        "outcome": "plan",
+        "error_code": null,
+        "failure_codes": null,
+        "llm_calls": 2,
+        "repairs": 1,
+        "completion_tokens": 3184,
+        "last_finish_reason": "tool_calls"
+      },
+      {
+        "rep": 3,
+        "session_id": "846b8883-5589-4ba4-9acb-43cf0b6f3c84",
+        "duration_s": 17.7,
+        "outcome": "plan",
+        "error_code": null,
+        "failure_codes": null,
+        "llm_calls": 1,
+        "repairs": 0,
+        "completion_tokens": 2113,
+        "last_finish_reason": "tool_calls"
+      }
+    ],
+    "rehome2_strict_off (tree d4d3de9ec, strict flag false)": [
+      {
+        "rep": 1,
+        "session_id": "eb237d25-0818-4883-a777-48823e71b355",
+        "duration_s": 22.9,
+        "outcome": "plan",
+        "error_code": null,
+        "failure_codes": null,
+        "llm_calls": 1,
+        "repairs": 0,
+        "completion_tokens": 2229,
+        "last_finish_reason": "tool_calls"
+      },
+      {
+        "rep": 2,
+        "session_id": "0d6a30f8-8f8e-467a-b96a-b02b93dfab32",
+        "duration_s": 33.7,
+        "outcome": "error",
+        "error_code": "self_correction_invalid_payload",
+        "failure_codes": "proposal_parse_schema",
+        "llm_calls": null,
+        "repairs": null,
+        "completion_tokens": null,
+        "last_finish_reason": null
+      },
+      {
+        "rep": 3,
+        "session_id": "d6988f94-d8e5-4779-8057-e900f1e69373",
+        "duration_s": 56.3,
+        "outcome": "plan",
+        "error_code": null,
+        "failure_codes": null,
+        "llm_calls": 4,
+        "repairs": 3,
+        "completion_tokens": 7682,
+        "last_finish_reason": "tool_calls"
+      }
+    ]
+  },
+  "normaliser_activity_rehome2": "session d6988f94 (rep 3): _rehome_misplaced_create_children fired on 3 consecutive attempts and the turn ended in a plan; session 0d6a30f8 (rep 2): the lossy string-item shape on all 4 attempts, unrecoverable by design",
+  "reading": "strict 3/3 on 2ca17c7b6; non-strict 2/3 on both trees, the single failure being the lossy string-item shape each time; on d4d3de9ec the re-homer rescued a turn that would otherwise have been refused (3 hits). Strict flag restored to true after each non-strict arm (verified).",
+  "revision_note": "arms ran on 2ca17c7b6 and d4d3de9ec as named; the explicit-null commit on top changes no measured path"
+}

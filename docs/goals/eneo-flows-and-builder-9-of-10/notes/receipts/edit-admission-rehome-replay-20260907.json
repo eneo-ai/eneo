@@ -1,17 +1,25 @@
 {
-  "purpose": "eneo-f43: offline replay of every captured non-strict rejected propose_flow payload through the branch-aware admission normaliser (edit tool schema, 5-step flow shaped like the owner's audio flow)",
-  "generated_at": "2026-09-07T09:59:55+00:00",
-  "revision_replayed": "2ca17c7b6fac956f869af17ac0d27eaedf6ffafb + the null-tail commit on top (this file is committed with it)",
+  "purpose": "eneo-f43: offline replay of every captured non-strict rejected propose_flow payload through admission and, where admitted, through process_edit_arguments with a five-step flow shaped like the owner's audio flow",
+  "generated_at": "2026-09-07T10:16:44+00:00",
+  "revision_replayed": "d4d3de9ec6bdc2685b811fd9439ec777c116c35e with the explicit-null commit on top (this file is committed with it)",
   "route": "gpt-5.6-luna (69ea7ad9), supports_strict_tool_schema=false during capture",
   "stack": "parent :8146",
   "replay": [
+    {
+      "capture": "121fe7bc2b6a",
+      "sha256": "121fe7bc2b6ab39da66f7035bdf936287b7876eb90d725b4470588809cf3ded8",
+      "session_id": "0d6a30f8-8f8e-467a-b96a-b02b93dfab32",
+      "captured": "2026-09-07T10:01:21+00:00",
+      "issue": "parse: Invalid propose_flow arguments: steps.2: 'review_mode\":null},{' is not of type 'object' (type)",
+      "outcome_after_slice": "rejected at admission: lossy string item (a step closed early, its remainder emitted as a string)"
+    },
     {
       "capture": "1bdf7f0bb472",
       "sha256": "1bdf7f0bb4726fccc3b7d230b1f4dfda32ea83f3725863b19d72910e98256d00",
       "session_id": "9f22bbd4-92c1-4e20-858d-1734b2a6f072",
       "captured": "2026-09-07T09:57:18+00:00",
       "issue": "parse: Invalid propose_flow arguments: root: Additional properties are not allowed ('document_delivery_mode', 'input_source', 'input_type', ",
-      "outcome_after_slice": "admitted: same payload (repair attempt)"
+      "outcome_after_slice": "admitted at schema admission (spilled field objects re-homed, root tail redundant); through process_edit_arguments with the five-step flow: CorrectableFailure 'every existing step must appear ... Missing refs: existing_step_4, existing_step_5' - the payload never carried steps 4-5, so the model is told exactly what is missing instead of a schema error"
     },
     {
       "capture": "26ebea14c6bf",
@@ -19,7 +27,7 @@
       "session_id": "105f3487-6770-47de-9023-344ae642e04b",
       "captured": "2026-09-07T09:56:37+00:00",
       "issue": "steps.2: 'review_mode»:null},{' is not of type 'object' (type)",
-      "outcome_after_slice": "rejected: lossy string item"
+      "outcome_after_slice": "rejected at admission: lossy string item (a step closed early, its remainder emitted as a string)"
     },
     {
       "capture": "359f525c1170",
@@ -27,7 +35,23 @@
       "session_id": "105f3487-6770-47de-9023-344ae642e04b",
       "captured": "2026-09-07T09:57:01+00:00",
       "issue": "parse: Invalid propose_flow arguments: steps.2: 'review_mode»:null},{' is not of type 'object' (type)",
-      "outcome_after_slice": "rejected: lossy string item (repair)"
+      "outcome_after_slice": "rejected at admission: lossy string item (a step closed early, its remainder emitted as a string)"
+    },
+    {
+      "capture": "4bdf15895627",
+      "sha256": "4bdf158956276ec00658e99fd90813af197eb4acf14e1ba4644eb17d2592ee1a",
+      "session_id": "0d6a30f8-8f8e-467a-b96a-b02b93dfab32",
+      "captured": "2026-09-07T10:01:28+00:00",
+      "issue": "steps.2: 'review_mode\":null},{' is not of type 'object' (type)",
+      "outcome_after_slice": "rejected at admission: lossy string item (a step closed early, its remainder emitted as a string)"
+    },
+    {
+      "capture": "567356e47fa3",
+      "sha256": "567356e47fa308da9da8eacb24b57e7a9c935630d08d8a0b6ffdd18f0177d1ea",
+      "session_id": "0d6a30f8-8f8e-467a-b96a-b02b93dfab32",
+      "captured": "2026-09-07T10:01:45+00:00",
+      "issue": "parse: Invalid propose_flow arguments: steps.2: 'review_mode\":null},{' is not of type 'object' (type)",
+      "outcome_after_slice": "rejected at admission: lossy string item (a step closed early, its remainder emitted as a string)"
     },
     {
       "capture": "59e7abfd3591",
@@ -35,7 +59,23 @@
       "session_id": "105f3487-6770-47de-9023-344ae642e04b",
       "captured": "2026-09-07T09:57:01+00:00",
       "issue": "steps.2: 'review_mode»:null},{' is not of type 'object' (type)",
-      "outcome_after_slice": "rejected: lossy string item"
+      "outcome_after_slice": "rejected at admission: lossy string item (a step closed early, its remainder emitted as a string)"
+    },
+    {
+      "capture": "6c3304049c9e",
+      "sha256": "6c3304049c9e9576ce77f14df7de2713428f353ea96e2721ffd2a77388750407",
+      "session_id": "0d6a30f8-8f8e-467a-b96a-b02b93dfab32",
+      "captured": "2026-09-07T10:01:28+00:00",
+      "issue": "parse: Invalid propose_flow arguments: steps.2: 'review_mode\":null},{' is not of type 'object' (type)",
+      "outcome_after_slice": "rejected at admission: lossy string item (a step closed early, its remainder emitted as a string)"
+    },
+    {
+      "capture": "bad1801a4c4a",
+      "sha256": "bad1801a4c4a3081dfc3c3befd012605617e15afd29c1e4257caf252c58e48b3",
+      "session_id": "0d6a30f8-8f8e-467a-b96a-b02b93dfab32",
+      "captured": "2026-09-07T10:01:21+00:00",
+      "issue": "steps.2: 'review_mode\":null},{' is not of type 'object' (type)",
+      "outcome_after_slice": "rejected at admission: lossy string item (a step closed early, its remainder emitted as a string)"
     },
     {
       "capture": "c99fff0619cb",
@@ -43,7 +83,7 @@
       "session_id": "105f3487-6770-47de-9023-344ae642e04b",
       "captured": "2026-09-07T09:56:37+00:00",
       "issue": "parse: Invalid propose_flow arguments: steps.2: 'review_mode»:null},{' is not of type 'object' (type)",
-      "outcome_after_slice": "rejected: lossy string item (repair)"
+      "outcome_after_slice": "rejected at admission: lossy string item (a step closed early, its remainder emitted as a string)"
     },
     {
       "capture": "cb778d1add5f",
@@ -51,7 +91,15 @@
       "session_id": "9f22bbd4-92c1-4e20-858d-1734b2a6f072",
       "captured": "2026-09-07T09:57:18+00:00",
       "issue": "root: Additional properties are not allowed ('document_delivery_mode', 'input_source', 'input_type', 'output_type' were unexpected) (additio",
-      "outcome_after_slice": "admitted: spill re-homed; the null optional tail at the root is redundant beside the step's own values"
+      "outcome_after_slice": "admitted at schema admission (spilled field objects re-homed, root tail redundant); through process_edit_arguments with the five-step flow: CorrectableFailure 'every existing step must appear ... Missing refs: existing_step_4, existing_step_5' - the payload never carried steps 4-5, so the model is told exactly what is missing instead of a schema error"
+    },
+    {
+      "capture": "d0d9c7ae2cce",
+      "sha256": "d0d9c7ae2ccef1f73c3c00bc60ddccfeb21ca55671ad7409eff2a22527e47e1b",
+      "session_id": "0d6a30f8-8f8e-467a-b96a-b02b93dfab32",
+      "captured": "2026-09-07T10:01:45+00:00",
+      "issue": "steps.2: 'review_mode\":null},{' is not of type 'object' (type)",
+      "outcome_after_slice": "rejected at admission: lossy string item (a step closed early, its remainder emitted as a string)"
     },
     {
       "capture": "1aab217a8e72",
@@ -59,7 +107,7 @@
       "session_id": "43830f9b-963e-4607-8860-3a3c0bcf45de",
       "captured": "2026-09-07T08:26:06+00:00",
       "issue": "steps.2: 'review_mode\":null},{' is not of type 'object' (type)",
-      "outcome_after_slice": "rejected: lossy (a step closed early, remainder emitted as a string item)"
+      "outcome_after_slice": "rejected at admission: lossy string item (a step closed early, its remainder emitted as a string)"
     },
     {
       "capture": "1daaf53a71fe",
@@ -67,7 +115,7 @@
       "session_id": "43830f9b-963e-4607-8860-3a3c0bcf45de",
       "captured": "2026-09-07T08:25:45+00:00",
       "issue": "root: Additional properties are not allowed ('assistant_spec', 'document_delivery_mode', 'existing_step_ref', 'input_source', 'input_type', ",
-      "outcome_after_slice": "rejected: spill re-homed, but the root re-emission of the same step conflicts on output_fields"
+      "outcome_after_slice": "rejected at admission: spill re-homed, but the step re-emitted at the root conflicts on output_fields"
     },
     {
       "capture": "34740695695b",
@@ -75,7 +123,7 @@
       "session_id": "43830f9b-963e-4607-8860-3a3c0bcf45de",
       "captured": "2026-09-07T08:25:55+00:00",
       "issue": "parse: Invalid propose_flow arguments: root: Additional properties are not allowed ('review_mode' was unexpected) (additionalProperties)",
-      "outcome_after_slice": "admitted: 5 spilled field objects re-homed into existing_step_3.output_fields (9 fields), root review_mode re-homed"
+      "outcome_after_slice": "admitted at schema admission (spilled field objects re-homed, root tail redundant); through process_edit_arguments with the five-step flow: CorrectableFailure 'every existing step must appear ... Missing refs: existing_step_4, existing_step_5' - the payload never carried steps 4-5, so the model is told exactly what is missing instead of a schema error"
     },
     {
       "capture": "3f4e3739b75c",
@@ -83,7 +131,7 @@
       "session_id": "43830f9b-963e-4607-8860-3a3c0bcf45de",
       "captured": "2026-09-07T08:26:06+00:00",
       "issue": "parse: Invalid propose_flow arguments: steps.2: 'review_mode\":null},{' is not of type 'object' (type)",
-      "outcome_after_slice": "rejected: same payload (repair attempt)"
+      "outcome_after_slice": "rejected at admission: lossy string item (a step closed early, its remainder emitted as a string)"
     },
     {
       "capture": "d7ff61086165",
@@ -91,7 +139,7 @@
       "session_id": "43830f9b-963e-4607-8860-3a3c0bcf45de",
       "captured": "2026-09-07T08:25:55+00:00",
       "issue": "root: Additional properties are not allowed ('review_mode' was unexpected) (additionalProperties)",
-      "outcome_after_slice": "admitted: same payload (repair attempt)"
+      "outcome_after_slice": "admitted at schema admission (spilled field objects re-homed, root tail redundant); through process_edit_arguments with the five-step flow: CorrectableFailure 'every existing step must appear ... Missing refs: existing_step_4, existing_step_5' - the payload never carried steps 4-5, so the model is told exactly what is missing instead of a schema error"
     },
     {
       "capture": "e1b373e9ec11",
@@ -99,8 +147,8 @@
       "session_id": "43830f9b-963e-4607-8860-3a3c0bcf45de",
       "captured": "2026-09-07T08:25:45+00:00",
       "issue": "parse: Invalid propose_flow arguments: root: Additional properties are not allowed ('assistant_spec', 'document_delivery_mode', 'existing_st",
-      "outcome_after_slice": "rejected: same payload (repair attempt)"
+      "outcome_after_slice": "rejected at admission: spill re-homed, but the step re-emitted at the root conflicts on output_fields"
     }
   ],
-  "reading": "one parse family (wrong-boundary closes in the sparse edit shape). Re-nested losslessly: field objects spilled into steps and an optional tail at the root that is identical or null (4 of 12 captures, two sessions). Still rejected: a step re-emitted at the root whose output_fields conflict after re-homing (2), and a step closed early with its remainder emitted as a string item (6, lossy). The rejected shapes go to the repair loop; the 6 quality rejections in the same capture set predate the review-scoped schema."
+  "reading": "one parse family (wrong-boundary closes in the sparse edit shape). 4 of 18 parse captures (two sessions) are re-nested at admission and then fail the edit compiler with the precise 'missing existing_step_4, existing_step_5' feedback: those payloads never carried the trailing steps, so the normaliser converts an unspecific schema error into an actionable repair, not a valid plan. The other captures stay rejected at admission (root re-emission of a step: 2; lossy string item: the rest). The measured effect is on the lane: see edit-admission-rehome-lane-20260907.json (a turn with three consecutive normalisations ended in a plan)."
 }
