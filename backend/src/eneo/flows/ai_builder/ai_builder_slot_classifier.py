@@ -218,7 +218,7 @@ async def classify_slots(
         raise AIBuilderKnownProviderRejectionException(
             build_ai_builder_request_budget_exhausted_error(request_id=None)
         )
-    completion_kwargs["max_tokens"] = request_budget.resolved_output_tokens
+    completion_kwargs["max_tokens"] = request_budget.provider_output_cap_tokens
     if before_provider_call is not None:
         await before_provider_call()
     call = (

@@ -64,7 +64,7 @@ class PlannerCallRecordMetadata(BaseModel):
     context_window_tokens: int | None = None
     model_output_ceiling_tokens: int | None = None
     output_reserve_tokens: int | None = None
-    effective_output_tokens: int | None = None
+    provider_output_cap_tokens: int | None = None
     fixed_input_tokens: int | None = None
     safety_buffer_tokens: int | None = None
     timeout_seconds: float | None = None

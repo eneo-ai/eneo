@@ -4379,6 +4379,35 @@ async def test_classify_slots_clamps_output_to_available_headroom() -> None:
 
 
 @pytest.mark.asyncio
+async def test_classify_slots_sends_the_models_ceiling_not_the_reserve() -> None:
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps(_VALID_CLASSIFICATION_RESPONSE)
+    )
+
+    with (
+        patch.object(classifier, "count_message_tokens", return_value=100),
+        patch.object(classifier, "count_tokens", return_value=20),
+    ):
+        attempt = await classify_slots(
+            litellm_client=litellm_client,
+            completion_model_route=_route(),
+            classification_input=_classification_input("Return JSON with case_id."),
+            allowed_slot_values={"terminal_output": {"structured_json"}},
+            tenant_id=uuid4(),
+            max_input_tokens=100_000,
+            max_output_tokens=16_000,
+            budget_policy=AIBuilderBudgetPolicy(
+                conversation_safety_buffer_tokens=100,
+                minimum_conversation_budget_tokens=0,
+            ),
+        )
+
+    assert attempt.outcome == "resolved"
+    assert litellm_client.acompletion.await_args.kwargs["max_tokens"] == 16_000
+
+
+@pytest.mark.asyncio
 async def test_classify_slots_requests_bounded_json_schema_response_format() -> None:
     litellm_client = AsyncMock()
     litellm_client.acompletion.return_value = _make_response(

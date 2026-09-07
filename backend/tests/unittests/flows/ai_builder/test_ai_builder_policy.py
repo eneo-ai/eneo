@@ -89,7 +89,7 @@ def test_the_provider_cap_is_the_models_ceiling_within_the_room_left() -> None:
             model_output_ceiling_tokens=output_ceiling,
         ).resolve(input_tokens=input_tokens)
         assert budget is not None
-        return budget.resolved_output_tokens
+        return budget.provider_output_cap_tokens
 
     # The ceiling is the model's own, never a fixed number below it.
     assert cap(32_768) == 32_768

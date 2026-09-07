@@ -1235,6 +1235,33 @@ async def test_usage_tracked_completion_counts_repair_usage() -> None:
 
 
 @pytest.mark.asyncio
+async def test_the_proposal_is_sent_with_the_models_ceiling_not_the_reserve() -> None:
+    response = _make_response_with_text("ok")
+    litellm_client = SimpleNamespace(acompletion=AsyncMock(return_value=response))
+
+    await call_proposal_completion(
+        litellm_client=litellm_client,
+        request=_completion_request(
+            messages=[{"role": "user", "content": "Keep this current turn"}],
+            tool_schemas=[],
+            route=_route(),
+            max_output_tokens=16_000,
+            temperature=0.2,
+            request_budget=AIBuilderRequestBudget(
+                context_window_tokens=100_000,
+                model_output_ceiling_tokens=16_000,
+                output_reserve_tokens=6_144,
+                minimum_output_tokens=1_024,
+                safety_buffer_tokens=0,
+                timeout_seconds=180.0,
+            ),
+        ),
+    )
+
+    assert litellm_client.acompletion.await_args.kwargs["max_tokens"] == 16_000
+
+
+@pytest.mark.asyncio
 async def test_request_budget_treats_model_output_as_a_ceiling() -> None:
     response = _make_response_with_text("ok")
     litellm_client = SimpleNamespace(acompletion=AsyncMock(return_value=response))
@@ -1453,7 +1480,7 @@ def test_request_budget_evicts_oldest_optional_groups_and_preserves_repair_conte
         failed_call,
         tool_feedback,
     ]
-    assert resolved.resolved_output_tokens == 1
+    assert resolved.provider_output_cap_tokens == 1
 
 
 def test_the_provider_cap_follows_the_request_that_is_sent(
@@ -1505,7 +1532,7 @@ def test_the_provider_cap_follows_the_request_that_is_sent(
     )
     assert len(flatten_proposal_message_groups(fitted)) == 3
     assert resolved.fixed_input_tokens == 30
-    assert resolved.resolved_output_tokens == 60
+    assert resolved.provider_output_cap_tokens == 60
 
     # A tighter window leaves less, never less than the reserve the input was
     # planned against.
@@ -1513,7 +1540,7 @@ def test_the_provider_cap_follows_the_request_that_is_sent(
         budget=budget(50), message_groups=groups, tool_schemas=[], model_name="test"
     )
     assert len(flatten_proposal_message_groups(fitted)) == 3
-    assert resolved.resolved_output_tokens == 20
+    assert resolved.provider_output_cap_tokens == 20
 
 
 @pytest.mark.asyncio

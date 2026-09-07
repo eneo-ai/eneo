@@ -219,7 +219,7 @@ def test_turn_call_records_are_the_usage_and_call_count_owner() -> None:
         "context_window_tokens": 32_000,
         "model_output_ceiling_tokens": 16_000,
         "output_reserve_tokens": 8_000,
-        "effective_output_tokens": 16_000,
+        "provider_output_cap_tokens": 16_000,
         "fixed_input_tokens": 6_000,
         "safety_buffer_tokens": 2_000,
         "timeout_seconds": 180.0,
@@ -237,7 +237,7 @@ def test_turn_call_records_are_the_usage_and_call_count_owner() -> None:
     )
     assert metadata is not None
     assert (
-        metadata["planner_telemetry"]["call_records"][0]["effective_output_tokens"]
+        metadata["planner_telemetry"]["call_records"][0]["provider_output_cap_tokens"]
         == 16_000
     )
     summary = metadata["session_telemetry"]

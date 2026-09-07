@@ -577,7 +577,7 @@ async def generate_review_suggestions(
     whole; they are fitted here, outside any transaction, against the review
     request budget of that model (its window, capped by tenant policy): the
     rendered request is measured the way the provider will see it, the answer
-    keeps its target size, and what did not fit is marked so the model and
+    keeps its reserve, and what did not fit is marked so the model and
     the reader are told. A request that still does not fit is refused before
     the provider refuses it, and a model answer that does not resolve in the
     sample is `review_suggestions_invalid_output`, never an empty list.
@@ -625,7 +625,8 @@ async def generate_review_suggestions(
     def fits(candidate: FlowReviewSample) -> bool:
         resolved = request_budget.resolve(input_tokens=request_tokens_for(candidate))
         return (
-            resolved is not None and resolved.effective_output_tokens >= answer_tokens
+            resolved is not None
+            and resolved.provider_output_cap_tokens >= answer_tokens
         )
 
     fit_started = time.monotonic()
@@ -636,7 +637,7 @@ async def generate_review_suggestions(
     resolved_budget = request_budget.resolve(input_tokens=request_tokens)
     if (
         resolved_budget is None
-        or resolved_budget.effective_output_tokens < answer_tokens
+        or resolved_budget.provider_output_cap_tokens < answer_tokens
     ):
         raise AIBuilderKnownProviderRejectionException(
             build_ai_builder_request_budget_exhausted_error(request_id=None)
@@ -648,7 +649,7 @@ async def generate_review_suggestions(
     if response_format:
         completion_kwargs["response_format"] = response_format
     completion_kwargs.pop("timeout", None)
-    completion_kwargs["max_tokens"] = request_budget_resolved.resolved_output_tokens
+    completion_kwargs["max_tokens"] = request_budget_resolved.provider_output_cap_tokens
     started = time.monotonic()
     try:
         response = await litellm_client.acompletion(
@@ -696,7 +697,7 @@ async def generate_review_suggestions(
             "kinds": sorted({item.kind for item in parsed.suggestions}),
             "request_tokens": request_tokens,
             "context_window_tokens": request_budget.context_window_tokens,
-            "max_output_tokens": request_budget_resolved.resolved_output_tokens,
+            "max_output_tokens": request_budget_resolved.provider_output_cap_tokens,
             "excerpts_included": summary.excerpts_included,
             "excerpts_truncated": summary.excerpts_truncated,
             "excerpts_omitted_by_budget": summary.excerpts_omitted_by_budget,

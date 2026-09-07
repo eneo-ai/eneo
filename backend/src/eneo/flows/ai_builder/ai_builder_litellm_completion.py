@@ -105,7 +105,7 @@ async def call_proposal_completion(
         logger.debug("ai_builder_proposal_completion_dropped_response_format")
     incident_evidence = _proposal_request_evidence(
         request=request,
-        max_tokens=request_budget.resolved_output_tokens,
+        max_tokens=request_budget.provider_output_cap_tokens,
         timeout_seconds=request_budget.timeout_seconds,
         messages=messages,
         tool_schemas=tool_schemas,
@@ -128,7 +128,7 @@ async def call_proposal_completion(
             parallel_tool_calls=False,
             stream=False,
             drop_params=True,
-            max_tokens=request_budget.resolved_output_tokens,
+            max_tokens=request_budget.provider_output_cap_tokens,
             timeout=request_budget.timeout_seconds,
             **provider_kwargs,
         )

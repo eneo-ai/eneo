@@ -2415,7 +2415,7 @@ def test_real_proposal_boundary_fits_attachments_and_protects_current_turn() -> 
     final_request_tokens = (
         count_message_tokens(fitted_messages, model_name)
         + count_tool_tokens([prepared_tool_schema_for_budget], model_name)
-        + resolved_budget.resolved_output_tokens
+        + resolved_budget.provider_output_cap_tokens
         + resolved_budget.safety_buffer_tokens
     )
     assert final_request_tokens <= tight_context_window

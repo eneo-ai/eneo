@@ -107,7 +107,9 @@ class AIBuilderRequestBudget:
             request_id=self.request_id,
             fixed_input_tokens=input_tokens,
             reserved_output_tokens=reserved_output_tokens,
-            effective_output_tokens=self.provider_output_cap(input_tokens=input_tokens),
+            provider_output_cap_tokens=self.provider_output_cap(
+                input_tokens=input_tokens
+            ),
         )
 
 
@@ -118,11 +120,7 @@ class AIBuilderResolvedRequestBudget(AIBuilderRequestBudget):
     # provider is told the model may write. The second is never below the
     # first while the input stays within `available_input_tokens`.
     reserved_output_tokens: int
-    effective_output_tokens: int
-
-    @property
-    def resolved_output_tokens(self) -> int:
-        return self.effective_output_tokens
+    provider_output_cap_tokens: int
 
     @property
     def available_input_tokens(self) -> int:

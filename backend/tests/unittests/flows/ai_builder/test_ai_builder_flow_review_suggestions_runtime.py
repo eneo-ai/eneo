@@ -102,7 +102,13 @@ def _route():
     )
 
 
-async def _generate(client, *, max_input_tokens: int = 100_000, sample=None):
+async def _generate(
+    client,
+    *,
+    max_input_tokens: int = 100_000,
+    max_output_tokens: int = 4000,
+    sample=None,
+):
     return await generate_review_suggestions(
         sample=sample or _sample(),
         litellm_client=client,
@@ -110,7 +116,7 @@ async def _generate(client, *, max_input_tokens: int = 100_000, sample=None):
         model_id=uuid4(),
         model_name="gpt-test",
         max_input_tokens=max_input_tokens,
-        max_output_tokens=4000,
+        max_output_tokens=max_output_tokens,
         budget_policy=resolve_ai_builder_budget_policy(None),
         tenant_id=uuid4(),
         ui_language="sv",
@@ -264,6 +270,14 @@ async def test_the_evidence_is_fitted_to_the_models_window_and_marked():
     assert result.sample.excerpts_included == 0
     # The answer keeps the model ceiling; the evidence did not erode it.
     assert call["max_tokens"] == 4000
+
+
+@pytest.mark.asyncio
+async def test_the_answer_is_sent_with_the_models_ceiling_not_the_reserve():
+    client = _Client(content=json.dumps({"suggestions": []}))
+    await _generate(client, max_input_tokens=100_000, max_output_tokens=16_000)
+    (call,) = client.calls
+    assert call["max_tokens"] == 16_000
 
 
 @pytest.mark.asyncio

@@ -229,31 +229,38 @@ def fit_proposal_message_groups(
     token_limit: int,
     model_name: str,
 ) -> tuple[ProposalMessageGroup, ...] | None:
-    return _evict_optional_message_groups(
-        groups,
-        fits=lambda candidate: measure_provider_input_reserve(
+    fitted = _fit_proposal_message_groups_measured(
+        groups, token_limit=token_limit, model_name=model_name
+    )
+    return None if fitted is None else fitted[0]
+
+
+def _fit_proposal_message_groups_measured(
+    groups: tuple[ProposalMessageGroup, ...],
+    *,
+    token_limit: int,
+    model_name: str,
+) -> tuple[tuple[ProposalMessageGroup, ...], int] | None:
+    """Evict optional groups oldest first; the accepted set and its tokens."""
+
+    def measure(candidate: tuple[ProposalMessageGroup, ...]) -> int:
+        return measure_provider_input_reserve(
             [dict(message) for message in flatten_proposal_message_groups(candidate)],
             [],
             model_name,
         ).tokens
-        <= token_limit,
-    )
 
-
-def _evict_optional_message_groups(
-    groups: tuple[ProposalMessageGroup, ...],
-    *,
-    fits: Callable[[tuple[ProposalMessageGroup, ...]], bool],
-) -> tuple[ProposalMessageGroup, ...] | None:
     kept = list(groups)
-    if fits(tuple(kept)):
-        return tuple(kept)
+    tokens = measure(tuple(kept))
+    if tokens <= token_limit:
+        return tuple(kept), tokens
     for group in groups:
         if group.protected:
             continue
         kept.remove(group)
-        if fits(tuple(kept)):
-            return tuple(kept)
+        tokens = measure(tuple(kept))
+        if tokens <= token_limit:
+            return tuple(kept), tokens
     return None
 
 
@@ -290,26 +297,19 @@ def fit_proposal_request_budget(
                 request_id=budget.request_id
             )
         )
-    fitted = fit_proposal_message_groups(
+    fitted = _fit_proposal_message_groups_measured(
         message_groups,
         token_limit=resolved.available_input_tokens - tool_tokens,
         model_name=model_name,
     )
     assert fitted is not None, "resolved protected proposal context must fit"
+    fitted_groups, fitted_tokens = fitted
     # The cap the provider is told belongs to the request that is sent, not
     # to its protected core: whatever room the fitted input leaves is the
-    # model's, up to its ceiling. One more measurement of the fitted messages
-    # buys that.
-    sent = budget.resolve(
-        input_tokens=tool_tokens
-        + measure_provider_input_reserve(
-            [dict(message) for message in flatten_proposal_message_groups(fitted)],
-            [],
-            model_name,
-        ).tokens
-    )
+    # model's, up to its ceiling.
+    sent = budget.resolve(input_tokens=tool_tokens + fitted_tokens)
     assert sent is not None, "a fitted proposal request keeps its reserved room"
-    return fitted, sent
+    return fitted_groups, sent
 
 
 @dataclass(frozen=True)
