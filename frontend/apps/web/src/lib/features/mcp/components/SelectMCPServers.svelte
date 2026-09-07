@@ -12,6 +12,7 @@
   import { ChevronRight } from "lucide-svelte";
   import { SvelteSet } from "svelte/reactivity";
   import { isCapabilityPurpose } from "$lib/features/mcp/capabilities";
+  import { readinessMessage } from "$lib/features/mcp/readiness";
 
   interface MCPTool {
     id: string;
@@ -25,6 +26,8 @@
     name: string;
     description?: string;
     purpose?: string;
+    /** Org-level availability; a deactivated server stays attached but is never called. */
+    is_enabled?: boolean;
     tags?: string[];
     tools?: MCPTool[];
     [key: string]: unknown;
@@ -73,9 +76,20 @@
 
   // This picker manages general-purpose servers only; capabilities (web
   // search, image generation) have their own settings section (CapabilityToggle).
-  let generalAvailableServers = $derived(
-    availableServers.filter((server) => !isCapabilityPurpose(server.purpose))
-  );
+  // A server an admin deactivated leaves the space's offer but stays on the
+  // assistant; keep it listed as unavailable so the setting survives until
+  // reactivation instead of being silently dropped on the next save.
+  let generalAvailableServers = $derived.by(() => {
+    const offered = availableServers.filter((server) => !isCapabilityPurpose(server.purpose));
+    const offeredIds = new Set(offered.map((server) => server.id));
+    const retained = servers.filter(
+      (server) =>
+        server.is_enabled === false &&
+        !isCapabilityPurpose(server.purpose) &&
+        !offeredIds.has(server.id)
+    );
+    return [...offered, ...retained];
+  });
 
   // Track expanded servers
   const expandedServers = new SvelteSet<string>();
@@ -94,6 +108,7 @@
 
   // When the allowed set changes (governance policy, or a server removed from
   // the space), drop any selected server/tool that is no longer available.
+  // A deactivated server is retained: it is unavailable, not removed.
   // Keyed only on `availableServers`; the selection reads + writes are
   // untracked so this never re-triggers on user toggles (which would churn the
   // whole list) or loops on its own writes.
@@ -103,13 +118,20 @@
       availableServers.flatMap((server) => server.tools?.map((tool) => tool.id) ?? [])
     );
     untrack(() => {
-      const filteredSelectedServers = servers.filter((server) => availableServerIds.has(server.id));
+      const retainedToolIds = new Set(
+        servers
+          .filter((server) => server.is_enabled === false)
+          .flatMap((server) => server.tools?.map((tool) => tool.id) ?? [])
+      );
+      const filteredSelectedServers = servers.filter(
+        (server) => availableServerIds.has(server.id) || server.is_enabled === false
+      );
       if (filteredSelectedServers.length !== servers.length) {
         selectedMCPServers = filteredSelectedServers;
       }
 
-      const filteredSelectedTools = selectedMCPTools.filter((tool) =>
-        availableToolIds.has(tool.tool_id)
+      const filteredSelectedTools = selectedMCPTools.filter(
+        (tool) => availableToolIds.has(tool.tool_id) || retainedToolIds.has(tool.tool_id)
       );
       if (filteredSelectedTools.length !== selectedMCPTools.length) {
         selectedMCPTools = filteredSelectedTools;
@@ -269,7 +291,8 @@
     <div class="divide-dimmer border-default divide-y overflow-hidden rounded-xl border">
       {#each generalAvailableServers as server (server.id)}
         {@const isSelected = isServerSelected(server.id)}
-        {@const hasTools = isSelected && server.tools && server.tools.length > 0}
+        {@const unavailable = server.is_enabled === false}
+        {@const hasTools = isSelected && !unavailable && server.tools && server.tools.length > 0}
         {@const isExpanded = expandedServers.has(server.id)}
         {@const toolCount = server.tools?.length ?? 0}
         {@const enabledToolCount =
@@ -293,10 +316,20 @@
 
             <!-- Server Toggle -->
             <div class="flex-1 py-2.5 pr-4">
-              <Input.Switch value={isSelected} sideEffect={() => toggleServer(server)}>
+              <Input.Switch
+                value={isSelected}
+                disabled={unavailable && !isSelected}
+                sideEffect={() => toggleServer(server)}
+              >
                 <div class="flex flex-col gap-0.5">
                   <div class="flex items-center gap-2">
                     <span class="text-default font-medium">{server.name}</span>
+                    {#if unavailable}
+                      <span
+                        class="bg-warning-dimmer text-warning-stronger inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
+                        >{m.disabled()}</span
+                      >
+                    {/if}
                     {#if hasTools}
                       <span
                         class="bg-secondary text-muted inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium tabular-nums"
@@ -307,7 +340,11 @@
                       </span>
                     {/if}
                   </div>
-                  {#if server.description}
+                  {#if unavailable}
+                    <p class="text-muted text-xs leading-snug">
+                      {readinessMessage("server_disabled")}
+                    </p>
+                  {:else if server.description}
                     <p class="text-muted line-clamp-1 text-xs leading-snug">
                       {server.description}
                     </p>
