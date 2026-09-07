@@ -651,15 +651,18 @@ FLOW_JSONB_COLUMN_OWNER_ENTRIES: tuple[FlowJsonbColumnOwner, ...] = (
             "apply_corrections",
         ),
         storage_category=FlowJsonbStorageCategory.REVIEW_CHECKPOINT,
-        schema_version_policy=FlowJsonbSchemaVersionPolicy.TABLE_SCHEMA_VERSION,
+        schema_version_policy=(
+            "The row's schema_version is written as "
+            "TRANSCRIPT_CORRECTIONS_SCHEMA_VERSION but not validated on read: "
+            "hydration accepts any integer and any item shape."
+        ),
         corruption_behavior=FlowJsonbCorruptionBehavior.REJECT_BEFORE_WRITE,
         rationale=(
             "Reviewer text corrections to a run step's transcript: each occurrence "
             "is validated against the stored segments and sorted before it is "
-            "saved, the row's schema_version and segments_hash pin the shape and "
-            "the transcript it was written for, and the revision rejects stale "
-            "writes. Reads hydrate the typed set and apply it to the rendered "
-            "transcript non-destructively."
+            "saved, segments_hash names the transcript it was written for, and "
+            "the revision rejects stale writes. A malformed stored item is not "
+            "detected until the set is applied to the rendered transcript."
         ),
     ),
     _owner(
@@ -673,34 +676,43 @@ FLOW_JSONB_COLUMN_OWNER_ENTRIES: tuple[FlowJsonbColumnOwner, ...] = (
             "apply_corrections_and_speaker_edits",
         ),
         storage_category=FlowJsonbStorageCategory.REVIEW_CHECKPOINT,
-        schema_version_policy=FlowJsonbSchemaVersionPolicy.TABLE_SCHEMA_VERSION,
+        schema_version_policy=(
+            "Shares the row's schema_version with occurrences_json: written, not "
+            "validated on read."
+        ),
         corruption_behavior=FlowJsonbCorruptionBehavior.REJECT_BEFORE_WRITE,
         rationale=(
             "Reviewer speaker re-attributions on the same row as the text "
             "corrections: validated against the stored segments before save "
-            "(an invalid edit is a typed bad request), sorted canonically, and "
-            "versioned by the row's schema_version, segments_hash and revision."
+            "(an invalid edit is a typed bad request) and sorted canonically; "
+            "segments_hash and revision guard the transcript and the write order."
         ),
     ),
     _owner(
         "flow_step_transcript_words",
         "words_json",
-        owner_module="eneo.flows.domain.transcript_words",
+        owner_module="eneo.flows.runtime.transcription",
         envelope_name="FlowStepTranscriptWords",
         owner_symbols=(
-            "locate_words",
-            "count_interpolated_words",
-            "is_interpolated_word",
+            "serialize_segment_words",
+            "_cap_words",
         ),
         storage_category=FlowJsonbStorageCategory.DERIVED_INDEX,
-        schema_version_policy=FlowJsonbSchemaVersionPolicy.PROVIDER_DEFINED,
-        corruption_behavior=FlowJsonbCorruptionBehavior.MARK_EVIDENCE_UNAVAILABLE,
+        schema_version_policy=(
+            "No persisted schema version: the stored shape is Eneo's own "
+            "serialization of normalized provider words with a segment_index per "
+            "entry, bounded by _cap_words before persistence."
+        ),
+        corruption_behavior=(
+            "No corruption detection on read: hydration keeps list[dict] as "
+            "stored. A missing row is a 404 and a row whose segments_hash no "
+            "longer matches the transcript is served flagged stale."
+        ),
         rationale=(
-            "Word timings the transcription provider returned for a step, kept in "
-            "stored segment order and keyed to the segments hash they were "
-            "aligned to. They are an index over the transcript, not the "
-            "transcript: a row whose hash no longer matches the segments is "
-            "served flagged stale and a missing row is a 404, never a failed run."
+            "Word timings derived from the transcription provider's output for a "
+            "step, kept in stored segment order and keyed to the segments hash "
+            "they were aligned to: an index over the transcript, not the "
+            "transcript, so drift is reported rather than failing a run."
         ),
     ),
 )
