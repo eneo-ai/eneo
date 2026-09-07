@@ -636,10 +636,6 @@ matching PostgreSQL backup.
 
 ## Upgrade and rollback
 
-The [PostgreSQL 13 bridge rehearsal](FILE_ICON_QUALIFICATION.md) records the
-tested released-schema route, reproducible fixture, measured resource use, and
-remaining deployment qualification limits.
-
 Start with the concise [File and Icon storage upgrade
 guide](https://docs.eneo.ai/guides/file-icon-storage-upgrade) for its operator
 checklist, disk and duration estimates, pause/rollback decisions, and cleanup.
@@ -1087,12 +1083,6 @@ LIMIT 100;
 
 ### Close the recovery window and reclaim disk
 
-The [bridge and contraction release contract](FILE_ICON_RELEASE_CONTRACT.md)
-defines the tested starting revision, release gates, and complete removal
-inventory. Existing installations must run the bridge API and worker before
-installing contraction; do not skip that release because its online work
-cannot finish inside Alembic.
-
 Do not remove frozen legacy bytes when the online campaign first reports
 `complete`. Keep the current release for the deployment's verification period,
 exercise representative old File and Icon downloads, and restore-test a current
@@ -1104,10 +1094,9 @@ and the deployment's retention rules allow its removal.
 Install the later contract release only after the campaign is `complete` and
 the ledger has no `pending`, `ready`, `leased`, or `failed` row. Its migration
 must treat that as a necessary but insufficient precondition. In the same
-transaction that drops legacy columns, it must fence writers and recheck every
-live legacy source as well as each surviving ledger key. The exact File or Icon
-reference must point to available content with matching bytes; a complete ledger
-cannot hide missing source coverage or a wrong reference. A missing or failed reference
+transaction that drops legacy columns, it must lock and recheck that every
+surviving ledger key has its matching File or Icon reference and that the
+referenced object content is still `available`. A missing or failed reference
 must abort before any legacy column is dropped. Do not drop the columns
 manually. Installing that release closes direct rollback to the old image;
 recovery remains forward or through the retained coordinated backup.
