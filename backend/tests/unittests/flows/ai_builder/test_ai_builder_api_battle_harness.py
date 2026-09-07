@@ -6454,6 +6454,7 @@ def test_six_file_runtime_gate_rejects_each_release_dimension() -> None:
         "runtime_source_display",
         "runtime_model_call_count",
         "runtime_total_tokens",
+        "runtime_step_tokens",
     ):
         assert baseline[name]["passed"] is True
 
@@ -6580,6 +6581,131 @@ def test_six_file_runtime_gate_rejects_each_release_dimension() -> None:
     missing_artifact = _six_file_runtime_evidence()
     missing_artifact["final_artifact"] = None
     assert checks_for(missing_artifact)["runtime_final_artifact"]["passed"] is False
+
+
+def test_step_tokens_are_recorded_beside_their_provider_calls() -> None:
+    """The receipt carries each step's run cost. A step the evidence lists
+    calls for must carry its counts; a step without a model call carries
+    none and is not judged."""
+    harness = _battle_harness()
+    expected = {"expected_runtime_evidence": {"model_call_count": 3}}
+
+    def checks_for(evidence: dict[str, object]) -> dict[str, dict[str, object]]:
+        report = harness._quality_report(
+            plan={},
+            summary={},
+            expected=expected,
+            event_summary={},
+            runtime_evidence=evidence,
+        )
+        return {check["name"]: check for check in report["checks"]}
+
+    def evidence(
+        *, second_step_tokens: tuple[int | None, int | None]
+    ) -> dict[str, object]:
+        return {
+            "provider_calls": {
+                "items": [
+                    {
+                        "event_id": "c1",
+                        "status": "succeeded",
+                        "step_order": 1,
+                        "num_tokens_input": 100,
+                        "num_tokens_output": 20,
+                    },
+                    {
+                        "event_id": "c2",
+                        "status": "succeeded",
+                        "step_order": 1,
+                        "num_tokens_input": 110,
+                        "num_tokens_output": 25,
+                    },
+                    {
+                        "event_id": "c3",
+                        "status": "succeeded",
+                        "step_order": 2,
+                        "num_tokens_input": 300,
+                        "num_tokens_output": 60,
+                    },
+                ],
+                "count": 3,
+                "total_count": 3,
+                "total_count_truncated": False,
+                "has_more": False,
+                "next_after_event_id": None,
+            },
+            "run": {"status": "completed", "result": {"kind": "text"}},
+            "step_results": [
+                {
+                    "step_order": 1,
+                    "status": "completed",
+                    "num_tokens_input": 210,
+                    "num_tokens_output": 45,
+                },
+                {
+                    "step_order": 2,
+                    "status": "completed",
+                    "num_tokens_input": second_step_tokens[0],
+                    "num_tokens_output": second_step_tokens[1],
+                },
+                {
+                    "step_order": 3,
+                    "status": "completed",
+                    "num_tokens_input": None,
+                    "num_tokens_output": None,
+                },
+            ],
+        }
+
+    recorded = checks_for(evidence(second_step_tokens=(300, 60)))["runtime_step_tokens"]
+    assert recorded["passed"] is True
+    assert recorded["actual"] == [
+        {
+            "step_order": 1,
+            "status": "completed",
+            "num_tokens_input": 210,
+            "num_tokens_output": 45,
+            "provider_calls": 2,
+            "provider_num_tokens_input": 210,
+            "provider_num_tokens_output": 45,
+        },
+        {
+            "step_order": 2,
+            "status": "completed",
+            "num_tokens_input": 300,
+            "num_tokens_output": 60,
+            "provider_calls": 1,
+            "provider_num_tokens_input": 300,
+            "provider_num_tokens_output": 60,
+        },
+        {
+            "step_order": 3,
+            "status": "completed",
+            "num_tokens_input": None,
+            "num_tokens_output": None,
+            "provider_calls": 0,
+            "provider_num_tokens_input": None,
+            "provider_num_tokens_output": None,
+        },
+    ]
+    # The step made a call but its counts are missing: the run cost is not judgeable.
+    assert (
+        checks_for(evidence(second_step_tokens=(None, None)))["runtime_step_tokens"][
+            "passed"
+        ]
+        is False
+    )
+    # The receipt's runtime metrics carry the rows under the check's name.
+    metrics = harness._runtime_metrics_from_quality_report(
+        harness._quality_report(
+            plan={},
+            summary={},
+            expected=expected,
+            event_summary={},
+            runtime_evidence=evidence(second_step_tokens=(300, 60)),
+        )
+    )
+    assert metrics["runtime_step_tokens"] == recorded["actual"]
 
 
 def test_runtime_evidence_collection_uses_published_contract(

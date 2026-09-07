@@ -9028,6 +9028,7 @@ def _runtime_evidence_checks(
         else None
     )
     max_total_tokens = _int_value(expected.get("max_total_tokens"))
+    step_tokens = _runtime_step_tokens(steps=steps, provider_calls=provider_calls)
 
     expected_field_groups = _field_groups_from_expected_key(
         expected,
@@ -9232,7 +9233,83 @@ def _runtime_evidence_checks(
             "actual": total_tokens,
             "expected": {"max": max_total_tokens},
         },
+        {
+            # A build is judged by what its flows cost to run, step by step:
+            # the receipt carries every step's counted tokens beside the
+            # provider calls the evidence attributes to it. A step with no
+            # model call (a document conversion) carries no counts; a step
+            # the evidence lists calls for must.
+            "name": "runtime_step_tokens",
+            "passed": (
+                provider_call_evidence_status == "complete"
+                and all(
+                    row["num_tokens_input"] is not None
+                    and row["num_tokens_output"] is not None
+                    for row in step_tokens
+                    if row["provider_calls"] > 0
+                )
+            ),
+            "actual": step_tokens,
+            "expected": {"evidence_status": "complete"},
+        },
     ]
+
+
+def _runtime_step_tokens(
+    *,
+    steps: Sequence[Mapping[str, object]],
+    provider_calls: Mapping[str, object] | None,
+) -> list[JsonObject]:
+    """Each step's counted tokens beside the provider calls attributed to it.
+
+    The step counts come from the run's step results (the final attempt's
+    own counting); the call sums come from the provider-call evidence page
+    when its items carry a step order. Both are reported: the sums may
+    exceed the step's counts when an earlier attempt of the step also called
+    the provider, so they are read side by side, never equated.
+    """
+
+    calls_by_step: dict[int, dict[str, int | None]] = {}
+    raw_items: object = (
+        provider_calls.get("items") if provider_calls is not None else None
+    )
+    items: list[Mapping[str, object]] = (
+        [item for item in raw_items if isinstance(item, Mapping)]
+        if isinstance(raw_items, list)
+        else []
+    )
+    for item in items:
+        order = _int_value(item.get("step_order"))
+        if order is None:
+            continue
+        bucket = calls_by_step.setdefault(
+            order, {"calls": 0, "num_tokens_input": 0, "num_tokens_output": 0}
+        )
+        bucket["calls"] = (bucket["calls"] or 0) + 1
+        for key in ("num_tokens_input", "num_tokens_output"):
+            count = _token_count(item.get(key))
+            current = bucket[key]
+            bucket[key] = None if current is None or count is None else current + count
+    rows: list[JsonObject] = []
+    for step in steps:
+        order = _int_value(step.get("step_order"))
+        calls = calls_by_step.get(order) if order is not None else None
+        rows.append(
+            {
+                "step_order": order,
+                "status": _optional_string(step, "status"),
+                "num_tokens_input": _token_count(step.get("num_tokens_input")),
+                "num_tokens_output": _token_count(step.get("num_tokens_output")),
+                "provider_calls": calls["calls"] if calls is not None else 0,
+                "provider_num_tokens_input": (
+                    calls["num_tokens_input"] if calls is not None else None
+                ),
+                "provider_num_tokens_output": (
+                    calls["num_tokens_output"] if calls is not None else None
+                ),
+            }
+        )
+    return rows
 
 
 def _runtime_metrics_from_quality_report(report: Mapping[str, object]) -> JsonObject:
