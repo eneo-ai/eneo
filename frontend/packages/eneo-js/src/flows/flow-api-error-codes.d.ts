@@ -140,6 +140,7 @@ export declare const FLOW_API_ERROR_CODE: Readonly<{
   TRANSCRIPT_CORRECTIONS_STALE_REVISION: "flow_transcript_corrections_stale_revision";
   TRANSCRIPT_CORRECTIONS_SEGMENTS_UNAVAILABLE: "flow_transcript_corrections_segments_unavailable";
   TRANSCRIPT_CORRECTIONS_INVALID_OCCURRENCE: "flow_transcript_corrections_invalid_occurrence";
+  TRANSCRIPT_CORRECTIONS_INVALID_SPEAKER_EDIT: "flow_transcript_corrections_invalid_speaker_edit";
   REVIEW_OPEN_ACTIVE_CONFLICT_INVARIANT: "flow_review_open_active_conflict_invariant";
   REVIEW_OPEN_STEP_RESULT_INCOMPLETE_INVARIANT: "flow_review_open_step_result_incomplete_invariant";
   REVIEW_OPEN_MULTIPLE_ACTIVE_CHECKPOINTS_INVARIANT: "flow_review_open_multiple_active_checkpoints_invariant";
@@ -296,6 +297,7 @@ export type FlowApiErrorCode =
   | "flow_transcript_corrections_stale_revision"
   | "flow_transcript_corrections_segments_unavailable"
   | "flow_transcript_corrections_invalid_occurrence"
+  | "flow_transcript_corrections_invalid_speaker_edit"
   | "flow_review_open_active_conflict_invariant"
   | "flow_review_open_step_result_incomplete_invariant"
   | "flow_review_open_multiple_active_checkpoints_invariant"

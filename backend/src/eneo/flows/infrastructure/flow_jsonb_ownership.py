@@ -640,6 +640,69 @@ FLOW_JSONB_COLUMN_OWNER_ENTRIES: tuple[FlowJsonbColumnOwner, ...] = (
             "spec_hash rejects silent row drift."
         ),
     ),
+    _owner(
+        "flow_transcript_corrections",
+        "occurrences_json",
+        owner_module="eneo.flows.domain.transcript_corrections",
+        envelope_name="FlowTranscriptCorrectionSet",
+        owner_symbols=(
+            "validate_occurrences",
+            "sort_occurrences",
+            "apply_corrections",
+        ),
+        storage_category=FlowJsonbStorageCategory.REVIEW_CHECKPOINT,
+        schema_version_policy=FlowJsonbSchemaVersionPolicy.TABLE_SCHEMA_VERSION,
+        corruption_behavior=FlowJsonbCorruptionBehavior.REJECT_BEFORE_WRITE,
+        rationale=(
+            "Reviewer text corrections to a run step's transcript: each occurrence "
+            "is validated against the stored segments and sorted before it is "
+            "saved, the row's schema_version and segments_hash pin the shape and "
+            "the transcript it was written for, and the revision rejects stale "
+            "writes. Reads hydrate the typed set and apply it to the rendered "
+            "transcript non-destructively."
+        ),
+    ),
+    _owner(
+        "flow_transcript_corrections",
+        "speaker_edits_json",
+        owner_module="eneo.flows.domain.transcript_corrections",
+        envelope_name="FlowTranscriptCorrectionSet",
+        owner_symbols=(
+            "validate_speaker_edits",
+            "sort_speaker_edits",
+            "apply_corrections_and_speaker_edits",
+        ),
+        storage_category=FlowJsonbStorageCategory.REVIEW_CHECKPOINT,
+        schema_version_policy=FlowJsonbSchemaVersionPolicy.TABLE_SCHEMA_VERSION,
+        corruption_behavior=FlowJsonbCorruptionBehavior.REJECT_BEFORE_WRITE,
+        rationale=(
+            "Reviewer speaker re-attributions on the same row as the text "
+            "corrections: validated against the stored segments before save "
+            "(an invalid edit is a typed bad request), sorted canonically, and "
+            "versioned by the row's schema_version, segments_hash and revision."
+        ),
+    ),
+    _owner(
+        "flow_step_transcript_words",
+        "words_json",
+        owner_module="eneo.flows.domain.transcript_words",
+        envelope_name="FlowStepTranscriptWords",
+        owner_symbols=(
+            "locate_words",
+            "count_interpolated_words",
+            "is_interpolated_word",
+        ),
+        storage_category=FlowJsonbStorageCategory.DERIVED_INDEX,
+        schema_version_policy=FlowJsonbSchemaVersionPolicy.PROVIDER_DEFINED,
+        corruption_behavior=FlowJsonbCorruptionBehavior.MARK_EVIDENCE_UNAVAILABLE,
+        rationale=(
+            "Word timings the transcription provider returned for a step, kept in "
+            "stored segment order and keyed to the segments hash they were "
+            "aligned to. They are an index over the transcript, not the "
+            "transcript: a row whose hash no longer matches the segments is "
+            "served flagged stale and a missing row is a 404, never a failed run."
+        ),
+    ),
 )
 
 FLOW_JSONB_COLUMN_OWNERS = build_flow_jsonb_owner_map(FLOW_JSONB_COLUMN_OWNER_ENTRIES)

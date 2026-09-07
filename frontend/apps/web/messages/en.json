@@ -5142,6 +5142,7 @@
   "flow_error_flow_transcript_corrections_stale_revision": "The corrections changed after they were loaded. Reload and try again.",
   "flow_error_flow_transcript_corrections_segments_unavailable": "This transcript has no structured lines and cannot be corrected.",
   "flow_error_flow_transcript_corrections_invalid_occurrence": "The correction no longer matches the transcript. Reload and try again.",
+  "flow_error_flow_transcript_corrections_invalid_speaker_edit": "The speaker edit no longer matches the transcript. Reload and try again.",
   "flow_error_flow_review_step_result_not_found": "The reviewed step output is no longer available. Reload the run and try again.",
   "flow_error_flow_published_form_schema_invalid": "This published flow has an invalid form setup. Ask a flow editor to review the form fields before running it.",
   "flow_error_flow_input_required_field_missing": "A required form field is missing. Complete the field and try again.",

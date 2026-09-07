@@ -60,6 +60,15 @@ def _runtime_paths_payload() -> dict[str, object]:
         "input_file_signed_url_template": (
             "/api/v1/flows/{id}/runs/{run_id}/input-files/{file_id}/signed-url/"
         ),
+        "transcript_corrections_template": (
+            "/api/v1/flows/{id}/runs/{run_id}/transcript-corrections/"
+        ),
+        "edit_transcript_corrections_template": (
+            "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/transcript-corrections/"
+        ),
+        "transcript_words_template": (
+            "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/transcript-words/"
+        ),
     }
 
 

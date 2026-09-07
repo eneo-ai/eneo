@@ -5142,6 +5142,7 @@
   "flow_error_flow_transcript_corrections_stale_revision": "Rättningarna har ändrats sedan de lästes in. Läs om och försök igen.",
   "flow_error_flow_transcript_corrections_segments_unavailable": "Transkriptet saknar strukturerade rader och kan inte rättas.",
   "flow_error_flow_transcript_corrections_invalid_occurrence": "Rättningen matchar inte längre transkriptet. Läs om och försök igen.",
+  "flow_error_flow_transcript_corrections_invalid_speaker_edit": "Talarändringen matchar inte längre transkriptet. Läs om och försök igen.",
   "flow_error_flow_review_step_result_not_found": "Det granskade stegresultatet är inte längre tillgängligt. Läs om körningen och försök igen.",
   "flow_error_flow_published_form_schema_invalid": "Det publicerade flödet har ogiltig formulärkonfiguration. Be en flödesredigerare granska formulärfälten innan du kör det.",
   "flow_error_flow_input_required_field_missing": "Ett obligatoriskt formulärfält saknas. Fyll i fältet och försök igen.",
