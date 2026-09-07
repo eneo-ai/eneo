@@ -1543,6 +1543,49 @@ def test_the_provider_cap_follows_the_request_that_is_sent(
     assert resolved.provider_output_cap_tokens == 20
 
 
+def test_an_all_protected_request_is_measured_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    groups = (
+        ProposalMessageGroup(
+            messages=({"role": "system", "content": "system"},),  # type: ignore[arg-type]
+            kind="system",
+            protected=True,
+        ),
+        ProposalMessageGroup(
+            messages=({"role": "user", "content": "current"},),  # type: ignore[arg-type]
+            kind="current_turn",
+            protected=True,
+        ),
+    )
+    measurements: list[int] = []
+
+    def measure(candidate, _tools, _model):
+        measurements.append(len(candidate))
+        return SimpleNamespace(tokens=len(candidate) * 10)
+
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_proposal_tool_contracts.measure_provider_input_reserve",
+        measure,
+    )
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_proposal_tool_contracts.count_tool_tokens",
+        lambda _tools, _model: 0,
+    )
+
+    fitted, resolved = fit_proposal_request_budget(
+        budget=_request_budget(context_window_tokens=100, output_tokens=10),
+        message_groups=groups,
+        tool_schemas=[],
+        model_name="test",
+    )
+
+    assert len(flatten_proposal_message_groups(fitted)) == 2
+    assert resolved.fixed_input_tokens == 20
+    # The protected core is the whole request here: tokenised once, reused.
+    assert measurements == [2]
+
+
 @pytest.mark.asyncio
 async def test_repair_time_overflow_uses_same_completion_boundary_rejection(
     monkeypatch: pytest.MonkeyPatch,

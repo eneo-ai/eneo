@@ -240,10 +240,19 @@ def _fit_proposal_message_groups_measured(
     *,
     token_limit: int,
     model_name: str,
+    protected_tokens: int | None = None,
 ) -> tuple[tuple[ProposalMessageGroup, ...], int] | None:
-    """Evict optional groups oldest first; the accepted set and its tokens."""
+    """Evict optional groups oldest first; the accepted set and its tokens.
+
+    ``protected_tokens`` is the measurement of the protected groups alone
+    when the caller already has it: a candidate made of exactly those (a
+    first turn with no history, or one that lost all of it) is not measured
+    again.
+    """
 
     def measure(candidate: tuple[ProposalMessageGroup, ...]) -> int:
+        if protected_tokens is not None and all(group.protected for group in candidate):
+            return protected_tokens
         return measure_provider_input_reserve(
             [dict(message) for message in flatten_proposal_message_groups(candidate)],
             [],
@@ -281,16 +290,12 @@ def fit_proposal_request_budget(
     protected_messages = flatten_proposal_message_groups(
         tuple(group for group in message_groups if group.protected)
     )
-    resolved = budget.resolve(
-        input_tokens=(
-            tool_tokens
-            + measure_provider_input_reserve(
-                [dict(message) for message in protected_messages],
-                [],
-                model_name,
-            ).tokens
-        )
-    )
+    protected_tokens = measure_provider_input_reserve(
+        [dict(message) for message in protected_messages],
+        [],
+        model_name,
+    ).tokens
+    resolved = budget.resolve(input_tokens=tool_tokens + protected_tokens)
     if resolved is None:
         raise AIBuilderKnownProviderRejectionException(
             build_ai_builder_request_budget_exhausted_error(
@@ -301,6 +306,7 @@ def fit_proposal_request_budget(
         message_groups,
         token_limit=resolved.available_input_tokens - tool_tokens,
         model_name=model_name,
+        protected_tokens=protected_tokens,
     )
     assert fitted is not None, "resolved protected proposal context must fit"
     fitted_groups, fitted_tokens = fitted
