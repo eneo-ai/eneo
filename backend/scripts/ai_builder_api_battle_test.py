@@ -26,7 +26,7 @@ from dataclasses import dataclass, replace
 from http.client import HTTPException
 from pathlib import Path
 from threading import Lock
-from typing import Any, cast
+from typing import Any, Literal, cast
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
@@ -164,6 +164,10 @@ from eneo.flows.ai_builder.ai_builder_flow_schema_values import (  # noqa: E402
 )
 from eneo.flows.ai_builder.ai_builder_new_step_models import (  # noqa: E402
     normalize_authoring_string_list,
+)
+from eneo.flows.domain.flow import (  # noqa: E402
+    FlowProviderCallTokenUsage,
+    FlowRunTokenUsage,
 )
 
 
@@ -9022,13 +9026,25 @@ def _runtime_evidence_checks(
     expected_source_displays = _int_value(expected.get("source_display_count"))
     expected_model_calls = _int_value(expected.get("model_call_count"))
     token_usage = run.get("token_usage")
+    token_usage = token_usage if isinstance(token_usage, Mapping) else None
     total_tokens = (
         _int_value(token_usage.get("num_tokens_total"))
-        if isinstance(token_usage, Mapping)
+        if token_usage is not None
         else None
     )
+    # The run's own usage says whether every contributing call reported its
+    # counts; a total with a gap in it bounds nothing.
+    total_tokens_complete = token_usage is not None and all(
+        token_usage.get(key) == "complete"
+        for key in ("input_completeness", "output_completeness")
+    )
     max_total_tokens = _int_value(expected.get("max_total_tokens"))
-    step_tokens = _runtime_step_tokens(steps=steps, provider_calls=provider_calls)
+    step_cost = _runtime_step_cost(
+        steps=steps,
+        provider_calls=provider_calls,
+        provider_call_evidence_status=provider_call_evidence_status,
+        run_token_usage=token_usage,
+    )
 
     expected_field_groups = _field_groups_from_expected_key(
         expected,
@@ -9227,89 +9243,143 @@ def _runtime_evidence_checks(
             "name": "runtime_total_tokens",
             "passed": (
                 total_tokens is not None
+                and total_tokens_complete
                 and max_total_tokens is not None
                 and total_tokens <= max_total_tokens
             ),
             "actual": total_tokens,
-            "expected": {"max": max_total_tokens},
+            "expected": {"max": max_total_tokens, "completeness": "complete"},
         },
         {
-            # A build is judged by what its flows cost to run, step by step:
-            # the receipt carries every step's counted tokens beside the
-            # provider calls the evidence attributes to it. A step with no
-            # model call (a document conversion) carries no counts; a step
-            # the evidence lists calls for must.
+            # A build is judged by what its flows cost to run, step by step,
+            # with the runtime's own cost rules: every completion call of every
+            # attempt counts unless the provider rejected it, and a call whose
+            # counts were never reported makes the step incomplete. The check
+            # fails closed: a partial evidence page, a call no step owns, a
+            # missing count, or a breakdown that does not add up to the run's
+            # recorded usage is not a cost the build can be judged by.
             "name": "runtime_step_tokens",
-            "passed": (
-                provider_call_evidence_status == "complete"
-                and all(
-                    row["num_tokens_input"] is not None
-                    and row["num_tokens_output"] is not None
-                    for row in step_tokens
-                    if row["provider_calls"] > 0
-                )
-            ),
-            "actual": step_tokens,
-            "expected": {"evidence_status": "complete"},
+            "passed": step_cost["judgeable"],
+            "actual": step_cost["steps"],
+            "expected": {
+                "evidence": "complete page, every call attributed",
+                "completeness": "complete",
+                "reconciles_with_run": True,
+            },
         },
     ]
 
 
-def _runtime_step_tokens(
+def _runtime_step_cost(
     *,
     steps: Sequence[Mapping[str, object]],
     provider_calls: Mapping[str, object] | None,
-) -> list[JsonObject]:
-    """Each step's counted tokens beside the provider calls attributed to it.
+    provider_call_evidence_status: str,
+    run_token_usage: Mapping[str, object] | None,
+) -> JsonObject:
+    """Each step's all-attempt completion-token cost, folded the runtime's way.
 
-    The step counts come from the run's step results (the final attempt's
-    own counting); the call sums come from the provider-call evidence page
-    when its items carry a step order. Both are reported: the sums may
-    exceed the step's counts when an earlier attempt of the step also called
-    the provider, so they are read side by side, never equated.
+    The provider-call evidence page carries every call with its step order,
+    attempt, status and count sources; `FlowRunTokenUsage.from_provider_calls`
+    is the one owner of which calls contribute and when usage is incomplete,
+    so the receipt cannot invent a second cost definition. Transcription
+    calls are token-free here as in the runtime (they are audio seconds).
+    `judgeable` is True only when the page is complete, every call belongs to
+    a step the run reports, every step's usage is complete, and the folded
+    breakdown equals the run's own recorded usage.
     """
 
-    calls_by_step: dict[int, dict[str, int | None]] = {}
-    raw_items: object = (
-        provider_calls.get("items") if provider_calls is not None else None
-    )
-    items: list[Mapping[str, object]] = (
-        [item for item in raw_items if isinstance(item, Mapping)]
-        if isinstance(raw_items, list)
-        else []
-    )
+    page_complete = False
+    items: list[Mapping[str, object]] = []
+    if provider_calls is not None and provider_call_evidence_status == "complete":
+        raw_items: object = provider_calls.get("items")
+        if isinstance(raw_items, list):
+            items = [item for item in raw_items if isinstance(item, Mapping)]
+            page_complete = (
+                len(items) == len(raw_items)
+                and provider_calls.get("has_more") is False
+                and provider_calls.get("count") == len(items)
+                and provider_calls.get("total_count") == len(items)
+            )
+    known_orders = {
+        order
+        for order in (_int_value(step.get("step_order")) for step in steps)
+        if order is not None
+    }
+    calls_by_step: dict[int, list[FlowProviderCallTokenUsage]] = {}
+    unattributed = 0
     for item in items:
         order = _int_value(item.get("step_order"))
-        if order is None:
+        if order is None or order not in known_orders:
+            unattributed += 1
             continue
-        bucket = calls_by_step.setdefault(
-            order, {"calls": 0, "num_tokens_input": 0, "num_tokens_output": 0}
+        if item.get("call_kind") != "completion":
+            continue
+        status = item.get("status")
+        if status not in ("started", "completed", "rejected", "outcome_unknown"):
+            unattributed += 1
+            continue
+        calls_by_step.setdefault(order, []).append(
+            FlowProviderCallTokenUsage(
+                status=status,  # type: ignore[arg-type]
+                num_tokens_input=_token_count(item.get("num_tokens_input")),
+                num_tokens_output=_token_count(item.get("num_tokens_output")),
+                input_source=_count_source(item.get("input_source")),
+                output_source=_count_source(item.get("output_source")),
+            )
         )
-        bucket["calls"] = (bucket["calls"] or 0) + 1
-        for key in ("num_tokens_input", "num_tokens_output"):
-            count = _token_count(item.get(key))
-            current = bucket[key]
-            bucket[key] = None if current is None or count is None else current + count
     rows: list[JsonObject] = []
+    usages: list[FlowRunTokenUsage] = []
+    all_complete = True
     for step in steps:
         order = _int_value(step.get("step_order"))
-        calls = calls_by_step.get(order) if order is not None else None
+        calls = calls_by_step.get(order, []) if order is not None else []
+        usage = FlowRunTokenUsage.from_provider_calls(calls)
+        if usage is not None:
+            usages.append(usage)
+            if "incomplete" in (usage.input_completeness, usage.output_completeness):
+                all_complete = False
         rows.append(
             {
                 "step_order": order,
                 "status": _optional_string(step, "status"),
-                "num_tokens_input": _token_count(step.get("num_tokens_input")),
-                "num_tokens_output": _token_count(step.get("num_tokens_output")),
-                "provider_calls": calls["calls"] if calls is not None else 0,
-                "provider_num_tokens_input": (
-                    calls["num_tokens_input"] if calls is not None else None
-                ),
-                "provider_num_tokens_output": (
-                    calls["num_tokens_output"] if calls is not None else None
-                ),
+                "completion_calls": len(calls),
+                "num_tokens_input": usage.num_tokens_input if usage else 0,
+                "num_tokens_output": usage.num_tokens_output if usage else 0,
+                "input_completeness": usage.input_completeness if usage else "complete",
+                "output_completeness": usage.output_completeness
+                if usage
+                else "complete",
             }
         )
-    return rows
+    folded = FlowRunTokenUsage.combine(usages)
+    reconciled = (
+        run_token_usage is not None
+        and folded is not None
+        and run_token_usage.get("num_tokens_input") == folded.num_tokens_input
+        and run_token_usage.get("num_tokens_output") == folded.num_tokens_output
+        and run_token_usage.get("input_completeness") == folded.input_completeness
+        and run_token_usage.get("output_completeness") == folded.output_completeness
+    ) or (run_token_usage is None and folded is None)
+    return {
+        "judgeable": (
+            page_complete and unattributed == 0 and all_complete and reconciled
+        ),
+        "page_complete": page_complete,
+        "unattributed_calls": unattributed,
+        "reconciles_with_run": reconciled,
+        "steps": rows,
+    }
+
+
+def _count_source(
+    value: object,
+) -> Literal["provider", "estimated", "mixed", "not_reported", "not_applicable"] | None:
+    return (
+        value  # type: ignore[return-value]
+        if value in ("provider", "estimated", "mixed", "not_reported", "not_applicable")
+        else None
+    )
 
 
 def _runtime_metrics_from_quality_report(report: Mapping[str, object]) -> JsonObject:

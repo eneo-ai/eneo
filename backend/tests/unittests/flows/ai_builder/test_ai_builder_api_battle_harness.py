@@ -899,9 +899,24 @@ def _six_file_runtime_evidence() -> dict[str, object]:
     ]
     return {
         "provider_calls": {
+            # Six per-source calls on step 1 and one on step 2, every count
+            # reported by the provider: the run usage below is their fold.
             "items": [
-                {"event_id": f"provider-call-{index}", "status": "succeeded"}
-                for index in range(1, 8)
+                *(
+                    _provider_call_item(
+                        f"provider-call-{index}",
+                        step_order=1,
+                        num_tokens_input=1000 // 6 + (1 if index <= 1000 % 6 else 0),
+                        num_tokens_output=200 // 6 + (1 if index <= 200 % 6 else 0),
+                    )
+                    for index in range(1, 7)
+                ),
+                _provider_call_item(
+                    "provider-call-7",
+                    step_order=2,
+                    num_tokens_input=200,
+                    num_tokens_output=100,
+                ),
             ],
             "count": 7,
             "total_count": 7,
@@ -919,6 +934,8 @@ def _six_file_runtime_evidence() -> dict[str, object]:
                 "num_tokens_input": 1200,
                 "num_tokens_output": 300,
                 "num_tokens_total": 1500,
+                "input_completeness": "complete",
+                "output_completeness": "complete",
             },
         },
         "step_results": [
@@ -951,15 +968,15 @@ def _six_file_runtime_evidence() -> dict[str, object]:
                 "step_order": 3,
                 "status": "completed",
                 "output_payload_json": {"text": "Deterministic composed report"},
-                "num_tokens_input": None,
-                "num_tokens_output": None,
+                "num_tokens_input": 0,
+                "num_tokens_output": 0,
             },
             {
                 "step_order": 4,
                 "status": "completed",
                 "result_files": [{"file_id": "artifact-1", "name": "report.pdf"}],
-                "num_tokens_input": None,
-                "num_tokens_output": None,
+                "num_tokens_input": 0,
+                "num_tokens_output": 0,
             },
         ],
         "final_artifact": {
@@ -6583,14 +6600,37 @@ def test_six_file_runtime_gate_rejects_each_release_dimension() -> None:
     assert checks_for(missing_artifact)["runtime_final_artifact"]["passed"] is False
 
 
-def test_step_tokens_are_recorded_beside_their_provider_calls() -> None:
-    """The receipt carries each step's run cost. A step the evidence lists
-    calls for must carry its counts; a step without a model call carries
-    none and is not judged."""
+def _provider_call_item(
+    event_id: str,
+    *,
+    step_order: int | None,
+    num_tokens_input: int | None,
+    num_tokens_output: int | None,
+    status: str = "completed",
+    call_kind: str = "completion",
+    input_source: str | None = "provider",
+    output_source: str | None = "provider",
+) -> dict[str, object]:
+    return {
+        "event_id": event_id,
+        "step_order": step_order,
+        "attempt_no": 1,
+        "status": status,
+        "call_kind": call_kind,
+        "num_tokens_input": num_tokens_input,
+        "num_tokens_output": num_tokens_output,
+        "input_source": input_source,
+        "output_source": output_source,
+    }
+
+
+def test_step_cost_is_folded_the_runtime_way_and_fails_closed() -> None:
+    """The receipt carries each step's all-attempt cost by the runtime's own
+    rules, and is judgeable only when the evidence is whole."""
     harness = _battle_harness()
     expected = {"expected_runtime_evidence": {"model_call_count": 3}}
 
-    def checks_for(evidence: dict[str, object]) -> dict[str, dict[str, object]]:
+    def check_for(evidence: dict[str, object]) -> dict[str, object]:
         report = harness._quality_report(
             plan={},
             summary={},
@@ -6598,43 +6638,38 @@ def test_step_tokens_are_recorded_beside_their_provider_calls() -> None:
             event_summary={},
             runtime_evidence=evidence,
         )
-        return {check["name"]: check for check in report["checks"]}
+        return {check["name"]: check for check in report["checks"]}[
+            "runtime_step_tokens"
+        ]
 
     def evidence(
-        *, second_step_tokens: tuple[int | None, int | None]
+        items: list[dict[str, object]],
+        *,
+        usage: dict[str, object] | None = None,
+        page: dict[str, object] | None = None,
     ) -> dict[str, object]:
         return {
             "provider_calls": {
-                "items": [
-                    {
-                        "event_id": "c1",
-                        "status": "succeeded",
-                        "step_order": 1,
-                        "num_tokens_input": 100,
-                        "num_tokens_output": 20,
-                    },
-                    {
-                        "event_id": "c2",
-                        "status": "succeeded",
-                        "step_order": 1,
-                        "num_tokens_input": 110,
-                        "num_tokens_output": 25,
-                    },
-                    {
-                        "event_id": "c3",
-                        "status": "succeeded",
-                        "step_order": 2,
-                        "num_tokens_input": 300,
-                        "num_tokens_output": 60,
-                    },
-                ],
-                "count": 3,
-                "total_count": 3,
+                "items": items,
+                "count": len(items),
+                "total_count": len(items),
                 "total_count_truncated": False,
                 "has_more": False,
                 "next_after_event_id": None,
+                **(page or {}),
             },
-            "run": {"status": "completed", "result": {"kind": "text"}},
+            "run": {
+                "status": "completed",
+                "result": {"kind": "text"},
+                "token_usage": usage
+                or {
+                    "num_tokens_input": 510,
+                    "num_tokens_output": 105,
+                    "num_tokens_total": 615,
+                    "input_completeness": "complete",
+                    "output_completeness": "complete",
+                },
+            },
             "step_results": [
                 {
                     "step_order": 1,
@@ -6645,67 +6680,185 @@ def test_step_tokens_are_recorded_beside_their_provider_calls() -> None:
                 {
                     "step_order": 2,
                     "status": "completed",
-                    "num_tokens_input": second_step_tokens[0],
-                    "num_tokens_output": second_step_tokens[1],
+                    "num_tokens_input": 300,
+                    "num_tokens_output": 60,
                 },
                 {
                     "step_order": 3,
                     "status": "completed",
-                    "num_tokens_input": None,
-                    "num_tokens_output": None,
+                    "num_tokens_input": 0,
+                    "num_tokens_output": 0,
                 },
             ],
         }
 
-    recorded = checks_for(evidence(second_step_tokens=(300, 60)))["runtime_step_tokens"]
-    assert recorded["passed"] is True
-    assert recorded["actual"] == [
+    whole = [
+        _provider_call_item(
+            "c1", step_order=1, num_tokens_input=100, num_tokens_output=20
+        ),
+        _provider_call_item(
+            "c2", step_order=1, num_tokens_input=110, num_tokens_output=25
+        ),
+        _provider_call_item(
+            "c3", step_order=2, num_tokens_input=300, num_tokens_output=60
+        ),
+    ]
+    judged = check_for(evidence(whole))
+    assert judged["passed"] is True
+    assert judged["actual"] == [
         {
             "step_order": 1,
             "status": "completed",
+            "completion_calls": 2,
             "num_tokens_input": 210,
             "num_tokens_output": 45,
-            "provider_calls": 2,
-            "provider_num_tokens_input": 210,
-            "provider_num_tokens_output": 45,
+            "input_completeness": "complete",
+            "output_completeness": "complete",
         },
         {
             "step_order": 2,
             "status": "completed",
+            "completion_calls": 1,
             "num_tokens_input": 300,
             "num_tokens_output": 60,
-            "provider_calls": 1,
-            "provider_num_tokens_input": 300,
-            "provider_num_tokens_output": 60,
+            "input_completeness": "complete",
+            "output_completeness": "complete",
         },
         {
             "step_order": 3,
             "status": "completed",
-            "num_tokens_input": None,
-            "num_tokens_output": None,
-            "provider_calls": 0,
-            "provider_num_tokens_input": None,
-            "provider_num_tokens_output": None,
+            "completion_calls": 0,
+            "num_tokens_input": 0,
+            "num_tokens_output": 0,
+            "input_completeness": "complete",
+            "output_completeness": "complete",
         },
     ]
-    # The step made a call but its counts are missing: the run cost is not judgeable.
-    assert (
-        checks_for(evidence(second_step_tokens=(None, None)))["runtime_step_tokens"][
-            "passed"
-        ]
-        is False
-    )
-    # The receipt's runtime metrics carry the rows under the check's name.
-    metrics = harness._runtime_metrics_from_quality_report(
-        harness._quality_report(
-            plan={},
-            summary={},
-            expected=expected,
-            event_summary={},
-            runtime_evidence=evidence(second_step_tokens=(300, 60)),
+
+    # An earlier attempt whose outcome is unknown: the step's cost is incomplete
+    # (its counts are unknown, not zero) and the run is not judgeable.
+    with_unknown_retry = [
+        _provider_call_item(
+            "c0",
+            step_order=2,
+            num_tokens_input=None,
+            num_tokens_output=None,
+            status="outcome_unknown",
+            input_source="not_reported",
+            output_source="not_reported",
+        ),
+        *whole,
+    ]
+    incomplete = check_for(
+        evidence(
+            with_unknown_retry,
+            usage={
+                "num_tokens_input": 510,
+                "num_tokens_output": 105,
+                "num_tokens_total": 615,
+                "input_completeness": "incomplete",
+                "output_completeness": "incomplete",
+            },
         )
     )
-    assert metrics["runtime_step_tokens"] == recorded["actual"]
+    assert incomplete["passed"] is False
+    assert incomplete["actual"][1]["input_completeness"] == "incomplete"
+    assert incomplete["actual"][1]["completion_calls"] == 2
+
+    # A rejected call costs nothing and does not make the step incomplete.
+    with_rejected = [
+        _provider_call_item(
+            "c0",
+            step_order=1,
+            num_tokens_input=None,
+            num_tokens_output=None,
+            status="rejected",
+            input_source=None,
+            output_source=None,
+        ),
+        *whole,
+    ]
+    assert check_for(evidence(with_rejected))["passed"] is True
+
+    # A transcription call is audio seconds, not tokens, as in the runtime.
+    with_transcription = [
+        _provider_call_item(
+            "t1",
+            step_order=1,
+            num_tokens_input=None,
+            num_tokens_output=None,
+            call_kind="transcription",
+            input_source="not_applicable",
+            output_source="not_applicable",
+        ),
+        *whole,
+    ]
+    assert check_for(evidence(with_transcription))["passed"] is True
+
+    # A page that has more calls than it carries proves nothing.
+    assert check_for(evidence(whole, page={"has_more": True}))["passed"] is False
+    assert check_for(evidence(whole, page={"total_count": 4}))["passed"] is False
+
+    # A call no reported step owns cannot be attributed: not judgeable.
+    orphan = [
+        *whole,
+        _provider_call_item(
+            "c9", step_order=9, num_tokens_input=5, num_tokens_output=1
+        ),
+    ]
+    assert (
+        check_for(
+            evidence(
+                orphan,
+                usage={
+                    "num_tokens_input": 515,
+                    "num_tokens_output": 106,
+                    "num_tokens_total": 621,
+                    "input_completeness": "complete",
+                    "output_completeness": "complete",
+                },
+            )
+        )["passed"]
+        is False
+    )
+
+    # A breakdown that does not add up to the run's recorded usage is refused.
+    assert (
+        check_for(
+            evidence(
+                whole,
+                usage={
+                    "num_tokens_input": 500,
+                    "num_tokens_output": 105,
+                    "num_tokens_total": 605,
+                    "input_completeness": "complete",
+                    "output_completeness": "complete",
+                },
+            )
+        )["passed"]
+        is False
+    )
+
+
+def test_the_total_token_gate_needs_complete_usage() -> None:
+    harness = _battle_harness()
+    expected = {"expected_runtime_evidence": {"max_total_tokens": 2000}}
+    evidence = _six_file_runtime_evidence()
+    run = evidence["run"]
+    assert isinstance(run, dict)
+    usage = run["token_usage"]
+    assert isinstance(usage, dict)
+    usage["output_completeness"] = "incomplete"
+    report = harness._quality_report(
+        plan={},
+        summary={},
+        expected=expected,
+        event_summary={},
+        runtime_evidence=evidence,
+    )
+    check = {c["name"]: c for c in report["checks"]}["runtime_total_tokens"]
+    assert check["passed"] is False
+    assert check["actual"] == 1500
 
 
 def test_runtime_evidence_collection_uses_published_contract(
