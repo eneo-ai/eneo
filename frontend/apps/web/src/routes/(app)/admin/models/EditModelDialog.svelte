@@ -42,6 +42,7 @@
     hasValidCompletionTokenBudgets,
     modelToDraft,
     rawCostToNumber,
+    submittedModelName,
     tokenCostFromPerMillion,
     type ModelDraftState,
     type ModelType
@@ -121,7 +122,7 @@
 
   function buildCompletionUpdate(): TenantCompletionModelUpdate {
     return {
-      name: draft.name.trim(),
+      name: submittedModelName(draft),
       display_name: draft.displayName.trim(),
       description: draft.description.trim() || null,
       hosting: draft.hosting,

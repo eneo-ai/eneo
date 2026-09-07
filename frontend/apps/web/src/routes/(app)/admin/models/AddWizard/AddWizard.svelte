@@ -22,7 +22,7 @@
   import { cubicOut } from "svelte/easing";
   import { invalidate } from "$app/navigation";
   import type { Writable } from "svelte/store";
-  import type { ModelProviderPublic } from "@eneo/eneo-js";
+  import type { ModelProviderPublic, TenantCompletionModelCreate } from "@eneo/eneo-js";
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
@@ -382,6 +382,11 @@
     providerId: string
   ): Promise<{ id: string } | undefined> {
     if (modelType === "completion") {
+      if (model.maxInputTokens === undefined || model.maxOutputTokens === undefined) {
+        // isDraftComplete admits a completion draft only with both budgets;
+        // the shared draft shape cannot say so, the request contract can.
+        throw new Error(`Model ${model.name} has no token budgets`);
+      }
       return eneo.tenantModels.createCompletion({
         provider_id: providerId,
         name: model.name,
@@ -398,7 +403,7 @@
         security_classification: model.securityClassification
           ? { id: model.securityClassification.id }
           : null
-      });
+      } satisfies TenantCompletionModelCreate);
     }
     if (modelType === "embedding") {
       return eneo.tenantModels.createEmbedding({

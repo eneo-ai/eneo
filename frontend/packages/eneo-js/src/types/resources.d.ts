@@ -411,7 +411,8 @@ export type ModelKwargs = components["schemas"]["ModelKwargs"];
 export type ModelKwargCapability = components["schemas"]["ModelKwargCapability"];
 export type SupportedModelKwargs = components["schemas"]["SupportedModelKwargs"];
 
-// Tenant model update types
+// Tenant model create and update types
+export type TenantCompletionModelCreate = components["schemas"]["TenantCompletionModelCreate"];
 export type TenantCompletionModelUpdate = components["schemas"]["TenantCompletionModelUpdate"];
 export type TenantEmbeddingModelUpdate = components["schemas"]["TenantEmbeddingModelUpdate"];
 export type TenantTranscriptionModelUpdate =

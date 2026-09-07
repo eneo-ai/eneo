@@ -10,6 +10,8 @@ import type {
   CompletionModel,
   EmbeddingModel,
   SecurityClassification,
+  TenantCompletionModelCreate,
+  TenantCompletionModelUpdate,
   TranscriptionModel
 } from "@eneo/eneo-js";
 import type { WizardModelDraft } from "../wizardState";
@@ -173,26 +175,36 @@ export function perMillionFromTokenCost(value: number | string | null | undefine
   return Number((n * TOKENS_PER_MILLION).toPrecision(10)).toString();
 }
 
+/** The model identifier as a request submits it. The route a declaration
+ *  is bound to, the identifier compared against it, and the name on the wire
+ *  are one value, so what the form shows is what the server stores. */
+export function submittedModelName(draft: ModelDraftState): string {
+  return draft.name.trim();
+}
+
 /** Whether the strict tool-schema declaration applies to the draft's current
  *  route. Changing the identifier (typing, or picking a catalog model) makes
  *  a declaration ineffective; declaring again binds it to the new route. */
 export function isStrictToolSchemaDeclared(draft: ModelDraftState): boolean {
-  return draft.strictToolSchemaRoute !== null && draft.strictToolSchemaRoute === draft.name;
+  return (
+    draft.strictToolSchemaRoute !== null &&
+    draft.strictToolSchemaRoute === submittedModelName(draft)
+  );
 }
 
 export function declareStrictToolSchema(draft: ModelDraftState, declared: boolean): void {
-  draft.strictToolSchemaRoute = declared ? draft.name : null;
+  draft.strictToolSchemaRoute = declared ? submittedModelName(draft) : null;
   draft.strictToolSchemaTouched = true;
 }
 
+type CompletionCapabilityField =
+  "vision" | "reasoning" | "supports_tool_calling" | "supports_strict_tool_schema";
+
 /** The capability fields of a create request: a total projection, there is
  *  no server state to preserve. */
-export function completionCreateCapabilities(model: WizardModelDraft): {
-  vision: boolean;
-  reasoning: boolean;
-  supports_tool_calling: boolean;
-  supports_strict_tool_schema: boolean;
-} {
+export function completionCreateCapabilities(
+  model: WizardModelDraft
+): Required<Pick<TenantCompletionModelCreate, CompletionCapabilityField>> {
   return {
     vision: model.vision ?? false,
     reasoning: model.reasoning ?? false,
@@ -205,12 +217,9 @@ export function completionCreateCapabilities(model: WizardModelDraft): {
  *  declaration travels only when the admin changed it in this edit; left
  *  untouched it is omitted, so the server's own withdrawal on a route move
  *  stands and a stale form cannot declare a route nobody assessed. */
-export function completionUpdateCapabilities(draft: ModelDraftState): {
-  vision: boolean;
-  reasoning: boolean;
-  supports_tool_calling: boolean;
-  supports_strict_tool_schema?: boolean;
-} {
+export function completionUpdateCapabilities(
+  draft: ModelDraftState
+): Pick<TenantCompletionModelUpdate, CompletionCapabilityField> {
   return {
     vision: draft.vision,
     reasoning: draft.reasoning,
@@ -223,7 +232,7 @@ export function completionUpdateCapabilities(draft: ModelDraftState): {
 
 export function draftToWizardModel(draft: ModelDraftState): WizardModelDraft {
   return {
-    name: draft.name,
+    name: submittedModelName(draft),
     displayName: draft.displayName,
     maxInputTokens: draft.maxInputTokensStr ? parseInt(draft.maxInputTokensStr, 10) : undefined,
     maxOutputTokens: draft.maxOutputTokensStr ? parseInt(draft.maxOutputTokensStr, 10) : undefined,

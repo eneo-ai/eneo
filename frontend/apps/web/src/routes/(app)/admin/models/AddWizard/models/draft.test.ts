@@ -56,6 +56,17 @@ describe("the strict tool-schema declaration belongs to one route", () => {
     expect("supports_strict_tool_schema" in completionUpdateCapabilities(draft)).toBe(false);
   });
 
+  it("compares the identifier as a request submits it, so surrounding whitespace is no move", () => {
+    const draft = modelToDraft(completionModel(), "completion");
+    draft.name = " gpt-old ";
+    expect(isStrictToolSchemaDeclared(draft)).toBe(true);
+    expect(draftToWizardModel(draft).name).toBe("gpt-old");
+    draft.name = " gpt-new ";
+    declareStrictToolSchema(draft, true);
+    expect(draft.strictToolSchemaRoute).toBe("gpt-new");
+    expect(draftToWizardModel(draft).supportsStrictToolSchema).toBe(true);
+  });
+
   it("is withdrawn or declared again for the new route only by an explicit choice", () => {
     const draft = modelToDraft(completionModel(), "completion");
     draft.name = "gpt-new";
