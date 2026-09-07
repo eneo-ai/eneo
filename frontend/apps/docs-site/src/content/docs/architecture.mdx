@@ -264,14 +264,43 @@ async def process_document(ctx, document_id: int):
 
 **Web Crawling:**
 
-```python
-@worker.task
-async def crawl_website(ctx, url: str, max_depth: int):
-    async with Crawler() as crawler:
-        pages = await crawler.crawl(url, max_depth=max_depth)
-        for page in pages:
-            await process_page_content(page)
-```
+The API, general worker and crawler worker share a durable crawl lifecycle in
+PostgreSQL. Redis carries work to the dedicated `arq:crawler` queue.
+
+1. **Admission:** A manual request or schedule creates a crawl run in PostgreSQL
+   before dispatch. Concurrency limits determine when queued work can start.
+2. **Execution:** The crawler worker claims an execution attempt with a renewable
+   lease, then discovers pages through links or a sitemap. It records progress
+   against that attempt.
+3. **Publication:** Extracted text is hashed, split and embedded. Unchanged text
+   with the same embedding model reuses stored content. Publication checks that
+   the attempt still owns its lease before committing each batch.
+4. **Recovery:** The general worker reconciles missed deliveries, expired leases
+   and transport cleanup. A dead execution becomes interrupted; a stale worker
+   cannot publish after losing ownership. Both worker services are required.
+
+Recursive crawls fetch HTML again so unchanged pages can still lead to new or
+previously missed descendants. Conditional page requests are limited to sitemap
+crawls with file downloads disabled. Robots server errors, timeouts and network
+failures stop discovery after bounded retries. Only complete discovery can
+authorize removal of sources no longer present; partial runs preserve them.
+
+A normalized source URL identifies each website document. Files at different
+URLs remain separate even when their names match; a title change at the same URL
+keeps the source's version history. Migration preserves existing metadata and
+citation IDs. Unknown or ambiguous legacy URLs remain available and require
+resolution before publication can replace them. Changed content retains previous
+versions, while removal of an absent source removes its history and citation
+references. There is no automatic age-based retention policy. Crawl history is
+paginated, and the UI loads older runs on request.
+
+Uploads and crawl downloads share extraction subprocesses with time, output,
+archive and PDF bounds; Linux also enforces address-space limits and parent-death
+cleanup. HTML parsing and text splitting use a bounded thread pool so they do not
+run directly on the worker's event loop. Quota checks include retained versions
+and serialize the final commit after provider work, rolling back an over-limit
+publication. Stored knowledge also prevents changes to embedding model semantics
+or provider routing; those changes require a new model and reindexing.
 
 ---
 

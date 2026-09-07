@@ -638,10 +638,15 @@ After deployment, some features require additional configuration in the Admin pa
 ### Crawler & Document Upload
 
 <Callout type="info">
-  To use the web crawler or upload documents for processing, the **worker
-  service must be running** and at least one **embedding model must be enabled**
-  in Admin → Models → Embeddings.
+  Document uploads require the **general worker**. Web crawls require both the
+  **general worker and crawler worker**. Enable at least one embedding model in
+  Admin → Models → Embeddings. See [how crawling works](/docs/architecture#worker-service-arq-today).
 </Callout>
+
+When applying source-URL migration `202609071000`, stop the API and both workers,
+then restart all publishers on the same version. Old publishers identify website
+documents by title; the new version uses their source URL. The migration preserves
+metadata and citation IDs and reports ambiguous legacy URLs for review.
 
 ### Apps (Voice/Audio Features)
 
