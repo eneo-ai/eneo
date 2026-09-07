@@ -26,6 +26,7 @@ from eneo.database.tables.object_content_table import (
     ObjectContentHolds,
     ObjectContentMoves,
     ObjectContentOrphanCandidates,
+    ObjectContentReconciliationState,
     ObjectContents,
     ObjectStoreObjects,
 )
@@ -41,6 +42,7 @@ from eneo.object_content.configuration import (
 from eneo.object_content.content import (
     CapturedContent,
     ContentAccessClass,
+    ContentFailureCode,
     ContentIntent,
     ContentRead,
     ContentState,
@@ -60,7 +62,10 @@ from eneo.object_content.move_repository import (
 )
 from eneo.object_content.object_store_provider import ObjectStoreProvider
 from eneo.object_content.reconciliation import ObjectContentReconciler
-from eneo.object_content.reconciliation_repository import PublicationReservation
+from eneo.object_content.reconciliation_repository import (
+    ObjectContentReconciliationRepository,
+    PublicationReservation,
+)
 from eneo.object_content.runtime import (
     ObjectContentReadinessCode,
     ObjectContentRuntime,
@@ -234,6 +239,137 @@ async def _expire_crashed_operation(
                 .where(ObjectContentOrphanCandidates.object_key == object_key)
                 .values(lease_owner="expired-worker", lease_until=expired)
             )
+
+
+async def _publish_object_store_move(
+    database: DatabaseSessionManager,
+    *,
+    content_id: UUID,
+    actor_id: UUID,
+    payload: bytes,
+) -> str:
+    """Supply verified upload facts at the move executor's publication boundary."""
+    await _queue_move(
+        database,
+        target_kind=StorageKind.OBJECT_STORE,
+        actor_id=actor_id,
+        target_maximum_bytes=max(1, len(payload)),
+    )
+    reservation = PublicationReservation(
+        object_key=f"test/object-content/{uuid4().hex}",
+        size_bytes=len(payload),
+    )
+    async with database.session() as session, session.begin():
+        moves = ObjectContentMoveRepository(session)
+        work = await moves.claim(lease_owner="move-test", lease_seconds=300)
+        assert work is not None and work.content_id == content_id
+        await ObjectContentReconciliationRepository(
+            session
+        ).reserve_publication_objects(
+            (reservation,),
+            lease_owner="move-test",
+            lease_seconds=300,
+            orphan_grace_seconds=300,
+        )
+        await moves.record_object_target(
+            content_id=content_id,
+            lease_owner="move-test",
+            object_key=reservation.object_key,
+        )
+        await moves.record_target_verified(
+            content_id=content_id,
+            lease_owner="move-test",
+            object_key=reservation.object_key,
+            verification_chunk_size_bytes=max(1, len(payload)),
+            verification_chunk_sha256=sha256(payload).digest(),
+        )
+        await moves.complete_to_object_store(
+            content_id=content_id,
+            lease_owner="move-test",
+            reservation=reservation,
+            publication_lease_owner="move-test",
+        )
+    return reservation.object_key
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("inventory_boundary", ["completed", "partway", "equal"])
+async def test_completed_inventory_cannot_fail_a_new_remote_placement(
+    object_content_database: DatabaseSessionManager,
+    inventory_boundary: str,
+) -> None:
+    database = object_content_database
+    payload = b"verified bytes moved after the inventory"
+    content_id, actor_id = await _create_inline_content(
+        database,
+        payload=payload,
+        idempotency_key=f"inventory-move-{uuid4().hex}",
+    )
+    # The fixture's initial cycle predates content availability. Complete a
+    # later cycle as well so the content's age cannot mask placement's age.
+    for _ in range(2):
+        async with database.session() as session, session.begin():
+            repository = ObjectContentReconciliationRepository(session)
+            cursor = await repository.object_inventory_cursor()
+            assert await repository.record_object_page(
+                cursor=cursor,
+                objects=(),
+                next_token=None,
+                orphan_grace_seconds=300,
+            )
+
+    await _publish_object_store_move(
+        database,
+        content_id=content_id,
+        actor_id=actor_id,
+        payload=payload,
+    )
+
+    async with database.session() as session, session.begin():
+        if inventory_boundary == "partway":
+            repository = ObjectContentReconciliationRepository(session)
+            cursor = await repository.object_inventory_cursor()
+            assert not await repository.record_object_page(
+                cursor=cursor,
+                objects=(),
+                next_token="next-page",
+                orphan_grace_seconds=300,
+            )
+        elif inventory_boundary == "equal":
+            descriptor = await session.get(ObjectStoreObjects, content_id)
+            state = await session.scalar(select(ObjectContentReconciliationState))
+            assert descriptor is not None and state is not None
+            state.last_completed_object_cycle_started_at = descriptor.created_at
+            await session.flush()
+        missing = await ObjectContentReconciliationRepository(
+            session
+        ).mark_missing_from_completed_inventory(limit=100)
+        content = await session.get(ObjectContents, content_id)
+        assert content is not None
+        assert missing == 0
+        assert content.state == ContentState.AVAILABLE.value
+
+    # A later complete cycle really omitting this placement must still fail it.
+    for _ in range(2):
+        async with database.session() as session, session.begin():
+            repository = ObjectContentReconciliationRepository(session)
+            cursor = await repository.object_inventory_cursor()
+            assert await repository.record_object_page(
+                cursor=cursor,
+                objects=(),
+                next_token=None,
+                orphan_grace_seconds=300,
+            )
+    async with database.session() as session, session.begin():
+        missing = await ObjectContentReconciliationRepository(
+            session
+        ).mark_missing_from_completed_inventory(limit=100)
+        content = await session.get(ObjectContents, content_id)
+        assert content is not None
+        assert missing == 1
+        assert content.state == ContentState.FAILED.value
+        assert content.failure_code == ContentFailureCode.BACKEND_MISSING.value
 
 
 @pytest.mark.integration

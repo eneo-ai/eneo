@@ -756,6 +756,7 @@ class ObjectContentReconciliationRepository:
                         ),
                     ),
                     ObjectContents.available_at < cutoff,
+                    ObjectStoreObjects.created_at < cutoff,
                     or_(
                         ObjectStoreObjects.remote_observed_at.is_(None),
                         ObjectStoreObjects.remote_observed_at < cutoff,
