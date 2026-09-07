@@ -22,6 +22,7 @@ from eneo.database.tables.assistant_table import (
     AssistantsWebsites,
 )
 from eneo.database.tables.assistant_template_table import AssistantTemplates
+from eneo.database.tables.capabilities_table import AssistantCapabilities
 from eneo.database.tables.collections_table import CollectionsTable
 from eneo.database.tables.help_assistant_assignment_history_table import (
     HelpAssistantAssignmentHistory,
@@ -710,6 +711,10 @@ class AssistantRepository:
         entry_in_db = await self.session.scalar(query)
         assert entry_in_db is not None
 
+        entry_in_db.capabilities = [
+            AssistantCapabilities(purpose=p)
+            for p in sorted(set(assistant.enabled_capabilities))
+        ]
         # Assign groups and websites
         await self._set_collections(entry_in_db, assistant.collections)
         await self._set_websites(entry_in_db, assistant.websites)
@@ -1011,6 +1016,10 @@ class AssistantRepository:
         entry_in_db = await self.session.scalar(query)
         assert entry_in_db is not None
 
+        entry_in_db.capabilities = [
+            AssistantCapabilities(purpose=p)
+            for p in sorted(set(assistant.enabled_capabilities))
+        ]
         # assign groups and websites
         await self._set_collections(entry_in_db, assistant.collections)
         await self._set_websites(entry_in_db, assistant.websites)

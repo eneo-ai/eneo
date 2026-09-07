@@ -16,8 +16,7 @@ from tests.integration.migrations.test_crawl_lifecycle_round_trip import (
 )
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
-_PARENT = "202609031000"
-_REVISION = "202609071000"
+_REVISION = "202609071200"
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -40,18 +39,20 @@ def encryption_service() -> Generator[None, None, None]:
     yield
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def migration_database() -> Generator[tuple[str, Config], None, None]:
     with PostgresContainer("pgvector/pgvector:pg16") as postgres:
         url = postgres.get_connection_url()
         yield _sync_url(url), _alembic_config(url)
 
 
+@pytest.mark.parametrize("parent_revision", ["202609031000", "202609071000"])
 def test_source_url_backfill_preserves_metadata_citations_and_ambiguities(
     migration_database,
+    parent_revision,
 ) -> None:
     url, config = migration_database
-    command.upgrade(config, _PARENT)
+    command.upgrade(config, parent_revision)
     ids = [uuid4() for _ in range(5)]
     source_id = uuid4()
     urls = [
@@ -130,7 +131,7 @@ def test_source_url_backfill_preserves_metadata_citations_and_ambiguities(
         )
         assert cursor.fetchone()[0] is True
 
-    command.downgrade(config, _PARENT)
+    command.downgrade(config, parent_revision)
     with psycopg2.connect(url) as connection, connection.cursor() as cursor:
         cursor.execute(
             "SELECT id, source_id, version_state, title, url, text FROM info_blobs ORDER BY id"

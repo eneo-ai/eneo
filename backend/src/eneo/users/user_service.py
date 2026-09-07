@@ -108,6 +108,12 @@ _SERVICE_KEY_BASE_PERMISSIONS: frozenset[Permission] = frozenset(
         Permission.INTEGRATIONS,
         Permission.SHARED_SPACES,
         Permission.INSIGHTS,
+        # Web search: automations asking an assistant keep the capability the
+        # assistant offers; the route guards and the tenant's providers still
+        # bound what a key can reach. Image generation is deliberately absent:
+        # a generated image is persisted as a file keyed on user_id, and the
+        # synthetic service user has no users row to key it on.
+        Permission.WEB_SEARCH,
     }
 )
 
@@ -1452,7 +1458,7 @@ class UserService:
                         code="insufficient_scope",
                         message=(
                             f"API key is scoped to space '{key.scope_id}'. "
-                            f"The requested resource belongs to a different scope."
+                            "The requested resource was not found or is outside this key's scope."
                         ),
                     )
                 return
@@ -1463,23 +1469,14 @@ class UserService:
                 target_space_id = await self._resolve_space_id_for_resource(
                     resource_type, resource_id
                 )
-            if target_space_id is None:
-                # Fail-closed: can't prove scope → deny
+            if target_space_id is None or key.scope_id != target_space_id:
+                # Deny without distinguishing missing resources from other scopes.
                 raise ApiKeyValidationError(
                     status_code=403,
                     code="insufficient_scope",
                     message=(
                         f"API key is scoped to space '{key.scope_id}'. "
-                        f"The requested resource belongs to a different scope."
-                    ),
-                )
-            if key.scope_id != target_space_id:
-                raise ApiKeyValidationError(
-                    status_code=403,
-                    code="insufficient_scope",
-                    message=(
-                        f"API key is scoped to space '{key.scope_id}'. "
-                        f"The requested resource belongs to a different scope."
+                        "The requested resource was not found or is outside this key's scope."
                     ),
                 )
             return

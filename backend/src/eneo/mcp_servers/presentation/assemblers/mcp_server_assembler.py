@@ -1,9 +1,13 @@
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
 from eneo.mcp_servers.presentation.models import (
+    MCPServerAudience,
+    MCPServerAudienceGroupPublic,
+    MCPServerBackingModelPublic,
     MCPServerList,
     MCPServerPublic,
+    MCPServerPurpose,
     MCPServerSettingsList,
     MCPServerSettingsPublic,
     MCPServerToolPublic,
@@ -46,6 +50,21 @@ def _compute_credential_preview(
     return None
 
 
+def _backing_model_public(
+    mcp_server: MCPServer,
+) -> MCPServerBackingModelPublic | None:
+    model = mcp_server.image_model
+    if model is None:
+        return None
+    return MCPServerBackingModelPublic(
+        id=model.id,
+        name=model.name,
+        nickname=model.nickname,
+        provider_name=model.provider_name,
+        is_enabled=model.is_enabled and not model.is_deleted,
+    )
+
+
 class MCPServerAssembler:
     """Assembler for converting MCP domain entities to presentation DTOs."""
 
@@ -62,7 +81,7 @@ class MCPServerAssembler:
         # Sort tools by name for consistent ordering
         sorted_tools = sorted(mcp_server.tools, key=lambda t: t.name)
 
-        sc = mcp_server.security_classification
+        sc = mcp_server.effective_security_classification
         sc_dict = None
         if sc is not None:
             sc_public = SecurityClassificationPublic.from_domain(sc)
@@ -75,6 +94,7 @@ class MCPServerAssembler:
             "description": mcp_server.description,
             "http_url": mcp_server.http_url,
             "http_auth_type": mcp_server.http_auth_type,
+            "purpose": mcp_server.purpose,
             "tags": mcp_server.tags,
             "icon_url": mcp_server.icon_url,
             "security_classification": sc_dict,
@@ -83,6 +103,7 @@ class MCPServerAssembler:
                     "id": str(tool.id),
                     "name": tool.name,
                     "title": tool.title,
+                    "display_name": tool.display_name,
                     "description": tool.description,
                     "input_schema": tool.input_schema,
                     "is_enabled": tool.is_enabled_by_default,
@@ -99,6 +120,17 @@ class MCPServerAssembler:
             description=mcp_server.description,
             http_url=mcp_server.http_url,
             http_auth_type=mcp_server.http_auth_type,
+            purpose=cast(MCPServerPurpose, mcp_server.purpose),
+            is_enabled=mcp_server.is_enabled,
+            readiness_reason=mcp_server.readiness_reason,
+            audience=cast(MCPServerAudience, mcp_server.audience),
+            audience_priority=mcp_server.audience_priority,
+            image_model_id=mcp_server.image_model_id,
+            image_model=_backing_model_public(mcp_server),
+            user_groups=[
+                MCPServerAudienceGroupPublic(id=group.id, name=group.name)
+                for group in mcp_server.user_groups
+            ],
             has_credentials=bool(mcp_server.http_auth_config_schema),
             credential_preview=_compute_credential_preview(
                 mcp_server.http_auth_config_schema, self.encryption_service
@@ -111,7 +143,7 @@ class MCPServerAssembler:
             icon_url=mcp_server.icon_url,
             documentation_url=mcp_server.documentation_url,
             security_classification=SecurityClassificationPublic.from_domain(
-                mcp_server.security_classification,
+                mcp_server.effective_security_classification,
             ),
         )
 
@@ -141,6 +173,7 @@ class MCPServerSettingsAssembler:
                 mcp_server_id=tool.mcp_server_id,
                 name=tool.name,
                 title=tool.title,
+                display_name=tool.display_name,
                 description=tool.description,
                 input_schema=tool.input_schema,
                 is_enabled_by_default=tool.is_enabled_by_default,
@@ -159,6 +192,17 @@ class MCPServerSettingsAssembler:
             description=mcp_server.description,
             http_url=mcp_server.http_url,
             http_auth_type=mcp_server.http_auth_type,
+            purpose=cast(MCPServerPurpose, mcp_server.purpose),
+            is_enabled=mcp_server.is_enabled,
+            readiness_reason=mcp_server.readiness_reason,
+            audience=cast(MCPServerAudience, mcp_server.audience),
+            audience_priority=mcp_server.audience_priority,
+            image_model_id=mcp_server.image_model_id,
+            image_model=_backing_model_public(mcp_server),
+            user_groups=[
+                MCPServerAudienceGroupPublic(id=group.id, name=group.name)
+                for group in mcp_server.user_groups
+            ],
             has_credentials=bool(mcp_server.http_auth_config_schema),
             credential_preview=_compute_credential_preview(
                 mcp_server.http_auth_config_schema, self.encryption_service
@@ -173,7 +217,7 @@ class MCPServerSettingsAssembler:
             is_org_enabled=mcp_server.is_enabled,
             tools=tools,
             security_classification=SecurityClassificationPublic.from_domain(
-                mcp_server.security_classification,
+                mcp_server.effective_security_classification,
             ),
         )
 

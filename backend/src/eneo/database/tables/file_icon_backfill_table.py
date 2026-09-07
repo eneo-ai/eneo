@@ -124,6 +124,11 @@ class FileIconBackfillAdmissionState(BaseWithTableName):
         server_default=text("0"),
         nullable=False,
     )
+    paused: Mapped[bool] = mapped_column(
+        Boolean,
+        server_default=text("false"),
+        nullable=False,
+    )
 
     __table_args__ = (
         CheckConstraint(

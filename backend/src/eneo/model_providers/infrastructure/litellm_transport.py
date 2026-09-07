@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import socket
 from typing import Any, Callable, NoReturn, cast
 
@@ -15,6 +16,7 @@ from litellm.exceptions import (
     RateLimitError,
     ServiceUnavailableError,
     Timeout,
+    UnsupportedParamsError,
 )
 
 from eneo.main.exceptions import (
@@ -90,6 +92,29 @@ async def aembedding(**kwargs: Any) -> Any:
 async def atranscription(**kwargs: Any) -> Any:
     call = cast(Callable[..., Any], getattr(litellm, "atranscription"))
     return await call(**kwargs)
+
+
+async def aimage_generation(**kwargs: Any) -> Any:
+    call = cast(Callable[..., Any], getattr(litellm, "aimage_generation"))
+    return await call(**kwargs)
+
+
+_UNSUPPORTED_PARAM_RE = re.compile(r"Setting `(\w+)` is not supported")
+
+
+def unsupported_param(exc: BaseException) -> str | None:
+    """The request parameter a model rejected, when that is what ``exc`` says.
+
+    LiteLLM refuses parameters a model does not support before any network
+    call ("Setting `response_format` is not supported by openai, gpt-image-1")
+    and only names one per error, so callers drop it and retry.
+    """
+    for candidate in _exception_chain(exc):
+        if isinstance(candidate, UnsupportedParamsError):
+            match = _UNSUPPORTED_PARAM_RE.search(str(candidate))
+            if match:
+                return match.group(1)
+    return None
 
 
 def _exception_chain(exc: BaseException) -> list[BaseException]:

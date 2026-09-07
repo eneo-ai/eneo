@@ -6,8 +6,10 @@
 
 <script lang="ts">
   import { Button, Input } from "@eneo/ui";
-  import { ChevronRight } from "lucide-svelte";
+  import type { Snippet } from "svelte";
+  import { AlertTriangle, ChevronRight } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
+  import { getCapability, isCapabilityPurpose } from "$lib/features/mcp/capabilities";
   import MCPServerPrimaryCell from "./MCPServerPrimaryCell.svelte";
   import MCPServerEnabledSwitch from "./MCPServerEnabledSwitch.svelte";
   import MCPServerActions from "./MCPServerActions.svelte";
@@ -19,9 +21,11 @@
 
   type Props = {
     mcpServers: MCPServerSettings[];
+    actions?: Snippet;
+    filters?: Snippet;
   };
 
-  const { mcpServers }: Props = $props();
+  const { mcpServers, actions, filters }: Props = $props();
 
   const eneo = getEneo();
 
@@ -35,9 +39,22 @@
     mcpServers.filter((server) => {
       if (!filterValue) return true;
       const searchStr =
-        `${server.name} ${server.description || ""} ${server.http_url} ${server.security_classification?.name || ""}`.toLowerCase();
+        `${server.name} ${server.description || ""} ${server.http_auth_type === "internal" ? `${server.image_model?.nickname ?? ""} ${server.image_model?.name ?? ""}` : server.http_url} ${server.security_classification?.name || ""} ${getCapability(server.purpose)?.label() || ""} ${(server.user_groups ?? []).map((group) => group.name).join(" ")}`.toLowerCase();
       return searchStr.includes(filterValue.toLowerCase());
     })
+  );
+
+  // Activating a capability provider can be refused (unreachable, no usable
+  // tools); the switch reports that here so it shows above the table.
+  let switchError = $state("");
+
+  // The switch column means "activated as provider" for capability rows and
+  // "enabled for the tenant" for general servers; label it for what is shown.
+  const switchColumnLabel = $derived(
+    filteredServers.length > 0 &&
+      filteredServers.every((server) => isCapabilityPurpose(server.purpose))
+      ? m.active()
+      : m.enabled()
   );
 
   function toggleExpanded(serverId: string) {
@@ -51,7 +68,7 @@
 
 <div class="flex w-full flex-col">
   <!-- Filter bar -->
-  <div class="flex items-center justify-between gap-4 pt-2 pb-4">
+  <div class="flex flex-wrap items-center justify-between gap-4 pt-2 pb-4">
     <Input.Text
       bind:value={filterValue}
       label={m.filter()}
@@ -60,7 +77,23 @@
       hiddenLabel={true}
       inputClass="!px-4 !rounded-lg !bg-secondary/50"
     />
+    {#if filters}
+      <div class="shrink-0">{@render filters()}</div>
+    {/if}
+    {#if actions}
+      <div class="ml-auto shrink-0">{@render actions()}</div>
+    {/if}
   </div>
+
+  {#if switchError}
+    <div
+      class="border-negative-default/30 bg-negative-dimmer text-negative-stronger mb-4 flex items-start gap-3 rounded-lg border px-4 py-3 text-sm"
+      role="alert"
+    >
+      <AlertTriangle class="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+      <p>{switchError}</p>
+    </div>
+  {/if}
 
   <!-- Server cards -->
   <div class="w-full">
@@ -80,7 +113,7 @@
           >
           <th
             class="border-default text-muted h-12 w-28 border-b px-4 text-center text-xs font-medium tracking-wider uppercase"
-            >{m.enabled()}</th
+            >{switchColumnLabel}</th
           >
           <th
             class="border-default text-muted h-12 w-16 border-b px-4 text-left text-xs font-medium tracking-wider uppercase"
@@ -91,6 +124,7 @@
         {#each filteredServers as server (server.mcp_server_id)}
           {@const hasTools = (server.tools_count ?? 0) > 0}
           {@const expanded = isExpanded(server.mcp_server_id)}
+          {@const capability = getCapability(server.purpose)}
           <!-- Server row -->
           <tr
             class="group relative transition-colors duration-150 {expanded
@@ -112,6 +146,12 @@
             </td>
             <td class="border-dimmer overflow-hidden border-b px-4 py-3">
               <MCPServerPrimaryCell mcpServer={server} />
+              {#if capability && server.forward_identity}
+                <p class="text-warning-default mt-1.5 flex items-center gap-1.5 text-xs">
+                  <AlertTriangle class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  {m.capability_identity_forwarded_warning()}
+                </p>
+              {/if}
             </td>
             <td class="border-dimmer border-b px-4 py-3 text-center align-middle">
               <span
@@ -124,7 +164,11 @@
             </td>
             <td class="border-dimmer border-b px-4 py-3 align-middle">
               <div class="flex justify-center">
-                <MCPServerEnabledSwitch mcpServer={server} />
+                <MCPServerEnabledSwitch
+                  mcpServer={server}
+                  onAttempt={() => (switchError = "")}
+                  onError={(message) => (switchError = message)}
+                />
               </div>
             </td>
             <td class="border-dimmer border-b px-4 py-3 align-middle">

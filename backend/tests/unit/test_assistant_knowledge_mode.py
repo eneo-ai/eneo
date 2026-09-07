@@ -332,6 +332,7 @@ class TestKnowledgeServerCollisionDefense:
             tool = MagicMock()
             tool.name = "search_knowledge"
             tool.title = None
+            tool.display_name = None
             tool.description = description
             tool.input_schema = {"type": "object", "properties": {}}
             tool.is_enabled_by_default = True

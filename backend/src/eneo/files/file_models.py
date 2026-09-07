@@ -54,7 +54,11 @@ class FileInUseError(Exception):
     def __init__(self, preview: FileDeletionPreview) -> None:
         self.preview = preview
         self.details = preview.model_dump(mode="json")
-        super().__init__("File is still used and cannot be deleted.")
+        super().__init__(
+            "File is still in use and cannot be deleted. "
+            "See details.blockers for the remaining references; "
+            "retry only after those references have been removed."
+        )
 
 
 class FileOriginalNotFoundError(Exception):

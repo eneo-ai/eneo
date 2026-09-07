@@ -643,7 +643,7 @@ After deployment, some features require additional configuration in the Admin pa
   Admin → Models → Embeddings. See [how crawling works](/docs/architecture#worker-service-arq-today).
 </Callout>
 
-When applying source-URL migration `202609071000`, stop the API and both workers,
+When applying source-URL migration `202609071200`, stop the API and both workers,
 then restart all publishers on the same version. Old publishers identify website
 documents by title; the new version uses their source URL. The migration preserves
 metadata and citation IDs and reports ambiguous legacy URLs for review.

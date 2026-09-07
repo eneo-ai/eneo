@@ -14,11 +14,13 @@ model type subclasses and supplies only its specifics:
 Behavioural note: this began as a straight extraction of the original
 `CompletionModelMigrationService` (orchestration, repoint logic and validation
 messages are byte-for-byte preserved). One behaviour was intentionally changed
-for *both* model types when partial migrations were hardened: the source is
-latched (`migrated_to_model_id`) only once no migratable surface still
-references it (see `_has_remaining_source_references`) rather than
-unconditionally after every run, and a partial migration to a different target
-than an earlier completed one is rejected (see the split-target guard in
+for *both* model types when partial migrations were hardened. A source model may
+be disabled because migration is how it is retired; the target must remain
+enabled and tenant-owned. The source is latched (`migrated_to_model_id`) only
+once no migratable surface still references it (see
+`_has_remaining_source_references`) rather than unconditionally after every
+run, and a partial migration to a different target than an earlier completed
+one is rejected (see the split-target guard in
 `_ensure_partial_migrations_keep_same_target`). The full-migration path the
 frontend uses (entity_types omitted → all surfaces in one call) latches exactly
 as before.
@@ -97,7 +99,11 @@ class BaseModelMigrationService:
         return {}
 
     async def _after_execute(
-        self, migration_id: UUID, migrated_count: int, tenant_id: UUID
+        self,
+        migration_id: UUID,
+        migrated_count: int,
+        tenant_id: UUID,
+        from_model_id: UUID,
     ) -> tuple[bool, bool]:
         """Hook run after a successful transactional migration. Returns
         (auto_recalculated, requires_manual_recalculation). Default: no-op."""
@@ -202,18 +208,17 @@ class BaseModelMigrationService:
                 from_model_id, to_model_id, user.tenant_id
             )
 
-            from_enabled = await self.session.execute(
+            source_owned = await self.session.execute(
                 select(self._model_table).where(
                     and_(
                         self._model_table.id == from_model_id,
                         self._model_table.tenant_id == user.tenant_id,
-                        self._model_table.is_enabled == True,  # noqa: E712
                     )
                 )
             )
-            if not from_enabled.scalar_one_or_none():
+            if not source_owned.scalar_one_or_none():
                 raise ValidationException(
-                    f"Source model not available: '{from_model.name}' is not enabled for your organization."
+                    f"Source model not available: '{from_model.name}' does not belong to your organization."
                 )
 
             to_enabled = await self.session.execute(
@@ -354,7 +359,9 @@ class BaseModelMigrationService:
             (
                 auto_recalculated,
                 requires_manual_recalculation,
-            ) = await self._after_execute(migration_id, migrated_count, user.tenant_id)
+            ) = await self._after_execute(
+                migration_id, migrated_count, user.tenant_id, from_model_id
+            )
 
             duration = (datetime.now(timezone.utc) - start_time).total_seconds()
 
