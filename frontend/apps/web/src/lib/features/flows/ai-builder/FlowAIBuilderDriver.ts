@@ -478,10 +478,11 @@ export class FlowAIBuilderDriver {
       });
       this.#state.error = createError;
       this.#forcedCreateRefusal = options?.forceNew ? { targetKind, error: createError } : null;
-      // The session is back on screen before the draft list is asked for:
-      // that request is not what the user is waiting for.
+      // The session is back on screen before the draft list is asked for, and
+      // the failure is reported before that request settles: the list is a
+      // background recovery affordance, not what the user is waiting for.
       this.#notify();
-      await this.loadDraftSessions();
+      void this.loadDraftSessions();
       throw e;
     }
 
@@ -502,7 +503,9 @@ export class FlowAIBuilderDriver {
         { sessionId: result.session_id }
       );
       this.#notify();
-      await this.loadDraftSessions();
+      // Recovery affordances refresh in the background: the failure is what
+      // the user is waiting for, not the draft list.
+      void this.loadDraftSessions();
       throw adoptionError;
     }
     if (owner === null) return false;

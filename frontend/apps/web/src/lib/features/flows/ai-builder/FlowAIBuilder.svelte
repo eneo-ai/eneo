@@ -65,28 +65,24 @@
   let conversationRef = $state<BuilderConversationScreen | undefined>();
   let pendingSavedFlowStepScope = $state<AIBuilderSavedFlowStepScope | null>(null);
   let showReplaceEditSessionDialog = $state(false);
-  // The one owner of getting a session on screen. Every way it can end
-  // without one (a draft that will not open, a refused create, a session
-  // whose plan will not load) lands on the same panel with a retry, so the
-  // driver's "try again" wording always has a button behind it.
-  let bootstrapFailed = $state<"resume" | "session" | null>(null);
+  // Every attempt to get a session on screen goes through `bootstrap`, and a
+  // failed attempt is kept so Retry repeats exactly that attempt.
+  type BootstrapAttempt = "resume" | "session";
+  let failedAttempt = $state<BootstrapAttempt | null>(null);
 
   // ---- Session bootstrap ---------------------------------------------------
 
   onMount(() => {
-    void bootstrap();
+    void bootstrap(targetKind === "create" && resumeSessionId ? "resume" : "session");
   });
 
-  async function bootstrap() {
-    bootstrapFailed = null;
+  async function bootstrap(attempt: BootstrapAttempt) {
+    failedAttempt = null;
     if (service.hasSession) return;
     try {
-      if (targetKind === "create" && resumeSessionId) {
+      if (attempt === "resume" && resumeSessionId) {
         await service.resumeSession(resumeSessionId);
-        if (!service.hasSession) bootstrapFailed = "resume";
-        return;
-      }
-      if (targetKind === "create") {
+      } else if (targetKind === "create") {
         // A new task always gets its own session; unfinished drafts live in
         // the Flöden list, so the builder never has to guess which to reopen.
         await service.createSession("create");
@@ -96,7 +92,7 @@
     } catch {
       // The driver has already put its typed error on the state.
     }
-    if (!service.hasSession) bootstrapFailed = "session";
+    if (!service.hasSession) failedAttempt = attempt;
   }
 
   // ---- Phase and screen ----------------------------------------------------
@@ -686,7 +682,7 @@
   }
 </script>
 
-{#if service.isInitializing || (!service.hasSession && bootstrapFailed === null)}
+{#if service.isInitializing || (!service.hasSession && failedAttempt === null)}
   <div class="flex flex-1 flex-col gap-8 p-6" aria-hidden="true">
     <Skeleton class="h-10 w-full rounded-lg" />
     <div class="flex flex-col gap-3">
@@ -695,27 +691,28 @@
       <Skeleton class="h-4 w-2/5 rounded" />
     </div>
   </div>
-{:else if bootstrapFailed !== null && !service.hasSession}
+{:else if failedAttempt !== null && !service.hasSession}
   <div class="flex flex-1 items-center justify-center p-6">
-    <div class="max-w-[40ch] text-center">
-      <p class="text-primary font-semibold">
-        {bootstrapFailed === "resume"
+    <div class="max-w-[40ch] text-center" role="alert">
+      <h2 class="text-primary font-semibold">
+        {failedAttempt === "resume"
           ? m.ai_builder_resume_failed_title()
           : m.ai_builder_bootstrap_failed_title()}
-      </p>
+      </h2>
       <p class="text-secondary mt-1 text-sm">{service.error?.message ?? ""}</p>
-      <div class="mt-4 flex justify-center gap-2">
-        <Button variant="outline" href={flowsHref}>{m.ai_builder_resume_failed_back()}</Button>
-        <Button variant={bootstrapFailed === "resume" ? "outline" : "default"} onclick={bootstrap}>
+      <div class="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-center">
+        <Button variant="outline" class="w-full sm:w-auto" href={flowsHref}>
+          {m.ai_builder_resume_failed_back()}
+        </Button>
+        <Button
+          variant={failedAttempt === "resume" ? "outline" : "default"}
+          class="w-full sm:w-auto"
+          onclick={() => bootstrap(failedAttempt ?? "session")}
+        >
           {m.ai_builder_turn_retry()}
         </Button>
-        {#if bootstrapFailed === "resume"}
-          <Button
-            onclick={() => {
-              bootstrapFailed = null;
-              void service.createSession("create");
-            }}
-          >
+        {#if failedAttempt === "resume"}
+          <Button class="w-full sm:w-auto" onclick={() => bootstrap("session")}>
             {m.ai_builder_resume_failed_new()}
           </Button>
         {/if}

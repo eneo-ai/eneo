@@ -596,8 +596,12 @@ describe("FlowAIBuilder bootstrap", () => {
       flowId: "flow-1"
     });
 
-    // No skeleton and no dead end: the failure names itself and offers a retry.
-    expect(await screen.findByText(m.ai_builder_bootstrap_failed_title())).toBeTruthy();
+    // No skeleton and no dead end: the failure announces itself as an alert
+    // with a heading and offers a retry.
+    expect(
+      await screen.findByRole("heading", { name: m.ai_builder_bootstrap_failed_title() })
+    ).toBeTruthy();
+    expect(screen.getByRole("alert")).toBeTruthy();
     expect(service().isInitializing).toBe(false);
     expect(screen.getByRole("link", { name: m.ai_builder_resume_failed_back() })).toBeTruthy();
 
@@ -606,6 +610,56 @@ describe("FlowAIBuilder bootstrap", () => {
     await waitFor(() => expect(service().hasSession).toBe(true));
     expect(posts).toBe(2);
     expect(screen.queryByText(m.ai_builder_bootstrap_failed_title())).toBeNull();
+  });
+
+  it("keeps the failure panel when starting a new task from a failed draft is refused", async () => {
+    let posts = 0;
+    const { fetch } = makeFetch({ failOnce: ["s-1"], created: makeSession({ session_id: "s-2" }) });
+    const baseFetch = fetch.getMockImplementation()!;
+    fetch.mockImplementation(async (path, init) => {
+      if (path === SESSIONS_ROUTE && init?.method === "post") {
+        posts += 1;
+        if (posts === 1) throw new Error("create refused");
+      }
+      return baseFetch(path, init);
+    });
+    const { service } = renderShell({ fetch, stream: makeStream().stream, resumeSessionId: "s-1" });
+    await screen.findByRole("heading", { name: m.ai_builder_resume_failed_title() });
+
+    await fireEvent.click(button(m.ai_builder_resume_failed_new()));
+
+    // The escape failed too: the same panel, now for the session attempt,
+    // and Retry repeats that attempt rather than the draft.
+    expect(
+      await screen.findByRole("heading", { name: m.ai_builder_bootstrap_failed_title() })
+    ).toBeTruthy();
+    await fireEvent.click(button(m.ai_builder_turn_retry()));
+    await waitFor(() => expect(service().hasSession).toBe(true));
+    expect(posts).toBe(2);
+  });
+
+  it("shows a failed bootstrap before the draft list refresh settles", async () => {
+    let releaseDrafts!: () => void;
+    const heldDrafts = new Promise<void>((resolve) => {
+      releaseDrafts = resolve;
+    });
+    const { fetch } = makeFetch({});
+    const baseFetch = fetch.getMockImplementation()!;
+    let posts = 0;
+    fetch.mockImplementation(async (path, init) => {
+      if (path === SESSIONS_ROUTE && init?.method === "post") {
+        posts += 1;
+        throw new Error("create refused");
+      }
+      if (path === SESSIONS_ROUTE && init?.method === "get" && posts > 0) await heldDrafts;
+      return baseFetch(path, init);
+    });
+    renderShell({ fetch, stream: makeStream().stream, targetKind: "edit", flowId: "flow-1" });
+
+    expect(
+      await screen.findByRole("heading", { name: m.ai_builder_bootstrap_failed_title() })
+    ).toBeTruthy();
+    releaseDrafts();
   });
 
   it("offers the list and a new task when the chosen draft cannot be opened", async () => {
