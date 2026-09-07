@@ -4632,6 +4632,7 @@
   "ai_builder_build_confirmed_label": "Confirmed task:",
   "ai_builder_build_show_confirmation": "Show",
   "ai_builder_build_slow_note": "This is taking a little longer than usual. You can wait; your answers are still here.",
+  "ai_builder_bootstrap_failed_title": "The session could not be opened",
   "ai_builder_resume_failed_title": "The draft could not be opened",
   "ai_builder_resume_failed_back": "Back to Flows",
   "ai_builder_resume_failed_new": "Start a new task",

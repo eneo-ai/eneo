@@ -4632,6 +4632,7 @@
   "ai_builder_build_confirmed_label": "Bekräftad uppgift:",
   "ai_builder_build_show_confirmation": "Visa",
   "ai_builder_build_slow_note": "Det tar lite längre än vanligt. Du kan vänta kvar, dina svar finns kvar.",
+  "ai_builder_bootstrap_failed_title": "Sessionen kunde inte öppnas",
   "ai_builder_resume_failed_title": "Utkastet kunde inte öppnas",
   "ai_builder_resume_failed_back": "Tillbaka till Flöden",
   "ai_builder_resume_failed_new": "Börja en ny uppgift",

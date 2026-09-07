@@ -65,26 +65,38 @@
   let conversationRef = $state<BuilderConversationScreen | undefined>();
   let pendingSavedFlowStepScope = $state<AIBuilderSavedFlowStepScope | null>(null);
   let showReplaceEditSessionDialog = $state(false);
-  let resumeFailed = $state(false);
+  // The one owner of getting a session on screen. Every way it can end
+  // without one (a draft that will not open, a refused create, a session
+  // whose plan will not load) lands on the same panel with a retry, so the
+  // driver's "try again" wording always has a button behind it.
+  let bootstrapFailed = $state<"resume" | "session" | null>(null);
 
   // ---- Session bootstrap ---------------------------------------------------
 
   onMount(() => {
-    if (service.hasSession) return;
-    if (targetKind === "create" && resumeSessionId) {
-      void resumeChosenDraft(resumeSessionId);
-    } else if (targetKind === "create") {
-      // A new task always gets its own session; unfinished drafts live in the
-      // Flöden list, so the builder never has to guess which one to reopen.
-      void service.createSession("create");
-    } else {
-      void service.initialize(targetKind);
-    }
+    void bootstrap();
   });
 
-  async function resumeChosenDraft(sessionId: string) {
-    await service.resumeSession(sessionId);
-    if (!service.hasSession) resumeFailed = true;
+  async function bootstrap() {
+    bootstrapFailed = null;
+    if (service.hasSession) return;
+    try {
+      if (targetKind === "create" && resumeSessionId) {
+        await service.resumeSession(resumeSessionId);
+        if (!service.hasSession) bootstrapFailed = "resume";
+        return;
+      }
+      if (targetKind === "create") {
+        // A new task always gets its own session; unfinished drafts live in
+        // the Flöden list, so the builder never has to guess which to reopen.
+        await service.createSession("create");
+      } else {
+        await service.initialize(targetKind);
+      }
+    } catch {
+      // The driver has already put its typed error on the state.
+    }
+    if (!service.hasSession) bootstrapFailed = "session";
   }
 
   // ---- Phase and screen ----------------------------------------------------
@@ -674,7 +686,7 @@
   }
 </script>
 
-{#if service.isInitializing || (!service.hasSession && !resumeFailed && !service.error)}
+{#if service.isInitializing || (!service.hasSession && bootstrapFailed === null)}
   <div class="flex flex-1 flex-col gap-8 p-6" aria-hidden="true">
     <Skeleton class="h-10 w-full rounded-lg" />
     <div class="flex flex-col gap-3">
@@ -683,21 +695,30 @@
       <Skeleton class="h-4 w-2/5 rounded" />
     </div>
   </div>
-{:else if resumeFailed && !service.hasSession}
+{:else if bootstrapFailed !== null && !service.hasSession}
   <div class="flex flex-1 items-center justify-center p-6">
     <div class="max-w-[40ch] text-center">
-      <p class="text-primary font-semibold">{m.ai_builder_resume_failed_title()}</p>
+      <p class="text-primary font-semibold">
+        {bootstrapFailed === "resume"
+          ? m.ai_builder_resume_failed_title()
+          : m.ai_builder_bootstrap_failed_title()}
+      </p>
       <p class="text-secondary mt-1 text-sm">{service.error?.message ?? ""}</p>
       <div class="mt-4 flex justify-center gap-2">
         <Button variant="outline" href={flowsHref}>{m.ai_builder_resume_failed_back()}</Button>
-        <Button
-          onclick={() => {
-            resumeFailed = false;
-            void service.createSession("create");
-          }}
-        >
-          {m.ai_builder_resume_failed_new()}
+        <Button variant={bootstrapFailed === "resume" ? "outline" : "default"} onclick={bootstrap}>
+          {m.ai_builder_turn_retry()}
         </Button>
+        {#if bootstrapFailed === "resume"}
+          <Button
+            onclick={() => {
+              bootstrapFailed = null;
+              void service.createSession("create");
+            }}
+          >
+            {m.ai_builder_resume_failed_new()}
+          </Button>
+        {/if}
       </div>
     </div>
   </div>

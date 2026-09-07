@@ -577,6 +577,37 @@ describe("FlowAIBuilder bootstrap", () => {
     });
   });
 
+  it("retries a failed session bootstrap from the failure panel", async () => {
+    const created = makeSession({ session_id: "e-1", target_kind: "edit", flow_id: "flow-1" });
+    let posts = 0;
+    const { fetch } = makeFetch({ created });
+    const baseFetch = fetch.getMockImplementation()!;
+    fetch.mockImplementation(async (path, init) => {
+      if (path === SESSIONS_ROUTE && init?.method === "post") {
+        posts += 1;
+        if (posts === 1) throw new Error("create refused");
+      }
+      return baseFetch(path, init);
+    });
+    const { service } = renderShell({
+      fetch,
+      stream: makeStream().stream,
+      targetKind: "edit",
+      flowId: "flow-1"
+    });
+
+    // No skeleton and no dead end: the failure names itself and offers a retry.
+    expect(await screen.findByText(m.ai_builder_bootstrap_failed_title())).toBeTruthy();
+    expect(service().isInitializing).toBe(false);
+    expect(screen.getByRole("link", { name: m.ai_builder_resume_failed_back() })).toBeTruthy();
+
+    await fireEvent.click(button(m.ai_builder_turn_retry()));
+
+    await waitFor(() => expect(service().hasSession).toBe(true));
+    expect(posts).toBe(2);
+    expect(screen.queryByText(m.ai_builder_bootstrap_failed_title())).toBeNull();
+  });
+
   it("offers the list and a new task when the chosen draft cannot be opened", async () => {
     const { fetch, posts } = makeFetch({
       failOnce: ["s-1"],
