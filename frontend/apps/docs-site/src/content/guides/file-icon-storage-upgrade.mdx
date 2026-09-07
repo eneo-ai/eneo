@@ -12,8 +12,9 @@ installations. S3-compatible storage is optional.**
 
 For an organization upgrading an existing installation:
 
-1. **Prepare and test.** Restore a recent backup in a test environment and follow
-   this guide with the intended release. Measure the affected legacy bytes,
+1. **Prepare and test.** Run [preflight before downtime](#run-preflight-before-downtime)
+   with the intended release image. Restore a recent backup in a test environment
+   and follow this guide. Use the reported legacy bytes to
    reserve additional PostgreSQL and WAL space, and test representative uploads
    and downloads during adoption. Keep **PostgreSQL inline** selected for the
    migration.
@@ -57,7 +58,8 @@ by that model.
 
 ```mermaid
 flowchart LR
-  expand["db-init\nschema · write fence · inventory"] --> online["Eneo starts\nlegacy files remain readable"]
+  preflight["Before downtime\nread-only preflight"] --> expand["db-init\nschema · write fence · inventory"]
+  expand --> online["Eneo starts\nlegacy files remain readable"]
   online --> adopt["Worker\nbounded copy · SHA-256 · reference"]
   adopt --> verify["Verification period\nfiles · backup · restore"]
   verify --> contract["Later contract release\nlock · recheck · remove legacy schema"]
@@ -80,6 +82,65 @@ a production-size test shows acceptable latency.
 </Callout>
 
 <Steps>
+### Run preflight before downtime
+
+Point the Compose `worker` service at the intended new release image and keep
+the current database settings. Use the same Compose files and profile as the
+deployment. Pull the image, then run only the preflight command while the old
+services are still available:
+
+```bash
+docker compose pull worker
+docker compose run --rm --no-deps -T --entrypoint python worker \
+  -m eneo.object_content.file_icon_migration preflight --timeout-seconds 60 \
+  > file-icon-preflight.json
+```
+
+The entrypoint override runs the inspection without starting a worker, running
+`db-init`, or starting its dependencies. An existing worker from the old release
+does not contain this command, so use `run` with the new image before the upgrade.
+After deployment, `exec worker` can run it in the current worker container.
+
+Preflight checks the installed revision, required schema shape and UTF8 encoding,
+then counts legacy File and Icon variants using their logical byte lengths.
+It reports the largest remaining item, items over
+`OBJECT_CONTENT_INLINE_MAXIMUM_BYTES`, and counts in fixed size bands: empty,
+up to 1 MiB, over 1–16 MiB, over 16–200 MiB, and over 200 MiB. Available content
+references are excluded from the remaining estimate; failed references are not.
+No payloads are fetched or hashed, and no capacity is approved or data changed.
+
+The command writes one JSON result to stdout with `format_version: 1`. Check its
+exit code as well as the report:
+
+| Exit code | `outcome` | Required action |
+| --- | --- | --- |
+| `0` | `ready` | Metadata checks passed. Plan disk/WAL headroom and test the upgrade before proceeding. |
+| `2` | `blocked` | Resolve the reported `blockers`: unsupported schema/encoding, oversized items, an incompatible storage target, or a halted campaign. |
+| `3` | `incomplete` | The inspection did not finish or configuration is invalid. Check connectivity, read permissions and locks; increase `--timeout-seconds` for an intentionally longer scan. |
+
+Resolve oversized items before adoption. Raising the inline ceiling also raises
+the possible database memory demand; test capacity and use matching backend and
+worker settings. Direct legacy-to-S3 adoption is unsupported. Keep PostgreSQL
+inline selected through completion, then use verified moves if needed.
+
+`capacity.remaining_logical_bytes` is the remaining copy estimate.
+`campaign_admitted_logical_bytes`, when present, is cumulative exposure already
+accepted by an existing campaign; it can include completed or replacement copies.
+Do not add it to the remaining estimate as a new requirement. Physical database
+growth, generated WAL, retained WAL and host free bytes are separate fields with
+`null` values because this scan cannot determine them. Use the
+[disk planning procedure](#disk-use-the-affected-bytes-not-total-database-size)
+to measure them and preserve operating headroom.
+
+Before the write fence, normal traffic can change these facts. The report is an
+estimate from one read-only snapshot, not a reservation or an upgrade guarantee.
+Recheck [migration status after admission](#read-migration-status) for the
+worker's actual capacity decision. This is an on-demand scan of source-row
+metadata, with a total deadline and a two-second lock timeout; it still consumes
+database I/O. Do not poll it frequently. Matching schema and revision IDs cannot
+prove which earlier unreleased migration code was applied; the restore warning
+above still applies.
+
 ### Test the complete path
 
 Restore a recent production backup in a test environment. Run the same release,
