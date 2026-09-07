@@ -61,12 +61,14 @@ from tests.integration.object_content.conftest import RealObjectStore
 
 async def _tenant_and_user(
     database: DatabaseSessionManager,
+    *,
+    user_email: str = "object-content@example.test",
 ) -> tuple[UUID, UUID]:
     async with database.session() as session, session.begin():
         return (
             await session.execute(
                 sa.select(Users.tenant_id, Users.id).where(
-                    Users.email == "object-content@example.test"
+                    Users.email == user_email
                 )
             )
         ).one()
@@ -79,8 +81,9 @@ async def _seed_legacy_text(
     estimate: int | None = None,
     file_id: UUID | None = None,
     parent_file_id: UUID | None = None,
+    user_email: str = "object-content@example.test",
 ) -> UUID:
-    tenant_id, user_id = await _tenant_and_user(database)
+    tenant_id, user_id = await _tenant_and_user(database, user_email=user_email)
     file_id = file_id or uuid4()
     async with database.session() as session, session.begin():
         await session.execute(sa.text("SET LOCAL session_replication_role = replica"))

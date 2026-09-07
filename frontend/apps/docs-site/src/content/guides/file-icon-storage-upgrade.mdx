@@ -4,43 +4,37 @@ import { Callout, Steps, Tabs } from "nextra/components";
 
 ## TL;DR
 
-This is a **one-time adoption** of File and Icon bytes written by older Eneo
-releases.
+This upgrade consolidates File and Icon bytes, integrity checks, storage rules,
+and cleanup in the shared object-content module. It removes the need to maintain
+separate storage paths as Eneo grows. **Every installation with legacy File or
+Icon content needs this one-time migration, including PostgreSQL-only
+installations. S3-compatible storage is optional.**
 
-<Callout type="info">
-  **Normal availability:** `db-init` keeps the API closed while Eneo expands the
-  schema, installs the legacy write fence, and inventories row metadata. After
-  it succeeds, Eneo starts normally. The maintenance worker then copies and
-  verifies bounded batches while old files remain readable.
-</Callout>
+For an organization upgrading an existing installation:
 
-New uploads use object content as soon as the new release starts. They do not
-wait for the legacy adoption or write bytes back to the old columns.
-
-The default capacity path depends on the **combined logical size of affected
-legacy payloads**, not the size of the whole database or the largest file:
-
-- **At or below 5 GiB:** no action. The online worker starts automatically.
-- **Above 5 GiB:** check disk and WAL headroom, set the reported capacity
-  acknowledgement, and recreate the worker.
-
-During the verification period, affected payloads exist in both layouts. For
-example, 10 GiB of existing legacy payload becomes roughly 20.4 GiB in total:
-the original 10 GiB already on disk plus about 10.4 GiB for the new verified
-copy. The host therefore needs about 10.4 GiB of **additional** database space,
-not another 20.4 GiB, plus temporary WAL growth and its normal free-space floor.
-
-PostgreSQL inline remains a complete byte backend, so this adoption is required
-even when the deployment does not use S3-compatible storage. Run large
-deployments at a quiet time and verify representative files and a current
-restore before closing the recovery window. Do not delete the old columns when
-the worker finishes; a later contract release owns their removal. PostgreSQL
-does not return that filesystem space automatically. Run a planned `pg_repack`
-or `VACUUM FULL` after the contract release only when the host needs it back.
-
-This release adopts legacy payloads into PostgreSQL inline. If object storage is
-selected before the campaign starts, the worker waits rather than silently
-changing the destination; follow [Run and monitor](#run-and-monitor).
+1. **Prepare and test.** Restore a recent backup in a test environment and follow
+   this guide with the intended release. Measure the affected legacy bytes,
+   reserve additional PostgreSQL and WAL space, and test representative uploads
+   and downloads during adoption. Keep **PostgreSQL inline** selected for the
+   migration.
+2. **Take the recovery point and upgrade.** Drain jobs, stop all old backend and
+   worker processes, and take the coordinated backup. Deploy the new release and
+   let `db-init` finish while the API remains closed. This phase needs a
+   maintenance window; use the [deployment commands](/guides/deployment#updating-eneo).
+3. **Start Eneo and let the worker adopt old content.** New uploads use the shared
+   model immediately; existing files remain readable during the background copy.
+   Ready legacy payloads up to 5 GiB start automatically. Above that default,
+   [acknowledge the required capacity](#read-migration-status) after checking
+   disk and WAL headroom.
+4. **Monitor and verify.** Check [migration status](#read-migration-status), disk,
+   WAL, and API latency.
+   Pause adoption if needed. After completion, verify representative old and new
+   content and restore a backup of the new release before closing the recovery
+   window.
+5. **Choose optional storage changes later.** Once adoption is complete, you may
+   select S3-compatible storage and explicitly move existing content. Retain the
+   legacy columns until the separate contract release removes them; completion
+   alone does not reclaim filesystem space.
 
 ## What this changes
 
@@ -299,7 +293,7 @@ copy runs      = max(ceil(payload MiB / 128), ceil(items / 200))
 scheduled runs = admission runs + copy runs - 1
 ```
 
-- **1 GiB in about 1,600 items:** about 15 scheduled runs.
+- **About 1 GiB in 1,639 measured items:** 17 scheduled runs, about 16 minutes.
 - **5 GiB in about 8,000 similarly sized items:** about 1 hour 19 minutes.
 - **10 GiB in 16,384 measured items:** 163 scheduled runs, about 2 hours 42
   minutes.
@@ -332,6 +326,27 @@ database CPU and I/O, WAL/checkpoints, free disk, and batch duration.
   bounded design; use a restored copy to forecast another server.
 </Callout>
 
+A fresh PostgreSQL 13 check on 7 September 2026 copied about 1 GiB across 1,639
+items in **36.5 seconds of active work** at the default batch bounds. The 17
+runs project to about **16 minutes** at the normal cadence. Worker peak memory
+was 140 MiB, generated WAL was 1.08 GiB, additional database allocation was
+1.04 GiB, and all payload digests matched. These are separate measurements:
+generated WAL is not the peak amount retained on disk at once.
+
+An additional small test exercised authenticated uploads, legacy downloads,
+and new-original downloads through the production API routes while adoption
+ran. All 19 foreground rounds and the final byte checks passed. It used an
+in-process HTTP client, 20 legacy items totaling less than 1 MiB, and ten copy
+batches; it proves those request paths remain correct during adoption, not
+production latency under load. The resource benchmark's concurrent probe was
+only a metadata SQL query (p95 4.6 ms), not an HTTP request.
+
+The [recorded workload and results](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/benchmarks/file-icon-migration-pg13-20260907.json)
+include the pinned PostgreSQL image and source hashes. Both tests used a shared
+development machine. Neither measures the offline `db-init` phase, ingestion or
+model-provider load, replicas, backup retention, or a production-size restore.
+Use the following checklist to qualify those parts for the organization.
+
 The main throughput lever is cadence, not parallel PostgreSQL workers. Keep the
 defaults unless a restored-production canary shows that higher bounds preserve
 API latency, memory, I/O, WAL, and checkpoint behavior. Do not disable planner
@@ -363,15 +378,38 @@ or is paused. New uploads use the selected object-content target immediately;
 they do not write back to legacy columns.
 
 <Steps>
-### Read the worker status
+### Read migration status
+
+```bash
+docker compose exec worker python -m eneo.object_content.file_icon_migration status
+```
+
+Use the same Compose files and profile as the deployment. The reference service
+is named `worker`; split deployments may call it the maintenance worker. Run the
+command there so it reads the same database and capacity settings as that worker.
+The command returns a read-only snapshot and never starts migration work.
+
+| Status field | What to do |
+| --- | --- |
+| `state: preparing` | Let the worker finalize metadata. Required bytes remain unknown until this finishes. |
+| `state: waiting_for_capacity` | Reserve PostgreSQL and WAL headroom, then set `FILE_ICON_BACKFILL_INLINE_CAPACITY_ACK` in `env_backend.env` to at least `capacity_required_bytes` and recreate the worker with `docker compose up -d --force-recreate worker`. |
+| `state: waiting_for_object_store` | Select PostgreSQL inline for this migration, as described below. |
+| `state: active` | Monitor disk, WAL, errors, and API latency while batches finish. |
+| `state: halted` | Read `detail` and fix the cause. Clearing pause alone does not recover a halted campaign. |
+| `state: complete` | Perform the verification and backup checks below. |
+| `paused: true` | No new migration work will be claimed. Use `resume` when ready; the underlying `state` and `detail` remain visible. |
+
+Before a campaign starts, this command may sum ledger metadata to report
+capacity. Run it on demand rather than polling it frequently. It does not read
+payload bytes. After a campaign starts, `capacity_admitted_bytes` reports its
+accepted cumulative exposure; `capacity_required_bytes` is null.
+
+For recent worker activity:
 
 ```bash
 docker compose logs --since=30m worker \
   | grep "File/Icon legacy backfill"
 ```
-
-Use the same Compose files and profile as the deployment. The reference service
-is named `worker`; split deployments may call it the maintenance worker.
 
 `waiting_for_capacity` means the application is available while the worker waits
 for the exact acknowledgement. `waiting_for_object_store` means this release
@@ -417,8 +455,8 @@ SELECT target_kind,
 FROM file_icon_backfill_campaign;
 ```
 
-No campaign row while the worker waits for capacity or object storage is normal;
-those pre-campaign states are reported in the worker log.
+No campaign row while the worker prepares admission or waits for capacity or
+object storage is normal; the status command and worker log explain those states.
 
 - **`active`:** admission or adoption is progressing. Monitor disk, WAL, I/O,
   errors, and API latency.
@@ -429,8 +467,8 @@ those pre-campaign states are reported in the worker log.
 
 </Steps>
 
-For `waiting_for_object_store`, either wait for a compatible release or select
-**PostgreSQL inline** in **Admin > Storage**. Selecting inline also changes the
+For `waiting_for_object_store`, select **PostgreSQL inline** in **Admin > Storage**.
+Selecting inline also changes the
 target for eligible new uploads and may lead to the capacity decision above.
 Keep inline selected until the campaign is `complete`; changing the target
 earlier halts the campaign. Then reselect object storage and queue verified
@@ -447,17 +485,32 @@ runbook](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/OBJECT_CON
 
 ### Pause or respond to low disk
 
-Stop the worker first:
-
-Use the same Compose files and profile as the deployment:
+Pause new migration work using the same Compose files and profile as the deployment:
 
 ```bash
-docker compose stop worker
+docker compose exec worker python -m eneo.object_content.file_icon_migration pause
 ```
 
-An in-flight bounded item may finish. Committed items stay committed, leases
-expire safely, and old content remains readable. Stopping this worker also
-pauses other background jobs.
+A bounded batch already claimed may finish. The pause persists across worker
+restarts; committed items stay committed and old content remains readable. Other
+background jobs and ordinary storage moves keep their existing controls.
+
+To allow new migration claims again:
+
+```bash
+docker compose exec worker python -m eneo.object_content.file_icon_migration resume
+```
+
+This clears only pause. Capacity acknowledgement and recovery from a halt still
+apply. For a halted campaign, fix the reported cause, restore its original storage
+target if changed, and set `FILE_ICON_BACKFILL_RESUME_REVISION` strictly above
+`campaign_resume_revision` before recreating the worker. See the
+[recovery runbook](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/OBJECT_CONTENT.md#upgrade-and-rollback)
+for replacement-copy capacity requirements.
+
+If the worker itself must stop immediately, use `docker compose stop worker`;
+that also stops its other background jobs. The migration pause is intended to
+stop new batches, so allow headroom for a batch already in progress.
 
 If free disk continues to fall because users are creating new content, stop or
 block new writes as well. Add capacity or restore the current release's matching
@@ -550,19 +603,23 @@ runbook](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/OBJECT_CON
 
 ### Does the application stay available?
 
-After the coordinated schema and inventory phase, yes. Existing content falls
+The application is designed to serve requests after the coordinated schema and
+inventory phase. Existing content falls
 back to the frozen legacy bytes until its verified reference exists. Large
 deployments should still start the work at a quiet time because online does not
-mean free of I/O or WAL load.
+mean free of I/O or WAL load. The small concurrent API check above passed; test
+representative traffic on a restored production copy before promising the same
+latency for an installation.
 
 ### Can we pause and continue tomorrow?
 
-Yes. Stop the worker. Completed batches remain committed and the same release
-resumes from durable ledger and lease state. Other background jobs pause too.
+Yes. Use the migration `pause` command, then `resume` when ready. Completed
+batches remain committed, and the pause survives worker restarts. A batch already
+claimed may finish; other background jobs continue.
 
 ### What happens if disk runs low?
 
-Stop the worker, stop new writes if necessary, and add capacity or restore the
+Pause migration claims, stop the worker or new writes if necessary, and add capacity or restore the
 coordinated backup. Do not delete old or new payload rows manually. For future
 upgrades on tight disks, set the automatic threshold to zero and approve the
 stable estimate before copying.
