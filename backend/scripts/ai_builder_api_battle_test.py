@@ -159,6 +159,9 @@ from ai_builder_release_gate import replacement_limit  # noqa: E402
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (  # noqa: E402
     StructuredQuestionAnswerMetadata,
 )
+from eneo.flows.ai_builder.ai_builder_flow_review_sample import (  # noqa: E402
+    reader_omitted_step_results,
+)
 from eneo.flows.ai_builder.ai_builder_flow_schema_values import (  # noqa: E402
     builder_form_field_type_values,
 )
@@ -9039,8 +9042,14 @@ def _runtime_evidence_checks(
         for key in ("input_completeness", "output_completeness")
     )
     max_total_tokens = _int_value(expected.get("max_total_tokens"))
+    debug_export = evidence.get("debug_export")
     step_cost = _runtime_step_cost(
         steps=steps,
+        step_results_omitted=(
+            reader_omitted_step_results(cast(dict[str, Any], debug_export))
+            if isinstance(debug_export, Mapping)
+            else True
+        ),
         provider_calls=provider_calls,
         provider_call_evidence_status=provider_call_evidence_status,
         run_token_usage=token_usage,
@@ -9260,10 +9269,14 @@ def _runtime_evidence_checks(
             # recorded usage is not a cost the build can be judged by.
             "name": "runtime_step_tokens",
             "passed": step_cost["judgeable"],
-            "actual": step_cost["steps"],
+            # The diagnostics travel with the rows: a receipt that is not
+            # judgeable says which evidence was short.
+            "actual": step_cost,
             "expected": {
-                "evidence": "complete page, every call attributed",
-                "completeness": "complete",
+                "step_results_complete": True,
+                "page_complete": True,
+                "unattributed_calls": 0,
+                "usage_complete": True,
                 "reconciles_with_run": True,
             },
         },
@@ -9273,6 +9286,7 @@ def _runtime_evidence_checks(
 def _runtime_step_cost(
     *,
     steps: Sequence[Mapping[str, object]],
+    step_results_omitted: bool,
     provider_calls: Mapping[str, object] | None,
     provider_call_evidence_status: str,
     run_token_usage: Mapping[str, object] | None,
@@ -9284,9 +9298,11 @@ def _runtime_step_cost(
     is the one owner of which calls contribute and when usage is incomplete,
     so the receipt cannot invent a second cost definition. Transcription
     calls are token-free here as in the runtime (they are audio seconds).
-    `judgeable` is True only when the page is complete, every call belongs to
-    a step the run reports, every step's usage is complete, and the folded
-    breakdown equals the run's own recorded usage.
+    `judgeable` is True only when the evidence reader returned every step
+    result (its own omission marker says so), the provider-call page is
+    complete, every call belongs to a step the run reports, every step's
+    usage is complete, and the folded breakdown equals the run's own
+    recorded usage.
     """
 
     page_complete = False
@@ -9363,10 +9379,16 @@ def _runtime_step_cost(
     ) or (run_token_usage is None and folded is None)
     return {
         "judgeable": (
-            page_complete and unattributed == 0 and all_complete and reconciled
+            not step_results_omitted
+            and page_complete
+            and unattributed == 0
+            and all_complete
+            and reconciled
         ),
+        "step_results_complete": not step_results_omitted,
         "page_complete": page_complete,
         "unattributed_calls": unattributed,
+        "usage_complete": all_complete,
         "reconciles_with_run": reconciled,
         "steps": rows,
     }

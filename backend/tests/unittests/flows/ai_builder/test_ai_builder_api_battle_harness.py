@@ -924,6 +924,7 @@ def _six_file_runtime_evidence() -> dict[str, object]:
             "has_more": False,
             "next_after_event_id": None,
         },
+        "debug_export": {"run": {"summary": {"omissions": []}}},
         "run": {
             "status": "completed",
             "result": {
@@ -6647,8 +6648,10 @@ def test_step_cost_is_folded_the_runtime_way_and_fails_closed() -> None:
         *,
         usage: dict[str, object] | None = None,
         page: dict[str, object] | None = None,
+        omissions: list[dict[str, object]] | None = None,
     ) -> dict[str, object]:
         return {
+            "debug_export": {"run": {"summary": {"omissions": omissions or []}}},
             "provider_calls": {
                 "items": items,
                 "count": len(items),
@@ -6692,6 +6695,28 @@ def test_step_cost_is_folded_the_runtime_way_and_fails_closed() -> None:
             ],
         }
 
+    def incomplete_usage(
+        num_tokens_input: int, num_tokens_output: int
+    ) -> dict[str, object]:
+        return {
+            "num_tokens_input": num_tokens_input,
+            "num_tokens_output": num_tokens_output,
+            "num_tokens_total": num_tokens_input + num_tokens_output,
+            "input_completeness": "incomplete",
+            "output_completeness": "incomplete",
+        }
+
+    def complete_usage(
+        num_tokens_input: int, num_tokens_output: int
+    ) -> dict[str, object]:
+        return {
+            "num_tokens_input": num_tokens_input,
+            "num_tokens_output": num_tokens_output,
+            "num_tokens_total": num_tokens_input + num_tokens_output,
+            "input_completeness": "complete",
+            "output_completeness": "complete",
+        }
+
     whole = [
         _provider_call_item(
             "c1", step_order=1, num_tokens_input=100, num_tokens_output=20
@@ -6705,7 +6730,12 @@ def test_step_cost_is_folded_the_runtime_way_and_fails_closed() -> None:
     ]
     judged = check_for(evidence(whole))
     assert judged["passed"] is True
-    assert judged["actual"] == [
+    assert judged["actual"]["step_results_complete"] is True
+    assert judged["actual"]["page_complete"] is True
+    assert judged["actual"]["unattributed_calls"] == 0
+    assert judged["actual"]["usage_complete"] is True
+    assert judged["actual"]["reconciles_with_run"] is True
+    assert judged["actual"]["steps"] == [
         {
             "step_order": 1,
             "status": "completed",
@@ -6735,8 +6765,8 @@ def test_step_cost_is_folded_the_runtime_way_and_fails_closed() -> None:
         },
     ]
 
-    # An earlier attempt whose outcome is unknown: the step's cost is incomplete
-    # (its counts are unknown, not zero) and the run is not judgeable.
+    # An earlier attempt whose outcome is unknown (no sources recorded, as the
+    # runtime persists it): the step's cost is incomplete and not judgeable.
     with_unknown_retry = [
         _provider_call_item(
             "c0",
@@ -6744,26 +6774,38 @@ def test_step_cost_is_folded_the_runtime_way_and_fails_closed() -> None:
             num_tokens_input=None,
             num_tokens_output=None,
             status="outcome_unknown",
+            input_source=None,
+            output_source=None,
+        ),
+        *whole,
+    ]
+    incomplete = check_for(
+        evidence(with_unknown_retry, usage=incomplete_usage(510, 105))
+    )
+    assert incomplete["passed"] is False
+    assert incomplete["actual"]["usage_complete"] is False
+    assert incomplete["actual"]["steps"][1]["input_completeness"] == "incomplete"
+    assert incomplete["actual"]["steps"][1]["completion_calls"] == 2
+
+    # A completed call whose provider never reported its counts is the same
+    # gap through the other door.
+    unreported = [
+        _provider_call_item(
+            "c0",
+            step_order=2,
+            num_tokens_input=None,
+            num_tokens_output=None,
             input_source="not_reported",
             output_source="not_reported",
         ),
         *whole,
     ]
-    incomplete = check_for(
-        evidence(
-            with_unknown_retry,
-            usage={
-                "num_tokens_input": 510,
-                "num_tokens_output": 105,
-                "num_tokens_total": 615,
-                "input_completeness": "incomplete",
-                "output_completeness": "incomplete",
-            },
-        )
+    assert (
+        check_for(evidence(unreported, usage=incomplete_usage(510, 105)))["actual"][
+            "usage_complete"
+        ]
+        is False
     )
-    assert incomplete["passed"] is False
-    assert incomplete["actual"][1]["input_completeness"] == "incomplete"
-    assert incomplete["actual"][1]["completion_calls"] == 2
 
     # A rejected call costs nothing and does not make the step incomplete.
     with_rejected = [
@@ -6796,8 +6838,13 @@ def test_step_cost_is_folded_the_runtime_way_and_fails_closed() -> None:
     assert check_for(evidence(with_transcription))["passed"] is True
 
     # A page that has more calls than it carries proves nothing.
-    assert check_for(evidence(whole, page={"has_more": True}))["passed"] is False
-    assert check_for(evidence(whole, page={"total_count": 4}))["passed"] is False
+    short_page = check_for(evidence(whole, page={"has_more": True}))
+    assert short_page["passed"] is False
+    assert short_page["actual"]["page_complete"] is False
+    assert (
+        check_for(evidence(whole, page={"total_count": 4}))["actual"]["page_complete"]
+        is False
+    )
 
     # A call no reported step owns cannot be attributed: not judgeable.
     orphan = [
@@ -6806,38 +6853,39 @@ def test_step_cost_is_folded_the_runtime_way_and_fails_closed() -> None:
             "c9", step_order=9, num_tokens_input=5, num_tokens_output=1
         ),
     ]
-    assert (
-        check_for(
-            evidence(
-                orphan,
-                usage={
-                    "num_tokens_input": 515,
-                    "num_tokens_output": 106,
-                    "num_tokens_total": 621,
-                    "input_completeness": "complete",
-                    "output_completeness": "complete",
-                },
-            )
-        )["passed"]
-        is False
-    )
+    orphaned = check_for(evidence(orphan, usage=complete_usage(515, 106)))
+    assert orphaned["passed"] is False
+    assert orphaned["actual"]["unattributed_calls"] == 1
 
     # A breakdown that does not add up to the run's recorded usage is refused.
-    assert (
-        check_for(
-            evidence(
-                whole,
-                usage={
-                    "num_tokens_input": 500,
-                    "num_tokens_output": 105,
-                    "num_tokens_total": 605,
-                    "input_completeness": "complete",
-                    "output_completeness": "complete",
-                },
-            )
-        )["passed"]
-        is False
+    unreconciled = check_for(evidence(whole, usage=complete_usage(500, 105)))
+    assert unreconciled["passed"] is False
+    assert unreconciled["actual"]["reconciles_with_run"] is False
+
+    # The evidence reader left a step result unread under its own bounds: a
+    # breakdown that reconciles and attributes every call still misses a
+    # step, so it is not judgeable; so is evidence with no reader summary.
+    omitted = check_for(
+        evidence(whole, omissions=[{"section": "step_results", "omitted_rows": 1}])
     )
+    assert omitted["passed"] is False
+    assert omitted["actual"]["step_results_complete"] is False
+    without_summary = {
+        key: value for key, value in evidence(whole).items() if key != "debug_export"
+    }
+    assert check_for(without_summary)["actual"]["step_results_complete"] is False
+
+    # The receipt's runtime metrics carry the check's rows and diagnostics.
+    metrics = harness._runtime_metrics_from_quality_report(
+        harness._quality_report(
+            plan={},
+            summary={},
+            expected=expected,
+            event_summary={},
+            runtime_evidence=evidence(whole),
+        )
+    )
+    assert metrics["runtime_step_tokens"] == judged["actual"]
 
 
 def test_the_total_token_gate_needs_complete_usage() -> None:
