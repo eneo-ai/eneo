@@ -34,12 +34,14 @@
       "repair_attempt_failure_codes": {
         "proposal_parse_model": 3
       },
-      "revisions": [],
+      "revisions": [
+        "af8532718d16e2ec448b31884a0b49cfcee56c24"
+      ],
       "spaces": [
         "6f18b073-ea64-4a5e-8236-778a25e72d8f"
       ],
       "tracked_clean": [
-        "None"
+        "True"
       ],
       "verdicts": {
         "fail": 64,
@@ -73,12 +75,14 @@
       "repair_attempt_failure_codes": {
         "proposal_parse_model": 5
       },
-      "revisions": [],
+      "revisions": [
+        "af8532718d16e2ec448b31884a0b49cfcee56c24"
+      ],
       "spaces": [
         "6f18b073-ea64-4a5e-8236-778a25e72d8f"
       ],
       "tracked_clean": [
-        "None"
+        "True"
       ],
       "verdicts": {
         "fail": 35,
@@ -105,12 +109,14 @@
       },
       "receipts_sha256": "9fdeb7f8173236c2084b50fefd3a2020dfe993abd05347a80c43634d618033f7",
       "repair_attempt_failure_codes": {},
-      "revisions": [],
+      "revisions": [
+        "a6e30c84ccbf85ae7c3e93d8747b18a3b35d534b"
+      ],
       "spaces": [
         "6f18b073-ea64-4a5e-8236-778a25e72d8f"
       ],
       "tracked_clean": [
-        "None"
+        "True"
       ],
       "verdicts": {
         "fail": 3,
@@ -141,12 +147,14 @@
       },
       "receipts_sha256": "2d86886d5806cb91e48387ee97be494bd42dc35a320850901dc91e848fb1fa05",
       "repair_attempt_failure_codes": {},
-      "revisions": [],
+      "revisions": [
+        "97fe995bb5bcc4ca307d303161f626dda6e93210"
+      ],
       "spaces": [
         "9fe65f26-b0dd-47e8-9aea-aa02a2e50014"
       ],
       "tracked_clean": [
-        "None"
+        "True"
       ],
       "verdicts": {
         "fail": 64,
@@ -179,12 +187,14 @@
       "repair_attempt_failure_codes": {
         "proposal_parse_model": 6
       },
-      "revisions": [],
+      "revisions": [
+        "97fe995bb5bcc4ca307d303161f626dda6e93210"
+      ],
       "spaces": [
         "9fe65f26-b0dd-47e8-9aea-aa02a2e50014"
       ],
       "tracked_clean": [
-        "None"
+        "True"
       ],
       "verdicts": {
         "fail": 36,
