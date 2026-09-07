@@ -67,9 +67,7 @@ async def _tenant_and_user(
     async with database.session() as session, session.begin():
         return (
             await session.execute(
-                sa.select(Users.tenant_id, Users.id).where(
-                    Users.email == user_email
-                )
+                sa.select(Users.tenant_id, Users.id).where(Users.email == user_email)
             )
         ).one()
 
@@ -1118,6 +1116,9 @@ async def test_concurrent_reference_failure_precedes_campaign_capacity_snapshot(
         async def wait_for_blocked_campaign_start() -> bool:
             async with object_content_database.session() as session, session.begin():
                 while not startup_task.done():
+                    # A cached activity snapshot can omit the campaign connection
+                    # if it starts after this observer's first poll.
+                    await session.execute(sa.text("SELECT pg_stat_clear_snapshot()"))
                     waiting = await session.scalar(
                         sa.text(
                             """
