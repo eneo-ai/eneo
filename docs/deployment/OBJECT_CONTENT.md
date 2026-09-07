@@ -648,8 +648,9 @@ S3-compatible storage is optional and is not the reason the migration is require
 
 The organizational sequence is:
 
-1. Restore and test the intended release with representative data. Measure legacy
-   payload size, reserve PostgreSQL/WAL headroom, and keep PostgreSQL inline selected.
+1. Run read-only preflight with the intended release before downtime. Restore and
+   test representative data, reserve PostgreSQL/WAL headroom from the reported
+   legacy bytes, and keep PostgreSQL inline selected.
 2. Drain old jobs, stop all old backend/worker processes, take the coordinated
    recovery point, and run `db-init` with the API closed.
 3. Start the new release. Let bounded online adoption run, or acknowledge the
@@ -766,6 +767,56 @@ Waiting for capacity is non-fatal: the upgrade is complete, the application
 continues serving frozen legacy File/Icon content, and the worker emits a
 structured warning with the requirement and required acknowledgement on startup
 and every scheduled tick.
+
+### Preflight before downtime
+
+Use the intended new release's image with the existing database configuration.
+Keep old services running during this inspection and use the deployment's normal
+Compose files, profile and maintenance-worker service name:
+
+```bash
+docker compose pull worker
+docker compose run --rm --no-deps -T --entrypoint python worker \
+  -m eneo.object_content.file_icon_migration preflight --timeout-seconds 60 \
+  > file-icon-preflight.json
+```
+
+`run` uses the new image; an old running worker does not contain the command.
+`--entrypoint python` and `--no-deps` keep this invocation to the inspection
+without starting worker jobs or `db-init`. After upgrading, it can also run via
+`docker compose exec worker`.
+
+JSON format version 1 reports `outcome`, `schema_state`, `alembic_revision`,
+`server_encoding`, `inline_maximum_bytes`, storage target, per-variant facts,
+`capacity` and `blockers`. Exit 0 (`ready`) means the metadata checks passed;
+exit 2 (`blocked`) requires resolving a reported issue; exit 3 (`incomplete`)
+means the scan or configuration did not allow a complete result. Check both
+the exit status and JSON before proceeding. No payloads, SQL errors or credentials
+are printed.
+
+The four inventory source groups use logical `octet_length`, preserve empty
+payloads, omit absent payloads/deleted owners and exclude only references whose
+content is `available`. Counts, total bytes, maximum remaining item, oversized
+items and fixed remaining-item size bands are returned in bounded output.
+Remaining logical bytes estimate the future copy; an expanded campaign's
+`campaign_admitted_logical_bytes` is its existing cumulative exposure, including
+possible replacement copies. These are not interchangeable capacity approvals.
+
+Physical database allocation, generated WAL, retained WAL and host free bytes
+remain `null` (unknown). Use the guide's
+[disk planning procedure](https://docs.eneo.ai/guides/file-icon-storage-upgrade#disk-use-the-affected-bytes-not-total-database-size)
+for measurements. Preflight does not reserve capacity, hash/copy bytes, contact
+object storage, or write schema or ledger data. It uses one read-only repeatable
+snapshot, a two-second lock timeout and a total deadline. Increase
+`--timeout-seconds` deliberately for a larger metadata scan; no retry or ongoing
+polling is performed.
+
+Before the write fence, normal traffic can change the estimate. Recheck `status`
+after admission for the worker's actual capacity requirement. Resolve unsupported
+schema/revision/encoding, oversized items, an incompatible target or a halted
+campaign before proceeding. Matching revision IDs and schema cannot distinguish
+earlier unreleased migration implementations with the same shape; the existing
+backup-restore requirement for those revisions still applies.
 
 ### Inspect or pause the one-time File/Icon migration
 

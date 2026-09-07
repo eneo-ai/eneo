@@ -1,7 +1,7 @@
 """Operator controls for the temporary File/Icon migration.
 
 Run inside the maintenance worker environment:
-    python -m eneo.object_content.file_icon_migration status|pause|resume
+    python -m eneo.object_content.file_icon_migration preflight|status|pause|resume
 """
 
 import argparse
@@ -12,6 +12,35 @@ from contextlib import redirect_stdout
 from dataclasses import asdict
 
 import sqlalchemy as sa
+from pydantic import ValidationError
+
+
+async def _preflight(timeout_seconds: int) -> tuple[str, int]:
+    from eneo.main.config import get_settings
+    from eneo.object_content.file_icon_preflight import (
+        FileIconPreflightReport,
+        PreflightIssue,
+        run_file_icon_preflight,
+    )
+
+    try:
+        report = await run_file_icon_preflight(
+            get_settings().database_url, timeout_seconds=timeout_seconds
+        )
+    except (ValidationError, ValueError):
+        report = FileIconPreflightReport(
+            blockers=[
+                PreflightIssue(
+                    "invalid_configuration",
+                    "Preflight configuration is invalid. Check the worker's database and OBJECT_CONTENT settings; values are omitted to protect credentials.",
+                )
+            ]
+        )
+    return json.dumps(asdict(report), indent=2), {
+        "ready": 0,
+        "blocked": 2,
+        "incomplete": 3,
+    }[report.outcome]
 
 
 async def _run(command: str) -> str:
@@ -63,13 +92,26 @@ async def _run(command: str) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("status", "pause", "resume"))
+    parser.add_argument("command", choices=("preflight", "status", "pause", "resume"))
+    parser.add_argument(
+        "--timeout-seconds",
+        type=int,
+        default=60,
+        help="Total preflight scan deadline in seconds (default: 60)",
+    )
     arguments = parser.parse_args()
+    if arguments.timeout_seconds < 1:
+        parser.error("--timeout-seconds must be positive")
     # App loggers bind their console stream on import. Keep diagnostics on
     # stderr and reserve stdout for one complete JSON result.
     with redirect_stdout(sys.stderr):
-        result = asyncio.run(_run(arguments.command))
+        if arguments.command == "preflight":
+            result, exit_code = asyncio.run(_preflight(arguments.timeout_seconds))
+        else:
+            result = asyncio.run(_run(arguments.command))
+            exit_code = 0
     print(result)
+    raise SystemExit(exit_code)
 
 
 if __name__ == "__main__":
