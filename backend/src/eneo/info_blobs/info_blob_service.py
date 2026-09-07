@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Optional, TypeVar
 from uuid import UUID
 
 from eneo.actors import SpaceAction
-from eneo.admin.quota_service import QuotaService
+from eneo.admin.quota_service import QuotaService, enforce_quota_on_commit
 from eneo.groups_legacy.group_service import GroupService
 from eneo.info_blobs.info_blob import (
     CapturedKnowledgeOriginal,
@@ -437,7 +437,13 @@ class InfoBlobService:
                 )
             updated = await self.update_info_blob_size(published.id)
             await self.quota_service.ensure_capacity(0)
-            return updated
+
+        enforce_quota_on_commit(
+            self.repo.session,
+            tenant_id=info_blob.tenant_id,
+            user_id=info_blob.user_id,
+        )
+        return updated
 
     async def add_info_blobs(
         self,

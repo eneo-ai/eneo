@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
+from aiohttp import web
 from dependency_injector import providers
 
 from eneo.audit.application import audit_service as audit_service_module
@@ -26,6 +27,8 @@ from eneo.crawler.engine import (
     PageFailed,
     PageUnchanged,
 )
+from eneo.crawler.extraction import extract_html
+from eneo.crawler.python_engine import PythonCrawlEngine
 from eneo.database.database import AsyncSession, sessionmanager
 from eneo.database.tables.ai_models_table import EmbeddingModels
 from eneo.database.tables.info_blobs_table import (
@@ -58,10 +61,12 @@ from eneo.websites.domain.crawl_run import (
 )
 from eneo.websites.domain.crawl_run_repo import CrawlRunRepository
 from eneo.websites.domain.crawl_service import CrawlService
+from eneo.websites.domain.source_url import normalize_url
 from eneo.websites.domain.website import UpdateInterval, Website
 from eneo.worker import crawl_tasks as crawl_tasks_module
 from eneo.worker.crawl import CrawlLeaseLostError
 from eneo.worker.crawl_tasks import crawl_task
+from tests.unit.crawler.test_python_engine import _serve
 
 pytestmark = pytest.mark.integration
 
@@ -787,6 +792,104 @@ async def test_delivery_failure_remains_repairable_and_retry_is_idempotent(
     assert (redelivered.claimed, redelivered.dispatched) == (1, 1)
 
 
+async def test_live_redis_outage_and_queue_loss_preserve_accepted_crawls(
+    db_session, admin_user, unused_tcp_port
+):
+    from arq import create_pool
+    from arq.connections import RedisSettings
+    from arq.jobs import JobStatus
+    from redis.exceptions import ConnectionError as RedisConnectionError
+    from testcontainers.redis import RedisContainer
+
+    from eneo.jobs.job_manager import CRAWLER_QUEUE_NAME, JobManager
+    from eneo.jobs.job_serialization import deserialize_job, serialize_job
+
+    redis = RedisContainer("redis:7-alpine").with_bind_ports(6379, unused_tcp_port)
+    await asyncio.to_thread(redis.start)
+    manager = JobManager()
+    try:
+        manager._redis = await create_pool(
+            RedisSettings(
+                host=redis.get_container_host_ip(),
+                port=int(redis.get_exposed_port(6379)),
+                conn_timeout=1,
+                conn_retries=0,
+            ),
+            job_serializer=serialize_job,
+            job_deserializer=deserialize_job,
+        )
+        runs = []
+        for index in range(2):
+            async with db_session() as session:
+                website = await _persist_website(
+                    session,
+                    tenant_id=admin_user.tenant_id,
+                    user_id=admin_user.id,
+                    label=f"Redis loss {index}",
+                )
+                runs.append(
+                    await _admit(
+                        session,
+                        website=website,
+                        user=admin_user,
+                        origin=CrawlOrigin.MANUAL,
+                    )
+                )
+            result = await crawl_dispatch.reconcile_crawl_work(
+                enqueue=manager.enqueue,
+                discard=manager.discard_crawl_deliveries,
+                concurrency_limit=2,
+            )
+            if index == 0:
+                assert result.dispatched == 1
+                await asyncio.to_thread(redis.get_wrapped_container().stop, timeout=0)
+            else:
+                assert result.delivery_errors == 1
+
+        await asyncio.to_thread(redis.get_wrapped_container().start)
+        for _ in range(50):
+            try:
+                await manager._redis.ping()
+                break
+            except RedisConnectionError:
+                await asyncio.sleep(0.1)
+        # This Redis belongs exclusively to the test. Drop its restored queue
+        # as well to cover delivery loss, independently of RDB timing on stop.
+        await manager._redis.flushdb()
+        async with db_session() as session:
+            attempts = list(
+                await session.scalars(
+                    sa.select(CrawlAttempts).where(
+                        CrawlAttempts.crawl_run_id.in_([run.id for run in runs])
+                    )
+                )
+            )
+            dispatch_ids = [attempt.dispatch_id for attempt in attempts]
+            for attempt in attempts:
+                attempt.dispatch_attempted_at -= timedelta(minutes=6)
+                if attempt.dispatched_at is not None:
+                    attempt.dispatched_at -= timedelta(minutes=6)
+        repaired = await crawl_dispatch.reconcile_crawl_work(
+            enqueue=manager.enqueue,
+            discard=manager.discard_crawl_deliveries,
+            concurrency_limit=2,
+        )
+        assert (repaired.dispatched, repaired.delivery_errors) == (2, 0)
+        assert await manager._redis.zcard(CRAWLER_QUEUE_NAME) == 2
+        for dispatch_id in dispatch_ids:
+            assert (
+                await manager.get_job_status(dispatch_id, Task.CRAWL)
+                == JobStatus.queued
+            )
+        async with db_session() as session:
+            for run in runs:
+                reloaded = await CrawlRunRepository(session).one(run.id)
+                assert reloaded.phase == CrawlPhase.QUEUED
+    finally:
+        await manager.close()
+        await asyncio.to_thread(redis.stop)
+
+
 async def test_expired_worker_delivery_is_discarded_after_database_repair(
     db_session,
     admin_user,
@@ -1269,7 +1372,9 @@ async def test_file_crawl_reobserves_linked_files_before_stale_cleanup(
     container = Container(session=providers.Object(SessionProxy()))
     container.crawler.override(providers.Object(engine))
     container.text_extractor.override(
-        providers.Object(SimpleNamespace(extract=Mock(return_value=file_text)))
+        providers.Object(
+            SimpleNamespace(extract_bounded=AsyncMock(return_value=file_text))
+        )
     )
 
     result = await crawl_task(job_id=dispatch_id, params=task, container=container)
@@ -1283,7 +1388,108 @@ async def test_file_crawl_reobserves_linked_files_before_stale_cleanup(
         assert persisted_file.version_state == InfoBlobVersionState.ACTIVE.value
 
 
-async def test_page_only_crawl_forwards_conditional_validators(
+@pytest.mark.parametrize("robots_unreachable", [False, True])
+async def test_recursive_crawl_rediscovers_children_of_cached_pages(
+    db_session,
+    admin_user,
+    robots_unreachable: bool,
+) -> None:
+    requested: list[str] = []
+    documents = {
+        "/": '<main>Root <a href="/child">Child</a></main>',
+        "/child": "<main>Child still exists without cache headers</main>",
+    }
+
+    async def page(request: web.Request) -> web.Response:
+        requested.append(request.path)
+        if request.headers.get("If-None-Match"):
+            return web.Response(status=304)
+        return web.Response(text=documents[request.path], content_type="text/html")
+
+    async def robots(_: web.Request) -> web.Response:
+        return web.Response(
+            status=503 if robots_unreachable else 404, headers={"Retry-After": "0"}
+        )
+
+    app = web.Application()
+    app.router.add_get("/robots.txt", robots)
+    app.router.add_get("/", page)
+    app.router.add_get("/child", page)
+    async with _serve(app) as origin:
+        async with db_session() as session:
+            website = await _persist_website(
+                session,
+                tenant_id=admin_user.tenant_id,
+                user_id=admin_user.id,
+                label="Recursive mixed validators",
+            )
+            record = await session.get(WebsitesTable, website.id)
+            assert record is not None
+            record.url = website.url = f"{origin}/"
+            model_id = await session.scalar(
+                sa.select(EmbeddingModels.id)
+                .where(
+                    EmbeddingModels.tenant_id == admin_user.tenant_id,
+                    EmbeddingModels.provider_id.is_not(None),
+                )
+                .limit(1)
+            )
+            assert model_id is not None
+            record.embedding_model_id = model_id
+            for path, html in documents.items():
+                url = f"{origin}{path}"
+                content = extract_html(html, url).content
+                session.add(
+                    InfoBlobs(
+                        title=url,
+                        url=url,
+                        text=content,
+                        size=len(content.encode()),
+                        content_hash=sha256(content.encode()).digest(),
+                        http_etag='"root-v1"' if path == "/" else None,
+                        source_id=uuid4(),
+                        version_state=InfoBlobVersionState.ACTIVE.value,
+                        website_id=website.id,
+                        tenant_id=admin_user.tenant_id,
+                        user_id=admin_user.id,
+                        embedding_model_id=record.embedding_model_id,
+                    )
+                )
+            run = await _admit(session, website=website, user=admin_user)
+            attempt = await session.scalar(
+                sa.select(CrawlAttempts).where(CrawlAttempts.crawl_run_id == run.id)
+            )
+            assert attempt is not None
+            task = CrawlTask.model_validate(attempt.dispatch_payload)
+            dispatch_id = attempt.dispatch_id
+
+        container = Container(session=providers.Object(SessionProxy()))
+        container.crawler.override(
+            providers.Object(PythonCrawlEngine(allow_private_network=True))
+        )
+        embeddings = Mock(
+            get_embeddings=AsyncMock(side_effect=AssertionError("Unchanged text"))
+        )
+        container.create_embeddings_service.override(providers.Object(embeddings))
+        result = await crawl_task(job_id=dispatch_id, params=task, container=container)
+
+    assert result["status"] == (
+        CrawlOutcome.FAILED.value
+        if robots_unreachable
+        else CrawlOutcome.SUCCEEDED.value
+    )
+    assert set(requested) == (set() if robots_unreachable else {"/", "/child"})
+    embeddings.get_embeddings.assert_not_awaited()
+    async with db_session() as session:
+        retained_urls = set(
+            await session.scalars(
+                sa.select(InfoBlobs.url).where(InfoBlobs.website_id == website.id)
+            )
+        )
+    assert retained_urls == {f"{origin}{path}" for path in documents}
+
+
+async def test_page_only_sitemap_forwards_conditional_validators(
     db_session,
     admin_user,
     tmp_path: Path,
@@ -1296,6 +1502,7 @@ async def test_page_only_crawl_forwards_conditional_validators(
             tenant_id=admin_user.tenant_id,
             user_id=admin_user.id,
             label="Conditional page crawl",
+            crawl_type=CrawlType.SITEMAP,
         )
         website_record = await session.get(WebsitesTable, website.id)
         assert website_record is not None
@@ -1332,7 +1539,7 @@ async def test_page_only_crawl_forwards_conditional_validators(
     assert result["status"] == CrawlOutcome.UNCHANGED.value
     assert engine.request is not None
     assert engine.request.conditional_gets == (
-        ConditionalGet(url=website.url, etag='"page-v1"'),
+        ConditionalGet(url=cast(str, normalize_url(website.url)), etag='"page-v1"'),
     )
 
 
@@ -1479,6 +1686,7 @@ async def test_truncated_page_validators_preserve_omitted_active_content(
             tenant_id=admin_user.tenant_id,
             user_id=admin_user.id,
             label="Bounded conditional crawl",
+            crawl_type=CrawlType.SITEMAP,
         )
         website_record = await session.get(WebsitesTable, website.id)
         assert website_record is not None
@@ -1800,7 +2008,9 @@ async def test_published_files_are_not_reduced_by_unrelated_download_failures(
         providers.Object(_UsefulFilePartialCrawlEngine((first_path, second_path)))
     )
     container.text_extractor.override(
-        providers.Object(SimpleNamespace(extract=Mock(return_value="file text")))
+        providers.Object(
+            SimpleNamespace(extract_bounded=AsyncMock(return_value="file text"))
+        )
     )
 
     result = await crawl_task(job_id=dispatch_id, params=task, container=container)
@@ -1847,7 +2057,9 @@ async def test_worker_closes_crawl_stream_when_file_processing_aborts(
     container.crawler.override(providers.Object(engine))
     container.text_extractor.override(
         providers.Object(
-            SimpleNamespace(extract=Mock(side_effect=CrawlLeaseLostError("lease lost")))
+            SimpleNamespace(
+                extract_bounded=AsyncMock(side_effect=CrawlLeaseLostError("lease lost"))
+            )
         )
     )
 

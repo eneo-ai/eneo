@@ -298,6 +298,17 @@ DB_POOL_PRE_PING=true
 # Log connections held >60s - use for debugging pool exhaustion only
 # DB_POOL_DEBUG=false
 
+# Background uploads and website files share bounded extraction. Restart workers
+# after changing these limits. Linux enforces child address-space and CPU limits.
+FILE_EXTRACTION_CONCURRENCY=2
+FILE_EXTRACTION_TIMEOUT_SECONDS=60
+FILE_EXTRACTION_CPU_SECONDS=30
+FILE_EXTRACTION_MEMORY_BYTES=1073741824
+FILE_EXTRACTION_MAX_OUTPUT_BYTES=10000000
+FILE_EXTRACTION_MAX_ARCHIVE_BYTES=134217728
+FILE_EXTRACTION_MAX_ARCHIVE_ENTRIES=10000
+FILE_EXTRACTION_MAX_PDF_PAGES=1000
+
 # ----------------------------------------------------------------------------
 # Background Worker Configuration
 # ----------------------------------------------------------------------------

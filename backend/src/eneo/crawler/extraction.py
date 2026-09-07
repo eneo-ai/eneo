@@ -3,10 +3,12 @@
 import re
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-from urllib.parse import unquote, urljoin, urlsplit, urlunsplit
+from urllib.parse import unquote, urlsplit
 
 from bs4 import BeautifulSoup, Tag
 from html2text import HTML2Text
+
+from eneo.websites.domain.source_url import normalize_url as normalize_url
 
 _NOISE_ELEMENTS = (
     "script",
@@ -96,31 +98,6 @@ class ExtractedPage:
     content: str
     links: tuple[str, ...]
     file_links: tuple[str, ...]
-
-
-def normalize_url(url: str, *, base_url: str | None = None) -> str | None:
-    """Return a stable HTTP URL identity, or None for unsupported links."""
-
-    absolute = urljoin(base_url, url) if base_url else url
-    try:
-        parsed = urlsplit(absolute)
-        port = parsed.port
-    except ValueError:
-        return None
-    scheme = parsed.scheme.lower()
-    hostname = parsed.hostname
-    if scheme not in {"http", "https"} or not hostname:
-        return None
-
-    host = hostname.lower()
-    if ":" in host:
-        host = f"[{host}]"
-    if port and not (
-        (scheme == "http" and port == 80) or (scheme == "https" and port == 443)
-    ):
-        host = f"{host}:{port}"
-    path = parsed.path or "/"
-    return urlunsplit((scheme, host, path, parsed.query, ""))
 
 
 def is_in_scope(url: str, seed_url: str) -> bool:

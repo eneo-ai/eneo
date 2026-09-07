@@ -7,7 +7,9 @@ import socket
 import time
 from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
+from pathlib import PurePosixPath
 from typing import Any, Generic, Protocol, TypeVar, cast
+from urllib.parse import unquote, urlsplit
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -231,7 +233,14 @@ def _failure_code_for_crawl(
     if any(
         marker in reason
         for reason in reasons
-        for marker in ("connector", "connection", "dns", "ssl", "certificate")
+        for marker in (
+            "connector",
+            "connection",
+            "dns",
+            "ssl",
+            "certificate",
+            "unreachable",
+        )
     ):
         return CrawlFailureCode.REMOTE_UNREACHABLE
     return CrawlFailureCode.PROCESSING_FAILED
@@ -505,7 +514,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
         async with contextlib.AsyncExitStack():
             # Initialize timing tracking for performance analysis
             timings = {
-                "fetch_existing_titles": 0.0,
+                "fetch_existing_urls": 0.0,
                 "crawl_and_parse": 0.0,
                 "process_pages": 0.0,
                 "process_files": 0.0,
@@ -536,7 +545,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
             # These will be populated by bootstrap
             crawl_context: CrawlContext
-            existing_titles: list[str] = []
+            existing_urls: set[str] = set()
+            ambiguous_urls: set[str] = set()
             existing_publications: dict[str, tuple[bytes, UUID]] = {}
             existing_validators: dict[str, tuple[str | None, str | None]] = {}
             conditional_gets_truncated = False
@@ -669,13 +679,15 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     ),
                 )
 
-                # Fetch existing titles for stale detection and file hashes for skip optimization
-                # A 304 page carries no file links, so file crawls must re-observe
-                # HTML before stale content can be removed.
-                reuse_page_validators = not params.download_files
+                # Read source identities for stale detection and content reuse.
+                # A 304 carries no links. Only a sitemap can establish the page
+                # inventory independently, and files still need HTML discovery.
+                reuse_page_validators = (
+                    params.crawl_type == CrawlType.SITEMAP and not params.download_files
+                )
                 stmt = (
                     sa.select(
-                        InfoBlobs.title,
+                        InfoBlobs.website_source_url,
                         InfoBlobs.content_hash,
                         InfoBlobs.embedding_model_id,
                         InfoBlobs.http_etag,
@@ -690,30 +702,41 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 )
                 blob_result = await bootstrap_session.execute(stmt)
 
-                # Build lookups for O(1) operations
-                for title, hash_bytes, model_id, etag, last_modified in blob_result:
-                    if title is None:
+                for url, hash_bytes, model_id, etag, last_modified in blob_result:
+                    if url is None:
                         continue
-                    existing_titles.append(title)
+                    if url in existing_urls:
+                        # Ambiguous legacy sources must never pick an arbitrary
+                        # cache entry or be removed by automatic stale cleanup.
+                        ambiguous_urls.add(url)
+                        existing_publications.pop(url, None)
+                        existing_validators.pop(url, None)
+                        continue
+                    existing_urls.add(url)
                     if hash_bytes is not None and model_id is not None:
-                        existing_publications[title] = (hash_bytes, model_id)
+                        existing_publications[url] = (hash_bytes, model_id)
                     if reuse_page_validators and (
                         etag is not None or last_modified is not None
                     ):
-                        if (
-                            title in existing_validators
-                            or len(existing_validators) < item_limit
-                        ):
-                            existing_validators[title] = (etag, last_modified)
+                        if len(existing_validators) < item_limit:
+                            existing_validators[url] = (etag, last_modified)
                         else:
                             conditional_gets_truncated = True
+                if ambiguous_urls:
+                    logger.warning(
+                        "Ambiguous website source URLs require operator review",
+                        extra={
+                            "website_id": str(params.website_id),
+                            "count": len(ambiguous_urls),
+                        },
+                    )
 
             finally:
                 # Always close the bootstrap session to return connection to pool
                 await bootstrap_session.close()
 
             # Session returned to pool HERE - bootstrap complete (~50-100ms)
-            timings["fetch_existing_titles"] = time.time() - start
+            timings["fetch_existing_urls"] = time.time() - start
 
             logger.info(
                 "Bootstrap phase complete - session returned to pool",
@@ -722,10 +745,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     "tenant_id": str(crawl_context.tenant_id),
                     "batch_size": crawl_context.batch_size,
                     "embedding_model": crawl_context.embedding_model_name,
-                    "existing_titles_count": len(existing_titles),
-                    "bootstrap_duration_ms": int(
-                        timings["fetch_existing_titles"] * 1000
-                    ),
+                    "existing_urls_count": len(existing_urls),
+                    "bootstrap_duration_ms": int(timings["fetch_existing_urls"] * 1000),
                 },
             )
 
@@ -743,8 +764,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             )
 
             # Use set for O(1) membership tests
-            crawled_titles: set[str] = set()
-            failed_titles: set[str] = set()  # Failed URLs excluded from stale deletion
+            crawled_urls: set[str] = set()
+            failed_urls: set[str] = set()  # Failed URLs excluded from stale deletion
 
             current_tenant = container.tenant()
 
@@ -839,7 +860,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 (
                     success_count,
                     failed_count,
-                    successful_titles,
+                    successful_urls,
                     batch_failures_by_reason,
                 ) = await persist_batch(
                     page_buffer=batch,
@@ -850,10 +871,10 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 )
                 processing_page_seconds += time.time() - flush_started
                 num_published_pages += success_count
-                crawled_titles.update(successful_titles)
+                crawled_urls.update(successful_urls)
                 for reason, titles in batch_failures_by_reason.items():
                     failure_counts[reason] += len(titles)
-                    failed_titles.update(titles)
+                    failed_urls.update(titles)
                 num_failed_pages += failed_count
                 logger.debug(
                     "Flushed crawled page batch",
@@ -872,10 +893,12 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 nonlocal processing_file_seconds
                 file_started = time.time()
                 num_files += 1
-                filename = event.path.stem
+                filename = (
+                    PurePosixPath(unquote(urlsplit(event.url).path)).stem
+                    or event.path.stem
+                )
                 try:
-                    extracted_text = await asyncio.to_thread(
-                        container.text_extractor().extract,
+                    extracted_text = await container.text_extractor().extract_bounded(
                         event.path,
                         None,
                         event.path.name,
@@ -883,19 +906,19 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     new_file_hash = hashlib.sha256(
                         extracted_text.encode("utf-8")
                     ).digest()
-                    existing_file = existing_publications.get(filename)
+                    existing_file = existing_publications.get(event.url)
                     if embedding_model_spec is not None and existing_file == (
                         new_file_hash,
                         embedding_model_spec.id,
                     ):
                         num_skipped_files += 1
-                        crawled_titles.add(filename)
+                        crawled_urls.add(event.url)
                         return
 
                     (
                         success_count,
                         failed_count,
-                        successful_titles,
+                        successful_urls,
                         file_failures,
                     ) = await persist_batch(
                         page_buffer=[
@@ -913,16 +936,16 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     )
                     num_published_files += success_count
                     if success_count:
-                        crawled_titles.update(successful_titles)
+                        crawled_urls.update(successful_urls)
                     if failed_count:
                         num_failed_files += failed_count
                         for reason, titles in file_failures.items():
                             failure_counts[reason] += len(titles)
-                            failed_titles.update(titles)
+                            failed_urls.update(titles)
                 except CrawlLeaseLostError:
                     raise
                 except Exception:
-                    failed_titles.add(filename)
+                    failed_urls.add(event.url)
                     num_failed_files += 1
                     logger.exception(
                         "Exception while uploading crawled file",
@@ -1017,10 +1040,10 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                                 await _flush_pages()
                         elif isinstance(event, PageUnchanged):
                             num_not_modified_pages += 1
-                            crawled_titles.add(event.url)
+                            crawled_urls.add(event.url)
                         elif isinstance(event, PageFailed):
                             num_failed_pages += 1
-                            failed_titles.add(event.url)
+                            failed_urls.add(event.url)
                             failure_counts[event.reason] += 1
                         elif isinstance(event, FileDownloaded):
                             await _process_file(event)
@@ -1117,18 +1140,20 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 }
                 or authoritative_empty_sitemap
             )
-            stale_titles = (
+            stale_urls = (
                 []
                 if not cleanup_is_safe
                 else [
                     title
-                    for title in existing_titles
-                    if title not in crawled_titles and title not in failed_titles
+                    for title in existing_urls
+                    if title not in crawled_urls
+                    and title not in failed_urls
+                    and title not in ambiguous_urls
                 ]
             )
 
             # Batch delete using session-per-operation pattern
-            if stale_titles:
+            if stale_urls:
 
                 async def _do_stale_blob_cleanup(sess: AsyncSession) -> int:
                     await _require_current_lease(
@@ -1139,8 +1164,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     session_provider = cast(Any, container.session)
                     session_provider.override(providers.Object(sess))
                     cleanup_repo = container.info_blob_repo()
-                    return await cleanup_repo.batch_delete_by_titles_and_website(
-                        titles=stale_titles, website_id=params.website_id
+                    return await cleanup_repo.batch_delete_by_source_urls_and_website(
+                        urls=stale_urls, website_id=params.website_id
                     )
 
                 num_deleted_blobs = await execute_with_recovery(
@@ -1155,7 +1180,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         f"Batch deleted {num_deleted_blobs} stale blobs",
                         extra={
                             "website_id": str(params.website_id),
-                            "num_stale": len(stale_titles),
+                            "num_stale": len(stale_urls),
                             "num_deleted": num_deleted_blobs,
                         },
                     )
@@ -1271,7 +1296,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             total_time = sum(timings.values())
             logger.info(
                 f"Performance breakdown: "
-                f"fetch_existing={timings['fetch_existing_titles']:.2f}s, "
+                f"fetch_existing={timings['fetch_existing_urls']:.2f}s, "
                 f"crawl_parse={timings['crawl_and_parse']:.2f}s, "
                 f"process_pages={timings['process_pages']:.2f}s, "
                 f"process_files={timings['process_files']:.2f}s, "

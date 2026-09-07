@@ -22,13 +22,15 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sqlalchemy.exc import SQLAlchemyError
 from typing_extensions import NotRequired, TypedDict
 
-from eneo.admin.quota_service import ensure_quota_capacity
+from eneo.admin.quota_service import enforce_quota_on_commit, ensure_quota_capacity
 from eneo.completion_models.infrastructure.context_builder import count_tokens
+from eneo.crawler.cpu_work import run_cpu_work
 from eneo.database.tables.info_blob_chunk_table import InfoBlobChunks
 from eneo.database.tables.info_blobs_table import (
     InfoBlobs,
     InfoBlobVersionState,
     active_info_blob_version,
+    website_source_url_equals,
 )
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
@@ -41,6 +43,7 @@ from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
 from eneo.websites.domain.crawl_run import CrawlPhase
 from eneo.websites.domain.crawl_run_repo import CrawlRunRepository
+from eneo.websites.domain.source_url import normalize_url
 from eneo.worker.crawl.heartbeat import CrawlLeaseLostError
 from eneo.worker.crawl_context import (
     CrawlContext,
@@ -120,7 +123,7 @@ async def _refresh_http_validators(
 
     values = [
         {
-            "b_title": row.get("title", row["url"]),
+            "b_url": normalize_url(row["url"]),
             "b_etag": row.get("etag"),
             "b_last_modified": row.get("last_modified"),
         }
@@ -137,7 +140,7 @@ async def _refresh_http_validators(
                     .where(
                         InfoBlobs.website_id == ctx.website_id,
                         InfoBlobs.tenant_id == ctx.tenant_id,
-                        InfoBlobs.title == sa.bindparam("b_title"),
+                        website_source_url_equals(sa.bindparam("b_url")),
                         active_info_blob_version(),
                     )
                     .values(
@@ -173,7 +176,7 @@ async def _publish_prepared_pages(
 
     def fail_all() -> None:
         failures_by_reason[FailureReason.DB_ERROR.value] = [
-            page.title for page in prepared_pages
+            page.url for page in prepared_pages
         ]
 
     logger.debug(
@@ -213,15 +216,19 @@ async def _publish_prepared_pages(
                 for prepared in prepared_pages:
                     savepoint = await session.begin_nested()
                     try:
+                        source_url = normalize_url(prepared.url)
+                        if source_url is None:
+                            raise ValueError(
+                                "Website publications require an HTTP source URL"
+                            )
                         await session.execute(
                             sa.text(
                                 "SELECT pg_advisory_xact_lock("
                                 "hashtextextended(:identity, 0))"
                             ),
                             {
-                                "identity": (
-                                    f"website:{prepared.website_id}:"
-                                    f"title:{prepared.title}"
+                                "identity": InfoBlobRepository.website_publication_identity(
+                                    prepared.website_id, source_url
                                 )
                             },
                         )
@@ -235,7 +242,7 @@ async def _publish_prepared_pages(
                                     InfoBlobs.embedding_model_id,
                                 )
                                 .where(
-                                    InfoBlobs.title == prepared.title,
+                                    website_source_url_equals(source_url),
                                     InfoBlobs.website_id == prepared.website_id,
                                     InfoBlobs.tenant_id == prepared.tenant_id,
                                     active_info_blob_version(),
@@ -262,7 +269,7 @@ async def _publish_prepared_pages(
                                 )
                             )
                             await savepoint.commit()
-                            successful_identities.append(prepared.title)
+                            successful_identities.append(source_url)
                             continue
 
                         chunk_sizes = [
@@ -306,6 +313,7 @@ async def _publish_prepared_pages(
                                 text=prepared.content,
                                 title=prepared.title,
                                 url=prepared.url,
+                                website_source_url=source_url,
                                 size=stored_size,
                                 content_hash=prepared.content_hash,
                                 http_etag=prepared.http_etag,
@@ -348,14 +356,19 @@ async def _publish_prepared_pages(
                         )
 
                         await savepoint.commit()
+                        enforce_quota_on_commit(
+                            session,
+                            tenant_id=prepared.tenant_id,
+                            user_id=prepared.user_id,
+                        )
                         tenant_usage += stored_size
                         user_usage += stored_size
-                        successful_identities.append(prepared.title)
+                        successful_identities.append(source_url)
                     except Exception as error:
                         await savepoint.rollback()
                         failures_by_reason.setdefault(
                             FailureReason.DB_ERROR.value, []
-                        ).append(prepared.title)
+                        ).append(prepared.url)
                         logger.error(
                             f"Phase 2: Failed to persist page {prepared.url}: {error}",
                             extra={
@@ -459,7 +472,7 @@ async def persist_batch(
         for page in page_buffer:
             add_failure(
                 FailureReason.NO_EMBEDDING_MODEL,
-                page.get("title", page["url"]),
+                page["url"],
             )
         return 0, len(page_buffer), [], failures_by_reason
 
@@ -481,7 +494,7 @@ async def persist_batch(
         for page in page_buffer:
             add_failure(
                 FailureReason.MISSING_PROVIDER,
-                page.get("title", page["url"]),
+                page["url"],
             )
         return 0, len(page_buffer), [], failures_by_reason
 
@@ -502,8 +515,9 @@ async def persist_batch(
         },
     )
 
-    for page in page_buffer:
-        url = page["url"]
+    for original_page in page_buffer:
+        url = normalize_url(original_page["url"]) or original_page["url"]
+        page: CrawlPageData = {**original_page, "url": url}
         title = page.get("title", url)
         content = page["content"]
 
@@ -518,7 +532,7 @@ async def persist_batch(
                 },
             )
             failed_count += 1
-            add_failure(FailureReason.EMPTY_CONTENT, title)
+            add_failure(FailureReason.EMPTY_CONTENT, url)
             continue
 
         try:
@@ -526,12 +540,12 @@ async def persist_batch(
                 page.get("content_hash")
                 or hashlib.sha256(content.encode("utf-8")).digest()
             )
-            if (existing_publications or {}).get(title) == (
+            if (existing_publications or {}).get(url) == (
                 content_hash,
                 embedding_model.id,
             ):
                 success_count += 1
-                successful_identities.append(title)
+                successful_identities.append(url)
                 if (
                     page.get("etag") is not None
                     or page.get("last_modified") is not None
@@ -539,7 +553,7 @@ async def persist_batch(
                     validator_refreshes.append(page)
                 continue
 
-            raw_chunks = splitter.split_text(content)
+            raw_chunks = await run_cpu_work(splitter.split_text, content)
             chunks = [chunk.strip() for chunk in raw_chunks if chunk.strip()]
             if not chunks:
                 logger.warning(
@@ -553,7 +567,7 @@ async def persist_batch(
                     },
                 )
                 failed_count += 1
-                add_failure(FailureReason.NO_CHUNKS, title)
+                add_failure(FailureReason.NO_CHUNKS, url)
                 continue
 
             plans.append(
@@ -575,21 +589,19 @@ async def persist_batch(
                 },
             )
             failed_count += 1
-            add_failure(FailureReason.EMBEDDING_ERROR, title)
+            add_failure(FailureReason.EMBEDDING_ERROR, url)
 
     if not await _refresh_http_validators(ctx=ctx, rows=validator_refreshes):
         # These pages were provisionally counted as unchanged. Count each only
         # once and keep cleanup conservative when their metadata did not commit.
-        failed_identities = {
-            page.get("title", page["url"]) for page in validator_refreshes
-        }
+        failed_identities = {page["url"] for page in validator_refreshes}
         successful_identities = [
             title for title in successful_identities if title not in failed_identities
         ]
         success_count -= len(validator_refreshes)
         failed_count += len(validator_refreshes)
         for page in validator_refreshes:
-            add_failure(FailureReason.DB_ERROR, page.get("title", page["url"]))
+            add_failure(FailureReason.DB_ERROR, page["url"])
     if not plans:
         log = logger.debug if successful_identities else logger.warning
         log(
@@ -621,7 +633,7 @@ async def persist_batch(
             },
         )
         for plan in plans:
-            add_failure(FailureReason.EMBEDDING_ERROR, plan.title)
+            add_failure(FailureReason.EMBEDDING_ERROR, plan.page["url"])
         return (
             success_count,
             failed_count + len(plans),
@@ -670,7 +682,7 @@ async def persist_batch(
             },
         )
         for plan in plans:
-            add_failure(FailureReason.EMBEDDING_ERROR, plan.title)
+            add_failure(FailureReason.EMBEDDING_ERROR, plan.page["url"])
         return (
             success_count,
             failed_count + len(plans),
@@ -789,7 +801,7 @@ async def persist_batch(
         )
         failed_plans = plans[incomplete_plan_index:]
         for plan in failed_plans:
-            add_failure(failure_reason, plan.title)
+            add_failure(failure_reason, plan.page["url"])
         failed_count += len(failed_plans)
 
         logger.warning(

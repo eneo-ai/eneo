@@ -31,6 +31,7 @@ import aiohttp
 from aiohttp.abc import AbstractResolver, ResolveResult
 from aiohttp.resolver import DefaultResolver
 
+from eneo.crawler.cpu_work import run_cpu_work
 from eneo.crawler.engine import (
     ConditionalGet,
     CrawlEvent,
@@ -156,6 +157,10 @@ class _RobotsDisallowed(aiohttp.ClientError):
     pass
 
 
+class _RobotsUnreachable(_RobotsDisallowed):
+    pass
+
+
 class _RedirectHandedOff(Exception):
     pass
 
@@ -172,6 +177,8 @@ def _terminal_page_owner(owner: str, handoffs: dict[str, str]) -> str:
 
 
 def _request_failure_reason(exc: BaseException) -> str:
+    if isinstance(exc, _RobotsUnreachable):
+        return "robots_unreachable"
     if isinstance(exc, _RobotsDisallowed):
         return "robots_disallowed"
     if isinstance(exc, _UnsafeTarget):
@@ -316,7 +323,7 @@ class PythonCrawlEngine:
                 request.limits.request_timeout_seconds,
             ),
         )
-        headers = {"User-Agent": _USER_AGENT, "Accept": "text/html,application/json"}
+        headers = {"User-Agent": _USER_AGENT}
         started_at = monotonic()
         pages_crawled = 0
         pages_failed = 0
@@ -331,15 +338,20 @@ class PythonCrawlEngine:
         page_owners: dict[str, str]
         owner_handoffs: dict[str, str] = {}
         follow_page_links = request.crawl_type == CrawlType.CRAWL
-        page_links_truncated = follow_page_links and request.conditional_gets_truncated
+        page_links_truncated = False
         validators: dict[str, ConditionalGet] = {}
-        for hint in request.conditional_gets:
+        # HTTP validators cannot replace link discovery. Previously indexed URLs
+        # also omit pages that failed ingestion and their newly linked children.
+        eligible_hints = (
+            request.conditional_gets
+            if request.crawl_type == CrawlType.SITEMAP and not request.download_files
+            else ()
+        )
+        for hint in eligible_hints:
             normalized = normalize_url(hint.url)
             if normalized is None or normalized in validators:
                 continue
             if len(validators) >= request.limits.max_items:
-                if follow_page_links:
-                    page_links_truncated = True
                 break
             validators[normalized] = hint
 
@@ -355,7 +367,9 @@ class PythonCrawlEngine:
                 timeout=timeout,
                 connector=connector,
             ) as session:
-                robots_by_origin: dict[str, _OriginRobotsPolicy | None] = {}
+                robots_by_origin: dict[
+                    str, _OriginRobotsPolicy | _RobotsUnreachable | None
+                ] = {}
                 robots_lock = asyncio.Lock()
 
                 async def robots_for_url(url: str) -> _OriginRobotsPolicy | None:
@@ -368,9 +382,17 @@ class PythonCrawlEngine:
                     # contains only the seed origin and its permitted HTTPS upgrade.
                     async with robots_lock:
                         if origin not in robots_by_origin:
-                            loaded = await self._load_robots(
-                                session, url, seed_url, request, origin_authorization
-                            )
+                            try:
+                                loaded = await self._load_robots(
+                                    session,
+                                    url,
+                                    seed_url,
+                                    request,
+                                    origin_authorization,
+                                )
+                            except _RobotsUnreachable as error:
+                                robots_by_origin[origin] = error
+                                raise
                             policy = (
                                 _OriginRobotsPolicy(loaded[0])
                                 if loaded is not None
@@ -389,7 +411,10 @@ class PythonCrawlEngine:
                                     robots_by_origin.setdefault(
                                         policy_origin, _OriginRobotsPolicy(loaded[0])
                                     )
-                        return robots_by_origin[origin]
+                        cached_policy = robots_by_origin[origin]
+                        if isinstance(cached_policy, _RobotsUnreachable):
+                            raise cached_policy
+                        return cached_policy
 
                 try:
                     await asyncio.wait_for(
@@ -416,6 +441,17 @@ class PythonCrawlEngine:
                         sitemap_urls = []
                         sitemap_failures = []
                         sitemap_truncated = False
+                except _RobotsUnreachable:
+                    yield PageFailed(
+                        url=seed_url, reason="robots_unreachable", retryable=True
+                    )
+                    yield CrawlFinished(
+                        status="partial",
+                        pages_crawled=0,
+                        pages_failed=1,
+                        reason="robots_unreachable",
+                    )
+                    return
                 except TimeoutError:
                     yield CrawlFinished(
                         status="partial",
@@ -437,14 +473,6 @@ class PythonCrawlEngine:
                 else:
                     frontier = deque([seed_url])
                     page_owners = {seed_url: seed_url}
-                    for url in validators:
-                        if url == seed_url or not is_in_scope(url, seed_url):
-                            continue
-                        if len(page_owners) >= request.limits.max_items:
-                            page_links_truncated = True
-                            break
-                        page_owners[url] = url
-                        frontier.append(url)
 
                 # Configured pacing delays refilling freed HTTP slots. Robots
                 # pacing is enforced separately at each actual request origin.
@@ -686,32 +714,43 @@ class PythonCrawlEngine:
         robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
         parser = RobotFileParser()
         parser.set_url(robots_url)
+
+        async def consume_response(
+            response: aiohttp.ClientResponse, final_url: str
+        ) -> tuple[RobotFileParser, str] | None:
+            # RFC 9309 distinguishes unavailable rules (4xx) from an
+            # unreachable origin (5xx or transport failure). Only 4xx allows
+            # crawling without rules; a failed check cannot establish inventory.
+            if 400 <= response.status < 500:
+                return None
+            if not 200 <= response.status < 300:
+                raise _RobotsUnreachable("Unable to retrieve robots.txt")
+            body = await self._read_bounded(response, request.limits.max_response_bytes)
+            parser.set_url(final_url)
+            parser.parse(
+                body.decode(response.charset or "utf-8", errors="replace").splitlines()
+            )
+            return parser, final_url
+
         try:
-            async with self._request_with_redirects(
+            return await self._request_with_retries(
                 session,
                 robots_url,
                 scope_url,
+                request.limits.retries,
                 origin_authorization,
                 path_scope=False,
                 robots=None,  # Bootstrap the policy without recursively checking it.
-            ) as (response, final_url):
-                if response.status != 200:
-                    return None
-                body = await self._read_bounded(
-                    response, request.limits.max_response_bytes
-                )
-                parser.set_url(final_url)
+                consume_response=consume_response,
+                accept="text/plain,*/*;q=0.1",
+            )
         except (
             aiohttp.ClientError,
             asyncio.TimeoutError,
             _ResponseTooLarge,
             LookupError,
         ):
-            return None
-        parser.parse(
-            body.decode(response.charset or "utf-8", errors="replace").splitlines()
-        )
-        return parser, final_url
+            raise _RobotsUnreachable("Unable to retrieve robots.txt") from None
 
     async def _request_with_retries(
         self,
@@ -728,6 +767,7 @@ class PythonCrawlEngine:
         ],
         validators: dict[str, ConditionalGet] | None = None,
         claim_redirect_target: Callable[[str], bool] | None = None,
+        accept: str = "text/html,application/xhtml+xml,application/json",
     ) -> _ResponseResult:
         """Consume one response under capacity, retrying transport/status failures.
 
@@ -745,6 +785,7 @@ class PythonCrawlEngine:
                     robots=robots,
                     validators=validators,
                     claim_redirect_target=claim_redirect_target,
+                    accept=accept,
                 ) as (response, final_url):
                     if (
                         response.status in _RETRYABLE_STATUSES
@@ -847,7 +888,7 @@ class PythonCrawlEngine:
                     )
                 )
 
-            extracted = extract_html(text, final_url)
+            extracted = await run_cpu_work(extract_html, text, final_url)
             scoped_file_links = (
                 tuple(
                     file_url
@@ -1047,6 +1088,7 @@ class PythonCrawlEngine:
                 path_scope=False,
                 robots=robots,
                 consume_response=consume_response,
+                accept="*/*",
             )
         except (_UnsafeTarget, _RedirectRejected, _RobotsDisallowed) as exc:
             return FileFailed(url=normalized, reason=_request_failure_reason(exc))
@@ -1140,6 +1182,7 @@ class PythonCrawlEngine:
                     path_scope=False,
                     robots=robots,
                     consume_response=consume_response,
+                    accept="application/xml,text/xml,application/gzip,*/*;q=0.1",
                 )
             except _ResponseTooLarge:
                 failures.append(PageFailed(url=current, reason="sitemap_too_large"))
@@ -1242,6 +1285,7 @@ class PythonCrawlEngine:
         robots: _RobotsLookup | None,
         validators: dict[str, ConditionalGet] | None = None,
         claim_redirect_target: Callable[[str], bool] | None = None,
+        accept: str = "text/html,application/xhtml+xml,application/json",
     ) -> AsyncGenerator[tuple[aiohttp.ClientResponse, str], None]:
         current = normalize_url(url)
         if current is None:
@@ -1276,7 +1320,7 @@ class PythonCrawlEngine:
             request_authorization = (
                 origin_authorization if is_same_origin(current, scope_url) else None
             )
-            request_headers: dict[str, str] = {}
+            request_headers: dict[str, str] = {"Accept": accept}
             validator = validators.get(current) if validators is not None else None
             if validator is not None and validator.etag:
                 request_headers["If-None-Match"] = validator.etag

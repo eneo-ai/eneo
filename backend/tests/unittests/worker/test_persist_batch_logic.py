@@ -1011,7 +1011,7 @@ class TestPhaseIsolation:
         mock_sm.session.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_file_identity_can_use_title_and_extracted_content_hash(
+    async def test_file_identity_uses_source_url_and_extracted_content_hash(
         self, crawl_context, embedding_model_spec, mock_embeddings_service
     ):
         source_url = "https://example.com/files/agenda.pdf"
@@ -1024,7 +1024,7 @@ class TestPhaseIsolation:
         with patch("eneo.database.database.sessionmanager", mock_sm):
             from eneo.worker.crawl_tasks import persist_batch
 
-            success, failed, persisted_titles, failures = await persist_batch(
+            success, failed, persisted_urls, failures = await persist_batch(
                 page_buffer=[
                     {
                         "url": source_url,
@@ -1036,10 +1036,12 @@ class TestPhaseIsolation:
                 ctx=crawl_context,
                 embedding_model=embedding_model_spec,
                 container=create_mock_container(mock_embeddings_service),
-                existing_publications={title: (content_hash, embedding_model_spec.id)},
+                existing_publications={
+                    source_url: (content_hash, embedding_model_spec.id)
+                },
             )
 
-        assert (success, failed, persisted_titles, failures) == (1, 0, [title], {})
+        assert (success, failed, persisted_urls, failures) == (1, 0, [source_url], {})
         mock_embeddings_service.get_embeddings.assert_not_awaited()
         mock_sm.session.assert_not_called()
 

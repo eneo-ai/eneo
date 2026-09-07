@@ -162,6 +162,7 @@ services:
     # The RUN_AS_WORKER env var tells run.sh to start ARQ instead of Gunicorn
     image: ghcr.io/eneo-ai/eneo-backend:latest
     container_name: eneo_worker
+    init: true
     restart: unless-stopped
     environment:
       - RUN_AS_WORKER=true  # Runs today's ARQ adapter; task logic is queue-neutral
@@ -187,6 +188,7 @@ services:
   crawler-worker:
     # Dedicated consumer for long-running website crawls on arq:crawler.
     image: ghcr.io/eneo-ai/eneo-backend:latest
+    init: true
     restart: unless-stopped
     stop_grace_period: 70s
     healthcheck:

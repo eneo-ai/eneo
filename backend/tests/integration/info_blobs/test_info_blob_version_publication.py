@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from dataclasses import replace
+from datetime import timedelta
 from hashlib import sha256
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
@@ -12,6 +14,7 @@ import pytest
 import sqlalchemy as sa
 from dependency_injector import providers
 
+from eneo.admin.quota_service import QuotaService
 from eneo.database.tables.ai_models_table import EmbeddingModels
 from eneo.database.tables.collections_table import CollectionsTable
 from eneo.database.tables.info_blob_chunk_table import InfoBlobChunks
@@ -29,6 +32,9 @@ from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
 from eneo.database.tables.websites_table import Websites
+from eneo.embedding_models.infrastructure.create_embeddings_service import (
+    CreateEmbeddingsService,
+)
 from eneo.files.chunk_embedding_list import ChunkEmbeddingList
 from eneo.info_blobs.info_blob import (
     InfoBlobAdd,
@@ -40,12 +46,253 @@ from eneo.main.exceptions import (
     QuotaExceededException,
 )
 from eneo.object_content.content import ContentState, StorageKind
-from eneo.websites.domain.crawl_run import CrawlType
+from eneo.websites.domain.crawl_run import CrawlRun, CrawlType
+from eneo.websites.domain.crawl_run_repo import CrawlRunRepository
 from eneo.worker.crawl.persistence import (
     _publish_prepared_pages,
     _refresh_http_validators,
 )
 from eneo.worker.crawl_context import CrawlContext, PreparedPage
+from tests.integration.test_crawl_lifecycle import _job, _task, _website_identity
+
+
+async def _leased_crawl_context(db_session, admin_user, space_factory) -> CrawlContext:
+    async with db_session() as session:
+        website = await _website_identity(session, admin_user, space_factory)
+        record = await session.get(Websites, website.id)
+        assert record is not None
+        repo = CrawlRunRepository(session)
+        run, _ = await repo.add_or_get_active(CrawlRun.create(website=website))
+        job = await _job(session, admin_user)
+        attempt_id = uuid4()
+        await repo.add_attempt(
+            run_id=run.id,
+            attempt_id=attempt_id,
+            dispatch_id=job.id,
+            task=_task(website=website, run_id=run.id, attempt_id=attempt_id, job=job),
+        )
+        assert await repo.claim_attempt(
+            attempt_id,
+            dispatch_id=job.id,
+            lease_owner="publication-test",
+            lease_duration=timedelta(minutes=5),
+        )
+        return CrawlContext(
+            website_id=website.id,
+            tenant_id=admin_user.tenant_id,
+            tenant_slug=None,
+            user_id=admin_user.id,
+            attempt_id=attempt_id,
+            lease_owner="publication-test",
+            embedding_model_id=record.embedding_model_id,
+            embedding_model_name="publication-test",
+            embedding_model_open_source=False,
+            embedding_model_family=None,
+            embedding_model_dimensions=3,
+        )
+
+
+def _prepared_page(
+    ctx: CrawlContext, *, url: str, title: str, text: str
+) -> PreparedPage:
+    assert ctx.embedding_model_id is not None
+    return PreparedPage(
+        url=url,
+        title=title,
+        content=text,
+        content_hash=sha256(text.encode()).digest(),
+        http_etag=None,
+        http_last_modified=None,
+        chunks=[text],
+        embeddings=[np.zeros(3, dtype=np.float32)],
+        tenant_id=ctx.tenant_id,
+        website_id=ctx.website_id,
+        user_id=ctx.user_id,
+        embedding_model_id=ctx.embedding_model_id,
+    )
+
+
+async def test_website_versions_follow_source_urls_instead_of_file_titles(
+    db_session,
+    admin_user,
+    space_factory,
+) -> None:
+    ctx = await _leased_crawl_context(db_session, admin_user, space_factory)
+    pages = [
+        _prepared_page(
+            ctx, url=f"https://example.com/policy.{suffix}", title="policy", text=text
+        )
+        for suffix, text in (("pdf", "First document"), ("docx", "Different document"))
+    ]
+    published, failures = await _publish_prepared_pages(prepared_pages=pages, ctx=ctx)
+    assert not failures
+    async with db_session() as session:
+        originals = list(
+            await session.scalars(
+                sa.select(InfoBlobs).where(InfoBlobs.website_id == ctx.website_id)
+            )
+        )
+        original_ids = {row.url: row.id for row in originals}
+        source_ids = {row.url: row.source_id for row in originals}
+        assert len(set(source_ids.values())) == 2
+        assert all(row.version_state == "active" for row in originals)
+        assert all(row.title == "policy" for row in originals)
+    assert published == [page.url for page in pages]
+
+    changed = replace(
+        _prepared_page(
+            ctx, url=pages[0].url, title="renamed download", text="Updated policy"
+        ),
+        url="https://EXAMPLE.com:443/policy.pdf#heading",
+    )
+    published, failures = await _publish_prepared_pages(
+        prepared_pages=[changed], ctx=ctx
+    )
+    assert not failures
+    assert published == [pages[0].url]
+    async with db_session() as session:
+        versions = list(
+            await session.scalars(
+                sa.select(InfoBlobs).where(InfoBlobs.website_id == ctx.website_id)
+            )
+        )
+        assert len(versions) == 3
+        assert {row.id for row in versions} >= set(original_ids.values())
+        assert len({row.source_id for row in versions}) == 2
+        active = {
+            row.source_id: row for row in versions if row.version_state == "active"
+        }
+        assert active[source_ids[pages[0].url]].text == "Updated policy"
+        assert active[source_ids[pages[1].url]].id == original_ids[pages[1].url]
+
+
+async def test_crawler_and_other_website_publishers_share_the_url_lock(
+    db_session,
+    admin_user,
+    space_factory,
+) -> None:
+    ctx = await _leased_crawl_context(db_session, admin_user, space_factory)
+    page = _prepared_page(
+        ctx, url="https://example.com/policy.pdf", title="policy", text="Knowledge"
+    )
+    async with db_session() as session:
+        repo = InfoBlobRepository(session)
+        await repo.lock_publication_identity(
+            InfoBlobAdd(
+                url="https://EXAMPLE.com:443/policy.pdf#section",
+                title="Other title",
+                text=page.content,
+                website_id=ctx.website_id,
+                user_id=ctx.user_id,
+                tenant_id=ctx.tenant_id,
+            )
+        )
+        publishing = asyncio.create_task(
+            _publish_prepared_pages(prepared_pages=[page], ctx=ctx)
+        )
+        completed, _ = await asyncio.wait({publishing}, timeout=0.1)
+    published, failures = await asyncio.wait_for(publishing, timeout=5)
+    assert not completed, (
+        "Crawler publication bypassed the existing publisher's URL lock"
+    )
+    assert published == [page.url]
+    assert not failures
+
+
+async def test_ambiguous_legacy_website_urls_are_preserved_on_publication(
+    db_session,
+    admin_user,
+    space_factory,
+) -> None:
+    ctx = await _leased_crawl_context(db_session, admin_user, space_factory)
+    page = _prepared_page(
+        ctx, url="https://example.com/policy.pdf", title="policy", text="New knowledge"
+    )
+    async with db_session() as session:
+        for url in (page.url, "https://EXAMPLE.com:443/policy.pdf#section"):
+            session.add(
+                InfoBlobs(
+                    url=url,
+                    title="Legacy policy",
+                    text="Retained knowledge",
+                    size=18,
+                    source_id=uuid4(),
+                    version_state="active",
+                    content_hash=sha256(b"Retained knowledge").digest(),
+                    website_id=ctx.website_id,
+                    tenant_id=ctx.tenant_id,
+                    user_id=ctx.user_id,
+                    embedding_model_id=ctx.embedding_model_id,
+                )
+            )
+    published, failures = await _publish_prepared_pages(prepared_pages=[page], ctx=ctx)
+    assert not published
+    assert sum(map(len, failures.values())) == 1
+    async with db_session() as session:
+        rows = list(
+            await session.scalars(
+                sa.select(InfoBlobs).where(InfoBlobs.website_id == ctx.website_id)
+            )
+        )
+        assert len(rows) == 2
+        assert all(
+            row.text == "Retained knowledge" and row.version_state == "active"
+            for row in rows
+        )
+
+
+async def test_concurrent_crawls_cannot_overrun_retained_tenant_quota(
+    db_session,
+    admin_user,
+    space_factory,
+    monkeypatch,
+) -> None:
+    contexts = [
+        await _leased_crawl_context(db_session, admin_user, space_factory)
+        for _ in range(2)
+    ]
+    async with db_session() as session:
+        await session.execute(
+            sa.update(Tenants)
+            .where(Tenants.id == admin_user.tenant_id)
+            .values(quota_limit=150)
+        )
+
+    original_usage = InfoBlobRepository.get_retained_size_of_tenant
+
+    async def allow_overlapping_reads(self, tenant_id):
+        usage = await original_usage(self, tenant_id)
+        # Both preliminary checks may observe the same usage. The definitive
+        # check must serialize at commit, after these unprotected reads.
+        await asyncio.sleep(0.1)
+        return usage
+
+    monkeypatch.setattr(
+        InfoBlobRepository, "get_retained_size_of_tenant", allow_overlapping_reads
+    )
+    results = await asyncio.gather(
+        *[
+            _publish_prepared_pages(
+                prepared_pages=[
+                    _prepared_page(
+                        ctx,
+                        url=f"https://example.com/{index}",
+                        title="Page",
+                        text="x" * 40,
+                    )
+                ],
+                ctx=ctx,
+            )
+            for index, ctx in enumerate(contexts)
+        ]
+    )
+    async with db_session() as session:
+        retained = await original_usage(
+            InfoBlobRepository(session), admin_user.tenant_id
+        )
+    assert retained == 92
+    assert sum(len(published) for published, _ in results) == 1
+    assert sum(len(urls) for _, failures in results for urls in failures.values()) == 1
 
 
 async def _seed_active_document(
@@ -109,6 +356,182 @@ def _embedding_result(*, model, chunks):
     result = ChunkEmbeddingList()
     result.add(chunks, [[0.7, 0.8, 0.9] for _ in chunks])
     return result
+
+
+@pytest.mark.parametrize("quota_scope", ["tenant", "user"])
+async def test_upload_batch_and_crawls_share_atomic_quota_without_locking_provider_io(
+    db_container,
+    db_session,
+    admin_user,
+    space_factory,
+    monkeypatch,
+    quota_scope,
+) -> None:
+    contexts = [
+        await _leased_crawl_context(db_session, admin_user, space_factory)
+        for _ in range(2)
+    ]
+    async with db_container() as setup:
+        group, model, original, _ = await _seed_active_document(
+            setup, title="first.txt", text="Retained original"
+        )
+        group_id, model_id, original_id = group.id, model.id, original.id
+        retained_before = await setup.info_blob_repo().get_retained_size_of_tenant(
+            admin_user.tenant_id
+        )
+        table = Tenants if quota_scope == "tenant" else Users
+        owner_id = admin_user.tenant_id if quota_scope == "tenant" else admin_user.id
+        await setup.session().execute(
+            sa.update(table)
+            .where(table.id == owner_id)
+            .values(quota_limit=retained_before + 3 * 92)
+        )
+
+    second_embedding_started = asyncio.Event()
+    release_embedding = asyncio.Event()
+    final_precheck_finished = asyncio.Event()
+    release_commit = asyncio.Event()
+    embedding_calls = 0
+    final_checks = 0
+    original_check = QuotaService.ensure_capacity
+
+    async def pause_after_precheck(self, size_in_bytes):
+        nonlocal final_checks
+        await original_check(self, size_in_bytes)
+        if size_in_bytes == 0:
+            final_checks += 1
+            if final_checks == 2:
+                final_precheck_finished.set()
+                await release_commit.wait()
+
+    monkeypatch.setattr(QuotaService, "ensure_capacity", pause_after_precheck)
+
+    async def publish_upload_batch():
+        async with db_container() as container:
+            embedding_model = await container.session().get(EmbeddingModels, model_id)
+            embeddings = AsyncMock()
+
+            async def embed(*, model, chunks):
+                nonlocal embedding_calls
+                embedding_calls += 1
+                if embedding_calls == 2:
+                    second_embedding_started.set()
+                    await release_embedding.wait()
+                return _embedding_result(model=model, chunks=chunks)
+
+            embeddings.get_embeddings.side_effect = embed
+            container.create_embeddings_service.override(providers.Object(embeddings))
+            for title in ("first.txt", "second.txt"):
+                await container.text_processor().process_text(
+                    text="x" * 40,
+                    title=title,
+                    embedding_model=embedding_model,
+                    group_id=group_id,
+                )
+
+    upload = asyncio.create_task(publish_upload_batch())
+    try:
+        await asyncio.wait_for(second_embedding_started.wait(), timeout=10)
+        for index, ctx in enumerate(contexts):
+            published, failures = await asyncio.wait_for(
+                _publish_prepared_pages(
+                    prepared_pages=[
+                        _prepared_page(
+                            ctx,
+                            url=f"https://example.com/{index}",
+                            title="Page",
+                            text="x" * 40,
+                        )
+                    ],
+                    ctx=ctx,
+                ),
+                timeout=5,
+            )
+            assert len(published) == 1
+            assert not failures
+            if index == 0:
+                release_embedding.set()
+                await asyncio.wait_for(final_precheck_finished.wait(), timeout=10)
+        release_commit.set()
+        with pytest.raises(QuotaExceededException):
+            await asyncio.wait_for(upload, timeout=5)
+    finally:
+        release_embedding.set()
+        release_commit.set()
+        await asyncio.gather(upload, return_exceptions=True)
+
+    async with db_container() as verification:
+        repo = verification.info_blob_repo()
+        assert await repo.get_retained_size_of_tenant(admin_user.tenant_id) == (
+            retained_before + 2 * 92
+        )
+        versions = list(
+            await verification.session().scalars(
+                sa.select(InfoBlobs).where(InfoBlobs.group_id == group_id)
+            )
+        )
+        assert [(row.id, row.version_state) for row in versions] == [
+            (original_id, "active")
+        ]
+        # The rejected transaction releases its quota row locks.
+        await verification.session().execute(
+            sa.select(Tenants.id)
+            .where(Tenants.id == admin_user.tenant_id)
+            .with_for_update(key_share=True, nowait=True)
+        )
+
+
+async def test_upload_http_response_waits_for_final_quota_check(
+    client,
+    db_container,
+    db_session,
+    admin_user,
+    admin_user_api_key,
+    monkeypatch,
+) -> None:
+    async with db_container() as setup:
+        group, _, original, _ = await _seed_active_document(
+            setup, title="policy.txt", text="Retained policy"
+        )
+        group_id, original_id = group.id, original.id
+        retained_before = await setup.info_blob_repo().get_retained_size_of_tenant(
+            admin_user.tenant_id
+        )
+
+    async def embed(self, *, model, chunks):
+        return _embedding_result(model=model, chunks=chunks)
+
+    monkeypatch.setattr(CreateEmbeddingsService, "get_embeddings", embed)
+    original_check = QuotaService.ensure_capacity
+    limit_changed = False
+
+    async def lower_limit_after_precheck(self, size_in_bytes):
+        nonlocal limit_changed
+        await original_check(self, size_in_bytes)
+        if size_in_bytes == 0:
+            async with db_session() as session:
+                await session.execute(
+                    sa.update(Tenants)
+                    .where(Tenants.id == admin_user.tenant_id)
+                    .values(quota_limit=retained_before + 1)
+                )
+            limit_changed = True
+
+    monkeypatch.setattr(QuotaService, "ensure_capacity", lower_limit_after_precheck)
+    response = await client.post(
+        f"/api/v1/groups/{group_id}/info-blobs/",
+        headers={"X-API-Key": admin_user_api_key.key},
+        json={
+            "info_blobs": [
+                {"text": "Replacement policy", "metadata": {"title": "policy.txt"}}
+            ]
+        },
+    )
+    assert limit_changed
+    assert response.status_code == 403, response.text
+    async with db_container() as verification:
+        visible = await verification.info_blob_repo().get_by_group(group_id)
+        assert [row.id for row in visible] == [original_id]
 
 
 async def test_crawler_float32_vector_round_trips_through_postgres(
@@ -1478,6 +1901,7 @@ async def test_changed_website_file_publishes_from_a_fresh_session(
     db_container,
 ) -> None:
     title = "downloaded-website-file.txt"
+    source_url = "https://knowledge-version.example.com/downloaded-website-file.txt"
     previous_text = "Previous downloaded file content"
     replacement_text = "Replacement downloaded file content"
 
@@ -1503,6 +1927,7 @@ async def test_changed_website_file_publishes_from_a_fresh_session(
         await session.flush()
         previous = InfoBlobs(
             title=title,
+            url=source_url,
             text=previous_text,
             size=len(previous_text.encode("utf-8")),
             content_hash=sha256(previous_text.encode("utf-8")).digest(),
@@ -1532,6 +1957,7 @@ async def test_changed_website_file_publishes_from_a_fresh_session(
             title=title,
             embedding_model=embedding_model,
             website_id=website_id,
+            url=source_url,
         )
         versions = (
             await container.session().scalars(

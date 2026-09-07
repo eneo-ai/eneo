@@ -843,6 +843,155 @@ async def test_crawl_honors_robots_rules() -> None:
     )
 
 
+@pytest.mark.parametrize("robots_status", [404, 503])
+async def test_unreachable_robots_prevents_discovery(robots_status: int) -> None:
+    requested: list[str] = []
+
+    async def handler(request: web.Request) -> web.Response:
+        requested.append(request.path)
+        if request.path == "/robots.txt":
+            return web.Response(status=robots_status, headers={"Retry-After": "0"})
+        return web.Response(text="<main>Knowledge</main>", content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/{tail:.*}", handler)
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(f"{base_url}/start", obey_robots=True)
+            )
+        ]
+
+    if robots_status == 404:
+        assert requested == ["/robots.txt", "/start"]
+        assert any(isinstance(event, PageCrawled) for event in events)
+    else:
+        assert requested == ["/robots.txt", "/robots.txt"]
+        assert events == [
+            PageFailed(
+                url=f"{base_url}/start", reason="robots_unreachable", retryable=True
+            ),
+            CrawlFinished(
+                status="partial",
+                pages_crawled=0,
+                pages_failed=1,
+                reason="robots_unreachable",
+            ),
+        ]
+
+
+async def test_robots_content_negotiation_preserves_disallow_rules() -> None:
+    requested: list[str] = []
+
+    async def handler(request: web.Request) -> web.Response:
+        requested.append(request.path)
+        if request.path == "/robots.txt":
+            if "text/plain" not in request.headers.get("Accept", ""):
+                return web.Response(status=406)
+            return web.Response(
+                text="User-agent: *\nDisallow: /\n", content_type="text/plain"
+            )
+        return web.Response(text="<main>Blocked</main>", content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/{tail:.*}", handler)
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(f"{base_url}/start", obey_robots=True)
+            )
+        ]
+
+    assert requested == ["/robots.txt"]
+    assert any(
+        isinstance(event, PageFailed) and event.reason == "robots_disallowed"
+        for event in events
+    )
+
+
+async def test_robots_request_timeout_blocks_the_origin() -> None:
+    async def slow_rules(_: web.Request) -> web.Response:
+        await asyncio.sleep(0.05)
+        return web.Response(text="User-agent: *\nAllow: /\n")
+
+    app = web.Application()
+    app.router.add_get("/robots.txt", slow_rules)
+    async with _serve(app) as base_url:
+        request = _request(f"{base_url}/start", obey_robots=True)
+        request = replace(
+            request,
+            limits=replace(request.limits, request_timeout_seconds=0.01, retries=0),
+        )
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                request
+            )
+        ]
+
+    assert events == [
+        PageFailed(
+            url=f"{base_url}/start", reason="robots_unreachable", retryable=True
+        ),
+        CrawlFinished(
+            status="partial",
+            pages_crawled=0,
+            pages_failed=1,
+            reason="robots_unreachable",
+        ),
+    ]
+
+
+async def test_sitemap_file_crawl_negotiates_media_and_rediscovers_links() -> None:
+    async def sitemap(request: web.Request) -> web.Response:
+        if "application/xml" not in request.headers.get("Accept", ""):
+            return web.Response(status=406)
+        return web.Response(
+            text=f"<urlset><url><loc>{request.scheme}://{request.host}/page</loc></url></urlset>",
+            content_type="application/xml",
+        )
+
+    async def page(request: web.Request) -> web.Response:
+        if request.headers.get("If-None-Match"):
+            return web.Response(status=304)
+        return web.Response(
+            text='<main>Policy <a href="/policy.pdf">Document</a></main>',
+            content_type="text/html",
+        )
+
+    async def document(request: web.Request) -> web.Response:
+        if "*/*" not in request.headers.get("Accept", ""):
+            return web.Response(status=406)
+        return web.Response(body=b"policy document", content_type="application/pdf")
+
+    app = web.Application()
+    app.router.add_get("/sitemap.xml", sitemap)
+    app.router.add_get("/page", page)
+    app.router.add_get("/policy.pdf", document)
+    contents: list[bytes] = []
+    async with _serve(app) as base_url:
+        events: list[CrawlEvent] = []
+        async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            _request(
+                f"{base_url}/sitemap.xml",
+                crawl_type=CrawlType.SITEMAP,
+                conditional_gets=(ConditionalGet(f"{base_url}/page", etag='"known"'),),
+            )
+        ):
+            events.append(event)
+            if isinstance(event, FileDownloaded):
+                contents.append(event.path.read_bytes())
+
+    assert contents == [b"policy document"]
+    finished = events[-1]
+    assert isinstance(finished, CrawlFinished)
+    assert finished.status == "completed"
+    assert finished.pages_crawled == finished.files_downloaded == 1
+    assert finished.pages_failed == finished.files_failed == 0
+
+
 async def test_sitemap_crawl_follows_nested_indexes_but_not_page_links() -> None:
     app = web.Application()
 
@@ -1093,6 +1242,7 @@ async def test_redirect_validators_belong_to_each_requested_url(
                 _request(
                     f"{base_url}/sitemap.xml",
                     crawl_type=CrawlType.SITEMAP,
+                    download_files=False,
                     conditional_gets=tuple(hints),
                 )
             )
@@ -1114,103 +1264,46 @@ async def test_redirect_validators_belong_to_each_requested_url(
     )
 
 
-async def test_conditional_frontier_keeps_known_children_when_seed_is_304() -> None:
+@pytest.mark.parametrize("child_has_validator", [False, True])
+async def test_recursive_discovery_ignores_cached_inventory(
+    child_has_validator: bool,
+) -> None:
     requested: list[str] = []
+    documents = {
+        "/start": '<main><a href="/start/old">Old</a><a href="/start/bridge">Bridge</a></main>',
+        "/start/old": "<main>Previously indexed child</main>",
+        "/start/bridge": '<main><a href="/start/new">New descendant</a></main>',
+        "/start/new": "<main>New knowledge</main>",
+    }
 
-    async def not_modified(request: web.Request) -> web.Response:
+    async def page(request: web.Request) -> web.Response:
         requested.append(request.path)
-        assert request.headers["If-None-Match"] == '"known"'
-        return web.Response(status=304)
+        if request.headers.get("If-None-Match"):
+            return web.Response(status=304)
+        return web.Response(text=documents[request.path], content_type="text/html")
 
     app = web.Application()
-    app.router.add_get("/start", not_modified)
-    app.router.add_get("/start/child", not_modified)
-
+    app.router.add_get("/{tail:.*}", page)
     async with _serve(app) as base_url:
-        events = [
-            event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
-                _request(
-                    f"{base_url}/start",
-                    conditional_gets=(
-                        ConditionalGet(f"{base_url}/start", etag='"known"'),
-                        ConditionalGet(f"{base_url}/start/child", etag='"known"'),
-                    ),
-                )
-            )
-        ]
-
-    assert set(requested) == {"/start", "/start/child"}
-    assert len([event for event in events if isinstance(event, PageUnchanged)]) == 2
-    assert events[-1] == CrawlFinished(
-        status="completed",
-        pages_crawled=0,
-        pages_failed=0,
-        pages_unchanged=2,
-    )
-
-
-async def test_truncated_conditional_frontier_marks_link_crawl_partial() -> None:
-    async def page(_: web.Request) -> web.Response:
-        return web.Response(text="<main>Known page</main>", content_type="text/html")
-
-    app = web.Application()
-    app.router.add_get("/start", page)
-
-    async with _serve(app) as base_url:
+        hints = [ConditionalGet(f"{base_url}/start", etag='"known"')]
+        if child_has_validator:
+            hints.append(ConditionalGet(f"{base_url}/start/old", etag='"known"'))
         events = [
             event
             async for event in PythonCrawlEngine(allow_private_network=True).crawl(
                 _request(
                     f"{base_url}/start",
                     download_files=False,
+                    conditional_gets=tuple(hints),
                     conditional_gets_truncated=True,
                 )
             )
         ]
 
+    assert set(requested) == set(documents)
+    assert not any(isinstance(event, PageUnchanged) for event in events)
     assert events[-1] == CrawlFinished(
-        status="partial",
-        pages_crawled=1,
-        pages_failed=0,
-        reason="item_limit",
-    )
-
-
-async def test_engine_marks_excess_conditional_hints_as_partial() -> None:
-    requested: list[str] = []
-
-    async def not_modified(request: web.Request) -> web.Response:
-        requested.append(request.path)
-        return web.Response(status=304)
-
-    app = web.Application()
-    app.router.add_get("/start", not_modified)
-    app.router.add_get("/start/child", not_modified)
-
-    async with _serve(app) as base_url:
-        events = [
-            event
-            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
-                _request(
-                    f"{base_url}/start",
-                    download_files=False,
-                    max_items=1,
-                    conditional_gets=(
-                        ConditionalGet(f"{base_url}/start", etag='"known"'),
-                        ConditionalGet(f"{base_url}/start/child", etag='"known"'),
-                    ),
-                )
-            )
-        ]
-
-    assert requested == ["/start"]
-    assert events[-1] == CrawlFinished(
-        status="partial",
-        pages_crawled=0,
-        pages_failed=0,
-        pages_unchanged=1,
-        reason="item_limit",
+        status="completed", pages_crawled=4, pages_failed=0
     )
 
 
