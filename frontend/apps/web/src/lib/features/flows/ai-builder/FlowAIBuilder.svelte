@@ -704,13 +704,20 @@
         <Button variant="outline" class="w-full sm:w-auto" href={flowsHref}>
           {m.ai_builder_resume_failed_back()}
         </Button>
-        <Button
-          variant={failedAttempt === "resume" ? "outline" : "default"}
-          class="w-full sm:w-auto"
-          onclick={() => bootstrap(failedAttempt ?? "session")}
-        >
-          {m.ai_builder_turn_retry()}
-        </Button>
+        {#if failedAttempt === "resume" || targetKind === "edit"}
+          <!-- Resuming a draft and an edit session (resume-first on the server)
+               are safe to repeat. A create-mode session is an unconditional
+               insert: after an ambiguous outcome a retry could persist a second
+               draft, so that case sends the user to the Flows list, where any
+               draft the server did create is recoverable. -->
+          <Button
+            variant={failedAttempt === "resume" ? "outline" : "default"}
+            class="w-full sm:w-auto"
+            onclick={() => bootstrap(failedAttempt ?? "session")}
+          >
+            {m.ai_builder_turn_retry()}
+          </Button>
+        {/if}
         {#if failedAttempt === "resume"}
           <Button class="w-full sm:w-auto" onclick={() => bootstrap("session")}>
             {m.ai_builder_resume_failed_new()}

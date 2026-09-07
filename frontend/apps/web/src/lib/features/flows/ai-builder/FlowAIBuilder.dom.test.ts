@@ -628,14 +628,18 @@ describe("FlowAIBuilder bootstrap", () => {
 
     await fireEvent.click(button(m.ai_builder_resume_failed_new()));
 
-    // The escape failed too: the same panel, now for the session attempt,
-    // and Retry repeats that attempt rather than the draft.
+    // The escape failed too: the same panel, now for the session attempt. A
+    // create is an unconditional insert, so no Retry is offered here (a lost
+    // response may already have persisted a draft); the Flows list is the way
+    // back, and no second create is sent.
     expect(
       await screen.findByRole("heading", { name: m.ai_builder_bootstrap_failed_title() })
     ).toBeTruthy();
-    await fireEvent.click(button(m.ai_builder_turn_retry()));
-    await waitFor(() => expect(service().hasSession).toBe(true));
-    expect(posts).toBe(2);
+    expect(screen.getByRole("link", { name: m.ai_builder_resume_failed_back() })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: m.ai_builder_turn_retry() })).toBeNull();
+    expect(screen.queryByRole("button", { name: m.ai_builder_resume_failed_new() })).toBeNull();
+    expect(service().hasSession).toBe(false);
+    expect(posts).toBe(1);
   });
 
   it("shows a failed bootstrap before the draft list refresh settles", async () => {
