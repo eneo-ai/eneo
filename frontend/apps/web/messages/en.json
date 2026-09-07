@@ -4340,6 +4340,7 @@
   "ai_builder_error_fallback_approve_plan": "Failed to approve plan.",
   "ai_builder_error_fallback_create_flow": "Failed to create the flow.",
   "ai_builder_error_fallback_create_session": "Failed to create session.",
+  "ai_builder_error_fallback_load_plan": "Failed to load the session's plan. Please try again.",
   "ai_builder_error_fallback_generic": "AI Builder failed. Please try again.",
   "ai_builder_error_fallback_refresh_session": "Failed to refresh the AI Builder session.",
   "ai_builder_error_fallback_resume_saved_draft": "Failed to resume the saved draft.",

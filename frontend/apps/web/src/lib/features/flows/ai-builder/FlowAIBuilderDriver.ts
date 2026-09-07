@@ -471,14 +471,32 @@ export class FlowAIBuilderDriver {
           }
         }
       })) as AIBuilderSession;
-      if ((await this.#adoptSession(result, sessionGeneration)) === null) return false;
+      let owner: SessionOperationOwner | null;
+      try {
+        owner = await this.#adoptSession(result, sessionGeneration);
+      } catch (adoptionError) {
+        // The session exists but its plan could not be loaded: a failure of
+        // this session's bootstrap, reported as such, never as a refused create.
+        if (sessionGeneration !== this.#sessionGeneration) return false;
+        this.#restoreReplacedSession(replacedState, replacedRefreshRequired, replacedRefreshError);
+        this.#state.error = this.#parseAndReportError(
+          {
+            transport: "apply",
+            payload: adoptionError,
+            fallbackMessage: m.ai_builder_error_fallback_load_plan()
+          },
+          { sessionId: result.session_id }
+        );
+        this.#notify();
+        await this.loadDraftSessions();
+        throw adoptionError;
+      }
+      if (owner === null) return false;
       await this.loadDraftSessions();
       return true;
     } catch (e) {
       if (sessionGeneration !== this.#sessionGeneration) return false;
-      this.#state = replacedState;
-      this.#requiresAuthoritativeRefresh = replacedRefreshRequired;
-      this.#authoritativeRefreshError = replacedRefreshError;
+      this.#restoreReplacedSession(replacedState, replacedRefreshRequired, replacedRefreshError);
       const createError = this.#parseAndReportError({
         transport: "apply",
         payload: e,
@@ -492,6 +510,20 @@ export class FlowAIBuilderDriver {
       await this.loadDraftSessions();
       throw e;
     }
+  }
+
+  /** Put the session a refused or failed create was replacing back on screen.
+   *  A create that failed has ended whatever initialization it was part of:
+   *  the snapshot's transient initializing flag is never restored, or the
+   *  screen would stay on the skeleton with the error hidden behind it. */
+  #restoreReplacedSession(
+    replacedState: FlowAIBuilderState,
+    replacedRefreshRequired: boolean,
+    replacedRefreshError: boolean
+  ): void {
+    this.#state = { ...replacedState, isInitializing: false };
+    this.#requiresAuthoritativeRefresh = replacedRefreshRequired;
+    this.#authoritativeRefreshError = replacedRefreshError;
   }
 
   async startFreshSession(targetKind: TargetKind): Promise<boolean> {
@@ -587,13 +619,9 @@ export class FlowAIBuilderDriver {
     result: AIBuilderSession,
     sessionGeneration: number
   ): Promise<SessionOperationOwner | null> {
-    const plan = result.latest_plan_id ? await this.#fetchPlan(result.latest_plan_id) : null;
+    const plan = await this.#fetchSessionPlan(result);
     if (sessionGeneration !== this.#sessionGeneration) return null;
-    this.#state.session = result;
-    this.#applyCommittedTurnOutcome(result);
-    this.#hydrateMessagesFromConversation(result.conversation ?? []);
-    this.#state.currentPlan = plan;
-    this.#notify();
+    this.#commitSession(result, plan);
     const owner: SessionOperationOwner = {
       sessionId: result.session_id,
       sessionGeneration,
@@ -603,12 +631,29 @@ export class FlowAIBuilderDriver {
     return owner;
   }
 
-  async #fetchPlan(planId: string): Promise<ProposedPlan> {
+  /** The plan a session snapshot names, or null when it names none. A named
+   *  plan that cannot be loaded throws: no caller may publish that session. */
+  async #fetchSessionPlan(session: AIBuilderSession): Promise<ProposedPlan | null> {
+    if (!session.latest_plan_id) return null;
     const result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.plan, {
       method: "get",
-      params: { path: { plan_id: planId } }
+      params: { path: { plan_id: session.latest_plan_id } }
     })) as ProposedPlan;
     return this.#normalizePlan(result);
+  }
+
+  /** The one place a session snapshot and its plan enter state: together,
+   *  with one notify, so no reader sees a session whose plan is missing. */
+  #commitSession(
+    session: AIBuilderSession,
+    plan: ProposedPlan | null,
+    attemptedClientTurnId?: string
+  ): void {
+    this.#state.session = session;
+    this.#applyCommittedTurnOutcome(session, attemptedClientTurnId);
+    this.#hydrateMessagesFromConversation(session.conversation ?? []);
+    this.#state.currentPlan = plan;
+    this.#notify();
   }
 
   async discardSession(sessionId: string): Promise<void> {
@@ -654,26 +699,32 @@ export class FlowAIBuilderDriver {
       this.#requiresAuthoritativeRefresh ||
       (latestTurnState !== null && latestTurnState !== "committed");
 
+    let snapshot: AIBuilderSession | null = null;
     try {
-      const result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.session, {
+      snapshot = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.session, {
         method: "get",
         params: { path: { session_id: owner.sessionId } }
       })) as AIBuilderSession;
+      const result = snapshot;
+      if (!this.#ownsSession(owner)) return false;
+      // Staged: the plan the snapshot names is read before anything is
+      // published, so a failed read leaves the fence and the old state alone.
+      const plan = await this.#fetchSessionPlan(result);
       if (!this.#ownsSession(owner)) return false;
       this.#requiresAuthoritativeRefresh = false;
       if (this.#authoritativeRefreshError) {
         this.#state.error = null;
         this.#authoritativeRefreshError = false;
       }
-      this.#state.session = result;
-      this.#applyCommittedTurnOutcome(result, options?.attemptedClientTurnId);
-      this.#hydrateMessagesFromConversation(result.conversation ?? []);
-      this.#notify();
-      return this.#syncPlanFromSession(owner);
+      this.#commitSession(result, plan, options?.attemptedClientTurnId);
+      return true;
     } catch (error) {
       if (!this.#ownsSession(owner)) return false;
-      this.#requiresAuthoritativeRefresh = refreshIsRequired;
-      if (refreshIsRequired && this.#state.error === null) {
+      // A snapshot that was read but not published (its plan failed) is state
+      // the screen has not seen: the fence stays up until a refresh lands.
+      const mustRefresh = refreshIsRequired || snapshot !== null;
+      this.#requiresAuthoritativeRefresh = mustRefresh;
+      if (mustRefresh && this.#state.error === null) {
         this.#authoritativeRefreshError = true;
         this.#state.error = this.#parseAndReportError({
           transport: "apply",
@@ -1808,30 +1859,6 @@ export class FlowAIBuilderDriver {
       ...plan,
       status: plan.status ?? "proposed"
     };
-  }
-
-  async #syncPlanFromSession(owner: SessionOperationOwner): Promise<boolean> {
-    if (!this.#ownsSession(owner)) return false;
-    const latestPlanId = this.#state.session?.latest_plan_id;
-    if (!latestPlanId) {
-      this.#state.currentPlan = null;
-      this.#notify();
-      return true;
-    }
-
-    let plan: ProposedPlan;
-    try {
-      plan = await this.#fetchPlan(latestPlanId);
-    } catch {
-      // A refresh leaves the current plan as-is if the read fails.
-      return this.#ownsSession(owner);
-    }
-    if (!this.#ownsSession(owner) || this.#state.session?.latest_plan_id !== latestPlanId) {
-      return false;
-    }
-    this.#state.currentPlan = plan;
-    this.#notify();
-    return true;
   }
 
   #hasRecoverableCreateDraft(): boolean {

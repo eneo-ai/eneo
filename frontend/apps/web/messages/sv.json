@@ -4342,6 +4342,7 @@
   "ai_builder_error_fallback_approve_plan": "Det gick inte att godkänna planen.",
   "ai_builder_error_fallback_create_flow": "Det gick inte att skapa flödet.",
   "ai_builder_error_fallback_create_session": "Det gick inte att skapa sessionen.",
+  "ai_builder_error_fallback_load_plan": "Planen för sessionen kunde inte hämtas. Försök igen.",
   "ai_builder_error_fallback_generic": "AI-byggaren kunde inte slutföra åtgärden. Försök igen.",
   "ai_builder_error_fallback_refresh_session": "Det gick inte att uppdatera sessionen i AI-byggaren.",
   "ai_builder_error_fallback_resume_saved_draft": "Det gick inte att återuppta det sparade utkastet.",

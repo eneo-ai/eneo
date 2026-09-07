@@ -808,6 +808,56 @@ describe("FlowAIBuilderDriver", () => {
     expect(driver.state.error).not.toBeNull();
   });
 
+  it("ends edit initialization with a visible failure when the created session's plan cannot load", async () => {
+    const fetch = vi.fn(async (path: string, init?: { method?: string }) => {
+      if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "get") {
+        return { sessions: [] };
+      }
+      if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "post") {
+        return makeSession({ session_id: "session-2", latest_plan_id: "plan-9" });
+      }
+      if (path === "/api/v1/flows/ai-builder/plans/{plan_id}") {
+        throw new Error("plan unavailable");
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const { driver } = makeDriver({ fetchImpl: fetch });
+
+    await expect(driver.initialize("edit")).rejects.toThrow("plan unavailable");
+
+    // Initialization is over: the skeleton must not hide the failure.
+    expect(driver.state.isInitializing).toBe(false);
+    expect(driver.state.session).toBeNull();
+    expect(driver.state.currentPlan).toBeNull();
+    expect(driver.state.error).not.toBeNull();
+  });
+
+  it("keeps the current session and plan when a refresh cannot load the plan it names", async () => {
+    const current = makeSession({ session_id: "session-1", latest_plan_id: "plan-1" });
+    const refreshed = makeSession({
+      session_id: "session-1",
+      latest_plan_id: "plan-2",
+      status: "awaiting_approval"
+    });
+    const fetch = vi.fn(async (path: string) => {
+      if (path === "/api/v1/flows/ai-builder/sessions/{session_id}") return refreshed;
+      if (path === "/api/v1/flows/ai-builder/plans/{plan_id}") throw new Error("plan unavailable");
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    driver.seedState({
+      session: current,
+      currentPlan: makePlan({ plan_id: "plan-1", status: "approved" })
+    });
+
+    expect(await driver.refreshSession()).toBe(false);
+
+    // Nothing half-published: the snapshot naming plan-2 never replaced the
+    // session that still agrees with plan-1.
+    expect(driver.state.session?.latest_plan_id).toBe("plan-1");
+    expect(driver.state.currentPlan?.plan_id).toBe("plan-1");
+  });
+
   it("keeps a pending resume cancellable while its plan is still loading", async () => {
     const sessionId = "session-shared";
     const activeSnapshot = makeSession({ session_id: sessionId, latest_plan_id: "plan-9" });
@@ -4138,9 +4188,11 @@ describe("FlowAIBuilderDriver review turns", () => {
 
       await expect(driver.recoverFromConflict()).resolves.toBe(false);
 
-      // The old plan is still on screen, so the conflict still applies to it.
+      // Nothing was published: the old plan is still on screen and the failed
+      // reload is visible and retryable instead of a half-applied snapshot.
       expect(driver.state.currentPlan?.plan_id).toBe("plan-1");
-      expect(driver.state.error?.code).toBe("stale_plan_revision");
+      expect(driver.state.session?.latest_plan_id).toBe("plan-1");
+      expect(driver.state.error).not.toBeNull();
     });
 
     it("keeps the conflict when the reload fails", async () => {
