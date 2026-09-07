@@ -6866,14 +6866,33 @@ def test_step_cost_is_folded_the_runtime_way_and_fails_closed() -> None:
     # breakdown that reconciles and attributes every call still misses a
     # step, so it is not judgeable; so is evidence with no reader summary.
     omitted = check_for(
-        evidence(whole, omissions=[{"section": "step_results", "omitted_rows": 1}])
+        evidence(
+            whole,
+            omissions=[
+                {
+                    "reason": "row_limit",
+                    "section": "step_results",
+                    "rows_omitted": 1,
+                    "count_truncated": False,
+                }
+            ],
+        )
     )
     assert omitted["passed"] is False
     assert omitted["actual"]["step_results_complete"] is False
-    without_summary = {
-        key: value for key, value in evidence(whole).items() if key != "debug_export"
-    }
-    assert check_for(without_summary)["actual"]["step_results_complete"] is False
+    # Absent omission metadata proves nothing: no export, no run summary, a
+    # null summary and a missing omission list all read as incomplete.
+    for export in (
+        None,
+        {},
+        {"run": {}},
+        {"run": {"summary": None}},
+        {"run": {"summary": {}}},
+    ):
+        thin = {**evidence(whole), "debug_export": export}
+        if export is None:
+            del thin["debug_export"]
+        assert check_for(thin)["actual"]["step_results_complete"] is False, export
 
     # The receipt's runtime metrics carry the check's rows and diagnostics.
     metrics = harness._runtime_metrics_from_quality_report(

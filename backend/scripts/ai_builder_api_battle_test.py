@@ -159,9 +159,6 @@ from ai_builder_release_gate import replacement_limit  # noqa: E402
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (  # noqa: E402
     StructuredQuestionAnswerMetadata,
 )
-from eneo.flows.ai_builder.ai_builder_flow_review_sample import (  # noqa: E402
-    reader_omitted_step_results,
-)
 from eneo.flows.ai_builder.ai_builder_flow_schema_values import (  # noqa: E402
     builder_form_field_type_values,
 )
@@ -9042,13 +9039,10 @@ def _runtime_evidence_checks(
         for key in ("input_completeness", "output_completeness")
     )
     max_total_tokens = _int_value(expected.get("max_total_tokens"))
-    debug_export = evidence.get("debug_export")
     step_cost = _runtime_step_cost(
         steps=steps,
-        step_results_omitted=(
-            reader_omitted_step_results(cast(dict[str, Any], debug_export))
-            if isinstance(debug_export, Mapping)
-            else True
+        step_results_complete=_reader_returned_every_step_result(
+            evidence.get("debug_export")
         ),
         provider_calls=provider_calls,
         provider_call_evidence_status=provider_call_evidence_status,
@@ -9286,7 +9280,7 @@ def _runtime_evidence_checks(
 def _runtime_step_cost(
     *,
     steps: Sequence[Mapping[str, object]],
-    step_results_omitted: bool,
+    step_results_complete: bool,
     provider_calls: Mapping[str, object] | None,
     provider_call_evidence_status: str,
     run_token_usage: Mapping[str, object] | None,
@@ -9379,19 +9373,41 @@ def _runtime_step_cost(
     ) or (run_token_usage is None and folded is None)
     return {
         "judgeable": (
-            not step_results_omitted
+            step_results_complete
             and page_complete
             and unattributed == 0
             and all_complete
             and reconciled
         ),
-        "step_results_complete": not step_results_omitted,
+        "step_results_complete": step_results_complete,
         "page_complete": page_complete,
         "unattributed_calls": unattributed,
         "usage_complete": all_complete,
         "reconciles_with_run": reconciled,
         "steps": rows,
     }
+
+
+def _reader_returned_every_step_result(debug_export: object) -> bool:
+    """Affirmative: the evidence reader's summary is present and records no
+    omitted step results. A missing export, run, summary or omission list
+    proves nothing and reads as incomplete, so the receipt fails closed."""
+
+    if not isinstance(debug_export, Mapping):
+        return False
+    run_export = debug_export.get("run")
+    if not isinstance(run_export, Mapping):
+        return False
+    summary = run_export.get("summary")
+    if not isinstance(summary, Mapping):
+        return False
+    omissions = summary.get("omissions")
+    if not isinstance(omissions, list):
+        return False
+    return not any(
+        isinstance(item, Mapping) and item.get("section") == "step_results"
+        for item in omissions
+    )
 
 
 def _count_source(
