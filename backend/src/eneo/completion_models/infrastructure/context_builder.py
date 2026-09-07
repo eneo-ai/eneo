@@ -212,7 +212,6 @@ class _Prompt:
         self.prompt: str | None = None
         self.knowledge: str | None = None
         self.knowledge_catalog: str | None = None
-        self.web_search_result: str | None = None
         self.attachments: str | None = None
         self._knowledge_tokens: int = 0
         self.version: int = version
@@ -239,9 +238,8 @@ class _Prompt:
         if self.has_file_references and self.has_tools:
             components.append(ATTACHED_FILE_REFERENCES_INSTRUCTION)
 
-        # Add references prompt if either knowledge or web search results exist
-        # but only for version 2
-        if (self.knowledge or self.web_search_result) and self.version == 2:
+        # Add references prompt if knowledge exists, but only for version 2
+        if self.knowledge and self.version == 2:
             components.append(SHOW_REFERENCES_PROMPT)
 
         # Add hallucination guard for version 1 knowledge
@@ -253,9 +251,6 @@ class _Prompt:
 
         if self.knowledge_catalog:
             components.append(self.knowledge_catalog)
-
-        if self.web_search_result:
-            components.append(self.web_search_result)
 
         if self.attachments:
             components.append(self.attachments)
@@ -438,15 +433,6 @@ class _Prompt:
 
         self.prompt = prompt
 
-    def add_web_search_result(
-        self, web_search_results: Sequence[_InformationChunkLike] | None = None
-    ) -> None:
-        if web_search_results is None:
-            web_search_results = []
-        self.web_search_result = self._create_information_string(
-            information_chunks=web_search_results
-        )
-
     def add_knowledge_catalog(self, catalog: str) -> None:
         self.knowledge_catalog = catalog or None
 
@@ -470,28 +456,6 @@ class _Prompt:
 
 
 class ContextBuilder:
-    @staticmethod
-    def _functions() -> list[FunctionDefinition]:
-        return [
-            FunctionDefinition(
-                name="generate_image",
-                description=(
-                    "Generate an image based on a text prompt. Will always be JPEG."
-                    "\n\nWhen discussing this ability with users:"
-                    "\n- DO NOT mention 'tools' or the technical name 'generate_image'."
-                    "\n- DO say you can 'create' or 'generate' images based on descriptions."
-                    "\n- Use natural, conversational language about your image capabilities."
-                    "\n- If asked to create Vector-based images, do it in code instead."
-                ),
-                schema={
-                    "type": "object",
-                    "properties": {"prompt": {"type": "string"}},
-                    "required": ["prompt"],
-                    "additionalProperties": False,
-                },
-            )
-        ]
-
     def _build_input(
         self,
         input_str: str,
@@ -555,7 +519,7 @@ class ContextBuilder:
         messages: list[Message] = []
         total_tokens = 0
 
-        for message in reversed(session.questions):
+        for turns_back, message in enumerate(reversed(session.questions)):
             # History replays each turn's files through the same inline-vs-URL
             # rules as the current turn: URL-only files must not have their
             # text re-inlined on follow-ups.
@@ -568,11 +532,16 @@ class ContextBuilder:
             )
             answer = message.answer
             # History can contain images (e.g. after a model switch) — never
-            # replay them to a model without vision.
+            # replay them to a model without vision. Generated images replay
+            # only from the latest turn: that keeps "change this image" flows
+            # working, while older ones are already described to the model by
+            # the placeholder text in their replayed tool results.
             if vision:
                 images = self._get_files_by_type(message.files, FileType.IMAGE)
-                generated_images = self._get_files_by_type(
-                    message.generated_files, FileType.IMAGE
+                generated_images = (
+                    self._get_files_by_type(message.generated_files, FileType.IMAGE)
+                    if turns_back == 0
+                    else []
                 )
             else:
                 images = []
@@ -618,8 +587,6 @@ class ContextBuilder:
         info_blob_chunks: Sequence[_InfoBlobChunkLike] | None = None,
         session: Optional[SessionInDB] = None,
         version: int = 1,
-        use_image_generation: bool = False,
-        web_search_results: Sequence[_InformationChunkLike] | None = None,
         mcp_tools: list[FunctionDefinition] | None = None,
         extra_tool_dicts: list[dict[str, Any]] | None = None,
         vision: bool = True,
@@ -635,8 +602,6 @@ class ContextBuilder:
             transcription_inputs = []
         if info_blob_chunks is None:
             info_blob_chunks = []
-        if web_search_results is None:
-            web_search_results = []
         if mcp_tools is None:
             mcp_tools = []
         tokens_used = 0
@@ -671,10 +636,7 @@ class ContextBuilder:
         # Tool definitions occupy context space too — count them up front so
         # the history and knowledge budgets shrink accordingly. extra_tool_dicts
         # carries definitions merged later by the adapter (MCP proxy tools).
-        functions: list[FunctionDefinition] = []
-        if use_image_generation:
-            functions.extend(self._functions())
-        functions.extend(mcp_tools)
+        functions: list[FunctionDefinition] = list(mcp_tools)
 
         tool_dicts: list[dict[str, Any]] = [
             function_definition_to_tool(func_def) for func_def in functions
@@ -698,8 +660,6 @@ class ContextBuilder:
         _prompt.add_attachments(
             files=self._get_files_by_type(prompt_files, FileType.TEXT)
         )
-        # Add web search results first so references prompt appears before knowledge
-        _prompt.add_web_search_result(web_search_results=web_search_results)
         # Tool-mode knowledge: a token-cheap catalog of searchable sources; the
         # content itself stays behind the knowledge-MCP search tool.
         _prompt.add_knowledge_catalog(knowledge_catalog)

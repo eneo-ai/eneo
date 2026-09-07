@@ -18,6 +18,10 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.models import NOT_PROVIDED, NotProvided, is_provided
+from eneo.mcp_servers.domain.capabilities import (
+    CapabilityAvailability,
+    CapabilityPurpose,
+)
 from eneo.prompts.prompt import Prompt
 from eneo.services.service import DatastoreResult
 from eneo.sessions.session import SessionInDB
@@ -33,7 +37,6 @@ if TYPE_CHECKING:
     from eneo.assistants.references import ReferencesService
     from eneo.collections.domain.collection import Collection
     from eneo.completion_models.domain.skill_activation import SkillActivationRuntime
-    from eneo.completion_models.infrastructure.web_search import WebSearchResult
     from eneo.integration.domain.entities.integration_knowledge import (
         IntegrationKnowledge,
     )
@@ -77,6 +80,7 @@ class Assistant(Entity):
         data_retention_days: Optional[int] = None,
         metadata_json: dict[str, object] | None = None,
         icon_id: Optional[UUID] = None,
+        enabled_capabilities: list[CapabilityPurpose] | None = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
 
@@ -107,6 +111,10 @@ class Assistant(Entity):
             AssistantType.DEFAULT_ASSISTANT if is_default else AssistantType.ASSISTANT
         )
         self._metadata_json = metadata_json
+        self.enabled_capabilities: list[CapabilityPurpose] = list(
+            enabled_capabilities or []
+        )
+        self.available_capabilities: list[CapabilityAvailability] = []
         self.icon_id = icon_id
 
         # Temporary attributes for update flow - not persisted directly
@@ -457,7 +465,7 @@ class Assistant(Entity):
         files: list["File"] | None = None,
         stream: bool = False,
         version: int = 1,
-        web_search_results: Sequence["WebSearchResult"] | None = None,
+        capability_mcp_servers: Sequence["MCPServer"] = (),
         require_tool_approval: bool = False,
         completion_model_override: Optional[CompletionModel] = None,
         model_kwargs_override: ModelKwargs | None = None,
@@ -531,12 +539,21 @@ class Assistant(Entity):
         # tools lead the tool array and, with the proxy's first-registered-wins
         # collision rule, survive a prefixed-name collision with an external
         # server. Knowledge leads because it also steers the knowledge catalog.
+        # Resolved capability providers (web search, image generation) follow
+        # the internal servers but precede the assistant's own / governance
+        # servers.
         prepended_servers: list["MCPServer"] = []
         if knowledge_mcp_server is not None:
             prepended_servers.append(knowledge_mcp_server)
         prepended_servers.extend(internal_mcp_servers)
+        prepended_servers.extend(capability_mcp_servers)
         if prepended_servers:
-            effective_mcp_servers = prepended_servers + list(effective_mcp_servers)
+            prepended_ids = {server.id for server in prepended_servers}
+            effective_mcp_servers = prepended_servers + [
+                server
+                for server in effective_mcp_servers
+                if server.id not in prepended_ids
+            ]
         knowledge_catalog = self.build_knowledge_catalog() if use_knowledge_tool else ""
 
         response = await completion_service.get_response(
@@ -557,8 +574,6 @@ class Assistant(Entity):
                 else self.completion_model_kwargs
             ),
             version=version,
-            use_image_generation=self.is_default,
-            web_search_results=list(web_search_results or []),
             mcp_servers=effective_mcp_servers,
             require_tool_approval=require_tool_approval,
             skill_runtime=skill_runtime,

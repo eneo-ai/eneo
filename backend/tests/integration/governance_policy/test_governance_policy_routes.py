@@ -123,6 +123,7 @@ async def test_admin_get_auto_creates_empty_policy(client, admin_token):
     assert payload["mcp_restriction"] == {
         "enabled": False,
         "servers": [],
+        "capabilities": [],
         "disabled_tool_ids": [],
     }
     assert payload["prompt_enforcement"] == {

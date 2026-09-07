@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
@@ -10,6 +11,7 @@ import pytest
 
 from eneo.ai_models.completion_models.completion_model import ResponseType
 from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
+    MCP_IMAGE_PLACEHOLDER_TEMPLATE,
     PROVIDER_UNAVAILABLE_CODE,
     PROVIDER_UNAVAILABLE_MESSAGE,
     TOOL_RESULT_BUDGET_NOTICE,
@@ -173,7 +175,7 @@ def _make_adapter() -> TenantModelAdapter:
 
 
 def test_build_tool_result_with_references_uses_self_describing_resource_blocks():
-    llm_text, display_text, refs = _build_tool_result_with_references(
+    llm_text, display_text, refs, _ = _build_tool_result_with_references(
         content_list=[
             {"type": "text", "text": "Tool summary.\n"},
             {
@@ -225,7 +227,7 @@ def test_build_tool_result_with_references_uses_self_describing_resource_blocks(
 
 
 def test_build_tool_result_with_references_skips_unciteable_resources():
-    llm_text, display_text, refs = _build_tool_result_with_references(
+    llm_text, display_text, refs, _ = _build_tool_result_with_references(
         content_list=[
             {"type": "text", "text": "Tool summary."},
             {
@@ -242,6 +244,52 @@ def test_build_tool_result_with_references_skips_unciteable_resources():
     assert display_text == "Tool summary."
     assert llm_text == "Tool summary."
     assert refs == []
+
+
+def test_build_tool_result_with_references_turns_image_blocks_into_generated_images():
+    png_bytes = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
+    encoded = base64.b64encode(png_bytes).decode("ascii")
+    llm_text, display_text, refs, images = _build_tool_result_with_references(
+        content_list=[
+            {"type": "text", "text": "Here is your picture."},
+            {"type": "image", "data": encoded, "mime_type": "image/png"},
+        ],
+        tool_call_id="call_img",
+        mcp_tool_name="images__generate",
+        existing_prefixes=set(),
+    )
+
+    assert refs == []
+    assert len(images) == 1
+    assert images[0].data == png_bytes
+    assert images[0].mime_type == "image/png"
+    assert images[0].tool_call_id == "call_img"
+    assert images[0].mcp_tool_name == "images__generate"
+
+    # The model and the persisted result text see a placeholder, never base64.
+    expected = "Here is your picture." + MCP_IMAGE_PLACEHOLDER_TEMPLATE.format(
+        index=1, mime_type="image/png"
+    )
+    assert llm_text == expected
+    assert display_text == expected
+    assert encoded not in llm_text
+
+
+def test_build_tool_result_with_references_skips_undecodable_image_blocks():
+    llm_text, display_text, refs, images = _build_tool_result_with_references(
+        content_list=[
+            {"type": "image", "data": "not base64!!", "mime_type": "image/png"},
+            {"type": "image", "data": "", "mime_type": "image/png"},
+        ],
+        tool_call_id="call_img",
+        mcp_tool_name="images__generate",
+        existing_prefixes=set(),
+    )
+
+    assert images == []
+    assert refs == []
+    assert llm_text == ""
+    assert display_text == ""
 
 
 def _make_completion_adapter() -> TenantModelAdapter:

@@ -1,5 +1,7 @@
 """Minimal adapter for tenant models using LiteLLM."""
 
+import base64
+import binascii
 import json
 import re
 import uuid
@@ -23,6 +25,7 @@ from typing_extensions import override
 
 from eneo.ai_models.completion_models.completion_model import (
     Completion,
+    GeneratedImage,
     McpToolReference,
     ModelKwargs,
     ResponseType,
@@ -73,6 +76,12 @@ PROVIDER_UNAVAILABLE_CODE = litellm_transport.PROVIDER_UNAVAILABLE_CODE
 
 # Regex to match Qwen3 thinking blocks: <think>...</think>
 THINKING_BLOCK_PATTERN = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
+
+# Stands in for an MCP ``image`` content block in the model-facing and
+# persisted tool-result text; the bytes themselves become a generated file.
+MCP_IMAGE_PLACEHOLDER_TEMPLATE = (
+    "[Image {index} ({mime_type}) was generated and is shown to the user.]"
+)
 
 # Markdown image token: ![alt](url "optional title"). Captures the url only.
 _MARKDOWN_IMAGE_PATTERN = re.compile(r"!\[[^\]]*\]\(\s*<?([^)\s>]+)>?[^)]*\)")
@@ -127,7 +136,7 @@ def _build_tool_result_with_references(
     tool_call_id: Optional[str],
     mcp_tool_name: Optional[str],
     existing_prefixes: set[str],
-) -> tuple[str, str, list[McpToolReference]]:
+) -> tuple[str, str, list[McpToolReference], list[GeneratedImage]]:
     """Build LLM-facing and user-facing tool result texts; capture resource refs.
 
     Two texts are produced because they serve different audiences:
@@ -153,11 +162,16 @@ def _build_tool_result_with_references(
     inline Markdown images by signature-independent URL identity, so a server
     that emits both an inline ``![](url)`` and a ``resource_link`` for the same
     object renders it once (inline wins).
+
+    ``image`` blocks (base64 bytes) become ``GeneratedImage`` values that the
+    ask path persists as generated files. The base64 never reaches the model
+    or the persisted result text; both see a short placeholder instead.
     """
     text_parts: list[str] = []
     resource_texts: list[str] = []
     llm_blocks: list[str] = []
     refs: list[McpToolReference] = []
+    images: list[GeneratedImage] = []
 
     # Inline Markdown wins. Collect every image url already embedded in any
     # text/resource block so a resource_link for the same object is suppressed
@@ -194,6 +208,28 @@ def _build_tool_result_with_references(
             )
             resource_texts.append(resource_text)
             llm_blocks.append(f'"""source_id: {prefix}\n{resource_text}"""')
+        elif block_type == "image":
+            raw = ci.get("data") or ""
+            mime_type = ci.get("mime_type") or "image/png"
+            try:
+                data = base64.b64decode(raw, validate=True)
+            except (binascii.Error, ValueError):
+                continue
+            if not data:
+                continue
+            images.append(
+                GeneratedImage(
+                    data=data,
+                    mime_type=mime_type,
+                    tool_call_id=tool_call_id,
+                    mcp_tool_name=mcp_tool_name,
+                )
+            )
+            text_parts.append(
+                MCP_IMAGE_PLACEHOLDER_TEMPLATE.format(
+                    index=len(images), mime_type=mime_type
+                )
+            )
         elif block_type == "resource_link":
             # Typed image block (MCP spec, 2025-11-25). Display-only: it carries
             # no citable text, so it rides the structured channel (the
@@ -230,14 +266,14 @@ def _build_tool_result_with_references(
 
     upstream_text = "".join(text_parts)
     if not refs:
-        return upstream_text, upstream_text, refs
+        return upstream_text, upstream_text, refs, images
 
     display_text = "\n\n".join(
         seg.strip() for seg in (upstream_text, *resource_texts) if seg.strip()
     )
     llm_segments = [seg for seg in (upstream_text, *llm_blocks) if seg]
     llm_text = "\n".join(llm_segments) + "\n\n" + MCP_TOOL_REFERENCES_INSTRUCTION
-    return llm_text, display_text, refs
+    return llm_text, display_text, refs, images
 
 
 class _LiteLLMUsageDetails(Protocol):
@@ -1137,6 +1173,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 tool_round = 0
                 seen_prefixes: set[str] = set()
                 captured_refs: list[McpToolReference] = []
+                captured_images: list[GeneratedImage] = []
                 collected_tool_metadata: list[ToolCallMetadata] = []
                 result_budget = _ToolResultBudget(
                     token_limit=self.model.token_limit,
@@ -1313,6 +1350,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                             llm_text,
                             display_text,
                             refs_for_call,
+                            images_for_call,
                         ) = _build_tool_result_with_references(
                             content_list=content_list,
                             tool_call_id=call.call_id,
@@ -1320,6 +1358,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                             existing_prefixes=seen_prefixes,
                         )
                         captured_refs.extend(refs_for_call)
+                        captured_images.extend(images_for_call)
                         result_status = "succeeded"
                         if result.get("is_error"):
                             llm_text = json.dumps(
@@ -1354,6 +1393,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 result_status=result_status,
                                 result=display_text,
                                 mcp_tool_name=call.name,
+                                meta=result.get("meta") or None,
                             )
                         )
                     if not await _follow_up_completion():
@@ -1361,6 +1401,8 @@ class TenantModelAdapter(CompletionModelAdapter):
 
                 if captured_refs:
                     completion.mcp_tool_references = captured_refs
+                if captured_images:
+                    completion.generated_images = captured_images
                 if collected_tool_metadata:
                     completion.tool_calls_metadata = collected_tool_metadata
                 if msg.content:
@@ -2143,6 +2185,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 llm_text,
                                 display_text,
                                 refs_for_call,
+                                images_for_call,
                             ) = _build_tool_result_with_references(
                                 content_list=content_list,
                                 tool_call_id=tc["id"],
@@ -2150,6 +2193,13 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 existing_prefixes=seen_prefixes,
                             )
                             captured_refs.extend(refs_for_call)
+                            # Generated images ride their own chunks so the
+                            # ask path can persist each as a file before the
+                            # tool-call metadata that references it arrives.
+                            for image in images_for_call:
+                                yield Completion(
+                                    response_type=ResponseType.FILES, image=image
+                                )
                             result_status = "succeeded"
                             if result_data.get("is_error"):
                                 error_payload = json.dumps(
@@ -2190,6 +2240,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     result_status=result_status,
                                     result=display_text,
                                     mcp_tool_name=tc["function"]["name"],
+                                    meta=result_data.get("meta") or None,
                                 )
                             )
 

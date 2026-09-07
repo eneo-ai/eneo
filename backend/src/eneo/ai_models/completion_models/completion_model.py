@@ -107,6 +107,10 @@ class ToolCallMetadata:
     # forms used by the UI; this field preserves the exact identifier needed
     # to replay the tool_use so it matches the currently-registered tools.
     mcp_tool_name: Optional[str] = None
+    # The tool result's MCP `_meta` (capped by the client). Servers use it for
+    # out-of-band facts about the call, e.g. OpenTelemetry GenAI usage
+    # attributes (`gen_ai.usage.input_tokens`) from a model-backed tool.
+    meta: Optional[dict[str, Any]] = None
 
 
 @dataclass
@@ -129,6 +133,20 @@ class McpToolReference:
 
 
 @dataclass
+class GeneratedImage:
+    """An image produced by a tool call (an MCP ``image`` content block).
+
+    Carried out of the model adapter as raw bytes; the ask path persists it as
+    a generated file. The model itself only ever sees a text placeholder.
+    """
+
+    data: bytes
+    mime_type: str
+    tool_call_id: Optional[str] = None
+    mcp_tool_name: Optional[str] = None
+
+
+@dataclass
 class Completion:
     reasoning_token_count: Optional[int] = 0
     text: Optional[str] = None
@@ -138,7 +156,8 @@ class Completion:
     tool_calls_metadata: Optional[list[ToolCallMetadata]] = None  # For TOOL_CALL events
     mcp_tool_references: Optional[list[McpToolReference]] = None
     approval_id: Optional[str] = None  # For TOOL_APPROVAL_REQUIRED events
-    image_data: Optional[bytes] = None
+    image: Optional[GeneratedImage] = None  # For FILES events (streaming)
+    generated_images: Optional[list[GeneratedImage]] = None  # Non-streaming
     response_type: Optional[ResponseType] = None
     generated_file: Optional[File] = None
     stop: bool = False

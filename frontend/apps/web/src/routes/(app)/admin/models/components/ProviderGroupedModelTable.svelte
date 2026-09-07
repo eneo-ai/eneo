@@ -1,8 +1,8 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <!--
-  Generic provider-grouped table used by all three model-type tabs
-  (completion / embedding / transcription). Replaces three near-identical
+  Generic provider-grouped table used by all four model-type tabs
+  (completion / embedding / transcription / image). Replaces three near-identical
   copies that drifted apart over time. Per-type behaviour is limited to:
 
     - the deprecation banner — only completion models carry deprecation_date
@@ -13,10 +13,14 @@
   identical and live here.
 -->
 
-<script lang="ts" generics="M extends CompletionModel | EmbeddingModel | TranscriptionModel">
+<script
+  lang="ts"
+  generics="M extends CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel"
+>
   import type {
     CompletionModel,
     EmbeddingModel,
+    ImageModel,
     ModelProviderPublic,
     TranscriptionModel
   } from "@eneo/eneo-js";
@@ -46,13 +50,14 @@
   import ProviderEmptyState from "./ProviderEmptyState.svelte";
   import { AddWizard } from "../AddWizard/index.js";
 
-  type ModelTypeKey = "completionModel" | "embeddingModel" | "transcriptionModel";
-  type WizardModelType = "completion" | "embedding" | "transcription";
+  type ModelTypeKey = "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel";
+  type WizardModelType = "completion" | "embedding" | "transcription" | "image";
 
   const wizardModelTypeFor: Record<ModelTypeKey, WizardModelType> = {
     completionModel: "completion",
     embeddingModel: "embedding",
-    transcriptionModel: "transcription"
+    transcriptionModel: "transcription",
+    imageModel: "image"
   };
 
   export let models: M[];

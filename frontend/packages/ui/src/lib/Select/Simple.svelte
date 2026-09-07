@@ -25,6 +25,13 @@
     }
   }
 
+  // Follow the bound value when the parent changes it (a form reset, a
+  // preset), not only when the user picks an option.
+  $: if (value !== $store?.value) {
+    // No match clears the selection, as an empty initial value does.
+    store.set(options.find((option) => option.value === value) as (typeof options)[number]);
+  }
+
   let cls = "";
   export { cls as class };
 </script>

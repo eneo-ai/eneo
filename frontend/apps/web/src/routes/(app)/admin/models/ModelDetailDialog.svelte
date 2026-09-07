@@ -7,7 +7,12 @@
 
 <script lang="ts">
   import { onMount } from "svelte";
-  import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@eneo/eneo-js";
+  import type {
+    CompletionModel,
+    EmbeddingModel,
+    ImageModel,
+    TranscriptionModel
+  } from "@eneo/eneo-js";
   import { writable, type Writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
   import { Pencil, TriangleAlert, Clock, ArrowRight, ExternalLink } from "lucide-svelte";
@@ -22,6 +27,7 @@
   import { formatTokens, getDeprecationStatus } from "$lib/features/ai-models/formatModelStats";
   import { findHostingLabel } from "$lib/features/ai-models/hosting/hostingOptions";
   import ModelCostBadge from "$lib/features/ai-models/components/ModelCostBadge.svelte";
+  import { imageQualityLabel, imageSizeLabel } from "$lib/features/ai-models/imageModelOptions";
 
   let {
     openController,
@@ -30,8 +36,8 @@
     completionModels = []
   }: {
     openController: Writable<boolean>;
-    model: CompletionModel | EmbeddingModel | TranscriptionModel;
-    type: "completionModel" | "embeddingModel" | "transcriptionModel";
+    model: CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel;
+    type: "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel";
     completionModels?: CompletionModel[];
   } = $props();
 
@@ -226,6 +232,22 @@
           <tr>
             <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap">{m.hosting_region()}</td>
             <td class="py-2.5">{findHostingLabel(model.hosting) || model.hosting.toUpperCase()}</td>
+          </tr>
+        {/if}
+
+        <!-- Image request defaults -->
+        {#if "default_size" in model}
+          <tr>
+            <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap"
+              >{m.image_default_size()}</td
+            >
+            <td class="py-2.5">{imageSizeLabel(model.default_size)}</td>
+          </tr>
+          <tr>
+            <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap"
+              >{m.image_default_quality()}</td
+            >
+            <td class="py-2.5">{imageQualityLabel(model.default_quality)}</td>
           </tr>
         {/if}
 

@@ -165,6 +165,68 @@ class TranscriptionModels(BasePublic):
     )
 
 
+class ImageModels(BasePublic):
+    """Image generation models: what the built-in image capability calls.
+
+    Same catalog shape as the other model types (tenant/provider ownership,
+    enablement, default, classification, soft delete). `name` is the model
+    identifier sent to the provider, `nickname` the display name. There is
+    no space association or migration engine: the only consumer is the
+    built-in capability provider row on `mcp_servers`.
+    """
+
+    name: Mapped[str] = mapped_column()
+    nickname: Mapped[str] = mapped_column()
+    open_source: Mapped[Optional[bool]] = mapped_column()
+    is_deprecated: Mapped[bool] = mapped_column(server_default="False")
+    hf_link: Mapped[Optional[str]] = mapped_column()
+    family: Mapped[str] = mapped_column()
+    stability: Mapped[str] = mapped_column()
+    hosting: Mapped[str] = mapped_column()
+    description: Mapped[Optional[str]] = mapped_column()
+    org: Mapped[Optional[str]] = mapped_column()
+
+    # USD per generated image at the default size and quality. NULL = unknown
+    # / self-hosted. Same precision cap as cost_per_minute above.
+    cost_per_image: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(20, 6), nullable=True
+    )
+    # Defaults the image tool uses when the assistant does not ask for a size
+    # or quality. Vocabulary lives in eneo.image_models.domain.image_model;
+    # "auto" sends nothing so the model decides.
+    default_size: Mapped[str] = mapped_column(server_default="auto")
+    default_quality: Mapped[str] = mapped_column(server_default="auto")
+
+    # Tenant model support: NULL = global model, NOT NULL = tenant-specific model
+    tenant_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"), nullable=True, index=True
+    )
+    provider_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("model_providers.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    provider: Mapped[Optional[ModelProviders]] = relationship()
+
+    is_enabled: Mapped[bool] = mapped_column(server_default="True")
+    is_default: Mapped[bool] = mapped_column(server_default="False")
+    security_classification_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(SecurityClassificationsTable.id, ondelete="SET NULL"), nullable=True
+    )
+    security_classification: Mapped[Optional["SecurityClassificationsTable"]] = (
+        relationship(back_populates="image_models")
+    )
+
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "(tenant_id IS NULL AND provider_id IS NULL) OR (tenant_id IS NOT NULL AND provider_id IS NOT NULL)",
+            name="ck_image_models_tenant_provider",
+        ),
+    )
+
+
 class EmbeddingModels(BasePublic):
     name: Mapped[str] = mapped_column()
     nickname: Mapped[Optional[str]] = mapped_column()

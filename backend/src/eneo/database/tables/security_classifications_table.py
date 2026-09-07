@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from eneo.database.tables.ai_models_table import (
         CompletionModels,
         EmbeddingModels,
+        ImageModels,
         TranscriptionModels,
     )
     from eneo.database.tables.mcp_server_table import MCPServers
@@ -50,6 +51,10 @@ class SecurityClassification(BasePublic):
     transcription_models: Mapped[list["TranscriptionModels"]] = relationship(
         back_populates="security_classification",
         order_by="TranscriptionModels.created_at",
+    )
+    image_models: Mapped[list["ImageModels"]] = relationship(
+        back_populates="security_classification",
+        order_by="ImageModels.created_at",
     )
     spaces: Mapped[list["Spaces"]] = relationship(
         back_populates="security_classification", order_by="Spaces.created_at"

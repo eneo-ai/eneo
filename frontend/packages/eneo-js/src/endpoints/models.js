@@ -1,6 +1,7 @@
 /** @typedef {import('../types/resources').CompletionModel} CompletionModel */
 /** @typedef {import('../types/resources').EmbeddingModel} EmbeddingModel */
 /** @typedef {import('../types/resources').TranscriptionModel} TranscriptionModel */
+/** @typedef {import('../types/resources').ImageModel} ImageModel */
 /** @typedef {import('../client/client').EneoError} EneoError */
 
 /**
@@ -25,18 +26,19 @@ export function initModels(client) {
       return {
         completionModels: res.completion_models,
         embeddingModels: res.embedding_models,
-        transcriptionModels: res.transcription_models
+        transcriptionModels: res.transcription_models,
+        imageModels: res.image_models
       };
     },
 
     /**
-     * Update either an existing Completion Model, Embedding Model, or Transcription Model, only one can be processed at any time
-     * @template {{completionModel: {id:string}, embeddingModel?: never, transcriptionModel?: never, update:import('../types/fetch').JSONRequestBody<"post", "/api/v1/completion-models/{id}/">} | {completionModel?: never, embeddingModel: {id:string}, transcriptionModel?: never, update:import('../types/fetch').JSONRequestBody<"post", "/api/v1/embedding-models/{id}/">} | {completionModel?: never, embeddingModel?: never, transcriptionModel: {id:string}, update:import('../types/fetch').JSONRequestBody<"post", "/api/v1/transcription-models/{id}/">}} T
+     * Update either an existing Completion, Embedding, Transcription or Image Model, only one can be processed at any time
+     * @template {{completionModel: {id:string}, embeddingModel?: never, transcriptionModel?: never, imageModel?: never, update:import('../types/fetch').JSONRequestBody<"post", "/api/v1/completion-models/{id}/">} | {completionModel?: never, embeddingModel: {id:string}, transcriptionModel?: never, imageModel?: never, update:import('../types/fetch').JSONRequestBody<"post", "/api/v1/embedding-models/{id}/">} | {completionModel?: never, embeddingModel?: never, transcriptionModel: {id:string}, imageModel?: never, update:import('../types/fetch').JSONRequestBody<"post", "/api/v1/transcription-models/{id}/">} | {completionModel?: never, embeddingModel?: never, transcriptionModel?: never, imageModel: {id:string}, update:import('../types/fetch').JSONRequestBody<"post", "/api/v1/image-models/{id}/">}} T
      * @param {T} params
-     * @returns {Promise<T extends { completionModel: { id: string } } ? CompletionModel : T extends { embeddingModel: { id: string } } ? EmbeddingModel : TranscriptionModel>}
+     * @returns {Promise<T extends { completionModel: { id: string } } ? CompletionModel : T extends { embeddingModel: { id: string } } ? EmbeddingModel : T extends { transcriptionModel: { id: string } } ? TranscriptionModel : ImageModel>}
      * @throws {EneoError}
      * */
-    update: async ({ completionModel, embeddingModel, transcriptionModel, update }) => {
+    update: async ({ completionModel, embeddingModel, transcriptionModel, imageModel, update }) => {
       if (completionModel) {
         const { id } = completionModel;
         const res = await client.fetch("/api/v1/completion-models/{id}/", {
@@ -55,9 +57,18 @@ export function initModels(client) {
         });
         /** @ts-expect-error Jsdoc can't properly infer return type */
         return res;
-      } else {
+      } else if (transcriptionModel) {
         const { id } = transcriptionModel;
         const res = await client.fetch("/api/v1/transcription-models/{id}/", {
+          method: "post",
+          params: { path: { id } },
+          requestBody: { "application/json": update }
+        });
+        /** @ts-expect-error Jsdoc can't properly infer return type */
+        return res;
+      } else {
+        const { id } = imageModel;
+        const res = await client.fetch("/api/v1/image-models/{id}/", {
           method: "post",
           params: { path: { id } },
           requestBody: { "application/json": update }

@@ -35,19 +35,27 @@
     if (id) {
       await eneo.mcpServers.update({ id, ...data });
     }
-    await Promise.all([invalidate("admin:layout"), invalidate("spaces:data")]);
+    await Promise.all([
+      invalidate("admin:layout"),
+      invalidate("spaces:data"),
+      invalidate("admin:tools")
+    ]);
   }
 
   async function handleDelete(id: string) {
     await eneo.mcpServers.delete({ id });
-    await Promise.all([invalidate("admin:layout"), invalidate("spaces:data")]);
+    await Promise.all([
+      invalidate("admin:layout"),
+      invalidate("spaces:data"),
+      invalidate("admin:tools")
+    ]);
   }
 
   async function syncTools() {
     syncing = true;
     try {
       await eneo.mcpServers.syncTools({ mcp_server_id: mcpServer.mcp_server_id });
-      await invalidate("spaces:data");
+      await Promise.all([invalidate("spaces:data"), invalidate("admin:tools")]);
     } catch (error) {
       console.error("Failed to sync tools:", error);
     } finally {

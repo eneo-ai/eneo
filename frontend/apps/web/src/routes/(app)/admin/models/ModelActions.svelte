@@ -5,6 +5,7 @@
     EneoError,
     type CompletionModel,
     type EmbeddingModel,
+    type ImageModel,
     type TranscriptionModel
   } from "@eneo/eneo-js";
   import { getEneo } from "$lib/core/Eneo";
@@ -32,8 +33,8 @@
    *  Mirrors `ErrorCodes.MODEL_IN_USE` in `backend/src/eneo/main/exceptions.py`. */
   const MODEL_IN_USE_CODE = 9039;
 
-  type AnyModel = CompletionModel | EmbeddingModel | TranscriptionModel;
-  type ModelTypeKey = "completionModel" | "embeddingModel" | "transcriptionModel";
+  type AnyModel = CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel;
+  type ModelTypeKey = "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel";
 
   // svelte-headless-table's `createRender` expects a class-based component,
   // so we keep this file on the legacy `export let` API. Shadcn primitives
@@ -83,6 +84,8 @@
         await eneo.tenantModels.deleteCompletion({ id: model.id });
       } else if (type === "embeddingModel") {
         await eneo.tenantModels.deleteEmbedding({ id: model.id });
+      } else if (type === "imageModel") {
+        await eneo.tenantModels.deleteImage({ id: model.id });
       } else {
         await eneo.tenantModels.deleteTranscription({ id: model.id });
       }
