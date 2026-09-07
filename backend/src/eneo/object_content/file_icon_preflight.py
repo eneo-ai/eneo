@@ -18,6 +18,7 @@ from alembic.util.exc import CommandError
 from eneo.object_content.configuration import ObjectContentCoreSettings
 
 _MIB = 1024 * 1024
+_PAGE_PARENT = "b4f2a9c1e7d3"
 _FOUNDATION = "202607151200"
 _EXPAND = "202607231700"
 _POLICY = "202607251700"
@@ -171,13 +172,14 @@ async def _read_schema(
         "files": {
             "id": "uuid",
             "file_type": "text",
-            "parent_file_id": "uuid",
             "text": "text",
             "blob": "bytea",
             "transcription": "text",
         },
         "icons": {"id": "uuid", "blob": "bytea"},
     }
+    if _PAGE_PARENT in ancestors:
+        required["files"]["parent_file_id"] = "uuid"
     unexpected: set[str] = set()
     if _FOUNDATION in ancestors:
         required.update(
@@ -234,6 +236,8 @@ async def _read_schema(
         if columns.get(table, {}).get(name) != kind
     ]
     mismatches.extend(sorted(unexpected.intersection(columns)))
+    if _PAGE_PARENT not in ancestors and "parent_file_id" in columns.get("files", {}):
+        mismatches.append("unexpected files.parent_file_id")
     if _EXPAND in ancestors:
         freezes = await connection.scalar(
             sa.text(
@@ -265,7 +269,7 @@ async def _read_schema(
     return ancestors
 
 
-def _source_query(has_references: bool) -> str:
+def _source_query(has_references: bool, has_page_parent: bool) -> str:
     # Keep these four source groups equivalent to frozen inventory 202607231745.
     # Only AVAILABLE references are excluded: failed references still need recovery.
     file_join = (
@@ -286,6 +290,7 @@ def _source_query(has_references: bool) -> str:
         else ""
     )
     available = "coalesce(c.state = 'available', false)" if has_references else "false"
+    has_parent = "parent_file_id IS NOT NULL" if has_page_parent else "false"
     return f"""
         SELECT 'file' AS owner_kind, source.variant, source.size_bytes,
                {available} AS available
@@ -293,7 +298,7 @@ def _source_query(has_references: bool) -> str:
             SELECT id AS owner_id,
                    CASE WHEN file_type = 'text' THEN 'extracted_text'
                         WHEN file_type = 'audio' THEN 'original'
-                        WHEN parent_file_id IS NOT NULL THEN 'derived_page'
+                        WHEN {has_parent} THEN 'derived_page'
                         ELSE 'legacy_image' END AS variant,
                    CASE WHEN file_type = 'text' THEN octet_length(text)::bigint
                         ELSE octet_length(blob)::bigint END AS size_bytes
@@ -354,7 +359,7 @@ async def _inspect(
 
     rows = await connection.execute(
         sa.text(f"""
-        WITH source AS ({_source_query(_FOUNDATION in ancestors)})
+        WITH source AS ({_source_query(_FOUNDATION in ancestors, _PAGE_PARENT in ancestors)})
         SELECT owner_kind, variant, count(*) AS source_count,
                sum(size_bytes) AS source_bytes,
                count(*) FILTER (WHERE available) AS available_reference_count,
