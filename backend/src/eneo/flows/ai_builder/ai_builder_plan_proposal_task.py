@@ -172,6 +172,7 @@ def project_authoring_brief(
     is_edit_mode: bool,
     resource_catalog: AIBuilderResourceCatalog,
     named_results: ProposalObligationProjection | None,
+    runtime_inputs: tuple[ConfirmedRuntimeInputRequirement, ...],
     is_pure_audio_transcription: bool = False,
     plan_revision_context: str | None = None,
     requested_output_sections: RequestedOutputSections | None = None,
@@ -190,17 +191,7 @@ def project_authoring_brief(
     constraints = planning_state.example_output_constraints
     return AuthoringBrief(
         decisions=_project_authoring_decisions(planning_state),
-        runtime_inputs=(
-            tuple(
-                ConfirmedRuntimeInputRequirement(
-                    name=item.value.variable_name,
-                    purpose=item.purpose,
-                )
-                for item in planning_state.input_fields
-            )
-            if not is_edit_mode
-            else ()
-        ),
+        runtime_inputs=runtime_inputs,
         attachments=_project_authoring_attachments(
             planning_state,
             attachment_context,
@@ -467,6 +458,7 @@ def build_authoring_brief(
     is_edit_mode: bool,
     resource_catalog: AIBuilderResourceCatalog,
     named_results: ProposalObligationProjection | None,
+    runtime_inputs: tuple[ConfirmedRuntimeInputRequirement, ...],
     is_pure_audio_transcription: bool = False,
     plan_revision_context: str | None = None,
     requested_output_sections: RequestedOutputSections | None = None,
@@ -480,6 +472,7 @@ def build_authoring_brief(
         is_pure_audio_transcription=is_pure_audio_transcription,
         resource_catalog=resource_catalog,
         named_results=named_results,
+        runtime_inputs=runtime_inputs,
         plan_revision_context=plan_revision_context,
         requested_output_sections=requested_output_sections,
         can_decline=can_decline,

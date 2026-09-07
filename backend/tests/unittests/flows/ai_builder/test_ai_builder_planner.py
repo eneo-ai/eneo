@@ -2351,7 +2351,8 @@ async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -
     output_fields_description = prepared.proposal_tool_schema["function"]["parameters"][
         "properties"
     ]["steps"]["items"]["properties"]["output_fields"]["description"]
-    assert rendered_requirement not in output_fields_description
+    # The identity is stated once in the brief and once where it is enforced.
+    assert output_fields_description.count(rendered_requirement) == 1
     serialized_request = json.dumps(
         {
             "messages": prepared.llm_messages,
@@ -2359,8 +2360,9 @@ async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -
         },
         ensure_ascii=False,
     )
-    assert serialized_request.count("case_id") == 1
-    assert serialized_request.count("interpret_input") == 1
+    # Once in the brief, once in the enforcing output_fields description.
+    assert serialized_request.count("case_id") == 2
+    assert serialized_request.count("interpret_input") == 2
     assert prepared.compile_context is not None
     assert [
         field.value.variable_name
@@ -2618,7 +2620,6 @@ def test_create_proposal_request_assigns_state_facts_to_one_wire_channel() -> No
         "replay": json.dumps(prepared.llm_messages[1:], ensure_ascii=False),
     }
     semantic_fact_owners = {
-        "runtime-field-owner-sentinel": "system",
         "attachment-name-owner-sentinel.txt": "system",
         "attachment-body-owner-sentinel": "system",
         "input-schema-owner-sentinel": "system",
@@ -2634,6 +2635,7 @@ def test_create_proposal_request_assigns_state_facts_to_one_wire_channel() -> No
         for channel, content in channels.items():
             assert content.count(sentinel) == (1 if channel == owner else 0)
     contract_identity_channels = {
+        "runtime-field-owner-sentinel": {"system", "tool"},
         "model.model-ref-owner-sentinel": {"system", "tool"},
         "knowledge.kb-ref-id-sentinel": {"system", "tool"},
     }

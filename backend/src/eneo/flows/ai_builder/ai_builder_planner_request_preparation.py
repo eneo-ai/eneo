@@ -642,10 +642,18 @@ def build_proposal_prepared(
         planning_state,
         is_edit_mode=is_edit_mode,
     )
+    # Create-only server-owned identities; the compile context is their owner,
+    # and both the enforcing schema and the brief read this one tuple.
+    confirmed_runtime_inputs = (
+        compile_context.confirmed_runtime_input_requirements
+        if compile_context is not None and not is_edit_mode
+        else ()
+    )
     proposal_tool_schema = build_propose_flow_tool_schema(
         current_steps=None if flow is None else list(flow.steps),
         resource_catalog=resource_catalog,
         is_pure_audio_transcription=is_pure_audio_transcription,
+        confirmed_runtime_inputs=confirmed_runtime_inputs,
         review_scope=review_edit_scope_for_turn(conversation),
     )
     # A review-backed proposal carries run excerpts: the tenant's review-evidence
@@ -683,6 +691,7 @@ def build_proposal_prepared(
             is_pure_audio_transcription=is_pure_audio_transcription,
             resource_catalog=resource_catalog,
             named_results=obligation_projection,
+            runtime_inputs=confirmed_runtime_inputs,
             requested_output_sections=requested_output_sections,
             plan_revision_context=plan_revision_context,
             can_decline=decline_tool_schema is not None,

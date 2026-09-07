@@ -2729,6 +2729,7 @@ async def test_runtime_classifies_named_results_after_slots_are_resolved(
             available_kbs=[],
         ),
         named_results=named_result_projection(replayed, is_edit_mode=False),
+        runtime_inputs=(),
     )
     assert "sokta_insatser" in proposal_prompt
 

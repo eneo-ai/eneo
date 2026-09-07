@@ -142,6 +142,7 @@ def test_project_authoring_brief_create_fixture_is_typed() -> None:
             confidence="high",
         ),
         named_results=named_result_projection(state, is_edit_mode=False),
+        runtime_inputs=runtime_inputs,
     )
 
     assert actual == AuthoringBrief(
@@ -178,6 +179,7 @@ def test_project_authoring_brief_edit_fixture_is_typed() -> None:
         named_results=named_result_projection(
             _state_with_runtime_inputs(runtime_inputs), is_edit_mode=True
         ),
+        runtime_inputs=(),
     )
 
     assert actual == AuthoringBrief(
@@ -204,6 +206,7 @@ def test_create_prompt_projects_confirmed_runtime_input_identity_and_purpose() -
         named_results=named_result_projection(
             _state_with_runtime_inputs(requirements), is_edit_mode=False
         ),
+        runtime_inputs=requirements,
     )
     edit_prompt = build_authoring_brief(
         planning_state=_state_with_runtime_inputs(requirements),
@@ -214,6 +217,7 @@ def test_create_prompt_projects_confirmed_runtime_input_identity_and_purpose() -
         named_results=named_result_projection(
             _state_with_runtime_inputs(requirements), is_edit_mode=True
         ),
+        runtime_inputs=(),
     )
 
     assert "Runtime inputs:" in create_prompt
@@ -240,6 +244,7 @@ def test_runtime_input_projection_preserves_long_and_delimited_names_exactly() -
         named_results=named_result_projection(
             _state_with_runtime_inputs(requirements), is_edit_mode=False
         ),
+        runtime_inputs=requirements,
     )
     schema = build_propose_flow_tool_schema(
         resource_catalog=_empty_catalog(),
@@ -334,6 +339,7 @@ def test_plan_proposal_prompt_includes_readable_resources_without_execution_surf
         is_edit_mode=False,
         resource_catalog=catalog,
         named_results=named_result_projection(state, is_edit_mode=False),
+        runtime_inputs=(),
     )
 
     assert "Available resources:" in prompt
@@ -363,6 +369,7 @@ def test_plan_proposal_prompt_keeps_previous_refs_backend_owned() -> None:
         is_edit_mode=False,
         resource_catalog=_empty_catalog(),
         named_results=named_result_projection(state, is_edit_mode=False),
+        runtime_inputs=(),
     )
     edit_prompt = build_authoring_brief(
         planning_state=state,
@@ -371,6 +378,7 @@ def test_plan_proposal_prompt_keeps_previous_refs_backend_owned() -> None:
         is_edit_mode=True,
         resource_catalog=_empty_catalog(),
         named_results=named_result_projection(state, is_edit_mode=True),
+        runtime_inputs=(),
     )
 
     assert "uses_previous_fields" not in create_prompt
@@ -404,6 +412,7 @@ def test_plan_proposal_prompt_keeps_document_rendering_backend_owned() -> None:
         is_edit_mode=False,
         resource_catalog=_empty_catalog(),
         named_results=named_result_projection(state, is_edit_mode=False),
+        runtime_inputs=(),
     )
 
     assert "final text step immediately before the renderer" in prompt
@@ -456,6 +465,7 @@ def test_plan_proposal_prompt_renders_persisted_file_roles() -> None:
         is_edit_mode=False,
         resource_catalog=_empty_catalog(),
         named_results=named_result_projection(state, is_edit_mode=False),
+        runtime_inputs=(),
     )
 
     assert "Uploaded files:" in prompt
@@ -491,6 +501,7 @@ def test_plan_proposal_prompt_renders_output_schema_evidence_compactly() -> None
         is_edit_mode=False,
         resource_catalog=_empty_catalog(),
         named_results=named_result_projection(state, is_edit_mode=False),
+        runtime_inputs=(),
     )
 
     assert "Output schema evidence:" in prompt
@@ -523,6 +534,7 @@ def test_plan_proposal_prompt_describes_input_schema_without_directing_docx_outp
         is_edit_mode=False,
         resource_catalog=_empty_catalog(),
         named_results=named_result_projection(state, is_edit_mode=False),
+        runtime_inputs=(),
     )
 
     assert "Input schema evidence:" in prompt
@@ -608,6 +620,7 @@ def test_plan_proposal_prompt_treats_example_shape_and_style_as_guidance() -> No
         is_edit_mode=False,
         resource_catalog=_empty_catalog(),
         named_results=named_result_projection(state, is_edit_mode=False),
+        runtime_inputs=(),
     )
 
     assert "example-hint top-level fields:" in prompt
@@ -647,6 +660,7 @@ def test_plan_proposal_prompt_renders_template_placeholder_evidence() -> None:
         is_edit_mode=False,
         resource_catalog=_empty_catalog(),
         named_results=named_result_projection(state, is_edit_mode=False),
+        runtime_inputs=(),
     )
     edit_prompt = build_authoring_brief(
         planning_state=state,
@@ -655,6 +669,7 @@ def test_plan_proposal_prompt_renders_template_placeholder_evidence() -> None:
         is_edit_mode=True,
         resource_catalog=_empty_catalog(),
         named_results=named_result_projection(state, is_edit_mode=True),
+        runtime_inputs=(),
     )
 
     assert "template placeholder fields: kundnamn, datum" in prompt
@@ -706,6 +721,7 @@ def test_plan_proposal_prompt_visibly_clips_long_evidence_and_field_names() -> N
         is_edit_mode=False,
         resource_catalog=_empty_catalog(),
         named_results=named_result_projection(state, is_edit_mode=False),
+        runtime_inputs=(),
     )
 
     assert long_placeholder not in prompt
@@ -722,6 +738,7 @@ def test_plan_proposal_prompt_keeps_create_mechanics_backend_owned():
         named_results=named_result_projection(
             PlanningState.empty(), is_edit_mode=False
         ),
+        runtime_inputs=(),
     )
 
     assert "input_fields" not in prompt
@@ -752,6 +769,7 @@ def test_plan_proposal_prompt_omits_raw_slots_and_provenance() -> None:
         is_edit_mode=False,
         resource_catalog=_empty_catalog(),
         named_results=named_result_projection(state, is_edit_mode=False),
+        runtime_inputs=(),
     )
 
     assert prompt.count("- terminal_output: structured_json") == 1
@@ -769,6 +787,7 @@ def test_plan_proposal_prompt_teaches_direct_text_transform_restraint():
         named_results=named_result_projection(
             PlanningState.empty(), is_edit_mode=False
         ),
+        runtime_inputs=(),
     )
 
     assert "Direct text transformations" in prompt
@@ -795,6 +814,7 @@ def test_plan_proposal_prompt_renders_static_authoring_rules_once() -> None:
         named_results=named_result_projection(
             PlanningState.empty(), is_edit_mode=False
         ),
+        runtime_inputs=(),
     )
     section_rule = (
         "- When the user names multiple output headings/sections for an "
@@ -837,6 +857,7 @@ def test_plan_proposal_prompt_renders_static_authoring_rules_once() -> None:
         named_results=named_result_projection(
             PlanningState.empty(), is_edit_mode=False
         ),
+        runtime_inputs=(),
     )
     assert section_rule not in single_section_prompt
 
@@ -852,6 +873,7 @@ def test_plan_proposal_prompt_omits_section_rule_for_simple_transform() -> None:
         named_results=named_result_projection(
             PlanningState.empty(), is_edit_mode=False
         ),
+        runtime_inputs=(),
     )
 
     assert "Direct text transformations" in prompt
@@ -883,6 +905,7 @@ def test_plan_proposal_prompt_guides_terminal_document_review_shape() -> None:
             ),
             is_edit_mode=False,
         ),
+        runtime_inputs=(),
     )
 
     assert "For DOCX/PDF delivery" in prompt
@@ -904,6 +927,7 @@ def test_plan_proposal_prompt_renders_action_followup_result_contract() -> None:
         is_edit_mode=False,
         resource_catalog=_empty_catalog(),
         named_results=named_result_projection(state, is_edit_mode=False),
+        runtime_inputs=(),
     )
 
     assert "Result contract:" in prompt
@@ -926,6 +950,7 @@ def test_plan_proposal_prompt_renders_machine_readable_result_contract() -> None
         named_results=named_result_projection(
             _state_with_slot("terminal_output", "structured_json"), is_edit_mode=False
         ),
+        runtime_inputs=(),
     )
 
     assert "Result contract:" in prompt
@@ -958,6 +983,7 @@ def test_plan_proposal_prompt_scopes_audio_transcription_to_backend():
             ),
             is_edit_mode=False,
         ),
+        runtime_inputs=(),
     )
 
     assert "committed audio input" in prompt
@@ -996,6 +1022,7 @@ def test_pure_audio_prompt_requests_one_mechanics_free_transcription_step() -> N
             ),
             is_edit_mode=False,
         ),
+        runtime_inputs=(),
     )
 
     assert "exactly one semantic transcription step" in prompt
@@ -1057,6 +1084,7 @@ def test_project_authoring_brief_projects_only_commit_grade_decisions() -> None:
         is_edit_mode=False,
         resource_catalog=_empty_catalog(),
         named_results=None,
+        runtime_inputs=(),
     )
 
     assert actual.decisions == AuthoringDecisions(
@@ -1075,6 +1103,7 @@ def test_authoring_brief_states_each_decision_once() -> None:
         is_edit_mode=False,
         resource_catalog=_empty_catalog(),
         named_results=None,
+        runtime_inputs=(),
     )
     empty_prompt = build_authoring_brief(
         planning_state=PlanningState.empty(),
@@ -1083,6 +1112,7 @@ def test_authoring_brief_states_each_decision_once() -> None:
         is_edit_mode=False,
         resource_catalog=_empty_catalog(),
         named_results=None,
+        runtime_inputs=(),
     )
 
     assert prompt.count("Confirmed decisions:") == 1

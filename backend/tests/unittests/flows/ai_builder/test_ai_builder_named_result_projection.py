@@ -1762,6 +1762,7 @@ def test_the_prompt_names_the_projected_fields_concretely() -> None:
             available_models=[], available_kbs=[]
         ),
         named_results=named_result_projection(state, is_edit_mode=False),
+        runtime_inputs=(),
     )
 
     expected_rule = (
@@ -1802,6 +1803,7 @@ def test_the_prompt_names_the_projected_fields_concretely() -> None:
         named_results=named_result_projection(
             PlanningState.empty(), is_edit_mode=False
         ),
+        runtime_inputs=(),
     )
     assert "The user attested to these named results" not in empty_prompt
 
@@ -1851,6 +1853,7 @@ def test_the_prompt_names_exact_paths_and_marks_unplaced_results() -> None:
             available_models=[], available_kbs=[]
         ),
         named_results=named_result_projection(state, is_edit_mode=False),
+        runtime_inputs=(),
     )
 
     assert "`documents[]` (type array)" in prompt
