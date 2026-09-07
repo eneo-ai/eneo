@@ -18,6 +18,9 @@ from eneo.completion_models.infrastructure.completion_service import (
 from eneo.files.file_models import File, FileType
 from eneo.flows.ai_builder import ai_builder_discovery_runtime as runtime
 from eneo.flows.ai_builder import ai_builder_slot_classifier as classifier
+from eneo.flows.ai_builder.ai_builder_action_policy import (
+    named_result_projection,
+)
 from eneo.flows.ai_builder.ai_builder_architecture_commit import (
     finalize_architecture_commit,
 )
@@ -2725,6 +2728,7 @@ async def test_runtime_classifies_named_results_after_slots_are_resolved(
             available_models=[],
             available_kbs=[],
         ),
+        named_results=named_result_projection(replayed, is_edit_mode=False),
     )
     assert "sokta_insatser" in proposal_prompt
 

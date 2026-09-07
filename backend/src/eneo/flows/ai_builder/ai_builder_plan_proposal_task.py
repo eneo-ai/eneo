@@ -11,12 +11,10 @@ the tool schema owns shapes, not rules.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
-from eneo.flows.ai_builder.ai_builder_action_policy import (
-    named_result_projection,
-)
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AIBuilderAttachmentContext,
     render_ai_builder_evidence_value,
@@ -101,8 +99,53 @@ class AuthoringExampleGuidance:
     style_constraints: tuple[AuthoringExampleStyle, ...] = ()
 
 
+PrimaryRuntimeInputDecision = Literal[
+    "audio",
+    "documents",
+    "json",
+    "text",
+    "text_and_documents",
+]
+DocumentMaterialScopeDecision = Literal[
+    "single_document_case",
+    "multiple_documents_case",
+    "flexible_document_case",
+]
+ComparisonScopeDecision = Literal[
+    "same_run_compare",
+    "compare_previous_material",
+    "no_direct_compare",
+]
+StructuredOperationDecision = Literal[
+    "map_to_new_schema",
+    "validate_against_schema_or_rules",
+    "extract_or_compute_fields",
+    "normalize_or_enrich",
+    "classify_or_tag",
+    "custom_schema_or_rules",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class AuthoringDecisions:
+    """Commit-grade planning decisions whose meaning the model must author to.
+
+    The compiler owns the mechanics these decisions imply (input type, fan-in,
+    report topology); the sentences rendered from them tell the model what the
+    steps' semantic work must cover. Decisions the compiler materialises fully
+    (report disposition, generation modes, extra runtime fields) are not here.
+    The value vocabularies are pinned to the question catalog by test.
+    """
+
+    primary_runtime_input: PrimaryRuntimeInputDecision | None = None
+    document_material_scope: DocumentMaterialScopeDecision | None = None
+    comparison_scope: ComparisonScopeDecision | None = None
+    structured_operation: StructuredOperationDecision | None = None
+
+
 @dataclass(frozen=True, slots=True)
 class AuthoringBrief:
+    decisions: AuthoringDecisions = AuthoringDecisions()
     runtime_inputs: tuple[ConfirmedRuntimeInputRequirement, ...] = ()
     attachments: tuple[AuthoringAttachment, ...] = ()
     input_schema: AuthoringSchema | None = None
@@ -128,6 +171,7 @@ def project_authoring_brief(
     flow_context: str | None,
     is_edit_mode: bool,
     resource_catalog: AIBuilderResourceCatalog,
+    named_results: ProposalObligationProjection | None,
     is_pure_audio_transcription: bool = False,
     plan_revision_context: str | None = None,
     requested_output_sections: RequestedOutputSections | None = None,
@@ -145,6 +189,7 @@ def project_authoring_brief(
     result_contract = derive_result_contract(planning_state)
     constraints = planning_state.example_output_constraints
     return AuthoringBrief(
+        decisions=_project_authoring_decisions(planning_state),
         runtime_inputs=(
             tuple(
                 ConfirmedRuntimeInputRequirement(
@@ -184,10 +229,7 @@ def project_authoring_brief(
             else None
         ),
         result_contract=result_contract,
-        named_results=named_result_projection(
-            planning_state,
-            is_edit_mode=is_edit_mode,
-        ),
+        named_results=named_results,
         requested_output_sections=(
             requested_output_sections.sections
             if requested_output_sections is not None
@@ -211,6 +253,151 @@ def project_authoring_brief(
         ),
         can_decline=can_decline,
     )
+
+
+def _project_authoring_decisions(planning_state: PlanningState) -> AuthoringDecisions:
+    # Commit grade, like the compiler: a value the planner may not commit on
+    # must not shape the authoring either.
+    return AuthoringDecisions(
+        primary_runtime_input=_primary_runtime_input_decision(
+            planning_state.commit_grade_slot_value("primary_runtime_input")
+        ),
+        document_material_scope=_document_material_scope_decision(
+            planning_state.commit_grade_slot_value("document_material_scope")
+        ),
+        comparison_scope=_comparison_scope_decision(
+            planning_state.commit_grade_slot_value("comparison_scope")
+        ),
+        structured_operation=_structured_operation_decision(
+            planning_state.commit_grade_slot_value("structured_io_contract")
+        ),
+    )
+
+
+def _primary_runtime_input_decision(
+    value: str | None,
+) -> PrimaryRuntimeInputDecision | None:
+    match value:
+        case "audio" | "documents" | "json" | "text" | "text_and_documents":
+            return value
+        case _:
+            return None
+
+
+def _document_material_scope_decision(
+    value: str | None,
+) -> DocumentMaterialScopeDecision | None:
+    match value:
+        case (
+            "single_document_case"
+            | "multiple_documents_case"
+            | "flexible_document_case"
+        ):
+            return value
+        case _:
+            return None
+
+
+def _comparison_scope_decision(value: str | None) -> ComparisonScopeDecision | None:
+    match value:
+        case "same_run_compare" | "compare_previous_material" | "no_direct_compare":
+            return value
+        case _:
+            return None
+
+
+def _structured_operation_decision(
+    value: str | None,
+) -> StructuredOperationDecision | None:
+    match value:
+        case (
+            "map_to_new_schema"
+            | "validate_against_schema_or_rules"
+            | "extract_or_compute_fields"
+            | "normalize_or_enrich"
+            | "classify_or_tag"
+            | "custom_schema_or_rules"
+        ):
+            return value
+        case _:
+            return None
+
+
+PRIMARY_RUNTIME_INPUT_SENTENCES: Mapping[PrimaryRuntimeInputDecision, str] = {
+    "audio": "The runtime input is audio to transcribe.",
+    "documents": "The runtime input is one or more uploaded documents.",
+    "json": "The runtime input is JSON data.",
+    "text": "The runtime input is text typed at run time.",
+    "text_and_documents": (
+        "The runtime input is both typed text and uploaded documents."
+    ),
+}
+DOCUMENT_MATERIAL_SCOPE_SENTENCES: Mapping[DocumentMaterialScopeDecision, str] = {
+    "single_document_case": "Each run handles one main document.",
+    "multiple_documents_case": (
+        "Each run handles several documents together; every step that reads "
+        "sources must cover all of them."
+    ),
+    "flexible_document_case": (
+        "A run may carry one or several documents; the steps must work for both."
+    ),
+}
+COMPARISON_SCOPE_SENTENCES: Mapping[ComparisonScopeDecision, str] = {
+    "same_run_compare": (
+        "Compare the documents supplied in the same run with each other."
+    ),
+    "compare_previous_material": (
+        "Compare the run's material against earlier saved reference material, "
+        "not the run's documents with each other."
+    ),
+    "no_direct_compare": "No direct comparison between sources is wanted.",
+}
+STRUCTURED_OPERATION_SENTENCES: Mapping[StructuredOperationDecision, str] = {
+    "map_to_new_schema": (
+        "The structured work is mapping the input into a new schema."
+    ),
+    "validate_against_schema_or_rules": (
+        "The structured work is validating the input against a schema or rules."
+    ),
+    "extract_or_compute_fields": (
+        "The structured work is extracting or computing fields."
+    ),
+    "normalize_or_enrich": (
+        "The structured work is normalizing or enriching the data."
+    ),
+    "classify_or_tag": "The structured work is classifying or tagging.",
+    "custom_schema_or_rules": (
+        "The structured work follows the user's own schema or rules."
+    ),
+}
+
+
+def _decisions_block(decisions: AuthoringDecisions) -> str | None:
+    sentences = [
+        *(
+            [PRIMARY_RUNTIME_INPUT_SENTENCES[decisions.primary_runtime_input]]
+            if decisions.primary_runtime_input is not None
+            else []
+        ),
+        *(
+            [DOCUMENT_MATERIAL_SCOPE_SENTENCES[decisions.document_material_scope]]
+            if decisions.document_material_scope is not None
+            else []
+        ),
+        *(
+            [COMPARISON_SCOPE_SENTENCES[decisions.comparison_scope]]
+            if decisions.comparison_scope is not None
+            else []
+        ),
+        *(
+            [STRUCTURED_OPERATION_SENTENCES[decisions.structured_operation]]
+            if decisions.structured_operation is not None
+            else []
+        ),
+    ]
+    if not sentences:
+        return None
+    return "\n".join(f"- {sentence}" for sentence in sentences)
 
 
 def _project_authoring_attachments(
@@ -278,8 +465,9 @@ def build_authoring_brief(
     attachment_context: AIBuilderAttachmentContext | None,
     flow_context: str | None,
     is_edit_mode: bool,
-    is_pure_audio_transcription: bool = False,
     resource_catalog: AIBuilderResourceCatalog,
+    named_results: ProposalObligationProjection | None,
+    is_pure_audio_transcription: bool = False,
     plan_revision_context: str | None = None,
     requested_output_sections: RequestedOutputSections | None = None,
     can_decline: bool = False,
@@ -291,6 +479,7 @@ def build_authoring_brief(
         is_edit_mode=is_edit_mode,
         is_pure_audio_transcription=is_pure_audio_transcription,
         resource_catalog=resource_catalog,
+        named_results=named_results,
         plan_revision_context=plan_revision_context,
         requested_output_sections=requested_output_sections,
         can_decline=can_decline,
@@ -392,6 +581,9 @@ def _render_authoring_brief(brief: AuthoringBrief) -> str:
         "- The backend will compile, validate, and persist the plan for user approval.",
         *create_mode_rules,
     ]
+    decisions_block = _decisions_block(brief.decisions)
+    if decisions_block is not None:
+        lines.extend(["", "Confirmed decisions:", decisions_block])
     if brief.runtime_inputs:
         lines.extend(
             [

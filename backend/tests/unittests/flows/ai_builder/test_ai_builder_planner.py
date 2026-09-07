@@ -79,6 +79,12 @@ from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderSavedFlowStepEditContext,
     ResolvedAIBuilderEditContext,
 )
+from eneo.flows.ai_builder.ai_builder_plan_proposal_task import (
+    COMPARISON_SCOPE_SENTENCES,
+    DOCUMENT_MATERIAL_SCOPE_SENTENCES,
+    PRIMARY_RUNTIME_INPUT_SENTENCES,
+    STRUCTURED_OPERATION_SENTENCES,
+)
 from eneo.flows.ai_builder.ai_builder_planner import (
     AIBuilderPlanner,
 )
@@ -5949,3 +5955,109 @@ def test_the_investigation_evidence_share_is_bounded_by_the_system_bound() -> No
         review_evidence_max_input_tokens=None, window=1_000_000, excerpt_chars=2_000
     )
     assert "avklippt efter" not in short.message_groups[0].messages[0]["content"]
+
+
+def _metadata_only_answer(question_id: str, value: str) -> ConversationMessage:
+    return ConversationMessage(
+        message_id=f"answer-{question_id}",
+        role="user",
+        content="",
+        metadata={
+            "question_answer": {
+                "question_id": question_id,
+                "selected_option_ids": [value],
+                "selected_values": [value],
+            }
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    ("answers", "sentences"),
+    [
+        pytest.param(
+            (
+                ("primary_runtime_input", "documents"),
+                ("document_material_scope", "multiple_documents_case"),
+                ("comparison_scope", "same_run_compare"),
+            ),
+            (
+                PRIMARY_RUNTIME_INPUT_SENTENCES["documents"],
+                DOCUMENT_MATERIAL_SCOPE_SENTENCES["multiple_documents_case"],
+                COMPARISON_SCOPE_SENTENCES["same_run_compare"],
+            ),
+            id="documents",
+        ),
+        pytest.param(
+            (
+                ("primary_runtime_input", "json"),
+                ("terminal_output", "structured_json"),
+                ("structured_io_contract", "map_to_new_schema"),
+            ),
+            (
+                PRIMARY_RUNTIME_INPUT_SENTENCES["json"],
+                STRUCTURED_OPERATION_SENTENCES["map_to_new_schema"],
+            ),
+            id="json",
+        ),
+    ],
+)
+def test_metadata_only_decisions_survive_history_trimming(
+    answers: tuple[tuple[str, str], ...],
+    sentences: tuple[str, ...],
+) -> None:
+    # An API client may answer a question with no message text, and fitting may
+    # drop the earlier turns that carried the user's own words. The decisions
+    # must still reach the model, once, from the brief. Relevance rules keep
+    # document-scope and structured-operation decisions in different worlds.
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content="label-owner-sentinel " + ("history-padding " * 20_000),
+        ),
+        *(_metadata_only_answer(question_id, value) for question_id, value in answers),
+        ConversationMessage(role="user", content="final-turn-sentinel"),
+    ]
+    state = build_planning_state_from_conversation(conversation)
+
+    prepared = build_proposal_prepared(
+        requirements_state=RequirementsState(),
+        ui_language="en",
+        slot_classification_metadata=None,
+        conversation=conversation,
+        planning_state=state,
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[], available_kbs=[], prior_bindings=()
+        ),
+        flow=None,
+        assistant_snapshots=None,
+        plan_edit_context=None,
+        prior_plan_for_revision=None,
+        litellm_model="openai/gpt-5.4",
+        max_input_tokens=10_000,
+        max_output_tokens=1_024,
+        budget_policy=_budget_policy(),
+        attachment_file_count=0,
+        current_turn_start=len(conversation) - 1,
+    )
+
+    channels = {
+        "system": str(prepared.llm_messages[0]["content"]),
+        "tool": json.dumps(prepared.proposal_tool_schema, ensure_ascii=False),
+        "replay": json.dumps(prepared.llm_messages[1:], ensure_ascii=False),
+    }
+    assert "label-owner-sentinel" not in channels["replay"]
+    assert "final-turn-sentinel" in channels["replay"]
+    for sentence in sentences:
+        for channel, content in channels.items():
+            assert content.count(sentence) == (1 if channel == "system" else 0)
+    # Slot vocabulary tokens never leak; plain words ("documents", "json") and
+    # the terminal value the result contract names are not vocabulary leaks.
+    for _, raw_value in answers:
+        if "_" not in raw_value or raw_value == "structured_json":
+            continue
+        for channel, content in channels.items():
+            assert raw_value not in content, (channel, raw_value)

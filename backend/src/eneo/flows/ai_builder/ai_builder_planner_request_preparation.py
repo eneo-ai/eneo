@@ -682,6 +682,7 @@ def build_proposal_prepared(
             is_edit_mode=is_edit_mode,
             is_pure_audio_transcription=is_pure_audio_transcription,
             resource_catalog=resource_catalog,
+            named_results=obligation_projection,
             requested_output_sections=requested_output_sections,
             plan_revision_context=plan_revision_context,
             can_decline=decline_tool_schema is not None,

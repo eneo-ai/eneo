@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from typing import get_args
 from uuid import UUID
 
+from eneo.flows.ai_builder.ai_builder_action_policy import (
+    named_result_projection,
+)
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AIBuilderAttachmentContext,
     AIBuilderAttachmentEvidence,
@@ -13,8 +17,17 @@ from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
 )
 from eneo.flows.ai_builder.ai_builder_plan_proposal_task import (
+    COMPARISON_SCOPE_SENTENCES,
+    DOCUMENT_MATERIAL_SCOPE_SENTENCES,
+    PRIMARY_RUNTIME_INPUT_SENTENCES,
+    STRUCTURED_OPERATION_SENTENCES,
     AuthoringAttachment,
     AuthoringBrief,
+    AuthoringDecisions,
+    ComparisonScopeDecision,
+    DocumentMaterialScopeDecision,
+    PrimaryRuntimeInputDecision,
+    StructuredOperationDecision,
     build_authoring_brief,
     project_authoring_brief,
 )
@@ -47,6 +60,7 @@ from eneo.flows.ai_builder.planning_state import (
     SlotSource,
     StepTriple,
 )
+from eneo.flows.ai_builder.question_catalog import legal_slot_values
 
 
 def _empty_catalog() -> AIBuilderResourceCatalog:
@@ -127,6 +141,7 @@ def test_project_authoring_brief_create_fixture_is_typed() -> None:
             sections=("heading-sentinel",),
             confidence="high",
         ),
+        named_results=named_result_projection(state, is_edit_mode=False),
     )
 
     assert actual == AuthoringBrief(
@@ -160,6 +175,9 @@ def test_project_authoring_brief_edit_fixture_is_typed() -> None:
         is_edit_mode=True,
         resource_catalog=_empty_catalog(),
         plan_revision_context="selected-step-sentinel",
+        named_results=named_result_projection(
+            _state_with_runtime_inputs(runtime_inputs), is_edit_mode=True
+        ),
     )
 
     assert actual == AuthoringBrief(
@@ -183,6 +201,9 @@ def test_create_prompt_projects_confirmed_runtime_input_identity_and_purpose() -
         flow_context=None,
         is_edit_mode=False,
         resource_catalog=_empty_catalog(),
+        named_results=named_result_projection(
+            _state_with_runtime_inputs(requirements), is_edit_mode=False
+        ),
     )
     edit_prompt = build_authoring_brief(
         planning_state=_state_with_runtime_inputs(requirements),
@@ -190,6 +211,9 @@ def test_create_prompt_projects_confirmed_runtime_input_identity_and_purpose() -
         flow_context=None,
         is_edit_mode=True,
         resource_catalog=_empty_catalog(),
+        named_results=named_result_projection(
+            _state_with_runtime_inputs(requirements), is_edit_mode=True
+        ),
     )
 
     assert "Runtime inputs:" in create_prompt
@@ -213,6 +237,9 @@ def test_runtime_input_projection_preserves_long_and_delimited_names_exactly() -
         flow_context=None,
         is_edit_mode=False,
         resource_catalog=_empty_catalog(),
+        named_results=named_result_projection(
+            _state_with_runtime_inputs(requirements), is_edit_mode=False
+        ),
     )
     schema = build_propose_flow_tool_schema(
         resource_catalog=_empty_catalog(),
@@ -306,6 +333,7 @@ def test_plan_proposal_prompt_includes_readable_resources_without_execution_surf
         flow_context=None,
         is_edit_mode=False,
         resource_catalog=catalog,
+        named_results=named_result_projection(state, is_edit_mode=False),
     )
 
     assert "Available resources:" in prompt
@@ -334,6 +362,7 @@ def test_plan_proposal_prompt_keeps_previous_refs_backend_owned() -> None:
         flow_context=None,
         is_edit_mode=False,
         resource_catalog=_empty_catalog(),
+        named_results=named_result_projection(state, is_edit_mode=False),
     )
     edit_prompt = build_authoring_brief(
         planning_state=state,
@@ -341,6 +370,7 @@ def test_plan_proposal_prompt_keeps_previous_refs_backend_owned() -> None:
         flow_context=None,
         is_edit_mode=True,
         resource_catalog=_empty_catalog(),
+        named_results=named_result_projection(state, is_edit_mode=True),
     )
 
     assert "uses_previous_fields" not in create_prompt
@@ -373,6 +403,7 @@ def test_plan_proposal_prompt_keeps_document_rendering_backend_owned() -> None:
         flow_context=None,
         is_edit_mode=False,
         resource_catalog=_empty_catalog(),
+        named_results=named_result_projection(state, is_edit_mode=False),
     )
 
     assert "final text step immediately before the renderer" in prompt
@@ -424,6 +455,7 @@ def test_plan_proposal_prompt_renders_persisted_file_roles() -> None:
         flow_context=None,
         is_edit_mode=False,
         resource_catalog=_empty_catalog(),
+        named_results=named_result_projection(state, is_edit_mode=False),
     )
 
     assert "Uploaded files:" in prompt
@@ -458,6 +490,7 @@ def test_plan_proposal_prompt_renders_output_schema_evidence_compactly() -> None
         flow_context=None,
         is_edit_mode=False,
         resource_catalog=_empty_catalog(),
+        named_results=named_result_projection(state, is_edit_mode=False),
     )
 
     assert "Output schema evidence:" in prompt
@@ -489,6 +522,7 @@ def test_plan_proposal_prompt_describes_input_schema_without_directing_docx_outp
         flow_context=None,
         is_edit_mode=False,
         resource_catalog=_empty_catalog(),
+        named_results=named_result_projection(state, is_edit_mode=False),
     )
 
     assert "Input schema evidence:" in prompt
@@ -573,6 +607,7 @@ def test_plan_proposal_prompt_treats_example_shape_and_style_as_guidance() -> No
         flow_context=None,
         is_edit_mode=False,
         resource_catalog=_empty_catalog(),
+        named_results=named_result_projection(state, is_edit_mode=False),
     )
 
     assert "example-hint top-level fields:" in prompt
@@ -611,6 +646,7 @@ def test_plan_proposal_prompt_renders_template_placeholder_evidence() -> None:
         flow_context=None,
         is_edit_mode=False,
         resource_catalog=_empty_catalog(),
+        named_results=named_result_projection(state, is_edit_mode=False),
     )
     edit_prompt = build_authoring_brief(
         planning_state=state,
@@ -618,6 +654,7 @@ def test_plan_proposal_prompt_renders_template_placeholder_evidence() -> None:
         flow_context="Existing template flow",
         is_edit_mode=True,
         resource_catalog=_empty_catalog(),
+        named_results=named_result_projection(state, is_edit_mode=True),
     )
 
     assert "template placeholder fields: kundnamn, datum" in prompt
@@ -668,6 +705,7 @@ def test_plan_proposal_prompt_visibly_clips_long_evidence_and_field_names() -> N
         flow_context=None,
         is_edit_mode=False,
         resource_catalog=_empty_catalog(),
+        named_results=named_result_projection(state, is_edit_mode=False),
     )
 
     assert long_placeholder not in prompt
@@ -681,6 +719,9 @@ def test_plan_proposal_prompt_keeps_create_mechanics_backend_owned():
         flow_context=None,
         is_edit_mode=False,
         resource_catalog=_empty_catalog(),
+        named_results=named_result_projection(
+            PlanningState.empty(), is_edit_mode=False
+        ),
     )
 
     assert "input_fields" not in prompt
@@ -710,6 +751,7 @@ def test_plan_proposal_prompt_omits_raw_slots_and_provenance() -> None:
         flow_context=None,
         is_edit_mode=False,
         resource_catalog=_empty_catalog(),
+        named_results=named_result_projection(state, is_edit_mode=False),
     )
 
     assert prompt.count("- terminal_output: structured_json") == 1
@@ -724,6 +766,9 @@ def test_plan_proposal_prompt_teaches_direct_text_transform_restraint():
         flow_context=None,
         is_edit_mode=False,
         resource_catalog=_empty_catalog(),
+        named_results=named_result_projection(
+            PlanningState.empty(), is_edit_mode=False
+        ),
     )
 
     assert "Direct text transformations" in prompt
@@ -746,6 +791,9 @@ def test_plan_proposal_prompt_renders_static_authoring_rules_once() -> None:
                 "Planerad tidplan",
             ),
             confidence="high",
+        ),
+        named_results=named_result_projection(
+            PlanningState.empty(), is_edit_mode=False
         ),
     )
     section_rule = (
@@ -786,6 +834,9 @@ def test_plan_proposal_prompt_renders_static_authoring_rules_once() -> None:
             sections=("Only section",),
             confidence="high",
         ),
+        named_results=named_result_projection(
+            PlanningState.empty(), is_edit_mode=False
+        ),
     )
     assert section_rule not in single_section_prompt
 
@@ -798,6 +849,9 @@ def test_plan_proposal_prompt_omits_section_rule_for_simple_transform() -> None:
         is_edit_mode=False,
         resource_catalog=_empty_catalog(),
         requested_output_sections=RequestedOutputSections(),
+        named_results=named_result_projection(
+            PlanningState.empty(), is_edit_mode=False
+        ),
     )
 
     assert "Direct text transformations" in prompt
@@ -819,6 +873,16 @@ def test_plan_proposal_prompt_guides_terminal_document_review_shape() -> None:
         flow_context=None,
         is_edit_mode=False,
         resource_catalog=_empty_catalog(),
+        named_results=named_result_projection(
+            _planning_state_with_architecture(
+                StepTriple(
+                    input_type="document",
+                    output_type="docx",
+                    output_mode="pass_through",
+                )
+            ),
+            is_edit_mode=False,
+        ),
     )
 
     assert "For DOCX/PDF delivery" in prompt
@@ -839,6 +903,7 @@ def test_plan_proposal_prompt_renders_action_followup_result_contract() -> None:
         flow_context=None,
         is_edit_mode=False,
         resource_catalog=_empty_catalog(),
+        named_results=named_result_projection(state, is_edit_mode=False),
     )
 
     assert "Result contract:" in prompt
@@ -858,6 +923,9 @@ def test_plan_proposal_prompt_renders_machine_readable_result_contract() -> None
         flow_context=None,
         is_edit_mode=False,
         resource_catalog=_empty_catalog(),
+        named_results=named_result_projection(
+            _state_with_slot("terminal_output", "structured_json"), is_edit_mode=False
+        ),
     )
 
     assert "Result contract:" in prompt
@@ -880,6 +948,16 @@ def test_plan_proposal_prompt_scopes_audio_transcription_to_backend():
         flow_context=None,
         is_edit_mode=False,
         resource_catalog=_empty_catalog(),
+        named_results=named_result_projection(
+            _planning_state_with_architecture(
+                StepTriple(
+                    input_type="audio",
+                    output_type="text",
+                    output_mode="pass_through",
+                )
+            ),
+            is_edit_mode=False,
+        ),
     )
 
     assert "committed audio input" in prompt
@@ -907,9 +985,113 @@ def test_pure_audio_prompt_requests_one_mechanics_free_transcription_step() -> N
         is_edit_mode=False,
         is_pure_audio_transcription=True,
         resource_catalog=_empty_catalog(),
+        named_results=named_result_projection(
+            _planning_state_with_architecture(
+                StepTriple(
+                    input_type="audio",
+                    output_type="text",
+                    output_mode="transcribe_only",
+                ),
+                chosen_patterns=["audio_transcription"],
+            ),
+            is_edit_mode=False,
+        ),
     )
 
     assert "exactly one semantic transcription step" in prompt
     assert "only `name` and `instructions`" in prompt
     assert "backend owns upload and transcription mechanics" in prompt
     assert "start propose_flow steps with the analysis" not in prompt
+
+
+def test_authoring_decision_vocabularies_are_the_question_catalog() -> None:
+    vocabularies = {
+        "primary_runtime_input": (
+            PrimaryRuntimeInputDecision,
+            PRIMARY_RUNTIME_INPUT_SENTENCES,
+        ),
+        "document_material_scope": (
+            DocumentMaterialScopeDecision,
+            DOCUMENT_MATERIAL_SCOPE_SENTENCES,
+        ),
+        "comparison_scope": (ComparisonScopeDecision, COMPARISON_SCOPE_SENTENCES),
+        "structured_io_contract": (
+            StructuredOperationDecision,
+            STRUCTURED_OPERATION_SENTENCES,
+        ),
+    }
+    for slot_name, (decision_type, sentences) in vocabularies.items():
+        catalog_values = legal_slot_values(slot_name)
+        assert set(get_args(decision_type)) == catalog_values, slot_name
+        assert set(sentences) == catalog_values, slot_name
+        assert len(set(sentences.values())) == len(sentences), slot_name
+
+
+def _state_with_decisions() -> PlanningState:
+    state = PlanningState.empty()
+    for slot_name, value in (
+        ("primary_runtime_input", "documents"),
+        ("document_material_scope", "multiple_documents_case"),
+        ("comparison_scope", "same_run_compare"),
+        ("structured_io_contract", "map_to_new_schema"),
+    ):
+        state = _state_with_slot(slot_name, value, state=state)
+    return state
+
+
+def test_project_authoring_brief_projects_only_commit_grade_decisions() -> None:
+    state = _state_with_decisions()
+    # A weak reading is not a decision: the compiler ignores it, so must the brief.
+    state = _state_with_slot(
+        "comparison_scope",
+        "compare_previous_material",
+        state=state,
+        source="heuristic",
+        confidence="low",
+    )
+
+    actual = project_authoring_brief(
+        planning_state=state,
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
+        named_results=None,
+    )
+
+    assert actual.decisions == AuthoringDecisions(
+        primary_runtime_input="documents",
+        document_material_scope="multiple_documents_case",
+        comparison_scope=None,
+        structured_operation="map_to_new_schema",
+    )
+
+
+def test_authoring_brief_states_each_decision_once() -> None:
+    prompt = build_authoring_brief(
+        planning_state=_state_with_decisions(),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
+        named_results=None,
+    )
+    empty_prompt = build_authoring_brief(
+        planning_state=PlanningState.empty(),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
+        named_results=None,
+    )
+
+    assert prompt.count("Confirmed decisions:") == 1
+    for sentence in (
+        PRIMARY_RUNTIME_INPUT_SENTENCES["documents"],
+        DOCUMENT_MATERIAL_SCOPE_SENTENCES["multiple_documents_case"],
+        COMPARISON_SCOPE_SENTENCES["same_run_compare"],
+        STRUCTURED_OPERATION_SENTENCES["map_to_new_schema"],
+    ):
+        assert prompt.count(f"- {sentence}") == 1
+    assert "same_run_compare" not in prompt
+    assert "Confirmed decisions:" not in empty_prompt
