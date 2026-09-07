@@ -1823,53 +1823,6 @@ def test_the_compiled_change_is_held_to_the_scope_not_only_the_request():
     )
 
 
-def test_preparing_the_plan_may_not_rename_a_step_the_findings_never_named():
-    """The plan the user is shown is the prepared one, not the compiled one.
-
-    Preparation gives duplicate step names their distinguishing suffix after
-    the compiled change has been checked. On an ordinary edit that is
-    housekeeping; on a review turn it can move a step nobody selected.
-    """
-    from eneo.flows.ai_builder.ai_builder_flow_review import (
-        review_edit_renamed_outside_the_scope,
-        review_edit_scope,
-    )
-
-    one, two = _refs(1, 2)
-    scope = review_edit_scope(_suggestion_context(("duplicated_work", [2])))
-
-    def _step(ref: str, name: str):
-        return SimpleNamespace(existing_step_ref=ref, name=name)
-
-    compiled = [_step(one, "Sammanfatta"), _step(two, "Sammanfatta")]
-
-    # Renaming the selected step is the turn's own work.
-    assert (
-        review_edit_renamed_outside_the_scope(
-            scope=scope,
-            compiled_steps=compiled,
-            prepared_steps=[_step(one, "Sammanfatta"), _step(two, "Sammanfatta 2")],
-        )
-        is None
-    )
-    # Renaming the step nobody selected is not.
-    refusal = review_edit_renamed_outside_the_scope(
-        scope=scope,
-        compiled_steps=compiled,
-        prepared_steps=[_step(one, "Sammanfatta 2"), _step(two, "Sammanfatta")],
-    )
-    assert refusal is not None and one in refusal
-    # A turn with no review scope is preparation's own business.
-    assert (
-        review_edit_renamed_outside_the_scope(
-            scope=None,
-            compiled_steps=compiled,
-            prepared_steps=[_step(one, "Sammanfatta 2"), _step(two, "Sammanfatta")],
-        )
-        is None
-    )
-
-
 def test_a_compiled_review_edit_that_changes_nothing_is_not_an_answer():
     """Judged on the compiled diff, not on which fields the model wrote.
 

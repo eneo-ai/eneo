@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
@@ -21,6 +22,7 @@ from eneo.flows.ai_builder.ai_builder_create_compile_context import (
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
+    FlowBuilderEditApproval,
     FlowBuilderProposalContent,
     TargetKind,
 )
@@ -28,7 +30,6 @@ from eneo.flows.ai_builder.ai_builder_edit_admission import (
     lower_edit_tool_arguments,
 )
 from eneo.flows.ai_builder.ai_builder_edit_compiler import (
-    EditCompilationResult,
     compile_edit_proposal,
 )
 from eneo.flows.ai_builder.ai_builder_error_contract import (
@@ -38,7 +39,6 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
 from eneo.flows.ai_builder.ai_builder_flow_review import (
     review_edit_changed_nothing,
     review_edit_changes_of_the_model,
-    review_edit_renamed_outside_the_scope,
     validate_review_edit_effect,
     validate_review_edit_proposal,
 )
@@ -75,6 +75,7 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     collect_flow_spec_resource_bindings,
 )
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
+from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from eneo.flows.ai_builder.planning_state import PlanningState
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.flows.domain.flow import FlowStep
@@ -100,6 +101,15 @@ _REVIEW_FOUND_NOTHING_TO_CHANGE = {
         "that justifies a change. The flow stays as it is."
     ),
 }
+
+
+@dataclass(frozen=True, slots=True)
+class _PreparedCandidate:
+    """An edit proposal after projection, compilation and preparation."""
+
+    spec: FlowDraftSpecCore
+    validation: SpecValidationResult
+    approval: FlowBuilderEditApproval
 
 
 def _unchanged_edit_proposal(current_steps: Sequence[FlowStep]) -> OrderedEditProposal:
@@ -195,75 +205,109 @@ async def process_edit_arguments(
         return CorrectableFailure(feedback=scoped_proposal_feedback, kind="quality")
     ui_language = compile_context.ui_language if compile_context is not None else None
 
-    def compile_against_the_flow(
+    def compile_and_prepare(
         candidate: OrderedEditProposal,
-    ) -> EditCompilationResult:
-        return compile_edit_proposal(
-            candidate,
-            current_steps=list(flow.steps),
-            base_flow_revision=flow.draft_revision,
-            flow_name=flow.name,
-            flow_description=flow.description,
-            current_metadata_json=flow.metadata_json,
-            assistant_snapshots=assistant_snapshots,
+    ) -> _PreparedCandidate | CorrectableFailure | TerminalFailure:
+        """One deterministic path from an edit proposal to the plan it becomes."""
+
+        try:
+            edit_result = compile_edit_proposal(
+                candidate,
+                current_steps=list(flow.steps),
+                base_flow_revision=flow.draft_revision,
+                flow_name=flow.name,
+                flow_description=flow.description,
+                current_metadata_json=flow.metadata_json,
+                assistant_snapshots=assistant_snapshots,
+                resource_catalog=resource_catalog,
+                requested_primary_runtime_input_type=(
+                    compile_context.runtime_input_type
+                    if compile_context is not None
+                    else None
+                ),
+                ui_language=ui_language,
+                selected_template_count=(
+                    compile_context.selected_template_count
+                    if compile_context is not None
+                    else None
+                ),
+                selected_template_placeholders=(
+                    compile_context.selected_template_placeholders
+                    if compile_context is not None
+                    else None
+                ),
+            )
+        except BadRequestException as exc:
+            return CorrectableFailure(
+                feedback=_format_edit_compilation_request_error(exc), kind="validation"
+            )
+        except AIBuilderArchitectureError as exc:
+            return architecture_failure_outcome(exc)
+        except AssistantSnapshotResourceUnavailableError as exc:
+            logger.warning(
+                "Edit compilation failed because an assistant snapshot references "
+                "an unavailable %s resource",
+                exc.kind,
+            )
+            # Only the user can re-select the resource; another model call cannot.
+            return TerminalFailure(
+                kind="validation",
+                message=(
+                    "A resource used by the existing flow is no longer available. "
+                    "Re-select the affected model or knowledge base and try again."
+                ),
+                code=AIBuilderErrorCode.AI_BUILDER_PLAN_RESOURCE_BINDING_UNAVAILABLE,
+                phase=AIBuilderErrorPhase.PROPOSAL,
+                details={"resource_kind": str(exc.kind)},
+            )
+        prepared = prepare_compiled_spec_for_session(
+            spec=edit_result.spec,
+            target_kind=TargetKind.EDIT,
+            available_model_refs=available_model_refs,
+            available_kb_refs=available_kb_refs,
             resource_catalog=resource_catalog,
-            requested_primary_runtime_input_type=(
-                compile_context.runtime_input_type
-                if compile_context is not None
-                else None
+            terminal_output_type=terminal_output_type_for_edit_conversation(
+                conversation,
+                plan_edit_context=plan_edit_context,
+                prior_spec=prior_spec_for_revision,
             ),
             ui_language=ui_language,
-            selected_template_count=(
-                compile_context.selected_template_count
-                if compile_context is not None
-                else None
-            ),
-            selected_template_placeholders=(
-                compile_context.selected_template_placeholders
-                if compile_context is not None
-                else None
-            ),
+        )
+        if prepared.failure_feedback is not None:
+            return CorrectableFailure(
+                feedback=prepared.failure_feedback, kind="validation"
+            )
+        assert prepared.spec is not None
+        assert prepared.validation is not None
+        return _PreparedCandidate(
+            spec=prepared.spec,
+            validation=prepared.validation,
+            approval=edit_result.approval_for_prepared_spec(prepared.spec),
         )
 
-    try:
-        edit_result = compile_against_the_flow(proposal)
-        # The compiler also normalises persisted shapes on every edit. On a
-        # bounded turn those changes are not the model reaching past the
-        # findings, so the scope is held to the difference between what the
-        # proposal compiles to and what the flow unchanged compiles to.
-        housekeeping = (
-            compile_against_the_flow(_unchanged_edit_proposal(flow.steps))
-            if review_scope is not None
-            else None
-        )
-    except BadRequestException as exc:
-        return CorrectableFailure(
-            feedback=_format_edit_compilation_request_error(exc), kind="validation"
-        )
-    except AIBuilderArchitectureError as exc:
-        return architecture_failure_outcome(exc)
-    except AssistantSnapshotResourceUnavailableError as exc:
-        logger.warning(
-            "Edit compilation failed because an assistant snapshot references "
-            "an unavailable %s resource",
-            exc.kind,
-        )
-        # Only the user can re-select the resource; another model call cannot.
-        return TerminalFailure(
-            kind="validation",
-            message=(
-                "A resource used by the existing flow is no longer available. "
-                "Re-select the affected model or knowledge base and try again."
-            ),
-            code=AIBuilderErrorCode.AI_BUILDER_PLAN_RESOURCE_BINDING_UNAVAILABLE,
-            phase=AIBuilderErrorPhase.PROPOSAL,
-            details={"resource_kind": str(exc.kind)},
-        )
+    candidate = compile_and_prepare(proposal)
+    if not isinstance(candidate, _PreparedCandidate):
+        return candidate
 
-    if review_scope is not None and housekeeping is not None:
+    if review_scope is not None:
+        # The server projects, compiles and prepares the flow unchanged along
+        # the same path: whatever that changes (a confirmed input field it
+        # carries, a transcription step ahead of a bare audio input, a
+        # document step's output mode, a duplicate name's suffix) is its own
+        # housekeeping, not the model reaching past the findings. The scope is
+        # held to the difference; the plan the user approves shows all of it.
+        baseline = compile_and_prepare(
+            _apply_server_owned_input_fields(
+                _unchanged_edit_proposal(flow.steps), planning_state=planning_state
+            )
+        )
         own_changes = review_edit_changes_of_the_model(
-            edit_result.authored_approval.diff,
-            housekeeping=housekeeping.authored_approval.diff,
+            candidate.approval.diff,
+            housekeeping=(
+                baseline.approval.diff
+                if isinstance(baseline, _PreparedCandidate)
+                else None
+            ),
         )
         effect_feedback = validate_review_edit_effect(
             scope=review_scope, diff=own_changes
@@ -281,33 +325,8 @@ async def process_edit_arguments(
                 ]
             )
 
-    compiled_spec = edit_result.spec
-    prepared = prepare_compiled_spec_for_session(
-        spec=compiled_spec,
-        target_kind=TargetKind.EDIT,
-        available_model_refs=available_model_refs,
-        available_kb_refs=available_kb_refs,
-        resource_catalog=resource_catalog,
-        terminal_output_type=terminal_output_type_for_edit_conversation(
-            conversation,
-            plan_edit_context=plan_edit_context,
-            prior_spec=prior_spec_for_revision,
-        ),
-        ui_language=ui_language,
-    )
-    if prepared.failure_feedback is not None:
-        return CorrectableFailure(feedback=prepared.failure_feedback, kind="validation")
-    assert prepared.spec is not None
-    rename_feedback = review_edit_renamed_outside_the_scope(
-        scope=review_scope,
-        compiled_steps=compiled_spec.steps,
-        prepared_steps=prepared.spec.steps,
-    )
-    if rename_feedback is not None:
-        return CorrectableFailure(feedback=rename_feedback, kind="validation")
-    assert prepared.validation is not None
-    compiled_spec = prepared.spec
-    validation = prepared.validation
+    compiled_spec = candidate.spec
+    validation = candidate.validation
     if validation.errors:
         error_messages = [err.message for err in validation.errors]
         return CorrectableFailure(
@@ -332,7 +351,7 @@ async def process_edit_arguments(
             kind="validation",
             codes=topology_policy.failure_codes,
         )
-    edit_approval = edit_result.approval_for_prepared_spec(compiled_spec).model_copy(
+    edit_approval = candidate.approval.model_copy(
         update={
             "scoped_target_existing_step_ref": (
                 plan_edit_context.target_existing_step_ref
@@ -345,7 +364,7 @@ async def process_edit_arguments(
                 else None
             ),
             "advisories": [
-                *edit_result.authored_approval.advisories,
+                *candidate.approval.advisories,
                 *topology_policy.advisories,
             ],
         }

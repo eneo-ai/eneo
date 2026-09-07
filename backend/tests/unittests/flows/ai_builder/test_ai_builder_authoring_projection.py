@@ -1310,6 +1310,10 @@ def test_edit_overlay_rejects_previous_field_missing_from_output_contract() -> N
     message = str(exc_info.value)
     assert "Step 1 does not declare the field `missing`" in message
     assert "Its declared fields are: answer" in message
+    # Both repairs it names are the consumer's own; editing the producer is
+    # not offered, because a bounded turn may not do it.
+    assert "or drop the reference" in message
+    assert "add the field" not in message
     assert base.steps[1].assistant_spec.instructions == "Original prompt"
 
 

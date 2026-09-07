@@ -2900,7 +2900,9 @@ def test_the_turn_scope_is_read_from_the_handoff_and_not_after_the_user_typed() 
     )
 
 
-def _review_command_conversation(*, then_the_user_typed: str | None = None):
+def _review_command_conversation(
+    *, then_the_user_typed: str | None = None, step_orders: list[int] | None = None
+):
     """A suggestion handoff, optionally followed by the user's own message."""
     from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
         metadata_for_user_message,
@@ -2917,7 +2919,8 @@ def _review_command_conversation(*, then_the_user_typed: str | None = None):
         sample_run_ids=[uuid4()],
         suggestions=[
             FlowReviewSuggestionFocus(
-                suggestion_kind="instruction_outcome_drift", step_orders=[1]
+                suggestion_kind="instruction_outcome_drift",
+                step_orders=step_orders or [1],
             )
         ],
     )
@@ -2988,25 +2991,27 @@ async def test_a_review_turn_is_not_blamed_for_the_compilers_housekeeping():
     changes, and the plan the user approves still shows all of them.
     """
     flow = _audio_document_flow()
+    conversation = _review_command_conversation()
 
     result = await _process(
         flow=flow,
-        arguments={
-            "plan_rationale": "Steg 1 får tydligare instruktioner.",
-            "steps": [
-                {
-                    "kind": "modify",
-                    "existing_step_ref": "existing_step_1",
-                    "assistant_spec": {
-                        "instructions": "Fånga mötets syfte, deltagare och beslut."
+        arguments=_admitted_by_the_review_schema(
+            flow,
+            conversation,
+            steps=[
+                _strict_review_modify(
+                    "existing_step_1",
+                    assistant_spec={
+                        "instructions": "Fånga mötets syfte, deltagare och beslut.",
+                        "knowledge_refs": None,
                     },
-                },
+                ),
                 {"kind": "keep", "existing_step_ref": "existing_step_2"},
                 {"kind": "keep", "existing_step_ref": "existing_step_3"},
                 {"kind": "keep", "existing_step_ref": "existing_step_4"},
             ],
-        },
-        conversation=_review_command_conversation(),
+        ),
+        conversation=conversation,
     )
 
     assert isinstance(result, ProposalReady), getattr(result, "feedback", result)
@@ -3027,6 +3032,159 @@ async def test_a_review_turn_is_not_blamed_for_the_compilers_housekeeping():
     assert by_kind["added"] == ["Transkribera ljud"]
     assert by_kind["modified"] == ["existing_step_1", "existing_step_4"]
     assert by_kind["unchanged"] == ["existing_step_2", "existing_step_3"]
+
+
+@pytest.mark.asyncio
+async def test_a_review_turn_is_not_blamed_for_the_input_field_the_server_carries():
+    """A confirmed runtime field from the session is projected onto every
+    proposal before compilation. The bounded turn never wrote it, and the
+    unchanged flow gets the same projection, so it is not the model's."""
+    flow = _flow(
+        _flow_step(step_order=1, user_description="Sammanfatta"),
+        _flow_step(
+            step_order=2,
+            user_description="Föreslå beslut",
+            input_source="previous_step",
+        ),
+    )
+    state = PlanningState.empty()
+    state.input_fields = [
+        ConfirmedRuntimeMetadataField(
+            value=FlowInputFieldIntent(
+                variable_name="priority",
+                label="Priority",
+                field_type="select",
+                required=True,
+                options=["Low", "High"],
+                provenance="user_confirmed",
+            ),
+            purpose="interpret_input",
+            structured_answer_message_id="message-1",
+        )
+    ]
+    conversation = _review_command_conversation()
+
+    result = await _process(
+        flow=flow,
+        planning_state=state,
+        arguments=_admitted_by_the_review_schema(
+            flow,
+            conversation,
+            steps=[
+                _strict_review_modify(
+                    "existing_step_1",
+                    assistant_spec={"instructions": "Kortare.", "knowledge_refs": None},
+                ),
+                {"kind": "keep", "existing_step_ref": "existing_step_2"},
+            ],
+        ),
+        conversation=conversation,
+    )
+
+    assert isinstance(result, ProposalReady), getattr(result, "feedback", result)
+    assert [f.name for f in result.compiled.content.spec.form_fields or []] == [
+        "priority"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_review_turn_is_not_blamed_for_a_duplicate_name_preparation_suffixes():
+    """Preparation gives duplicate step names their suffix after compilation.
+
+    Two unselected steps share a name; the unchanged flow gets the same
+    suffix, so the rename is the server's. The plan still shows it.
+    """
+    flow = _flow(
+        _flow_step(step_order=1, user_description="Sammanfatta"),
+        _flow_step(
+            step_order=2, user_description="Sammanfatta", input_source="previous_step"
+        ),
+        _flow_step(
+            step_order=3,
+            user_description="Föreslå beslut",
+            input_source="previous_step",
+        ),
+    )
+    conversation = _review_command_conversation(step_orders=[3])
+
+    result = await _process(
+        flow=flow,
+        arguments=_admitted_by_the_review_schema(
+            flow,
+            conversation,
+            steps=[
+                {"kind": "keep", "existing_step_ref": "existing_step_1"},
+                {"kind": "keep", "existing_step_ref": "existing_step_2"},
+                _strict_review_modify(
+                    "existing_step_3",
+                    assistant_spec={
+                        "instructions": "Föreslå högst tre beslut.",
+                        "knowledge_refs": None,
+                    },
+                ),
+            ],
+        ),
+        conversation=conversation,
+    )
+
+    assert isinstance(result, ProposalReady), getattr(result, "feedback", result)
+    names = [step.name for step in result.compiled.content.spec.steps]
+    assert len(set(names)) == 3
+    renamed = [
+        c.step_ref
+        for c in result.compiled.content.edit.diff.step_changes
+        if any(f.field == "name" for f in c.field_changes)
+    ]
+    assert renamed and renamed != ["existing_step_3"]
+
+
+def _strict_review_modify(ref: str, **changes: object) -> dict[str, object]:
+    """A modify item as a strict provider writes it: every property present."""
+    return {
+        "kind": "modify",
+        "existing_step_ref": ref,
+        "name": None,
+        "assistant_spec": {"instructions": None, "knowledge_refs": None},
+        "input_source": None,
+        "input_type": None,
+        "output_type": None,
+        "document_delivery_mode": None,
+        "uses_form_fields": None,
+        "uses_previous_fields": None,
+        "output_fields": None,
+        "review_mode": None,
+        **changes,
+    }
+
+
+def _admitted_by_the_review_schema(
+    flow, conversation, *, steps: list[dict[str, object]]
+) -> dict[str, object]:
+    """The payload a strict provider may send for this handoff, admitted
+    against the review-scoped schema before it is processed."""
+    from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+        review_edit_scope_for_turn,
+    )
+
+    schema = build_edit_flow_tool_schema(
+        list(flow.steps),
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[], available_kbs=[]
+        ),
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
+        review_scope=review_edit_scope_for_turn(conversation),
+    )
+    strict = build_native_strict_tool_schema(schema)  # type: ignore[arg-type]
+    parameters = strict["function"]["parameters"]
+    arguments: dict[str, object] = {
+        "plan_rationale": "Svar på granskningens fynd.",
+        "assumptions": [],
+        "steps": steps,
+    }
+    if "removed_existing_step_refs" in parameters["properties"]:
+        arguments["removed_existing_step_refs"] = []
+    jsonschema.validate(arguments, parameters)
+    return arguments
 
 
 def test_the_models_own_changes_are_the_diff_net_of_the_housekeeping() -> None:
@@ -3089,8 +3247,41 @@ def test_the_models_own_changes_are_the_diff_net_of_the_housekeeping() -> None:
         ("modified", "existing_step_1"),
         ("modified", "existing_step_4"),
     ]
+    assert (own.net_steps_added, own.net_steps_removed) == (0, 0)
     # Only the rename is the model's; the output mode was the compiler's.
     assert [f.field for f in own.step_changes[1].field_changes] == ["name"]
+    # A structured value reads the same in short but differs in full: the
+    # model's, not the compiler's.
+    contract_change = StepChange(
+        kind="modified",
+        step_name="Etablera",
+        step_ref="existing_step_1",
+        field_changes=[
+            StepFieldChange(
+                field="output_contract",
+                current="2 fält",
+                current_detail='{"properties":{"a":{},"b":{}}}',
+            )
+        ],
+    )
+    housekept_contract = contract_change.model_copy(
+        update={
+            "field_changes": [
+                StepFieldChange(
+                    field="output_contract",
+                    current="2 fält",
+                    current_detail='{"properties":{"a":{},"c":{}}}',
+                )
+            ]
+        }
+    )
+    still_the_models = review_edit_changes_of_the_model(
+        FlowEditDiff(step_changes=[contract_change]),
+        housekeeping=FlowEditDiff(step_changes=[housekept_contract]),
+    )
+    assert still_the_models.step_changes[0].kind == "modified"
+    # No baseline: nothing is exempt.
+    assert review_edit_changes_of_the_model(diff, housekeeping=None) == diff
     # A step the compiler alone touched counts as unchanged.
     only_housekeeping = review_edit_changes_of_the_model(
         FlowEditDiff(step_changes=housekeeping.step_changes), housekeeping=housekeeping

@@ -857,8 +857,9 @@ def _require_resolvable_previous_refs(
         if missing_path is not None:
             # The model reads the message, not the context: name the
             # reference, where it breaks, and what the step declares, so one
-            # repair can either point at a declared field or declare the one
-            # it meant.
+            # repair can point at a declared field or drop the reference.
+            # Declaring the missing field means editing the other step, which
+            # not every turn may do.
             declared = sorted(
                 str(name)
                 for name in cast(

@@ -70,7 +70,6 @@ if TYPE_CHECKING:
     from eneo.flows.ai_builder.ai_builder_proposal_intent import (
         OrderedEditProposal,
     )
-    from eneo.flows.flow_authoring_spec import StepSpec
 
 # Newest runs examined for the exact published version; a flow with a long
 # history at an older version still yields a bounded read.
@@ -519,7 +518,10 @@ class ReviewEditScope(BaseModel):
 
     The user picked findings on a screen, not a free edit: the steps they
     selected are the surface, and the kinds they selected decide whether
-    removing or adding is among the answers.
+    removing or adding is among the answers. The scope bounds the model's
+    own contribution; what the server changes on any edit of this flow
+    (its housekeeping of a persisted shape) is exempt and stays visible in
+    the plan the user approves.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -647,13 +649,13 @@ def validate_review_edit_effect(
     scope: ReviewEditScope | None,
     diff: "FlowEditDiff",
 ) -> str | None:
-    """What the compiler made of the proposal, held to the same scope.
+    """What the prepared plan changes on the model's account, held to the scope.
 
     The authored proposal is checked before compilation so the model is told
-    what it did wrong in its own terms. This is the check that decides: the
-    compiler completes a proposal with steps of its own — a transcription
-    step ahead of an audio input, a rewiring of the step that follows — and
-    what the user is asked to approve is the compiled plan, not the request.
+    what it did wrong in its own terms. This is the check that decides, on
+    the diff the user will approve net of the server's own housekeeping
+    (`review_edit_changes_of_the_model`): a step the compiler adds because
+    the model asked for one, a rewiring the model caused, are the model's.
     """
 
     if scope is None:
@@ -692,52 +694,23 @@ def validate_review_edit_effect(
     return None
 
 
-def review_edit_renamed_outside_the_scope(
-    *,
-    scope: ReviewEditScope | None,
-    compiled_steps: Sequence["StepSpec"],
-    prepared_steps: Sequence["StepSpec"],
-) -> str | None:
-    """Whether preparing the plan renamed a step the findings never named.
-
-    Preparation runs after the compiled change has been checked and gives
-    duplicate step names their distinguishing suffix. On an ordinary edit
-    that is housekeeping; on a review turn it can move a step the user never
-    selected, and the plan they are shown is the prepared one.
-    """
-
-    if scope is None:
-        return None
-    compiled_names = {
-        step.existing_step_ref: step.name
-        for step in compiled_steps
-        if step.existing_step_ref is not None
-    }
-    for step in prepared_steps:
-        ref = step.existing_step_ref
-        if ref is None or ref in scope.step_refs:
-            continue
-        if compiled_names.get(ref, step.name) != step.name:
-            return (
-                f"Step `{ref}` would be renamed, and the findings do not name "
-                "it. Give the step you change a name that does not collide "
-                "with another step's."
-            )
-    return None
-
-
 def review_edit_changes_of_the_model(
-    diff: "FlowEditDiff", *, housekeeping: "FlowEditDiff"
+    diff: "FlowEditDiff", *, housekeeping: "FlowEditDiff | None"
 ) -> "FlowEditDiff":
-    """The compiled diff net of what compiling the flow unchanged changes.
+    """The prepared diff net of what preparing the flow unchanged changes.
 
-    The compiler normalises persisted shapes on every edit: a transcription
-    step ahead of a bare audio input, a document step's output mode. On a
-    bounded turn those are not the model reaching past the findings, and a
-    model told to undo them could not. The scope is held to what remains;
-    the plan the user approves still shows every change.
+    The server projects, compiles and prepares a proposal along one path,
+    and that path changes a persisted flow on its own: a confirmed input
+    field it carries, a transcription step ahead of a bare audio input, a
+    document step's output mode, a duplicate name's suffix. On a bounded
+    turn those are not the model reaching past the findings, and a model
+    told to undo them could not. The scope is held to what remains; the plan
+    the user approves still shows every change. With no baseline (the flow
+    unchanged does not prepare) nothing is exempt.
     """
 
+    if housekeeping is None:
+        return diff
     added_by_housekeeping = Counter(
         change.step_name
         for change in housekeeping.step_changes
@@ -748,9 +721,10 @@ def review_edit_changes_of_the_model(
         for change in housekeeping.step_changes
         if change.kind == "removed"
     }
-    fields_by_housekeeping: dict[str | None, set[tuple[str, str | None]]] = {
+    fields_by_housekeeping = {
         change.step_ref: {
-            (field.field, field.current) for field in change.field_changes
+            (field.field, field.current, field.current_detail)
+            for field in change.field_changes
         }
         for change in housekeeping.step_changes
         if change.kind == "modified"
@@ -766,7 +740,7 @@ def review_edit_changes_of_the_model(
             own_fields = [
                 field
                 for field in change.field_changes
-                if (field.field, field.current)
+                if (field.field, field.current, field.current_detail)
                 not in fields_by_housekeeping.get(change.step_ref, set())
             ]
             step_changes.append(
@@ -782,6 +756,8 @@ def review_edit_changes_of_the_model(
     return diff.model_copy(
         update={
             "step_changes": step_changes,
+            "net_steps_added": sum(1 for c in step_changes if c.kind == "added"),
+            "net_steps_removed": sum(1 for c in step_changes if c.kind == "removed"),
             "form_changes": [
                 change
                 for change in diff.form_changes
