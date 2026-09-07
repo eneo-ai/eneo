@@ -1,53 +1,106 @@
 {
-  "purpose": "eneo-f43: offline replay of captured non-strict rejected propose_flow payloads through the branch-aware admission normaliser (edit tool schema, 5-step flow shaped like the owner's audio flow)",
-  "generated_at": "2026-09-07T09:54:10+00:00",
-  "base_revision": "8640fa7e48426076820dd1e8e4d9c36f73b8c143",
-  "note": "the slice's own commit is on top of base_revision; captures are untracked (review-ui/.codex/captures) and identified by sha256",
+  "purpose": "eneo-f43: offline replay of every captured non-strict rejected propose_flow payload through the branch-aware admission normaliser (edit tool schema, 5-step flow shaped like the owner's audio flow)",
+  "generated_at": "2026-09-07T09:59:55+00:00",
+  "revision_replayed": "2ca17c7b6fac956f869af17ac0d27eaedf6ffafb + the null-tail commit on top (this file is committed with it)",
   "route": "gpt-5.6-luna (69ea7ad9), supports_strict_tool_schema=false during capture",
   "stack": "parent :8146",
   "replay": [
     {
+      "capture": "1bdf7f0bb472",
+      "sha256": "1bdf7f0bb4726fccc3b7d230b1f4dfda32ea83f3725863b19d72910e98256d00",
+      "session_id": "9f22bbd4-92c1-4e20-858d-1734b2a6f072",
+      "captured": "2026-09-07T09:57:18+00:00",
+      "issue": "parse: Invalid propose_flow arguments: root: Additional properties are not allowed ('document_delivery_mode', 'input_source', 'input_type', ",
+      "outcome_after_slice": "admitted: same payload (repair attempt)"
+    },
+    {
+      "capture": "26ebea14c6bf",
+      "sha256": "26ebea14c6bfec6fa3e6b4889832c5cb00e12d035219dd9672ecfa949a0bb004",
+      "session_id": "105f3487-6770-47de-9023-344ae642e04b",
+      "captured": "2026-09-07T09:56:37+00:00",
+      "issue": "steps.2: 'review_mode»:null},{' is not of type 'object' (type)",
+      "outcome_after_slice": "rejected: lossy string item"
+    },
+    {
+      "capture": "359f525c1170",
+      "sha256": "359f525c1170411793afec5127b6d03fa17200a9bb1da3c0d89c8f2ef6f44268",
+      "session_id": "105f3487-6770-47de-9023-344ae642e04b",
+      "captured": "2026-09-07T09:57:01+00:00",
+      "issue": "parse: Invalid propose_flow arguments: steps.2: 'review_mode»:null},{' is not of type 'object' (type)",
+      "outcome_after_slice": "rejected: lossy string item (repair)"
+    },
+    {
+      "capture": "59e7abfd3591",
+      "sha256": "59e7abfd359126cef419d3461a1371564ed41d59ff91bc24cc17acb04831bd96",
+      "session_id": "105f3487-6770-47de-9023-344ae642e04b",
+      "captured": "2026-09-07T09:57:01+00:00",
+      "issue": "steps.2: 'review_mode»:null},{' is not of type 'object' (type)",
+      "outcome_after_slice": "rejected: lossy string item"
+    },
+    {
+      "capture": "c99fff0619cb",
+      "sha256": "c99fff0619cb1d9542eafdd8bf299cf37bd0acdb919c57e6d6c81a51854bbd3a",
+      "session_id": "105f3487-6770-47de-9023-344ae642e04b",
+      "captured": "2026-09-07T09:56:37+00:00",
+      "issue": "parse: Invalid propose_flow arguments: steps.2: 'review_mode»:null},{' is not of type 'object' (type)",
+      "outcome_after_slice": "rejected: lossy string item (repair)"
+    },
+    {
+      "capture": "cb778d1add5f",
+      "sha256": "cb778d1add5fc32a78ddc217328df0498ff7c09e03b10b6c56ea28099f0c02fc",
+      "session_id": "9f22bbd4-92c1-4e20-858d-1734b2a6f072",
+      "captured": "2026-09-07T09:57:18+00:00",
+      "issue": "root: Additional properties are not allowed ('document_delivery_mode', 'input_source', 'input_type', 'output_type' were unexpected) (additio",
+      "outcome_after_slice": "admitted: spill re-homed; the null optional tail at the root is redundant beside the step's own values"
+    },
+    {
       "capture": "1aab217a8e72",
       "sha256": "1aab217a8e723a65bf6341175fdd057d36f5a925fd5487830963d05016ed27e0",
       "session_id": "43830f9b-963e-4607-8860-3a3c0bcf45de",
+      "captured": "2026-09-07T08:26:06+00:00",
       "issue": "steps.2: 'review_mode\":null},{' is not of type 'object' (type)",
-      "outcome_after_slice": "rejected (lossy: a step closed early and its remainder emitted as a string item)"
+      "outcome_after_slice": "rejected: lossy (a step closed early, remainder emitted as a string item)"
     },
     {
       "capture": "1daaf53a71fe",
       "sha256": "1daaf53a71fe92cd7b1ac098a7dc0cb5182c66bf50c924d78fe93a42ab136b2b",
       "session_id": "43830f9b-963e-4607-8860-3a3c0bcf45de",
+      "captured": "2026-09-07T08:25:45+00:00",
       "issue": "root: Additional properties are not allowed ('assistant_spec', 'document_delivery_mode', 'existing_step_ref', 'input_source', 'input_type', ",
-      "outcome_after_slice": "rejected (shape 2 spill re-homed; the root-level re-emission of the same step conflicts on output_fields and stays invalid)"
+      "outcome_after_slice": "rejected: spill re-homed, but the root re-emission of the same step conflicts on output_fields"
     },
     {
       "capture": "34740695695b",
       "sha256": "34740695695bc1c99c175e74d4041bfbd3a8e3cb8fbf1d9b52f4af9164a7a3dd",
       "session_id": "43830f9b-963e-4607-8860-3a3c0bcf45de",
+      "captured": "2026-09-07T08:25:55+00:00",
       "issue": "parse: Invalid propose_flow arguments: root: Additional properties are not allowed ('review_mode' was unexpected) (additionalProperties)",
-      "outcome_after_slice": "admitted (5 spilled field objects re-homed into existing_step_3.output_fields -> 9 fields; root review_mode re-homed to the last step)"
+      "outcome_after_slice": "admitted: 5 spilled field objects re-homed into existing_step_3.output_fields (9 fields), root review_mode re-homed"
     },
     {
       "capture": "3f4e3739b75c",
       "sha256": "3f4e3739b75ca18a18acaaac73e1e92449c3b8597c7fedb43994e55f710df947",
       "session_id": "43830f9b-963e-4607-8860-3a3c0bcf45de",
+      "captured": "2026-09-07T08:26:06+00:00",
       "issue": "parse: Invalid propose_flow arguments: steps.2: 'review_mode\":null},{' is not of type 'object' (type)",
-      "outcome_after_slice": "rejected (same payload as 1aab217a8e72, repair attempt)"
+      "outcome_after_slice": "rejected: same payload (repair attempt)"
     },
     {
       "capture": "d7ff61086165",
       "sha256": "d7ff61086165c185c2754dac44dd0d3ebb09a376c97b460efdbfb24a598a6509",
       "session_id": "43830f9b-963e-4607-8860-3a3c0bcf45de",
+      "captured": "2026-09-07T08:25:55+00:00",
       "issue": "root: Additional properties are not allowed ('review_mode' was unexpected) (additionalProperties)",
-      "outcome_after_slice": "admitted (same payload as 34740695695b, repair attempt)"
+      "outcome_after_slice": "admitted: same payload (repair attempt)"
     },
     {
       "capture": "e1b373e9ec11",
       "sha256": "e1b373e9ec11052daf5e7e78fd461a5bc8c1aa09015e7916a4890e943e167359",
       "session_id": "43830f9b-963e-4607-8860-3a3c0bcf45de",
+      "captured": "2026-09-07T08:25:45+00:00",
       "issue": "parse: Invalid propose_flow arguments: root: Additional properties are not allowed ('assistant_spec', 'document_delivery_mode', 'existing_st",
-      "outcome_after_slice": "rejected (same payload as 1daaf53a71fe, repair attempt)"
+      "outcome_after_slice": "rejected: same payload (repair attempt)"
     }
   ],
-  "reading": "one parse family (wrong-boundary closes in the sparse edit shape); the field-spill shape is re-nested losslessly (2 of 6 parse captures, one session); the root re-emission shape and the string-fragment shape stay rejected and go to the repair loop; the 6 quality rejections in the same capture set predate the review-scoped schema and no longer occur."
+  "reading": "one parse family (wrong-boundary closes in the sparse edit shape). Re-nested losslessly: field objects spilled into steps and an optional tail at the root that is identical or null (4 of 12 captures, two sessions). Still rejected: a step re-emitted at the root whose output_fields conflict after re-homing (2), and a step closed early with its remainder emitted as a string item (6, lossy). The rejected shapes go to the repair loop; the 6 quality rejections in the same capture set predate the review-scoped schema."
 }

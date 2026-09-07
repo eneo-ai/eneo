@@ -685,8 +685,10 @@ def _rehome_misplaced_create_children(
     # A non-strict tool implementation can also close the final step object
     # before its optional tail. Rehome only keys that the prepared schema says
     # are optional step properties and never valid at the root. An identical
-    # duplicate is redundant and can be discarded; conflicting values stay
-    # invalid rather than guessing which value should win.
+    # duplicate is redundant and can be discarded, and so is a null one: a
+    # null optional carries nothing (an edit reads it as "keep", a create as
+    # "not set"), so the step's own value stands. Two different values stay
+    # invalid rather than guessing which should win.
     root_keys = frozenset(properties)
     step_tail_keys = allowed_step_keys - root_keys - required_step_keys
     misplaced_tail = step_tail_keys.intersection(admitted)
@@ -701,7 +703,8 @@ def _rehome_misplaced_create_children(
     redundant_tail = tuple(
         key
         for key in misplaced_tail
-        if key in final_step and admitted[key] == final_step[key]
+        if key in final_step
+        and (admitted[key] is None or admitted[key] == final_step[key])
     )
     removable_tail = (*movable_tail, *redundant_tail)
     if not removable_tail:

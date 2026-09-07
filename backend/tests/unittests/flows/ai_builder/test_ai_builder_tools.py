@@ -394,6 +394,29 @@ class TestBuildToolSchema:
         ]
         assert admitted["steps"][-1]["output_fields"] == [*kept, *spilled]
         assert admitted["steps"][-1]["review_mode"] is None
+        # The captured variant where the step's whole optional tail followed
+        # the closed array as nulls: a null beside the step's own value carries
+        # nothing and is discarded, the step's values stand.
+        null_tail = {
+            **deepcopy(arguments),
+            "document_delivery_mode": None,
+            "input_source": None,
+            "input_type": None,
+            "output_type": None,
+            "name": None,
+        }
+        null_tail["steps"][2] = {
+            **null_tail["steps"][2],
+            "input_source": "previous_step",
+            "input_type": "json",
+            "output_type": "json",
+        }
+        admitted_tail = admit_propose_flow_tool_arguments(
+            arguments=null_tail, tool_schema=schema
+        )
+        assert admitted_tail["steps"][-1]["input_type"] == "json"
+        assert admitted_tail["steps"][-1]["output_type"] == "json"
+        assert "input_type" not in admitted_tail and "name" not in admitted_tail
         # A whole step re-emitted at the root beside its partial copy conflicts
         # on output_fields once the spill is re-homed: that stays invalid
         # rather than guessing which copy is meant.
