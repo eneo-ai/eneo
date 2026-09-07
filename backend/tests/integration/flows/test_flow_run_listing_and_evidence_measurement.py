@@ -70,6 +70,10 @@ from eneo.flows.infrastructure.flow_provider_call_repo import (
     FlowProviderCallRepository,
 )
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository, PreseedStep
+from eneo.flows.infrastructure.flow_run_step_input_file_rows import (
+    build_step_input_file_rows,
+    insert_step_input_file_rows,
+)
 from eneo.flows.principal import FlowPrincipal
 from eneo.flows.published_definition import build_published_definition_json
 
@@ -301,6 +305,7 @@ async def _write_representative_evidence(
     step_ids: tuple[UUID, ...],
     result_file_id: UUID,
     attempts_per_step: int = ATTEMPTS_PER_STEP,
+    input_file_ids: tuple[UUID, ...] = (),
 ) -> None:
     provider_repo = FlowProviderCallRepository(session=session)
     result_file_reference = FlowStepResultFileReference(
@@ -319,6 +324,27 @@ async def _write_representative_evidence(
                 attempt_no=attempt_no,
                 dispatch_task_id=f"flow-evidence-{step_order}-{attempt_no}",
             )
+            if attempt_no > 1 and step_order == 1 and input_file_ids:
+                # Synthetic history: run creation binds uploads to attempt 1
+                # only, and no supported lifecycle allocates a later attempt of
+                # an active run today. The measured bundle reads the current
+                # attempt's files, so this fixture owns the rows it measures.
+                await insert_step_input_file_rows(
+                    session=session,
+                    rows=build_step_input_file_rows(
+                        flow_run_id=run_id,
+                        flow_id=flow_id,
+                        tenant_id=tenant_id,
+                        attempt_no=attempt_no,
+                        projections=[
+                            {
+                                "step_id": step_id,
+                                "step_order": step_order,
+                                "file_ids": list(input_file_ids),
+                            }
+                        ],
+                    ),
+                )
             activated = await run_repo.activate_step_attempt(
                 run_id=run_id,
                 step_id=step_id,
@@ -487,6 +513,7 @@ async def _seed_workload(
         assistant_id=assistant.id,
         step_ids=step_ids,
         result_file_id=result_file_id,
+        input_file_ids=input_file_ids,
     )
     completed_run = await run_repo.terminalize_run_status(
         run_id=representative_run.id,
@@ -837,7 +864,7 @@ async def test_flow_run_listing_and_evidence_measurement_contract(
         )
         heavy_sections = cast(dict[str, object], heavy_cost["section_counts"])
         # Non-scaling: twenty steps with five attempts each issue no more
-        # statements than the three-step, three-attempt representative run.
+        # statements than the five-step, three-attempt representative run.
         assert heavy_cost["query_count"] <= representative_cost["query_count"]
         assert representative_cost["query_count"] <= EVIDENCE_QUERY_COUNT
         assert heavy_sections["step_attempts"] == HEAVY_ATTEMPT_COUNT
@@ -921,80 +948,3 @@ async def test_flow_run_listing_and_evidence_measurement_contract(
             encoding="utf-8",
         )
         print(f"{REPORT_SCHEMA_VERSION} report={report_path}")
-
-
-async def test_recovery_attempts_inherit_the_run_input_files(
-    db_container,
-    completion_model_factory,
-    space_factory,
-    assistant_factory,
-    admin_user,
-) -> None:
-    # Run creation binds the uploads to attempt 1; a recovery attempt allocated
-    # by the repository reads the same files, and allocating it twice is a no-op.
-    async with db_container(user=admin_user) as container:
-        session = container.session()
-        model = await completion_model_factory(session, "flow-evidence-inherit-model")
-        space = await space_factory(session, "Flow evidence inherit", [model.id])
-        assistant = await assistant_factory(
-            session, "Flow evidence inherit assistant", model.id, space_id=space.id
-        )
-        flow = await _create_flow(
-            FlowRepository(session=session),
-            FlowVersionRepository(session=session),
-            tenant_id=admin_user.tenant_id,
-            space_id=space.id,
-            user_id=admin_user.id,
-            assistant_id=assistant.id,
-            name="Flow evidence inherit",
-            step_count=1,
-        )
-        step_id = cast(UUID, flow.steps[0].id)
-        input_file_ids, _ = await _create_evidence_files(
-            file_service=container.file_service()
-        )
-        upload_repo = FlowRuntimeUploadRepository(session=session)
-        principal = FlowPrincipal.from_user(admin_user)
-        for file_id in input_file_ids:
-            await upload_repo.create(
-                file_id=file_id,
-                flow_id=flow.id,
-                tenant_id=admin_user.tenant_id,
-                uploaded_for_step_id=step_id,
-                principal=principal,
-            )
-        run_repo = FlowRunRepository(session=session)
-        run = await run_repo.create(
-            flow_id=flow.id,
-            flow_version=1,
-            principal_type="user",
-            principal_user_id=admin_user.id,
-            tenant_id=admin_user.tenant_id,
-            input_payload_json={},
-            preseed_steps=[
-                {"step_id": step_id, "step_order": 1, "assistant_id": assistant.id}
-            ],
-            step_input_files=[
-                {"step_id": step_id, "step_order": 1, "file_ids": list(input_file_ids)}
-            ],
-        )
-
-        for _ in range(2):
-            await run_repo.create_or_get_attempt_started(
-                run_id=run.id,
-                flow_id=flow.id,
-                tenant_id=admin_user.tenant_id,
-                step_id=step_id,
-                step_order=1,
-                attempt_no=2,
-                dispatch_task_id="inherit-2",
-            )
-
-        first = await run_repo.list_step_input_file_ids(
-            run_id=run.id, tenant_id=admin_user.tenant_id, step_id=step_id, attempt_no=1
-        )
-        second = await run_repo.list_step_input_file_ids(
-            run_id=run.id, tenant_id=admin_user.tenant_id, step_id=step_id, attempt_no=2
-        )
-        assert first == list(input_file_ids)
-        assert second == first
