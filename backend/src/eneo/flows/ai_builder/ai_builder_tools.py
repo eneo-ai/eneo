@@ -365,6 +365,46 @@ def _record_admission_normalizer_hit(
         recorder(family)
 
 
+def _step_object_schema(
+    tool_schema: ProposalToolSchema,
+) -> dict[str, object] | None:
+    """The step object schema the normalisers walk.
+
+    The create tool lists one step object under ``steps.items``; the edit tool
+    lists a union of branches (modify, keep, add), of which the modify branch
+    is the one a non-strict provider closes at the wrong boundary: it is the
+    branch that carries ``output_fields``. Both tools are read the same way.
+    """
+
+    parameters = tool_schema["function"]["parameters"]
+    raw_properties = parameters.get("properties")
+    if not isinstance(raw_properties, dict):
+        return None
+    steps_schema = cast(dict[str, object], raw_properties).get("steps")
+    if not isinstance(steps_schema, dict):
+        return None
+    items = cast(dict[str, object], steps_schema).get("items")
+    if not isinstance(items, dict):
+        return None
+    items_map = cast(dict[str, object], items)
+    if isinstance(items_map.get("properties"), dict):
+        return items_map
+    for keyword in _UNION_KEYWORDS:
+        branches = items_map.get(keyword)
+        if not isinstance(branches, list):
+            continue
+        for branch in cast(list[object], branches):
+            if not isinstance(branch, dict):
+                continue
+            branch_map = cast(dict[str, object], branch)
+            branch_properties = branch_map.get("properties")
+            if isinstance(branch_properties, dict) and "output_fields" in cast(
+                dict[str, object], branch_properties
+            ):
+                return branch_map
+    return None
+
+
 def _discard_punctuation_serialization_artifacts(
     *,
     arguments: dict[str, Any],
@@ -382,13 +422,10 @@ def _discard_punctuation_serialization_artifacts(
         allowed_keys=frozenset(root_properties),
     )
 
-    raw_steps_schema = root_properties.get("steps")
-    if not isinstance(raw_steps_schema, dict):
+    step_schema = _step_object_schema(tool_schema)
+    if step_schema is None:
         return admitted_root
-    raw_step_schema = cast(dict[str, object], raw_steps_schema).get("items")
-    if not isinstance(raw_step_schema, dict):
-        return admitted_root
-    raw_step_properties = cast(dict[str, object], raw_step_schema).get("properties")
+    raw_step_properties = step_schema.get("properties")
     if not isinstance(raw_step_properties, dict):
         return admitted_root
 
@@ -523,18 +560,21 @@ def _rehome_misplaced_create_children(
     arguments: dict[str, Any],
     tool_schema: ProposalToolSchema,
 ) -> dict[str, Any]:
+    """Re-home children a non-strict provider closed at the wrong boundary.
+
+    Applies to the create tool and to the edit tool's modify branch alike; the
+    family name predates the edit schema and stays because it is a public
+    telemetry value (`admission_normalization_hits`).
+    """
+
     parameters = tool_schema["function"]["parameters"]
     raw_properties = parameters.get("properties")
     if not isinstance(raw_properties, dict):
         return arguments
     properties = cast(dict[str, object], raw_properties)
-    steps_schema = properties.get("steps")
-    if not isinstance(steps_schema, dict):
+    step_schema_map = _step_object_schema(tool_schema)
+    if step_schema_map is None:
         return arguments
-    step_schema = cast(dict[str, object], steps_schema).get("items")
-    if not isinstance(step_schema, dict):
-        return arguments
-    step_schema_map = cast(dict[str, object], step_schema)
     step_properties = step_schema_map.get("properties")
     raw_required_step_keys = step_schema_map.get("required")
     if not isinstance(step_properties, dict) or not isinstance(
@@ -583,13 +623,16 @@ def _rehome_misplaced_create_children(
         previous_map = (
             cast(dict[str, object], previous) if isinstance(previous, dict) else None
         )
+        # A field object that landed among the steps belongs to the step
+        # before it: it has a field's required keys and nothing a step needs,
+        # and the previous item is a step of this tool (its required keys).
         if (
             candidate_map is not None
-            and "instructions" not in candidate_map
+            and not required_step_keys.issubset(candidate_map)
             and required_field_keys.issubset(candidate_map)
             and candidate_map.keys() <= allowed_field_keys
             and previous_map is not None
-            and isinstance(previous_map.get("instructions"), str)
+            and required_step_keys.issubset(previous_map)
         ):
             existing_fields = previous_map.get("output_fields")
             if existing_fields is None or isinstance(existing_fields, list):

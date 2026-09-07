@@ -41,6 +41,21 @@ from eneo.flows.ai_builder.ai_builder_tools import (
 from eneo.flows.domain.flow import FlowStep
 
 
+def _flow_step(step_order: int) -> FlowStep:
+    return FlowStep(
+        id=uuid4(),
+        flow_id=uuid4(),
+        tenant_id=uuid4(),
+        assistant_id=uuid4(),
+        step_order=step_order,
+        user_description=f"Steg {step_order}",
+        input_source="flow_input" if step_order == 1 else "previous_step",
+        input_type="text",
+        output_mode="pass_through",
+        output_type="text",
+    )
+
+
 def _empty_catalog() -> AIBuilderResourceCatalog:
     return build_ai_builder_resource_catalog(
         available_models=[],
@@ -321,6 +336,75 @@ class TestBuildToolSchema:
         assert admitted["steps"][-1]["knowledge_refs"] == ["knowledge.policy"]
         assert admitted["steps"][-1]["citations_requested"] is True
         assert "knowledge_refs" in arguments
+
+    def test_edit_admission_rehomes_fields_closed_at_the_wrong_boundary(self) -> None:
+        """The captured non-strict shape: a modify step's output_fields array
+        closed after some of its fields, the remaining field objects spilled
+        into steps, and the step's trailing review_mode landed at the root.
+        Every object is intact, so the payload is re-nested, not repaired."""
+        from eneo.flows.ai_builder.ai_builder_edit_tool_schema import (
+            build_edit_flow_tool_schema,
+        )
+
+        schema = build_edit_flow_tool_schema(
+            [_flow_step(1), _flow_step(2), _flow_step(3)],
+            resource_catalog=_empty_catalog(),
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
+        )
+        kept = [
+            {"name": "motestyp", "field_type": "string", "description": "Mötestyp."},
+            {"name": "syfte", "field_type": "string", "description": "Syfte."},
+        ]
+        spilled = [
+            {"name": "risker", "field_type": "array", "description": "Risker."},
+            {"name": "oppna_fragor", "field_type": "array", "description": "Öppna."},
+        ]
+        arguments = {
+            "plan_rationale": "Steg 3 fångar fler fält.",
+            "steps": [
+                {"kind": "keep", "existing_step_ref": "existing_step_1"},
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_2",
+                    "assistant_spec": {"instructions": "Sammanfatta."},
+                },
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_3",
+                    "output_fields": kept,
+                },
+                *spilled,
+            ],
+            "review_mode": None,
+        }
+
+        hits: list[str] = []
+        admitted = admit_propose_flow_tool_arguments(
+            arguments=deepcopy(arguments),
+            tool_schema=schema,
+            on_normalizer_hit=hits.append,
+        )
+
+        assert hits == ["_rehome_misplaced_create_children"]
+        assert "review_mode" not in admitted
+        assert [step["existing_step_ref"] for step in admitted["steps"]] == [
+            "existing_step_1",
+            "existing_step_2",
+            "existing_step_3",
+        ]
+        assert admitted["steps"][-1]["output_fields"] == [*kept, *spilled]
+        assert admitted["steps"][-1]["review_mode"] is None
+        # A whole step re-emitted at the root beside its partial copy conflicts
+        # on output_fields once the spill is re-homed: that stays invalid
+        # rather than guessing which copy is meant.
+        duplicated = {
+            **deepcopy(arguments),
+            "kind": "modify",
+            "existing_step_ref": "existing_step_3",
+            "output_fields": kept,
+        }
+        with pytest.raises(ProposalToolArgumentsError):
+            admit_propose_flow_tool_arguments(arguments=duplicated, tool_schema=schema)
 
     def test_create_admission_discards_identical_duplicate_step_tail(self) -> None:
         schema = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())
