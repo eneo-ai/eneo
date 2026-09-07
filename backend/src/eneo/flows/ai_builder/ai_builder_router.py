@@ -1410,7 +1410,7 @@ async def send_message(
                     review_context=prepared_context.review_context,
                     review_evidence=prepared_context.review_evidence,
                     evidence_floor=prepared_context.evidence_floor,
-                    acts_on_review=prepared_context.acts_on_review,
+                    acts_on_review=review_turn,
                     ui_language=body.ui_language,
                     completion_model_route=prepared_context.completion_model_route,
                     available_models=(

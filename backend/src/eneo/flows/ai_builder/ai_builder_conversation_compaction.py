@@ -7,6 +7,7 @@ from typing import Iterable, Literal, cast
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     SLOT_CLASSIFICATION_METADATA_KEY,
     ClassifierRetentionIdentity,
+    carries_review_session_marker,
     metadata_has_requirements_summary,
     metadata_with_slot_classification,
     named_content_fields_edit_from_metadata,
@@ -292,10 +293,27 @@ def _required_message_indices(
     latest_field_edit_index = _latest_named_content_fields_edit_index(conversation)
     if latest_field_edit_index is not None:
         required_indices.add(latest_field_edit_index)
+    # The review permission is decided from the retained conversation. The
+    # review reference itself may go (every accepted turn since re-wrote the
+    # session's marker), but the latest marker must stay under both limits,
+    # or the session silently falls back to ordinary Builder authorization.
+    latest_review_marker_index = _latest_review_session_marker_index(conversation)
+    if latest_review_marker_index is not None:
+        required_indices.add(latest_review_marker_index)
     required_indices.update(_latest_question_interaction_indices(conversation))
     required_indices.update(_latest_tool_trace_indices(conversation))
     required_indices.update(_classifier_semantic_indices(conversation))
     return required_indices
+
+
+def _latest_review_session_marker_index(
+    conversation: list[ConversationMessage],
+) -> int | None:
+    for index in range(len(conversation) - 1, -1, -1):
+        message = conversation[index]
+        if message.role == "user" and carries_review_session_marker(message.metadata):
+            return index
+    return None
 
 
 def _latest_named_content_fields_edit_index(

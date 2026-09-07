@@ -715,6 +715,25 @@ def test_the_review_marker_survives_the_real_compactor_dropping_the_review_messa
     assert len(compacted) < len(conversation)
     assert all("review_context" not in (m.metadata or {}) for m in compacted)
     assert conversation_acts_on_a_review(compacted)
+    # The byte limit prunes from the front too and keeps only the required
+    # messages plus the last one: the latest marker is required, so a cap
+    # with room for little more than the assistant's last word keeps it.
+    marked = ConversationMessage(
+        role="user",
+        content="Mer",
+        metadata=metadata_for_user_message(acts_on_review=True),
+    )
+    last = ConversationMessage(role="assistant", content="Ok.")
+    filler = [
+        ConversationMessage(role="user", content=f"Prat {index} " * 20)
+        for index in range(6)
+    ]
+    byte_compacted = compact_ai_builder_conversation(
+        [*filler, marked, last], max_conversation_bytes=600
+    )
+    assert len(byte_compacted) < 8
+    assert marked in byte_compacted and last in byte_compacted
+    assert conversation_acts_on_a_review(byte_compacted)
     # A plain turn of an ordinary session writes nothing.
     assert metadata_for_user_message(acts_on_review=False) is None
     assert not conversation_acts_on_a_review(

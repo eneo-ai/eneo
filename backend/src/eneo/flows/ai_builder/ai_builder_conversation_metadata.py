@@ -132,7 +132,8 @@ _REVIEW_REFERENCE_KINDS = ("flow_review", "flow_review_suggestion")
 EVIDENCE_FLOOR_METADATA_KEY = "evidence_floor"
 # Written on every accepted turn of a session that acts on a review, the way
 # the evidence floor is: the review reference lives on one message that
-# compaction may drop, and the review permission must outlive it.
+# compaction may drop, and the review permission must outlive it. Compaction
+# keeps the latest message that carries it under both of its limits.
 REVIEW_SESSION_METADATA_KEY = "acts_on_review"
 ASSISTANT_QUESTION_ID_METADATA_KEY = "question_id"
 ASSISTANT_QUESTION_INDEX_METADATA_KEY = "question_index"
@@ -2353,21 +2354,27 @@ def conversation_acts_on_a_review(
     a session that read run evidence stays the review feature even when the
     reference itself was written by an older build, and even after the
     message that carried it was compacted away, because every accepted turn
-    since re-wrote the marker into the tail compaction keeps.
+    since re-wrote the marker and compaction keeps the latest one.
     """
 
-    for message in conversation:
-        if message.role != "user":
-            continue
-        if names_a_review(message.metadata):
-            return True
-        metadata_map = _metadata_mapping(message.metadata)
-        if (
-            metadata_map is not None
-            and metadata_map.get(REVIEW_SESSION_METADATA_KEY) is True
-        ):
-            return True
-    return False
+    return any(
+        message.role == "user"
+        and (
+            names_a_review(message.metadata)
+            or carries_review_session_marker(message.metadata)
+        )
+        for message in conversation
+    )
+
+
+def carries_review_session_marker(metadata: object) -> bool:
+    """Whether an accepted user turn recorded that its session acts on a review."""
+
+    metadata_map = _metadata_mapping(metadata)
+    return (
+        metadata_map is not None
+        and metadata_map.get(REVIEW_SESSION_METADATA_KEY) is True
+    )
 
 
 def semantic_conversation(

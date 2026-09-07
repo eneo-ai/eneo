@@ -420,7 +420,6 @@ def _make_container(
         review_context=None,
         review_evidence=None,
         evidence_floor=0,
-        acts_on_review=False,
         planner_context=SimpleNamespace(
             available_models=[],
             available_kbs=[],
@@ -2317,7 +2316,6 @@ class TestSendMessageEndpoint:
             review_context=None,
             review_evidence=None,
             evidence_floor=0,
-            acts_on_review=False,
             planner_context=SimpleNamespace(
                 available_models=[
                     {"id": str(model.id), "name": "GPT-4", "provider": "openai"}
@@ -2427,6 +2425,53 @@ class TestSendMessageEndpoint:
         assert inherited.value.code == "insufficient_tenant_permission"
         service.preflight_message_turn.assert_not_called()
         service.prepare_message_context.assert_not_called()
+
+        # A long review session compacted past its opening turn: the reference
+        # is gone, the marker every accepted turn re-wrote is what remains.
+        from eneo.flows.ai_builder.ai_builder_conversation_compaction import (
+            compact_ai_builder_conversation,
+        )
+        from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+            metadata_for_user_message,
+        )
+
+        long_review = [
+            ConversationMessage(
+                role="user",
+                content="Åtgärda",
+                metadata=metadata_for_user_message(
+                    review_context=AIBuilderReviewContext(
+                        flow_version=1,
+                        definition_checksum="sum",
+                        finding_ids=["f1f1f1f1f1f1f1f1"],
+                    ),
+                    acts_on_review=True,
+                ),
+            )
+        ]
+        for index in range(30):
+            long_review.append(
+                ConversationMessage(
+                    role="user",
+                    content=f"Mer {index}",
+                    metadata=metadata_for_user_message(acts_on_review=True),
+                )
+            )
+            long_review.append(ConversationMessage(role="assistant", content="Ok."))
+        session.conversation = compact_ai_builder_conversation(
+            long_review, max_messages=12, tail_messages=8
+        )
+        assert all(
+            "review_context" not in (m.metadata or {}) for m in session.conversation
+        )
+        with pytest.raises(UnauthorizedException) as compacted:
+            await send_message(
+                request=MagicMock(),
+                session_id=session.id,
+                body=SendMessageRequest(client_turn_id=uuid4(), message="Och steg 3?"),
+                container=container,
+            )
+        assert compacted.value.code == "insufficient_tenant_permission"
 
         session.conversation = []
 
@@ -2724,7 +2769,6 @@ class TestSendMessageEndpoint:
             review_context=None,
             review_evidence=None,
             evidence_floor=0,
-            acts_on_review=False,
             planner_context=SimpleNamespace(
                 available_models=[
                     {"id": str(model.id), "name": "GPT-4", "provider": "azure"}

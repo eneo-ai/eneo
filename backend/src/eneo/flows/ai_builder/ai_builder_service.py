@@ -35,7 +35,6 @@ from eneo.flows.ai_builder.ai_builder_context import (
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     AIBuilderQuestionAnswerInput,
-    conversation_acts_on_a_review,
     conversation_evidence_floor,
     latest_user_review_context,
 )
@@ -191,10 +190,6 @@ class PreparedMessageContext:
     review_context: AIBuilderReviewReference | None = None
     review_evidence: FlowReviewEvidence | None = None
     evidence_floor: int = 0
-    # Whether this session acts on a review: decided the way the router
-    # decides the permission, and written back on the accepted turn so a
-    # compacted conversation still says so.
-    acts_on_review: bool = False
 
 
 @dataclass(frozen=True)
@@ -552,10 +547,6 @@ class AIBuilderService:
             review_context=review_context,
             review_evidence=review_evidence,
             evidence_floor=evidence_floor,
-            acts_on_review=(
-                review_context is not None
-                or conversation_acts_on_a_review(session.conversation)
-            ),
         )
 
     @staticmethod
@@ -652,7 +643,11 @@ class AIBuilderService:
         review_context: AIBuilderReviewReference | None = None,
         review_evidence: FlowReviewEvidence | None = None,
         evidence_floor: int = 0,
-        acts_on_review: bool = False,
+        # The router's own decision from the locked snapshot: whether this
+        # turn was held to the review permission. Written on the accepted
+        # turn so a compacted conversation still says so. Required, so no
+        # caller can hand the planner a silent "not a review".
+        acts_on_review: bool,
         ui_language: str | None = None,
         completion_model_route: ResolvedCompletionModelRoute,
         available_models: list[AIBuilderAvailableModelResource] | None = None,

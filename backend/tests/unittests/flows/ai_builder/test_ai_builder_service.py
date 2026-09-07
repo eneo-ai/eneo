@@ -1463,6 +1463,7 @@ class TestSendMessage:
         with pytest.raises(BadRequestException, match="Cannot send messages"):
             await _collect_events(
                 service.send_message(
+                    acts_on_review=False,
                     session_id=session.id,
                     client_turn_id=_TEST_CLIENT_TURN_ID,
                     request_fingerprint=_TEST_REQUEST_FINGERPRINT,
@@ -1500,6 +1501,7 @@ class TestSendMessage:
             )
             await _collect_events(
                 service.send_message(
+                    acts_on_review=False,
                     session_id=session.id,
                     client_turn_id=_TEST_CLIENT_TURN_ID,
                     request_fingerprint=_TEST_REQUEST_FINGERPRINT,
@@ -1576,6 +1578,7 @@ class TestSendMessage:
             mock_litellm.acompletion = AsyncMock(side_effect=provider_error)
             events = await _collect_events(
                 service.send_message(
+                    acts_on_review=False,
                     session_id=session.id,
                     client_turn_id=_TEST_CLIENT_TURN_ID,
                     request_fingerprint=_TEST_REQUEST_FINGERPRINT,
@@ -1644,6 +1647,7 @@ class TestSendMessage:
             mock_litellm.acompletion = AsyncMock()
             events = await _collect_events(
                 service.send_message(
+                    acts_on_review=False,
                     session_id=session.id,
                     client_turn_id=_TEST_CLIENT_TURN_ID,
                     request_fingerprint=_TEST_REQUEST_FINGERPRINT,
@@ -1708,6 +1712,7 @@ class TestSendMessage:
             with pytest.raises(AIBuilderProviderOutcomeUnknownException):
                 await _collect_events(
                     service.send_message(
+                        acts_on_review=False,
                         session_id=session.id,
                         client_turn_id=_TEST_CLIENT_TURN_ID,
                         request_fingerprint=_TEST_REQUEST_FINGERPRINT,
@@ -1740,6 +1745,7 @@ class TestSendMessageToolCall:
             )
             await _collect_events(
                 service.send_message(
+                    acts_on_review=False,
                     session_id=session.id,
                     client_turn_id=_TEST_CLIENT_TURN_ID,
                     request_fingerprint=_TEST_REQUEST_FINGERPRINT,
@@ -1863,6 +1869,7 @@ class TestSendMessageToolCall:
             mock_litellm.acompletion = AsyncMock(side_effect=classification_response)
             events = await _collect_events(
                 service.send_message(
+                    acts_on_review=False,
                     session_id=session.id,
                     client_turn_id=_TEST_CLIENT_TURN_ID,
                     request_fingerprint=_TEST_REQUEST_FINGERPRINT,
@@ -1999,6 +2006,7 @@ class TestSendMessageToolCall:
             )
             events = await _collect_events(
                 service.send_message(
+                    acts_on_review=False,
                     session_id=session.id,
                     client_turn_id=_TEST_CLIENT_TURN_ID,
                     request_fingerprint=_TEST_REQUEST_FINGERPRINT,
@@ -2053,6 +2061,7 @@ class TestSendMessageToolCall:
             )
             await _collect_events(
                 service.send_message(
+                    acts_on_review=False,
                     session_id=session.id,
                     client_turn_id=_TEST_CLIENT_TURN_ID,
                     request_fingerprint=_TEST_REQUEST_FINGERPRINT,
@@ -2128,6 +2137,7 @@ class TestSendMessageToolCall:
             )
             events = await _collect_events(
                 service.send_message(
+                    acts_on_review=False,
                     session_id=session.id,
                     client_turn_id=_TEST_CLIENT_TURN_ID,
                     request_fingerprint=_TEST_REQUEST_FINGERPRINT,
@@ -2365,6 +2375,7 @@ class TestSendMessageStructuredQuestion:
         ):
             events = await _collect_events(
                 service.send_message(
+                    acts_on_review=False,
                     session_id=session.id,
                     client_turn_id=_TEST_CLIENT_TURN_ID,
                     request_fingerprint=_TEST_REQUEST_FINGERPRINT,
@@ -2538,6 +2549,7 @@ class TestSendMessageStructuredQuestion:
             )
             events = await _collect_events(
                 service.send_message(
+                    acts_on_review=False,
                     session_id=session.id,
                     client_turn_id=_TEST_CLIENT_TURN_ID,
                     request_fingerprint=_TEST_REQUEST_FINGERPRINT,
@@ -2602,6 +2614,7 @@ class TestSendMessageStructuredQuestion:
             )
             events = await _collect_events(
                 service.send_message(
+                    acts_on_review=False,
                     session_id=session.id,
                     client_turn_id=_TEST_CLIENT_TURN_ID,
                     request_fingerprint=_TEST_REQUEST_FINGERPRINT,
@@ -2712,6 +2725,7 @@ class TestSendMessageStructuredQuestion:
             )
             events = await _collect_events(
                 service.send_message(
+                    acts_on_review=False,
                     session_id=session.id,
                     client_turn_id=_TEST_CLIENT_TURN_ID,
                     request_fingerprint=_TEST_REQUEST_FINGERPRINT,
@@ -2775,6 +2789,7 @@ class TestSendMessageStructuredQuestion:
             )
             events = await _collect_events(
                 service.send_message(
+                    acts_on_review=False,
                     session_id=session.id,
                     client_turn_id=_TEST_CLIENT_TURN_ID,
                     request_fingerprint=_TEST_REQUEST_FINGERPRINT,
