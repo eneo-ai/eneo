@@ -159,6 +159,9 @@ from ai_builder_release_gate import replacement_limit  # noqa: E402
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (  # noqa: E402
     StructuredQuestionAnswerMetadata,
 )
+from eneo.flows.ai_builder.ai_builder_flow_review_sample import (  # noqa: E402
+    reader_omitted_step_results,
+)
 from eneo.flows.ai_builder.ai_builder_flow_schema_values import (  # noqa: E402
     builder_form_field_type_values,
 )
@@ -9391,23 +9394,22 @@ def _runtime_step_cost(
 def _reader_returned_every_step_result(debug_export: object) -> bool:
     """Affirmative: the evidence reader's summary is present and records no
     omitted step results. A missing export, run, summary or omission list
-    proves nothing and reads as incomplete, so the receipt fails closed."""
+    proves nothing and reads as incomplete, so the receipt fails closed.
+    What an omission means is the reader's own reading
+    (`reader_omitted_step_results`); this adds only the presence requirement
+    that the negative helper does not express."""
 
-    if not isinstance(debug_export, Mapping):
+    if not isinstance(debug_export, dict):
         return False
     run_export = debug_export.get("run")
-    if not isinstance(run_export, Mapping):
+    if not isinstance(run_export, dict):
         return False
     summary = run_export.get("summary")
-    if not isinstance(summary, Mapping):
+    if not isinstance(summary, dict):
         return False
-    omissions = summary.get("omissions")
-    if not isinstance(omissions, list):
+    if not isinstance(summary.get("omissions"), list):
         return False
-    return not any(
-        isinstance(item, Mapping) and item.get("section") == "step_results"
-        for item in omissions
-    )
+    return not reader_omitted_step_results(cast(dict[str, Any], debug_export))
 
 
 def _count_source(
