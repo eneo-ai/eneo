@@ -12,6 +12,7 @@ import json
 import os
 import random
 import resource
+import shutil
 import subprocess
 import sys
 import time
@@ -554,6 +555,15 @@ async def test_released_upgrade_recovers_from_process_death_and_backup_restore(
         output = os.getenv("ENEO_FILE_ICON_REHEARSAL_OUTPUT")
         if output:
             Path(output).write_text(json.dumps(report, indent=2) + "\n")
+        backup_output = os.getenv("ENEO_FILE_ICON_REHEARSAL_BACKUP")
+        if backup_output:
+            # Preserve synthetic bridge state for the separate contraction image.
+            # Exclusive creation prevents replacing an existing recovery artifact.
+            with (
+                Path(backup_output).open("xb") as destination,
+                (path / "after.dump").open("rb") as source,
+            ):
+                shutil.copyfileobj(source, destination, length=_MIB)
     finally:
         for process in (killed, worker):
             if process is not None:

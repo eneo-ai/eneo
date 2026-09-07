@@ -112,6 +112,12 @@ containers, databases, and worker processes belong to this fixture and are
 removed on completion. The output contains metadata and measurements, not
 payloads or connection credentials.
 
+For a later contraction rehearsal, set `ENEO_FILE_ICON_REHEARSAL_BACKUP` to a new
+local file path. After all checks pass, the fixture exports its synthetic adopted
+PostgreSQL backup there. An existing file is never overwritten. Restore that
+backup in a separate disposable database using the contraction candidate; this
+tests the handoff between the actual bridge worker and the later application.
+
 The focused preflight regression is in
 `tests/integration/migrations/test_file_icon_preflight.py`. Existing
 `test_file_icon_inline_backfill.py` and `test_file_icon_migration_controls.py`
