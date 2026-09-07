@@ -107,7 +107,7 @@ RUN_LISTING_STATEMENT_COUNT = 1
 # steps, attempts, provider calls, sources, or attached files. The reviewed
 # ceiling is the representative bundle's statement count (its two input files
 # cost two metadata reads the file-less heavy bundle does not issue).
-EVIDENCE_QUERY_COUNT = 25
+MAX_EVIDENCE_QUERY_COUNT = 25
 REPORT_PATH_ENV = "FLOW_RUN_LISTING_EVIDENCE_REPORT_PATH"
 SECRET_SENTINEL = "flow-evidence-secret-20260726"
 _BASE_TIME = datetime(2026, 7, 26, 12, 0, tzinfo=timezone.utc)
@@ -833,7 +833,7 @@ async def test_flow_run_listing_and_evidence_measurement_contract(
         evidence_query_sources = Counter(
             _statement_source(query.sql) for query in evidence_queries
         )
-        assert len(evidence_queries) <= EVIDENCE_QUERY_COUNT, "\n".join(
+        assert len(evidence_queries) <= MAX_EVIDENCE_QUERY_COUNT, "\n".join(
             f"{count} × {source}"
             for source, count in sorted(evidence_query_sources.items())
         )
@@ -866,7 +866,7 @@ async def test_flow_run_listing_and_evidence_measurement_contract(
         # Non-scaling: twenty steps with five attempts each issue no more
         # statements than the five-step, three-attempt representative run.
         assert heavy_cost["query_count"] <= representative_cost["query_count"]
-        assert representative_cost["query_count"] <= EVIDENCE_QUERY_COUNT
+        assert representative_cost["query_count"] <= MAX_EVIDENCE_QUERY_COUNT
         assert heavy_sections["step_attempts"] == HEAVY_ATTEMPT_COUNT
         assert heavy_sections["provider_calls_total"] == HEAVY_ATTEMPT_COUNT
 
