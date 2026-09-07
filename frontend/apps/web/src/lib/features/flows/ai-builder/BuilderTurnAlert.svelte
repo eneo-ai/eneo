@@ -15,11 +15,9 @@
     targetKind: "create" | "edit";
     /** Another surface (the build screen) already shows this stream error. */
     suppressStreamError?: boolean;
-    /** Runs once a fresh session has replaced an unsupported-architecture one. */
-    onstartedfresh?: () => void;
   }
 
-  let { targetKind, suppressStreamError = false, onstartedfresh }: Props = $props();
+  let { targetKind, suppressStreamError = false }: Props = $props();
 
   const service = getAIBuilderService();
 
@@ -127,7 +125,7 @@
   // only way out, so the offer stays while the driver's refusal error stands.
   async function handleUnsupportedArchitectureStartFresh() {
     try {
-      if (await service.startFreshSession(targetKind)) onstartedfresh?.();
+      await service.startFreshSession(targetKind);
     } catch {
       // The driver keeps the session it was replacing, its typed error and
       // the standing offer to try again.

@@ -720,15 +720,8 @@ describe("FlowAIBuilderDriver", () => {
           status: "awaiting_approval"
         })
       )
-      .mockResolvedValueOnce({ models: [], default_model_id: null })
-      .mockResolvedValueOnce(
-        makeSession({
-          session_id: "session-2",
-          latest_plan_id: "plan-9",
-          status: "awaiting_approval"
-        })
-      )
       .mockResolvedValueOnce(makePlan({ plan_id: "plan-9", status: "approved" }))
+      .mockResolvedValueOnce({ models: [], default_model_id: null })
       .mockResolvedValueOnce({
         sessions: [makeDraft({ session_id: "session-2", latest_plan_id: "plan-9" })]
       });
@@ -749,6 +742,50 @@ describe("FlowAIBuilderDriver", () => {
     expect(driver.state.draftSessions).toEqual([makeDraft()]);
   });
 
+  it("publishes a created session only once its plan is loaded", async () => {
+    // A session on screen before its plan is sendable with a half-built
+    // context; the plan request is held to prove nothing is published first.
+    let releasePlan: (plan: unknown) => void = () => {};
+    const heldPlan = new Promise((resolve) => {
+      releasePlan = resolve;
+    });
+    const fetch = vi.fn(async (path: string, init?: { method?: string }) => {
+      if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "post") {
+        return makeSession({ session_id: "session-2", latest_plan_id: "plan-9" });
+      }
+      if (path === "/api/v1/flows/ai-builder/plans/{plan_id}") return await heldPlan;
+      if (path.endsWith("/models")) return { models: [], default_model_id: null };
+      if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "get") {
+        return { sessions: [] };
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const published: string[] = [];
+    const driver = new FlowAIBuilderDriver(
+      { fetch, stream: vi.fn() } as unknown as AIBuilderClientTransport,
+      "space-1",
+      "flow-1",
+      (state) => {
+        if (state.session) published.push(state.session.session_id);
+      }
+    );
+
+    const creating = driver.createSession("edit");
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    expect(driver.state.session).toBeNull();
+    expect(published).toEqual([]);
+
+    releasePlan(makePlan({ plan_id: "plan-9", status: "approved" }));
+    await creating;
+
+    expect(driver.state.session?.session_id).toBe("session-2");
+    expect(driver.state.currentPlan?.plan_id).toBe("plan-9");
+    expect(published[0]).toBe("session-2");
+    expect(
+      fetch.mock.calls.filter(([path]) => path === "/api/v1/flows/ai-builder/sessions/{session_id}")
+    ).toHaveLength(0);
+  });
+
   it("reuses edit session creation as resume-first and refreshes recovered plan state", async () => {
     const fetch = vi
       .fn()
@@ -759,15 +796,8 @@ describe("FlowAIBuilderDriver", () => {
           status: "awaiting_approval"
         })
       )
-      .mockResolvedValueOnce({ models: [], default_model_id: null })
-      .mockResolvedValueOnce(
-        makeSession({
-          session_id: "session-2",
-          latest_plan_id: "plan-9",
-          status: "awaiting_approval"
-        })
-      )
       .mockResolvedValueOnce(makePlan({ plan_id: "plan-9", status: "approved" }))
+      .mockResolvedValueOnce({ models: [], default_model_id: null })
       .mockResolvedValueOnce({
         sessions: [makeDraft({ session_id: "session-2", latest_plan_id: "plan-9" })]
       });

@@ -633,8 +633,8 @@
     // session stays, and the next launch asks again) and rejects when the
     // create fails (the session it had is kept, carrying the driver's own
     // error, so the launch can simply be asked for again). Neither outcome
-    // may open the step or review, and the composer context is consumed only
-    // once the replacement is real.
+    // may open the step or review. The composer context of the replaced
+    // session is owned by that session and simply stops applying.
     let replaced = false;
     try {
       replaced = await service.startFreshSession("edit");
@@ -642,7 +642,6 @@
       return;
     }
     if (!replaced) return;
-    conversationRef?.resetComposerContext();
     if (scope !== null) {
       await activateSavedFlowStep(scope);
     } else {
@@ -663,18 +662,15 @@
     showDiscardChangeDialog = true;
   }
 
-  // The scoped composer context belongs to the session being replaced, so it
-  // is cleared only once the replacement is real - and a refused create is the
-  // driver's own error to show, not an unhandled rejection.
+  // A refused create is the driver's own error to show, not an unhandled
+  // rejection; the scoped composer context stays with the session it belongs to.
   async function discardChangeAndStartOver() {
     showDiscardChangeDialog = false;
-    let replaced = false;
     try {
-      replaced = await service.startFreshSession("edit");
+      await service.startFreshSession("edit");
     } catch {
       return;
     }
-    if (replaced) conversationRef?.resetComposerContext();
   }
 </script>
 
@@ -759,11 +755,7 @@
     </div>
 
     <div class="flex min-h-0 flex-1 flex-col overflow-y-auto" bind:this={screenScrollEl}>
-      <BuilderTurnAlert
-        {targetKind}
-        suppressStreamError={generationFailedWithoutPlan}
-        onstartedfresh={() => conversationRef?.resetComposerContext()}
-      />
+      <BuilderTurnAlert {targetKind} suppressStreamError={generationFailedWithoutPlan} />
 
       {#if screen === "conversation"}
         <BuilderConversationScreen

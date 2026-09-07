@@ -231,11 +231,6 @@ export class FlowAIBuilderService {
     this.#suppressedPlanStepScope = sessionId && planId ? { sessionId, planId } : null;
   }
 
-  resetStepScope(): void {
-    this.#savedFlowStepScope = null;
-    this.#suppressedPlanStepScope = null;
-  }
-
   get isStreaming(): boolean {
     return this.#state.streamState === "streaming";
   }
@@ -384,9 +379,7 @@ export class FlowAIBuilderService {
   }
 
   async startFreshSession(targetKind: TargetKind): Promise<boolean> {
-    const replaced = await this.#driver.startFreshSession(targetKind);
-    if (replaced) this.clearSavedFlowStepScope();
-    return replaced;
+    return this.#driver.startFreshSession(targetKind);
   }
 
   async loadDraftSessions(): Promise<void> {
@@ -394,7 +387,6 @@ export class FlowAIBuilderService {
   }
 
   async resumeSession(sessionId: string): Promise<void> {
-    this.clearSavedFlowStepScope();
     await this.#driver.resumeSession(sessionId);
   }
 

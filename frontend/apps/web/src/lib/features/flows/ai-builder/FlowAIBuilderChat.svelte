@@ -71,14 +71,6 @@
     }
   });
 
-  // Called by the shell before it starts a fresh session, so a scoped-edit
-  // placeholder cannot leak into the new conversation.
-  export function resetComposerContext() {
-    clearPendingEditContext();
-    service.resetStepScope();
-    inputRef?.clearActivePlaceholder();
-  }
-
   let scrollContainer = $state<HTMLDivElement | undefined>();
 
   $effect(() => {

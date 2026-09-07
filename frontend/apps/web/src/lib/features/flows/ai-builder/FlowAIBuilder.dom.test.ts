@@ -315,10 +315,14 @@ function makeFetch(options: FetchOptions = {}) {
       if (path === SESSIONS_ROUTE && init?.method === "post") {
         posts.push(init.requestBody!["application/json"]);
         const created = options.created ?? makeSession();
-        // A pre-registered read sequence for the same id wins over the POST body,
-        // so a test can script what later authoritative refreshes return.
+        // The server answers a create with the full session, so a scripted
+        // read sequence for the same id starts at the POST: its first state is
+        // the created session and later states are what authoritative
+        // refreshes return.
         if (!byId.has(created.session_id)) byId.set(created.session_id, created);
-        return created;
+        const entry = byId.get(created.session_id)!;
+        reads.set(created.session_id, 1);
+        return Array.isArray(entry) ? entry[0]! : entry;
       }
       if (path === SESSION_ROUTE) {
         const id = init?.params?.path?.session_id ?? "";

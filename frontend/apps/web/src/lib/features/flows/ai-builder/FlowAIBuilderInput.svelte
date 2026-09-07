@@ -70,11 +70,19 @@
   let inputValue = $state("");
   let textareaEl: HTMLTextAreaElement | undefined = $state();
   let fileInputEl: HTMLInputElement | undefined = $state();
-  let activePlaceholder = $state<string | null>(null);
+  // A requested placeholder belongs to the session it was requested in, the
+  // way a saved-step scope does: a replacement session never inherits it.
+  let activePlaceholder = $state<{ sessionId: string | null; text: string } | null>(null);
   let isDragging = $state(false);
 
+  const requestedPlaceholder = $derived(
+    activePlaceholder !== null &&
+      activePlaceholder.sessionId === (service.session?.session_id ?? null)
+      ? activePlaceholder.text
+      : null
+  );
   const currentPlaceholder = $derived(
-    activePlaceholder ??
+    requestedPlaceholder ??
       placeholder ??
       (generationWait
         ? m.ai_builder_wait_composer_placeholder()
@@ -207,11 +215,12 @@
 
   export function focus(options?: string | { placeholder?: string; prefill?: string }) {
     // Support both legacy string signature (treated as placeholder) and options object
+    const sessionId = service.session?.session_id ?? null;
     if (typeof options === "string") {
-      activePlaceholder = options;
+      activePlaceholder = { sessionId, text: options };
     } else if (options) {
       if (options.prefill) inputValue = options.prefill;
-      if (options.placeholder) activePlaceholder = options.placeholder;
+      if (options.placeholder) activePlaceholder = { sessionId, text: options.placeholder };
     }
     requestAnimationFrame(() => {
       textareaEl?.focus();

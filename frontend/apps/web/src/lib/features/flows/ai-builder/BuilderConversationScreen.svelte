@@ -24,10 +24,6 @@
     await new Promise((resolve) => requestAnimationFrame(resolve));
     chatRef?.focusInput(intent);
   }
-
-  export function resetComposerContext() {
-    chatRef?.resetComposerContext();
-  }
 </script>
 
 <div

@@ -471,21 +471,8 @@ export class FlowAIBuilderDriver {
           }
         }
       })) as AIBuilderSession;
-      if (sessionGeneration !== this.#sessionGeneration) return false;
-      this.#state.session = result;
-      this.#applyCommittedTurnOutcome(result);
-      this.#hydrateMessagesFromConversation(result.conversation ?? []);
-      this.#notify();
-      const owner: SessionOperationOwner = {
-        sessionId: result.session_id,
-        sessionGeneration,
-        abortController: this.#abortController
-      };
-      void this.#fetchModels(owner);
-      await this.#refreshSession(owner);
-      if (this.#ownsSession(owner)) {
-        await this.loadDraftSessions();
-      }
+      if ((await this.#adoptSession(result, sessionGeneration)) === null) return false;
+      await this.loadDraftSessions();
       return true;
     } catch (e) {
       if (sessionGeneration !== this.#sessionGeneration) return false;
@@ -584,10 +571,24 @@ export class FlowAIBuilderDriver {
         this.#notify();
       }
     }
-    if (sessionGeneration !== this.#sessionGeneration) return;
+    if ((await this.#adoptSession(result, sessionGeneration)) === null) return;
+    await this.loadDraftSessions();
+  }
+
+  /** Publish a session only once everything a send reads is loaded: the plan
+   *  it may be scoped to. A session on screen before that is sendable with a
+   *  half-built context, and any notify in between (a model list arriving)
+   *  would publish that state. Models are display data and load afterwards. */
+  async #adoptSession(
+    result: AIBuilderSession,
+    sessionGeneration: number
+  ): Promise<SessionOperationOwner | null> {
+    const plan = result.latest_plan_id ? await this.#fetchPlan(result.latest_plan_id) : null;
+    if (sessionGeneration !== this.#sessionGeneration) return null;
     this.#state.session = result;
     this.#applyCommittedTurnOutcome(result);
     this.#hydrateMessagesFromConversation(result.conversation ?? []);
+    this.#state.currentPlan = plan;
     this.#notify();
     const owner: SessionOperationOwner = {
       sessionId: result.session_id,
@@ -595,8 +596,19 @@ export class FlowAIBuilderDriver {
       abortController: this.#abortController
     };
     void this.#fetchModels(owner);
-    await this.#syncPlanFromSession(owner);
-    await this.loadDraftSessions();
+    return owner;
+  }
+
+  async #fetchPlan(planId: string): Promise<FlowAIBuilderState["currentPlan"]> {
+    try {
+      const result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.plan, {
+        method: "get",
+        params: { path: { plan_id: planId } }
+      })) as ProposedPlan;
+      return this.#normalizePlan(result);
+    } catch {
+      return null;
+    }
   }
 
   async discardSession(sessionId: string): Promise<void> {
@@ -1807,21 +1819,15 @@ export class FlowAIBuilderDriver {
       return true;
     }
 
-    try {
-      const result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.plan, {
-        method: "get",
-        params: { path: { plan_id: latestPlanId } }
-      })) as ProposedPlan;
-      if (!this.#ownsSession(owner) || this.#state.session?.latest_plan_id !== latestPlanId) {
-        return false;
-      }
-      this.#state.currentPlan = this.#normalizePlan(result);
-      this.#notify();
-      return true;
-    } catch {
-      // Leave the current plan as-is if recovery fails.
-      return this.#ownsSession(owner);
+    const plan = await this.#fetchPlan(latestPlanId);
+    if (!this.#ownsSession(owner) || this.#state.session?.latest_plan_id !== latestPlanId) {
+      return false;
     }
+    // Leave the current plan as-is if recovery fails.
+    if (plan === null) return true;
+    this.#state.currentPlan = plan;
+    this.#notify();
+    return true;
   }
 
   #hasRecoverableCreateDraft(): boolean {
