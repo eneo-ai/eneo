@@ -9,6 +9,8 @@ const latestRun = vi.hoisted(() => vi.fn());
 const listRuns = vi.hoisted(() => vi.fn());
 const listBlobs = vi.hoisted(() => vi.fn());
 const cancelRun = vi.hoisted(() => vi.fn());
+const showError = vi.hoisted(() => vi.fn());
+vi.mock("$lib/core/errors", () => ({ toastError: showError }));
 const route = vi.hoisted(() => ({
   url: new URL("http://localhost/?tab=crawls"),
   state: { tab: "crawls" }
@@ -16,7 +18,7 @@ const route = vi.hoisted(() => ({
 vi.mock("$lib/core/Eneo", () => ({
   getEneo: () => ({
     websites: {
-      crawlRuns: { latest: latestRun, list: listRuns, cancel: cancelRun },
+      crawlRuns: { latest: latestRun, listPage: listRuns, cancel: cancelRun },
       indexedBlobs: { listPage: listBlobs }
     }
   })
@@ -79,6 +81,8 @@ const emptyPage = {
 const data = {
   website: { id: "website-1", name: "Test website", url: "https://example.test" },
   crawlRuns: [],
+  nextCrawlRunCursor: null,
+  totalCrawlRunCount: 0,
   infoBlobPage: emptyPage,
   currentSpace: { name: "Test space", personal: false },
   readonly: true,
@@ -90,11 +94,50 @@ beforeEach(() => {
   route.state = { tab: "crawls" };
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
   latestRun.mockReset().mockResolvedValue(running);
-  listRuns.mockReset().mockResolvedValue([running]);
+  listRuns.mockReset().mockResolvedValue({ ...emptyPage, items: [running], total_count: 1 });
   listBlobs.mockReset().mockResolvedValue(emptyPage);
   cancelRun.mockReset().mockResolvedValue({});
+  showError.mockReset();
 });
 afterEach(() => vi.useRealTimers());
+
+test("older history has a loading state and retries without losing the current run", async () => {
+  let rejectPage: (error: Error) => void = () => {};
+  listRuns.mockImplementationOnce(
+    () =>
+      new Promise((_resolve, reject) => {
+        rejectPage = reject;
+      })
+  );
+  render(WebsiteDetailPage, {
+    data: {
+      ...data,
+      crawlRuns: [running],
+      nextCrawlRunCursor: "older-page",
+      totalCrawlRunCount: 2
+    } as never
+  });
+  const label = m.website_crawl_history_load_more({ current: 1, total: 2 });
+  await page.getByRole("button", { name: label }).click();
+  expect(listRuns).toHaveBeenCalledWith({ id: "website-1", limit: 100, cursor: "older-page" });
+  await expect.element(page.getByRole("button", { name: m.loading_more() })).toBeDisabled();
+  rejectPage(new Error("History unavailable"));
+  await expect.element(page.getByRole("button", { name: label })).toBeEnabled();
+  expect(showError).toHaveBeenCalledOnce();
+  await expect.element(page.getByText(m.in_progress(), { exact: true })).toBeVisible();
+
+  listRuns.mockResolvedValue({
+    ...emptyPage,
+    total_count: 2,
+    items: [{ ...terminal, id: "older", outcome: "empty" }]
+  });
+  await page.getByRole("button", { name: label }).click();
+  await expect
+    .element(page.getByText(m.crawl_status_empty(), { exact: true }).first())
+    .toBeVisible();
+  await expect.element(page.getByText(m.in_progress(), { exact: true })).toBeVisible();
+  await expect.element(page.getByRole("button", { name: label })).not.toBeInTheDocument();
+});
 
 test("an idle mounted page discovers and displays a scheduled crawl, then refreshes its results", async () => {
   render(WebsiteDetailPage, { data: data as never });
@@ -178,7 +221,7 @@ test("history failures do not hide the latest status or block content, and histo
 
   // A stale history response must not overwrite the confirmed terminal state.
   const older = { ...terminal, id: "older-run", pages_crawled: 1 };
-  listRuns.mockResolvedValue([running, older]);
+  listRuns.mockResolvedValue({ ...emptyPage, items: [running, older], total_count: 2 });
   await vi.advanceTimersByTimeAsync(10_000);
   expect(listRuns).toHaveBeenCalledTimes(3);
   await expect.element(page.getByText(m.in_progress(), { exact: true })).not.toBeInTheDocument();
@@ -281,7 +324,11 @@ test.each([false, true])(
   async (hasHistory) => {
     const previous = { ...terminal, id: "previous-run" };
     latestRun.mockResolvedValue(terminal);
-    listRuns.mockResolvedValue([terminal, ...(hasHistory ? [previous] : [])]);
+    listRuns.mockResolvedValue({
+      ...emptyPage,
+      items: [terminal, ...(hasHistory ? [previous] : [])],
+      total_count: hasHistory ? 2 : 1
+    });
     render(WebsiteDetailPage, {
       data: { ...data, crawlRuns: hasHistory ? [previous] : [] } as never
     });

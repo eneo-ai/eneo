@@ -59,6 +59,67 @@ async def headers(db_container, admin_user, patch_auth_service_jwt):
     return {"Authorization": f"Bearer {token}"}
 
 
+async def test_crawl_history_is_bounded_and_pages_tied_timestamps_without_duplicates(
+    client, db_container, admin_user, website_id, headers
+):
+    now = datetime.now(timezone.utc)
+    run_ids = sorted(uuid4() for _ in range(105))
+    async with db_container(user=admin_user) as container:
+        await container.session().execute(
+            sa.insert(CrawlRuns),
+            [
+                dict(
+                    id=run_id,
+                    website_id=website_id,
+                    tenant_id=admin_user.tenant_id,
+                    created_at=now,
+                    phase="terminal",
+                    outcome="succeeded",
+                    origin="scheduled",
+                    finished_at=now,
+                )
+                for run_id in run_ids
+            ],
+        )
+    url = f"/api/v1/websites/{website_id}/runs/"
+    response = await client.get(url, headers=headers)
+    assert response.status_code == 200, response.text
+    first = response.json()
+    assert len(first["items"]) == 100
+    assert first["total_count"] == 105
+    assert [item["id"] for item in first["items"]] == [
+        str(id) for id in reversed(run_ids[5:])
+    ]
+
+    # A newly completed run belongs to a later refresh, not the older-history page.
+    async with db_container(user=admin_user) as container:
+        container.session().add(
+            CrawlRuns(
+                website_id=website_id,
+                tenant_id=admin_user.tenant_id,
+                phase="terminal",
+                outcome="succeeded",
+                finished_at=datetime.now(timezone.utc),
+                origin="manual",
+            )
+        )
+    response = await client.get(
+        url, headers=headers, params={"cursor": first["next_cursor"]}
+    )
+    assert response.status_code == 200, response.text
+    older = response.json()
+    assert [item["id"] for item in older["items"]] == [
+        str(id) for id in reversed(run_ids[:5])
+    ]
+    assert older["next_cursor"] is None
+    assert older["total_count"] == 106
+    invalid = await client.get(url, headers=headers, params={"cursor": str(uuid4())})
+    assert invalid.status_code == 400
+    for limit in (0, 101):
+        invalid = await client.get(url, headers=headers, params={"limit": limit})
+        assert invalid.status_code == 422
+
+
 async def test_latest_crawl_returns_null_then_one_deterministic_run_without_space_hydration(
     client, db_container, admin_user, website_id, headers, monkeypatch
 ) -> None:
@@ -283,7 +344,7 @@ async def test_latest_crawl_preserves_group_membership_and_ignores_deleted_group
                 await service.get_crawl_runs(website_id)
         else:
             assert await service.get_latest_crawl_run(website_id) is None
-            assert await service.get_crawl_runs(website_id) == []
+            assert (await service.get_crawl_runs(website_id)).items == []
 
 
 @pytest.mark.parametrize("ownership", list(ApiKeyOwnership))
@@ -345,7 +406,7 @@ async def test_latest_crawl_preserves_resource_scoped_key_access(
         # Preserve the full aggregate's policy, including default-assistant exclusion.
         if same_space and resource != "default_assistant":
             assert await service.get_latest_crawl_run(website_id) is None
-            assert await service.get_crawl_runs(website_id) == []
+            assert (await service.get_crawl_runs(website_id)).items == []
         else:
             with pytest.raises(UnauthorizedException):
                 await service.get_latest_crawl_run(website_id)

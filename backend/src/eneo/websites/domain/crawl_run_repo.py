@@ -12,7 +12,7 @@ from eneo.database.tables.websites_table import CrawlAttempts
 from eneo.database.tables.websites_table import CrawlRuns as CrawlRunsTable
 from eneo.database.tables.websites_table import Websites as WebsitesTable
 from eneo.jobs.job_models import Task
-from eneo.main.exceptions import NotFoundException
+from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.main.models import Status
 from eneo.websites.crawl_dependencies.crawl_models import CrawlTask
 from eneo.websites.domain.crawl_run import (
@@ -71,6 +71,13 @@ class CrawlDispatchCandidate:
 class CrawlCancellation:
     run: CrawlRun
     dispatch_id: UUID | None
+
+
+@dataclass(frozen=True, slots=True)
+class CrawlRunPage:
+    items: list[CrawlRun]
+    total_count: int
+    next_cursor: UUID | None
 
 
 class CrawlDeletionBlocker(StrEnum):
@@ -231,13 +238,44 @@ class CrawlRunRepository:
 
         raise RuntimeError("Active crawl changed repeatedly during admission")
 
-    async def get_crawl_runs(self, website_id: UUID) -> list[CrawlRun]:
-        records = await self.session.scalars(
+    async def get_crawl_runs(
+        self, website_id: UUID, *, limit: int = 100, cursor: UUID | None = None
+    ) -> CrawlRunPage:
+        if not 1 <= limit <= 100:
+            raise BadRequestException("History page size must be between 1 and 100")
+        query = (
             sa.select(CrawlRunsTable)
             .where(CrawlRunsTable.website_id == website_id)
             .order_by(CrawlRunsTable.created_at.desc(), CrawlRunsTable.id.desc())
+            .limit(limit + 1)
         )
-        return [CrawlRun.to_domain(record=record) for record in records]
+        if cursor is not None:
+            cursor_created_at = await self.session.scalar(
+                sa.select(CrawlRunsTable.created_at).where(
+                    CrawlRunsTable.id == cursor,
+                    CrawlRunsTable.website_id == website_id,
+                )
+            )
+            if cursor_created_at is None:
+                raise BadRequestException(
+                    "History cursor does not belong to this website"
+                )
+            query = query.where(
+                sa.tuple_(CrawlRunsTable.created_at, CrawlRunsTable.id)
+                < sa.tuple_(sa.literal(cursor_created_at), sa.literal(cursor))
+            )
+        records = list(await self.session.scalars(query))
+        total_count = await self.session.scalar(
+            sa.select(sa.func.count())
+            .select_from(CrawlRunsTable)
+            .where(CrawlRunsTable.website_id == website_id)
+        )
+        items = [CrawlRun.to_domain(record=record) for record in records[:limit]]
+        return CrawlRunPage(
+            items=items,
+            total_count=total_count or 0,
+            next_cursor=items[-1].id if len(records) > limit else None,
+        )
 
     async def get_active_for_website(self, website_id: UUID) -> CrawlRun | None:
         record = await self.session.scalar(

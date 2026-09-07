@@ -108,6 +108,7 @@ export type Role = components["schemas"]["RolePublic"];
 export type Permission = components["schemas"]["Permission"];
 export type ResourcePermission = components["schemas"]["ResourcePermission"];
 export type CrawlRun = components["schemas"]["CrawlRunPublic"];
+export type WebsiteCrawlRunPage = components["schemas"]["CursorPaginatedResponse_CrawlRunPublic_"];
 export type Limits = components["schemas"]["Limits"];
 export type UploadedFile = components["schemas"]["FilePublic"];
 export type Website = components["schemas"]["WebsitePublic"];

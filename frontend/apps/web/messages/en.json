@@ -707,6 +707,8 @@
   "crawls": "Crawls",
   "indexed_content": "Indexed content",
   "website_indexed_content_load_more_failed": "More indexed content could not be loaded.",
+  "website_crawl_history_load_more_failed": "More crawl history could not be loaded. Try again.",
+  "website_crawl_history_load_more": "Load older crawls ({current}/{total})",
   "website_indexed_content_load_more": "Load more ({current}/{total})",
   "website_indexed_content_resource": "loaded indexed items",
   "website_no_indexed_content": "No content has been indexed from this website yet.",

@@ -4809,7 +4809,7 @@ export interface paths {
     };
     /**
      * Get Crawl Runs
-     * @description List crawl runs for a website by id.
+     * @description List newest crawl runs first. A cursor continues into older history; new runs appear on refresh.
      */
     get: operations["get_crawl_runs_api_v1_websites__id__runs__get"];
     put?: never;
@@ -11683,6 +11683,27 @@ export interface components {
        */
       readonly count: number;
     };
+    /** CursorPaginatedResponse[CrawlRunPublic] */
+    CursorPaginatedResponse_CrawlRunPublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["CrawlRunPublic"][];
+      /** Limit */
+      limit?: number | null;
+      /** Next Cursor */
+      next_cursor?: string | null;
+      /** Previous Cursor */
+      previous_cursor?: string | null;
+      /** Total Count */
+      total_count: number;
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
     /** CursorPaginatedResponse[InfoBlobPublicNoText] */
     CursorPaginatedResponse_InfoBlobPublicNoText_: {
       /**
@@ -15337,19 +15358,6 @@ export interface components {
        * @description List of items returned in the response
        */
       items: components["schemas"]["CompletionModelPublic"][];
-      /**
-       * Count
-       * @description Number of items returned in the response
-       */
-      readonly count: number;
-    };
-    /** PaginatedResponse[CrawlRunPublic] */
-    PaginatedResponse_CrawlRunPublic_: {
-      /**
-       * Items
-       * @description List of items returned in the response
-       */
-      items: components["schemas"]["CrawlRunPublic"][];
       /**
        * Count
        * @description Number of items returned in the response
@@ -38208,7 +38216,10 @@ export interface operations {
   };
   get_crawl_runs_api_v1_websites__id__runs__get: {
     parameters: {
-      query?: never;
+      query?: {
+        limit?: number;
+        cursor?: string | null;
+      };
       header?: never;
       path: {
         /** @description Unique identifier of the website */
@@ -38224,7 +38235,16 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["PaginatedResponse_CrawlRunPublic_"];
+          "application/json": components["schemas"]["CursorPaginatedResponse_CrawlRunPublic_"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */

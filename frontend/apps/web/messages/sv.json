@@ -703,6 +703,8 @@
   "crawls": "Indexeringar",
   "indexed_content": "Indexerat innehåll",
   "website_indexed_content_load_more_failed": "Det gick inte att läsa in mer indexerat innehåll.",
+  "website_crawl_history_load_more_failed": "Det gick inte att läsa in mer historik. Försök igen.",
+  "website_crawl_history_load_more": "Visa äldre genomsökningar ({current}/{total})",
   "website_indexed_content_load_more": "Visa fler ({current}/{total})",
   "website_indexed_content_resource": "inlästa indexerade objekt",
   "website_no_indexed_content": "Inget innehåll har indexerats från webbplatsen ännu.",

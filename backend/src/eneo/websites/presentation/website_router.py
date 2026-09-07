@@ -389,19 +389,24 @@ async def run_crawl(
 
 @router.get(
     "/{id}/runs/",
-    response_model=PaginatedResponse[CrawlRunPublic],
-    responses=responses.get_responses([403, 404]),
-    description="List crawl runs for a website by id.",
+    response_model=CursorPaginatedResponse[CrawlRunPublic],
+    responses=responses.get_responses([400, 403, 404]),
+    description="List newest crawl runs first. A cursor continues into older history; new runs appear on refresh.",
 )
 async def get_crawl_runs(
     id: Annotated[UUID, Path(description="Unique identifier of the website")],
     container: ContainerDep,
+    limit: Annotated[int, Query(ge=1, le=100)] = 100,
+    cursor: Annotated[UUID | None, Query()] = None,
 ):
     service = container.website_crud_service()
-    crawl_runs = await service.get_crawl_runs(id)
+    page = await service.get_crawl_runs(id, limit=limit, cursor=cursor)
 
-    return to_paginated_response(
-        [CrawlRunPublic.from_domain(crawl_run) for crawl_run in crawl_runs]
+    return CursorPaginatedResponse(
+        items=[CrawlRunPublic.from_domain(crawl_run) for crawl_run in page.items],
+        limit=limit,
+        next_cursor=str(page.next_cursor) if page.next_cursor is not None else None,
+        total_count=page.total_count,
     )
 
 

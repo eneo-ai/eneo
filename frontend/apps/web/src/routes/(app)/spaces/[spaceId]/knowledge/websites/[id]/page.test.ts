@@ -2,7 +2,7 @@ import { describe, expect, test, vi } from "vitest";
 import { load } from "./+page";
 
 describe("Website detail loader", () => {
-  test("loads only the first bounded page of indexed content", async () => {
+  test("loads only the first bounded pages of history and indexed content", async () => {
     const website = { id: "website-id", space_id: "space-id" };
     const crawlRuns = [{ id: "newer" }, { id: "older" }];
     const infoBlobPage = {
@@ -14,7 +14,9 @@ describe("Website detail loader", () => {
       previous_cursor: null
     };
     const getWebsite = vi.fn().mockResolvedValue(website);
-    const listCrawlRuns = vi.fn().mockResolvedValue(crawlRuns);
+    const listCrawlRuns = vi
+      .fn()
+      .mockResolvedValue({ items: crawlRuns, next_cursor: "older-page", total_count: 120 });
     const listInfoBlobs = vi.fn().mockResolvedValue(infoBlobPage);
     const event = {
       params: { id: website.id },
@@ -24,7 +26,7 @@ describe("Website detail loader", () => {
         eneo: {
           websites: {
             get: getWebsite,
-            crawlRuns: { list: listCrawlRuns },
+            crawlRuns: { listPage: listCrawlRuns },
             indexedBlobs: { listPage: listInfoBlobs }
           }
         }
@@ -36,11 +38,13 @@ describe("Website detail loader", () => {
     expect(event.parent).toHaveBeenCalledOnce();
     expect(event.depends).toHaveBeenCalledWith("crawlruns:list");
     expect(getWebsite).toHaveBeenCalledWith({ id: website.id });
-    expect(listCrawlRuns).toHaveBeenCalledWith({ id: website.id });
+    expect(listCrawlRuns).toHaveBeenCalledWith({ id: website.id, limit: 100 });
     expect(listInfoBlobs).toHaveBeenCalledWith({ id: website.id, limit: 100 });
     expect(result).toEqual({
       website,
       crawlRuns: [{ id: "older" }, { id: "newer" }],
+      nextCrawlRunCursor: "older-page",
+      totalCrawlRunCount: 120,
       infoBlobPage,
       readonly: false
     });

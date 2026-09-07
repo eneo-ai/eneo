@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from eneo.spaces.space_service import SpaceService
     from eneo.users.user import UserInDB
     from eneo.websites.domain.crawl_run import CrawlRun, CrawlType
-    from eneo.websites.domain.crawl_run_repo import CrawlRunRepository
+    from eneo.websites.domain.crawl_run_repo import CrawlRunPage, CrawlRunRepository
     from eneo.websites.domain.crawl_service import CrawlService
 
 
@@ -281,14 +281,18 @@ class WebsiteCRUDService:
 
         return await self.crawl_service.cancel(id)
 
-    async def get_crawl_runs(self, website_id: UUID) -> list["CrawlRun"]:
+    async def get_crawl_runs(
+        self, website_id: UUID, *, limit: int = 100, cursor: UUID | None = None
+    ) -> "CrawlRunPage":
         space = await self.space_service.get_space_by_website(website_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
         if not actor.can_read_websites():
             raise UnauthorizedException()
 
-        return await self.crawl_run_repo.get_crawl_runs(website_id=website_id)
+        return await self.crawl_run_repo.get_crawl_runs(
+            website_id=website_id, limit=limit, cursor=cursor
+        )
 
     async def get_latest_crawl_run(self, website_id: UUID) -> "CrawlRun | None":
         access = await self.space_repo.get_website_access_facts(website_id)

@@ -22,6 +22,10 @@
   const eneo = getEneo();
   let serverCrawlRuns = data.crawlRuns;
   let crawlRuns = data.crawlRuns;
+  let nextCrawlRunCursor = data.nextCrawlRunCursor;
+  let totalCrawlRunCount = data.totalCrawlRunCount;
+  let crawlRunPageGeneration = 0;
+  let loadingMoreCrawlRuns = false;
   let serverInfoBlobPage = data.infoBlobPage;
   let infoBlobs = [...data.infoBlobPage.items];
   let nextInfoBlobCursor = data.infoBlobPage.next_cursor ?? null;
@@ -35,6 +39,10 @@
   $: if (data.crawlRuns !== serverCrawlRuns) {
     serverCrawlRuns = data.crawlRuns;
     crawlRuns = data.crawlRuns;
+    nextCrawlRunCursor = data.nextCrawlRunCursor;
+    totalCrawlRunCount = data.totalCrawlRunCount;
+    crawlRunPageGeneration += 1;
+    loadingMoreCrawlRuns = false;
     historyRunId = data.crawlRuns.at(-1)?.id;
   }
 
@@ -77,9 +85,17 @@
           }
         }
         if (result.latestRun && result.latestRun.id !== historyRunId) {
-          const history = [...(await eneo.websites.crawlRuns.list({ id: websiteId }))].reverse();
+          const historyPage = await eneo.websites.crawlRuns.listPage({
+            id: websiteId,
+            limit: PAGINATION.PAGE_SIZE
+          });
           if (!mounted || websiteId !== data.website.id || pageCrawlRuns !== data.crawlRuns) return;
+          const history = [...historyPage.items].reverse();
           crawlRuns = mergeLatestCrawlRun(history, result.latestRun);
+          nextCrawlRunCursor = historyPage.next_cursor ?? null;
+          totalCrawlRunCount = historyPage.total_count;
+          crawlRunPageGeneration += 1;
+          loadingMoreCrawlRuns = false;
           // A lagging response is not a completed sync. Keep retrying until
           // history includes the run, without letting it overwrite latest status.
           if (history.some((run) => run.id === result.latestRun?.id)) {
@@ -96,6 +112,7 @@
     return () => {
       mounted = false;
       infoBlobPageGeneration += 1;
+      crawlRunPageGeneration += 1;
       clearInterval(interval);
     };
   });
@@ -107,6 +124,32 @@
   // History may contain an older last-known active state while its refresh fails.
   $: latestKnownRun = crawlRuns.at(-1);
   $: activeRun = latestKnownRun && isActiveCrawlRun(latestKnownRun) ? latestKnownRun : undefined;
+
+  async function loadMoreCrawlRuns() {
+    if (nextCrawlRunCursor === null || loadingMoreCrawlRuns) return;
+    const generation = crawlRunPageGeneration;
+    const cursor = nextCrawlRunCursor;
+    const websiteId = data.website.id;
+    loadingMoreCrawlRuns = true;
+    try {
+      const page = await eneo.websites.crawlRuns.listPage({
+        id: websiteId,
+        limit: PAGINATION.PAGE_SIZE,
+        cursor
+      });
+      if (generation !== crawlRunPageGeneration || websiteId !== data.website.id) return;
+      const knownIds = new Set(crawlRuns.map((run) => run.id));
+      crawlRuns = [...page.items.filter((run) => !knownIds.has(run.id)).reverse(), ...crawlRuns];
+      nextCrawlRunCursor = page.next_cursor ?? null;
+      totalCrawlRunCount = page.total_count;
+    } catch (error) {
+      if (generation === crawlRunPageGeneration && websiteId === data.website.id) {
+        toastError(error, m.website_crawl_history_load_more_failed());
+      }
+    } finally {
+      if (generation === crawlRunPageGeneration) loadingMoreCrawlRuns = false;
+    }
+  }
 
   function replaceInfoBlobPage(page: WebsiteInfoBlobPage) {
     infoBlobPageGeneration += 1;
@@ -181,6 +224,26 @@
         <CrawlLimitations></CrawlLimitations>
       {/if}
       <CrawlRunsTable runs={crawlRuns} />
+      {#if nextCrawlRunCursor !== null}
+        <div class="mt-4 flex justify-center">
+          <Button
+            variant="outline"
+            disabled={loadingMoreCrawlRuns}
+            aria-busy={loadingMoreCrawlRuns}
+            onclick={loadMoreCrawlRuns}
+          >
+            {#if loadingMoreCrawlRuns}
+              <LoaderCircle class="animate-spin" aria-hidden="true" />
+              {m.loading_more()}
+            {:else}
+              {m.website_crawl_history_load_more({
+                current: crawlRuns.length,
+                total: totalCrawlRunCount
+              })}
+            {/if}
+          </Button>
+        </div>
+      {/if}
     </Page.Tab>
     <Page.Tab id="blobs">
       {#if data.environment.integrationRequestFormUrl}

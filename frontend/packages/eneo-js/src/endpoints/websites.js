@@ -4,6 +4,7 @@
 /** @typedef {import('../types/resources').EmbeddingModel} EmbeddingModel  */
 /** @typedef {import('../types/resources').InfoBlob} InfoBlob */
 /** @typedef {import('../types/resources').WebsiteInfoBlobPage} WebsiteInfoBlobPage */
+/** @typedef {import('../types/resources').WebsiteCrawlRunPage} WebsiteCrawlRunPage */
 
 /**
  * @param {import('../client/client').Client} client Provide a client with which to call the endpoints
@@ -176,7 +177,7 @@ export function initWebsites(client) {
         }),
 
       /**
-       * List all runs of a specific website
+       * List the newest page of runs. Use listPage to traverse older history.
        * @param {{id: string} | Website} website Website
        * @returns {Promise<CrawlRun[]>}
        * @throws {EneoError}
@@ -189,6 +190,18 @@ export function initWebsites(client) {
         });
         return res.items;
       },
+
+      /**
+       * List a bounded page of runs, newest first.
+       * @param {{id: string, limit?: number, cursor?: string}} website
+       * @returns {Promise<WebsiteCrawlRunPage>}
+       * @throws {EneoError}
+       */
+      listPage: async ({ id, limit = 100, cursor }) =>
+        client.fetch("/api/v1/websites/{id}/runs/", {
+          method: "get",
+          params: { path: { id }, query: { limit, cursor } }
+        }),
 
       /**
        * Manually trigger a new crawl run

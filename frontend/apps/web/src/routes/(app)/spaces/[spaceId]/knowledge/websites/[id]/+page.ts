@@ -5,16 +5,18 @@ export const load = async (event) => {
 
   event.depends("crawlruns:list");
 
-  const [website, crawlRuns, infoBlobPage] = await Promise.all([
+  const [website, crawlRunPage, infoBlobPage] = await Promise.all([
     eneo.websites.get({ id: event.params.id }),
-    eneo.websites.crawlRuns.list({ id: event.params.id }),
+    eneo.websites.crawlRuns.listPage({ id: event.params.id, limit: PAGINATION.PAGE_SIZE }),
     eneo.websites.indexedBlobs.listPage({ id: event.params.id, limit: PAGINATION.PAGE_SIZE })
   ]);
 
   const isOrgWebsite = organizationSpaceId != null && website.space_id === organizationSpaceId;
 
   return {
-    crawlRuns: crawlRuns.reverse(),
+    crawlRuns: [...crawlRunPage.items].reverse(),
+    nextCrawlRunCursor: crawlRunPage.next_cursor ?? null,
+    totalCrawlRunCount: crawlRunPage.total_count,
     infoBlobPage,
     website,
     readonly: isOrgWebsite
