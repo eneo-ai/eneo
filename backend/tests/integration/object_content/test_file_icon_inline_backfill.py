@@ -971,6 +971,7 @@ async def test_reference_failure_before_admission_requires_inline_capacity(
         await ObjectContentRepository(session).mark_backend_failure(
             content_id=referenced_content_id,
             failure_code=ContentFailureCode.BACKEND_CORRUPT,
+            observed_storage_kind=StorageKind.POSTGRES_INLINE,
         )
 
     waiting = await backfill.run_once()
@@ -1032,6 +1033,7 @@ async def test_reference_failure_invalidates_cached_capacity_requirement(
         await ObjectContentRepository(session).mark_backend_failure(
             content_id=referenced_content_id,
             failure_code=ContentFailureCode.BACKEND_CORRUPT,
+            observed_storage_kind=StorageKind.POSTGRES_INLINE,
         )
 
     refreshed_wait = await backfill.run_once()
@@ -1093,6 +1095,7 @@ async def test_concurrent_reference_failure_precedes_campaign_capacity_snapshot(
             await failure_repository.mark_backend_failure(
                 content_id=referenced_content_id,
                 failure_code=ContentFailureCode.BACKEND_CORRUPT,
+                observed_storage_kind=StorageKind.POSTGRES_INLINE,
             )
 
     failure_task = asyncio.create_task(fail_reference())
@@ -1286,6 +1289,7 @@ async def test_reference_failure_rechecks_admission_before_lock_order_fallback(
             await ObjectContentRepository(session).mark_backend_failure(
                 content_id=content_id,
                 failure_code=ContentFailureCode.BACKEND_CORRUPT,
+                observed_storage_kind=StorageKind.POSTGRES_INLINE,
             )
 
     failure_task = asyncio.create_task(fail_reference())
@@ -1961,6 +1965,7 @@ async def test_failed_existing_reference_is_replaced_by_available_legacy_content
         await ObjectContentRepository(session).mark_backend_failure(
             content_id=failed_content_id,
             failure_code=ContentFailureCode.BACKEND_CORRUPT,
+            observed_storage_kind=StorageKind.POSTGRES_INLINE,
         )
 
     original_delete_reference = (
@@ -2107,6 +2112,7 @@ async def test_failed_icon_reference_is_replaced_by_available_legacy_content(
         await ObjectContentRepository(session).mark_backend_failure(
             content_id=failed_content_id,
             failure_code=ContentFailureCode.BACKEND_CORRUPT,
+            observed_storage_kind=StorageKind.POSTGRES_INLINE,
         )
 
     result = await _backfill(object_content_database).run_once()

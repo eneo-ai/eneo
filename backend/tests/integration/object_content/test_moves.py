@@ -297,9 +297,16 @@ async def _publish_object_store_move(
 @pytest.mark.parametrize("inventory_boundary", ["completed", "partway", "equal"])
 async def test_completed_inventory_cannot_fail_a_new_remote_placement(
     object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
     inventory_boundary: str,
 ) -> None:
     database = object_content_database
+    provider = ObjectStoreProvider.fixed(
+        real_object_store.settings, real_object_store.store
+    )
+    reconciler = ObjectContentReconciler(
+        real_object_store.settings, database, object_store_provider=provider
+    )
     payload = b"verified bytes moved after the inventory"
     content_id, actor_id = await _create_inline_content(
         database,
@@ -312,12 +319,13 @@ async def test_completed_inventory_cannot_fail_a_new_remote_placement(
         async with database.session() as session, session.begin():
             repository = ObjectContentReconciliationRepository(session)
             cursor = await repository.object_inventory_cursor()
-            assert await repository.record_object_page(
+            page = await repository.record_object_page(
                 cursor=cursor,
                 objects=(),
                 next_token=None,
                 orphan_grace_seconds=300,
             )
+            assert page.completed
 
     await _publish_object_store_move(
         database,
@@ -330,21 +338,22 @@ async def test_completed_inventory_cannot_fail_a_new_remote_placement(
         if inventory_boundary == "partway":
             repository = ObjectContentReconciliationRepository(session)
             cursor = await repository.object_inventory_cursor()
-            assert not await repository.record_object_page(
+            page = await repository.record_object_page(
                 cursor=cursor,
                 objects=(),
                 next_token="next-page",
                 orphan_grace_seconds=300,
             )
+            assert not page.completed
         elif inventory_boundary == "equal":
             descriptor = await session.get(ObjectStoreObjects, content_id)
             state = await session.scalar(select(ObjectContentReconciliationState))
             assert descriptor is not None and state is not None
             state.last_completed_object_cycle_started_at = descriptor.created_at
             await session.flush()
-        missing = await ObjectContentReconciliationRepository(
-            session
-        ).mark_missing_from_completed_inventory(limit=100)
+    async with provider.acquire(refresh=False) as lease:
+        missing = await reconciler._mark_missing_from_completed_inventory(lease)
+    async with database.session() as session, session.begin():
         content = await session.get(ObjectContents, content_id)
         assert content is not None
         assert missing == 0
@@ -355,16 +364,16 @@ async def test_completed_inventory_cannot_fail_a_new_remote_placement(
         async with database.session() as session, session.begin():
             repository = ObjectContentReconciliationRepository(session)
             cursor = await repository.object_inventory_cursor()
-            assert await repository.record_object_page(
+            page = await repository.record_object_page(
                 cursor=cursor,
                 objects=(),
                 next_token=None,
                 orphan_grace_seconds=300,
             )
+            assert page.completed
+    async with provider.acquire(refresh=False) as lease:
+        missing = await reconciler._mark_missing_from_completed_inventory(lease)
     async with database.session() as session, session.begin():
-        missing = await ObjectContentReconciliationRepository(
-            session
-        ).mark_missing_from_completed_inventory(limit=100)
         content = await session.get(ObjectContents, content_id)
         assert content is not None
         assert missing == 1

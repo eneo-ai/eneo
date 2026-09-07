@@ -225,6 +225,24 @@ advancing cursor. An invalid or non-advancing page fails the run before Eneo
 marks unseen rows missing. A complete scan can mark absent available content as
 failed; retained content stays retained while health reports missing bytes.
 
+A missing-object scan only applies to remote descriptors created before that
+scan began. Moving older inline content to object storage does not inherit the
+inline placement's inventory age. Before recording a backend failure, the
+content repository rechecks the observed storage kind and object key; remote
+evidence also has to match the leased connection revision. A newer inventory
+observation supersedes an older missing or length-mismatch candidate. Reads may
+resolve a changed placement once more after releasing the old store lease and
+before returning any response bytes.
+
+Backend failures use the same legacy recovery owner as reads. For adopted
+content, it locks admission state, campaign, ordered ledger items, content, and
+then the remote descriptor. Inventory pages commit their content and descriptor
+updates before applying failure candidates in separate transactions, so they
+never enter that recovery sequence while holding page locks. A genuine failure
+reopens the affected ledger items and halts the campaign; its next run observes
+that durable state even when completion was cached. Recovery still requires
+the existing capacity acknowledgement and a higher resume revision.
+
 Unknown remote objects become orphan candidates. Eneo waits through repeated
 complete inventories and the configured grace period before deletion. This
 protects bytes that are newer than a restored PostgreSQL snapshot.

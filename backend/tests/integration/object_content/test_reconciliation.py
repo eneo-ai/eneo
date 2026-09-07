@@ -1264,7 +1264,7 @@ async def test_publication_reservation_is_not_an_inventory_observation(
             reservation.object_key,
         )
 
-        assert completed is True
+        assert completed.completed is True
         assert candidate is not None
         assert candidate.completed_observations == 0
 
@@ -1326,7 +1326,7 @@ async def test_known_orphan_waits_for_a_cycle_started_after_registration(
                 next_token=None,
                 orphan_grace_seconds=1,
             )
-            assert completed is True
+            assert completed.completed is True
 
         async with object_content_database.session() as session, session.begin():
             repository = ObjectContentReconciliationRepository(session)
@@ -1337,7 +1337,7 @@ async def test_known_orphan_waits_for_a_cycle_started_after_registration(
                 next_token="after-known-former-key",
                 orphan_grace_seconds=1,
             )
-            assert completed is False
+            assert completed.completed is False
 
         allow_registration.set()
         await registration
@@ -1362,7 +1362,7 @@ async def test_known_orphan_waits_for_a_cycle_started_after_registration(
             orphan_grace_seconds=1,
         )
         candidate = await session.get(ObjectContentOrphanCandidates, object_key)
-        assert completed is True
+        assert completed.completed is True
         assert candidate is not None
         assert candidate.completed_observations == 0
 
