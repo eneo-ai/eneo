@@ -1,0 +1,220 @@
+{
+  "arm_revisions": {
+    "candidate-broad-x1": "af8532718",
+    "candidate-cohort-x3": "af8532718",
+    "candidate-collision-x3": "a6e30c84c (the seven cases that hit confirmed_runtime_input_source_output_collision on af8532718, x3; parent had 0 collisions in 277 observations)",
+    "parent-broad-x1": "97fe995bb",
+    "parent-cohort-x3": "97fe995bb"
+  },
+  "arms": {
+    "candidate-broad-x1": {
+      "admission_normalization_hits": {},
+      "builder_error_codes": {
+        "self_correction_invalid_payload": 1
+      },
+      "dir": "candidate-broad-x1",
+      "initial_attempt_failure_codes": {
+        "confirmed_runtime_input_source_output_collision": 5,
+        "proposal_parse_model": 9
+      },
+      "initial_prompt_tokens": {
+        "mean": 2651,
+        "median": 2475,
+        "n": 151
+      },
+      "observations": 172,
+      "outcomes": {
+        "builder_error": 1,
+        "clarification_stop_intended": 17,
+        "plan_first_pass": 137,
+        "plan_repaired": 14,
+        "stalled_unanswered_question": 3
+      },
+      "receipts_sha256": "936207f641cb2379689fa85510fd90c975da26244b613c4f8c3cc39266a9e902",
+      "repair_attempt_failure_codes": {
+        "proposal_parse_model": 3
+      },
+      "revisions": [],
+      "spaces": [
+        "6f18b073-ea64-4a5e-8236-778a25e72d8f"
+      ],
+      "tracked_clean": [
+        "None"
+      ],
+      "verdicts": {
+        "fail": 64,
+        "not_evaluated": 1,
+        "pass": 107
+      }
+    },
+    "candidate-cohort-x3": {
+      "admission_normalization_hits": {},
+      "builder_error_codes": {
+        "self_correction_invalid_payload": 5
+      },
+      "dir": "candidate-cohort-x3",
+      "initial_attempt_failure_codes": {
+        "confirmed_runtime_input_source_output_collision": 2,
+        "proposal_parse_model": 17
+      },
+      "initial_prompt_tokens": {
+        "mean": 2549,
+        "median": 2440.0,
+        "n": 98
+      },
+      "observations": 105,
+      "outcomes": {
+        "builder_error": 5,
+        "plan_first_pass": 79,
+        "plan_repaired": 19,
+        "stalled_unanswered_question": 2
+      },
+      "receipts_sha256": "06deb6b610d3dc0055e2a5fe4f96b9da887fa85a199de3f0b5dd706a2a6105c7",
+      "repair_attempt_failure_codes": {
+        "proposal_parse_model": 5
+      },
+      "revisions": [],
+      "spaces": [
+        "6f18b073-ea64-4a5e-8236-778a25e72d8f"
+      ],
+      "tracked_clean": [
+        "None"
+      ],
+      "verdicts": {
+        "fail": 35,
+        "not_evaluated": 5,
+        "pass": 65
+      }
+    },
+    "candidate-collision-x3": {
+      "admission_normalization_hits": {},
+      "builder_error_codes": {},
+      "dir": "candidate-collision-x3",
+      "initial_attempt_failure_codes": {
+        "confirmed_runtime_input_source_output_collision": 1
+      },
+      "initial_prompt_tokens": {
+        "mean": 2616,
+        "median": 2555,
+        "n": 21
+      },
+      "observations": 21,
+      "outcomes": {
+        "plan_first_pass": 20,
+        "plan_repaired": 1
+      },
+      "receipts_sha256": "9fdeb7f8173236c2084b50fefd3a2020dfe993abd05347a80c43634d618033f7",
+      "repair_attempt_failure_codes": {},
+      "revisions": [],
+      "spaces": [
+        "6f18b073-ea64-4a5e-8236-778a25e72d8f"
+      ],
+      "tracked_clean": [
+        "None"
+      ],
+      "verdicts": {
+        "fail": 3,
+        "pass": 18
+      }
+    },
+    "parent-broad-x1": {
+      "admission_normalization_hits": {},
+      "builder_error_codes": {
+        "self_correction_invalid_payload": 1
+      },
+      "dir": "parent-broad-x1",
+      "initial_attempt_failure_codes": {
+        "proposal_parse_model": 6
+      },
+      "initial_prompt_tokens": {
+        "mean": 3127,
+        "median": 2922.0,
+        "n": 146
+      },
+      "observations": 172,
+      "outcomes": {
+        "builder_error": 1,
+        "clarification_stop_intended": 17,
+        "plan_first_pass": 140,
+        "plan_repaired": 6,
+        "stalled_unanswered_question": 8
+      },
+      "receipts_sha256": "2d86886d5806cb91e48387ee97be494bd42dc35a320850901dc91e848fb1fa05",
+      "repair_attempt_failure_codes": {},
+      "revisions": [],
+      "spaces": [
+        "9fe65f26-b0dd-47e8-9aea-aa02a2e50014"
+      ],
+      "tracked_clean": [
+        "None"
+      ],
+      "verdicts": {
+        "fail": 64,
+        "not_evaluated": 1,
+        "pass": 107
+      }
+    },
+    "parent-cohort-x3": {
+      "admission_normalization_hits": {},
+      "builder_error_codes": {
+        "self_correction_invalid_payload": 4
+      },
+      "dir": "parent-cohort-x3",
+      "initial_attempt_failure_codes": {
+        "proposal_parse_model": 14
+      },
+      "initial_prompt_tokens": {
+        "mean": 3112,
+        "median": 2776.0,
+        "n": 100
+      },
+      "observations": 105,
+      "outcomes": {
+        "builder_error": 4,
+        "plan_first_pass": 86,
+        "plan_repaired": 14,
+        "stalled_unanswered_question": 1
+      },
+      "receipts_sha256": "492ba1d5a10960e55c1c1ac2df6dbd19a9dfc5b20c53bfffe9a66a75c728b1d1",
+      "repair_attempt_failure_codes": {
+        "proposal_parse_model": 6
+      },
+      "revisions": [],
+      "spaces": [
+        "9fe65f26-b0dd-47e8-9aea-aa02a2e50014"
+      ],
+      "tracked_clean": [
+        "None"
+      ],
+      "verdicts": {
+        "fail": 36,
+        "not_evaluated": 4,
+        "pass": 65
+      }
+    }
+  },
+  "candidate_diff_sha256": "9d8583717ccdd02851ee910feb558521bd112570e95ced99e566cc4f5921ecaf",
+  "candidate_revision": "a6e30c84c",
+  "compare": {
+    "broad_x1": "Did this change help? **no_measurable_change** (net conformance -1: 10 improved, 11 regressed; declared margin 7)",
+    "cohort_x3": "Did this change help? **no_measurable_change** (net conformance -1: 0 improved, 1 regressed; declared margin 2)"
+  },
+  "declared_before_legs": {
+    "broad": "all cases x1, noise margin 7",
+    "cohort": "frozen 35-case list from the 2026-09-02 C2 cohort, x3, noise margin 2",
+    "first_comparison": "initial-attempt parse-failure classes"
+  },
+  "model": "gpt-5.6-luna 69ea7ad9-19e1-4dac-bcbe-9eb715e12644, supports_strict_tool_schema=true on both arms (verified by row diff)",
+  "parent_revision": "97fe995bb",
+  "slice": "C2 one authoring brief (eneo-m55.20)",
+  "voided_acquisitions": [
+    {
+      "cause": "candidate DB had supports_strict_tool_schema=false (left by the strict experiment); not evidence",
+      "dir": "candidate-cohort-x3.nonstrict-void"
+    },
+    {
+      "cause": "served worktree edited during the leg; 54/105 invalid_evidence (tracked_clean=false); not evidence",
+      "dir": "candidate-cohort-x3.dirty-tree-void"
+    }
+  ]
+}
