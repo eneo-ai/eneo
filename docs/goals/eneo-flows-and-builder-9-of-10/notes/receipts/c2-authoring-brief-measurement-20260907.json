@@ -1,7 +1,9 @@
 {
   "arm_revisions": {
     "candidate-broad-x1": "af8532718",
+    "candidate-broad-x1-final": "a6e30c84c",
     "candidate-cohort-x3": "af8532718",
+    "candidate-cohort-x3-final": "a6e30c84c",
     "candidate-collision-x3": "a6e30c84c (the seven cases that hit confirmed_runtime_input_source_output_collision on af8532718, x3; parent had 0 collisions in 277 observations)",
     "parent-broad-x1": "97fe995bb",
     "parent-cohort-x3": "97fe995bb"
@@ -9,6 +11,12 @@
   "arms": {
     "candidate-broad-x1": {
       "admission_normalization_hits": {},
+      "authoring_tokens_total": {
+        "attempts": 168,
+        "completion": 286367,
+        "per_observation": 4417,
+        "prompt": 473285
+      },
       "builder_error_codes": {
         "self_correction_invalid_payload": 1
       },
@@ -34,6 +42,11 @@
       "repair_attempt_failure_codes": {
         "proposal_parse_model": 3
       },
+      "repair_rate": {
+        "observations": 172,
+        "plan_first_pass": 137,
+        "plan_repaired": 14
+      },
       "revisions": [
         "af8532718d16e2ec448b31884a0b49cfcee56c24"
       ],
@@ -49,8 +62,67 @@
         "pass": 107
       }
     },
+    "candidate-broad-x1-final": {
+      "admission_normalization_hits": {},
+      "authoring_tokens_total": {
+        "attempts": 161,
+        "completion": 263652,
+        "per_observation": 4139,
+        "prompt": 448222
+      },
+      "builder_error_codes": {
+        "self_correction_invalid_payload": 1,
+        "self_correction_invalid_plan": 1
+      },
+      "dir": "candidate-broad-x1-final",
+      "initial_attempt_failure_codes": {
+        "proposal_parse_model": 9
+      },
+      "initial_prompt_tokens": {
+        "mean": 2623,
+        "median": 2469.5,
+        "n": 148
+      },
+      "observations": 172,
+      "outcomes": {
+        "builder_error": 2,
+        "clarification_stop_intended": 17,
+        "plan_first_pass": 139,
+        "plan_repaired": 9,
+        "stalled_unanswered_question": 5
+      },
+      "receipts_sha256": "9cfaf2c1a74903489b7cc529b2d54fabdfd94d5adb53a940c2f7c24a43b4723c",
+      "repair_attempt_failure_codes": {
+        "proposal_parse_model": 4
+      },
+      "repair_rate": {
+        "observations": 172,
+        "plan_first_pass": 139,
+        "plan_repaired": 9
+      },
+      "revisions": [
+        "a6e30c84ccbf85ae7c3e93d8747b18a3b35d534b"
+      ],
+      "spaces": [
+        "6f18b073-ea64-4a5e-8236-778a25e72d8f"
+      ],
+      "tracked_clean": [
+        "True"
+      ],
+      "verdicts": {
+        "fail": 63,
+        "not_evaluated": 2,
+        "pass": 107
+      }
+    },
     "candidate-cohort-x3": {
       "admission_normalization_hits": {},
+      "authoring_tokens_total": {
+        "attempts": 122,
+        "completion": 209924,
+        "per_observation": 5368,
+        "prompt": 353669
+      },
       "builder_error_codes": {
         "self_correction_invalid_payload": 5
       },
@@ -75,6 +147,11 @@
       "repair_attempt_failure_codes": {
         "proposal_parse_model": 5
       },
+      "repair_rate": {
+        "observations": 105,
+        "plan_first_pass": 79,
+        "plan_repaired": 19
+      },
       "revisions": [
         "af8532718d16e2ec448b31884a0b49cfcee56c24"
       ],
@@ -90,8 +167,67 @@
         "pass": 65
       }
     },
+    "candidate-cohort-x3-final": {
+      "admission_normalization_hits": {},
+      "authoring_tokens_total": {
+        "attempts": 122,
+        "completion": 215694,
+        "per_observation": 5421,
+        "prompt": 353485
+      },
+      "builder_error_codes": {
+        "self_correction_invalid_payload": 2
+      },
+      "dir": "candidate-cohort-x3-final",
+      "initial_attempt_failure_codes": {
+        "action_followup_requires_followup_fields": 1,
+        "confirmed_runtime_input_source_output_collision": 1,
+        "proposal_parse_model": 14
+      },
+      "initial_prompt_tokens": {
+        "mean": 2591,
+        "median": 2378,
+        "n": 99
+      },
+      "observations": 105,
+      "outcomes": {
+        "builder_error": 2,
+        "plan_first_pass": 81,
+        "plan_repaired": 18,
+        "stalled_unanswered_question": 4
+      },
+      "receipts_sha256": "edba71fc9241697622a59e8533e8b90f67142e060d0f7bbace9f4cb0860ee259",
+      "repair_attempt_failure_codes": {
+        "proposal_parse_model": 5
+      },
+      "repair_rate": {
+        "observations": 105,
+        "plan_first_pass": 81,
+        "plan_repaired": 18
+      },
+      "revisions": [
+        "a6e30c84ccbf85ae7c3e93d8747b18a3b35d534b"
+      ],
+      "spaces": [
+        "6f18b073-ea64-4a5e-8236-778a25e72d8f"
+      ],
+      "tracked_clean": [
+        "True"
+      ],
+      "verdicts": {
+        "fail": 34,
+        "not_evaluated": 2,
+        "pass": 69
+      }
+    },
     "candidate-collision-x3": {
       "admission_normalization_hits": {},
+      "authoring_tokens_total": {
+        "attempts": 22,
+        "completion": 33088,
+        "per_observation": 4365,
+        "prompt": 58578
+      },
       "builder_error_codes": {},
       "dir": "candidate-collision-x3",
       "initial_attempt_failure_codes": {
@@ -109,6 +245,11 @@
       },
       "receipts_sha256": "9fdeb7f8173236c2084b50fefd3a2020dfe993abd05347a80c43634d618033f7",
       "repair_attempt_failure_codes": {},
+      "repair_rate": {
+        "observations": 21,
+        "plan_first_pass": 20,
+        "plan_repaired": 1
+      },
       "revisions": [
         "a6e30c84ccbf85ae7c3e93d8747b18a3b35d534b"
       ],
@@ -125,6 +266,12 @@
     },
     "parent-broad-x1": {
       "admission_normalization_hits": {},
+      "authoring_tokens_total": {
+        "attempts": 152,
+        "completion": 229388,
+        "per_observation": 4163,
+        "prompt": 486731
+      },
       "builder_error_codes": {
         "self_correction_invalid_payload": 1
       },
@@ -147,6 +294,11 @@
       },
       "receipts_sha256": "2d86886d5806cb91e48387ee97be494bd42dc35a320850901dc91e848fb1fa05",
       "repair_attempt_failure_codes": {},
+      "repair_rate": {
+        "observations": 172,
+        "plan_first_pass": 140,
+        "plan_repaired": 6
+      },
       "revisions": [
         "97fe995bb5bcc4ca307d303161f626dda6e93210"
       ],
@@ -164,6 +316,12 @@
     },
     "parent-cohort-x3": {
       "admission_normalization_hits": {},
+      "authoring_tokens_total": {
+        "attempts": 120,
+        "completion": 184124,
+        "per_observation": 5621,
+        "prompt": 406125
+      },
       "builder_error_codes": {
         "self_correction_invalid_payload": 4
       },
@@ -187,6 +345,11 @@
       "repair_attempt_failure_codes": {
         "proposal_parse_model": 6
       },
+      "repair_rate": {
+        "observations": 105,
+        "plan_first_pass": 86,
+        "plan_repaired": 14
+      },
       "revisions": [
         "97fe995bb5bcc4ca307d303161f626dda6e93210"
       ],
@@ -206,8 +369,26 @@
   "candidate_diff_sha256": "9d8583717ccdd02851ee910feb558521bd112570e95ced99e566cc4f5921ecaf",
   "candidate_revision": "a6e30c84c",
   "compare": {
-    "broad_x1": "Did this change help? **no_measurable_change** (net conformance -1: 10 improved, 11 regressed; declared margin 7)",
-    "cohort_x3": "Did this change help? **no_measurable_change** (net conformance -1: 0 improved, 1 regressed; declared margin 2)"
+    "broad_x1_af8532718": {
+      "candidate": "af8532718",
+      "parent": "97fe995bb",
+      "verdict": "Did this change help? **no_measurable_change** (net conformance -1: 10 improved, 11 regressed; declared margin 7)"
+    },
+    "broad_x1_final": {
+      "candidate": "a6e30c84c",
+      "parent": "97fe995bb",
+      "verdict": "Did this change help? **no_measurable_change** (net conformance +2: 12 improved, 10 regressed; declared margin 7)"
+    },
+    "cohort_x3_af8532718": {
+      "candidate": "af8532718",
+      "parent": "97fe995bb",
+      "verdict": "Did this change help? **no_measurable_change** (net conformance -1: 0 improved, 1 regressed; declared margin 2)"
+    },
+    "cohort_x3_final": {
+      "candidate": "a6e30c84c",
+      "parent": "97fe995bb",
+      "verdict": "Did this change help? **no_measurable_change** (net conformance +0: 0 improved, 0 regressed; declared margin 2)"
+    }
   },
   "declared_before_legs": {
     "broad": "all cases x1, noise margin 7",

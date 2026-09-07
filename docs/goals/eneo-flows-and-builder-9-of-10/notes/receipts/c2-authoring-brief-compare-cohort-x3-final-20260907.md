@@ -1,0 +1,220 @@
+# Battle suite delta: DEV-20260907T111226Z -> DEV-20260907T123213Z
+
+## Did this change help? **no_measurable_change** (net conformance +0: 0 improved, 0 regressed; declared margin 2)
+Evidence: repeated — Both builds repeated; per-case instability is measured.
+
+Conformance direction (primary): {'inconclusive': 25, 'unchanged': 10}
+Mechanics direction: {'improved': 2, 'unchanged': 32, 'regressed': 1}
+Current outcomes: {'plan_repaired': 18, 'plan_first_pass': 81, 'stalled_unanswered_question': 4, 'builder_error': 2}
+
+## Conformance direction by cohort
+- attachment_or_template: +0 net; {'inconclusive': 8, 'unchanged': 2}
+- audio: +0 net; {'inconclusive': 2}
+- complete_everyday: +0 net; {'inconclusive': 1, 'unchanged': 2}
+- document: +0 net; {'inconclusive': 1}
+- file_role_discrimination: +0 net; {'inconclusive': 1}
+- form_fields: +0 net; {'inconclusive': 3, 'unchanged': 3}
+- foundation: +0 net; {'inconclusive': 7, 'unchanged': 4}
+- human_review: +0 net; {'inconclusive': 1, 'unchanged': 1}
+- input_field_contract: +0 net; {'inconclusive': 2, 'unchanged': 1}
+- json: +0 net; {'inconclusive': 20, 'unchanged': 5}
+- long_context: +0 net; {'inconclusive': 1}
+- municipal_journey_v1: +0 net; {'inconclusive': 1, 'unchanged': 1}
+- pdf: +0 net; {'inconclusive': 3, 'unchanged': 1}
+- persona_beginner: +0 net; {'unchanged': 1}
+- persona_domain_expert: +0 net; {'unchanged': 1}
+- persona_intermediate: +0 net; {'inconclusive': 1}
+- persona_technical: +0 net; {'inconclusive': 1}
+- prompt_complete: +0 net; {'unchanged': 1}
+- prompt_contract: +0 net; {'inconclusive': 1}
+- prompt_partial: +0 net; {'inconclusive': 1}
+- prompt_vague: +0 net; {'unchanged': 1}
+- single_missing_dimension: +0 net; {'inconclusive': 1}
+- technical_contract: +0 net; {'inconclusive': 9, 'unchanged': 1}
+- tjansteskrivelse_v1: +0 net; {'inconclusive': 1}
+- vague: +0 net; {'unchanged': 2}
+
+## Unstable cases (a build disagreed with itself; no direction)
+- baseline: advanced_explicit_change_log_analysis, advanced_explicit_integration_validation, advanced_explicit_lss_intake_contract, advanced_explicit_procurement_matrix, advanced_explicit_retention_inventory, attachment_json_lokalkalkyl_budgetposter_saknat_belopp, attachment_json_protokoll_remissvar_datumkonflikt, attachment_json_remissvar_per_avsandare, attachment_pdf_report_remissvar_sammanstallning, complex_social_case_timeline_redaction, easy_hr_job_application_summary, input_field_open_text_must_not_become_select, long_context_miljofarlig_verksamhet_documents_to_json, medium_school_absence_followup_json, simple_audio_minutes_actions
+- current: advanced_explicit_change_log_analysis, advanced_explicit_integration_validation, advanced_explicit_lss_intake_contract, advanced_explicit_meeting_action_register, advanced_explicit_procurement_matrix, advanced_explicit_retention_inventory, advanced_sundsvall_tjansteskrivelse_runtime_sources_docx, attachment_json_protokoll_remissvar_datumkonflikt, attachment_json_remissvar_per_avsandare, attachment_pdf_report_ekonomisk_konsekvens_lokalkalkyl, attachment_pdf_report_exemplarform_kallgenomgang, attachment_pdf_report_remissvar_sammanstallning, complex_social_case_timeline_redaction, declared_terminal_everyday_fardtjanst_json, easy_hr_job_application_summary, file_role_discrimination_reference_material_criteria, hard_archive_retention_classification, input_field_required_and_optional_metadata, interview_input_citizen_feedback, long_context_miljofarlig_verksamhet_documents_to_json, medium_school_absence_followup_json, text_terminal_apt_avvikelsesammanfattning
+
+Identity differences (expected between builds; an undeclared harness or corpus change would show here): ['source_revision']
+
+## Remaining blockers (ranked, by distinct case)
+- 2x self_correction_invalid_payload
+- 2x proposal_parse_model
+
+## Remaining failed checks (ranked, by distinct case)
+- 8x expected_leaf_output_fields
+- 4x plan_created
+- 4x question_relevance_complete
+- 4x expected_output_contract_schema
+- 3x min_source_ref_steps
+- 2x min_steps
+- 2x proposed_review_policy_target
+- 2x classifier_file_role:file_index_0
+- 1x max_question_event_count
+- 1x expected_question_event_count
+- 1x expected_input_contract_schema
+- 1x proposed_review_policy_topology
+- 1x proposed_review_policy_not_terminal_or_delivery
+- 1x applied_expected_output_contract_schema
+- 1x applied_review_policy_target
+- 1x proposed_review_policy_count
+- 1x proposed_review_policy_mode
+- 1x max_steps
+- 1x classifier_file_role:file_index_1
+
+## Per-case transitions
+- **advanced_explicit_change_log_analysis** [inconclusive] conformance pass -> pass; mechanics [improved] plan_repaired -> plan_first_pass
+  - baseline_observed_states: ["builder_error/not_evaluated", "plan_repaired/pass"]
+  - current_observed_states: ["plan_first_pass/fail", "plan_first_pass/pass"]
+  - authoring_tokens: {"before": 16548, "after": 10480, "delta": -6068}
+  - repair_economics: {"before": {"repair_token_cost": 5946, "attempt_failure_codes": ["proposal_parse_model"]}, "after": {"repair_token_cost": 0, "attempt_failure_codes": []}, "delta": -5946}
+- **advanced_explicit_integration_validation** [inconclusive] conformance fail -> fail; mechanics [unchanged] plan_repaired -> plan_repaired
+  - baseline_observed_states: ["plan_first_pass/fail", "plan_repaired/fail"]
+  - current_observed_states: ["plan_first_pass/fail", "plan_repaired/fail"]
+  - authoring_tokens: {"before": 13806, "after": 12948, "delta": -858}
+  - repair_economics: {"before": {"repair_token_cost": 4228, "attempt_failure_codes": ["proposal_parse_model"]}, "after": {"repair_token_cost": 3787, "attempt_failure_codes": ["proposal_parse_model"]}, "delta": -441}
+- **advanced_explicit_lss_intake_contract** [inconclusive] conformance pass -> pass; mechanics [unchanged] plan_first_pass -> plan_first_pass
+  - baseline_observed_states: ["plan_first_pass/fail", "plan_first_pass/pass"]
+  - current_observed_states: ["plan_first_pass/pass", "plan_repaired/pass"]
+  - authoring_tokens: {"before": 11644, "after": 11040, "delta": -604}
+  - repair_economics: {"before": {"repair_token_cost": 0, "attempt_failure_codes": []}, "after": {"repair_token_cost": 0, "attempt_failure_codes": []}, "delta": 0}
+- **advanced_explicit_meeting_action_register** [inconclusive] conformance pass -> fail; mechanics [unchanged] plan_first_pass -> plan_first_pass
+  - current_observed_states: ["plan_first_pass/fail", "plan_first_pass/pass", "stalled_unanswered_question/fail"]
+  - failed_checks: {"resolved": [], "introduced": ["expected_output_contract_schema"]}
+  - authoring_tokens: {"before": 9804, "after": 10376, "delta": 572}
+  - repair_economics: {"before": {"repair_token_cost": 0, "attempt_failure_codes": []}, "after": {"repair_token_cost": 0, "attempt_failure_codes": []}, "delta": 0}
+- **advanced_explicit_privacy_assessment** [unchanged] conformance pass -> pass; mechanics [unchanged] plan_first_pass -> plan_first_pass
+  - authoring_tokens: {"before": 10405, "after": 10987, "delta": 582}
+  - repair_economics: {"before": {"repair_token_cost": 0, "attempt_failure_codes": []}, "after": {"repair_token_cost": 0, "attempt_failure_codes": []}, "delta": 0}
+- **advanced_explicit_procurement_matrix** [inconclusive] conformance not_evaluated -> not_evaluated; mechanics [unchanged] builder_error -> builder_error
+  - baseline_observed_states: ["builder_error/not_evaluated", "plan_repaired/pass"]
+  - current_observed_states: ["builder_error/not_evaluated", "plan_first_pass/fail", "plan_repaired/pass"]
+  - authoring_tokens: {"before": 6745, "after": 6633, "delta": -112}
+  - repair_economics: {"before": {"repair_token_cost": 0, "attempt_failure_codes": []}, "after": {"repair_token_cost": 0, "attempt_failure_codes": []}, "delta": 0}
+- **advanced_explicit_retention_inventory** [inconclusive] conformance pass -> pass; mechanics [unchanged] plan_repaired -> plan_repaired
+  - baseline_observed_states: ["plan_first_pass/pass", "plan_repaired/pass"]
+  - current_observed_states: ["plan_first_pass/pass", "plan_repaired/pass"]
+  - authoring_tokens: {"before": 20250, "after": 15983, "delta": -4267}
+  - repair_economics: {"before": {"repair_token_cost": 9499, "attempt_failure_codes": ["proposal_parse_model", "proposal_parse_model"]}, "after": {"repair_token_cost": 5559, "attempt_failure_codes": ["proposal_parse_model"]}, "delta": -3940}
+- **advanced_sundsvall_tjansteskrivelse_runtime_sources_docx** [inconclusive] conformance fail -> fail; mechanics [unchanged] plan_first_pass -> plan_first_pass
+  - current_observed_states: ["plan_first_pass/fail", "stalled_unanswered_question/fail"]
+  - authoring_tokens: {"before": 22471, "after": 21628, "delta": -843}
+  - repair_economics: {"before": {"repair_token_cost": 0, "attempt_failure_codes": []}, "after": {"repair_token_cost": 0, "attempt_failure_codes": []}, "delta": 0}
+- **attachment_json_lokalkalkyl_budgetposter_saknat_belopp** [inconclusive] conformance fail -> pass; mechanics [unchanged] plan_first_pass -> plan_first_pass
+  - baseline_observed_states: ["plan_first_pass/fail", "plan_first_pass/pass"]
+  - failed_checks: {"resolved": ["expected_output_contract_schema"], "introduced": []}
+  - authoring_tokens: {"before": 10831, "after": 10441, "delta": -390}
+  - repair_economics: {"before": {"repair_token_cost": 0, "attempt_failure_codes": []}, "after": {"repair_token_cost": 0, "attempt_failure_codes": []}, "delta": 0}
+- **attachment_json_protokoll_remissvar_datumkonflikt** [inconclusive] conformance pass -> pass; mechanics [improved] plan_repaired -> plan_first_pass
+  - baseline_observed_states: ["builder_error/not_evaluated", "plan_first_pass/fail", "plan_repaired/pass"]
+  - current_observed_states: ["builder_error/not_evaluated", "plan_first_pass/fail", "plan_first_pass/pass"]
+  - authoring_tokens: {"before": 32526, "after": 15014, "delta": -17512}
+  - repair_economics: {"before": {"repair_token_cost": 16803, "attempt_failure_codes": ["proposal_parse_model", "proposal_parse_model"]}, "after": {"repair_token_cost": 0, "attempt_failure_codes": []}, "delta": -16803}
+- **attachment_json_remissvar_per_avsandare** [inconclusive] conformance pass -> pass; mechanics [unchanged] plan_first_pass -> plan_first_pass
+  - baseline_observed_states: ["plan_first_pass/fail", "plan_first_pass/pass"]
+  - current_observed_states: ["plan_first_pass/pass", "plan_repaired/pass"]
+  - authoring_tokens: {"before": 11700, "after": 10889, "delta": -811}
+  - repair_economics: {"before": {"repair_token_cost": 0, "attempt_failure_codes": []}, "after": {"repair_token_cost": 0, "attempt_failure_codes": []}, "delta": 0}
+- **attachment_pdf_report_ekonomisk_konsekvens_lokalkalkyl** [inconclusive] conformance fail -> fail; mechanics [unchanged] plan_first_pass -> plan_first_pass
+  - current_observed_states: ["plan_first_pass/fail", "plan_repaired/fail"]
+  - failed_checks: {"resolved": [], "introduced": ["expected_leaf_output_fields"]}
+  - authoring_tokens: {"before": 13233, "after": 12023, "delta": -1210}
+  - repair_economics: {"before": {"repair_token_cost": 0, "attempt_failure_codes": []}, "after": {"repair_token_cost": 0, "attempt_failure_codes": []}, "delta": 0}
+- **attachment_pdf_report_exemplarform_kallgenomgang** [inconclusive] conformance pass -> fail; mechanics [unchanged] plan_first_pass -> plan_first_pass
+  - current_observed_states: ["plan_first_pass/fail", "plan_first_pass/pass"]
+  - failed_checks: {"resolved": [], "introduced": ["expected_leaf_output_fields"]}
+  - authoring_tokens: {"before": 17042, "after": 15933, "delta": -1109}
+  - repair_economics: {"before": {"repair_token_cost": 0, "attempt_failure_codes": []}, "after": {"repair_token_cost": 0, "attempt_failure_codes": []}, "delta": 0}
+- **attachment_pdf_report_remissvar_sammanstallning** [inconclusive] conformance pass -> pass; mechanics [unchanged] plan_first_pass -> plan_first_pass
+  - baseline_observed_states: ["plan_first_pass/fail", "plan_first_pass/pass"]
+  - current_observed_states: ["plan_first_pass/fail", "plan_first_pass/pass"]
+  - authoring_tokens: {"before": 16855, "after": 15686, "delta": -1169}
+  - repair_economics: {"before": {"repair_token_cost": 0, "attempt_failure_codes": []}, "after": {"repair_token_cost": 0, "attempt_failure_codes": []}, "delta": 0}
+- **complex_social_case_timeline_redaction** [inconclusive] conformance fail -> fail; mechanics [unchanged] plan_first_pass -> plan_first_pass
+  - baseline_observed_states: ["plan_first_pass/fail", "plan_first_pass/pass"]
+  - current_observed_states: ["plan_first_pass/fail", "stalled_unanswered_question/fail"]
+  - failed_checks: {"resolved": ["min_json_steps", "min_source_ref_steps"], "introduced": []}
+  - authoring_tokens: {"before": 11249, "after": 11519, "delta": 270}
+  - repair_economics: {"before": {"repair_token_cost": 0, "attempt_failure_codes": []}, "after": {"repair_token_cost": 0, "attempt_failure_codes": []}, "delta": 0}
+- **declared_terminal_everyday_fardtjanst_json** [inconclusive] conformance fail -> fail; mechanics [unchanged] plan_first_pass -> plan_first_pass
+  - current_observed_states: ["plan_first_pass/fail", "plan_first_pass/pass"]
+  - authoring_tokens: {"before": 10849, "after": 10198, "delta": -651}
+  - repair_economics: {"before": {"repair_token_cost": 0, "attempt_failure_codes": []}, "after": {"repair_token_cost": 0, "attempt_failure_codes": []}, "delta": 0}
+- **docx_template_fill_vague_mall_ifyllning_interview** [unchanged] conformance pass -> pass; mechanics [unchanged] plan_first_pass -> plan_first_pass
+  - questions: {"before": ["primary_runtime_input"], "after": ["post_processing_goal", "primary_runtime_input"]}
+  - authoring_tokens: {"before": 11560, "after": 11733, "delta": 173}
+  - repair_economics: {"before": {"repair_token_cost": 0, "attempt_failure_codes": []}, "after": {"repair_token_cost": 0, "attempt_failure_codes": []}, "delta": 0}
+- **easy_hr_job_application_summary** [inconclusive] conformance pass -> pass; mechanics [unchanged] plan_repaired -> plan_repaired
+  - baseline_observed_states: ["plan_first_pass/pass", "plan_repaired/pass"]
+  - current_observed_states: ["plan_first_pass/pass", "plan_repaired/pass"]
+  - authoring_tokens: {"before": 17562, "after": 26077, "delta": 8515}
+  - repair_economics: {"before": {"repair_token_cost": 6464, "attempt_failure_codes": ["proposal_parse_model"]}, "after": {"repair_token_cost": 13938, "attempt_failure_codes": ["proposal_parse_model", "proposal_parse_model"]}, "delta": 7474}
+- **easy_preschool_incident_note_json** [unchanged] conformance pass -> pass; mechanics [unchanged] plan_first_pass -> plan_first_pass
+  - authoring_tokens: {"before": 17547, "after": 17288, "delta": -259}
+  - repair_economics: {"before": {"repair_token_cost": 0, "attempt_failure_codes": []}, "after": {"repair_token_cost": 0, "attempt_failure_codes": []}, "delta": 0}
+- **file_role_discrimination_reference_material_criteria** [inconclusive] conformance pass -> pass; mechanics [regressed] plan_first_pass -> plan_repaired
+  - current_observed_states: ["plan_repaired/pass", "stalled_unanswered_question/fail"]
+  - authoring_tokens: {"before": 11724, "after": 15614, "delta": 3890}
+  - repair_economics: {"before": {"repair_token_cost": 0, "attempt_failure_codes": []}, "after": {"repair_token_cost": 4776, "attempt_failure_codes": []}, "delta": 4776}
+- **hard_archive_retention_classification** [inconclusive] conformance fail -> pass; mechanics [unchanged] plan_first_pass -> plan_first_pass
+  - current_observed_states: ["plan_first_pass/pass", "plan_repaired/pass"]
+  - failed_checks: {"resolved": ["min_steps"], "introduced": []}
+  - authoring_tokens: {"before": 10790, "after": 12516, "delta": 1726}
+  - repair_economics: {"before": {"repair_token_cost": 0, "attempt_failure_codes": []}, "after": {"repair_token_cost": 0, "attempt_failure_codes": []}, "delta": 0}
+- **hard_municipal_company_board_packet** [unchanged] conformance fail -> fail; mechanics [unchanged] plan_first_pass -> plan_first_pass
+  - authoring_tokens: {"before": 16404, "after": 16166, "delta": -238}
+  - repair_economics: {"before": {"repair_token_cost": 0, "attempt_failure_codes": []}, "after": {"repair_token_cost": 0, "attempt_failure_codes": []}, "delta": 0}
+- **input_field_open_text_must_not_become_select** [inconclusive] conformance pass -> pass; mechanics [unchanged] plan_first_pass -> plan_first_pass
+  - baseline_observed_states: ["plan_first_pass/pass", "plan_repaired/pass"]
+  - authoring_tokens: {"before": 17866, "after": 17982, "delta": 116}
+  - repair_economics: {"before": {"repair_token_cost": 0, "attempt_failure_codes": []}, "after": {"repair_token_cost": 0, "attempt_failure_codes": []}, "delta": 0}
+- **input_field_required_and_optional_metadata** [inconclusive] conformance pass -> pass; mechanics [unchanged] plan_first_pass -> plan_first_pass
+  - current_observed_states: ["plan_first_pass/pass", "plan_repaired/pass"]
+  - authoring_tokens: {"before": 18164, "after": 17287, "delta": -877}
+  - repair_economics: {"before": {"repair_token_cost": 0, "attempt_failure_codes": []}, "after": {"repair_token_cost": 0, "attempt_failure_codes": []}, "delta": 0}
+- **input_field_single_select_permit_case_type** [unchanged] conformance pass -> pass; mechanics [unchanged] plan_first_pass -> plan_first_pass
+  - authoring_tokens: {"before": 17010, "after": 17187, "delta": 177}
+  - repair_economics: {"before": {"repair_token_cost": 0, "attempt_failure_codes": []}, "after": {"repair_token_cost": 0, "attempt_failure_codes": []}, "delta": 0}
+- **interview_input_citizen_feedback** [inconclusive] conformance fail -> pass; mechanics [unchanged] plan_first_pass -> plan_first_pass
+  - current_observed_states: ["plan_first_pass/fail", "plan_first_pass/pass"]
+  - failed_checks: {"resolved": ["expected_leaf_output_fields", "expected_question_event_count", "max_question_event_count", "question_relevance_complete"], "introduced": []}
+  - questions: {"before": ["primary_runtime_input", "runtime_metadata_fields"], "after": ["primary_runtime_input"]}
+  - authoring_tokens: {"before": 10123, "after": 10018, "delta": -105}
+  - repair_economics: {"before": {"repair_token_cost": 0, "attempt_failure_codes": []}, "after": {"repair_token_cost": 0, "attempt_failure_codes": []}, "delta": 0}
+- **interview_open_procurement_review** [unchanged] conformance pass -> pass; mechanics [unchanged] plan_first_pass -> plan_first_pass
+  - authoring_tokens: {"before": 12188, "after": 11995, "delta": -193}
+  - repair_economics: {"before": {"repair_token_cost": 0, "attempt_failure_codes": []}, "after": {"repair_token_cost": 0, "attempt_failure_codes": []}, "delta": 0}
+- **long_context_miljofarlig_verksamhet_documents_to_json** [inconclusive] conformance fail -> pass; mechanics [unchanged] plan_first_pass -> plan_first_pass
+  - baseline_observed_states: ["plan_first_pass/fail", "plan_first_pass/pass", "stalled_unanswered_question/fail"]
+  - current_observed_states: ["plan_first_pass/fail", "plan_first_pass/pass"]
+  - failed_checks: {"resolved": ["min_source_ref_steps", "min_steps"], "introduced": []}
+  - authoring_tokens: {"before": 14353, "after": 18836, "delta": 4483}
+  - repair_economics: {"before": {"repair_token_cost": 0, "attempt_failure_codes": []}, "after": {"repair_token_cost": 0, "attempt_failure_codes": []}, "delta": 0}
+- **medium_decision_letter_template_attachment** [unchanged] conformance pass -> pass; mechanics [unchanged] plan_first_pass -> plan_first_pass
+  - authoring_tokens: {"before": 18706, "after": 18143, "delta": -563}
+  - repair_economics: {"before": {"repair_token_cost": 0, "attempt_failure_codes": []}, "after": {"repair_token_cost": 0, "attempt_failure_codes": []}, "delta": 0}
+- **medium_school_absence_followup_json** [inconclusive] conformance fail -> fail; mechanics [unchanged] plan_first_pass -> plan_first_pass
+  - baseline_observed_states: ["plan_first_pass/fail", "plan_repaired/fail"]
+  - current_observed_states: ["plan_first_pass/fail", "plan_first_pass/pass"]
+  - authoring_tokens: {"before": 11661, "after": 12077, "delta": 416}
+  - repair_economics: {"before": {"repair_token_cost": 0, "attempt_failure_codes": []}, "after": {"repair_token_cost": 0, "attempt_failure_codes": []}, "delta": 0}
+- **ordinary_json_lss_completeness** [unchanged] conformance pass -> pass; mechanics [unchanged] plan_first_pass -> plan_first_pass
+  - authoring_tokens: {"before": 10673, "after": 9617, "delta": -1056}
+  - repair_economics: {"before": {"repair_token_cost": 0, "attempt_failure_codes": []}, "after": {"repair_token_cost": 0, "attempt_failure_codes": []}, "delta": 0}
+- **ordinary_json_security_incident** [unchanged] conformance pass -> pass; mechanics [unchanged] plan_first_pass -> plan_first_pass
+  - authoring_tokens: {"before": 10028, "after": 9455, "delta": -573}
+  - repair_economics: {"before": {"repair_token_cost": 0, "attempt_failure_codes": []}, "after": {"repair_token_cost": 0, "attempt_failure_codes": []}, "delta": 0}
+- **simple_audio_minutes_actions** [inconclusive] conformance pass -> pass; mechanics [unchanged] plan_repaired -> plan_repaired
+  - baseline_observed_states: ["plan_first_pass/pass", "plan_repaired/pass"]
+  - authoring_tokens: {"before": 14881, "after": 15745, "delta": 864}
+  - repair_economics: {"before": {"repair_token_cost": 4782, "attempt_failure_codes": ["proposal_parse_model"]}, "after": {"repair_token_cost": 5450, "attempt_failure_codes": ["proposal_parse_model"]}, "delta": 668}
+- **text_terminal_apt_avvikelsesammanfattning** [inconclusive] conformance pass -> pass; mechanics [unchanged] plan_first_pass -> plan_first_pass
+  - current_observed_states: ["plan_first_pass/pass", "plan_repaired/pass"]
+  - authoring_tokens: {"before": 10851, "after": 10436, "delta": -415}
+  - repair_economics: {"before": {"repair_token_cost": 0, "attempt_failure_codes": []}, "after": {"repair_token_cost": 0, "attempt_failure_codes": []}, "delta": 0}
+- **text_terminal_etjanst_svar_med_granskning** [unchanged] conformance fail -> fail; mechanics [unchanged] plan_first_pass -> plan_first_pass
+  - authoring_tokens: {"before": 10193, "after": 9898, "delta": -295}
+  - repair_economics: {"before": {"repair_token_cost": 0, "attempt_failure_codes": []}, "after": {"repair_token_cost": 0, "attempt_failure_codes": []}, "delta": 0}
