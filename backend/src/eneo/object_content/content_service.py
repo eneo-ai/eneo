@@ -80,6 +80,10 @@ def retry_delay_seconds(
 _READ_BATCH_MAX_ITEMS = 500
 
 
+class _ContentPlacementChanged(ObjectContentUnavailableError):
+    """The read's backend failure describes a superseded placement."""
+
+
 @dataclass(frozen=True, slots=True)
 class VerifiedObjectUpload:
     object_key: str
@@ -704,24 +708,32 @@ class ObjectContentService:
         *,
         range_header: str | None = None,
     ) -> AsyncGenerator[ContentRead]:
-        async with self._database.session() as session, session.begin():
-            sources = await ObjectContentRepository(session).get_readable_sources(
-                [grant]
+        for attempt in range(2):
+            async with self._database.session() as session, session.begin():
+                sources = await ObjectContentRepository(session).get_readable_sources(
+                    [grant]
+                )
+            source = sources[grant.content_id]
+            byte_range = (
+                None
+                if range_header is None
+                else ByteRange.parse(
+                    range_header,
+                    size_bytes=source.content.size_bytes,
+                )
             )
-        source = sources[grant.content_id]
-        byte_range = (
-            None
-            if range_header is None
-            else ByteRange.parse(
-                range_header,
-                size_bytes=source.content.size_bytes,
-            )
-        )
-        async with self._open_readable_source(
-            source,
-            byte_range=byte_range,
-        ) as opened:
-            yield opened
+            yielded = False
+            try:
+                async with self._open_readable_source(
+                    source,
+                    byte_range=byte_range,
+                ) as opened:
+                    yielded = True
+                    yield opened
+                return
+            except _ContentPlacementChanged:
+                if attempt or yielded:
+                    raise
 
     @asynccontextmanager
     async def _open_readable_source(
@@ -745,10 +757,13 @@ class ObjectContentService:
                     ) as opened:
                         yield opened
                 except ObjectContentIntegrityError:
-                    await self._mark_backend_failure(
-                        content.content_id,
+                    if not await self._mark_backend_failure(
+                        source,
                         ContentFailureCode.BACKEND_CORRUPT,
-                    )
+                    ):
+                        raise _ContentPlacementChanged(
+                            "Content placement changed during the read; try again"
+                        ) from None
                     raise
             case StorageKind.OBJECT_STORE:
                 if source.object_store_descriptor is None:
@@ -788,6 +803,7 @@ class ObjectContentService:
                         session
                     ).get_object_store_verification_chunks(
                         content_id=content.content_id,
+                        object_key=descriptor.object_key,
                         first_chunk_index=window.first_chunk_index,
                         chunk_count=window.chunk_count,
                     )
@@ -805,26 +821,38 @@ class ObjectContentService:
             ) as opened:
                 yield opened
         except (ValueError, ObjectContentStateError) as error:
-            await self._mark_backend_failure(
-                content.content_id,
+            if not await self._mark_backend_failure(
+                source,
                 ContentFailureCode.BACKEND_CORRUPT,
-            )
+                lease=lease,
+            ):
+                raise _ContentPlacementChanged(
+                    "Content placement changed during the read; try again"
+                ) from error
             raise ObjectContentIntegrityError(
                 "Durable object verification metadata is invalid"
             ) from error
         except ObjectStoreNotFoundError as error:
-            await self._mark_backend_failure(
-                content.content_id,
+            if not await self._mark_backend_failure(
+                source,
                 ContentFailureCode.BACKEND_MISSING,
-            )
+                lease=lease,
+            ):
+                raise _ContentPlacementChanged(
+                    "Content placement changed during the read; try again"
+                ) from error
             raise ObjectContentUnavailableError(
                 "Durable object content is unavailable"
             ) from error
         except ObjectStoreIntegrityError as error:
-            await self._mark_backend_failure(
-                content.content_id,
+            if not await self._mark_backend_failure(
+                source,
                 ContentFailureCode.BACKEND_CORRUPT,
-            )
+                lease=lease,
+            ):
+                raise _ContentPlacementChanged(
+                    "Content placement changed during the read; try again"
+                ) from error
             raise ObjectContentIntegrityError(
                 "Durable object verification failed"
             ) from error
@@ -972,13 +1000,25 @@ class ObjectContentService:
 
     async def _mark_backend_failure(
         self,
-        content_id: UUID,
+        source: ReadableContentSource,
         failure_code: ContentFailureCode,
-    ) -> None:
+        *,
+        lease: ObjectStoreLease | None = None,
+    ) -> bool:
         async with self._database.session() as session, session.begin():
-            await ObjectContentRepository(session).mark_backend_failure(
-                content_id=content_id,
+            if lease is not None:
+                await require_store_generation(
+                    session, slot=lease.slot, revision=lease.revision
+                )
+            return await ObjectContentRepository(session).mark_backend_failure(
+                content_id=source.content.content_id,
                 failure_code=failure_code,
+                observed_storage_kind=source.content.storage_kind,
+                observed_object_key=(
+                    source.object_store_descriptor.object_key
+                    if source.object_store_descriptor is not None
+                    else None
+                ),
             )
 
     @asynccontextmanager
