@@ -1746,16 +1746,15 @@ def test_the_prompt_names_the_projected_fields_concretely() -> None:
     # compiled postcondition read, so prompt and verification can never
     # disagree about the names.
     from eneo.flows.ai_builder.ai_builder_plan_proposal_task import (
-        build_plan_proposal_system_prompt,
+        build_authoring_brief,
     )
 
     state = _state(PUBLIC_RECORD_OBLIGATIONS)
     projection = named_result_projection(state)
     assert projection is not None
 
-    prompt = build_plan_proposal_system_prompt(
+    prompt = build_authoring_brief(
         planning_state=state,
-        confirmed_requirements=None,
         attachment_context=None,
         flow_context=None,
         is_edit_mode=False,
@@ -1765,7 +1764,7 @@ def test_the_prompt_names_the_projected_fields_concretely() -> None:
     )
 
     expected_rule = (
-        "- The user attested to these named results: "
+        "- The result must contain these exact named results: "
         + ", ".join(
             f"`{projection.render_key_location(key)}`"
             + (f" (type {key.declared_shape})" if key.declared_shape else "")
@@ -1785,19 +1784,14 @@ def test_the_prompt_names_the_projected_fields_concretely() -> None:
         "are rejected."
     )
     assert expected_rule in prompt
-    assert prompt.count("The user attested to these named results") == 1
-    assert (
-        "Only primitive fields (string, number, boolean) may be nullable; "
-        "never mark object or array fields nullable." in prompt
-    )
+    assert prompt.count("The result must contain these exact named results") == 1
     # The prohibition era is over: the positive contract is the only prompt
     # owner of the boundary.
     assert "Never add any of them" not in prompt
     assert "One narrow exception" not in prompt
 
-    empty_prompt = build_plan_proposal_system_prompt(
+    empty_prompt = build_authoring_brief(
         planning_state=PlanningState.empty(),
-        confirmed_requirements=None,
         attachment_context=None,
         flow_context=None,
         is_edit_mode=False,
@@ -1810,7 +1804,7 @@ def test_the_prompt_names_the_projected_fields_concretely() -> None:
 
 def test_the_prompt_names_exact_paths_and_marks_unplaced_results() -> None:
     from eneo.flows.ai_builder.ai_builder_plan_proposal_task import (
-        build_plan_proposal_system_prompt,
+        build_authoring_brief,
     )
 
     state = _state()
@@ -1844,9 +1838,8 @@ def test_the_prompt_names_exact_paths_and_marks_unplaced_results() -> None:
         ),
     ]
 
-    prompt = build_plan_proposal_system_prompt(
+    prompt = build_authoring_brief(
         planning_state=state,
-        confirmed_requirements=None,
         attachment_context=None,
         flow_context=None,
         is_edit_mode=False,

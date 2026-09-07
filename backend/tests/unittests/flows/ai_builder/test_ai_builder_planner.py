@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator
 from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -33,6 +33,7 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AIBuilderAttachmentContext,
     AIBuilderAttachmentContextPolicy,
     AIBuilderAttachmentSchemaDiscovery,
+    attachment_file_roles,
     build_ai_builder_attachment_context,
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
@@ -51,6 +52,8 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderTurnLifecycle,
     BuilderTurnState,
     ConversationMessage,
+    FlowBuilderProposal,
+    FlowBuilderProposalContent,
     SessionStatus,
     TargetKind,
 )
@@ -83,7 +86,6 @@ from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     PlannerRequestPreparationInput,
     ProposalPrepared,
     ServerOutputPrepared,
-    _fit_replayed_requirements,
     build_proposal_prepared,
     prepare_planner_request,
     validate_preprovider_schema_gate,
@@ -117,6 +119,7 @@ from eneo.flows.ai_builder.ai_builder_runtime_input_requirements import (
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     SCHEMA_MAX_JSON_BYTES,
     DeclaredSchemaCandidate,
+    build_schema_evidence,
 )
 from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
     ServerDecisionDispatchRequest,
@@ -164,14 +167,15 @@ from eneo.flows.ai_builder.ai_builder_user_question_metadata import (
 )
 from eneo.flows.ai_builder.planning_state import (
     BUILDER_SCHEMA_VERSION,
-    NAMED_RESULT_EVIDENCE_MAX_ITEMS,
     ArchitectureCommit,
     AttachmentCoverage,
     ConfirmedRuntimeMetadataField,
     ExactNamedResultPlacement,
     ExampleOutputCitation,
     ExampleOutputConstraintEvidence,
+    ExampleOutputSchemaInferenceOutcome,
     ExampleOutputSourceCoverage,
+    ExampleOutputStyleConstraint,
     FileRoleEvidence,
     MappedFileLimit,
     NamedResultEvidence,
@@ -988,7 +992,7 @@ def test_example_document_headings_stay_guidance_and_never_become_topology() -> 
             ExampleOutputSourceCoverage(file_id=file_id, coverage="fully_seen")
         ],
         headings=["Résumé", "Findings", "Analysis", "Recommendations"],
-        confidence="high",
+        confidence="medium",
         citations=[
             ExampleOutputCitation(
                 source_id="user_message:0",
@@ -1932,7 +1936,7 @@ async def test_prepare_planner_request_requires_fresh_confirmation_after_attachm
             return_value=_runtime_result(discovery_analysis, state),
         ),
         patch(
-            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_plan_proposal_system_prompt",
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_authoring_brief",
             return_value="proposal prompt",
         ) as build_proposal_prompt,
         patch(
@@ -2204,16 +2208,6 @@ async def test_prepare_planner_request_passes_attachment_context_into_proposal_p
     discovery_analysis = _discovery_analysis()
     state = _document_architecture_state()
     requirements_state = _requirements_state_confirmed_for(state)
-    requirements = RequirementsSummaryPayload(
-        requirements_version="0" * 64,
-        summary="Build from this file.",
-        key_decisions=[],
-        input_description="Attachment",
-        output_description="Summary",
-        assumptions=[],
-        manual_setup_notes=[],
-    )
-
     with (
         patch(
             "eneo.flows.ai_builder.ai_builder_planner_request_preparation.resolve_requirements_state",
@@ -2224,10 +2218,6 @@ async def test_prepare_planner_request_passes_attachment_context_into_proposal_p
             new_callable=AsyncMock,
             return_value=_runtime_result(discovery_analysis, state),
         ) as build_discovery_runtime_result,
-        patch(
-            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.latest_confirmed_requirements",
-            return_value=requirements,
-        ),
         patch(
             "eneo.flows.ai_builder.ai_builder_planner_request_preparation."
             "build_ai_builder_attachment_context_for_model",
@@ -2241,9 +2231,9 @@ async def test_prepare_planner_request_passes_attachment_context_into_proposal_p
             ),
         ) as build_attachment_context,
         patch(
-            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_plan_proposal_system_prompt",
+            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_authoring_brief",
             return_value="proposal prompt",
-        ) as build_plan_proposal_system_prompt,
+        ) as build_authoring_brief,
         patch(
             "eneo.flows.ai_builder.ai_builder_planner_request_preparation.compute_conversation_token_budget",
             return_value=256,
@@ -2279,8 +2269,8 @@ async def test_prepare_planner_request_passes_attachment_context_into_proposal_p
         is build_attachment_context.return_value
     )
     assert (
-        build_plan_proposal_system_prompt.call_args.kwargs["attachment_context"]
-        == "attachment context"
+        build_authoring_brief.call_args.kwargs["attachment_context"]
+        is build_attachment_context.return_value
     )
 
 
@@ -2303,18 +2293,6 @@ async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -
         )
     ]
     requirements_state = _requirements_state_confirmed_for(state)
-    requirements = RequirementsSummaryPayload(
-        requirements_version="0" * 64,
-        summary="Build a report flow.",
-        key_decisions=[
-            KeyDecisionPayload(topic="Input", decision="Uploaded documents")
-        ],
-        input_description="Documents",
-        output_description="Report",
-        assumptions=[],
-        manual_setup_notes=[],
-    )
-
     with (
         patch(
             "eneo.flows.ai_builder.ai_builder_planner_request_preparation.resolve_requirements_state",
@@ -2324,10 +2302,6 @@ async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -
             "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
             new_callable=AsyncMock,
             return_value=_runtime_result(discovery_analysis, state),
-        ),
-        patch(
-            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.latest_confirmed_requirements",
-            return_value=requirements,
         ),
         patch(
             "eneo.flows.ai_builder.ai_builder_planner_request_preparation.compute_conversation_token_budget",
@@ -2371,12 +2345,513 @@ async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -
     output_fields_description = prepared.proposal_tool_schema["function"]["parameters"][
         "properties"
     ]["steps"]["items"]["properties"]["output_fields"]["description"]
-    assert rendered_requirement in output_fields_description
+    assert rendered_requirement not in output_fields_description
+    serialized_request = json.dumps(
+        {
+            "messages": prepared.llm_messages,
+            "tool": prepared.proposal_tool_schema,
+        },
+        ensure_ascii=False,
+    )
+    assert serialized_request.count("case_id") == 1
+    assert serialized_request.count("interpret_input") == 1
     assert prepared.compile_context is not None
     assert [
         field.value.variable_name
         for field in prepared.compile_context.runtime_input_fields
     ] == ["case_id"]
+
+
+def test_proposal_request_replays_corrections_after_canonical_folding() -> None:
+    conversation = [
+        ConversationMessage(
+            message_id="old-terminal-answer",
+            role="user",
+            content="First return a PDF document.",
+            metadata={
+                "question_answer": {
+                    "question_id": "terminal_output",
+                    "selected_values": ["pdf_document"],
+                }
+            },
+        ),
+        ConversationMessage(
+            message_id="corrected-terminal-answer",
+            role="user",
+            content="Actually return structured JSON.",
+            metadata={
+                "question_answer": {
+                    "question_id": "terminal_output",
+                    "selected_values": ["structured_json"],
+                }
+            },
+        ),
+        ConversationMessage(
+            message_id="empty-goal-answer",
+            role="user",
+            content="",
+            metadata={
+                "question_answer": {
+                    "question_id": "post_processing_goal",
+                    "selected_values": ["stop_after_primary_operation"],
+                }
+            },
+        ),
+    ]
+    state = build_planning_state_from_conversation(conversation)
+
+    prepared = build_proposal_prepared(
+        requirements_state=RequirementsState(),
+        ui_language="en",
+        slot_classification_metadata=None,
+        conversation=conversation,
+        planning_state=state,
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[], available_kbs=[], prior_bindings=()
+        ),
+        flow=None,
+        assistant_snapshots=None,
+        plan_edit_context=None,
+        prior_plan_for_revision=None,
+        litellm_model="openai/gpt-5.4",
+        max_input_tokens=100_000,
+        max_output_tokens=4_096,
+        budget_policy=_budget_policy(),
+        attachment_file_count=0,
+        current_turn_start=2,
+    )
+
+    system_prompt = prepared.llm_messages[0]["content"]
+    assert isinstance(system_prompt, str)
+    assert system_prompt.count("- terminal_output: structured_json") == 1
+    assert (
+        system_prompt.count("- post_processing_goal: stop_after_primary_operation") == 1
+    )
+    assert "- terminal_output: pdf_document" not in system_prompt
+    assert [
+        message["content"]
+        for message in prepared.llm_messages[1:]
+        if message["role"] == "user" and message["content"]
+    ] == ["First return a PDF document.", "Actually return structured JSON."]
+
+
+def test_create_proposal_request_assigns_state_facts_to_one_wire_channel() -> None:
+    attachment = _make_file(
+        "attachment-body-owner-sentinel",
+        name="attachment-name-owner-sentinel.txt",
+    )
+    attachment_context = build_ai_builder_attachment_context([attachment])
+    assert attachment_context is not None
+    state = PlanningState.empty()
+    state.architecture_commit = ArchitectureCommit(
+        tuples_chain=[
+            StepTriple(
+                input_type="text",
+                output_type="json",
+                output_mode="pass_through",
+            )
+        ],
+        chosen_patterns=[],
+        required_capabilities=[],
+        committed_at=datetime.now(timezone.utc),
+        architecture_hash="b" * 64,
+    )
+    state.resolved_slots["terminal_output"] = ResolvedSlot(
+        name="terminal_output",
+        value="structured_json",
+        source="structured_answer",
+        confidence="high",
+    )
+    state.input_fields = [
+        ConfirmedRuntimeMetadataField(
+            value=FlowInputFieldIntent(
+                variable_name="runtime-field-owner-sentinel",
+                label="Runtime field",
+                provenance="user_confirmed",
+            ),
+            purpose="shape_result",
+            structured_answer_message_id="runtime-answer",
+        )
+    ]
+    file_roles = [
+        FileRoleEvidence(
+            file_id=attachment.id,
+            filename=attachment.name,
+            file_type=attachment.file_type,
+            mimetype=attachment.mimetype,
+            has_readable_text=True,
+            coverage="fully_seen",
+            role="example_output",
+            source="structured_answer",
+            confidence="high",
+        )
+    ]
+    input_schema_evidence = build_schema_evidence(
+        json_schema={
+            "type": "object",
+            "properties": {"input-schema-owner-sentinel": {"type": "string"}},
+        },
+        source="declared_schema",
+        confidence="high",
+        evidence=(),
+    )
+    output_schema_evidence = build_schema_evidence(
+        json_schema={
+            "type": "object",
+            "properties": {"output-schema-owner-sentinel": {"type": "string"}},
+        },
+        source="inferred_example",
+        source_file_ids=(attachment.id,),
+        confidence="medium",
+        evidence=(),
+    )
+    state.named_result_evidence = [
+        NamedResultEvidence(
+            name="named-result-owner-sentinel",
+            confidence="high",
+            evidence=["quote:user_message:named-result"],
+        )
+    ]
+    example_output_constraints = ExampleOutputConstraintEvidence(
+        source_file_ids=[attachment.id],
+        source_coverage=[
+            ExampleOutputSourceCoverage(
+                file_id=attachment.id,
+                coverage="fully_seen",
+            )
+        ],
+        headings=["example-heading-owner-sentinel"],
+        style_constraints=[
+            ExampleOutputStyleConstraint(
+                category="tone",
+                description="example-style-owner-sentinel",
+            )
+        ],
+        confidence="medium",
+        citations=[
+            ExampleOutputCitation(
+                source_id=f"uploaded_file:{attachment.id}",
+                file_id=attachment.id,
+                quote="example citation",
+            )
+        ],
+    )
+    state.replace_attachment_interpretation(
+        file_roles=file_roles,
+        example_constraints=example_output_constraints,
+        input_evidence=input_schema_evidence,
+        output_evidence=output_schema_evidence,
+        example_inference=ExampleOutputSchemaInferenceOutcome(
+            status="inferred",
+            source_file_ids=[attachment.id],
+        ),
+    )
+    catalog = build_ai_builder_resource_catalog(
+        available_models=[
+            {
+                "id": "model-ref-owner-sentinel",
+                "ref": "model-ref-owner-sentinel",
+                "name": "Model owner",
+                "display_name": "model-ref-owner-sentinel",
+                "provider": "test",
+            }
+        ],
+        available_kbs=[
+            {
+                "id": "kb-ref-id-sentinel",
+                "ref": "kb-ref-id-sentinel",
+                "name": "KB owner",
+                "display_name": "kb-ref-id-sentinel",
+                "description": "kb-description-owner-sentinel",
+            }
+        ],
+        prior_bindings=(),
+    )
+    requested_sections = """Build a report with the following sections:
+- requested-section-one-sentinel
+- requested-section-two-sentinel
+- requested-section-three-sentinel
+- requested-section-four-sentinel
+"""
+    conversation = [
+        ConversationMessage(
+            role="user",
+            content=requested_sections + ("history-padding " * 20_000),
+        ),
+        ConversationMessage(role="user", content="replay-owner-sentinel"),
+    ]
+
+    prepared = build_proposal_prepared(
+        requirements_state=RequirementsState(),
+        ui_language="en",
+        slot_classification_metadata=None,
+        conversation=conversation,
+        planning_state=state,
+        attachment_context=attachment_context,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=catalog,
+        flow=None,
+        assistant_snapshots=None,
+        plan_edit_context=None,
+        prior_plan_for_revision=None,
+        litellm_model="openai/gpt-5.4",
+        max_input_tokens=10_000,
+        max_output_tokens=1_024,
+        budget_policy=_budget_policy(),
+        attachment_file_count=1,
+        current_turn_start=1,
+    )
+
+    channels = {
+        "system": str(prepared.llm_messages[0]["content"]),
+        "tool": json.dumps(prepared.proposal_tool_schema, ensure_ascii=False),
+        "replay": json.dumps(prepared.llm_messages[1:], ensure_ascii=False),
+    }
+    semantic_fact_owners = {
+        "runtime-field-owner-sentinel": "system",
+        "attachment-name-owner-sentinel.txt": "system",
+        "attachment-body-owner-sentinel": "system",
+        "input-schema-owner-sentinel": "system",
+        "output-schema-owner-sentinel": "system",
+        "named-result-owner-sentinel": "system",
+        "example-heading-owner-sentinel": "system",
+        "example-style-owner-sentinel": "system",
+        "requested-section-one-sentinel": "system",
+        "kb-description-owner-sentinel": "system",
+        "replay-owner-sentinel": "replay",
+    }
+    for sentinel, owner in semantic_fact_owners.items():
+        for channel, content in channels.items():
+            assert content.count(sentinel) == (1 if channel == owner else 0)
+    contract_identity_channels = {
+        "model.model-ref-owner-sentinel": {"system", "tool"},
+        "knowledge.kb-ref-id-sentinel": {"system", "tool"},
+    }
+    for sentinel, expected in contract_identity_channels.items():
+        for channel, content in channels.items():
+            assert (sentinel in content) is (channel in expected)
+
+
+def test_edit_proposal_request_assigns_each_dynamic_fact_to_one_channel() -> None:
+    plan_id = UUID("99999999-9999-4999-8999-999999999999")
+    attachment = _make_file(
+        "attachment-content-sentinel",
+        name="role-owner-sentinel.pdf",
+        mimetype="application/pdf",
+    )
+    attachment_context = build_ai_builder_attachment_context([attachment])
+    assert attachment_context is not None
+    state = PlanningState.empty()
+    state.file_roles = [
+        FileRoleEvidence(
+            file_id=attachment.id,
+            filename="role-owner-sentinel.pdf",
+            file_type="document",
+            mimetype="application/pdf",
+            has_readable_text=True,
+            coverage="fully_seen",
+            role="reference_material",
+            source="model",
+            confidence="medium",
+        )
+    ]
+    prepared = build_proposal_prepared(
+        requirements_state=RequirementsState(),
+        ui_language="en",
+        slot_classification_metadata=None,
+        conversation=[ConversationMessage(role="user", content="edit-replay-sentinel")],
+        planning_state=state,
+        attachment_context=attachment_context,
+        flow_context="existing-flow-sentinel",
+        is_edit_mode=True,
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[], available_kbs=[], prior_bindings=()
+        ),
+        flow=MagicMock(steps=[SimpleNamespace(step_order=1)]),
+        assistant_snapshots=None,
+        plan_edit_context=ResolvedAIBuilderEditContext(
+            request=AIBuilderPlanEditContext(
+                scope="step",
+                plan_id=plan_id,
+                target_plan_step_ref="existing_step_1",
+            ),
+            scope="step",
+            target_plan_step_ref="existing_step_1",
+            plan_id=plan_id,
+        ),
+        prior_plan_for_revision=BuilderPlan(
+            id=plan_id,
+            session_id=uuid4(),
+            tenant_id=uuid4(),
+            proposal=FlowBuilderProposal(
+                content=FlowBuilderProposalContent(
+                    spec=FlowDraftSpecCore(
+                        flow_name="Existing plan",
+                        steps=[
+                            StepSpec(
+                                plan_step_ref="existing_step_1",
+                                name="Selected step",
+                                assistant_spec=AssistantSpec(
+                                    instructions="Existing work."
+                                ),
+                                input_source=InputSource.FLOW_INPUT,
+                                input_type=InputType.TEXT,
+                                output_mode=OutputMode.PASS_THROUGH,
+                                output_type=OutputType.TEXT,
+                            )
+                        ],
+                    )
+                )
+            ),
+        ),
+        litellm_model="openai/gpt-5.4",
+        max_input_tokens=100_000,
+        max_output_tokens=4_096,
+        budget_policy=_budget_policy(),
+        attachment_file_count=1,
+        current_turn_start=0,
+    )
+
+    system_prompt = prepared.llm_messages[0]["content"]
+    assert isinstance(system_prompt, str)
+    tool_schema = json.dumps(prepared.proposal_tool_schema, ensure_ascii=False)
+    replay = "\n".join(
+        str(message["content"])
+        for message in prepared.llm_messages[1:]
+        if message["role"] == "user"
+    )
+    channels = {
+        "system": system_prompt,
+        "tool": tool_schema,
+        "replay": replay,
+    }
+    semantic_fact_owners = {
+        "role-owner-sentinel.pdf": "system",
+        "existing-flow-sentinel": "system",
+        "attachment-content-sentinel": "system",
+        str(plan_id): "system",
+        "edit-replay-sentinel": "replay",
+    }
+    for sentinel, owner in semantic_fact_owners.items():
+        for channel, content in channels.items():
+            assert content.count(sentinel) == (1 if channel == owner else 0)
+    contract_identity_channels = {
+        "existing_step_1": {"system", "tool"},
+    }
+    for sentinel, expected in contract_identity_channels.items():
+        for channel, content in channels.items():
+            assert (sentinel in content) is (channel in expected)
+    assert replay == "edit-replay-sentinel"
+    assert system_prompt.count("Scope: one selected step.") == 1
+    assert "existing_step_1 (Selected step)" in system_prompt
+
+
+def test_proposal_request_keeps_duplicate_attachment_names_attributed_when_fitted() -> (
+    None
+):
+    model_name = "gpt-4o-mini"
+    first_body = "FIRST-BODY-SENTINEL " * 200
+    second_body = "SECOND-BODY-SENTINEL " * 200
+    first = _make_file(first_body, name="duplicate.txt")
+    second = _make_file(second_body, name="duplicate.txt")
+    attachment_context = build_ai_builder_attachment_context([first, second])
+    assert attachment_context is not None
+    state = PlanningState.empty()
+    state.file_roles = [
+        FileRoleEvidence(
+            file_id=first.id,
+            filename=first.name,
+            file_type=first.file_type,
+            mimetype=first.mimetype,
+            has_readable_text=True,
+            coverage="fully_seen",
+            role="reference_material",
+            source="structured_answer",
+            confidence="high",
+        ),
+        FileRoleEvidence(
+            file_id=second.id,
+            filename=second.name,
+            file_type=second.file_type,
+            mimetype=second.mimetype,
+            has_readable_text=True,
+            coverage="fully_seen",
+            role="example_output",
+            source="structured_answer",
+            confidence="high",
+        ),
+    ]
+    policy = AIBuilderBudgetPolicy(
+        conversation_safety_buffer_tokens=64,
+        minimum_conversation_budget_tokens=128,
+    )
+    catalog = build_ai_builder_resource_catalog(
+        available_models=None,
+        available_kbs=None,
+    )
+    current_turn = ConversationMessage(
+        role="user",
+        content="Build the flow from both attached files.",
+    )
+    common = {
+        "requirements_state": RequirementsState(),
+        "ui_language": "en",
+        "slot_classification_metadata": None,
+        "conversation": [current_turn],
+        "planning_state": state,
+        "flow_context": None,
+        "is_edit_mode": False,
+        "resource_catalog": catalog,
+        "flow": None,
+        "assistant_snapshots": None,
+        "plan_edit_context": None,
+        "prior_plan_for_revision": None,
+        "litellm_model": model_name,
+        "max_output_tokens": 1_024,
+        "budget_policy": policy,
+        "attachment_file_count": 2,
+        "current_turn_start": 0,
+    }
+    baseline = build_proposal_prepared(
+        **common,
+        attachment_context=None,
+        max_input_tokens=100_000,
+    )
+    baseline_tool = cast(dict[str, Any], baseline.proposal_tool_schema)
+    tight_context_window = (
+        count_message_tokens(baseline.llm_messages, model_name)
+        + count_tool_tokens([baseline_tool], model_name)
+        + 1_024
+        + policy.conversation_safety_buffer_tokens
+        + 300
+    )
+
+    prepared = build_proposal_prepared(
+        **common,
+        attachment_context=attachment_context,
+        max_input_tokens=tight_context_window,
+    )
+
+    system_prompt = prepared.llm_messages[0]["content"]
+    assert isinstance(system_prompt, str)
+    attachment_section = system_prompt.split("Uploaded files:\n", maxsplit=1)[1]
+    first_block, second_block = attachment_section.split("\n\n---\n\n")
+    assert "file 1" in first_block
+    assert "duplicate.txt" in first_block
+    assert "reference_material" in first_block
+    assert "FIRST-BODY-SENTINEL" in first_block
+    assert "SECOND-BODY-SENTINEL" not in first_block
+    assert "file 2" in second_block
+    assert "duplicate.txt" in second_block
+    assert "example_output" in second_block
+    assert "SECOND-BODY-SENTINEL" in second_block
+    assert "FIRST-BODY-SENTINEL" not in second_block
+    assert first_body.strip() not in system_prompt
+    assert second_body.strip() not in system_prompt
 
 
 def test_real_proposal_boundary_fits_attachments_and_protects_current_turn() -> None:
@@ -2391,6 +2866,8 @@ def test_real_proposal_boundary_fits_attachments_and_protects_current_turn() -> 
         [_make_file(attachment_text)]
     )
     assert attachment_context is not None
+    planning_state = PlanningState.empty()
+    planning_state.file_roles = attachment_file_roles(attachment_context)
     catalog = build_ai_builder_resource_catalog(
         available_models=None,
         available_kbs=None,
@@ -2403,7 +2880,7 @@ def test_real_proposal_boundary_fits_attachments_and_protects_current_turn() -> 
         "requirements_state": RequirementsState(),
         "ui_language": "en",
         "slot_classification_metadata": None,
-        "planning_state": PlanningState.empty(),
+        "planning_state": planning_state,
         "flow_context": None,
         "is_edit_mode": False,
         "resource_catalog": catalog,
@@ -2675,16 +3152,6 @@ async def test_prepare_planner_request_logs_prompt_metrics() -> None:
     discovery_analysis = _discovery_analysis()
     state = _document_architecture_state()
     requirements_state = _requirements_state_confirmed_for(state)
-    requirements = RequirementsSummaryPayload(
-        requirements_version="0" * 64,
-        summary="Build a report flow.",
-        key_decisions=[],
-        input_description="Documents",
-        output_description="Report",
-        assumptions=[],
-        manual_setup_notes=[],
-    )
-
     with (
         patch(
             "eneo.flows.ai_builder.ai_builder_planner_request_preparation.resolve_requirements_state",
@@ -2694,10 +3161,6 @@ async def test_prepare_planner_request_logs_prompt_metrics() -> None:
             "eneo.flows.ai_builder.ai_builder_planner_request_preparation.build_discovery_runtime_result",
             new_callable=AsyncMock,
             return_value=_runtime_result(discovery_analysis, state),
-        ),
-        patch(
-            "eneo.flows.ai_builder.ai_builder_planner_request_preparation.latest_confirmed_requirements",
-            return_value=requirements,
         ),
         patch(
             "eneo.flows.ai_builder.ai_builder_planner_request_preparation.compute_conversation_token_budget",
@@ -4744,38 +5207,6 @@ async def test_a_confirmation_reuses_state_only_under_the_disclosed_policy(
 
 
 @pytest.mark.asyncio
-@pytest.mark.asyncio
-async def test_a_confirmed_requirement_core_that_cannot_fit_is_rejected() -> None:
-    planner = _make_planner()
-    state = _document_architecture_state()
-    state.named_result_evidence = [
-        NamedResultEvidence(
-            name=f"sokt_insats_med_ett_ganska_langt_namn_{index:03d}",
-            confidence="high",
-            evidence=["quote:user_message:user-1:sökta insatser"],
-        )
-        for index in range(NAMED_RESULT_EVIDENCE_MAX_ITEMS)
-    ]
-    disclosure = build_requirements_disclosure(state, ui_language="en")
-    conversation = _confirmation_conversation(disclosure)
-
-    with pytest.raises(AIBuilderKnownProviderRejectionException) as exc_info:
-        await _prepare_planner_request_for_test(
-            planner,
-            conversation=conversation,
-            completion_model_route=_route(),
-            persisted_planning_state=state,
-            max_input_tokens=4_096,
-        )
-
-    assert (
-        exc_info.value.public_error.code
-        is AIBuilderErrorCode.PLANNER_CONTEXT_LIMIT_EXCEEDED
-    )
-    planner.litellm_client.acompletion.assert_not_awaited()
-
-
-@pytest.mark.asyncio
 async def test_text_beside_a_confirmation_after_a_plan_is_read_as_a_change() -> None:
     """A confirmation stays valid across revision turns; the fast path does not.
 
@@ -5335,46 +5766,6 @@ def _confirmed_disclosure_with_assumption_rows() -> RequirementsSummaryPayload:
     disclosure = build_requirements_disclosure(state, ui_language="en")
     assert len(disclosure.assumptions) >= 2
     return disclosure
-
-
-def test_replayed_requirements_keep_the_assumptions_that_fit_the_model() -> None:
-    """The disclosure is bounded by evidence; the prompt is bounded by the model.
-
-    A confirmed disclosure lists every assumption the user attested to, and a
-    runtime form alone can contribute paragraphs. Replaying it whole would let
-    a confirmable session become one that cannot produce a proposal at all, so
-    the budget decides how many confirmed assumptions are replayed while the
-    confirmed decisions always stay.
-    """
-
-    disclosure = _confirmed_disclosure_with_assumption_rows()
-
-    def fits_up_to(limit: int) -> Callable[[RequirementsSummaryPayload | None], bool]:
-        return lambda payload: payload is not None and (
-            sum(len(row) for row in payload.assumptions) <= limit
-        )
-
-    whole = _fit_replayed_requirements(disclosure, fits=fits_up_to(10**9))
-    assert whole is disclosure
-
-    trimmed = _fit_replayed_requirements(
-        disclosure, fits=fits_up_to(len(disclosure.assumptions[0]))
-    )
-    assert trimmed is not None
-    assert trimmed.assumptions == disclosure.assumptions[:1]
-    assert trimmed.key_decisions == disclosure.key_decisions
-
-    bare = _fit_replayed_requirements(disclosure, fits=fits_up_to(0))
-    assert bare is not None
-    assert bare.assumptions == []
-    assert bare.key_decisions == disclosure.key_decisions
-
-
-def test_replayed_requirements_whose_core_cannot_fit_are_rejected() -> None:
-    disclosure = _confirmed_disclosure_with_assumption_rows()
-
-    with pytest.raises(AIBuilderKnownProviderRejectionException):
-        _fit_replayed_requirements(disclosure, fits=lambda _payload: False)
 
 
 def _review_evidence(excerpt_chars: int):

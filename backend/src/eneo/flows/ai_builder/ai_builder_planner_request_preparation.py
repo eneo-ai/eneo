@@ -22,7 +22,6 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     latest_turn_is_review_command,
     named_content_fields_edit_from_metadata,
     provider_safe_tool_call_id,
-    question_answer_from_metadata,
     review_command_is_the_only_user_intent,
     review_edit_scope_for_turn,
     semantic_conversation,
@@ -83,7 +82,7 @@ from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     build_plan_revision_prompt_block,
 )
 from eneo.flows.ai_builder.ai_builder_plan_proposal_task import (
-    build_plan_proposal_system_prompt,
+    build_authoring_brief,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     ProposalObligationProjection,
@@ -104,7 +103,6 @@ from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
 from eneo.flows.ai_builder.ai_builder_requirements_state import (
     RequirementsState,
     content_free_confirmation,
-    latest_confirmed_requirements,
     resolve_requirements_state,
 )
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
@@ -589,7 +587,6 @@ def build_proposal_prepared(
     current_turn_start: int,
     architecture_revised_this_turn: bool = False,
 ) -> ProposalPrepared:
-    confirmed_requirements = latest_confirmed_requirements(conversation)
     # Only the user's own wording names an output topology. The disclosure
     # renders evidence back to the user — including headings observed in an
     # attached example — and reading it here turned that example's layout into
@@ -650,11 +647,6 @@ def build_proposal_prepared(
         resource_catalog=resource_catalog,
         is_pure_audio_transcription=is_pure_audio_transcription,
         review_scope=review_edit_scope_for_turn(conversation),
-        confirmed_runtime_inputs=(
-            compile_context.confirmed_runtime_input_requirements
-            if compile_context is not None and not is_edit_mode
-            else ()
-        ),
     )
     # A review-backed proposal carries run excerpts: the tenant's review-evidence
     # cap bounds this whole request (prompt, attachments, conversation, tools)
@@ -680,25 +672,18 @@ def build_proposal_prepared(
         )
 
     def build_proposal_prompt(
-        attachment_text: str | None,
-        replayed_requirements: RequirementsSummaryPayload | None,
+        fitted_attachment_context: AIBuilderAttachmentContext | None,
         review_evidence: FlowReviewEvidence | None = None,
     ) -> str:
-        return build_plan_proposal_system_prompt(
+        return build_authoring_brief(
             planning_state=planning_state,
-            confirmed_requirements=replayed_requirements,
-            attachment_context=attachment_text,
+            attachment_context=fitted_attachment_context,
             flow_context=_flow_context_with_evidence(flow_context, review_evidence),
             is_edit_mode=is_edit_mode,
             is_pure_audio_transcription=is_pure_audio_transcription,
             resource_catalog=resource_catalog,
             requested_output_sections=requested_output_sections,
             plan_revision_context=plan_revision_context,
-            confirmed_runtime_inputs=(
-                compile_context.confirmed_runtime_input_requirements
-                if compile_context is not None and not is_edit_mode
-                else ()
-            ),
             can_decline=decline_tool_schema is not None,
         )
 
@@ -712,8 +697,7 @@ def build_proposal_prepared(
     )
 
     def prompt_fits(
-        attachment_text: str | None,
-        replayed_requirements: RequirementsSummaryPayload | None,
+        fitted_attachment_context: AIBuilderAttachmentContext | None,
         review_evidence: FlowReviewEvidence | None = None,
     ) -> bool:
         return (
@@ -722,7 +706,7 @@ def build_proposal_prepared(
                     {
                         "role": "system",
                         "content": build_proposal_prompt(
-                            attachment_text, replayed_requirements, review_evidence
+                            fitted_attachment_context, review_evidence
                         ),
                     }
                 ],
@@ -731,19 +715,14 @@ def build_proposal_prepared(
             <= system_prompt_token_limit
         )
 
-    replayed_requirements = _fit_replayed_requirements(
-        confirmed_requirements,
-        fits=lambda requirements: prompt_fits(None, requirements),
-    )
-
     # Run excerpts were read whole; the (capped) window and the evidence bound
-    # decide how much of them this prompt carries, after the facts and the
-    # replayed requirements and before attachments, which are fitted into
+    # decide how much of them this prompt carries, after the facts and before
+    # attachments, which are fitted into
     # what remains. The measurement is the reserving one because it decides
     # admission, and a prompt that does not fit even without excerpts is
     # refused here, before any provider work.
     def prompt_reserve(evidence: FlowReviewEvidence | None) -> int:
-        prompt = build_proposal_prompt(None, replayed_requirements, evidence)
+        prompt = build_proposal_prompt(None, evidence)
         return measure_provider_input_reserve(
             [{"role": "system", "content": prompt}], [], litellm_model
         ).tokens
@@ -774,21 +753,15 @@ def build_proposal_prepared(
     fitted_attachment_context = (
         fit_ai_builder_attachment_context(
             attachment_context,
-            fits_context=lambda context: prompt_fits(
-                context, replayed_requirements, fitted_review_evidence
+            fits_attachment_context=lambda context: prompt_fits(
+                context, fitted_review_evidence
             ),
         )
         if attachment_context is not None
         else None
     )
     proposal_system_prompt = build_proposal_prompt(
-        (
-            fitted_attachment_context.context
-            if fitted_attachment_context is not None
-            else None
-        ),
-        replayed_requirements,
-        fitted_review_evidence,
+        fitted_attachment_context, fitted_review_evidence
     )
     prepared_prompt = _prepare_prompt_messages(
         conversation=conversation,
@@ -811,12 +784,6 @@ def build_proposal_prepared(
             "conversation_message_count": len(conversation),
             "trimmed_message_count": prepared_prompt.trimmed_message_count,
             "attachment_file_count": attachment_file_count,
-            "confirmed_requirements_present": confirmed_requirements is not None,
-            "replayed_requirement_assumptions": (
-                len(replayed_requirements.assumptions)
-                if replayed_requirements is not None
-                else 0
-            ),
             "context_window_tokens": proposal_request_budget.context_window_tokens,
             "review_evidence_fit_ms": review_evidence_fit_ms,
             **_review_excerpt_counts(fitted_review_evidence),
@@ -919,49 +886,6 @@ def _proposal_system_prompt_token_limit(
         - request_budget.safety_buffer_tokens
         - budget_policy.minimum_conversation_budget_tokens
         - tool_tokens,
-    )
-
-
-def _fit_replayed_requirements(
-    confirmed_requirements: RequirementsSummaryPayload | None,
-    *,
-    fits: Callable[[RequirementsSummaryPayload | None], bool],
-) -> RequirementsSummaryPayload | None:
-    """Bound the replayed disclosure against the model, not a fixed count.
-
-    The disclosure is as long as the evidence the user must see — a template
-    can contribute thousands of placeholders — while the proposal prompt is
-    bounded by the model. The same budget that fits attachment text decides
-    how many confirmed assumptions are replayed; the confirmed decisions and
-    descriptions always stay, and `PlanningState` still carries every typed
-    fact into compilation.
-    """
-
-    if confirmed_requirements is None or fits(confirmed_requirements):
-        return confirmed_requirements
-
-    def with_assumptions(count: int) -> RequirementsSummaryPayload:
-        return confirmed_requirements.model_copy(
-            update={"assumptions": confirmed_requirements.assumptions[:count]},
-            deep=True,
-        )
-
-    lower = 0
-    upper = len(confirmed_requirements.assumptions)
-    while lower < upper:
-        middle = (lower + upper + 1) // 2
-        if fits(with_assumptions(middle)):
-            lower = middle
-        else:
-            upper = middle - 1
-    if lower:
-        return with_assumptions(lower)
-
-    without_assumptions = with_assumptions(0)
-    if fits(without_assumptions):
-        return without_assumptions
-    raise AIBuilderKnownProviderRejectionException(
-        build_ai_builder_request_budget_exhausted_error(request_id=None)
     )
 
 
@@ -1153,40 +1077,9 @@ def trim_conversation_for_context(
 
 
 def conversation_message_to_llm_message(msg: ConversationMessage) -> LLMMessageParam:
-    content = msg.content
-    question_answer = question_answer_from_metadata(msg.metadata)
-    if msg.role == "user" and question_answer is not None:
-        question_answer_payload = question_answer.model_dump(
-            mode="json",
-            exclude_none=True,
-            exclude={"kind", "ui_language"},
-        )
-        sanitized_answer = {
-            key: value
-            for key, value in question_answer_payload.items()
-            if key
-            in {
-                "question_id",
-                "selected_option_ids",
-                "selected_values",
-                "custom_value",
-            }
-        }
-        if sanitized_answer:
-            structured_note = json.dumps(
-                sanitized_answer,
-                ensure_ascii=False,
-                sort_keys=True,
-            )
-            content = (
-                f"{content}\n\n[Structured answer metadata: {structured_note}]"
-                if content
-                else f"[Structured answer metadata: {structured_note}]"
-            )
-
     payload: LLMMessageParam = {
         "role": _llm_message_role(msg.role),
-        "content": content,
+        "content": msg.content,
     }
     tool_calls = tool_calls_from_message(msg)
     if tool_calls:

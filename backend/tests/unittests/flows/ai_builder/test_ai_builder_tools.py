@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
+from inspect import signature
 from typing import Any
 from uuid import uuid4
 
@@ -15,15 +16,12 @@ from eneo.flows.ai_builder.ai_builder_edit_tool_schema import (
 )
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     ProposalIntentArgumentError,
+    build_create_flow_tool_schema,
     parse_create_flow_intent_arguments,
 )
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
-)
-from eneo.flows.ai_builder.ai_builder_runtime_input_requirements import (
-    ConfirmedRuntimeInputRequirement,
-    render_confirmed_runtime_input_requirements,
 )
 from eneo.flows.ai_builder.ai_builder_tool_parsing import (
     ToolArgumentParseError,
@@ -499,49 +497,15 @@ class TestBuildToolSchema:
         assert admitted["steps"][-1]["output_fields"] == fields
         assert "model_ref" in arguments
 
-    def test_create_schema_projects_runtime_identity_without_argument_shape_change(
-        self,
-    ) -> None:
-        requirements = (
-            ConfirmedRuntimeInputRequirement(
-                name="audience", purpose="interpret_input"
-            ),
-            ConfirmedRuntimeInputRequirement(name="case_id", purpose="shape_result"),
-            ConfirmedRuntimeInputRequirement(name="policy", purpose="whole_flow"),
-        )
-        rendered = render_confirmed_runtime_input_requirements(requirements)
-        baseline = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())
-        contextual = build_propose_flow_tool_schema(
-            resource_catalog=_empty_catalog(),
-            confirmed_runtime_inputs=requirements,
-        )
-
-        baseline_parameters = baseline["function"]["parameters"]
-        contextual_parameters = contextual["function"]["parameters"]
-        baseline_step = baseline_parameters["properties"]["steps"]["items"]
-        contextual_step = contextual_parameters["properties"]["steps"]["items"]
-        assert set(contextual_parameters["properties"]) == set(
-            baseline_parameters["properties"]
-        )
-        assert contextual_parameters["required"] == baseline_parameters["required"]
-        assert set(contextual_step["properties"]) == set(baseline_step["properties"])
-        assert contextual_step["required"] == baseline_step["required"]
+    def test_schema_builders_do_not_accept_runtime_input_facts(self) -> None:
         assert (
-            contextual_step["properties"]["output_fields"]["items"]
-            == baseline_step["properties"]["output_fields"]["items"]
+            "confirmed_runtime_inputs"
+            not in signature(build_create_flow_tool_schema).parameters
         )
-        description = contextual_step["properties"]["output_fields"]["description"]
-        assert rendered in description
-
-        baseline_edit = build_propose_flow_tool_schema(
-            resource_catalog=_empty_catalog(), current_steps=[]
+        assert (
+            "confirmed_runtime_inputs"
+            not in signature(build_propose_flow_tool_schema).parameters
         )
-        contextual_edit = build_propose_flow_tool_schema(
-            resource_catalog=_empty_catalog(),
-            current_steps=[],
-            confirmed_runtime_inputs=requirements,
-        )
-        assert contextual_edit == baseline_edit
 
     def test_pure_audio_create_schema_accepts_exactly_one_semantic_step(self) -> None:
         schema = build_propose_flow_tool_schema(
