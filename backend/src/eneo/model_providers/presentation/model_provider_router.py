@@ -415,7 +415,7 @@ async def create_provider(
     "/{provider_id}/",
     response_model=ModelProviderPublic,
     description="Update an existing model provider.",
-    responses=responses.get_responses([403, 404, 409, 503]),
+    responses=responses.get_responses([400, 403, 404, 409, 503]),
 )
 async def update_provider(
     provider_id: UUID,

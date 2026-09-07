@@ -2,9 +2,15 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID, uuid4
 
+from eneo.embedding_models.domain.embedding_model_repo import (
+    guard_embedding_provider_update,
+)
 from eneo.main.exceptions import BadRequestException, NameCollisionException
 from eneo.model_providers.domain.model_defaults_lookup import resolve_model_defaults
 from eneo.model_providers.domain.model_provider import ModelProvider
+from eneo.model_providers.infrastructure.litellm_provider import (
+    embedding_provider_configuration,
+)
 from eneo.model_providers.infrastructure.model_provider_repository import (
     ModelProviderRepository,
 )
@@ -337,7 +343,20 @@ class ModelProviderService:
     ) -> ModelProvider:
         """Update an existing provider."""
         # Get existing provider
-        provider = await self.repository.get_by_id(provider_id)
+        provider = await self.repository.get_by_id(provider_id, for_update=True)
+
+        merged_config = {**provider.config, **(config or {})}
+        next_credentials = (
+            credentials if credentials is not None else provider.credentials
+        )
+        if embedding_provider_configuration(
+            provider.provider_type, provider.credentials, provider.config
+        ) != embedding_provider_configuration(
+            provider.provider_type, next_credentials, merged_config
+        ):
+            # Locking the provider also blocks new model attachments until the
+            # semantic edit commits. Model locks coordinate knowledge assignments.
+            await guard_embedding_provider_update(self.repository.session, provider_id)
 
         # Check for duplicate names if name is being changed
         if name is not None and name != provider.name:
@@ -353,8 +372,7 @@ class ModelProviderService:
 
         if config is not None:
             # Merge with existing config so unchanged fields are preserved
-            merged = {**provider.config, **config}
-            provider.config = merged
+            provider.config = merged_config
 
         if is_active is not None:
             provider.is_active = is_active

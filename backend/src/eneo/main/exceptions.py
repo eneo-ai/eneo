@@ -161,7 +161,7 @@ class BadRequestException(Exception):
 
 
 class ModelInUseException(Exception):
-    """Raised when trying to soft-delete a model that is still referenced.
+    """Raised when deleting or semantically changing a model still in use.
 
     Surfaced as 400 with a dedicated error code so the frontend can show a
     localized "Model is in use" message and offer the migration flow as a

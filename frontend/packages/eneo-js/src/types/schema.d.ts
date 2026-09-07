@@ -34516,6 +34516,15 @@ export interface operations {
           "application/json": components["schemas"]["ModelProviderPublic"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Forbidden */
       403: {
         headers: {
@@ -46883,6 +46892,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["EmbeddingModelSparse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Unauthorized */
