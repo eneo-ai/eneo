@@ -45,7 +45,7 @@ from eneo.database.tables.websites_table import Websites as WebsitesTable
 from eneo.jobs.job_models import Task
 from eneo.jobs.job_repo import JobRepository
 from eneo.jobs.job_service import JobService
-from eneo.main.config import get_settings
+from eneo.main.config import Settings, get_settings
 from eneo.main.container.container import Container, SessionProxy
 from eneo.main.models import Status
 from eneo.users.user import UserInDB
@@ -2186,17 +2186,27 @@ async def test_dispatch_capacity_serves_another_tenant_before_one_tenant_backlog
     assert len(dispatched_websites & {website.id for website in tenant_a_websites}) == 1
 
 
-@pytest.mark.parametrize("tenant_limit", [None, 1])
+@pytest.mark.parametrize(
+    "settings_override,expected_initial",
+    [
+        ({}, 4),
+        ({"crawl_job_tenant_concurrency_limit": None}, 6),
+        ({"crawl_job_tenant_concurrency_limit": 1}, 1),
+    ],
+    ids=["default", "unlimited", "explicit-cap"],
+)
 async def test_next_free_dispatch_slot_prefers_a_late_tenant_over_backlog(
     db_session,
     admin_user,
     monkeypatch: pytest.MonkeyPatch,
-    tenant_limit: int | None,
+    settings_override: dict[str, int | None],
+    expected_initial: int,
 ) -> None:
-    settings = get_settings().model_copy(
-        update={"crawl_job_tenant_concurrency_limit": tenant_limit}
-    )
+    values = get_settings().model_dump()
+    values.pop("crawl_job_tenant_concurrency_limit", None)
+    settings = Settings.model_validate({**values, **settings_override})
     monkeypatch.setattr(crawl_dispatch, "get_settings", lambda: settings)
+    global_limit = 6
     async with db_session() as session:
         second_tenant = Tenants(
             name=f"crawl-fairness-{uuid4()}",
@@ -2221,7 +2231,7 @@ async def test_next_free_dispatch_slot_prefers_a_late_tenant_over_backlog(
                 user_id=admin_user.id,
                 label=f"Tenant A backlog {index}",
             )
-            for index in range(3)
+            for index in range(global_limit + 1)
         ]
         tenant_b_website = await _persist_website(
             session,
@@ -2237,19 +2247,31 @@ async def test_next_free_dispatch_slot_prefers_a_late_tenant_over_backlog(
     initial_enqueue = AsyncMock(return_value=None)
     initial = await crawl_dispatch.reconcile_crawl_work(
         enqueue=initial_enqueue,
-        concurrency_limit=2,
+        concurrency_limit=global_limit,
     )
 
-    expected_initial = tenant_limit or 2
     assert (initial.claimed, initial.dispatched) == (expected_initial, expected_initial)
     assert {call.args[2].website_id for call in initial_enqueue.await_args_list} <= {
         website.id for website in tenant_a_websites
     }
 
+    if settings.crawl_job_tenant_concurrency_limit is not None:
+        async with db_session() as session:
+            repository = CrawlRunRepository(session)
+            for enqueue_call in initial_enqueue.await_args_list:
+                _, dispatch_id, task = enqueue_call.args
+                assert task.attempt_id is not None
+                assert await repository.claim_attempt(
+                    task.attempt_id,
+                    dispatch_id=dispatch_id,
+                    lease_owner="tenant-a-worker",
+                    lease_duration=timedelta(minutes=5),
+                )
+
     # Reconciliation must count existing reservations toward the same ceiling.
     full = await crawl_dispatch.reconcile_crawl_work(
         enqueue=initial_enqueue,
-        concurrency_limit=2,
+        concurrency_limit=global_limit,
     )
     assert (full.claimed, full.dispatched) == (0, 0)
 
@@ -2259,8 +2281,8 @@ async def test_next_free_dispatch_slot_prefers_a_late_tenant_over_backlog(
             website=tenant_b_website,
             user=_user(second_user_id, second_tenant_id),
         )
-        if tenant_limit is None:
-            # The default uses all slots; a late tenant waits for one to finish.
+        if settings.crawl_job_tenant_concurrency_limit is None:
+            # Disabling the ceiling lets a tenant use every global slot.
             first_task = initial_enqueue.await_args_list[0].args[2]
             cancelled = await CrawlRunRepository(session).request_cancel(
                 first_task.run_id
@@ -2270,11 +2292,23 @@ async def test_next_free_dispatch_slot_prefers_a_late_tenant_over_backlog(
     next_enqueue = AsyncMock(return_value=None)
     next_result = await crawl_dispatch.reconcile_crawl_work(
         enqueue=next_enqueue,
-        concurrency_limit=2,
+        concurrency_limit=global_limit,
     )
 
     assert (next_result.claimed, next_result.dispatched) == (1, 1)
     assert next_enqueue.await_args.args[2].website_id == tenant_b_website.id
+
+    if settings.crawl_job_tenant_concurrency_limit is not None:
+        async with db_session() as session:
+            running_a = await session.scalar(
+                sa.select(sa.func.count())
+                .select_from(CrawlRunsTable)
+                .where(
+                    CrawlRunsTable.tenant_id == admin_user.tenant_id,
+                    CrawlRunsTable.phase == CrawlPhase.RUNNING.value,
+                )
+            )
+            assert running_a == expected_initial
 
 
 async def test_stale_redelivery_keeps_ambiguous_slots_reserved(
