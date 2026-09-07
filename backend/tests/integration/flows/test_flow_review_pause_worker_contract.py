@@ -1180,7 +1180,7 @@ async def test_edit_approve_resume_uses_edited_payload_for_downstream_steps(
             flow_id=context.flow_id,
             run_id=context.run_id,
             checkpoint_id=checkpoint.id,
-            expected_checkpoint_revision=approved.revision,
+            expected_checkpoint_revision=approved.checkpoint.revision,
             idempotency_key=f"resume-{uuid4()}",
         )
         stale_epoch_result = await context.executor.execute(
@@ -1356,7 +1356,7 @@ async def test_resume_last_step_review_terminalizes_completed_run(
             flow_id=context.flow_id,
             run_id=context.run_id,
             checkpoint_id=checkpoint.id,
-            expected_checkpoint_revision=approved.revision,
+            expected_checkpoint_revision=approved.checkpoint.revision,
             idempotency_key=f"resume-last-step-{uuid4()}",
         )
         completed_result = await context.executor.execute(

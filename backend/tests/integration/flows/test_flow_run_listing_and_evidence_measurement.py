@@ -100,8 +100,10 @@ RUN_LISTING_STATEMENT_COUNT = 1
 # Access resolution, section measurements, bounded section loads, immutable
 # resolved-input lineage, durable file projections, and run token usage are
 # fixed-cost per bundle; none scales in statement count with the number of
-# steps, attempts, provider calls, sources, or attached files.
-EVIDENCE_QUERY_COUNT = 30
+# steps, attempts, provider calls, sources, or attached files. The rerun and
+# retention governance cut (fb8231158) removed the predecessor-attempt lineage
+# and retention reads, which is where 30 became 23.
+EVIDENCE_QUERY_COUNT = 23
 REPORT_PATH_ENV = "FLOW_RUN_LISTING_EVIDENCE_REPORT_PATH"
 SECRET_SENTINEL = "flow-evidence-secret-20260726"
 _BASE_TIME = datetime(2026, 7, 26, 12, 0, tzinfo=timezone.utc)
@@ -307,9 +309,8 @@ async def _write_representative_evidence(
     )
     final_step_order = len(step_ids)
     for step_order, step_id in enumerate(step_ids, start=1):
-        predecessor_attempt_id: UUID | None = None
         for attempt_no in range(1, attempts_per_step + 1):
-            attempt = await run_repo.create_or_get_attempt_started(
+            await run_repo.create_or_get_attempt_started(
                 run_id=run_id,
                 flow_id=flow_id,
                 tenant_id=tenant_id,
@@ -317,18 +318,7 @@ async def _write_representative_evidence(
                 step_order=step_order,
                 attempt_no=attempt_no,
                 dispatch_task_id=f"flow-evidence-{step_order}-{attempt_no}",
-                predecessor_attempt_id=predecessor_attempt_id,
             )
-            if attempt_no > 1:
-                await run_repo.copy_step_input_files_from_predecessor_attempt(
-                    run_id=run_id,
-                    flow_id=flow_id,
-                    tenant_id=tenant_id,
-                    step_id=step_id,
-                    step_order=step_order,
-                    predecessor_attempt_id=predecessor_attempt_id,
-                    target_attempt_no=attempt_no,
-                )
             activated = await run_repo.activate_step_attempt(
                 run_id=run_id,
                 step_id=step_id,
@@ -375,7 +365,6 @@ async def _write_representative_evidence(
                 num_tokens_output=5 + attempt_no,
             )
             assert finished is not None
-            predecessor_attempt_id = attempt.id
 
         saved = await run_repo.save_step_result(
             flow_run_id=run_id,

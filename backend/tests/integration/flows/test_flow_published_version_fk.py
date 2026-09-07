@@ -34,7 +34,6 @@ async def test_published_version_fk_enforces_existing_flow_version(
                 owner_user_id=admin_user.id,
                 published_version=None,
                 metadata_json=None,
-                data_retention_days=None,
                 draft_revision=0,
                 deleted_at=None,
             )

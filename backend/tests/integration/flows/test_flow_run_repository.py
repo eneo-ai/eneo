@@ -4225,9 +4225,8 @@ async def test_provenance_measurement_and_bounded_attempt_read(
         assert step_one is not None and step_two is not None
 
         # Step 1: three attempts (1, 2 historical; 3 current). Step 2: one.
-        predecessor = None
         for attempt_no in (1, 2, 3):
-            attempt = await run_repo.create_or_get_attempt_started(
+            await run_repo.create_or_get_attempt_started(
                 run_id=run.id,
                 flow_id=flow.id,
                 tenant_id=tenant_id,
@@ -4235,9 +4234,7 @@ async def test_provenance_measurement_and_bounded_attempt_read(
                 step_order=1,
                 attempt_no=attempt_no,
                 dispatch_task_id=f"measure-{attempt_no}",
-                predecessor_attempt_id=predecessor.id if predecessor else None,
             )
-            predecessor = attempt
         await run_repo.create_or_get_attempt_started(
             run_id=run.id,
             flow_id=flow.id,

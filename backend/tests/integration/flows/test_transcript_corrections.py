@@ -300,7 +300,7 @@ async def test_save_and_list_round_trip(
             step_id=scenario.transcription_step_id,
             expected_revision=None,
             occurrences=[
-                _occurrence(segment_index=1, char_start=0),
+                _occurrence(segment_index=1, char_start=0, char_end=6),
                 _occurrence(),
             ],
         )

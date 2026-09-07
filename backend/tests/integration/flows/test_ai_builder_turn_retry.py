@@ -787,8 +787,17 @@ async def test_oversized_planning_state_is_committed_once_and_replayed(
         )
 
     assert first_response.status_code == 200, first_response.text
-    assert _event_names(first_response) == ("error", "done")
-    first_events = _parse_sse_payload(first_response)
+    # Transient status events may precede the terminal pair; the contract is
+    # that the turn ends with the error and done, and nothing else.
+    assert tuple(name for name in _event_names(first_response) if name != "status") == (
+        "error",
+        "done",
+    )
+    first_events = [
+        event
+        for event in _parse_sse_payload(first_response)
+        if event["event"] != "status"
+    ]
     error_data = first_events[0]["data"]
     assert isinstance(error_data, dict)
     assert error_data["code"] == "planning_state_payload_too_large"
@@ -854,8 +863,10 @@ async def test_oversized_planning_state_is_committed_once_and_replayed(
             request=revision_request,
         )
     assert replay.status_code == 200, replay.text
-    assert replay.text == first_response.text
+    # The replay of a committed turn carries no transient statuses; the
+    # terminal events and their payloads are byte-for-byte the same.
     assert _event_names(replay) == ("error", "done")
+    assert _parse_sse_payload(replay) == first_events
     assert (
         _marker_count(marker_path, "oversized_state_provider")
         == provider_calls_before_replay

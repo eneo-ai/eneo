@@ -47,163 +47,171 @@ def _service(*, session, user) -> FlowTranscriptWordsService:
 
 
 async def test_words_round_trip_and_replace_on_retry(
-    session,
+    db_container,
     completion_model_factory,
     space_factory,
     assistant_factory,
     admin_user,
 ) -> None:
-    scenario = await _create_scenario(
-        session=session,
-        completion_model_factory=completion_model_factory,
-        space_factory=space_factory,
-        assistant_factory=assistant_factory,
-        admin_user=admin_user,
-    )
-    repo = FlowTranscriptWordsRepository(session=session)
-    first = await repo.upsert(
-        tenant_id=scenario.tenant_id,
-        flow_id=scenario.flow_id,
-        run_id=scenario.flow_run_id,
-        step_id=scenario.transcription_step_id,
-        segments_hash=segments_content_hash(SEGMENTS),
-        alignment="forced",
-        words_json=WORDS,
-    )
-    # An in-run retry re-transcribes: the row is replaced, never duplicated.
-    second = await repo.upsert(
-        tenant_id=scenario.tenant_id,
-        flow_id=scenario.flow_id,
-        run_id=scenario.flow_run_id,
-        step_id=scenario.transcription_step_id,
-        segments_hash=segments_content_hash(SEGMENTS),
-        alignment="provider_words",
-        words_json=WORDS,
-    )
-    assert second.id == first.id
-    assert second.alignment == "provider_words"
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        repo = FlowTranscriptWordsRepository(session=session)
+        first = await repo.upsert(
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            run_id=scenario.flow_run_id,
+            step_id=scenario.transcription_step_id,
+            segments_hash=segments_content_hash(SEGMENTS),
+            alignment="forced",
+            words_json=WORDS,
+        )
+        # An in-run retry re-transcribes: the row is replaced, never duplicated.
+        second = await repo.upsert(
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            run_id=scenario.flow_run_id,
+            step_id=scenario.transcription_step_id,
+            segments_hash=segments_content_hash(SEGMENTS),
+            alignment="provider_words",
+            words_json=WORDS,
+        )
+        assert second.id == first.id
+        assert second.alignment == "provider_words"
 
-    view = await _service(session=session, user=admin_user).get_for_step(
-        flow_id=scenario.flow_id,
-        run_id=scenario.flow_run_id,
-        step_id=scenario.transcription_step_id,
-    )
-
-    assert view.stale is False
-    assert view.words.words_json == WORDS
-    assert view.words.alignment == "provider_words"
-
-
-async def test_words_go_stale_when_the_segments_change(
-    session,
-    completion_model_factory,
-    space_factory,
-    assistant_factory,
-    admin_user,
-) -> None:
-    scenario = await _create_scenario(
-        session=session,
-        completion_model_factory=completion_model_factory,
-        space_factory=space_factory,
-        assistant_factory=assistant_factory,
-        admin_user=admin_user,
-    )
-    await FlowTranscriptWordsRepository(session=session).upsert(
-        tenant_id=scenario.tenant_id,
-        flow_id=scenario.flow_id,
-        run_id=scenario.flow_run_id,
-        step_id=scenario.transcription_step_id,
-        segments_hash=segments_content_hash(SEGMENTS),
-        alignment="forced",
-        words_json=WORDS,
-    )
-    await _store_segments(
-        session=session,
-        run_id=scenario.flow_run_id,
-        step_id=scenario.transcription_step_id,
-        segments=[{**SEGMENTS[0], "text": "Vi frågade Çagri om planen."}],
-    )
-
-    view = await _service(session=session, user=admin_user).get_for_step(
-        flow_id=scenario.flow_id,
-        run_id=scenario.flow_run_id,
-        step_id=scenario.transcription_step_id,
-    )
-
-    assert view.stale is True
-
-
-async def test_missing_words_are_not_found(
-    session,
-    completion_model_factory,
-    space_factory,
-    assistant_factory,
-    admin_user,
-) -> None:
-    scenario = await _create_scenario(
-        session=session,
-        completion_model_factory=completion_model_factory,
-        space_factory=space_factory,
-        assistant_factory=assistant_factory,
-        admin_user=admin_user,
-    )
-
-    with pytest.raises(NotFoundException):
-        await _service(session=session, user=admin_user).get_for_step(
+        view = await _service(session=session, user=admin_user).get_for_step(
             flow_id=scenario.flow_id,
             run_id=scenario.flow_run_id,
             step_id=scenario.transcription_step_id,
         )
 
+        assert view.stale is False
+        assert view.words.words_json == WORDS
+        assert view.words.alignment == "provider_words"
 
-async def test_words_are_invisible_across_tenants(
-    session,
+
+async def test_words_go_stale_when_the_segments_change(
+    db_container,
     completion_model_factory,
     space_factory,
     assistant_factory,
     admin_user,
 ) -> None:
-    scenario = await _create_scenario(
-        session=session,
-        completion_model_factory=completion_model_factory,
-        space_factory=space_factory,
-        assistant_factory=assistant_factory,
-        admin_user=admin_user,
-    )
-    repo = FlowTranscriptWordsRepository(session=session)
-    await repo.upsert(
-        tenant_id=scenario.tenant_id,
-        flow_id=scenario.flow_id,
-        run_id=scenario.flow_run_id,
-        step_id=scenario.transcription_step_id,
-        segments_hash=segments_content_hash(SEGMENTS),
-        alignment="forced",
-        words_json=WORDS,
-    )
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        await FlowTranscriptWordsRepository(session=session).upsert(
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            run_id=scenario.flow_run_id,
+            step_id=scenario.transcription_step_id,
+            segments_hash=segments_content_hash(SEGMENTS),
+            alignment="forced",
+            words_json=WORDS,
+        )
+        await _store_segments(
+            session=session,
+            run_id=scenario.flow_run_id,
+            step_id=scenario.transcription_step_id,
+            segments=[{**SEGMENTS[0], "text": "Vi frågade Çagri om planen."}],
+        )
 
-    same_tenant = await repo.get_for_step(
-        run_id=scenario.flow_run_id,
-        step_id=scenario.transcription_step_id,
-        tenant_id=scenario.tenant_id,
-    )
-    other_tenant = await repo.get_for_step(
-        run_id=scenario.flow_run_id,
-        step_id=scenario.transcription_step_id,
-        tenant_id=uuid4(),
-    )
+        view = await _service(session=session, user=admin_user).get_for_step(
+            flow_id=scenario.flow_id,
+            run_id=scenario.flow_run_id,
+            step_id=scenario.transcription_step_id,
+        )
 
-    assert same_tenant is not None
-    assert other_tenant is None
-    await repo.delete_for_step(
-        run_id=scenario.flow_run_id,
-        step_id=scenario.transcription_step_id,
-        tenant_id=uuid4(),
-    )
-    assert (
-        await repo.get_for_step(
+        assert view.stale is True
+
+
+async def test_missing_words_are_not_found(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+) -> None:
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+
+        with pytest.raises(NotFoundException):
+            await _service(session=session, user=admin_user).get_for_step(
+                flow_id=scenario.flow_id,
+                run_id=scenario.flow_run_id,
+                step_id=scenario.transcription_step_id,
+            )
+
+
+async def test_words_are_invisible_across_tenants(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+) -> None:
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        repo = FlowTranscriptWordsRepository(session=session)
+        await repo.upsert(
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            run_id=scenario.flow_run_id,
+            step_id=scenario.transcription_step_id,
+            segments_hash=segments_content_hash(SEGMENTS),
+            alignment="forced",
+            words_json=WORDS,
+        )
+
+        same_tenant = await repo.get_for_step(
             run_id=scenario.flow_run_id,
             step_id=scenario.transcription_step_id,
             tenant_id=scenario.tenant_id,
         )
-        is not None
-    )
+        other_tenant = await repo.get_for_step(
+            run_id=scenario.flow_run_id,
+            step_id=scenario.transcription_step_id,
+            tenant_id=uuid4(),
+        )
+
+        assert same_tenant is not None
+        assert other_tenant is None
+        await repo.delete_for_step(
+            run_id=scenario.flow_run_id,
+            step_id=scenario.transcription_step_id,
+            tenant_id=uuid4(),
+        )
+        assert (
+            await repo.get_for_step(
+                run_id=scenario.flow_run_id,
+                step_id=scenario.transcription_step_id,
+                tenant_id=scenario.tenant_id,
+            )
+            is not None
+        )
