@@ -17,10 +17,17 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from eneo.authentication.signed_urls import looks_like_reference_url
-from eneo.internal_mcp.constants import FILES_SERVER_NAME
+from eneo.internal_mcp.constants import (
+    FILES_SERVER_NAME,
+    IMAGE_GENERATION_SERVER_NAME,
+)
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
-from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
+from eneo.mcp_servers.domain.entities.mcp_server import (
+    MCPServer,
+    MCPServerTool,
+    is_builtin_provider,
+)
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
     MCPClient,
     MCPClientError,
@@ -47,6 +54,19 @@ MCP_IDENTITY_CATALOG_PREPARATION_TIMEOUT_SECONDS = float(
 )
 _CIRCUIT_BREAKER_STATE: dict[UUID, dict[str, float | int]] = {}
 _CIRCUIT_BREAKER_LOCK = asyncio.Lock()
+
+
+def _tool_call_timeout_for(server: MCPServer) -> int | None:
+    """Per-server tool-call budget; ``None`` keeps the client default.
+
+    The built-in image generation provider runs an image model whose calls
+    routinely outlast a general MCP tool call, so it gets its own budget.
+    """
+    if is_builtin_provider(server.http_auth_type) and (
+        server.purpose == IMAGE_GENERATION_SERVER_NAME
+    ):
+        return _settings.image_generation_timeout_seconds
+    return None
 
 
 class MCPProxySession:
@@ -789,6 +809,7 @@ class MCPProxySession:
                     sid
                 ),
                 identity_headers=self.identity_headers,
+                tool_call_timeout=_tool_call_timeout_for(server),
             )
 
             logger.debug(f"[MCPProxy] Connecting to '{server.name}'...")

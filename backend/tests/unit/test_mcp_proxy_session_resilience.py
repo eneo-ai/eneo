@@ -101,6 +101,53 @@ class _FakeMCPClient:
         return {"content": [{"type": "text", "text": name}], "is_error": False}
 
 
+class _RecordingMCPClient(_FakeMCPClient):
+    """Fake client that keeps the constructor options the proxy passed."""
+
+    options_by_server: dict[UUID, dict[str, object]] = {}
+
+    def __init__(
+        self,
+        mcp_server: MCPServer,
+        auth_credentials: dict[str, str] | None = None,
+        *,
+        identity_headers: dict[str, str] | None = None,
+        **options: object,
+    ) -> None:
+        super().__init__(
+            mcp_server, auth_credentials, identity_headers=identity_headers
+        )
+        type(self).options_by_server[mcp_server.id] = options
+
+
+async def test_builtin_image_provider_gets_its_own_tool_call_budget(monkeypatch):
+    """Image generation outlasts a general tool call; only the built-in
+    provider carries the longer budget, other servers keep the default."""
+    general = _make_server("general")
+    image_provider = MCPServer(
+        id=uuid4(),
+        tenant_id=general.tenant_id,
+        name="Images",
+        http_url="http://localhost/internal-mcp/image_generation/mcp",
+        http_auth_type="internal",
+        purpose="image_generation",
+        image_model_id=uuid4(),
+    )
+    monkeypatch.setattr(proxy_module, "MCPClient", _RecordingMCPClient)
+    _RecordingMCPClient.options_by_server = {}
+    proxy = MCPProxySession([general, image_provider])
+
+    await proxy._get_or_create_client(general)  # pyright: ignore[reportPrivateUsage]
+    await proxy._get_or_create_client(image_provider)  # pyright: ignore[reportPrivateUsage]
+
+    options = _RecordingMCPClient.options_by_server
+    assert options[general.id]["tool_call_timeout"] is None
+    assert (
+        options[image_provider.id]["tool_call_timeout"]
+        == proxy_module._settings.image_generation_timeout_seconds  # pyright: ignore[reportPrivateUsage]
+    )
+
+
 class _InMemoryToolRepo:
     def __init__(self, tools: list[MCPServerTool]) -> None:
         self.tools = {tool.id: tool for tool in tools}

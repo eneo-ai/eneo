@@ -44,6 +44,17 @@ RESOURCE_TEXT_MAX_BYTES = 8 * 1024
 RESOURCE_META_MAX_BYTES = 16 * 1024
 MCP_SSE_READ_TIMEOUT_SECONDS = 300.0
 
+
+def transport_read_timeout(tool_call_timeout: float) -> float:
+    """HTTP read timeout that never undercuts the tool-call budget.
+
+    A tool call is bounded by ``tool_call_timeout``; the transport's read
+    timeout must be at least as long or a slow but legitimate call (image
+    generation) is cut by the transport before the tool-call timeout fires.
+    """
+    return max(MCP_SSE_READ_TIMEOUT_SECONDS, float(tool_call_timeout))
+
+
 MCPStreams = tuple[
     MemoryObjectReceiveStream[SessionMessage | Exception],
     MemoryObjectSendStream[SessionMessage],
@@ -447,10 +458,11 @@ async def _open_streamable_http_client(
     *,
     headers: dict[str, str],
     timeout_seconds: float,
+    read_timeout_seconds: float = MCP_SSE_READ_TIMEOUT_SECONDS,
     tool_catalog_max_count: int,
     tool_catalog_max_bytes: int,
 ) -> AsyncGenerator[MCPStreams]:
-    timeout = httpx.Timeout(timeout_seconds, read=MCP_SSE_READ_TIMEOUT_SECONDS)
+    timeout = httpx.Timeout(timeout_seconds, read=read_timeout_seconds)
     http_headers = {"Accept-Encoding": "identity", **headers}
     async with create_mcp_http_client(
         headers=http_headers, timeout=timeout
@@ -755,6 +767,7 @@ class MCPClient:
             url=self.mcp_server.http_url,
             headers=headers,
             timeout_seconds=float(self.timeout),
+            read_timeout_seconds=transport_read_timeout(self.tool_call_timeout),
             tool_catalog_max_count=self.mcp_server.tool_catalog_max_count,
             tool_catalog_max_bytes=self.mcp_server.tool_catalog_max_bytes,
         )
