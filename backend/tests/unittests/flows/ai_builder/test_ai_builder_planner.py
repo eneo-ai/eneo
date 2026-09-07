@@ -184,7 +184,7 @@ from eneo.flows.ai_builder.planning_state import (
 from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
 )
-from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.flows.domain.flow import FlowPersistedJsonObject, FlowStep
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -4973,16 +4973,35 @@ def _review_command_message(
 
 
 def _reviewed_flow() -> Any:
+    # The handoff fixture names steps 1 and 2; the reviewed flow has them.
+    flow_id = uuid4()
     return cast(
         Any,
         SimpleNamespace(
-            id=uuid4(),
+            id=flow_id,
             name="Beslutsunderlag",
             description="",
-            steps=[],
+            steps=[_reviewed_step(flow_id, 1), _reviewed_step(flow_id, 2)],
             metadata_json={},
             draft_revision=1,
         ),
+    )
+
+
+def _reviewed_step(flow_id: UUID, step_order: int) -> FlowStep:
+    # Shaped like the persisted document architecture the tests pair it with,
+    # or turn control would ask to revise the architecture instead.
+    return FlowStep(
+        id=uuid4(),
+        flow_id=flow_id,
+        tenant_id=uuid4(),
+        assistant_id=uuid4(),
+        step_order=step_order,
+        user_description=f"Steg {step_order}",
+        input_source="flow_input" if step_order == 1 else "previous_step",
+        input_type="document" if step_order == 1 else "text",
+        output_mode="pass_through",
+        output_type="text",
     )
 
 
@@ -5395,6 +5414,11 @@ def test_a_handoff_turn_is_offered_the_review_scoped_edit_tool() -> None:
     parameters = prepared.proposal_tool_schema["function"]["parameters"]
     assert "flow_description" not in parameters["properties"]
     assert "form_fields" not in parameters["properties"]
+    modify = parameters["properties"]["steps"]["items"]["anyOf"][0]
+    assert modify["properties"]["existing_step_ref"]["enum"] == [
+        "existing_step_1",
+        "existing_step_2",
+    ]
 
 
 def _build_review_backed_proposal(

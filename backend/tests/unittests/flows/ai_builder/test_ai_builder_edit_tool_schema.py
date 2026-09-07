@@ -560,13 +560,11 @@ class TestReviewScopedEditSchema:
         ]
         assert set(by_kind["keep"]["properties"]) == {"kind", "existing_step_ref"}
 
-    def test_a_findings_step_the_flow_no_longer_has_leaves_only_keep(self) -> None:
-        # The stale-review guard refuses such a turn earlier; the schema must
-        # still be a schema (no empty enum) if it is ever built.
-        params = self._scoped(step_refs={"existing_step_9"})
-        items = params["properties"]["steps"]["items"]
-        assert "anyOf" not in items
-        assert items["properties"]["kind"]["enum"] == ["keep"]
+    def test_a_findings_step_the_flow_does_not_have_is_a_server_defect(self) -> None:
+        # The stale-review guard refuses a moved flow before the schema is
+        # built, so an absent step is an invariant broken, never degraded.
+        with pytest.raises(ValueError, match="existing_step_9"):
+            self._scoped(step_refs={"existing_step_2", "existing_step_9"})
 
     def test_adding_is_offered_only_when_the_findings_call_for_it(self) -> None:
         kinds = lambda params: {  # noqa: E731

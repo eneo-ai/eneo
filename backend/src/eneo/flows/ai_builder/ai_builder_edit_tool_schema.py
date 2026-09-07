@@ -56,11 +56,21 @@ def build_edit_flow_tool_schema(
         model_refs=model_refs,
         kb_refs=kb_refs,
     )
-    modifiable_refs = (
-        valid_refs
-        if review_scope is None
-        else [ref for ref in valid_refs if ref in review_scope.step_refs]
-    )
+    if review_scope is None:
+        modifiable_refs = valid_refs
+    else:
+        # The scope was read from a review of this very definition (a turn
+        # whose flow moved on is refused before it gets here), so a finding's
+        # step the flow does not have is a broken server invariant, not a
+        # schema to degrade. Nothing before the provider call catches it: the
+        # stream boundary logs it and reports a failed turn.
+        absent = sorted(review_scope.step_refs.difference(valid_refs))
+        if absent:
+            raise ValueError(
+                "review scope names steps the flow does not have: "
+                f"{', '.join(absent)} (flow has {', '.join(valid_refs)})"
+            )
+        modifiable_refs = [ref for ref in valid_refs if ref in review_scope.step_refs]
     modify_step_schema = _build_modify_step_schema(
         valid_refs=modifiable_refs,
         kb_refs=kb_refs,
@@ -116,11 +126,8 @@ def build_edit_flow_tool_schema(
             },
         }
     else:
-        # A findings' step the flow no longer has leaves nothing to modify
-        # (the stale-review guard refuses that turn earlier); an empty enum is
-        # not a schema, so the branch is offered only when it can be used.
         step_branches: list[dict[str, Any]] = [
-            *([modify_step_schema] if modifiable_refs else []),
+            modify_step_schema,
             _build_keep_step_schema(valid_refs=valid_refs),
         ]
         if review_scope.may_add:
@@ -138,10 +145,7 @@ def build_edit_flow_tool_schema(
                     else ""
                 )
             ),
-            # A union needs two branches to be one; a lone branch is the item.
-            "items": (
-                {"anyOf": step_branches} if len(step_branches) > 1 else step_branches[0]
-            ),
+            "items": {"anyOf": step_branches},
         }
     if removable_refs:
         properties["removed_existing_step_refs"] = {
