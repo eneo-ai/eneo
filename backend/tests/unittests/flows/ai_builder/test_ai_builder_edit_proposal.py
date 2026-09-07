@@ -3141,6 +3141,73 @@ async def test_a_review_turn_is_not_blamed_for_a_duplicate_name_preparation_suff
     assert renamed and renamed != ["existing_step_3"]
 
 
+@pytest.mark.asyncio
+async def test_a_spilled_edit_payload_is_re_homed_and_then_told_what_it_still_lacks():
+    """The captured non-strict shape, through admission and the real edit
+    processor: the field objects that spilled out of step 3 are re-homed and
+    the root null tail dropped, so the model is told the one thing it can act
+    on (the steps it never emitted) instead of a schema error."""
+    from eneo.flows.ai_builder.ai_builder_tools import admit_propose_flow_tool_arguments
+
+    flow = _flow(
+        _flow_step(step_order=1, user_description="Transkribera"),
+        _flow_step(
+            step_order=2, user_description="Fakta", input_source="previous_step"
+        ),
+        _flow_step(
+            step_order=3, user_description="Analys", input_source="previous_step"
+        ),
+        _flow_step(
+            step_order=4, user_description="Rapport", input_source="previous_step"
+        ),
+        _flow_step(step_order=5, user_description="PDF", input_source="previous_step"),
+    )
+    schema = build_edit_flow_tool_schema(
+        list(flow.steps),
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[], available_kbs=[]
+        ),
+        tool_name=PROPOSE_FLOW_TOOL_NAME,
+    )
+    captured_shape = {
+        "plan_rationale": "Steg 3 fångar fler fält.",
+        "steps": [
+            {"kind": "keep", "existing_step_ref": "existing_step_1"},
+            {
+                "kind": "modify",
+                "existing_step_ref": "existing_step_2",
+                "assistant_spec": {"instructions": "Sammanfatta fakta."},
+            },
+            {
+                "kind": "modify",
+                "existing_step_ref": "existing_step_3",
+                "output_type": "json",
+                "output_fields": [
+                    {"name": "motestyp", "field_type": "string", "description": "Typ."}
+                ],
+            },
+            {"name": "risker", "field_type": "array", "description": "Risker."},
+            {"name": "oppna_fragor", "field_type": "array", "description": "Öppna."},
+        ],
+        "review_mode": None,
+        "document_delivery_mode": None,
+    }
+
+    admitted = admit_propose_flow_tool_arguments(
+        arguments=captured_shape,
+        tool_schema=schema,  # type: ignore[arg-type]
+    )
+    assert [f["name"] for f in admitted["steps"][2]["output_fields"]] == [
+        "motestyp",
+        "risker",
+        "oppna_fragor",
+    ]
+    result = await _process(flow=flow, arguments=admitted)
+
+    assert isinstance(result, CorrectableFailure)
+    assert "existing_step_4" in result.feedback and "existing_step_5" in result.feedback
+
+
 def _strict_review_modify(ref: str, **changes: object) -> dict[str, object]:
     """A modify item as a strict provider writes it: every property present."""
     return {

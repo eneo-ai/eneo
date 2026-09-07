@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import deque
 from copy import deepcopy
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Literal, NotRequired, TypedDict, cast
 
 import jsonschema
@@ -326,7 +327,7 @@ def admit_propose_flow_tool_arguments(
         recorder=on_normalizer_hit,
     )
     before_rehome = admitted
-    admitted = _rehome_misplaced_create_children(
+    admitted = _rehome_misplaced_step_children(
         arguments=admitted,
         tool_schema=tool_schema,
     )
@@ -365,9 +366,20 @@ def _record_admission_normalizer_hit(
         recorder(family)
 
 
+@dataclass(frozen=True, slots=True)
+class _StepObjectSchema:
+    """The step object schema the normalisers walk, and which tool it is from."""
+
+    schema: dict[str, object]
+    # True for the edit tool, whose step is a union branch: there a null
+    # optional means "keep" and carries nothing, while the create tool's null
+    # is a value ("no output fields") that can conflict.
+    is_edit_branch: bool
+
+
 def _step_object_schema(
     tool_schema: ProposalToolSchema,
-) -> dict[str, object] | None:
+) -> _StepObjectSchema | None:
     """The step object schema the normalisers walk.
 
     The create tool lists one step object under ``steps.items``; the edit tool
@@ -388,7 +400,7 @@ def _step_object_schema(
         return None
     items_map = cast(dict[str, object], items)
     if isinstance(items_map.get("properties"), dict):
-        return items_map
+        return _StepObjectSchema(schema=items_map, is_edit_branch=False)
     for keyword in _UNION_KEYWORDS:
         branches = items_map.get(keyword)
         if not isinstance(branches, list):
@@ -401,7 +413,7 @@ def _step_object_schema(
             if isinstance(branch_properties, dict) and "output_fields" in cast(
                 dict[str, object], branch_properties
             ):
-                return branch_map
+                return _StepObjectSchema(schema=branch_map, is_edit_branch=True)
     return None
 
 
@@ -425,7 +437,7 @@ def _discard_punctuation_serialization_artifacts(
     step_schema = _step_object_schema(tool_schema)
     if step_schema is None:
         return admitted_root
-    raw_step_properties = step_schema.get("properties")
+    raw_step_properties = step_schema.schema.get("properties")
     if not isinstance(raw_step_properties, dict):
         return admitted_root
 
@@ -555,16 +567,16 @@ def _normalize_field_children(
     return admitted_fields, changed
 
 
-def _rehome_misplaced_create_children(
+def _rehome_misplaced_step_children(
     *,
     arguments: dict[str, Any],
     tool_schema: ProposalToolSchema,
 ) -> dict[str, Any]:
     """Re-home children a non-strict provider closed at the wrong boundary.
 
-    Applies to the create tool and to the edit tool's modify branch alike; the
-    family name predates the edit schema and stays because it is a public
-    telemetry value (`admission_normalization_hits`).
+    Applies to the create tool and to the edit tool's modify branch alike. The
+    telemetry family it reports stays `_rehome_misplaced_create_children`: a
+    public value (`admission_normalization_hits`) that predates the edit schema.
     """
 
     parameters = tool_schema["function"]["parameters"]
@@ -572,9 +584,10 @@ def _rehome_misplaced_create_children(
     if not isinstance(raw_properties, dict):
         return arguments
     properties = cast(dict[str, object], raw_properties)
-    step_schema_map = _step_object_schema(tool_schema)
-    if step_schema_map is None:
+    step_schema = _step_object_schema(tool_schema)
+    if step_schema is None:
         return arguments
+    step_schema_map = step_schema.schema
     step_properties = step_schema_map.get("properties")
     raw_required_step_keys = step_schema_map.get("required")
     if not isinstance(step_properties, dict) or not isinstance(
@@ -688,10 +701,11 @@ def _rehome_misplaced_create_children(
     # A non-strict tool implementation can also close the final step object
     # before its optional tail. Rehome only keys that the prepared schema says
     # are optional step properties and never valid at the root. An identical
-    # duplicate is redundant and can be discarded, and so is a null one: a
-    # null optional carries nothing (an edit reads it as "keep", a create as
-    # "not set"), so the step's own value stands. Two different values stay
-    # invalid rather than guessing which should win.
+    # duplicate is redundant and can be discarded. On the edit tool a null
+    # optional is redundant too: it means "keep" and carries nothing, so the
+    # step's own value stands; on the create tool a null is a value ("no
+    # output fields") and conflicts. Two different values stay invalid rather
+    # than guessing which should win.
     root_keys = frozenset(properties)
     step_tail_keys = allowed_step_keys - root_keys - required_step_keys
     misplaced_tail = step_tail_keys.intersection(admitted)
@@ -707,7 +721,10 @@ def _rehome_misplaced_create_children(
         key
         for key in misplaced_tail
         if key in final_step
-        and (admitted[key] is None or admitted[key] == final_step[key])
+        and (
+            admitted[key] == final_step[key]
+            or (step_schema.is_edit_branch and admitted[key] is None)
+        )
     )
     removable_tail = (*movable_tail, *redundant_tail)
     if not removable_tail:

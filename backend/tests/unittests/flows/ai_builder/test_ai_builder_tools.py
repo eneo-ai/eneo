@@ -437,6 +437,33 @@ class TestBuildToolSchema:
         with pytest.raises(ProposalToolArgumentsError):
             admit_propose_flow_tool_arguments(arguments=duplicated, tool_schema=schema)
 
+    def test_create_admission_keeps_a_null_root_tail_a_conflict(self) -> None:
+        """On the create tool a null is a value ("no output fields"), so a null
+        root tail beside a step that declares fields is a conflict, not a
+        redundant copy; admission fails closed as before."""
+        schema = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())
+        arguments = {
+            "flow_name": "Grounded assessment",
+            "plan_rationale": "Assess the submitted material.",
+            "steps": [
+                {
+                    "name": "Assess material",
+                    "instructions": "Assess only the supplied material.",
+                    "output_fields": [
+                        {
+                            "name": "summary",
+                            "field_type": "string",
+                            "description": "A concise summary.",
+                        }
+                    ],
+                }
+            ],
+            "output_fields": None,
+        }
+
+        with pytest.raises(ProposalToolArgumentsError):
+            admit_propose_flow_tool_arguments(arguments=arguments, tool_schema=schema)
+
     def test_create_admission_discards_identical_duplicate_step_tail(self) -> None:
         schema = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())
         fields = [
