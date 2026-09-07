@@ -1,4 +1,8 @@
-"""Build and persist flow step input-file rows for run creation and reruns."""
+"""Build and persist flow step input-file rows.
+
+Run creation binds the uploads to attempt 1; a recovery attempt inherits that
+binding so a retried step reads the same uploaded files.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +10,7 @@ from typing import Sequence, TypedDict
 from uuid import UUID
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -74,6 +79,56 @@ async def insert_step_input_file_rows(
             step_id=step_id,
             file_ids=file_ids,
         ) from exc
+
+
+async def inherit_step_input_file_rows(
+    *,
+    session: AsyncSession,
+    run_id: UUID,
+    tenant_id: UUID,
+    step_id: UUID,
+    attempt_no: int,
+) -> None:
+    """Bind attempt 1's uploaded files to a later attempt of the same step.
+
+    Idempotent under the unique constraint, so a repeated allocation of the
+    same attempt number is a no-op.
+    """
+    select_rows = (
+        sa.select(
+            FlowRunStepInputFiles.flow_run_id,
+            FlowRunStepInputFiles.flow_id,
+            FlowRunStepInputFiles.tenant_id,
+            FlowRunStepInputFiles.step_id,
+            FlowRunStepInputFiles.step_order,
+            sa.literal(attempt_no).label("attempt_no"),
+            FlowRunStepInputFiles.file_id,
+            FlowRunStepInputFiles.ordinal,
+        )
+        .where(FlowRunStepInputFiles.flow_run_id == run_id)
+        .where(FlowRunStepInputFiles.tenant_id == tenant_id)
+        .where(FlowRunStepInputFiles.step_id == step_id)
+        .where(FlowRunStepInputFiles.attempt_no == 1)
+    )
+    await session.execute(
+        pg_insert(FlowRunStepInputFiles)
+        .from_select(
+            [
+                "flow_run_id",
+                "flow_id",
+                "tenant_id",
+                "step_id",
+                "step_order",
+                "attempt_no",
+                "file_id",
+                "ordinal",
+            ],
+            select_rows,
+        )
+        .on_conflict_do_nothing(
+            constraint="uq_flow_run_step_input_files_run_step_attempt_file",
+        )
+    )
 
 
 def _step_input_file_binding_race_payload(

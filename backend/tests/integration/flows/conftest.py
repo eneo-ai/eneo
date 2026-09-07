@@ -561,7 +561,7 @@ def _flow_worker_environment(*, settings: Settings, queue_name: str) -> dict[str
             # execution timeout; the child inherits the ambient value (hours)
             # unless the pair is set together here.
             "FLOW_TRANSCRIPTION_SERVICE_POLL_TIMEOUT_SECONDS": str(
-                max(1, _FLOW_TASK_TIMEOUT_SECONDS - 1)
+                _FLOW_TASK_TIMEOUT_SECONDS - 1
             ),
             "FLOW_MAX_INLINE_TEXT_BYTES": str(settings.flow_max_inline_text_bytes),
             "FLOW_LLM_REQUEST_TIMEOUT_SECONDS": str(

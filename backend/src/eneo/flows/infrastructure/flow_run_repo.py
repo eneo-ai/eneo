@@ -94,6 +94,7 @@ from eneo.flows.infrastructure.flow_run_staleness import (
 )
 from eneo.flows.infrastructure.flow_run_step_input_file_rows import (
     build_step_input_file_rows,
+    inherit_step_input_file_rows,
     insert_step_input_file_rows,
 )
 from eneo.flows.infrastructure.flow_step_attempt_numbering import (
@@ -2510,6 +2511,17 @@ class FlowRunRepository:
             .returning(FlowStepAttempts)
         )
         row = await self.session.scalar(insert_stmt)
+        if row is not None and attempt_no > 1:
+            # A recovery attempt reads its uploads per attempt; the bindings
+            # made at run creation belong to attempt 1 and are inherited here,
+            # in the same transaction as the attempt row.
+            await inherit_step_input_file_rows(
+                session=self.session,
+                run_id=run_id,
+                tenant_id=tenant_id,
+                step_id=step_id,
+                attempt_no=attempt_no,
+            )
         if row is None:
             row = await self.session.scalar(
                 sa.select(FlowStepAttempts)
