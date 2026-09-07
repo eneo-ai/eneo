@@ -401,10 +401,6 @@ export class FlowAIBuilderDriver {
     if (!owner) return false;
     const reconciled = await this.#refreshSession(owner);
     if (!reconciled || !this.#ownsSession(owner)) return false;
-    // The session reload can succeed while the plan it names fails to load;
-    // clearing the conflict then would leave a superseded plan approvable.
-    const namedPlanId = this.#state.session?.latest_plan_id ?? null;
-    if ((this.#state.currentPlan?.plan_id ?? null) !== namedPlanId) return false;
     this.#state.isConflict = false;
     this.#state.applyError = null;
     if (
@@ -459,8 +455,9 @@ export class FlowAIBuilderDriver {
     this.#state.error = null;
     this.#notify();
 
+    let result: AIBuilderSession;
     try {
-      const result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.sessions, {
+      result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.sessions, {
         method: "post",
         requestBody: {
           "application/json": {
@@ -471,29 +468,6 @@ export class FlowAIBuilderDriver {
           }
         }
       })) as AIBuilderSession;
-      let owner: SessionOperationOwner | null;
-      try {
-        owner = await this.#adoptSession(result, sessionGeneration);
-      } catch (adoptionError) {
-        // The session exists but its plan could not be loaded: a failure of
-        // this session's bootstrap, reported as such, never as a refused create.
-        if (sessionGeneration !== this.#sessionGeneration) return false;
-        this.#restoreReplacedSession(replacedState, replacedRefreshRequired, replacedRefreshError);
-        this.#state.error = this.#parseAndReportError(
-          {
-            transport: "apply",
-            payload: adoptionError,
-            fallbackMessage: m.ai_builder_error_fallback_load_plan()
-          },
-          { sessionId: result.session_id }
-        );
-        this.#notify();
-        await this.loadDraftSessions();
-        throw adoptionError;
-      }
-      if (owner === null) return false;
-      await this.loadDraftSessions();
-      return true;
     } catch (e) {
       if (sessionGeneration !== this.#sessionGeneration) return false;
       this.#restoreReplacedSession(replacedState, replacedRefreshRequired, replacedRefreshError);
@@ -510,6 +484,30 @@ export class FlowAIBuilderDriver {
       await this.loadDraftSessions();
       throw e;
     }
+
+    // The session exists: a plan that will not load is a failure of THIS
+    // session's bootstrap, reported once against it, never as a refused create.
+    let owner: SessionOperationOwner | null;
+    try {
+      owner = await this.#adoptSession(result, sessionGeneration);
+    } catch (adoptionError) {
+      if (sessionGeneration !== this.#sessionGeneration) return false;
+      this.#restoreReplacedSession(replacedState, replacedRefreshRequired, replacedRefreshError);
+      this.#state.error = this.#parseAndReportError(
+        {
+          transport: "apply",
+          payload: adoptionError,
+          fallbackMessage: m.ai_builder_error_fallback_load_plan()
+        },
+        { sessionId: result.session_id }
+      );
+      this.#notify();
+      await this.loadDraftSessions();
+      throw adoptionError;
+    }
+    if (owner === null) return false;
+    await this.loadDraftSessions();
+    return true;
   }
 
   /** Put the session a refused or failed create was replacing back on screen.

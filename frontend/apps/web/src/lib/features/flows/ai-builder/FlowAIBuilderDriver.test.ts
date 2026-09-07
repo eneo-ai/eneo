@@ -792,7 +792,9 @@ describe("FlowAIBuilderDriver", () => {
         return makeSession({ session_id: "session-2", latest_plan_id: "plan-9" });
       }
       if (path === "/api/v1/flows/ai-builder/plans/{plan_id}") {
-        throw new Error("plan unavailable");
+        // A transport failure without its own message: the fallback must be
+        // the plan-load one, reported once, with one recovery draft read.
+        throw { status: 503 };
       }
       if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "get") {
         return { sessions: [] };
@@ -801,11 +803,16 @@ describe("FlowAIBuilderDriver", () => {
     });
     const { driver } = makeDriver({ fetchImpl: fetch });
 
-    await expect(driver.createSession("edit")).rejects.toThrow("plan unavailable");
+    await expect(driver.createSession("edit")).rejects.toEqual({ status: 503 });
 
     expect(driver.state.session).toBeNull();
     expect(driver.state.currentPlan).toBeNull();
-    expect(driver.state.error).not.toBeNull();
+    expect(driver.state.error?.message).toBe(m.ai_builder_error_fallback_load_plan());
+    expect(
+      fetch.mock.calls.filter(
+        ([path, init]) => path === "/api/v1/flows/ai-builder/sessions" && init?.method === "get"
+      )
+    ).toHaveLength(1);
   });
 
   it("ends edit initialization with a visible failure when the created session's plan cannot load", async () => {
@@ -853,9 +860,12 @@ describe("FlowAIBuilderDriver", () => {
     expect(await driver.refreshSession()).toBe(false);
 
     // Nothing half-published: the snapshot naming plan-2 never replaced the
-    // session that still agrees with plan-1.
+    // session that still agrees with plan-1, the fence stays up, and the
+    // failure is visible.
     expect(driver.state.session?.latest_plan_id).toBe("plan-1");
     expect(driver.state.currentPlan?.plan_id).toBe("plan-1");
+    expect(driver.canStartNewTurn).toBe(false);
+    expect(driver.state.error).not.toBeNull();
   });
 
   it("keeps a pending resume cancellable while its plan is still loading", async () => {
