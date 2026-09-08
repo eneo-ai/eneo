@@ -1,0 +1,131 @@
+{
+  "plan_id": "fd324e30-7e7e-4b6b-be2a-b94a4b4ec83d",
+  "session_id": "248ead76-5d4a-4950-a714-4a24a5372272",
+  "status": "proposed",
+  "spec_hash": "913628a44270f6afff889ce1039266c1d62904dbe4eec718cea9c2114300417d",
+  "proposal": {
+    "spec": {
+      "flow_name": "Kort svensk rapport",
+      "flow_description": "Tar emot ett textunderlag som klistras in vid körning, strukturerar det till en kort svensk rapport och fyller rapport.docx-mallens samtliga namngivna innehållskontroller. Resultatet levereras som en nedladdningsbar DOCX med mallens fasta rubriker och layout bevarade.",
+      "steps": [
+        {
+          "plan_step_ref": "step_a",
+          "name": "Förbered rapportinnehåll",
+          "assistant_spec": {
+            "instructions": "Läs det inklistrade svenska textunderlaget och skapa komplett, kort och sakligt innehåll för samtliga namngivna innehållskontroller i rapportmallen. Välj en kort titel som tydligt speglar underlaget. Ange dagens datum som ÅÅÅÅ-MM-DD. Hämta författare från underlaget om den finns; annars skriv exakt \"Uppgift saknas.\". Skriv sammanfattningen i två till fyra löpande stycken utan egen rubrik. Skriv bakgrund med syfte och relevant kontext från underlaget. Skriv analysen med en underrubrik per delområde och använd pipe-tabeller med rubrikrad när underlaget innehåller siffror som vinner på tabellform. Skriv slutsatser som löpande text och rekommendationer som en numrerad lista. Fyll även titel och datum, och skriv \"Uppgift saknas.\" i varje annan kontroll där underlaget inte ger tillräckligt stöd. Lägg inte till påståenden, källor eller detaljer som saknas i underlaget. För rika kontroller ska fältvärdet vara själva sektionsinnehållet utan sektionsrubriken, utan introduktion eller avslutande kommentar och utan platshållare; följ mallens tillåtna Markdown-format och bevara osäkerheter tydligt.\n\nRequired JSON fields:\n- titel: Kort rapporttitel som speglar det inklistrade underlaget; skriv \"Uppgift saknas.\" om en titel inte kan fastställas.\n- datum: Dagens datum i formatet ÅÅÅÅ-MM-DD.\n- forfattare: Författarens namn och funktion från underlaget; skriv \"Uppgift saknas.\" om uppgiften saknas.\n- sammanfattning: Sammanfattning av rapportens viktigaste innehåll i två till fyra löpande stycken utan egen rubrik, enbart grundad på underlaget.\n- bakgrund: Bakgrund och syfte från underlaget, strukturerat med relevanta underrubriker eller punktlistor vid behov; skriv \"Uppgift saknas.\" om underlaget inte ger stöd.\n- analys: Källnära analys med en underrubrik per delområde. Använd pipe-tabeller med rubrikrad för relevanta siffror och markera osäkerheter eller saknade uppgifter tydligt.\n- slutsatser: Slutsatser som löpande text följda av rekommendationer i en numrerad lista. Rekommendationerna ska endast bygga på underlaget; skriv \"Uppgift saknas.\" om slutsatser eller rekommendationer inte kan stödjas.",
+            "knowledge_refs": []
+          },
+          "input_source": "flow_input",
+          "input_type": "text",
+          "output_mode": "pass_through",
+          "output_type": "json",
+          "input_bindings": {
+            "question": "{{ indata_text }}"
+          },
+          "output_contract": {
+            "additionalProperties": false,
+            "properties": {
+              "analys": {
+                "description": "Källnära analys med en underrubrik per delområde. Använd pipe-tabeller med rubrikrad för relevanta siffror och markera osäkerheter eller saknade uppgifter tydligt.",
+                "title": "Analys",
+                "type": "string"
+              },
+              "bakgrund": {
+                "description": "Bakgrund och syfte från underlaget, strukturerat med relevanta underrubriker eller punktlistor vid behov; skriv \"Uppgift saknas.\" om underlaget inte ger stöd.",
+                "title": "Bakgrund",
+                "type": "string"
+              },
+              "datum": {
+                "description": "Dagens datum i formatet ÅÅÅÅ-MM-DD.",
+                "title": "Datum",
+                "type": "string"
+              },
+              "forfattare": {
+                "description": "Författarens namn och funktion från underlaget; skriv \"Uppgift saknas.\" om uppgiften saknas.",
+                "title": "Forfattare",
+                "type": "string"
+              },
+              "sammanfattning": {
+                "description": "Sammanfattning av rapportens viktigaste innehåll i två till fyra löpande stycken utan egen rubrik, enbart grundad på underlaget.",
+                "title": "Sammanfattning",
+                "type": "string"
+              },
+              "slutsatser": {
+                "description": "Slutsatser som löpande text följda av rekommendationer i en numrerad lista. Rekommendationerna ska endast bygga på underlaget; skriv \"Uppgift saknas.\" om slutsatser eller rekommendationer inte kan stödjas.",
+                "title": "Slutsatser",
+                "type": "string"
+              },
+              "titel": {
+                "description": "Kort rapporttitel som speglar det inklistrade underlaget; skriv \"Uppgift saknas.\" om en titel inte kan fastställas.",
+                "title": "Titel",
+                "type": "string"
+              }
+            },
+            "required": [
+              "titel",
+              "datum",
+              "forfattare",
+              "sammanfattning",
+              "bakgrund",
+              "analys",
+              "slutsatser"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "plan_step_ref": "step_b",
+          "name": "Fyll DOCX-mall",
+          "assistant_spec": {
+            "instructions": "Fyll DOCX-mallen med det förberedda innehållet. Bevara användarens önskade omfattning och terminologi.",
+            "knowledge_refs": []
+          },
+          "input_source": "previous_step",
+          "input_type": "text",
+          "output_mode": "template_fill",
+          "output_type": "docx",
+          "input_bindings": {
+            "source_refs": [
+              {
+                "output": "structured",
+                "step_ref": "step_a"
+              }
+            ]
+          },
+          "output_config": {
+            "bindings": {
+              "analys": "{{ step_a.output.structured.analys }}",
+              "bakgrund": "{{ step_a.output.structured.bakgrund }}",
+              "datum": "{{ datum }}",
+              "forfattare": "{{ step_a.output.structured.forfattare }}",
+              "sammanfattning": "{{ step_a.output.structured.sammanfattning }}",
+              "slutsatser": "{{ step_a.output.structured.slutsatser }}",
+              "titel": "{{ step_a.output.structured.titel }}"
+            }
+          }
+        }
+      ],
+      "form_fields": []
+    },
+    "assumptions": [
+      "Användaren klistrar in ett svenskt textunderlag vid varje körning.",
+      "rapport.docx används som fast slutlig Word-mall och dess rubriker och layout ska inte ändras.",
+      "Dagens datum ska anges i formatet ÅÅÅÅ-MM-DD.",
+      "Om titel, författare eller någon annan efterfrågad uppgift saknas i underlaget ska det anges tydligt som \"Uppgift saknas.\" i relevant kontroll.",
+      "Inga externa källor ska användas; rapporten ska enbart bygga på det inklistrade underlaget.",
+      "Sammanfattningen ska vara två till fyra stycken och övriga rika fält ska följa mallens angivna innehålls- och Markdown-begränsningar."
+    ],
+    "lint_warnings": [],
+    "plan_rationale": "Ett förberedelsesteg läser endast det inklistrade underlaget, skapar komplett innehåll för varje innehållskontroll och markerar saknade uppgifter tydligt. Därefter fyller den fasta Word-mallen innehållet utan externa källor eller nyupptäckta fakta.",
+    "description_override_manual": false,
+    "execution_shape": {
+      "completion_model_step_count": 1,
+      "transcription_model_step_count": 0,
+      "deterministic_step_count": 1,
+      "schema_constrained_step_count": 1,
+      "mapped_step_upper_bounds": []
+    }
+  },
+  "created_at": "2026-09-08T16:43:24.978594Z",
+  "updated_at": "2026-09-08T16:43:24.978594Z"
+}

@@ -1,0 +1,7 @@
+{
+  "client_turn_id": "0dd7bcae-277a-4c9f-9c14-7ed359229852",
+  "file_ids": [
+    "93bcfe01-c97c-43ab-950c-b7f6fd1b4566"
+  ],
+  "message": "Skapa ett flöde för en kort svensk rapport från ett textunderlag som användaren klistrar in vid körning. Använd bifogade rapport.docx som slutlig Word-mall. Läs mallens namngivna innehållskontroller och använd deras etiketter och instruktioner. Förbered och koppla innehåll till samtliga kontroller, inklusive titel och datum. Använd dagens datum och en kort titel från underlaget; om underlaget saknar en uppgift ska rapporten tydligt säga att uppgiften saknas. Behåll mallens fasta rubriker och layout. Slutresultatet ska vara en nedladdningsbar DOCX. Använd tillgänglig standardmodell och inga externa källor. Ge ett granskningsbart planförslag."
+}

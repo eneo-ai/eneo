@@ -1,0 +1,9 @@
+{
+  "titel": "Uppföljning av handläggning under försöksvecka",
+  "datum": "2026-09-08",
+  "forfattare": "Testförfattare, samordnare",
+  "sammanfattning": "Rapporten redovisar resultatet av en försöksvecka där tolv ärenden följts upp för att analysera handläggningstider och orsaker till förseningar.Majoriteten av ärendena färdigställdes snabbt, men en del av underlaget krävde kompletteringar vilket ledde till längre handläggningstider. Som åtgärd föreslås införandet av en checklista för bilagor.",
+  "bakgrund": "SyfteSyftet med genomförandet är att följa upp tolv specifika ärenden under en försöksvecka för att utvärdera handläggningsprocessen.",
+  "analys": "HandläggningstiderÄrendetypAntal ärendenHandläggningstidFärdigställda utan komplettering82 dagarÄrenden med kompletteringar45 dagarOrsaksanalysHandläggarna har identifierat att otydliga bilagor var den utlösande orsaken till att kompletteringar krävdes för de berörda ärendena.Ekonomiska dataKostnader samt jämförbara uppgifter från tidigare veckor saknas.",
+  "slutsatser": "Handläggningstiden påverkas avsevärt av bilagornas tydlighet, där kompletteringar mer än fördubblar tiden för färdigställande.Prova en tydligare bilagechecklista nästa vecka.Jämföra andelen kompletteringar efter införandet av checklistan.Underlaget ger inget stöd för att bedöma långsiktiga effekter."
+}

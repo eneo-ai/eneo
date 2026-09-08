@@ -1,0 +1,96 @@
+{
+  "source_commit": "2c23f4a2545dd79f39ddca1025c86d3b242da836",
+  "schema_revision": "202609081000",
+  "frontend": "http://localhost:3133",
+  "backend": "http://localhost:8144",
+  "authenticated_http_checks": {
+    "login": 200,
+    "current_user": 200,
+    "personal_space": 200,
+    "organization_space": 200,
+    "spaces": 200
+  },
+  "builder": {
+    "session_id": "248ead76-5d4a-4950-a714-4a24a5372272",
+    "template": "rapport.docx",
+    "controls": [
+      "titel",
+      "datum",
+      "forfattare",
+      "sammanfattning",
+      "bakgrund",
+      "analys",
+      "slutsatser"
+    ],
+    "gemma_plan_attempt": {
+      "outcome": "self_correction_invalid_payload",
+      "initial_and_repair_error": "steps.0.output_fields.0: 'titel' is not of type 'object' (type)",
+      "follow_up": "eneo-3te",
+      "baseline_provenance": "not established"
+    },
+    "luna_plan_attempt": {
+      "model": "gpt-5.6-luna",
+      "reasoning_effort": "high",
+      "plan_id": "fd324e30-7e7e-4b6b-be2a-b94a4b4ec83d",
+      "outcome": "proposed",
+      "lint_warnings": [],
+      "materialization_http": 200,
+      "publish_http": 200,
+      "template_readiness": "ready"
+    }
+  },
+  "verbatim": {
+    "flow_id": "7f3d9665-2d89-46c5-8ab7-8776ba4cbf05",
+    "run_id": "2e13ee99-2bc6-47c0-a2d5-83d5c481db1d",
+    "version": 1,
+    "status": "completed",
+    "started_at": "2026-09-08T16:35:13.129292Z",
+    "finished_at": "2026-09-08T16:35:14.257069Z",
+    "definition_integrity": {
+      "status": "verified",
+      "expected_checksum": "2f34a4e13db2ac1ac11480890343ed67ea983e340000466473ab5a5a56439e88",
+      "current_checksum": "2f34a4e13db2ac1ac11480890343ed67ea983e340000466473ab5a5a56439e88"
+    },
+    "artifact": {
+      "file_id": "d57d3609-371b-4115-8bd8-b1a62f007800",
+      "name": "step_1_output.docx",
+      "size": 38128,
+      "checksum": "5db33d2626898010a6421dd0a92a80fc26324e73070a1ed40bf50e3cfae32be6",
+      "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    },
+    "provider_calls": [],
+    "word_verification": "Owner downloaded the checksum-matching file, supplied layout screenshots, and confirmed editing. The agent also inspected the Word view."
+  },
+  "template_fill": {
+    "flow_id": "57dd7ace-b44c-4f66-8a64-42db063ac50b",
+    "run_id": "1d186c2c-b012-4d28-8f2c-727cc199af52",
+    "version": 1,
+    "status": "completed",
+    "started_at": "2026-09-08T16:45:55.621774Z",
+    "finished_at": "2026-09-08T16:46:02.257919Z",
+    "definition_integrity": {
+      "status": "verified",
+      "expected_checksum": "ff6685e8841cb9eebde9dd13a256ae131e8334bb60d9a358a440b5efdcd0a67d",
+      "current_checksum": "ff6685e8841cb9eebde9dd13a256ae131e8334bb60d9a358a440b5efdcd0a67d"
+    },
+    "artifact": {
+      "file_id": "d2ed0238-6216-4f6f-92ee-064a9401cf98",
+      "name": "step_2_output.docx",
+      "size": 38498,
+      "checksum": "7eeb04aff11dea3abd1a8ddf078598b7c19b0e67d7f04c6d9c866a1ed9bbcd1c",
+      "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    },
+    "provider_calls": [
+      {
+        "step_order": 1,
+        "call_kind": "completion",
+        "status": "completed",
+        "requested_model": "openai/gemma4-31b-it",
+        "response_model": "gemma4-31b-it",
+        "num_tokens_input": 1275,
+        "num_tokens_output": 471
+      }
+    ],
+    "visual_verification": "All seven controls non-empty; date 2026-09-08; two LibreOffice-rendered pages inspected, no visible clipping or overlap. No Word Accessibility Checker claim for this exact output."
+  }
+}
