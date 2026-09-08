@@ -275,38 +275,14 @@
         />
       </div>
     {:else}
-      {#snippet internalStepLines()}
-        {#each run.steps as step, i (step.toolCallId ?? i)}
-          <InternalToolStep
-            runningLabel={step.toolName}
-            doneLabel={step.doneLabel}
-            serverName={step.serverName}
-            detail={step.detail}
-            args={step.args}
-            toolCallId={step.toolCallId}
-            status={step.status}
-            onLoadResult={step.toolCallId
-              ? () => chat.getToolCallResult(step.toolCallId!)
-              : undefined}
-          />
-        {/each}
-      {/snippet}
+      <!-- The same keyed {#each} renders the run whether it is still working
+           (latest step only) or done (every step), so a step opened mid-run
+           keeps its panel open when the result lands. -->
+      {@const working = runWorking(run, runIndex)}
+      {@const folded = !working && run.steps.length > 1}
+      {@const visibleSteps = working ? run.steps.slice(-1) : run.steps}
       <div class="mb-4 flex flex-col gap-0.5">
-        {#if runWorking(run, runIndex)}
-          {@const currentStep = run.steps[run.steps.length - 1]}
-          <InternalToolStep
-            runningLabel={currentStep.toolName}
-            doneLabel={currentStep.doneLabel}
-            serverName={currentStep.serverName}
-            detail={currentStep.detail}
-            args={currentStep.args}
-            toolCallId={currentStep.toolCallId}
-            status={currentStep.status}
-            onLoadResult={currentStep.toolCallId
-              ? () => chat.getToolCallResult(currentStep.toolCallId!)
-              : undefined}
-          />
-        {:else if run.steps.length > 1}
+        {#if folded}
           <button
             type="button"
             class="text-muted hover:text-secondary flex w-fit max-w-full items-center gap-1.5 text-sm leading-tight transition-colors"
@@ -326,13 +302,24 @@
             {/if}
             <span class="truncate font-medium">{runSummary(run)}</span>
           </button>
-          {#if openInternalRuns.has(runIndex)}
-            <div class="flex flex-col gap-0.5 pl-7">
-              {@render internalStepLines()}
-            </div>
-          {/if}
-        {:else}
-          {@render internalStepLines()}
+        {/if}
+        {#if !folded || openInternalRuns.has(runIndex)}
+          <div class="flex flex-col gap-0.5 {folded ? 'pl-7' : ''}">
+            {#each visibleSteps as step, i (step.toolCallId ?? i)}
+              <InternalToolStep
+                runningLabel={step.toolName}
+                doneLabel={step.doneLabel}
+                serverName={step.serverName}
+                detail={step.detail}
+                args={step.args}
+                toolCallId={step.toolCallId}
+                status={step.status}
+                onLoadResult={step.toolCallId
+                  ? () => chat.getToolCallResult(step.toolCallId!)
+                  : undefined}
+              />
+            {/each}
+          </div>
         {/if}
       </div>
     {/if}
