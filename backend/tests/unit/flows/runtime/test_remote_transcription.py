@@ -347,7 +347,13 @@ async def test_transcribe_returns_service_text_verbatim_with_duration() -> None:
     assert result.diarization == "external"
     assert result.alignment == "segment_split"
     assert result.transcript_segments == (
-        TranscriptSegment("Hej och välkomna.", 0.0, 5.2, speaker="SPEAKER_00"),
+        TranscriptSegment(
+            "Hej och välkomna.",
+            0.0,
+            5.2,
+            speaker="SPEAKER_00",
+            words=(TranscriptWord("Hej", 0.0, 0.4),),
+        ),
     )
     assert service.submit_count == 1
 

@@ -295,6 +295,10 @@ def test_openapi_ai_builder_status_event_exposes_status_enum(
         "$ref": "#/components/schemas/AIBuilderStatus"
     }
     assert set(status["enum"]) == {
+        "understanding_request",
+        "reading_sources",
+        "drafting_flow",
+        "checking_flow",
         "architecture_committed",
         "architecture_revised",
         "repairing",
@@ -353,9 +357,10 @@ def test_openapi_ai_builder_turn_retry_contract_is_strict(
         "whole_flow",
     ]
     assert lifecycle["additionalProperties"] is False
-    assert lifecycle["properties"]["retry_request"] == {
-        "$ref": "#/components/schemas/SendMessageRequest"
-    }
+    assert lifecycle["properties"]["retry_request"]["anyOf"] == [
+        {"$ref": "#/components/schemas/SendMessageRequest"},
+        {"type": "null"},
+    ]
     assert lifecycle["properties"]["error"]["anyOf"][0] == {
         "$ref": "#/components/schemas/AIBuilderPublicError"
     }

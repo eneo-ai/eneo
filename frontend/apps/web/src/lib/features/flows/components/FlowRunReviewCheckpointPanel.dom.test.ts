@@ -623,9 +623,16 @@ describe("FlowRunReviewCheckpointPanel speaker mapping", () => {
     );
     expect(inputFileSignedUrl).toHaveBeenCalledTimes(1);
     // Stored segments carry raw labels; the proposed name shows on them.
-    const line = await screen.findByRole("button", { name: /Hej\./ });
-    expect(line.textContent).toContain("Anna");
-    expect(screen.getByRole("button", { name: /Hallå\./ }).textContent).toContain("SPEAKER_01");
+    const line = await screen.findByText("Hej.");
+    expect(line.closest("[data-turn-index]")?.textContent).toContain("Anna");
+    expect(screen.getByText("Hallå.").closest("[data-turn-index]")?.textContent).toContain(
+      "SPEAKER_01"
+    );
+    expect(
+      screen
+        .getByRole("button", { name: m.flow_run_transcript_seek_to({ time: "00:00" }) })
+        .hasAttribute("disabled")
+    ).toBe(false);
   });
 
   it("keeps the transcript visible and retries when audio context cannot be loaded", async () => {
@@ -639,7 +646,7 @@ describe("FlowRunReviewCheckpointPanel speaker mapping", () => {
       props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
     });
 
-    await screen.findByRole("button", { name: /Hej\./ });
+    await screen.findByText("Hej.");
     await screen.findByText(m.flow_run_review_audio_context_failed());
 
     await fireEvent.click(screen.getByRole("button", { name: m.flow_retry() }));
