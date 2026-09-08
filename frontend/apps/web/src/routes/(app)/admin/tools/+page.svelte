@@ -5,18 +5,16 @@
   import { invalidate } from "$app/navigation";
   import { writable } from "svelte/store";
   import { untrack } from "svelte";
-  import {
-    Plus,
-    Wrench,
-    CheckCircle2,
-    CircleDashed,
-    AlertTriangle,
-    Power,
-    Pause,
-    Pencil,
-    Trash2,
-    ChevronRight
-  } from "lucide-svelte";
+  import Plus from "lucide-svelte/icons/plus";
+  import Wrench from "lucide-svelte/icons/wrench";
+  import CheckCircle2 from "lucide-svelte/icons/check-circle-2";
+  import CircleDashed from "lucide-svelte/icons/circle-dashed";
+  import AlertTriangle from "lucide-svelte/icons/alert-triangle";
+  import Power from "lucide-svelte/icons/power";
+  import Pause from "lucide-svelte/icons/pause";
+  import Pencil from "lucide-svelte/icons/pencil";
+  import Trash2 from "lucide-svelte/icons/trash-2";
+  import ChevronRight from "lucide-svelte/icons/chevron-right";
   import { m } from "$lib/paraglide/messages";
   import { CAPABILITIES } from "$lib/features/mcp/capabilities";
   import { readinessMessage } from "$lib/features/mcp/readiness";

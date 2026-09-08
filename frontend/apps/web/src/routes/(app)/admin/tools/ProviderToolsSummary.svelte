@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Wrench } from "lucide-svelte";
+  import Wrench from "lucide-svelte/icons/wrench";
   import { m } from "$lib/paraglide/messages";
   import type { components } from "@eneo/eneo-js";
   import { builtinToolCatalogLabels } from "$lib/features/chat/internalToolLabels";
