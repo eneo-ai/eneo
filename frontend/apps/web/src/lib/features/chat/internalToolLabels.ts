@@ -8,6 +8,8 @@ import { m } from "$lib/paraglide/messages";
 
 type ToolArgs = Record<string, unknown> | undefined;
 
+type CatalogLabels = { title: () => string; description: () => string };
+
 /**
  * Localized display labels for Eneo's own built-in tools (the loopback
  * internal-MCP servers). External MCP servers provide their own titles and
@@ -24,6 +26,12 @@ const INTERNAL_SERVERS: Record<
       string,
       { running: (args?: ToolArgs) => string; done: (args?: ToolArgs) => string }
     >;
+    /**
+     * Admin-facing title and description per tool, for servers that admins
+     * see as catalog rows (built-in providers). Other internal servers are
+     * never listed in admin surfaces and carry none.
+     */
+    catalog?: Record<string, CatalogLabels>;
   }
 > = {
   knowledge: {
@@ -79,9 +87,31 @@ const INTERNAL_SERVERS: Record<
         running: () => m.tool_generate_image(),
         done: () => m.tool_generate_image_done()
       }
+    },
+    catalog: {
+      generate_image: {
+        title: () => m.tool_generate_image_title(),
+        description: () => m.tool_generate_image_description()
+      }
     }
   }
 };
+
+/**
+ * Localized admin-facing title and description of a tool on one of Eneo's
+ * built-in providers, or null for external servers and unknown tools. A
+ * built-in provider is an admin-named server row over the loopback server
+ * of its purpose; admin surfaces show synced protocol strings for external
+ * servers, while Eneo's own tools follow the UI language.
+ */
+export function builtinToolCatalogLabels(
+  server: { purpose?: string | null; http_auth_type?: string | null },
+  toolName: string
+): { title: string; description: string } | null {
+  if (server.http_auth_type !== "internal" || !server.purpose) return null;
+  const labels = INTERNAL_SERVERS[server.purpose]?.catalog?.[toolName];
+  return labels ? { title: labels.title(), description: labels.description() } : null;
+}
 
 /** Whether a server name refers to one of Eneo's built-in loopback servers. */
 export function isInternalServer(serverName: string): boolean {

@@ -1076,6 +1076,8 @@
   "tool_read_file": "Läser bifogad fil",
   "tool_read_file_done": "Läste bifogad fil",
   "tool_generate_image": "Genererar bild",
+  "tool_generate_image_title": "Generera bild",
+  "tool_generate_image_description": "Genererar en bild utifrån en textbeskrivning.",
   "tool_generate_image_done": "Genererade bild",
   "internal_files_server": "Bilagor",
   "internal_tool_steps_count": "{count} steg",

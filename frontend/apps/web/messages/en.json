@@ -1079,6 +1079,8 @@
   "tool_read_file": "Reading attached file",
   "tool_read_file_done": "Read attached file",
   "tool_generate_image": "Generating image",
+  "tool_generate_image_title": "Generate image",
+  "tool_generate_image_description": "Generate an image from a text description.",
   "tool_generate_image_done": "Generated image",
   "internal_files_server": "Attachments",
   "internal_tool_steps_count": "{count} steps",
