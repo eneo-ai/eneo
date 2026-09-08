@@ -43,6 +43,8 @@ PATH=/Users/ccimen/.local/bin:/opt/homebrew/bin:$PATH \
 | Final list-continuation regression, DOCX runtime and Builder proposal prompt suites | 99 passed, 10 skipped; 1.70 s. The new unsupported-form test failed before the parser correction. |
 | Final contract corrections: renderer, DOCX runtime, template assets, Flow service, graph validators, Builder proposal prompt, template references and variable definitions | 381 passed, 10 skipped; 3.23 s. New empty-template, corrupt-template and scalar-schema cases reproduced before correction. |
 | Final `tests/integration/flows/test_flow_template_attachment_persistence.py` | 9 passed; 29.74 s. Actual publish and pinned-template rendering remain valid after the empty-template guard. |
+| Error registry and affected template/service/validator suites | 311 passed; 7.27 s. All seven control errors use `FlowApiErrorCode`, with matching generated SDK types and EN/SV translations. |
+| Final taxonomy and attachment-publish integration checks | 10 passed; 33.68 s. Includes the startup requirement that taxonomy entries cover the full error registry. |
 | Strict backend Pyright, `.venv/bin/pyright --pythonpath .venv/bin/python` | 0 errors, 0 warnings. Official `types-lxml` is a development dependency; checking remains strict. |
 | Ruff and frontend ESLint | Changed files pass; Ruff formatting and `git diff --check` pass. |
 | Frontend `bun run check` | 0 errors, 0 warnings. |
@@ -50,8 +52,11 @@ PATH=/Users/ccimen/.local/bin:/opt/homebrew/bin:$PATH \
 | Five failed frontend files rerun with `NODE_OPTIONS=--no-experimental-webstorage` | 118 passed, 2 failed. |
 | Same checkpoint/counts files on clean tidy baseline with that Node setting | 19 passed, the same 2 checkpoint tests failed. |
 | Knowledge counts teardown recheck | 3 passed, no unhandled error. |
+| Final error-mapping and template-binding frontend suites | 68 passed; 2.14 s. Eight new cases failed before registration, then passed; the no-control error resolves to Swedish conversion guidance through the same function the editor uses. |
 
 The ten remaining backend failures were rerun as exact node IDs on the clean tidy archive: **all ten reproduced**, in 35.75 s. The [node list](docx-content-controls-2026-09-08/baseline-unit-nodeids.txt) is owned by cleanup issue **eneo-wqq**. They cover remote transcription, AI Builder public error/OpenAPI contracts, audit mappings, route audit coverage and router exports. The two frontend baseline failures both concern the checkpoint panel's audio context and missing `Hej` button. These comparisons establish provenance; they do not make either full suite green.
+
+Error registration used `python3 backend/scripts/generate_flow_api_error_codes_ts.py`. OpenAPI types were regenerated from `app.openapi()` with the repository's schema-drift environment, then `bun x openapi-typescript <snapshot> -o src/types/schema.d.ts --default-non-nullable=false` and Prettier, as in CI. `bun run i18n:compile`, `bun run check`, strict Pyright and the final generated-code parity checks passed. No generated types were edited by hand. The browser tool's administrator policy blocked the local editor page; the Swedish check above is an executable test of the editor's error-mapping function, not a claimed browser upload.
 
 The ten Mac skips require the native WeasyPrint stack. DOCX rendering tests ran; this receipt does not claim that the native PDF tests passed on macOS. The built Linux image also rendered a 9,713-byte PDF through the public renderer as a smoke check; that is separate from the skipped Mac tests.
 

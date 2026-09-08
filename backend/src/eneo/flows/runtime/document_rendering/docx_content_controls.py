@@ -28,6 +28,7 @@ from typing import Any, Iterator, Literal, Sequence
 
 from docx.oxml.ns import qn
 
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.runtime.document_rendering.docx_writer import word_element
 from eneo.main.exceptions import BadRequestException
 
@@ -94,26 +95,26 @@ def inspect_content_controls(document: Any) -> tuple[ContentControl, ...]:
                     f"A content control ('{label or 'untitled'}') has no tag. Give every "
                     "control a tag in Word (Developer > Properties) so the flow can "
                     "address it.",
-                    code="flow_template_control_untagged",
+                    code=FlowApiErrorCode.TEMPLATE_CONTROL_UNTAGGED.value,
                 )
             if part_label != "body":
                 raise DocxTemplateContractError(
                     f"The content control '{tag_value}' is placed in the document "
                     f"{part_label}. Controls are supported in the document body only.",
-                    code="flow_template_control_placement",
+                    code=FlowApiErrorCode.TEMPLATE_CONTROL_PLACEMENT.value,
                 )
             if any(ancestor.tag == qn("w:sdt") for ancestor in sdt.iterancestors()):
                 raise DocxTemplateContractError(
                     f"The content control '{tag_value}' is nested inside another "
                     "control. Nested controls are not supported.",
-                    code="flow_template_control_nested",
+                    code=FlowApiErrorCode.TEMPLATE_CONTROL_NESTED.value,
                 )
             if any(ancestor.tag == qn("w:tc") for ancestor in sdt.iterancestors()):
                 raise DocxTemplateContractError(
                     f"The content control '{tag_value}' is placed in a table cell. "
                     "Controls are supported between paragraphs and inside paragraphs "
                     "only.",
-                    code="flow_template_control_placement",
+                    code=FlowApiErrorCode.TEMPLATE_CONTROL_PLACEMENT.value,
                 )
             if (
                 properties is not None
@@ -123,7 +124,7 @@ def inspect_content_controls(document: Any) -> tuple[ContentControl, ...]:
                     f"The content control '{tag_value}' is mapped to custom XML data. "
                     "Remove the XML mapping; the flow writes the control's content "
                     "directly.",
-                    code="flow_template_control_mapped",
+                    code=FlowApiErrorCode.TEMPLATE_CONTROL_MAPPED.value,
                 )
             unsupported = _unsupported_kind(properties)
             if unsupported is not None:
@@ -131,13 +132,13 @@ def inspect_content_controls(document: Any) -> tuple[ContentControl, ...]:
                     f"The content control '{tag_value}' is a {unsupported} control. "
                     "Use a rich text control for sections and a plain text control "
                     "for single values.",
-                    code="flow_template_control_unsupported",
+                    code=FlowApiErrorCode.TEMPLATE_CONTROL_UNSUPPORTED.value,
                 )
             if tag_value in seen:
                 raise DocxTemplateContractError(
                     f"Two content controls share the tag '{tag_value}'. Tags must be "
                     "unique so the flow knows where each value belongs.",
-                    code="flow_template_control_duplicate",
+                    code=FlowApiErrorCode.TEMPLATE_CONTROL_DUPLICATE.value,
                 )
             seen[tag_value] = label
             parent = sdt.getparent()
@@ -153,7 +154,7 @@ def inspect_content_controls(document: Any) -> tuple[ContentControl, ...]:
                     f"The content control '{tag_value}' has an unsupported "
                     "placement. Place rich text controls directly in the document "
                     "body and inline text controls directly inside a paragraph.",
-                    code="flow_template_control_placement",
+                    code=FlowApiErrorCode.TEMPLATE_CONTROL_PLACEMENT.value,
                 )
             multiline = text_properties is not None and text_properties.get(
                 qn("w:multiLine")

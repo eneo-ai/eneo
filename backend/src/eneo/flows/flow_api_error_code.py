@@ -170,6 +170,13 @@ class FlowApiErrorCode(str, Enum):
         "flow_review_open_multiple_active_checkpoints_invariant"
     )
     TEMPLATE_INVALID_ARCHIVE = "flow_template_invalid_archive"
+    TEMPLATE_NO_CONTROLS = "flow_template_no_controls"
+    TEMPLATE_CONTROL_UNTAGGED = "flow_template_control_untagged"
+    TEMPLATE_CONTROL_PLACEMENT = "flow_template_control_placement"
+    TEMPLATE_CONTROL_NESTED = "flow_template_control_nested"
+    TEMPLATE_CONTROL_MAPPED = "flow_template_control_mapped"
+    TEMPLATE_CONTROL_UNSUPPORTED = "flow_template_control_unsupported"
+    TEMPLATE_CONTROL_DUPLICATE = "flow_template_control_duplicate"
     TEMPLATE_CORRUPTED_ARCHIVE = "flow_template_corrupted_archive"
     TEMPLATE_MACRO_NOT_ALLOWED = "flow_template_macro_not_allowed"
     TEMPLATE_MISSING_REQUIRED_PARTS = "flow_template_missing_required_parts"

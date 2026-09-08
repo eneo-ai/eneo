@@ -109,7 +109,7 @@ def _require_fill_targets(controls: Sequence[object]) -> None:
         raise DocxTemplateContractError(
             "A DOCX template must contain at least one supported Word content control. "
             "Replace any {{...}} placeholders with tagged content controls in Word.",
-            code="flow_template_no_controls",
+            code=FlowApiErrorCode.TEMPLATE_NO_CONTROLS.value,
         )
 
 
@@ -150,6 +150,10 @@ def render_docx_template(
         controls = inspect_content_controls(document)
         _require_fill_targets(controls)
     except Exception as exc:
+        logger.exception(
+            "Published DOCX template could not be parsed",
+            extra={"step_order": step_order},
+        )
         normalized = normalize_template_extraction_error(exc)
         raise TypedIOValidationException(
             f"The published DOCX template is no longer fillable: {normalized}",

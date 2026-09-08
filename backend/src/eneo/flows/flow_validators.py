@@ -874,10 +874,10 @@ def _validate_supported_input_binding_keys(*, step: FlowStepValidationView) -> N
 
 _SCALAR_FORM_FIELD_TYPES = frozenset(
     {
-        FlowFormFieldType.TEXT,
-        FlowFormFieldType.NUMBER,
-        FlowFormFieldType.DATE,
-        FlowFormFieldType.SELECT,
+        FlowFormFieldType.TEXT.value,
+        FlowFormFieldType.NUMBER.value,
+        FlowFormFieldType.DATE.value,
+        FlowFormFieldType.SELECT.value,
     }
 )
 

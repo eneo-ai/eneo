@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { EneoError } from "@eneo/eneo-js";
+import { getLocale, setLocale } from "$lib/paraglide/runtime";
 
 import {
   describeFlowRunError,
@@ -180,6 +181,47 @@ describe("flowRuntimeErrorMapping", () => {
       messageKey: "flow_error_flow_template_not_accessible"
     });
     expect(getFlowRuntimeErrorMessage(error, "fallback")).not.toBe("fallback");
+  });
+
+  it.each([
+    "flow_template_no_controls",
+    "flow_template_control_untagged",
+    "flow_template_control_placement",
+    "flow_template_control_nested",
+    "flow_template_control_mapped",
+    "flow_template_control_unsupported",
+    "flow_template_control_duplicate"
+  ])("recognizes content-control authoring error %s", (code) => {
+    const error = new EneoError(
+      "Backend detail",
+      "RESPONSE",
+      400,
+      0,
+      { code },
+      { endpoint: "POST@test" }
+    );
+    expect(describeFlowApiError(error)).toMatchObject({ code, messageKey: `flow_error_${code}` });
+    expect(getFlowRuntimeErrorMessage(error, "fallback")).not.toBe("Backend detail");
+  });
+
+  it("shows Swedish conversion guidance for a template without controls", () => {
+    const previousLocale = getLocale();
+    setLocale("sv", { reload: false });
+    try {
+      const error = new EneoError(
+        "A DOCX template must contain at least one supported Word content control.",
+        "RESPONSE",
+        400,
+        0,
+        { code: "flow_template_no_controls" },
+        { endpoint: "POST@test" }
+      );
+      expect(getFlowRuntimeErrorMessage(error, "fallback")).toBe(
+        "Mallen saknar innehållskontroller. Lägg till taggade innehållskontroller i Word, ersätt eventuella textplatshållare och ladda upp mallen igen."
+      );
+    } finally {
+      setLocale(previousLocale, { reload: false });
+    }
   });
 
   it("maps missing template file content errors from readable backend text", () => {
