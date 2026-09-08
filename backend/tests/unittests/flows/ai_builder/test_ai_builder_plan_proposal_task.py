@@ -33,7 +33,10 @@ from eneo.flows.ai_builder.ai_builder_runtime_input_requirements import (
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     build_schema_evidence,
 )
-from eneo.flows.ai_builder.ai_builder_tools import build_propose_flow_tool_schema
+from eneo.flows.ai_builder.ai_builder_tools import (
+    build_propose_flow_tool_schema,
+    validate_propose_flow_tool_arguments,
+)
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommit,
     ExampleOutputCitation,
@@ -68,6 +71,39 @@ def _empty_catalog() -> AIBuilderResourceCatalog:
     return build_ai_builder_resource_catalog(
         available_models=[],
         available_kbs=[],
+    )
+
+
+def test_prompt_field_example_satisfies_the_actual_proposal_contract() -> None:
+    prompt = build_plan_proposal_system_prompt(
+        planning_state=PlanningState.empty(),
+        confirmed_requirements=_requirements(),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
+    )
+    example_prefix = "- Example output_fields: "
+    examples = [
+        json.loads(line.removeprefix(example_prefix))
+        for line in prompt.splitlines()
+        if line.startswith(example_prefix)
+    ]
+    assert len(examples) == 1
+    arguments = {
+        "flow_name": "Source summary",
+        "plan_rationale": "Summarize the submitted material.",
+        "steps": [
+            {
+                "name": "Summarize",
+                "instructions": "Summarize the source material.",
+                "output_fields": examples[0],
+            }
+        ],
+    }
+    validate_propose_flow_tool_arguments(
+        arguments=arguments,
+        tool_schema=build_propose_flow_tool_schema(resource_catalog=_empty_catalog()),
     )
 
 

@@ -294,8 +294,16 @@ def validate_propose_flow_tool_arguments(
 
     actionable_error = _actionable_validation_error(error)
     path = ".".join(str(part) for part in actionable_error.absolute_path) or "root"
+    expected_properties = ""
+    if actionable_error.validator == "type" and isinstance(
+        actionable_error.schema, dict
+    ):
+        required = actionable_error.schema.get("required", [])
+        if required:
+            expected_properties = ". Required object properties: " + ", ".join(required)
     raise ProposalToolArgumentsError(
-        f"{path}: {actionable_error.message} ({actionable_error.validator})",
+        f"{path}: {actionable_error.message} ({actionable_error.validator})"
+        f"{expected_properties}",
         validator=str(actionable_error.validator),
     ) from error
 

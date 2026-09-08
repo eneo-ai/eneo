@@ -268,6 +268,45 @@ class TestBuildToolSchema:
             "_normalize_structured_field_children",
         ]
 
+    @pytest.mark.parametrize("nested", [False, True])
+    def test_string_field_is_rejected_with_required_object_properties(
+        self, nested: bool
+    ) -> None:
+        schema = build_propose_flow_tool_schema(resource_catalog=_empty_catalog())
+        fields: list[Any] = ["summary"]
+        if nested:
+            fields = [
+                {
+                    "name": "items",
+                    "field_type": "array",
+                    "description": "Source items.",
+                    "children": fields,
+                }
+            ]
+        arguments = {
+            "flow_name": "Source summary",
+            "plan_rationale": "Summarize the submitted material.",
+            "steps": [
+                {
+                    "name": "Summarize",
+                    "instructions": "Extract a summary from the source.",
+                    "output_fields": fields,
+                }
+            ],
+        }
+        original = deepcopy(arguments)
+
+        with pytest.raises(ProposalToolArgumentsError) as failure:
+            admit_propose_flow_tool_arguments(arguments=arguments, tool_schema=schema)
+
+        path = "steps.0.output_fields.0" + (".children.0" if nested else "")
+        assert path in str(failure.value)
+        assert "Required object properties: name, field_type, description" in str(
+            failure.value
+        )
+        assert failure.value.validator == "type"
+        assert arguments == original
+
     def test_create_admission_discards_only_punctuation_serialization_artifacts(
         self,
     ) -> None:
