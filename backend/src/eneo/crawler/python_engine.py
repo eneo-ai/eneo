@@ -44,7 +44,9 @@ from eneo.crawler.engine import (
     PageUnchanged,
 )
 from eneo.crawler.extraction import (
+    document_extension,
     extract_html,
+    is_document_link,
     is_in_scope,
     is_page_link,
     is_same_origin,
@@ -108,7 +110,7 @@ class _FetchResult:
 
 @dataclass(frozen=True, slots=True)
 class _FetchHandoff:
-    pass
+    file_url: str | None = None
 
 
 @dataclass
@@ -333,6 +335,16 @@ class PythonCrawlEngine:
         files_failed = 0
         file_links: set[str] = set()
         file_links_truncated = False
+
+        def remember_file(file_url: str) -> None:
+            nonlocal file_links_truncated
+            if file_url in file_links:
+                return
+            if len(file_links) >= request.limits.max_items:
+                file_links_truncated = True
+                return
+            file_links.add(file_url)
+
         sitemap_snapshot: SitemapSnapshot | None = None
         frontier: deque[str]
         page_owners: dict[str, str]
@@ -576,6 +588,8 @@ class PythonCrawlEngine:
                             sequence = pending_pages.pop(task)
                             result = task.result()
                             if isinstance(result, _FetchHandoff):
+                                if result.file_url is not None:
+                                    remember_file(result.file_url)
                                 if follow_page_links:
                                     completed_links[sequence] = ()
                                 continue
@@ -584,12 +598,7 @@ class PythonCrawlEngine:
                             if isinstance(result.event, PageCrawled):
                                 pages_crawled += 1
                                 for file_url in result.event.file_links:
-                                    if file_url in file_links:
-                                        continue
-                                    if len(file_links) >= request.limits.max_items:
-                                        file_links_truncated = True
-                                        break
-                                    file_links.add(file_url)
+                                    remember_file(file_url)
                             elif isinstance(result.event, PageUnchanged):
                                 pages_unchanged += 1
                             else:
@@ -844,7 +853,7 @@ class PythonCrawlEngine:
         async def consume_response(
             response: aiohttp.ClientResponse,
             final_url: str,
-        ) -> _FetchResult:
+        ) -> _FetchResult | _FetchHandoff:
             if response.status == 304:
                 validator = validators.get(final_url)
                 if validator is not None and (
@@ -866,8 +875,15 @@ class PythonCrawlEngine:
                     )
                 )
 
-            body = await self._read_bounded(response, request.limits.max_response_bytes)
             content_type = response.headers.get("Content-Type", "").lower()
+            if (
+                request.download_files
+                and "application/json" not in content_type
+                and document_extension(content_type) is not None
+            ):
+                # The file phase owns streaming, byte limits and borrowed paths.
+                return _FetchHandoff(file_url=final_url)
+            body = await self._read_bounded(response, request.limits.max_response_bytes)
             text = body.decode(response.charset or "utf-8", errors="replace")
             if "application/json" in content_type:
                 return _FetchResult(
@@ -892,7 +908,15 @@ class PythonCrawlEngine:
             scoped_file_links = (
                 tuple(
                     file_url
-                    for file_url in extracted.file_links
+                    for file_url in (
+                        *extracted.file_links,
+                        *(
+                            link
+                            for link in extracted.links
+                            if (not is_in_scope(link, scope_url) or not path_scope)
+                            and link not in page_owners
+                        ),
+                    )
                     if is_same_origin(file_url, final_url, allow_https_upgrade=True)
                 )
                 if request.download_files
@@ -926,6 +950,11 @@ class PythonCrawlEngine:
                 consume_response=consume_response,
                 validators=validators,
                 claim_redirect_target=claim_redirect_target,
+                accept=(
+                    "text/html,application/xhtml+xml,application/json,*/*;q=0.1"
+                    if request.download_files
+                    else "text/html,application/xhtml+xml,application/json"
+                ),
             )
         except _RedirectHandedOff:
             return _FetchHandoff()
@@ -964,9 +993,14 @@ class PythonCrawlEngine:
     ) -> AsyncIterator[FileDownloaded | FileFailed]:
         """Download files concurrently without creating an unbounded task set."""
 
-        urls = iter(islice(sorted(file_links), max_items))
+        urls = iter(
+            islice(
+                sorted(file_links, key=lambda url: (not is_document_link(url), url)),
+                max_items,
+            )
+        )
         taken_names: set[str] = set()
-        pending: set[asyncio.Task[FileDownloaded | FileFailed]] = set()
+        pending: set[asyncio.Task[FileDownloaded | FileFailed | None]] = set()
 
         def fill_capacity() -> None:
             while len(pending) < request.limits.concurrency:
@@ -1005,6 +1039,8 @@ class PythonCrawlEngine:
                 results = [task.result() for task in done]
                 fill_capacity()
                 for result in results:
+                    if result is None:
+                        continue
                     try:
                         yield result
                     finally:
@@ -1036,21 +1072,28 @@ class PythonCrawlEngine:
         taken_names: set[str],
         origin_authorization: str | None,
         robots: _RobotsLookup | None,
-    ) -> FileDownloaded | FileFailed:
+    ) -> FileDownloaded | FileFailed | None:
         normalized = normalize_url(url)
         if normalized is None or not is_same_origin(
             normalized, scope_url, allow_https_upgrade=True
         ):
             return FileFailed(url=url, reason="file_out_of_scope")
 
-        filename = self._filename_for_url(normalized, taken_names)
-        target = directory / filename
-        partial = target.with_name(f"{target.name}.part")
+        target: Path | None = None
+        partial: Path | None = None
 
         async def consume_response(
             response: aiohttp.ClientResponse,
             final_url: str,
-        ) -> FileDownloaded | FileFailed:
+        ) -> FileDownloaded | FileFailed | None:
+            nonlocal target, partial
+            extension = document_extension(response.content_type)
+            if not is_document_link(normalized) and (
+                response.status in {404, 410}
+                or (response.status < 400 and extension is None)
+            ):
+                # Out-of-prefix HTML is inspected only for document discovery.
+                return None
             if response.status >= 400:
                 return FileFailed(
                     url=final_url,
@@ -1064,6 +1107,18 @@ class PythonCrawlEngine:
             ):
                 return FileFailed(url=final_url, reason="file_too_large")
 
+            if target is None:
+                disposition = response.content_disposition
+                suggested_name = disposition.filename if disposition else None
+                filename = self._filename_for_url(
+                    normalized,
+                    taken_names,
+                    suggested_name=suggested_name,
+                    extension=extension,
+                )
+                target = directory / filename
+                partial = target.with_name(f"{target.name}.part")
+            assert partial is not None
             written = 0
             async with aiofiles.open(partial, "wb") as output:
                 async for chunk in response.content.iter_chunked(64 * 1024):
@@ -1074,7 +1129,7 @@ class PythonCrawlEngine:
             partial.replace(target)
             return FileDownloaded(
                 url=final_url,
-                filename=filename,
+                filename=target.name,
                 path=target,
             )
 
@@ -1099,15 +1154,29 @@ class PythonCrawlEngine:
                 retryable=True,
             )
         finally:
-            partial.unlink(missing_ok=True)
+            if partial is not None:
+                partial.unlink(missing_ok=True)
 
     @staticmethod
-    def _filename_for_url(url: str, taken_names: set[str]) -> str:
+    def _filename_for_url(
+        url: str,
+        taken_names: set[str],
+        *,
+        suggested_name: str | None = None,
+        extension: str | None = None,
+    ) -> str:
         basename = (
-            unicodedata.normalize("NFC", unquote(Path(urlsplit(url).path).name))
+            unicodedata.normalize(
+                "NFC",
+                Path(suggested_name.replace("\\", "/")).name
+                if suggested_name
+                else unquote(Path(urlsplit(url).path).name),
+            )
             or "download"
         )
         basename = _FILENAME_SANITIZE.sub("_", basename).strip("._") or "download"
+        if extension is not None and Path(basename).suffix.casefold() != extension:
+            basename = f"{Path(basename).stem}{extension}"
         encoded = basename.encode("utf-8")
         if len(encoded) > _MAX_FILENAME_BYTES:
             digest = hashlib.sha256(encoded).hexdigest()[:8]

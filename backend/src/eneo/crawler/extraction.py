@@ -8,6 +8,7 @@ from urllib.parse import unquote, urlsplit
 from bs4 import BeautifulSoup, Tag
 from html2text import HTML2Text
 
+from eneo.files.extensions import MIMETYPE_EXTENSIONS_MAPPER
 from eneo.websites.domain.source_url import normalize_url as normalize_url
 
 _NOISE_ELEMENTS = (
@@ -37,6 +38,11 @@ _DOCUMENT_SUFFIXES = frozenset(
         ".xml",
     }
 )
+_DOCUMENT_MIME_EXTENSIONS = {
+    mime_type: extensions[0]
+    for mime_type, extensions in MIMETYPE_EXTENSIONS_MAPPER.items()
+    if extensions[0] in _DOCUMENT_SUFFIXES
+}
 _NON_PAGE_SUFFIXES = frozenset(
     {
         ".7z",
@@ -163,8 +169,13 @@ def is_page_link(url: str) -> bool:
     return _url_suffix(url) not in _NON_PAGE_SUFFIXES
 
 
-def _is_document_link(url: str) -> bool:
+def is_document_link(url: str) -> bool:
     return _url_suffix(url) in _DOCUMENT_SUFFIXES
+
+
+def document_extension(content_type: str) -> str | None:
+    """Return the extraction suffix for a supported document MIME type."""
+    return _DOCUMENT_MIME_EXTENSIONS.get(content_type.lower().split(";", 1)[0].strip())
 
 
 def extract_html(html: str, url: str) -> ExtractedPage:
@@ -188,7 +199,7 @@ def extract_html(html: str, url: str) -> ExtractedPage:
         if absolute in seen:
             continue
         seen.add(absolute)
-        if _is_document_link(absolute):
+        if is_document_link(absolute):
             file_links.append(absolute)
         elif is_page_link(absolute):
             links.append(absolute)

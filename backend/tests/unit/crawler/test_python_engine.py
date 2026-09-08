@@ -130,6 +130,37 @@ async def _serve_origins(
             yield requests
 
 
+async def test_malformed_anchor_does_not_abort_valid_child_discovery() -> None:
+    async def start(_: web.Request) -> web.Response:
+        return web.Response(
+            text='<main><a href="http://[">Broken</a>'
+            '<a href="/start/child">Valid child</a></main>',
+            content_type="text/html",
+        )
+
+    async def child(_: web.Request) -> web.Response:
+        return web.Response(text="<main>Child content</main>", content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/start", start)
+    app.router.add_get("/start/child", child)
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(f"{base_url}/start")
+            )
+        ]
+
+    assert {event.url for event in events if isinstance(event, PageCrawled)} == {
+        f"{base_url}/start",
+        f"{base_url}/start/child",
+    }
+    assert events[-1] == CrawlFinished(
+        status="completed", pages_crawled=2, pages_failed=0
+    )
+
+
 async def test_crawl_emits_pages_incrementally_and_follows_scoped_links() -> None:
     async def start(_: web.Request) -> web.Response:
         return web.Response(
@@ -607,9 +638,10 @@ async def test_page_limit_selection_is_independent_of_response_order() -> None:
     assert set(first_selection) == set(second_selection) == expected_selection
 
 
-async def test_discovered_page_and_file_work_shares_the_configured_item_budget() -> (
-    None
-):
+@pytest.mark.parametrize("suffix", [".pdf", ""])
+async def test_discovered_page_and_file_work_shares_the_configured_item_budget(
+    suffix: str,
+) -> None:
     requested_pages: list[str] = []
     requested_files: list[str] = []
 
@@ -618,7 +650,7 @@ async def test_discovered_page_and_file_work_shares_the_configured_item_budget()
             f'<a href="/start/page-{index}">Page {index}</a>' for index in range(2)
         )
         file_links = "".join(
-            f'<a href="/files/document-{index}.pdf">Document {index}</a>'
+            f'<a href="/files/document-{index}{suffix}">Document {index}</a>'
             for index in range(100)
         )
         return web.Response(
@@ -759,13 +791,17 @@ async def test_link_reorder_window_stays_bounded_behind_slow_page() -> None:
     )
 
 
-@pytest.mark.parametrize("kind", ["page_redirect", "file", "file_redirect"])
+@pytest.mark.parametrize(
+    "kind", ["page_redirect", "file", "file_redirect", "extensionless_file"]
+)
 @pytest.mark.parametrize("obey_robots", [True, False])
 async def test_robots_policy_is_checked_before_each_target_request(
     kind: str, obey_robots: bool
 ) -> None:
     requested: list[str] = []
     blocked_path = "/start/blocked" if kind == "page_redirect" else "/files/blocked.pdf"
+    if kind == "extensionless_file":
+        blocked_path = "/files/blocked"
 
     async def handler(request: web.Request) -> web.Response:
         requested.append(request.path)
@@ -1789,6 +1825,110 @@ async def test_external_document_link_is_ignored_before_file_budgeting() -> None
     )
 
 
+@pytest.mark.parametrize(
+    ("download_path", "disposition", "expected_name"),
+    [
+        ("/download", None, "download.pdf"),
+        ("/start/download", None, "download.pdf"),
+        (
+            "/download",
+            'attachment; filename="../../Annual report.pdf"',
+            "Annual_report.pdf",
+        ),
+    ],
+)
+async def test_extensionless_document_reaches_bounded_text_extraction(
+    download_path: str, disposition: str | None, expected_name: str
+) -> None:
+    from eneo.files.text import TextExtractor
+
+    pdf = (
+        b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+        b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
+        b"3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]"
+        b"/Resources<</Font<</F1 4 0 R>>>>/Contents 5 0 R>>endobj\n"
+        b"4 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\n"
+        b"5 0 obj<</Length 47>>stream\n"
+        b"BT /F1 12 Tf 40 700 Td (Knowledge from a PDF) Tj ET\n"
+        b"endstream\nendobj\ntrailer<</Root 1 0 R>>\n%%EOF"
+    )
+
+    async def start(_: web.Request) -> web.Response:
+        return web.Response(
+            text=f'<main><a href="{download_path}?id=1">Report</a></main>',
+            content_type="text/html",
+        )
+
+    async def download(request: web.Request) -> web.Response:
+        if "*/*" not in request.headers.get("Accept", ""):
+            return web.Response(status=406)
+        return web.Response(
+            body=pdf,
+            content_type="application/pdf",
+            headers={"Content-Disposition": disposition} if disposition else {},
+        )
+
+    app = web.Application()
+    app.router.add_get("/start", start)
+    app.router.add_get(download_path, download)
+    documents: list[tuple[str, str, str]] = []
+    events: list[CrawlEvent] = []
+    async with _serve(app) as base_url:
+        async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+            _request(f"{base_url}/start", max_items=2, max_response_bytes=100)
+        ):
+            events.append(event)
+            if isinstance(event, FileDownloaded):
+                documents.append(
+                    (
+                        event.url,
+                        event.filename,
+                        await TextExtractor().extract_bounded(event.path),
+                    )
+                )
+
+    assert len(documents) == 1
+    assert documents[0][:2] == (f"{base_url}{download_path}?id=1", expected_name)
+    assert "Knowledge from a PDF" in documents[0][2]
+    assert events[-1] == CrawlFinished(
+        status="completed", pages_crawled=1, pages_failed=0, files_downloaded=1
+    )
+
+
+@pytest.mark.parametrize("download_files", [True, False])
+async def test_document_probe_does_not_follow_outside_pages_or_external_links(
+    download_files: bool,
+) -> None:
+    requested: list[str] = []
+
+    async def handler(request: web.Request) -> web.Response:
+        requested.append(request.path)
+        origin = f"{request.scheme}://{request.host}"
+        external = origin.replace("127.0.0.1", "localhost")
+        text = (
+            '<a href="/outside">Outside page</a>'
+            f'<a href="{external}/external">External document</a>'
+            if request.path == "/start"
+            else '<a href="/outside/child">Child</a>'
+        )
+        return web.Response(text=f"<main>{text}</main>", content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/{path:.*}", handler)
+    async with _serve(app) as base_url:
+        events = [
+            event
+            async for event in PythonCrawlEngine(allow_private_network=True).crawl(
+                _request(f"{base_url}/start", download_files=download_files)
+            )
+        ]
+
+    assert requested == (["/start", "/outside"] if download_files else ["/start"])
+    assert events[-1] == CrawlFinished(
+        status="completed", pages_crawled=1, pages_failed=0
+    )
+
+
 def test_download_filenames_preserve_unicode_and_fit_filesystem_limits() -> None:
     arabic = PythonCrawlEngine._filename_for_url(
         f"https://example.se/files/{quote('دليل البلدية.pdf')}", set()
@@ -2088,9 +2228,11 @@ async def test_closing_crawl_stream_removes_download_workspace() -> None:
         assert not workspace.exists()
 
 
+@pytest.mark.parametrize("file_path", ["/large.pdf", "/download"])
 async def test_file_size_limit_applies_to_streams_without_content_length(
     monkeypatch,
     tmp_path,
+    file_path: str,
 ) -> None:
     download_directory = tmp_path / "downloads"
     download_directory.mkdir()
@@ -2109,7 +2251,7 @@ async def test_file_size_limit_applies_to_streams_without_content_length(
 
     async def start(_: web.Request) -> web.Response:
         return web.Response(
-            text='<main><a href="/large.pdf">Large file</a></main>',
+            text=f'<main><a href="{file_path}">Large file</a></main>',
             content_type="text/html",
         )
 
@@ -2123,7 +2265,7 @@ async def test_file_size_limit_applies_to_streams_without_content_length(
 
     app = web.Application()
     app.router.add_get("/start", start)
-    app.router.add_get("/large.pdf", large)
+    app.router.add_get(file_path, large)
 
     async with _serve(app) as base_url:
         events = [

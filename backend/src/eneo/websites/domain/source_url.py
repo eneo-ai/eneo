@@ -6,8 +6,8 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 def normalize_url(url: str, *, base_url: str | None = None) -> str | None:
     """Return a stable HTTP URL identity, or None for unsupported links."""
 
-    absolute = urljoin(base_url, url) if base_url else url
     try:
+        absolute = urljoin(base_url, url) if base_url else url
         parsed = urlsplit(absolute)
         port = parsed.port
     except ValueError:
