@@ -242,11 +242,11 @@ jobs:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
 
-      - name: Verify File/Icon contraction and release-chain restore
-        # Separate pytest processes keep historical schemas and app sessions isolated.
+      - name: Verify File/Icon upgrade and optional cleanup on PostgreSQL 13
+        working-directory: backend
         run: |
-          uv run pytest -q -m migration_isolation tests/integration/migrations/test_file_icon_legacy_contraction.py
-          uv run python scripts/test_file_icon_release_chain.py
+          uv run pytest -q -m migration_isolation tests/integration/migrations/test_file_icon_preflight.py tests/integration/migrations/test_file_icon_legacy_cleanup.py
+          uv run pytest -q -m migration_isolation tests/integration/migrations/test_file_icon_bridge_rehearsal.py
         env:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock

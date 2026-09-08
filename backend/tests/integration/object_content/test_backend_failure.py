@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from hashlib import sha256
@@ -5,13 +6,17 @@ from unittest.mock import MagicMock
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from eneo.database.database import DatabaseSessionManager
+from eneo.database.tables.file_icon_backfill_table import (
+    FileIconBackfillCampaign,
+    FileIconBackfillItems,
+)
 from eneo.database.tables.object_content_table import (
+    FileContentReferences,
     InlineContentPayloads,
     ObjectContents,
-    ObjectStoreObjects,
 )
 from eneo.object_content.configuration import ObjectContentSettings
 from eneo.object_content.content import (
@@ -22,6 +27,10 @@ from eneo.object_content.content import (
 )
 from eneo.object_content.content_repository import ObjectContentRepository
 from eneo.object_content.content_service import ObjectContentService
+from eneo.object_content.file_icon_backfill import (
+    FileIconBackfill,
+    _FileIconBackfillRepository,
+)
 from eneo.object_content.move_repository import ObjectContentMoveRepository
 from eneo.object_content.object_store_provider import (
     ObjectStoreLease,
@@ -37,6 +46,11 @@ from eneo.object_content.s3_object_store import (
     RemoteObject,
     RemoteObjectPage,
     S3ObjectStore,
+)
+from tests.integration.object_content.test_file_icon_inline_backfill import (
+    _backfill,
+    _seed_legacy_text,
+    _tenant_and_user,
 )
 from tests.integration.object_content.test_moves import (
     _create_object_store_content,
@@ -61,6 +75,26 @@ def _settings() -> ObjectContentSettings:
         deployment_id=uuid4(),
         allow_insecure_http=True,
     )
+
+
+async def _adopt_remote_content(
+    database: DatabaseSessionManager, payload: bytes
+) -> tuple[UUID, UUID, str, FileIconBackfill]:
+    file_id = await _seed_legacy_text(database, payload=payload)
+    backfill = _backfill(database)
+    assert (await backfill.run_once()).state.value == "complete"
+    _, actor_id = await _tenant_and_user(database)
+    async with database.session() as session, session.begin():
+        content_id = await session.scalar(
+            select(FileContentReferences.content_id).where(
+                FileContentReferences.file_id == file_id
+            )
+        )
+    assert content_id is not None
+    object_key = await _publish_object_store_move(
+        database, content_id=content_id, actor_id=actor_id, payload=payload
+    )
+    return file_id, content_id, object_key, backfill
 
 
 def _inventory_reconciler(
@@ -212,6 +246,46 @@ async def test_ranged_read_handles_placement_changes_before_returning_bytes(
         assert content.failure_code is None
 
 
+@pytest.mark.parametrize("failure", ["missing", "length"])
+async def test_inventory_failure_reopens_adopted_content_recovery(
+    object_content_database: DatabaseSessionManager,
+    failure: str,
+) -> None:
+    database = object_content_database
+    payload = b"frozen legacy recovery source"
+    file_id, content_id, object_key, backfill = await _adopt_remote_content(
+        database, payload
+    )
+    reconciler = _inventory_reconciler(
+        database,
+        objects=(RemoteObject(object_key, len(payload) + 1),)
+        if failure == "length"
+        else (),
+    )
+    for _ in range(2):
+        await reconciler.run_once()
+
+    assert (await backfill.run_once()).state.value == "halted"
+    async with database.session() as session, session.begin():
+        content = await session.get(ObjectContents, content_id)
+        campaign = await session.scalar(select(FileIconBackfillCampaign))
+        item = await session.scalar(
+            select(FileIconBackfillItems).where(
+                FileIconBackfillItems.owner_id == file_id
+            )
+        )
+        assert content is not None and campaign is not None and item is not None
+        assert content.state == "failed"
+        assert content.failure_code == (
+            "backend_corrupt" if failure == "length" else "backend_missing"
+        )
+        assert campaign.state == "halted"
+        assert item.state == "failed"
+        assert item.content_id is None
+        assert not item.capacity_admitted
+        assert item.failure_revision == campaign.resume_revision
+
+
 async def test_read_failure_from_a_superseded_connection_keeps_content_available(
     object_content_database: DatabaseSessionManager,
 ) -> None:
@@ -259,23 +333,14 @@ async def test_new_inventory_observation_supersedes_a_failure_candidate(
 ) -> None:
     database = object_content_database
     payload = b"healthy bytes observed again"
-    content_id, _ = await _create_object_store_content(
-        database, payload=payload, idempotency_key=uuid4().hex
-    )
-    async with database.session() as session, session.begin():
-        object_key = await session.scalar(
-            select(ObjectStoreObjects.object_key).where(
-                ObjectStoreObjects.content_id == content_id
-            )
-        )
-    assert object_key is not None
+    _, content_id, object_key, backfill = await _adopt_remote_content(database, payload)
     await _complete_empty_inventories(database)
-    original = ObjectContentRepository._content_for_update
+    original = ObjectContentRepository._has_completed_file_icon_item
     observed_again = False
 
     async def observe_before_failure_lock(
         repository: ObjectContentRepository, checked_content_id: UUID
-    ) -> ObjectContents:
+    ) -> bool:
         nonlocal observed_again
         if checked_content_id == content_id and not observed_again:
             async with database.session() as session, session.begin():
@@ -292,7 +357,7 @@ async def test_new_inventory_observation_supersedes_a_failure_candidate(
 
     monkeypatch.setattr(
         ObjectContentRepository,
-        "_content_for_update",
+        "_has_completed_file_icon_item",
         observe_before_failure_lock,
     )
     result = await _inventory_reconciler(
@@ -303,7 +368,83 @@ async def test_new_inventory_observation_supersedes_a_failure_candidate(
     ).run_once()
     assert observed_again
     assert result.missing_objects == 0
+    assert (await backfill.run_once()).state.value == "complete"
     async with database.session() as session, session.begin():
         content = await session.get(ObjectContents, content_id)
         assert content is not None and content.state == "available"
         assert content.failure_code is None
+
+
+@pytest.mark.parametrize("failure", ["missing", "length"])
+async def test_inventory_recovery_waits_for_admission_without_locking_content(
+    object_content_database: DatabaseSessionManager,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    database = object_content_database
+    payload = b"adopted bytes with coordinated recovery"
+    _, content_id, object_key, backfill = await _adopt_remote_content(database, payload)
+    await _complete_empty_inventories(database)
+    admission_held = asyncio.Event()
+    release_admission = asyncio.Event()
+    admission_pid: int | None = None
+    original = _FileIconBackfillRepository.lock_admission
+
+    async def pause_admission(repository: _FileIconBackfillRepository) -> None:
+        nonlocal admission_pid
+        await original(repository)
+        if not admission_held.is_set():
+            admission_pid = await repository._session.scalar(
+                text("SELECT pg_backend_pid()")
+            )
+            admission_held.set()
+            await release_admission.wait()
+
+    monkeypatch.setattr(_FileIconBackfillRepository, "lock_admission", pause_admission)
+    admission_task = asyncio.create_task(_backfill(database).run_once())
+    inventory_task = None
+    try:
+        await asyncio.wait_for(admission_held.wait(), timeout=5)
+        assert admission_pid is not None
+        inventory_task = asyncio.create_task(
+            _inventory_reconciler(
+                database,
+                objects=(RemoteObject(object_key, len(payload) + 1),)
+                if failure == "length"
+                else (),
+            ).run_once()
+        )
+
+        async def wait_for_inventory_on_admission() -> bool:
+            async with database.session() as session, session.begin():
+                while not inventory_task.done():
+                    waiting = await session.scalar(
+                        text("""
+                        SELECT EXISTS (
+                            SELECT 1 FROM pg_stat_activity
+                            WHERE datname = current_database()
+                              AND :blocking_pid = ANY(pg_blocking_pids(pid))
+                        )
+                    """),
+                        {"blocking_pid": admission_pid},
+                    )
+                    if waiting:
+                        return True
+                    await asyncio.sleep(0.01)
+            return False
+
+        assert await asyncio.wait_for(wait_for_inventory_on_admission(), timeout=5)
+        async with database.session() as session, session.begin():
+            locked = await session.scalar(
+                select(ObjectContents.id)
+                .where(ObjectContents.id == content_id)
+                .with_for_update(nowait=True)
+            )
+            assert locked == content_id
+    finally:
+        release_admission.set()
+        pending = [admission_task]
+        if inventory_task is not None:
+            pending.append(inventory_task)
+        await asyncio.wait_for(asyncio.gather(*pending), timeout=5)
+    assert (await backfill.run_once()).state.value == "halted"

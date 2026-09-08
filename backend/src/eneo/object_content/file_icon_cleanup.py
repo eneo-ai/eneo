@@ -1,25 +1,41 @@
-"""remove verified File/Icon legacy storage after the bridge recovery window
+"""Explicit, transactional removal of verified File/Icon legacy columns.
 
-Revision ID: 202609081400
-Revises: 202609071000
-Create Date: 2026-09-08 14:00:00.000000
-
-This closes old-image rollback. Existing installations must first finish online
-adoption in the bridge release and test their retained backup. Final validation
-and removal share one transaction and writer fence; no remote I/O or physical
-table rewrite runs here. Keep this migration independent of application code.
+The caller owns a READ COMMITTED transaction and a maintenance window with all
+application and worker processes stopped. The 2.2 image supports both states.
 """
 
-from collections.abc import Sequence
+from typing import cast
 
 import sqlalchemy as sa
+from sqlalchemy.engine import Connection
+from sqlalchemy.orm import SessionTransaction
 
-from alembic import op
+from eneo.database.database import AsyncSession
+from eneo.database.tables.file_icon_backfill_table import FileIconBackfillAdmissionState
 
-revision: str = "202609081400"
-down_revision: str | None = "202609071000"
-branch_labels: str | Sequence[str] | None = None
-depends_on: str | Sequence[str] | None = None
+
+async def file_icon_legacy_is_cleaned(session: AsyncSession) -> bool:
+    """Read once per transaction; a reused session must observe later cleanup."""
+    transaction = session.sync_session.get_transaction()
+    cached = cast(
+        tuple[SessionTransaction, bool] | None,
+        session.info.get("file_icon_legacy_cleaned"),
+    )
+    # Retain the object, not its id: later transactions must not reuse this identity.
+    if transaction is not None and cached is not None and cached[0] is transaction:
+        return cached[1]
+    cleaned = bool(
+        await session.scalar(
+            sa.select(
+                FileIconBackfillAdmissionState.legacy_cleaned_at.is_not(None)
+            ).where(FileIconBackfillAdmissionState.singleton.is_(True))
+        )
+    )
+    transaction = session.sync_session.get_transaction()
+    if transaction is not None:
+        session.info["file_icon_legacy_cleaned"] = (transaction, cleaned)
+    return cleaned
+
 
 _LEGACY_COLUMNS = {
     "files": ("text", "blob", "checksum", "size", "transcription"),
@@ -51,22 +67,24 @@ _SOURCES = """
 """
 
 
+class FileIconCleanupRefused(RuntimeError):
+    """A verified prerequisite failed; the caller must roll back the transaction."""
+
+
 def _refuse(
     detail: str,
     *,
     remediation: str = (
-        "Continue with the bridge release to repair and complete adoption, "
-        "or restore the coordinated backup before retrying."
+        "Repair and complete adoption, or restore the coordinated backup before retrying."
     ),
 ) -> None:
-    raise RuntimeError(
-        f"File/Icon contraction refused: {detail}. Legacy storage is preserved. "
+    raise FileIconCleanupRefused(
+        f"File/Icon cleanup refused: {detail}. Legacy storage is preserved. "
         f"{remediation}"
     )
 
 
-def _require_supported_schema() -> None:
-    connection = op.get_bind()
+def _require_supported_schema(connection: Connection) -> None:
     columns = set(
         connection.execute(
             sa.text("""
@@ -81,18 +99,17 @@ def _require_supported_schema() -> None:
         for column in names
     ):
         _refuse(
-            "the expected bridge legacy columns are missing",
-            remediation="Check the bridge schema history and restore its coordinated backup if necessary.",
+            "the expected legacy columns are missing",
+            remediation="Check the schema history and restore its coordinated backup if necessary.",
         )
     if connection.exec_driver_sql("SHOW server_encoding").scalar_one() != "UTF8":
         _refuse(
             "source verification requires UTF8 server encoding",
-            remediation="Restore and verify the bridge database with UTF8 encoding before retrying.",
+            remediation="Restore and verify the database with UTF8 encoding before retrying.",
         )
 
 
-def _require_finished_campaign() -> None:
-    connection = op.get_bind()
+def _require_finished_campaign(connection: Connection) -> None:
     admission = connection.execute(
         sa.text("SELECT paused FROM file_icon_backfill_admission_state WHERE singleton")
     ).all()
@@ -127,11 +144,10 @@ def _require_finished_campaign() -> None:
             OR EXISTS (SELECT 1 FROM icons WHERE blob IS NOT NULL)
     """)
     ):
-        _refuse("legacy sources have not completed a bridge campaign")
+        _refuse("legacy sources have not completed an adoption campaign")
 
 
-def _require_live_source_coverage() -> None:
-    connection = op.get_bind()
+def _require_live_source_coverage(connection: Connection) -> None:
     if connection.scalar(
         sa.text("""
         SELECT EXISTS (SELECT 1 FROM files WHERE file_type <> 'text' AND text IS NOT NULL)
@@ -178,11 +194,9 @@ def _require_live_source_coverage() -> None:
         )
 
 
-def _require_surviving_ledger_references() -> None:
-    invalid = (
-        op.get_bind()
-        .execute(
-            sa.text("""
+def _require_surviving_ledger_references(connection: Connection) -> None:
+    invalid = connection.execute(
+        sa.text("""
         SELECT i.owner_kind, i.owner_id, i.variant, i.ordinal
         FROM file_icon_backfill_items i
         LEFT JOIN files owner_file ON i.owner_kind = 'file' AND owner_file.id = i.owner_id
@@ -202,73 +216,62 @@ def _require_surviving_ledger_references() -> None:
                OR c.tenant_id IS DISTINCT FROM i.tenant_id)
         LIMIT 1
     """)
-        )
-        .first()
-    )
+    ).first()
     if invalid is not None:
         _refuse(
             f"ledger key {invalid.owner_kind} {invalid.owner_id} {invalid.variant}/{invalid.ordinal} has no matching available reference"
         )
 
 
-def upgrade() -> None:
-    if op.get_context().as_sql:
-        _refuse(
-            "a live database is required for final verification",
-            remediation="Run db-init online against the bridge database during the maintenance window.",
-        )
-    # Alembic has already read its version table. A transaction-wide snapshot
-    # could predate writers that commit while LOCK waits, hiding their failures.
+def cleanup_file_icon_legacy_storage(connection: Connection) -> bool:
+    """Verify and drop legacy columns atomically; return False when already cleaned."""
     if (
-        op.get_bind().exec_driver_sql("SHOW transaction_isolation").scalar_one()
+        connection.exec_driver_sql("SHOW transaction_isolation").scalar_one()
         != "read committed"
     ):
-        _refuse(
-            "final verification requires READ COMMITTED transaction isolation",
-            remediation="Use READ COMMITTED isolation for db-init and retry the migration.",
-        )
-    connection = op.get_bind()
+        _refuse("final verification requires READ COMMITTED transaction isolation")
     previous_lock_timeout = connection.exec_driver_sql("SHOW lock_timeout").scalar_one()
-    op.execute("SET LOCAL lock_timeout = '5s'")
-    # Stop all owner/reference/content writers before the final scans. The same
-    # locks remain held through every DROP and the Alembic version update.
-    op.execute("""
+    connection.exec_driver_sql("SET LOCAL lock_timeout = '5s'")
+    connection.exec_driver_sql("""
         LOCK TABLE file_icon_backfill_admission_state, file_icon_backfill_campaign,
                    files, icons, file_icon_backfill_items,
                    file_content_references, icon_content_references,
                    object_contents, inline_content_payloads, object_store_objects
         IN ACCESS EXCLUSIVE MODE
     """)
-    _require_supported_schema()
-    _require_finished_campaign()
-    _require_live_source_coverage()
-    _require_surviving_ledger_references()
-
+    cleaned = connection.scalar(
+        sa.text(
+            "SELECT legacy_cleaned_at IS NOT NULL FROM file_icon_backfill_admission_state WHERE singleton"
+        )
+    )
+    if cleaned:
+        connection.execute(
+            sa.text("SELECT set_config('lock_timeout', :timeout, true)"),
+            {"timeout": previous_lock_timeout},
+        )
+        return False
+    _require_supported_schema(connection)
+    _require_finished_campaign(connection)
+    _require_live_source_coverage(connection)
+    _require_surviving_ledger_references(connection)
     for table in ("files", "icons"):
         for operation in ("insert", "update"):
-            op.execute(
+            connection.exec_driver_sql(
                 f"DROP TRIGGER freeze_{table}_legacy_payload_{operation} ON {table}"
             )
-    op.execute("DROP TRIGGER cancel_deleted_file_backfill_owner ON files")
-    op.execute("DROP TRIGGER cancel_deleted_icon_backfill_owner ON icons")
-    op.execute("DROP FUNCTION reject_file_icon_legacy_payload_write()")
-    op.execute("DROP FUNCTION cancel_deleted_file_icon_backfill_owner()")
+    connection.exec_driver_sql("DROP FUNCTION reject_file_icon_legacy_payload_write()")
     for table, columns in _LEGACY_COLUMNS.items():
         for column in columns:
-            op.drop_column(table, column)
-    op.drop_table("file_icon_backfill_items")
-    op.drop_table("file_icon_backfill_campaign")
-    op.drop_table("file_icon_backfill_admission_state")
-    # Later revisions can share this transaction. Only this migration owns 5s.
+            connection.exec_driver_sql(f'ALTER TABLE {table} DROP COLUMN "{column}"')
+    # Keep the ledger and owner-deletion triggers while this release still owns
+    # adoption. The marker prevents fallback and repair from reading dropped data.
+    connection.execute(
+        sa.text(
+            "UPDATE file_icon_backfill_admission_state SET legacy_cleaned_at = clock_timestamp() WHERE singleton"
+        )
+    )
     connection.execute(
         sa.text("SELECT set_config('lock_timeout', :timeout, true)"),
         {"timeout": previous_lock_timeout},
     )
-
-
-def downgrade() -> None:
-    raise RuntimeError(
-        "File/Icon contraction discarded the frozen legacy values. "
-        "Recover forward or restore the coordinated pre-contraction backup "
-        "with its matching bridge image; a schema downgrade cannot recreate those bytes."
-    )
+    return True

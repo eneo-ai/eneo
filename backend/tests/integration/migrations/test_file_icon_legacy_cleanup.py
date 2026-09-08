@@ -1,4 +1,4 @@
-"""Release B safety contracts on disposable PostgreSQL 13 databases."""
+"""Optional legacy cleanup contracts on disposable PostgreSQL 13 databases."""
 
 from __future__ import annotations
 
@@ -7,7 +7,12 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from hashlib import sha256
 from time import monotonic, sleep
-from uuid import uuid4
+from uuid import UUID, uuid4
+
+import json
+import os
+import subprocess
+import sys
 
 import psycopg2
 import pytest
@@ -17,9 +22,6 @@ from sqlalchemy.exc import DBAPIError
 from testcontainers.postgres import PostgresContainer
 
 from alembic import command
-from alembic.migration import MigrationContext
-from alembic.operations import Operations
-from alembic.script import ScriptDirectory
 from tests.integration.migrations import test_file_icon_staged_backfill_expand as expand
 
 override_settings_for_session = expand.override_settings_for_session
@@ -166,7 +168,7 @@ def adopted_template(contract_postgres):
                 ids["tenant"],
             ),
         )
-    command.upgrade(config, _BRIDGE)
+    command.upgrade(config, _CONTRACT)
     _adopt_fixture(url)
     assert all(row[-2] == row[-1] for row in _inline_reference_facts(url))
     return ids
@@ -197,23 +199,34 @@ def contract_database(request, contract_postgres, adopted_template):
                 cursor.execute(f"DROP DATABASE {name}")
 
 
-def test_adopted_bridge_removes_legacy_schema_and_preserves_content(contract_database):
+def _cleanup(url):
+    from eneo.object_content.file_icon_cleanup import cleanup_file_icon_legacy_storage
+
+    engine = create_engine(url)
+    try:
+        with engine.begin() as connection:
+            return cleanup_file_icon_legacy_storage(connection)
+    finally:
+        engine.dispose()
+
+
+def test_upgrade_preserves_legacy_until_explicit_cleanup(contract_database):
     url, config, _ids = contract_database
+    command.upgrade(config, "head")
+    assert _legacy_columns(url) == _LEGACY_COLUMNS
     before = _inline_reference_facts(url)
-    assert len(before) == 9
-    command.upgrade(config, _CONTRACT)
+    from eneo.object_content.file_icon_cleanup import cleanup_file_icon_legacy_storage
+
+    engine = create_engine(url)
+    try:
+        with engine.begin() as connection:
+            assert cleanup_file_icon_legacy_storage(connection) is True
+        with engine.begin() as connection:
+            assert cleanup_file_icon_legacy_storage(connection) is False
+    finally:
+        engine.dispose()
     assert _legacy_columns(url) == set()
     assert _inline_reference_facts(url) == before
-    with _connect(url) as connection, connection.cursor() as cursor:
-        cursor.execute("SELECT version_num FROM alembic_version")
-        assert cursor.fetchone() == (_CONTRACT,)
-        cursor.execute(
-            "SELECT to_regclass('file_icon_backfill_items'), to_regclass('file_icon_backfill_campaign'), "
-            "to_regclass('file_icon_backfill_admission_state'), "
-            "to_regprocedure('reject_file_icon_legacy_payload_write()'), "
-            "to_regprocedure('cancel_deleted_file_icon_backfill_owner()')"
-        )
-        assert cursor.fetchone() == (None,) * 5
 
 
 @pytest.mark.parametrize(
@@ -275,41 +288,40 @@ def test_contraction_refuses_unsafe_bridge_and_preserves_legacy(
             cursor.execute(
                 "ALTER TABLE inline_content_payloads ENABLE TRIGGER inline_content_payloads_identity_fence"
             )
-    with pytest.raises(RuntimeError, match="File/Icon contraction refused"):
-        command.upgrade(config, _CONTRACT)
+    with pytest.raises(RuntimeError, match="File/Icon cleanup refused"):
+        _cleanup(url)
     assert _legacy_columns(url) == _LEGACY_COLUMNS
     with _connect(url) as connection, connection.cursor() as cursor:
         cursor.execute("SELECT blob FROM files WHERE id=%s", (ids["image"],))
         assert bytes(cursor.fetchone()[0]) == b"legacy image"
         cursor.execute("SELECT version_num FROM alembic_version")
-        assert cursor.fetchone() == (_BRIDGE,)
+        assert cursor.fetchone() == (_CONTRACT,)
 
 
 @pytest.mark.parametrize("contract_database", [False], indirect=True)
-def test_fresh_install_runs_the_complete_historical_chain(contract_database):
+def test_fresh_install_preserves_optional_upgrade_schema(contract_database):
     url, config, _ids = contract_database
     command.upgrade(config, "head")
-    assert _legacy_columns(url) == set()
+    assert _legacy_columns(url) == _LEGACY_COLUMNS
+    assert _cleanup(url)
     assert _inline_reference_facts(url) == []
 
 
 @pytest.mark.parametrize("contract_database", [False], indirect=True)
-def test_direct_skip_preserves_sources_and_can_continue_through_bridge(
-    contract_database,
-):
+def test_first_upgrade_allows_adoption_then_optional_cleanup(contract_database):
     url, config, _ids = contract_database
     command.upgrade(config, expand._PREVIOUS_REVISION)
     ids = expand._seed_legacy_owners(url)
-    with pytest.raises(RuntimeError, match="File/Icon contraction refused"):
-        command.upgrade(config, _CONTRACT)
+    command.upgrade(config, "head")
+    with pytest.raises(RuntimeError, match="File/Icon cleanup refused"):
+        _cleanup(url)
     assert _legacy_columns(url) == _LEGACY_COLUMNS
     with _connect(url) as connection, connection.cursor() as cursor:
         cursor.execute("SELECT blob FROM files WHERE id=%s", (ids["image"],))
         assert bytes(cursor.fetchone()[0]) == b"legacy image"
-    command.upgrade(config, _BRIDGE)
     _adopt_fixture(url)
     before = _inline_reference_facts(url)
-    command.upgrade(config, _CONTRACT)
+    assert _cleanup(url)
     assert _inline_reference_facts(url) == before
     assert _legacy_columns(url) == set()
 
@@ -323,7 +335,7 @@ def test_verified_existing_reference_and_deleted_owner_are_supported(contract_da
         )
         cursor.execute("DELETE FROM files WHERE id=%s", (ids["text"],))
     before = _inline_reference_facts(url)
-    command.upgrade(config, _CONTRACT)
+    _cleanup(url)
     assert _inline_reference_facts(url) == before
     assert _legacy_columns(url) == set()
 
@@ -355,7 +367,7 @@ def test_identical_bytes_cannot_replace_the_exact_adopted_reference(contract_dat
             (ids["image"], replacement),
         )
     with pytest.raises(RuntimeError, match="ledger key"):
-        command.upgrade(config, _CONTRACT)
+        _cleanup(url)
     assert _legacy_columns(url) == _LEGACY_COLUMNS
 
 
@@ -398,7 +410,7 @@ def test_recorded_object_store_authority_requires_complete_verification_metadata
             "DELETE FROM object_content_moves WHERE content_id=%s", (content_id,)
         )
     if complete_manifest:
-        command.upgrade(config, _CONTRACT)
+        _cleanup(url)
         assert _legacy_columns(url) == set()
         with _connect(url) as connection, connection.cursor() as cursor:
             cursor.execute(
@@ -408,7 +420,7 @@ def test_recorded_object_store_authority_requires_complete_verification_metadata
             assert cursor.fetchone() == (content_id,)
     else:
         with pytest.raises(RuntimeError, match="lacks matching available bytes"):
-            command.upgrade(config, _CONTRACT)
+            _cleanup(url)
         assert _legacy_columns(url) == _LEGACY_COLUMNS
 
 
@@ -417,8 +429,8 @@ def test_unsupported_source_shape_refuses_before_other_removals(contract_databas
     with _connect(url) as connection, connection.cursor() as cursor:
         cursor.execute("ALTER TABLE files DROP COLUMN checksum CASCADE")
     before = _legacy_columns(url)
-    with pytest.raises(RuntimeError, match="expected bridge legacy columns"):
-        command.upgrade(config, _CONTRACT)
+    with pytest.raises(RuntimeError, match="expected legacy columns"):
+        _cleanup(url)
     assert _legacy_columns(url) == before
 
 
@@ -433,7 +445,7 @@ def test_failure_after_first_drop_rolls_back_the_entire_contraction(contract_dat
             WHEN TAG IN ('ALTER TABLE') EXECUTE FUNCTION abort_contract_ddl();
         """)
     with pytest.raises(DBAPIError, match="injected contraction interruption"):
-        command.upgrade(config, _CONTRACT)
+        _cleanup(url)
     assert _legacy_columns(url) == _LEGACY_COLUMNS
     assert _inline_reference_facts(url) == before
     with _connect(url) as connection, connection.cursor() as cursor:
@@ -442,7 +454,7 @@ def test_failure_after_first_drop_rolls_back_the_entire_contraction(contract_dat
         )
         assert cursor.fetchone() == (True,)
         cursor.execute("SELECT version_num FROM alembic_version")
-        assert cursor.fetchone() == (_BRIDGE,)
+        assert cursor.fetchone() == (_CONTRACT,)
 
 
 def _wait_for_blocked_backend(url, blocker_pid):
@@ -477,12 +489,12 @@ def test_failure_committed_before_fence_is_seen_by_final_verification(
             )
             cursor.execute("SELECT pg_backend_pid()")
             blocker_pid = cursor.fetchone()[0]
-            migration = executor.submit(command.upgrade, config, _CONTRACT)
+            migration = executor.submit(_cleanup, url)
             try:
                 _wait_for_blocked_backend(url, blocker_pid)
             finally:
                 failure.commit()
-        with pytest.raises(RuntimeError, match="File/Icon contraction refused"):
+        with pytest.raises(RuntimeError, match="File/Icon cleanup refused"):
             migration.result(timeout=10)
     assert _legacy_columns(url) == _LEGACY_COLUMNS
 
@@ -523,7 +535,7 @@ def test_final_verification_and_drops_share_the_writer_fence(
                 "SELECT pg_advisory_lock(%s), pg_backend_pid()", (barrier_key,)
             )
             blocker_pid = cursor.fetchone()[1]
-            migration = executor.submit(command.upgrade, config, _CONTRACT)
+            migration = executor.submit(_cleanup, url)
             writer = None
             try:
                 migration_pid = _wait_for_blocked_backend(url, blocker_pid)
@@ -541,8 +553,8 @@ def test_final_verification_and_drops_share_the_writer_fence(
 
 def test_downgrade_refuses_to_reconstruct_discarded_sources(contract_database):
     url, config, _ids = contract_database
-    command.upgrade(config, _CONTRACT)
-    with pytest.raises(RuntimeError, match="cannot recreate those bytes"):
+    _cleanup(url)
+    with pytest.raises(RuntimeError, match="pre-cleanup backup"):
         command.downgrade(config, _BRIDGE)
     assert _legacy_columns(url) == set()
 
@@ -557,20 +569,241 @@ def test_contraction_requires_fresh_snapshots_after_waiting_for_writers(
             f"ALTER DATABASE {name} SET default_transaction_isolation TO 'repeatable read'"
         )
     with pytest.raises(RuntimeError, match="READ COMMITTED"):
-        command.upgrade(config, _CONTRACT)
+        _cleanup(url)
     assert _legacy_columns(url) == _LEGACY_COLUMNS
 
 
 def test_contraction_preserves_the_callers_lock_timeout(contract_database):
     url, config, _ids = contract_database
-    migration = ScriptDirectory.from_config(config).get_revision(_CONTRACT).module
+    from eneo.object_content.file_icon_cleanup import cleanup_file_icon_legacy_storage
+
     engine = create_engine(url)
     try:
         with engine.connect() as connection, connection.begin() as transaction:
             connection.exec_driver_sql("SET LOCAL lock_timeout = '17s'")
-            with Operations.context(MigrationContext.configure(connection)):
-                migration.upgrade()
+            cleanup_file_icon_legacy_storage(connection)
             assert connection.exec_driver_sql("SHOW lock_timeout").scalar_one() == "17s"
             transaction.rollback()
     finally:
         engine.dispose()
+
+
+async def test_same_build_metadata_fallback_worker_and_failure_after_cleanup(
+    contract_database,
+):
+    from sqlalchemy import select
+    from eneo.database.database import DatabaseSessionManager
+    from eneo.database.tables.file_icon_backfill_table import (
+        FileIconBackfillCampaign,
+        FileIconBackfillItems,
+    )
+    from eneo.database.tables.object_content_table import (
+        FileContentReferences,
+        ObjectContents,
+    )
+    from eneo.files.file_models import FileContentVariant, FileMetadataCreate, FileType
+    from eneo.files.file_repo import FileRepository
+    from eneo.icons.icon import IconMetadataCreate
+    from eneo.icons.icon_repo import IconRepository
+    from eneo.object_content.configuration import ObjectContentCoreSettings
+    from eneo.object_content.content import ContentFailureCode, StorageKind
+    from eneo.object_content.content_repository import ObjectContentRepository
+    from eneo.object_content.content_service import ObjectContentService
+    from eneo.object_content.file_icon_backfill import (
+        FileIconBackfill,
+        FileIconBackfillSettings,
+        read_file_icon_backfill_status,
+    )
+    from eneo.object_content.file_icon_preflight import run_file_icon_preflight
+
+    url, _config, ids = contract_database
+    database = DatabaseSessionManager()
+    database.init(
+        make_url(url)
+        .set(drivername="postgresql+asyncpg")
+        .render_as_string(hide_password=False)
+    )
+    settings = FileIconBackfillSettings(_env_file=None)
+    worker = FileIconBackfill(
+        settings,
+        ObjectContentService(ObjectContentCoreSettings(_env_file=None), database),
+        database,
+    )
+    image_id = UUID(ids["image"])
+    try:
+        async with database.session() as session, session.begin():
+            repository = FileRepository(session)
+            original = await repository.get_by_id(image_id)
+            assert await repository.get_legacy_infos([image_id])
+            content_id = await session.scalar(
+                select(FileContentReferences.content_id).where(
+                    FileContentReferences.file_id == image_id
+                )
+            )
+        assert _cleanup(url)
+        preflight = await run_file_icon_preflight(url)
+        assert preflight.outcome == "ready", preflight.blockers
+        assert preflight.schema_state == "cleaned"
+        assert preflight.capacity.remaining_logical_bytes == 0
+        async with database.session() as session, session.begin():
+            repository = FileRepository(session)
+            assert await repository.get_by_id(image_id) == original
+            assert await repository.get_legacy_infos([image_id]) == []
+            assert (
+                await repository.get_legacy_content(
+                    {image_id: [FileContentVariant.LEGACY_IMAGE]}
+                )
+                == []
+            )
+            assert await repository.get_legacy_audio_slice(image_id, None) is None
+            assert await repository.get_by_ids([image_id])
+            assert await repository.get_list_by_id_and_user(
+                [image_id], original.user_id
+            )
+            assert await repository.get_list_by_user(original.user_id)
+            assert await repository.get_by_id_for_update(image_id)
+            created = await repository.add_metadata(
+                FileMetadataCreate(
+                    name="after-cleanup.png",
+                    file_type=FileType.IMAGE,
+                    user_id=original.user_id,
+                    tenant_id=original.tenant_id,
+                )
+            )
+            await repository.add_content_reference(
+                file_id=created.id,
+                content_id=content_id,
+                variant=FileContentVariant.LEGACY_IMAGE,
+            )
+            assert (await repository.get_by_id(created.id)).id == created.id
+            child = await repository.add_metadata(
+                FileMetadataCreate(
+                    name="page.png",
+                    file_type=FileType.IMAGE,
+                    user_id=original.user_id,
+                    tenant_id=original.tenant_id,
+                    parent_file_id=created.id,
+                )
+            )
+            assert [
+                row.id
+                for row in await repository.get_by_parent_ids(
+                    [created.id], original.user_id
+                )
+            ] == [child.id]
+            icons = IconRepository(session)
+            icon = await icons.add_metadata(
+                IconMetadataCreate(tenant_id=original.tenant_id)
+            )
+            assert await icons.get_legacy_primary(icon.id) is None
+            assert await icons.get(icon.id) is None
+            await icons.delete(icon.id)
+            status = await read_file_icon_backfill_status(session, settings)
+            assert status.state.value == "complete" and status.legacy_cleaned
+        assert (await worker.run_once()).state.value == "complete"
+        async with database.session() as session, session.begin():
+            changed = await ObjectContentRepository(session).mark_backend_failure(
+                content_id=content_id,
+                failure_code=ContentFailureCode.BACKEND_MISSING,
+                observed_storage_kind=StorageKind.POSTGRES_INLINE,
+                observed_object_key=None,
+            )
+            assert changed
+            content = await session.get(ObjectContents, content_id)
+            assert content.state == "failed"
+            item = await session.scalar(
+                select(FileIconBackfillItems).where(
+                    FileIconBackfillItems.owner_id == image_id
+                )
+            )
+            assert item.state == "done" and item.content_id == content_id
+            campaign = await session.scalar(select(FileIconBackfillCampaign))
+            assert campaign.state == "complete"
+        assert (await worker.run_once()).state.value == "complete"
+        async with database.session() as session, session.begin():
+            await FileRepository(session).delete_by_owner_for_lifecycle(
+                image_id, original.user_id, original.tenant_id
+            )
+            item = await session.scalar(
+                select(FileIconBackfillItems).where(
+                    FileIconBackfillItems.owner_id == image_id
+                )
+            )
+            assert item.state == "cancelled" and item.content_id is None
+    finally:
+        await database.close()
+
+
+@pytest.mark.parametrize("contract_database", [False], indirect=True)
+def test_cleanup_cli_refusal_lock_failure_commit_and_repeat(
+    contract_database, tmp_path
+):
+    url, config, _ids = contract_database
+    command.upgrade(config, expand._PREVIOUS_REVISION)
+    expand._seed_legacy_owners(url)
+    command.upgrade(config, "head")
+    address = make_url(url)
+    environment = os.environ.copy()
+    environment.update(
+        POSTGRES_HOST=address.host,
+        POSTGRES_PORT=str(address.port),
+        POSTGRES_USER=address.username,
+        POSTGRES_PASSWORD=address.password,
+        POSTGRES_DB=address.database,
+        TESTING="true",
+    )
+
+    def run(action="cleanup"):
+        result = subprocess.run(
+            [sys.executable, "-m", "eneo.object_content.file_icon_migration", action],
+            cwd=tmp_path,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        return result.returncode, json.loads(result.stdout)
+
+    code, result = run()
+    assert code == 2 and result["outcome"] == "blocked"
+    assert _legacy_columns(url) == _LEGACY_COLUMNS
+    _adopt_fixture(url)
+    with _connect(url) as blocker, blocker.cursor() as cursor:
+        cursor.execute("LOCK TABLE files IN ACCESS SHARE MODE")
+        code, result = run()
+        assert code == 3 and result["outcome"] == "incomplete"
+    assert _legacy_columns(url) == _LEGACY_COLUMNS
+    code, result = run()
+    assert code == 0 and result["legacy_cleaned"] and result["changed"]
+    # A separate psycopg2 connection observes the asyncpg command's committed DDL.
+    assert _legacy_columns(url) == set()
+    code, result = run()
+    assert code == 0 and result["legacy_cleaned"] and not result["changed"]
+    code, result = run("status")
+    assert code == 0 and result["legacy_cleaned"] and result["state"] == "complete"
+
+
+async def test_cleanup_marker_is_refreshed_when_a_session_starts_a_new_transaction(
+    contract_database,
+):
+    from eneo.database.database import DatabaseSessionManager
+    from eneo.object_content.file_icon_cleanup import file_icon_legacy_is_cleaned
+
+    url, _config, _ids = contract_database
+    database = DatabaseSessionManager()
+    database.init(
+        make_url(url)
+        .set(drivername="postgresql+asyncpg")
+        .render_as_string(hide_password=False)
+    )
+    try:
+        async with database.session() as session:
+            async with session.begin():
+                assert not await file_icon_legacy_is_cleaned(session)
+                assert not await file_icon_legacy_is_cleaned(session)
+            assert _cleanup(url)
+            async with session.begin():
+                assert await file_icon_legacy_is_cleaned(session)
+    finally:
+        await database.close()
