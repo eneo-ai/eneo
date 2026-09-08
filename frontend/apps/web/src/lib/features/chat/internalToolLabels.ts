@@ -67,6 +67,19 @@ const INTERNAL_SERVERS: Record<
         done: () => m.tool_read_file_done()
       }
     }
+  },
+  // The built-in image generation provider is an admin-named server row over
+  // Eneo's loopback server; the backend reports its tool calls under the
+  // loopback server's name so the tool follows the UI language too. An
+  // external image provider keeps its own name and titles.
+  image_generation: {
+    label: () => m.image_generation(),
+    tools: {
+      generate_image: {
+        running: () => m.tool_generate_image(),
+        done: () => m.tool_generate_image_done()
+      }
+    }
   }
 };
 

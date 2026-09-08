@@ -1078,6 +1078,8 @@
   "tool_describe_source_done": "Got an overview of the knowledge source",
   "tool_read_file": "Reading attached file",
   "tool_read_file_done": "Read attached file",
+  "tool_generate_image": "Generating image",
+  "tool_generate_image_done": "Generated image",
   "internal_files_server": "Attachments",
   "internal_tool_steps_count": "{count} steps",
   "mcp_internal_server_hint": "Built-in Eneo tool, always active",
