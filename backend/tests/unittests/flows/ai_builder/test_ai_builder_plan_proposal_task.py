@@ -22,6 +22,9 @@ from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
 from eneo.flows.ai_builder.ai_builder_plan_proposal_task import (
     build_plan_proposal_system_prompt,
 )
+from eneo.flows.ai_builder.ai_builder_proposal_intent import (
+    ProposalStructuredFieldIntent,
+)
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     build_ai_builder_resource_catalog,
@@ -105,6 +108,16 @@ def test_prompt_field_example_satisfies_the_actual_proposal_contract() -> None:
         arguments=arguments,
         tool_schema=build_propose_flow_tool_schema(resource_catalog=_empty_catalog()),
     )
+    fields = [
+        ProposalStructuredFieldIntent.model_validate(field).to_structured_field_draft()
+        for field in examples[0]
+    ]
+    assert fields[0].field_type == "string"
+    assert fields[1].field_type == "array"
+    assert fields[1].item_fields is not None
+    assert [(field.name, field.field_type) for field in fields[1].item_fields] == [
+        ("label", "string")
+    ]
 
 
 def test_create_prompt_projects_confirmed_runtime_input_identity_and_purpose() -> None:
