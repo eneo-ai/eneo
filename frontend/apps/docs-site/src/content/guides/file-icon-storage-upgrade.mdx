@@ -10,6 +10,17 @@ separate storage paths as Eneo grows. **Every installation with legacy File or
 Icon content needs this one-time migration, including PostgreSQL-only
 installations. S3-compatible storage is optional.**
 
+<Callout type="warning">
+  **Existing installations need two releases.** Complete adoption and backup
+  verification on the **bridge release (Release A)** before installing the
+  **contract release (Release B)**. The preparation, preflight, copy, status,
+  pause, and resume commands below belong to the bridge image. Release B removes
+  those commands and refuses to remove legacy storage while adoption is unsafe
+  or incomplete. See [Install the contract release](#install-the-contract-release)
+  for the final maintenance window. Fresh installations can install Release B
+  directly.
+</Callout>
+
 For an organization upgrading an existing installation:
 
 1. **Prepare and test.** Run [preflight before downtime](#run-preflight-before-downtime)
@@ -32,7 +43,7 @@ For an organization upgrading an existing installation:
    Pause adoption if needed. After completion, verify representative old and new
    content and restore a backup of the new release before closing the recovery
    window.
-5. **Choose optional storage changes later.** Once adoption is complete, you may
+5. **Choose optional storage changes later.** Once bridge adoption is complete, you may
    select S3-compatible storage and explicitly move existing content. Retain the
    legacy columns until the separate contract release removes them; completion
    alone does not reclaim filesystem space.
@@ -611,12 +622,79 @@ must be part of that release's instructions.
    restore when any authoritative content is remote.
 4. Keep the pre-upgrade recovery point until the restore succeeds and your
    retention policy permits removal.
-5. Install the later contract release during a planned window. Its migration
-   must fence writers and verify every remaining legacy source and exact
-   surviving File/Icon reference in the same transaction that drops legacy
-   columns. Matching available content must cover the actual sources; ledger
-   completion alone is not enough. This closes direct rollback to the old image.
+5. Install the contract release during a planned window as described below.
 6. Reclaim filesystem space only if measurements justify it.
+
+### Install the contract release
+
+Release B adds migration `202609081400` after bridge revision `202609071000`.
+Use the release instructions to identify the published bridge and contract
+images; a schema revision does not identify an image or prove a restore succeeded.
+Keep the bridge running until the verification steps above are complete.
+
+Before scheduling downtime, restore a production-size bridge backup and time
+the contract image's `db-init` against it with the same database resources and
+configuration. The five-second lock limit below does not limit verification or
+total downtime. Once locked, the migration scans every remaining legacy payload
+and hashes it along with its inline copy. Inline-only adoption therefore hashes
+roughly twice the remaining legacy byte total, plus row and join work. Completed
+ledger items still retain their legacy bytes; an empty adoption queue does not
+make this scan empty. Measure the payload total on the restored bridge database:
+
+```sql
+SELECT
+  (SELECT coalesce(sum(coalesce(octet_length(text)::bigint, 0)
+                     + coalesce(octet_length(blob)::bigint, 0)
+                     + coalesce(octet_length(transcription)::bigint, 0)), 0)
+   FROM files)
+  + (SELECT coalesce(sum(octet_length(blob)::bigint), 0) FROM icons)
+  AS legacy_payload_bytes;
+```
+
+1. Confirm the bridge campaign is `complete`, migration admission is not paused,
+   and no work or leases remain. Drain jobs and stop **all** backend, worker,
+   and maintenance processes. Keep the API closed throughout the upgrade;
+   this is not a rolling deployment.
+2. Take a current coordinated backup and retain its matching bridge image and
+   configuration. If any content is remote, include the object store. Verify
+   representative remote downloads and the paired restore before proceeding.
+3. Run `db-init` from the contract image using the normal
+   [deployment commands](/guides/deployment#updating-eneo). The database must use
+   `READ COMMITTED` transaction isolation. The migration waits at most five
+   seconds for each database lock; a busy writer causes the attempt to fail.
+4. Start only the contract backend and workers after `db-init` succeeds. Check
+   old and new File downloads, audio ranges, transcriptions, and public Icons.
+   Remove `FILE_ICON_BACKFILL_*` settings from the deployment. Those temporary
+   settings and worker commands no longer apply.
+
+The migration holds the owner, reference, content, and migration-table locks
+through verification and removal. It compares every surviving legacy source's
+SHA-256 and byte length with available content, hashes its inline copy, checks
+recorded verification metadata for remote content, and checks every surviving
+ledger key against its exact reference. Empty payloads count as sources. It
+then removes the legacy columns, write-fence triggers, and migration ledger.
+It does not contact the object store; database checks cannot prove that external
+bytes or a deployment backup remain readable.
+
+If verification, locking, or removal fails, the contract transaction rolls back
+and preserves the legacy values. Keep the API closed, return to the bridge image,
+repair or complete adoption, and repeat verification before retrying. Do not
+stamp past the guard or remove columns manually. A direct upgrade from a legacy
+release can have already committed the earlier expansion and inventory
+migrations; use the bridge image to finish that path.
+
+If a completed ledger item's exact reference no longer matches, investigate the
+inconsistency before retrying. The bridge does not revisit `done` items. Use a
+reviewed repair or coordinated restore; do not rewrite the ledger merely to pass
+the guard, even when a replacement contains identical bytes.
+
+Successful contraction closes the legacy recovery window. A schema downgrade
+cannot reconstruct discarded values and is refused. Recover forward, or restore
+the coordinated pre-contraction backup with its matching bridge image. Restoring
+that backup discards later writes. Once Release B is verified, take and test a
+new backup with the contract image as well.
+
+### Reclaim filesystem space separately
 
 Dropping legacy columns is metadata-only in PostgreSQL. It does not rewrite the
 existing rows, and ordinary `VACUUM` does not perform that rewrite or shrink the

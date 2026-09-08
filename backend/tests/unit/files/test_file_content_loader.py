@@ -51,8 +51,6 @@ def _reference(
 async def _load(metadata: FileMetadata, *references: FileContentReferenceRecord):
     repository = AsyncMock()
     repository.get_content_references.return_value = list(references)
-    repository.get_legacy_infos.return_value = []
-    repository.get_legacy_content.return_value = []
     object_content = AsyncMock()
     object_content.read_content_bytes.return_value = {
         reference.content_id: b"payload" for reference in references

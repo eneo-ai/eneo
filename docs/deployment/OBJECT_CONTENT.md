@@ -58,12 +58,12 @@ availability requirements justify it. There is no production filesystem
 backend, automatic fallback, dual write, public object URL, provider registry,
 or provider-specific product branch.
 
-File and Icon are the first adopted product owners. Existing legacy bytes stay
-readable while a staged, resumable backfill creates and verifies concrete typed
-references. The old columns remain the recovery source until a later contract
-release passes both the campaign-completion and locked live-reference checks
-defined in [Close the recovery window and reclaim
-disk](#close-the-recovery-window-and-reclaim-disk). Eligible new File and Icon
+File and Icon are the first adopted product owners. Existing installations must
+complete the bridge release's staged adoption and restore verification before
+installing this contract release. Migration `202609081400` checks completion,
+live sources, and exact references under database locks before removing the
+legacy columns and temporary copying runtime. See [Close the recovery window
+and reclaim disk](#close-the-recovery-window-and-reclaim-disk). Eligible new File and Icon
 writes use the target selected in **Admin > Storage**. InfoBlob generations and
 Flow artifacts remain separate follow-up work. A target change affects new
 writes only; moving existing content remains a separate migration workflow.
@@ -636,6 +636,13 @@ matching PostgreSQL backup.
 
 ## Upgrade and rollback
 
+The legacy preflight, adoption, status, pause/resume commands, ledger queries,
+and `FILE_ICON_BACKFILL_*` settings in this section apply to the **bridge image
+(Release A)**. They are removed from the **contract image (Release B)**. Existing
+installations must finish the bridge and verify a coordinated restore first;
+fresh installations can apply the complete migration chain directly. Release
+instructions must name both supported images and the verification window.
+
 Start with the concise [File and Icon storage upgrade
 guide](https://docs.eneo.ai/guides/file-icon-storage-upgrade) for its operator
 checklist, disk and duration estimates, pause/rollback decisions, and cleanup.
@@ -931,7 +938,8 @@ offline expansion, replicas, backup retention, or full restore behavior.
 
 The [raw results and frozen profile](benchmarks/file-icon-migration-pg13-20260907.json)
 record image, PostgreSQL settings, workload and source hashes. Reproduce the
-resource check with `ENEO_RUN_FILE_ICON_BACKFILL_BENCHMARK=1`,
+checks from a bridge source checkout; their temporary tests are retired in
+Release B. Run the resource check with `ENEO_RUN_FILE_ICON_BACKFILL_BENCHMARK=1`,
 `ENEO_FILE_ICON_BENCHMARK_TOTAL_MIB=1024`, and
 `ENEO_FILE_ICON_BENCHMARK_FOREGROUND_PROBE=1` when running
 `tests/integration/object_content/test_file_icon_backfill_benchmark.py`.
@@ -1091,15 +1099,78 @@ with any object-store authority need a matching PostgreSQL and object-store
 backup pair. Retain the pre-upgrade recovery point until that restore succeeds
 and the deployment's retention rules allow its removal.
 
-Install the later contract release only after the campaign is `complete` and
-the ledger has no `pending`, `ready`, `leased`, or `failed` row. Its migration
-must treat that as a necessary but insufficient precondition. In the same
-transaction that drops legacy columns, it must lock and recheck that every
-surviving ledger key has its matching File or Icon reference and that the
-referenced object content is still `available`. A missing or failed reference
-must abort before any legacy column is dropped. Do not drop the columns
-manually. Installing that release closes direct rollback to the old image;
-recovery remains forward or through the retained coordinated backup.
+Install the contract release only after the campaign is `complete`, admission
+is not paused, and no unfinished items or leases remain. Drain jobs and stop
+every backend, worker, and maintenance process. Take a current coordinated
+backup and keep the API closed while the contract image runs `db-init`. Start
+only contract processes after it succeeds. Remove `FILE_ICON_BACKFILL_*`
+deployment settings after this upgrade.
+
+Before scheduling this window, restore a production-size bridge backup and time
+the contract image's `db-init` against it with the same database resources and
+configuration. The five-second limit below applies to each lock acquisition,
+not to verification or total downtime. Once locked, the migration scans all
+remaining legacy payloads and hashes each payload plus its inline copy. For
+inline-only adoption this hashes roughly twice the remaining legacy byte total,
+with additional row and join work. Completed ledger items still retain those
+bytes; the adoption queue's remaining-byte count cannot size this final scan.
+Measure the legacy payload total on the restored bridge database:
+
+```sql
+SELECT
+  (SELECT coalesce(sum(coalesce(octet_length(text)::bigint, 0)
+                     + coalesce(octet_length(blob)::bigint, 0)
+                     + coalesce(octet_length(transcription)::bigint, 0)), 0)
+   FROM files)
+  + (SELECT coalesce(sum(octet_length(blob)::bigint), 0) FROM icons)
+  AS legacy_payload_bytes;
+```
+
+Migration `202609081400`, following `202609071000`, requires `READ COMMITTED`
+isolation and takes exclusive locks on File/Icon owners, their references,
+content backends, and the migration tables. Each lock wait is limited to five
+seconds. While holding these locks it checks campaign state, live legacy
+source coverage, SHA-256 and size, the inline payload itself, recorded remote
+verification metadata, and each surviving ledger key's exact content reference.
+This includes sources that were excluded from the original inventory because
+they already had references. Empty payloads are sources; NULL means absent.
+No remote I/O or table rewrite runs inside this transaction. Verify remote
+availability and paired backup recovery before the maintenance window.
+
+Only after these checks does the migration remove the eight legacy columns,
+temporary triggers/functions, and the three backfill tables. Any failure rolls
+back the entire contract transaction. Keep the API closed, return to the bridge
+image to repair adoption, then verify and retry. Earlier expansion/inventory
+migrations can already have committed on a direct legacy-to-contract attempt;
+their data remains available for the bridge to finish. Do not stamp past the
+guard or drop the columns manually.
+
+A completed ledger item's reference mismatch requires investigation: rerunning
+the bridge does not revisit `done` items. Resolve the inconsistency with a
+reviewed repair or a coordinated restore, then verify again. Do not rewrite the
+ledger merely to satisfy the guard, even if a replacement has identical bytes.
+
+Success closes direct rollback to the legacy image. A schema downgrade is
+refused because it cannot recreate the discarded values. Recover forward or
+restore the retained coordinated backup with its matching bridge image and
+configuration, accepting loss of later writes. Verify File/Icon reads and new
+uploads after contraction, then take and restore-test a contract-version backup.
+
+The required backend CI checks the refusal and writer-lock contracts on
+PostgreSQL 13. Run the same checks locally from `backend` with:
+
+```bash
+uv run pytest -q -m migration_isolation tests/integration/migrations/test_file_icon_legacy_contraction.py
+uv run python scripts/test_file_icon_release_chain.py
+```
+
+The [release-chain script](../../backend/scripts/test_file_icon_release_chain.py)
+pins the bridge source and lockfile and runs them in a temporary directory. Separate
+processes check its released-schema preflight and interrupted adoption/restore,
+then run the current application against the exported bridge backup, contract
+it, verify old/new downloads, and restore the contracted backup. Databases are
+disposable. This bounded PostgreSQL-only fixture does not qualify production
+traffic, available disk, maintenance duration, or external object-store backups.
 
 After the contract release, measure the remaining relations before deciding
 whether filesystem reclamation is worth the operational cost:

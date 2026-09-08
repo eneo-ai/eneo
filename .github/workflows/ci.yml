@@ -242,6 +242,15 @@ jobs:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
 
+      - name: Verify File/Icon contraction and release-chain restore
+        # Separate pytest processes keep historical schemas and app sessions isolated.
+        run: |
+          uv run pytest -q -m migration_isolation tests/integration/migrations/test_file_icon_legacy_contraction.py
+          uv run python scripts/test_file_icon_release_chain.py
+        env:
+          TESTCONTAINERS_RYUK_DISABLED: "true"
+          DOCKER_HOST: unix:///var/run/docker.sock
+
   script-tests:
     name: Script tests
     needs: changes

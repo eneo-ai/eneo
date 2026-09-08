@@ -193,9 +193,6 @@ async def object_content_database(
                 "TRUNCATE TABLE "
                 "files, "
                 "icons, "
-                "file_icon_backfill_campaign, "
-                "file_icon_backfill_items, "
-                "file_icon_backfill_admission_state, "
                 "object_store_connections, "
                 "object_store_bindings, "
                 "object_contents, "
@@ -207,12 +204,6 @@ async def object_content_database(
         )
         await session.execute(
             text("INSERT INTO object_content_reconciliation_state DEFAULT VALUES")
-        )
-        await session.execute(
-            text(
-                "INSERT INTO file_icon_backfill_admission_state "
-                "(singleton, generation) VALUES (true, 0)"
-            )
         )
     yield _object_content_database
 
