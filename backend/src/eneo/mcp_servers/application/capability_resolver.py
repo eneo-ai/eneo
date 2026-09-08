@@ -153,6 +153,25 @@ def meets_security_classification(
     )
 
 
+def general_servers_for_space(
+    attached_servers: Sequence["MCPServer"],
+    space_security_classification: "SecurityClassification | None",
+) -> list["MCPServer"]:
+    """The general-purpose servers among ``attached_servers`` the space may call.
+
+    Capability-purpose servers are markers resolved separately. A general
+    server is called directly, so one whose classification has dropped below
+    the space's since it was attached is left out this turn; attachments are
+    never pruned here.
+    """
+    return [
+        server
+        for server in attached_servers
+        if not is_capability_purpose(server.purpose)
+        and meets_security_classification(server, space_security_classification)
+    ]
+
+
 @dataclass(frozen=True)
 class CapabilityResolution:
     """Attached servers split into general servers and resolved providers."""
@@ -175,7 +194,8 @@ async def resolve_capability_servers(
     """Resolve independent purposes to the providers serving the user.
 
     Capability-purpose servers among ``attached_servers`` are stripped (they
-    may be stale or deactivated) and, for every requested purpose in
+    may be stale or deactivated), general servers below the space's security
+    classification are left out, and, for every requested purpose in
     ``CAPABILITY_PURPOSES`` order, the provider serving the user is attached
     in its place when the user's role allows the purpose (``allowed_purposes``,
     None meaning every purpose), a provider exists for the user's groups or
@@ -184,11 +204,9 @@ async def resolve_capability_servers(
     call tools. Anything else leaves the purpose silently unavailable this
     turn.
     """
-    general_servers = [
-        server
-        for server in attached_servers
-        if not is_capability_purpose(server.purpose)
-    ]
+    general_servers = general_servers_for_space(
+        attached_servers, space_security_classification
+    )
     requested_purposes = set(requested_capabilities)
     if allowed_purposes is not None:
         requested_purposes &= allowed_purposes

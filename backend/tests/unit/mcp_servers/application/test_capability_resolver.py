@@ -7,6 +7,7 @@ import pytest
 
 from eneo.mcp_servers.application import capability_resolver
 from eneo.mcp_servers.application.capability_resolver import (
+    general_servers_for_space,
     get_active_capability_servers,
     meets_security_classification,
     resolve_capability_servers,
@@ -226,6 +227,33 @@ class TestMeetsSecurityClassification:
         assert meets_security_classification(_server("web_search"), space)
 
 
+class TestGeneralServersForSpace:
+    def test_capability_markers_are_left_to_the_resolver(self):
+        general = _server("general")
+
+        assert general_servers_for_space(
+            [general, _server("web_search"), _server("image_generation")], None
+        ) == [general]
+
+    def test_server_below_space_classification_is_left_out(self):
+        """A general server is called directly, so a classification that no
+        longer meets the space's must keep it out of the turn."""
+        space = _classification(2)
+        matching = _server("general", security_level=2, name="matching")
+        above = _server("general", security_level=3, name="above")
+        below = _server("general", security_level=1, name="below")
+        unclassified = _server("general", name="unclassified")
+
+        assert general_servers_for_space(
+            [matching, below, above, unclassified], space
+        ) == [matching, above]
+
+    def test_unclassified_space_keeps_every_general_server(self):
+        servers = [_server("general"), _server("general", security_level=0)]
+
+        assert general_servers_for_space(servers, None) == servers
+
+
 class TestCapabilityPermissions:
     @pytest.mark.parametrize("purpose", CAPABILITY_PURPOSES)
     def test_every_capability_purpose_has_a_same_valued_permission(self, purpose):
@@ -261,6 +289,26 @@ class TestResolveCapabilityServers:
         assert resolution.general_servers == [general]
         assert resolution.capability_servers == []
         lookup.assert_not_awaited()
+
+    async def test_general_server_below_space_classification_is_left_out(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(
+            capability_resolver, "get_active_capability_servers", AsyncMock()
+        )
+        kept = _server("general", security_level=2, name="kept")
+        below = _server("general", security_level=1, name="below")
+
+        resolution = await resolve_capability_servers(
+            AsyncMock(),
+            uuid4(),
+            [kept, below],
+            requested_capabilities=[],
+            supports_tool_calling=True,
+            space_security_classification=_classification(2),
+        )
+
+        assert resolution.general_servers == [kept]
 
     async def test_markers_are_replaced_by_active_providers_in_purpose_order(
         self, monkeypatch
