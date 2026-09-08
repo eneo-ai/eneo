@@ -4,11 +4,12 @@ import sqlalchemy as sa
 from sqlalchemy.orm import selectinload
 
 from eneo.database.tables.ai_models_table import ImageModels
+from eneo.database.tables.mcp_server_table import MCPServers
 from eneo.database.tables.model_providers_table import ModelProviders
 from eneo.database.tables.security_classifications_table import (
     SecurityClassification as SecurityClassificationDBModel,
 )
-from eneo.image_models.domain.image_model import ImageModel
+from eneo.image_models.domain.image_model import ImageModel, ImageModelUsage
 from eneo.main.exceptions import NotFoundException
 
 if TYPE_CHECKING:
@@ -53,7 +54,7 @@ class ImageModelRepository:
             stmt = stmt.where(ImageModels.is_deprecated == False)  # noqa: E712
 
         result = await self.session.execute(stmt)
-        return [
+        models = [
             ImageModel.create_from_db(
                 image_model_db=image_model,
                 user=self.user,
@@ -62,6 +63,8 @@ class ImageModelRepository:
             )
             for image_model, provider_name, provider_type in result.all()
         ]
+        await self._attach_usage(models)
+        return models
 
     async def one_or_none(self, model_id: "UUID") -> Optional[ImageModel]:
         stmt = self._base_query().where(ImageModels.id == model_id)
@@ -71,12 +74,38 @@ class ImageModelRepository:
             return None
 
         image_model, provider_name, provider_type = row
-        return ImageModel.create_from_db(
+        model = ImageModel.create_from_db(
             image_model_db=image_model,
             user=self.user,
             provider_name=provider_name,
             provider_type=provider_type,
         )
+        await self._attach_usage([model])
+        return model
+
+    async def _attach_usage(self, models: list[ImageModel]) -> None:
+        """Record the tenant's capability providers that run on each model."""
+        if not models:
+            return
+        by_id = {model.id: model for model in models}
+        stmt = (
+            sa.select(
+                MCPServers.image_model_id,
+                MCPServers.id,
+                MCPServers.name,
+                MCPServers.purpose,
+            )
+            .where(
+                MCPServers.tenant_id == self.user.tenant_id,
+                MCPServers.image_model_id.in_(by_id.keys()),
+            )
+            .order_by(MCPServers.created_at, MCPServers.id)
+        )
+        result = await self.session.execute(stmt)
+        for image_model_id, server_id, name, purpose in result.all():
+            by_id[image_model_id].used_by_mcp_servers.append(
+                ImageModelUsage(id=server_id, name=name, purpose=purpose)
+            )
 
     async def one(self, model_id: "UUID") -> ImageModel:
         image_model = await self.one_or_none(model_id=model_id)

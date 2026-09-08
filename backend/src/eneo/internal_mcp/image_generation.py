@@ -45,6 +45,7 @@ from eneo.internal_mcp.foundation import (
     internal_tool_context,
     mcp_server_id_from_token,
 )
+from eneo.main.config import get_settings
 from eneo.mcp_servers.domain.entities.mcp_server import is_builtin_provider
 from eneo.model_providers.domain.model_route import resolve_model_route
 from eneo.model_providers.infrastructure import litellm_transport
@@ -95,11 +96,14 @@ def resolve_request_params(
     return params
 
 
-async def image_bytes_from_response(response: Any) -> tuple[bytes, str | None]:
+async def image_bytes_from_response(
+    response: Any, *, timeout: float = 60
+) -> tuple[bytes, str | None]:
     """The first generated image as bytes plus its revised prompt, if any.
 
     Providers return base64 (``b64_json``) or a short-lived URL; both are
-    accepted so the tool works across LiteLLM image backends.
+    accepted so the tool works across LiteLLM image backends. ``timeout``
+    bounds the URL fetch.
     """
     data = list(getattr(response, "data", None) or [])
     if not data:
@@ -111,7 +115,7 @@ async def image_bytes_from_response(response: Any) -> tuple[bytes, str | None]:
         return base64.b64decode(encoded), revised
     url = getattr(first, "url", None)
     if url:
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             fetched = await client.get(url)
             fetched.raise_for_status()
             return fetched.content, revised
@@ -187,17 +191,19 @@ async def generate_with_litellm(
     ``model`` is the configured model name for the usage metadata; it defaults
     to the route with its provider prefix removed.
     """
+    timeout = get_settings().image_generation_timeout_seconds
     call_kwargs: dict[str, Any] = {
         "model": route,
         "prompt": prompt,
         "n": 1,
         "response_format": "b64_json",
+        "timeout": timeout,
         **params,
         **provider_kwargs,
     }
     try:
         response = await _generate_dropping_unsupported_params(call_kwargs)
-        image, revised = await image_bytes_from_response(response)
+        image, revised = await image_bytes_from_response(response, timeout=timeout)
     except ValueError:
         raise
     except Exception as exc:
@@ -250,6 +256,7 @@ async def generate_image(
         if (
             server.tenant_id != tool_ctx.user.tenant_id
             or not is_builtin_provider(server.http_auth_type)
+            or not server.is_enabled
             or server.image_model_id is None
         ):
             raise ValueError(NOT_CONFIGURED_MESSAGE)

@@ -38,6 +38,9 @@
     icon_url?: string | null;
     /** "general" for ordinary MCP servers, otherwise a capability purpose (web search, image generation). */
     purpose?: string | null;
+    /** Org-level availability: a deactivated server stays attached but is never called. */
+    is_enabled?: boolean;
+    readiness_reason?: string | null;
   };
 
   const chat = getChatService();
@@ -280,7 +283,13 @@
   // each its own popover entry. A capability the user's role may not use is
   // hidden; the backend never attaches its tools for that user anyway.
   const generalMcpServers = $derived(
-    mcpServers.filter((server) => !isCapabilityPurpose(server.purpose))
+    mcpServers
+      .filter((server) => !isCapabilityPurpose(server.purpose))
+      .map((server) => ({
+        ...server,
+        available: server.is_enabled !== false,
+        reason: server.is_enabled === false ? "server_disabled" : null
+      }))
   );
   const capabilityServers = $derived.by(() => {
     const partner = chat.partner;

@@ -3,6 +3,7 @@ export function readinessMessage(reason: string | null | undefined): string {
   const labels: Record<string, () => string> = {
     permission: m.tools_readiness_permission,
     space_disabled: m.tools_readiness_space_disabled,
+    server_disabled: m.tools_readiness_server_disabled,
     model_missing: m.tools_readiness_model_missing,
     model_disabled: m.tools_readiness_model_disabled,
     model_deprecated: m.tools_readiness_model_deprecated,

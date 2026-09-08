@@ -154,6 +154,7 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
     space.get_assistant.return_value = assistant
     space.can_ask_assistant.return_value = None
     space.is_personal.return_value = True
+    space.security_classification = None
 
     actor = MagicMock()
     actor.can_read_assistant.return_value = True
@@ -257,6 +258,7 @@ async def test_ask_rejects_empty_model_policy_before_creating_history():
     space.get_assistant.return_value = assistant
     space.can_ask_assistant.return_value = None
     space.is_personal.return_value = True
+    space.security_classification = None
 
     actor = MagicMock()
     actor.can_read_assistant.return_value = True
@@ -343,6 +345,7 @@ async def test_ask_grants_policy_mcp_servers_to_personal_assistant():
     space.get_assistant.return_value = assistant
     space.can_ask_assistant.return_value = None
     space.is_personal.return_value = True
+    space.security_classification = None
 
     actor = MagicMock()
     actor.can_read_assistant.return_value = True
@@ -425,6 +428,7 @@ async def test_ask_respects_disabled_mcp_server_ids():
     space.get_assistant.return_value = assistant
     space.can_ask_assistant.return_value = None
     space.is_personal.return_value = True
+    space.security_classification = None
 
     actor = MagicMock()
     actor.can_read_assistant.return_value = True

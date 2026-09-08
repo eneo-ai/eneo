@@ -68,6 +68,7 @@ from eneo.main.models import (
     is_provided,
 )
 from eneo.mcp_servers.application.capability_resolver import (
+    general_servers_for_space,
     resolve_capability_servers,
 )
 from eneo.mcp_servers.domain.capabilities import (
@@ -2981,10 +2982,12 @@ class AssistantService:
             if mcp_servers_override is not None
             else list(assistant_to_ask.mcp_servers)
         )
-        # Provider IDs never grant a capability, including old attachments after a purpose edit.
-        mcp_servers_override = [
-            s for s in capability_base if not is_capability_purpose(s.purpose)
-        ]
+        # Provider IDs never grant a capability, including old attachments
+        # after a purpose edit. A general server whose classification has
+        # dropped below the space's is skipped this turn rather than called.
+        mcp_servers_override = general_servers_for_space(
+            capability_base, space.security_classification
+        )
         capability_mcp_servers: list["MCPServer"] = []
         requested_capabilities = set(assistant_to_ask.enabled_capabilities)
         if not space.is_personal():

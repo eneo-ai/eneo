@@ -70,16 +70,20 @@
   };
 
   // Built-ins are always active; capability and external servers toggle via
-  // disabledServerIds.
+  // disabledServerIds. An unavailable server (deactivated by an admin, or a
+  // capability without a usable provider) is off regardless of the toggle:
+  // the backend never calls it.
+  const isOff = (server: McpServer) =>
+    server.available === false || disabledServerIds.has(server.id);
   const total = $derived(servers.length + capabilityServers.length + internalServers.length);
-  const disabledCount = $derived(
-    [...servers, ...capabilityServers].filter((server) => disabledServerIds.has(server.id)).length
-  );
+  const disabledCount = $derived([...servers, ...capabilityServers].filter(isOff).length);
   const activeCount = $derived(total - disabledCount);
   // All-on/all-off only sweeps the general external servers, so its disabled
   // states must not count the capability toggles.
-  const generalDisabledCount = $derived(
-    servers.filter((server) => disabledServerIds.has(server.id)).length
+  const generalDisabledCount = $derived(servers.filter(isOff).length);
+  const generalSwitchableOffCount = $derived(
+    servers.filter((server) => server.available !== false && disabledServerIds.has(server.id))
+      .length
   );
 
   function setServer(id: string, on: boolean, notify = true) {
@@ -89,7 +93,9 @@
   }
 
   function setAll(on: boolean) {
-    for (const server of servers) setServer(server.id, on, false);
+    for (const server of servers) {
+      if (server.available !== false) setServer(server.id, on, false);
+    }
     onSelectionChange?.(disabledServerIds);
   }
 </script>
@@ -120,7 +126,7 @@
             <button
               type="button"
               class="hover:text-foreground rounded px-1 py-0.5 font-medium transition-colors disabled:pointer-events-none disabled:opacity-40"
-              disabled={generalDisabledCount === 0}
+              disabled={generalSwitchableOffCount === 0}
               onclick={() => setAll(true)}>{m.mcp_all_on()}</button
             >
             <span aria-hidden="true" class="text-border">·</span>
@@ -162,7 +168,7 @@
     {#if capabilityServers.length > 0}
       <div class="border-b p-1" role="group" aria-label={m.capabilities()}>
         {#each capabilityServers as server (server.id)}
-          {@const on = !disabledServerIds.has(server.id)}
+          {@const on = !isOff(server)}
           {@const capability = getCapability(server.purpose)}
           {@const Icon = capability?.icon ?? Plug}
           {@const label = capability?.label() ?? server.name}
@@ -170,7 +176,10 @@
                server avatar styling or provider identity. Which provider
                serves the capability is an admin concern. -->
           <label
-            class="hover:bg-muted flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 transition-colors"
+            class="hover:bg-muted flex items-center gap-2.5 rounded-md px-2 py-2 transition-colors {server.available ===
+            false
+              ? 'cursor-not-allowed'
+              : 'cursor-pointer'}"
           >
             <Icon
               class="text-muted-foreground size-5 shrink-0 {on ? '' : 'opacity-50'}"
@@ -186,7 +195,7 @@
               checked={on}
               onCheckedChange={(value) => setServer(server.id, value)}
               aria-label={label}
-              disabled={!on && server.available === false}
+              disabled={server.available === false}
             />
           </label>
         {/each}
@@ -196,10 +205,13 @@
     {#if servers.length > 0}
       <div class="flex max-h-64 flex-col overflow-y-auto p-1" role="group" aria-label={m.tools()}>
         {#each servers as server (server.id)}
-          {@const on = !disabledServerIds.has(server.id)}
+          {@const on = !isOff(server)}
           {@const descId = server.description ? `mcp-desc-${server.id}` : undefined}
           <label
-            class="hover:bg-muted flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 transition-colors"
+            class="hover:bg-muted flex items-center gap-2.5 rounded-md px-2 py-2 transition-colors {server.available ===
+            false
+              ? 'cursor-not-allowed'
+              : 'cursor-pointer'}"
           >
             <span
               class="bg-muted text-muted-foreground flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-md text-xs font-semibold {on
@@ -215,7 +227,11 @@
             </span>
             <span class="min-w-0 flex-1 {on ? '' : 'opacity-60'}">
               <span class="text-foreground block truncate text-sm font-medium">{server.name}</span>
-              {#if server.description}
+              {#if server.available === false}
+                <span class="text-muted-foreground block text-xs"
+                  >{readinessMessage(server.reason)}</span
+                >
+              {:else if server.description}
                 <span
                   id={descId}
                   class="text-muted-foreground block truncate text-xs"
@@ -228,6 +244,7 @@
               onCheckedChange={(value) => setServer(server.id, value)}
               aria-label={server.name}
               aria-describedby={descId}
+              disabled={server.available === false}
             />
           </label>
         {/each}

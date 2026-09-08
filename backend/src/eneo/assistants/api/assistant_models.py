@@ -103,6 +103,8 @@ class MCPServerPublicDict(TypedDict):
     http_url: str | None
     http_auth_type: str | None
     purpose: str
+    is_enabled: bool
+    readiness_reason: str | None
     tags: list[str] | None
     icon_url: str | None
     security_classification: dict[str, object] | None

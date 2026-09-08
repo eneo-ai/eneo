@@ -6,7 +6,10 @@ usage ``_meta`` the tool returns, the public error mapping, and the server mount
 """
 
 import base64
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 from litellm.exceptions import UnsupportedParamsError
@@ -15,13 +18,17 @@ from eneo.internal_mcp import image_generation
 from eneo.internal_mcp.image_generation import (
     DEFAULT_MIME_TYPE,
     NO_IMAGE_MESSAGE,
+    NOT_CONFIGURED_MESSAGE,
+    generate_image,
     generate_with_litellm,
     image_bytes_from_response,
     resolve_request_params,
     usage_meta_from_response,
 )
 from eneo.internal_mcp.registry import internal_mcp_mounts
+from eneo.main.config import get_settings
 from eneo.main.exceptions import OpenAIException
+from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
 from eneo.model_providers.infrastructure import litellm_transport
 
 DEFAULTS = {"default_size": "1024x1024", "default_quality": "high"}
@@ -138,6 +145,7 @@ class TestGenerateWithLitellm:
                 "prompt": "a lighthouse",
                 "n": 1,
                 "response_format": "b64_json",
+                "timeout": get_settings().image_generation_timeout_seconds,
                 "size": "1024x1536",
                 "api_key": "k",
                 "api_base": "https://x",
@@ -220,6 +228,52 @@ class TestGenerateWithLitellm:
                 params={},
                 provider_type="openai",
             )
+
+
+def _patch_tool_context(monkeypatch, *, server: MCPServer, tenant_id):
+    """Route ``generate_image`` at an in-memory provider row."""
+
+    @asynccontextmanager
+    async def fake_context(_ctx):
+        container = SimpleNamespace(
+            mcp_server_repo=lambda: SimpleNamespace(one=AsyncMock(return_value=server)),
+            image_model_repo=lambda: SimpleNamespace(one_or_none=AsyncMock()),
+            session=lambda: None,
+        )
+        yield SimpleNamespace(
+            container=container, user=SimpleNamespace(tenant_id=tenant_id)
+        )
+
+    monkeypatch.setattr(image_generation, "internal_tool_context", fake_context)
+    monkeypatch.setattr(image_generation, "bearer_from_ctx", lambda _ctx: "token")
+    monkeypatch.setattr(
+        image_generation, "mcp_server_id_from_token", lambda _t: server.id
+    )
+
+
+class TestGenerateImageGuard:
+    async def test_deactivated_provider_is_not_configured(self, monkeypatch):
+        tenant_id = uuid4()
+        server = MCPServer(
+            id=uuid4(),
+            tenant_id=tenant_id,
+            name="Images",
+            http_url="http://localhost/internal-mcp/image_generation/mcp",
+            http_auth_type="internal",
+            purpose="image_generation",
+            is_enabled=False,
+            image_model_id=uuid4(),
+        )
+        _patch_tool_context(monkeypatch, server=server, tenant_id=tenant_id)
+        load_provider = AsyncMock()
+        monkeypatch.setattr(
+            image_generation, "load_active_litellm_provider", load_provider
+        )
+
+        with pytest.raises(ValueError, match=NOT_CONFIGURED_MESSAGE):
+            await generate_image("a cat", object())
+
+        load_provider.assert_not_awaited()
 
 
 def test_image_generation_server_is_mounted():

@@ -37,6 +37,11 @@
 
   $: statusKey = isDeprecated ? "deprecated" : isRetiring ? "retiring" : "ok";
 
+  // Capability providers running on the model; while any exists the model
+  // cannot be deleted, so say so up front instead of after a failed delete.
+  $: usedBy = "used_by_mcp_servers" in model ? (model.used_by_mcp_servers ?? []) : [];
+  $: usedByNames = usedBy.map((u) => u.name).join(", ");
+
   $: statusLabel = isDeprecated
     ? m.model_label_deprecated()
     : isRetiring && deprecation.date
@@ -109,6 +114,25 @@
           {/snippet}
         </Tooltip.Trigger>
         <Tooltip.Content>{m.default_model_tooltip()}</Tooltip.Content>
+      </Tooltip.Root>
+    </Tooltip.Provider>
+  {/if}
+
+  {#if usedBy.length > 0}
+    <Tooltip.Provider delayDuration={150}>
+      <Tooltip.Root>
+        <Tooltip.Trigger>
+          {#snippet child({ props })}
+            <div
+              {...props}
+              class="bg-warning-dimmer text-warning-stronger inline-flex cursor-default items-center rounded-full px-2 py-[2px] text-[11px] font-medium tracking-wide"
+              data-status="in-use"
+            >
+              {m.model_used_by_image_generation()}
+            </div>
+          {/snippet}
+        </Tooltip.Trigger>
+        <Tooltip.Content>{usedByNames}</Tooltip.Content>
       </Tooltip.Root>
     </Tooltip.Provider>
   {/if}
