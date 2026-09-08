@@ -100,6 +100,11 @@ class ToolCallInfo(BaseModel):
     # OpenTelemetry GenAI attribute names, e.g. `gen_ai.usage.input_tokens`,
     # `gen_ai.usage.output_tokens`, `gen_ai.request.model`.
     meta: Optional[dict[str, Any]] = None
+    # Generated files this call produced (MCP `image` blocks), in the order of
+    # the "[Image N ...]" placeholders in `result`. Lets a later turn hand the
+    # model a fresh reference URL per image so it can pass the image back to
+    # an image tool. Absent on rows persisted before this field existed.
+    generated_file_ids: Optional[list[UUID]] = None
 
 
 class QuestionAdd(QuestionBase):

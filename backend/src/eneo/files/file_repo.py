@@ -132,6 +132,23 @@ def binary_file_variants(file_type: FileType) -> tuple[FileContentVariant, ...]:
     )
 
 
+def original_download_variants(
+    file_type: FileType,
+) -> tuple[FileContentVariant, ...]:
+    """Variants a signed original-download URL may serve, in preference order.
+
+    A generated image has no upload behind it: the generated artifact is that
+    file's original. Shared by the ``original_available`` flag and the download
+    route so the two never disagree about which files can be referenced.
+    """
+    if file_type is FileType.IMAGE:
+        return (
+            FileContentVariant.ORIGINAL,
+            FileContentVariant.GENERATED_ARTIFACT,
+        )
+    return (FileContentVariant.ORIGINAL,)
+
+
 def legacy_primary_file_variant(
     file_type: FileType,
     *,

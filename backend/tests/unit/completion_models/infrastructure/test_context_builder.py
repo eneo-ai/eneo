@@ -1,9 +1,11 @@
 """History replay in ContextBuilder._build_messages.
 
-Generated images (tool output) are replayed only from the latest turn: that
-is where "change this image" follow-ups need them, while older turns are
-already described to the model by the placeholder text in their replayed
-tool results. Uploaded images follow the vision gate as before.
+Generated images (tool output) are replayed as vision input only from the
+latest turn: that is where "change this image" follow-ups need them, while
+older turns are already described to the model by the placeholder text in
+their replayed tool results. Every replayed tool result additionally names a
+fresh reference URL per generated image, so the model can pass any earlier
+image back to an image tool. Uploaded images follow the vision gate as before.
 """
 
 from datetime import datetime, timezone
@@ -15,6 +17,7 @@ import pytest
 from eneo.completion_models.infrastructure import context_builder
 from eneo.completion_models.infrastructure.context_builder import ContextBuilder
 from eneo.files.file_models import File, FileType
+from eneo.questions.question import ToolCallInfo
 
 
 def _image(name: str) -> File:
@@ -76,3 +79,67 @@ def test_no_images_replay_without_vision():
     )
 
     assert all(m.images == [] and m.generated_images == [] for m in messages)
+
+
+def _image_tool_call(result: str, generated_file_ids) -> ToolCallInfo:
+    return ToolCallInfo(
+        server_name="image_generation",
+        tool_name="generate_image",
+        tool_call_id="call-1",
+        result=result,
+        mcp_tool_name="image_generation__generate_image",
+        generated_file_ids=generated_file_ids,
+    )
+
+
+def test_replayed_tool_result_carries_a_reference_url_per_generated_image():
+    first, second = uuid4(), uuid4()
+    result = (
+        "[Image 1 (image/png) was generated and is shown to the user.]\n"
+        "[Image 2 (image/png) was generated and is shown to the user.]"
+    )
+    call = _image_tool_call(result, [first, second])
+    session = SimpleNamespace(
+        questions=[
+            SimpleNamespace(
+                question="q",
+                answer="a",
+                files=[],
+                generated_files=[],
+                tool_calls=[call],
+            )
+        ]
+    )
+
+    messages, _ = ContextBuilder()._build_messages(
+        session,
+        max_tokens=10_000,
+        file_reference_urls={first: "https://x/1", second: "https://x/2"},
+    )
+
+    assert messages[0].tool_calls[0].result == (
+        f"{result}\n"
+        "Reference url for Image 1: https://x/1\n"
+        "Reference url for Image 2: https://x/2"
+    )
+    # The persisted row is untouched: URLs are short-lived and replay-time only.
+    assert call.result == result
+
+
+def test_replayed_tool_result_is_unchanged_without_a_minted_url():
+    result = "[Image 1 (image/png) was generated and is shown to the user.]"
+    session = SimpleNamespace(
+        questions=[
+            SimpleNamespace(
+                question="q",
+                answer="a",
+                files=[],
+                generated_files=[],
+                tool_calls=[_image_tool_call(result, [uuid4()])],
+            )
+        ]
+    )
+
+    messages, _ = ContextBuilder()._build_messages(session, max_tokens=10_000)
+
+    assert messages[0].tool_calls[0].result == result

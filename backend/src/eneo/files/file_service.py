@@ -34,6 +34,7 @@ from eneo.files.file_repo import (
     LegacyFileContentRecord,
     LegacyFileInfoRecord,
     legacy_primary_file_variant,
+    original_download_variants,
     primary_file_variants,
     project_file_info,
     select_file_content_variant,
@@ -748,7 +749,11 @@ class FileService:
                     {file_id: {FileContentVariant.ORIGINAL}}
                 )
             )
-            reference = self._original_content(references, legacy_content)
+            reference = self._original_content(
+                references,
+                legacy_content,
+                metadata.file_type,
+            )
         return await self._open_download(
             metadata,
             reference,
@@ -1107,15 +1112,19 @@ class FileService:
     def _original_content(
         references: list[FileContentReferenceRecord],
         legacy_content: list[LegacyFileContentRecord],
+        file_type: FileType = FileType.TEXT,
     ) -> FileContentReferenceRecord | LegacyFileContentRecord:
-        reference = select_file_content_variant(
-            references,
-            legacy_content,
-            FileContentVariant.ORIGINAL,
-        )
-        if reference is None:
-            raise FileOriginalNotFoundError()
-        return reference
+        # Same variant list as the loader's ``original_available`` flag, so a
+        # file the prompt references as downloadable is always servable here.
+        for variant in original_download_variants(file_type):
+            reference = select_file_content_variant(
+                references,
+                legacy_content,
+                variant,
+            )
+            if reference is not None:
+                return reference
+        raise FileOriginalNotFoundError()
 
     def _require_owner(self, file: FileMetadata, *, action: str) -> None:
         if file.user_id == self._authenticated_user().id:
