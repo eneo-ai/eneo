@@ -18,6 +18,22 @@ from eneo.skills.domain.skill import (
 )
 
 
+async def test_hydrates_all_info_blobs_without_file_loader(monkeypatch):
+    blobs = [MagicMock(), MagicMock()]
+    hydrate = AsyncMock()
+    monkeypatch.setattr(
+        "eneo.questions.questions_repo.InfoBlobRepository.hydrate_original_availability",
+        hydrate,
+    )
+    repo = QuestionRepository(AsyncMock())
+
+    await repo._hydrate_questions(
+        [SimpleNamespace(info_blobs=blobs, questions_files=[])]
+    )
+
+    hydrate.assert_awaited_once_with(blobs)
+
+
 async def test_get_by_tenant_filters_out_questions_without_session_id():
     repo = QuestionRepository(AsyncMock())
     repo.delegate.get_models_from_query = AsyncMock(return_value=[])

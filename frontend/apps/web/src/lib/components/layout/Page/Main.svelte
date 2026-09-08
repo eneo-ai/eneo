@@ -11,15 +11,14 @@
   function loadPersistedScroll(tabKey: string) {
     const scrollY = scrollPositions[tabKey] ?? 0;
 
-    const scrollContainer = div;
-    if (!scrollContainer) return;
-
-    setTimeout(() => {
-      scrollContainer.scrollTo({
-        top: scrollY,
-        behavior: "instant"
-      });
-    }, 1);
+    if (div) {
+      setTimeout(() => {
+        div?.scrollTo({
+          top: scrollY,
+          behavior: "instant"
+        });
+      }, 1);
+    }
   }
 
   function persistScroll(event: Event) {

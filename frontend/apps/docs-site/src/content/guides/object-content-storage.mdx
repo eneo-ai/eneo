@@ -12,8 +12,10 @@ import { Callout, Steps, Tabs } from "nextra/components";
 - A policy change affects new writes only. Existing content never moves
   implicitly.
 - The one-time [File and Icon storage
-  upgrade](/guides/file-icon-storage-upgrade) runs online after schema expansion
-  and is required for PostgreSQL-only installations too.
+  upgrade](/guides/file-icon-storage-upgrade) consolidates legacy bytes and their
+  storage rules in the shared module. It applies to PostgreSQL-only installations
+  too. Follow its numbered preparation, maintenance-window upgrade, online
+  adoption, and verification steps before optional S3 moves.
 - You can change to another S3-compatible service later: copy the bucket with
   your own tooling, then switch destination in **Admin > Storage**. The previous
   destination stays available so you can switch back.
@@ -28,7 +30,7 @@ import { Callout, Steps, Tabs } from "nextra/components";
 | Use the bundled private reference store           | [Bundled SeaweedFS](#set-up-your-choice)                     |
 | Connect MinIO or another compatible service       | [External endpoint](#set-up-your-choice)                     |
 | Understand ownership and RAG                      | [How content flows](#how-content-flows)                      |
-| Download a processed file or recover its original | [Download or recover](#download-or-recover-a-file)           |
+| Download processed content or recover an original | [Download or recover](#download-or-recover-content)          |
 | Upgrade and clean up legacy File/Icon storage     | [One-time upgrade guide](/guides/file-icon-storage-upgrade)  |
 | Move to another S3-compatible service             | [Change destination](#move-to-another-s3-compatible-service) |
 | Plan backup, recovery, and failure handling       | [Operate it safely](#operate-it-safely)                      |
@@ -84,7 +86,7 @@ Enabling an endpoint makes the optional byte plane available; it does not move
 existing content or change producer placement by itself. An administrator must
 select it after Eneo reports it compatible and ready.
 
-## Download or recover a File
+## Download or recover content
 
 Eneo keeps processing views and original recovery explicit:
 
@@ -98,7 +100,8 @@ callers can request between one second and one hour. Original recovery is
 strict: Eneo never substitutes a processed representation when the original is
 absent. Instead it returns `404 file_original_not_found` (Eneo error `9045`).
 
-For a download button, keep the File ID and mint the URL when the user clicks:
+For a File download button, keep the File ID and mint the URL when the user
+clicks:
 
 ```js
 const { url, expires_at } = await eneo.files.generateOriginalSignedUrl({
@@ -109,6 +112,32 @@ const { url, expires_at } = await eneo.files.generateOriginalSignedUrl({
 window.location.assign(url);
 ```
 
+New uploaded knowledge can also retain its exact original. Use the
+`original_available` field on the InfoBlob response to decide whether to show
+the action. When the reader clicks, call
+`POST /api/v1/info-blobs/{id}/original/signed-url/` directly or use the SDK:
+
+```js
+if (infoBlob.original_available) {
+  const { url } = await eneo.infoBlobs.generateOriginalSignedUrl({
+    infoBlobId: infoBlob.id,
+    contentDisposition: "attachment",
+  });
+
+  window.location.assign(url);
+}
+```
+
+Open the returned URL with browser navigation or the platform's native `fetch`
+when handling bytes yourself. The Eneo SDK call above mints the temporary URL;
+its JSON client does not parse the binary download response.
+
+Legacy, manually entered, and crawled knowledge has no retained upload, so
+`original_available` is `false`. Do not show a disabled download action or fall
+back to extracted text. If the original becomes unavailable before link
+creation, Eneo returns `404 info_blob_original_unavailable` (Eneo error `9057`).
+Creating the link requires the same read access as opening that knowledge.
+
 Do not persist the returned URL or send it to analytics. It is a temporary
 bearer credential; use `expires_at` to decide when the application must request
 a new one. Eneo records who created an original-recovery link, its expiry, and
@@ -118,7 +147,8 @@ is never written to the audit log.
 The original response includes `Repr-Digest` for the SHA-256 of the complete
 original. That value stays the same on an audio `206` range response because it
 describes the full representation, not only the returned range. Range requests
-remain audio-only; other file types use a complete download.
+remain audio-only for File downloads. Knowledge originals use a complete
+streamed download.
 
 This contract is independent of placement. It behaves the same whether the
 bytes are stored inline in PostgreSQL or in an optional configured
@@ -268,12 +298,18 @@ digest:
 ENEO_SEAWEEDFS_IMAGE=ghcr.io/eneo-ai/eneo-seaweedfs@sha256:<manifest-digest>
 ```
 
-Verify Eneo's build provenance:
+Verify Eneo's build provenance with the same constraints the release workflow
+applies (the signing workflow, the `develop` branch that publishes the image,
+GitHub-hosted runners, and the attestation bundle stored in the registry):
 
 ```bash
 gh attestation verify \
   "oci://ghcr.io/eneo-ai/eneo-seaweedfs@sha256:<manifest-digest>" \
   --repo eneo-ai/eneo \
+  --signer-workflow github.com/eneo-ai/eneo/.github/workflows/seaweedfs_image.yml \
+  --source-ref refs/heads/develop \
+  --deny-self-hosted-runners \
+  --bundle-from-oci \
   --predicate-type https://slsa.dev/provenance/v1
 ```
 
@@ -621,25 +657,51 @@ payload columns:
 1. Stop all `backend` API replicas so no new writes or knowledge jobs can be
    accepted. In the reference Compose deployment, `docker compose stop backend`
    leaves `worker`, `db`, `redis`, and optional `object-content` running.
-2. Keep the old worker running until both queued and in-progress
-   `upload_info_blob` and `transcription` jobs are zero:
+2. Keep the old worker running and read its live ARQ health value plus TTL from
+   Redis:
+
+   ```bash
+   docker compose exec -T redis redis-cli --raw GET arq:queue:health-check
+   docker compose exec -T redis redis-cli --raw TTL arq:queue:health-check
+   ```
+
+   The health value must contain `queued=0`, and the TTL must be greater than
+   zero. In the single-worker reference deployment, also require
+   `j_ongoing=0`. If the old release has multiple worker replicas, keep all of
+   them running until the shared Redis value first reports `queued=0` with a
+   positive TTL. Then use the deployment orchestrator to verify that every
+   replica has zero active jobs, scale down to one idle old worker, and repeat
+   both Redis commands. Proceed only when the repeated value contains both
+   `queued=0` and `j_ongoing=0` and its TTL is positive. Then inspect the
+   matching database jobs:
 
    ```bash
    docker compose exec -T db sh -lc \
      'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 \
-     -c "SELECT task, status, count(*) FROM jobs
+     -c "SELECT task, status,
+                to_jsonb(jobs) ->> '\''dispatch_envelope'\'' IS NULL AS pre_durable,
+                count(*)
+         FROM jobs
          WHERE task IN ('\''upload_info_blob'\'', '\''transcription'\'')
            AND status IN ('\''queued'\'', '\''in progress'\'')
-         GROUP BY task, status;"'
+         GROUP BY task, status, pre_durable;"'
    ```
 
-   No rows is the required result.
+   No rows is the normal result. Once the live Redis health value reports an
+   empty queue and its TTL is positive, a deployment may still contain
+   historical `queued` rows with
+   `pre_durable = true` that have no executable queue entry. `db-init` records
+   only those rows as failed and continues; no manual SQL repair is needed. An
+   `in progress` row or any row with `pre_durable = false` still blocks the
+   migration.
    An old worker marks an in-progress knowledge job failed after five minutes
    without a heartbeat. If a worker process stopped mid-job, keep one old worker
    running until that automatic recovery has completed; do not edit the job row
    by hand.
 
-3. Stop every old worker. Verify the zero-job condition again.
+3. Stop every old worker. Run the database query again and proceed only when it
+   shows no `in progress` row and no row with `pre_durable = false`. Historical
+   `queued` rows with `pre_durable = true` are the only permitted exception.
 4. Take one recovery point containing PostgreSQL and, when configured, the
    object store. Preserve Redis and the shared staging volume until the release
    has been verified.
@@ -767,9 +829,40 @@ Storage**. Changing the target for new writes never starts a fleet migration.
 
 ### Why can I not delete an uploaded File?
 
-The File is still used by a chat, Assistant, App, or App run. Check its deletion
-preview, remove those uses deliberately, and try again. Eneo blocks the delete
-instead of silently breaking those resources.
+`DELETE /api/v1/files/{file_id}/` returns `409` with `code: "file_in_use"`
+while a chat, Assistant, App, or App run still references the File or one of
+its generated files. This is a usage conflict; granting more permissions or
+retrying the same request does not resolve it.
+
+The response's `details.blockers` lists the remaining uses and their counts.
+For example, `{"kind": "chat_attachment", "count": 1}` means one chat-message
+attachment reference remains. The read-only
+`GET /api/v1/files/{file_id}/deletion-preview/` endpoint returns the same usage
+information before deletion. It reports counts, not the conversation IDs.
+
+There is currently no API endpoint to detach an individual file from an
+existing chat message while preserving the conversation. Leaving the file out
+of a later chat request does not remove its earlier reference.
+
+For a disposable automation conversation:
+
+1. Retain the conversation ID and uploaded file IDs when creating them.
+2. Finish processing and save the result the integration needs.
+3. Delete the conversation with `DELETE /api/v1/conversations/{session_id}/`.
+   This removes the whole conversation and its attachment references.
+4. Delete each uploaded file with `DELETE /api/v1/files/{file_id}/`. A successful
+   deletion returns `204`. If another reference remains, it still returns `409`.
+
+Use credentials for the owning user/principal, with the required scope and
+permissions. Conversation deletion checks `assistants` and `conversations`
+admin permission; file deletion requires a user-owned key with `files` admin
+permission. Adapt the `/api/v1` prefix to your gateway's environment and version.
+
+If the conversation must be retained, retain its attached files too. Do not
+delete conversation history merely to make file cleanup succeed. For other
+blocker kinds, remove the reference through the owning resource's supported
+workflow before retrying. The final DELETE always rechecks usage, even if a
+previous preview allowed deletion.
 
 ### What happens when an endpoint is down?
 

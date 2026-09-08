@@ -11,6 +11,16 @@ from eneo.main.models import InDB
 from eneo.object_content.content import CapturedContent, StorageKind
 from eneo.websites.presentation.website_models import WebsiteInDBBase
 
+
+class InfoBlobOriginalUnavailableError(Exception):
+    code = "info_blob_original_unavailable"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "The exact original is not available for this knowledge source."
+        )
+
+
 if TYPE_CHECKING:
     from eneo.object_content.content_service import VerifiedObjectPublication
 
@@ -119,6 +129,9 @@ class InfoBlobInDBNoText(InDB):
     content_hash: Optional[bytes] = None
     source_id: UUID
     version_state: str
+    # Availability is derived at public read boundaries, not persisted here.
+    # None distinguishes an unprojected internal model from a confirmed absence.
+    original_available: bool | None = None
 
     group: Optional[GroupInDBBase] = None
     website: Optional[WebsiteInDBBase] = None
@@ -140,6 +153,7 @@ class InfoBlobPublicNoText(InDB):
     metadata: InfoBlobMetadata
     group_id: Optional[UUID] = None
     website_id: Optional[UUID] = None
+    original_available: bool
 
 
 class InfoBlobAskAssistantPublic(InfoBlobPublicNoText):

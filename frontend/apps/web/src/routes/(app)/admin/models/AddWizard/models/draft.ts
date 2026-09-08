@@ -9,6 +9,7 @@
 import type {
   CompletionModel,
   EmbeddingModel,
+  ImageModel,
   SecurityClassification,
   TenantCompletionModelCreate,
   TenantCompletionModelUpdate,
@@ -16,8 +17,15 @@ import type {
 } from "@eneo/eneo-js";
 import type { WizardModelDraft } from "../wizardState";
 import { PROVIDER_DEFAULT_HOSTING } from "../../modelProviderCapabilities";
+import {
+  isImageQuality,
+  isImageSize,
+  type ImageQuality,
+  type ImageSize
+} from "$lib/features/ai-models/imageModelOptions";
 
-export type ModelType = "completion" | "embedding" | "transcription";
+export type ModelType = "completion" | "embedding" | "transcription" | "image";
+export type AnyCatalogModel = CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel;
 
 export interface ModelDraftState {
   name: string;
@@ -48,6 +56,11 @@ export interface ModelDraftState {
   outputCostPerTokenStr: string;
   /** USD per minute of audio (transcription only). */
   costPerMinuteStr: string;
+  /** USD per generated image (image only). */
+  costPerImageStr: string;
+  /** Request defaults the image tool uses when the assistant does not ask. */
+  defaultSize: ImageSize;
+  defaultQuality: ImageQuality;
   securityClassification: SecurityClassification | null;
 }
 
@@ -70,6 +83,9 @@ export function createEmptyDraft(modelType: ModelType, providerType: string): Mo
     inputCostPerTokenStr: "",
     outputCostPerTokenStr: "",
     costPerMinuteStr: "",
+    costPerImageStr: "",
+    defaultSize: "auto",
+    defaultQuality: "auto",
     securityClassification: null
   };
 }
@@ -105,11 +121,12 @@ export function rawCostToNumber(value: string | number | null | undefined): numb
  *  the admin typed — same units as `MAX_COST_INPUT`, no conversion. */
 export function findDraftCostOverflow(
   draft: ModelDraftState
-): "input" | "output" | "perMinute" | null {
-  const candidates: Array<["input" | "output" | "perMinute", string | number]> = [
+): "input" | "output" | "perMinute" | "perImage" | null {
+  const candidates: Array<["input" | "output" | "perMinute" | "perImage", string | number]> = [
     ["input", draft.inputCostPerTokenStr],
     ["output", draft.outputCostPerTokenStr],
-    ["perMinute", draft.costPerMinuteStr]
+    ["perMinute", draft.costPerMinuteStr],
+    ["perImage", draft.costPerImageStr]
   ];
   for (const [key, raw] of candidates) {
     const n = rawCostToNumber(raw);
@@ -120,11 +137,11 @@ export function findDraftCostOverflow(
 
 /** Same overflow check as `findDraftCostOverflow`, but for already-converted
  *  WizardModelDraft values (token cost stored per-token). The per-token DB
- *  cap is `MAX_COST_INPUT / TOKENS_PER_MILLION`; the per-minute value
- *  shares the same `MAX_COST_INPUT` budget directly. */
-export function isCostValueOverflow(value: number | null | undefined, perMinute = false): boolean {
+ *  cap is `MAX_COST_INPUT / TOKENS_PER_MILLION`; absolute values (per
+ *  minute, per image) share the same `MAX_COST_INPUT` budget directly. */
+export function isCostValueOverflow(value: number | null | undefined, absolute = false): boolean {
   if (value == null || !Number.isFinite(value)) return false;
-  const cap = perMinute ? MAX_COST_INPUT : MAX_TOKEN_COST_PER_TOKEN;
+  const cap = absolute ? MAX_COST_INPUT : MAX_TOKEN_COST_PER_TOKEN;
   return Math.abs(value) > cap;
 }
 
@@ -248,6 +265,9 @@ export function draftToWizardModel(draft: ModelDraftState): WizardModelDraft {
     inputCostPerToken: tokenCostFromPerMillion(draft.inputCostPerTokenStr),
     outputCostPerToken: tokenCostFromPerMillion(draft.outputCostPerTokenStr),
     costPerMinute: rawCostToNumber(draft.costPerMinuteStr),
+    costPerImage: rawCostToNumber(draft.costPerImageStr),
+    defaultSize: draft.defaultSize,
+    defaultQuality: draft.defaultQuality,
     securityClassification: draft.securityClassification
   };
 }
@@ -270,6 +290,7 @@ export interface ModelInfo {
   input_cost_per_token?: number | null;
   output_cost_per_token?: number | null;
   cost_per_minute?: number | null;
+  cost_per_image?: number | null;
 }
 
 /** Stringify a USD cost coming from the backend (which may be string or number). */
@@ -282,10 +303,7 @@ function costToString(value: number | string | null | undefined): string {
  * Build a draft from an existing model record. Used by EditModelDialog so
  * the same form component can power both create and edit flows.
  */
-export function modelToDraft(
-  model: CompletionModel | EmbeddingModel | TranscriptionModel,
-  modelType: ModelType
-): ModelDraftState {
+export function modelToDraft(model: AnyCatalogModel, modelType: ModelType): ModelDraftState {
   const base: ModelDraftState = {
     name: model.name,
     displayName: ("nickname" in model && model.nickname) || model.name,
@@ -304,6 +322,9 @@ export function modelToDraft(
     inputCostPerTokenStr: "",
     outputCostPerTokenStr: "",
     costPerMinuteStr: "",
+    costPerImageStr: "",
+    defaultSize: "auto",
+    defaultQuality: "auto",
     securityClassification: model.security_classification ?? null
   };
 
@@ -326,6 +347,10 @@ export function modelToDraft(
     base.outputCostPerTokenStr = perMillionFromTokenCost(model.output_cost_per_token);
   } else if (modelType === "transcription" && "cost_per_minute" in model) {
     base.costPerMinuteStr = costToString(model.cost_per_minute);
+  } else if (modelType === "image" && "cost_per_image" in model) {
+    base.costPerImageStr = costToString(model.cost_per_image);
+    base.defaultSize = isImageSize(model.default_size) ? model.default_size : "auto";
+    base.defaultQuality = isImageQuality(model.default_quality) ? model.default_quality : "auto";
   }
 
   return base;
@@ -353,6 +378,8 @@ export function applyCatalogModelToDraft(
   }
   if (modelType === "transcription") {
     if (info.cost_per_minute != null) next.costPerMinuteStr = String(info.cost_per_minute);
+  } else if (modelType === "image") {
+    if (info.cost_per_image != null) next.costPerImageStr = String(info.cost_per_image);
   } else {
     if (info.input_cost_per_token != null) {
       next.inputCostPerTokenStr = perMillionFromTokenCost(info.input_cost_per_token);

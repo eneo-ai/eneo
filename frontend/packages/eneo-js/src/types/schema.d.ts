@@ -1785,6 +1785,50 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/tenant-models/image/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Create Tenant Image Model
+     * @description Create a new tenant-specific image model.
+     */
+    post: operations["create_tenant_image_model_api_v1_admin_tenant_models_image__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/tenant-models/image/{model_id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Update Tenant Image Model
+     * @description Update a tenant-specific image model.
+     */
+    put: operations["update_tenant_image_model_api_v1_admin_tenant_models_image__model_id___put"];
+    post?: never;
+    /**
+     * Delete Tenant Image Model
+     * @description Delete a tenant-specific image model.
+     */
+    delete: operations["delete_tenant_image_model_api_v1_admin_tenant_models_image__model_id___delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/tenant-models/transcription/": {
     parameters: {
       query?: never;
@@ -2057,7 +2101,7 @@ export interface paths {
     };
     /**
      * Get all AI models
-     * @description Get all completion, embedding, and transcription models.
+     * @description Get all completion, embedding, transcription and image models.
      */
     get: operations["get_models_api_v1_ai_models__get"];
     put?: never;
@@ -3066,7 +3110,7 @@ export interface paths {
     };
     /**
      * Get per-action audit configuration
-     * @description Retrieve all 171 actions with their enabled status for the modal UI.
+     * @description Retrieve all 175 actions with their enabled status for the modal UI.
      */
     get: operations["get_action_config_api_v1_audit_config_actions_get"];
     put?: never;
@@ -5730,6 +5774,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/image-models/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Image Models
+     * @description List all image models for the tenant.
+     */
+    get: operations["get_image_models_api_v1_image_models__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/image-models/{id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Update Image Model
+     * @description Update org settings for an image model.
+     */
+    post: operations["update_image_model_api_v1_image_models__id___post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/info-blobs/": {
     parameters: {
       query?: never;
@@ -5792,6 +5876,46 @@ export interface paths {
      * @description Deletes an info-blob by id. Returns the deleted object.
      */
     delete: operations["delete_info_blob_api_v1_info_blobs__id___delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/info-blobs/{id}/original/download/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Download an uploaded knowledge original
+     * @description Streams the exact uploaded bytes using a short-lived, purpose-separated signed token.
+     */
+    get: operations["download_original_api_v1_info_blobs__id__original_download__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/info-blobs/{id}/original/signed-url/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Generate a signed URL for an uploaded knowledge original
+     * @description Checks knowledge read access and original availability, then returns a short-lived URL for the exact uploaded bytes.
+     */
+    post: operations["generate_original_signed_url_api_v1_info_blobs__id__original_signed_url__post"];
+    delete?: never;
     options?: never;
     head?: never;
     patch?: never;
@@ -6210,7 +6334,7 @@ export interface paths {
     };
     /**
      * Get Mcp Servers
-     * @description Get all MCP servers from global catalog with optional tag filtering.
+     * @description Get all MCP servers from global catalog with optional tag/purpose filtering.
      */
     get: operations["get_mcp_servers_api_v1_mcp_servers__get"];
     put?: never;
@@ -6316,6 +6440,46 @@ export interface paths {
      * @description Delete an MCP server from global catalog (admin only).
      */
     delete: operations["delete_mcp_server_api_v1_mcp_servers__id___delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/mcp-servers/{id}/activate/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Activate Capability Provider
+     * @description Activate this server as the tenant's provider for its capability purpose (admin only).
+     */
+    post: operations["activate_capability_provider_api_v1_mcp_servers__id__activate__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/mcp-servers/{id}/deactivate/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Deactivate Capability Provider
+     * @description Deactivate this capability provider (admin only).
+     */
+    post: operations["deactivate_capability_provider_api_v1_mcp_servers__id__deactivate__post"];
+    delete?: never;
     options?: never;
     head?: never;
     patch?: never;
@@ -6434,6 +6598,26 @@ export interface paths {
      * @description Update global default enabled status for a tool (admin only).
      */
     put: operations["update_tool_default_enabled_api_v1_mcp_servers__id__tools__tool_id___put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/mcp-servers/{id}/tools/{tool_id}/display-name/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Update Tool Display Name
+     * @description Set or clear the admin display name for a tool (admin only).
+     */
+    put: operations["update_tool_display_name_api_v1_mcp_servers__id__tools__tool_id__display_name__put"];
     post?: never;
     delete?: never;
     options?: never;
@@ -10786,6 +10970,7 @@ export interface components {
       | "file_deleted"
       | "file_original_download_link_created"
       | "file_signed_url_minted"
+      | "info_blob_original_download_link_created"
       | "website_created"
       | "website_updated"
       | "website_deleted"
@@ -10813,6 +10998,9 @@ export interface components {
       | "transcription_model_updated"
       | "transcription_model_deleted"
       | "transcription_model_migrated"
+      | "image_model_created"
+      | "image_model_updated"
+      | "image_model_deleted"
       | "template_created"
       | "template_updated"
       | "template_deleted"
@@ -12074,6 +12262,10 @@ export interface components {
     };
     /** AskAssistant */
     AskAssistant: {
+      /** Disabled Capabilities */
+      disabled_capabilities?: ("web_search" | "image_generation")[];
+      /** Disabled Mcp Server Ids */
+      disabled_mcp_server_ids?: string[];
       /** Files */
       files?: string[];
       /** Question */
@@ -12118,8 +12310,6 @@ export interface components {
       tools: components["schemas"]["UseTools"];
       /** Updated At */
       updated_at?: string | null;
-      /** Web Search References */
-      web_search_references: components["schemas"]["WebSearchResultPublic"][];
     };
     /**
      * AssistantActivityStats
@@ -12147,6 +12337,8 @@ export interface components {
        * @description This field is deprecated and will be ignored
        */
       completion_model_kwargs?: components["schemas"]["ModelKwargs"] | null;
+      /** Enabled Capabilities */
+      enabled_capabilities?: ("web_search" | "image_generation")[] | null;
       /**
        * Groups
        * @deprecated
@@ -12319,6 +12511,8 @@ export interface components {
       allowed_attachments: components["schemas"]["FileRestrictions"];
       /** Attachments */
       attachments: components["schemas"]["FilePublic"][];
+      /** Available Capabilities */
+      available_capabilities?: components["schemas"]["CapabilityAvailability"][];
       completion_model?: components["schemas"]["CompletionModelSparse"] | null;
       completion_model_kwargs: components["schemas"]["ModelKwargs"];
       /** Created At */
@@ -12336,6 +12530,8 @@ export interface components {
       description?: string | null;
       /** @description Personal-assistant governance hints. Only populated for personal default assistants when a tenant policy applies. */
       effective_config?: components["schemas"]["EffectiveConfigPublic"] | null;
+      /** Enabled Capabilities */
+      enabled_capabilities?: ("web_search" | "image_generation")[];
       /** Groups */
       groups: components["schemas"]["CollectionPublic"][];
       /**
@@ -12831,7 +13027,7 @@ export interface components {
      *           ]
      *         },
      *         {
-     *           "action_count": 76,
+     *           "action_count": 79,
      *           "category": "user_actions",
      *           "enabled": true,
      *           "example_actions": [
@@ -13125,6 +13321,30 @@ export interface components {
       code_verifier?: string | null;
       /** State */
       state: string;
+    };
+    /**
+     * CapabilityActivationResponse
+     * @description Response after activating a capability provider.
+     */
+    CapabilityActivationResponse: {
+      /**
+       * Deactivated Server Ids
+       * @default []
+       */
+      deactivated_server_ids?: string[];
+      server: components["schemas"]["MCPServerPublic"];
+    };
+    /** CapabilityAvailability */
+    CapabilityAvailability: {
+      /** Available */
+      available: boolean;
+      /**
+       * Purpose
+       * @enum {string}
+       */
+      purpose: "web_search" | "image_generation";
+      /** Reason */
+      reason?: string | null;
     };
     /** CapabilityPublic */
     CapabilityPublic: {
@@ -13796,6 +14016,8 @@ export interface components {
     ConversationRequest: {
       /** Assistant Id */
       assistant_id?: string | null;
+      /** Disabled Capabilities */
+      disabled_capabilities?: ("web_search" | "image_generation")[];
       /**
        * Disabled Mcp Server Ids
        * @default []
@@ -13823,11 +14045,6 @@ export interface components {
        */
       stream?: boolean;
       tools?: components["schemas"]["UseTools"] | null;
-      /**
-       * Use Web Search
-       * @default false
-       */
-      use_web_search?: boolean;
     };
     /** Counts */
     Counts: {
@@ -14128,6 +14345,8 @@ export interface components {
     };
     /** CreateSpaceAssistantRequest */
     CreateSpaceAssistantRequest: {
+      /** Enabled Capabilities */
+      enabled_capabilities?: ("web_search" | "image_generation")[] | null;
       from_template?: components["schemas"]["TemplateCreate"] | null;
       /**
        * Hidden
@@ -14440,6 +14659,8 @@ export interface components {
       allowed_attachments: components["schemas"]["FileRestrictions"];
       /** Attachments */
       attachments: components["schemas"]["FilePublic"][];
+      /** Available Capabilities */
+      available_capabilities?: components["schemas"]["CapabilityAvailability"][];
       completion_model?: components["schemas"]["CompletionModelSparse"] | null;
       completion_model_kwargs: components["schemas"]["ModelKwargs"];
       /** Created At */
@@ -14457,6 +14678,8 @@ export interface components {
       description?: string | null;
       /** @description Personal-assistant governance hints. Only populated for personal default assistants when a tenant policy applies. */
       effective_config?: components["schemas"]["EffectiveConfigPublic"] | null;
+      /** Enabled Capabilities */
+      enabled_capabilities?: ("web_search" | "image_generation")[];
       /** Groups */
       groups: components["schemas"]["CollectionPublic"][];
       /**
@@ -14689,24 +14912,23 @@ export interface components {
        */
       severity: "info" | "warning" | "error";
     };
-    /**
-     * EffectiveConfigPublic
-     * @description Frontend hint surface for personal-assistant governance.
-     *
-     *     Only meaningful on default assistants in personal spaces. `prompt_locked`
-     *     is exposed as a boolean — we never leak the admin-prompt text to the
-     *     user-facing API.
-     */
+    /** EffectiveConfigPublic */
     EffectiveConfigPublic: {
+      /** Available Capabilities */
+      available_capabilities?: components["schemas"]["CapabilityAvailability"][];
       /** Available Mcp Servers */
       available_mcp_servers?: components["schemas"]["MCPServerPublicDict"][];
       /** Available Models */
       available_models: components["schemas"]["CompletionModelSparse"][];
+      /** Default Disabled Capabilities */
+      default_disabled_capabilities?: ("web_search" | "image_generation")[];
       /** Default Disabled Mcp Server Ids */
       default_disabled_mcp_server_ids?: string[];
       default_model: components["schemas"]["CompletionModelSparse"] | null;
       /** Default Reasoning Effort */
       default_reasoning_effort: string | null;
+      /** Enabled Capabilities */
+      enabled_capabilities?: ("web_search" | "image_generation")[];
       locked_model: components["schemas"]["CompletionModelSparse"] | null;
       /** Mcp Enforced */
       mcp_enforced: boolean;
@@ -15083,6 +15305,7 @@ export interface components {
       | "app"
       | "skill"
       | "file"
+      | "info_blob"
       | "website"
       | "tenant_settings"
       | "governance_policy"
@@ -15102,6 +15325,7 @@ export interface components {
       | "completion_model"
       | "embedding_model"
       | "transcription_model"
+      | "image_model"
       | "audit_log"
       | "session"
       | "mcp_server"
@@ -15175,7 +15399,8 @@ export interface components {
       | 9053
       | 9054
       | 9055
-      | 9058;
+      | 9058
+      | 9059;
     /** EvidenceArtifactAvailabilitySummary */
     EvidenceArtifactAvailabilitySummary: {
       /** Artifact Count */
@@ -23962,6 +24187,192 @@ export interface components {
       /** Updated At */
       updated_at?: string | null;
     };
+    /** ImageModelPublic */
+    ImageModelPublic: {
+      /**
+       * Can Access
+       * @default false
+       */
+      can_access?: boolean;
+      /** Cost Per Image */
+      cost_per_image?: string | null;
+      /** Credential Provider */
+      credential_provider?: string | null;
+      /**
+       * Default Quality
+       * @default auto
+       */
+      default_quality?: string;
+      /**
+       * Default Size
+       * @default auto
+       */
+      default_size?: string;
+      /** Deprecation Date */
+      deprecation_date?: string | null;
+      /** Description */
+      description?: string | null;
+      /** Family */
+      family?: string | null;
+      /** Hf Link */
+      hf_link?: string | null;
+      /** Hosting */
+      hosting?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Is Deprecated */
+      is_deprecated: boolean;
+      /**
+       * Is Locked
+       * @default true
+       */
+      is_locked?: boolean;
+      /**
+       * Is Org Default
+       * @default false
+       */
+      is_org_default?: boolean;
+      /**
+       * Is Org Enabled
+       * @default false
+       */
+      is_org_enabled?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
+      /** Name */
+      name: string;
+      /** Nickname */
+      nickname: string;
+      /** Open Source */
+      open_source?: boolean | null;
+      /** Org */
+      org?: string | null;
+      /** Provider Id */
+      provider_id?: string | null;
+      /** Provider Name */
+      provider_name?: string | null;
+      /** Provider Type */
+      provider_type?: string | null;
+      security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /** Stability */
+      stability?: string | null;
+      /** Tenant Id */
+      tenant_id?: string | null;
+      /**
+       * Used By Mcp Servers
+       * @default []
+       */
+      used_by_mcp_servers?: components["schemas"]["ImageModelUsedByPublic"][];
+    };
+    /** ImageModelSecurityStatus */
+    ImageModelSecurityStatus: {
+      /**
+       * Can Access
+       * @default false
+       */
+      can_access?: boolean;
+      /** Cost Per Image */
+      cost_per_image?: string | null;
+      /** Credential Provider */
+      credential_provider?: string | null;
+      /**
+       * Default Quality
+       * @default auto
+       */
+      default_quality?: string;
+      /**
+       * Default Size
+       * @default auto
+       */
+      default_size?: string;
+      /** Deprecation Date */
+      deprecation_date?: string | null;
+      /** Description */
+      description?: string | null;
+      /** Family */
+      family?: string | null;
+      /** Hf Link */
+      hf_link?: string | null;
+      /** Hosting */
+      hosting?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Is Deprecated */
+      is_deprecated: boolean;
+      /**
+       * Is Locked
+       * @default true
+       */
+      is_locked?: boolean;
+      /**
+       * Is Org Default
+       * @default false
+       */
+      is_org_default?: boolean;
+      /**
+       * Is Org Enabled
+       * @default false
+       */
+      is_org_enabled?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
+      /** Meets Security Classification */
+      meets_security_classification?: boolean | null;
+      /** Name */
+      name: string;
+      /** Nickname */
+      nickname: string;
+      /** Open Source */
+      open_source?: boolean | null;
+      /** Org */
+      org?: string | null;
+      /** Provider Id */
+      provider_id?: string | null;
+      /** Provider Name */
+      provider_name?: string | null;
+      /** Provider Type */
+      provider_type?: string | null;
+      security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /** Stability */
+      stability?: string | null;
+      /** Tenant Id */
+      tenant_id?: string | null;
+      /**
+       * Used By Mcp Servers
+       * @default []
+       */
+      used_by_mcp_servers?: components["schemas"]["ImageModelUsedByPublic"][];
+    };
+    /** ImageModelUpdate */
+    ImageModelUpdate: {
+      /** Is Org Default */
+      is_org_default?: boolean | null;
+      /** Is Org Enabled */
+      is_org_enabled?: boolean | null;
+      /** Security Classification */
+      security_classification?: components["schemas"]["ModelId"] | null;
+    };
+    /**
+     * ImageModelUsedByPublic
+     * @description A capability provider that runs on the model.
+     */
+    ImageModelUsedByPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Purpose */
+      purpose: string;
+    };
     /** InfoBlobAddPublic */
     InfoBlobAddPublic: {
       metadata?: components["schemas"]["InfoBlobMetadataUpsertPublic"];
@@ -23980,6 +24391,8 @@ export interface components {
        */
       id: string;
       metadata: components["schemas"]["InfoBlobMetadata"];
+      /** Original Available */
+      original_available: boolean;
       /** Score */
       score: number;
       /** Updated At */
@@ -24025,6 +24438,8 @@ export interface components {
        */
       id: string;
       metadata: components["schemas"]["InfoBlobMetadata"];
+      /** Original Available */
+      original_available: boolean;
       /** Text */
       text: string;
       /** Updated At */
@@ -24044,6 +24459,8 @@ export interface components {
        */
       id: string;
       metadata: components["schemas"]["InfoBlobMetadata"];
+      /** Original Available */
+      original_available: boolean;
       /** Updated At */
       updated_at?: string | null;
       /** Website Id */
@@ -24404,11 +24821,53 @@ export interface components {
        */
       tools_discovered?: number;
     };
+    /** MCPServerAudienceGroupPublic */
+    MCPServerAudienceGroupPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+    };
     /**
-     * MCPServerCreate
-     * @description DTO for creating an MCP server (admin only, uses Streamable HTTP transport).
+     * MCPServerBackingModelPublic
+     * @description The catalog image model a built-in provider runs on (read-only).
      */
+    MCPServerBackingModelPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Is Enabled */
+      is_enabled: boolean;
+      /** Name */
+      name: string;
+      /** Nickname */
+      nickname: string;
+      /** Provider Name */
+      provider_name?: string | null;
+    };
+    /** MCPServerCreate */
     MCPServerCreate: {
+      /**
+       * Activate
+       * @default false
+       */
+      activate?: boolean;
+      /**
+       * Audience
+       * @default everyone
+       * @enum {string}
+       */
+      audience?: "everyone" | "groups";
+      /**
+       * Audience Priority
+       * @default 100
+       */
+      audience_priority?: number;
       /** Description */
       description?: string | null;
       /** Documentation Url */
@@ -24427,16 +24886,21 @@ export interface components {
        * @default none
        * @enum {string}
        */
-      http_auth_type?: "none" | "bearer";
-      /**
-       * Http Url
-       * Format: uri
-       */
-      http_url: string;
+      http_auth_type?: "none" | "bearer" | "api_key_header" | "internal";
+      /** Http Url */
+      http_url?: string | null;
       /** Icon Url */
       icon_url?: string | null;
+      /** Image Model Id */
+      image_model_id?: string | null;
       /** Name */
       name: string;
+      /**
+       * Purpose
+       * @default general
+       * @enum {string}
+       */
+      purpose?: "general" | "web_search" | "image_generation";
       security_classification?: components["schemas"]["ModelId"] | null;
       /** Tags */
       tags?: string[] | null;
@@ -24455,6 +24919,11 @@ export interface components {
        * @default 65536
        */
       tool_definition_max_bytes?: number;
+      /**
+       * User Group Ids
+       * @default []
+       */
+      user_group_ids?: string[];
     };
     /**
      * MCPServerCreateResponse
@@ -24469,6 +24938,17 @@ export interface components {
      * @description Public DTO for MCP server (HTTP-only, uses Streamable HTTP transport).
      */
     MCPServerPublic: {
+      /**
+       * Audience
+       * @default everyone
+       * @enum {string}
+       */
+      audience?: "everyone" | "groups";
+      /**
+       * Audience Priority
+       * @default 100
+       */
+      audience_priority?: number;
       /** Credential Preview */
       credential_preview?: string | null;
       /** Description */
@@ -24493,8 +24973,24 @@ export interface components {
        * Format: uuid
        */
       id: string;
+      image_model?: components["schemas"]["MCPServerBackingModelPublic"] | null;
+      /** Image Model Id */
+      image_model_id?: string | null;
+      /**
+       * Is Enabled
+       * @default true
+       */
+      is_enabled?: boolean;
       /** Name */
       name: string;
+      /**
+       * Purpose
+       * @default general
+       * @enum {string}
+       */
+      purpose?: "general" | "web_search" | "image_generation";
+      /** Readiness Reason */
+      readiness_reason?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
       /** Tags */
       tags: string[] | null;
@@ -24513,6 +25009,11 @@ export interface components {
        * @default 65536
        */
       tool_definition_max_bytes?: number;
+      /**
+       * User Groups
+       * @default []
+       */
+      user_groups?: components["schemas"]["MCPServerAudienceGroupPublic"][];
     };
     /** MCPServerPublicDict */
     MCPServerPublicDict: {
@@ -24526,8 +25027,14 @@ export interface components {
       icon_url: string | null;
       /** Id */
       id: string;
+      /** Is Enabled */
+      is_enabled: boolean;
       /** Name */
       name: string;
+      /** Purpose */
+      purpose: string;
+      /** Readiness Reason */
+      readiness_reason: string | null;
       /** Security Classification */
       security_classification: {
         [key: string]: unknown;
@@ -24554,6 +25061,17 @@ export interface components {
      * @description DTO for MCP server with tenant settings.
      */
     MCPServerSettingsPublic: {
+      /**
+       * Audience
+       * @default everyone
+       * @enum {string}
+       */
+      audience?: "everyone" | "groups";
+      /**
+       * Audience Priority
+       * @default 100
+       */
+      audience_priority?: number;
       /** Credential Preview */
       credential_preview?: string | null;
       /**
@@ -24584,11 +25102,19 @@ export interface components {
        * Format: uuid
        */
       id: string;
+      image_model?: components["schemas"]["MCPServerBackingModelPublic"] | null;
+      /** Image Model Id */
+      image_model_id?: string | null;
       /**
        * Is Available
        * @description Whether this MCP is enabled and available for use.
        */
       readonly is_available: boolean;
+      /**
+       * Is Enabled
+       * @default true
+       */
+      is_enabled?: boolean;
       /** Is Org Enabled */
       is_org_enabled: boolean;
       /**
@@ -24598,6 +25124,14 @@ export interface components {
       mcp_server_id: string;
       /** Name */
       name: string;
+      /**
+       * Purpose
+       * @default general
+       * @enum {string}
+       */
+      purpose?: "general" | "web_search" | "image_generation";
+      /** Readiness Reason */
+      readiness_reason?: string | null;
       security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
       /** Tags */
       tags: string[] | null;
@@ -24626,6 +25160,11 @@ export interface components {
        * @description Number of tools available on this server.
        */
       readonly tools_count: number;
+      /**
+       * User Groups
+       * @default []
+       */
+      user_groups?: components["schemas"]["MCPServerAudienceGroupPublic"][];
     };
     /**
      * MCPServerSettingsUpdate
@@ -24653,6 +25192,8 @@ export interface components {
     MCPServerToolPublic: {
       /** Description */
       description: string | null;
+      /** Display Name */
+      display_name?: string | null;
       /**
        * Id
        * Format: uuid
@@ -24689,6 +25230,16 @@ export interface components {
       requires_approval?: boolean;
       /** Title */
       title?: string | null;
+    };
+    /**
+     * MCPServerToolRename
+     * @description DTO for setting an admin display name on a tool.
+     *
+     *     None clears the override, falling back to the remote-synced title.
+     */
+    MCPServerToolRename: {
+      /** Display Name */
+      display_name?: string | null;
     };
     /**
      * MCPServerToolSyncResponse
@@ -24732,6 +25283,10 @@ export interface components {
      * @description DTO for updating an MCP server (admin only, uses Streamable HTTP transport).
      */
     MCPServerUpdate: {
+      /** Audience */
+      audience?: ("everyone" | "groups") | null;
+      /** Audience Priority */
+      audience_priority?: number | null;
       /** Description */
       description?: string | null;
       /** Documentation Url */
@@ -24743,13 +25298,17 @@ export interface components {
         [key: string]: unknown;
       } | null;
       /** Http Auth Type */
-      http_auth_type?: ("none" | "bearer") | null;
+      http_auth_type?: ("none" | "bearer" | "api_key_header" | "internal") | null;
       /** Http Url */
       http_url?: string | null;
       /** Icon Url */
       icon_url?: string | null;
+      /** Image Model Id */
+      image_model_id?: string | null;
       /** Name */
       name?: string | null;
+      /** Purpose */
+      purpose?: ("general" | "web_search" | "image_generation") | null;
       /** Security Classification */
       security_classification?: components["schemas"]["ModelId"] | null;
       /** Tags */
@@ -24760,6 +25319,8 @@ export interface components {
       tool_catalog_max_count?: number | null;
       /** Tool Definition Max Bytes */
       tool_definition_max_bytes?: number | null;
+      /** User Group Ids */
+      user_group_ids?: string[] | null;
     };
     /**
      * MCPToolSetting
@@ -24776,6 +25337,8 @@ export interface components {
     };
     /** McpRestrictionInput */
     McpRestrictionInput: {
+      /** Capabilities */
+      capabilities?: components["schemas"]["PolicyCapabilityInput"][];
       /**
        * Disabled Tool Ids
        * @default []
@@ -24791,6 +25354,8 @@ export interface components {
     };
     /** McpRestrictionPublic */
     McpRestrictionPublic: {
+      /** Capabilities */
+      capabilities?: components["schemas"]["PolicyCapabilityInput"][];
       /** Disabled Tool Ids */
       disabled_tool_ids: string[];
       /** Enabled */
@@ -24896,8 +25461,6 @@ export interface components {
       tools: components["schemas"]["UseTools"];
       /** Updated At */
       updated_at?: string | null;
-      /** Web Search References */
-      web_search_references: components["schemas"]["WebSearchResultPublic"][];
     };
     /** MessageLogging */
     MessageLogging: {
@@ -24961,8 +25524,6 @@ export interface components {
       tools: components["schemas"]["UseTools"];
       /** Updated At */
       updated_at?: string | null;
-      /** Web Search References */
-      web_search_references: components["schemas"]["WebSearchResultPublic"][];
     };
     /** MetadataChange */
     MetadataChange: {
@@ -25429,6 +25990,8 @@ export interface components {
       completion_models: components["schemas"]["CompletionModelSecurityStatus"][];
       /** Embedding Models */
       embedding_models: components["schemas"]["EmbeddingModelSecurityStatus"][];
+      /** Image Models */
+      image_models: components["schemas"]["ImageModelSecurityStatus"][];
       /** Transcription Models */
       transcription_models: components["schemas"]["TranscriptionModelSecurityStatus"][];
     };
@@ -26409,6 +26972,19 @@ export interface components {
        */
       items: components["schemas"]["HelperTemplatePublic"][];
     };
+    /** PaginatedResponse[ImageModelPublic] */
+    PaginatedResponse_ImageModelPublic_: {
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["ImageModelPublic"][];
+    };
     /** PaginatedResponse[InfoBlobPublicNoText] */
     PaginatedResponse_InfoBlobPublicNoText_: {
       /**
@@ -26856,6 +27432,8 @@ export interface components {
        * @example This is a helpful AI assistant
        */
       description?: string | null;
+      /** Enabled Capabilities */
+      enabled_capabilities?: ("web_search" | "image_generation")[] | null;
       /** Groups */
       groups?: components["schemas"]["ModelId"][] | null;
       /**
@@ -27070,6 +27648,8 @@ export interface components {
       description?: string | null;
       /** Embedding Models */
       embedding_models?: components["schemas"]["ModelId"][] | null;
+      /** Enabled Capabilities */
+      enabled_capabilities?: ("web_search" | "image_generation")[] | null;
       /**
        * Icon Id
        * @description Icon ID referencing an uploaded icon. Set to null to remove.
@@ -27230,7 +27810,9 @@ export interface components {
       | "flows_trace"
       | "storage"
       | "modules"
-      | "assistant_debug";
+      | "assistant_debug"
+      | "web_search"
+      | "image_generation";
     /** PermissionPublic */
     PermissionPublic: {
       /** Description */
@@ -27388,6 +27970,19 @@ export interface components {
      * @enum {string}
      */
     PolicyActor: "migration" | "storage_admin";
+    /** PolicyCapabilityInput */
+    PolicyCapabilityInput: {
+      /**
+       * Is Default Enabled
+       * @default true
+       */
+      is_default_enabled?: boolean;
+      /**
+       * Purpose
+       * @enum {string}
+       */
+      purpose: "web_search" | "image_generation";
+    };
     /** PolicyCompletionModelInput */
     PolicyCompletionModelInput: {
       /**
@@ -28808,8 +29403,6 @@ export interface components {
        * @default null
        */
       updated_at?: string | null;
-      /** Web Search References */
-      web_search_references: components["schemas"]["WebSearchResultPublic"][];
     };
     /**
      * SSEReasoning
@@ -30770,6 +31363,8 @@ export interface components {
     /** SpacePublic */
     SpacePublic: {
       applications?: components["schemas"]["Applications"] | null;
+      /** Available Capabilities */
+      available_capabilities?: components["schemas"]["CapabilityAvailability"][];
       /** Available Roles */
       available_roles: components["schemas"]["SpaceRole"][];
       /** Completion Models */
@@ -30786,6 +31381,8 @@ export interface components {
       description: string | null;
       /** Embedding Models */
       embedding_models: components["schemas"]["EmbeddingModelPublic"][];
+      /** Enabled Capabilities */
+      enabled_capabilities?: ("web_search" | "image_generation")[];
       group_members: components["schemas"]["PaginatedPermissions_SpaceGroupMember_"];
       /**
        * Icon Id
@@ -31699,6 +32296,125 @@ export interface components {
        */
       stability?: string | null;
     };
+    /** TenantImageModelCreate */
+    TenantImageModelCreate: {
+      /**
+       * Cost Per Image
+       * @description Indicative USD per generated image
+       */
+      cost_per_image?: number | string | null;
+      /**
+       * Default Quality
+       * @description Quality used when the assistant does not ask
+       * @default auto
+       * @enum {string}
+       */
+      default_quality?: "auto" | "low" | "medium" | "high";
+      /**
+       * Default Size
+       * @description Size used when the assistant does not ask
+       * @default auto
+       * @enum {string}
+       */
+      default_size?: "auto" | "1024x1024" | "1536x1024" | "1024x1536";
+      /**
+       * Description
+       * @description Model description
+       */
+      description?: string | null;
+      /**
+       * Display Name
+       * @description User-friendly display name
+       */
+      display_name: string;
+      /**
+       * Family
+       * @description Model family (e.g., 'openai', 'google')
+       * @default openai
+       */
+      family?: string;
+      /**
+       * Hosting
+       * @description Hosting location (swe, eu, usa)
+       * @default swe
+       */
+      hosting?: string;
+      /**
+       * Is Active
+       * @description Enable in organization
+       * @default true
+       */
+      is_active?: boolean;
+      /**
+       * Is Default
+       * @description Set as default model
+       * @default false
+       */
+      is_default?: boolean;
+      /**
+       * Name
+       * @description Model identifier as served by the provider (e.g. 'gpt-image-1', 'imagen-4.0-generate-001', or the name a vLLM endpoint serves)
+       */
+      name: string;
+      /**
+       * Provider Id
+       * Format: uuid
+       * @description Model provider ID
+       */
+      provider_id: string;
+      /** @description Security classification */
+      security_classification?: components["schemas"]["ModelId"] | null;
+    };
+    /** TenantImageModelUpdate */
+    TenantImageModelUpdate: {
+      /**
+       * Cost Per Image
+       * @description Indicative USD per generated image
+       */
+      cost_per_image?: number | string | null;
+      /**
+       * Default Quality
+       * @description Quality used when the assistant does not ask
+       */
+      default_quality?: ("auto" | "low" | "medium" | "high") | null;
+      /**
+       * Default Size
+       * @description Size used when the assistant does not ask
+       */
+      default_size?: ("auto" | "1024x1024" | "1536x1024" | "1024x1536") | null;
+      /**
+       * Description
+       * @description Model description
+       */
+      description?: string | null;
+      /**
+       * Display Name
+       * @description User-friendly display name
+       */
+      display_name?: string | null;
+      /**
+       * Hosting
+       * @description Hosting location (swe, eu, usa)
+       */
+      hosting?: string | null;
+      /**
+       * Is Default
+       * @description Set as tenant default
+       */
+      is_default?: boolean | null;
+      /**
+       * Open Source
+       * @description Is the model open source
+       */
+      open_source?: boolean | null;
+      /** @description Security classification reference (null clears it) */
+      security_classification?: components["schemas"]["ModelId"] | null;
+      /**
+       * Stability
+       * @description Model stability (stable, experimental)
+       */
+      stability?: string | null;
+    };
     /** TenantInDB */
     TenantInDB: {
       /** Api Credentials */
@@ -32297,6 +33013,10 @@ export interface components {
       } | null;
       /** Mcp Tool Name */
       mcp_tool_name?: string | null;
+      /** Meta */
+      meta?: {
+        [key: string]: unknown;
+      } | null;
       /** Result */
       result?: string | null;
       /** Result Status */
@@ -32761,6 +33481,8 @@ export interface components {
       apps: components["schemas"]["AppSparse"][];
       /** Assistants */
       assistants: components["schemas"]["AssistantSparse"][];
+      /** Capabilities */
+      capabilities?: ("web_search" | "image_generation")[];
       /** Completion Models */
       completion_models: components["schemas"]["CompletionModelPublic"][];
       /** Embedding Models */
@@ -33493,7 +34215,7 @@ export interface components {
       model_name: string;
       /**
        * Model Type
-       * @description Model type: completion, embedding, or transcription
+       * @description Model type: completion, embedding, transcription, or image
        * @default completion
        */
       model_type?: string;
@@ -33557,18 +34279,6 @@ export interface components {
        * @default 0
        */
       zombies_reconciled?: number;
-    };
-    /** WebSearchResultPublic */
-    WebSearchResultPublic: {
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      /** Title */
-      title: string;
-      /** Url */
-      url: string;
     };
     /** WebsiteCreate */
     WebsiteCreate: {
@@ -36451,7 +37161,7 @@ export interface operations {
     parameters: {
       query?: {
         /** @description Filter response to a single mode. */
-        mode?: ("completion" | "embedding" | "transcription") | null;
+        mode?: ("completion" | "embedding" | "transcription" | "image") | null;
       };
       header?: never;
       path: {
@@ -39952,6 +40662,195 @@ export interface operations {
     };
   };
   delete_tenant_embedding_model_api_v1_admin_tenant_models_embedding__model_id___delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        model_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  create_tenant_image_model_api_v1_admin_tenant_models_image__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantImageModelCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ImageModelPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  update_tenant_image_model_api_v1_admin_tenant_models_image__model_id___put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        model_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantImageModelUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ImageModelPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  delete_tenant_image_model_api_v1_admin_tenant_models_image__model_id___delete: {
     parameters: {
       query?: never;
       header?: never;
@@ -44067,8 +44966,6 @@ export interface operations {
             tools: components["schemas"]["UseTools"];
             /** Updated At */
             updated_at?: string | null;
-            /** Web Search References */
-            web_search_references: components["schemas"]["WebSearchResultPublic"][];
             $defs: {
               /** CompletionModelPublic */
               CompletionModelPublic: {
@@ -44221,6 +45118,8 @@ export interface operations {
                  */
                 id: string;
                 metadata: components["schemas"]["InfoBlobMetadata"];
+                /** Original Available */
+                original_available: boolean;
                 /** Score */
                 score: number;
                 /** Updated At */
@@ -44342,18 +45241,6 @@ export interface operations {
               UseTools: {
                 /** Assistants */
                 assistants: components["schemas"]["ToolAssistant"][];
-              };
-              /** WebSearchResultPublic */
-              WebSearchResultPublic: {
-                /**
-                 * Id
-                 * Format: uuid
-                 */
-                id: string;
-                /** Title */
-                title: string;
-                /** Url */
-                url: string;
               };
             };
           };
@@ -44511,8 +45398,6 @@ export interface operations {
             tools: components["schemas"]["UseTools"];
             /** Updated At */
             updated_at?: string | null;
-            /** Web Search References */
-            web_search_references: components["schemas"]["WebSearchResultPublic"][];
             $defs: {
               /** CompletionModelPublic */
               CompletionModelPublic: {
@@ -44665,6 +45550,8 @@ export interface operations {
                  */
                 id: string;
                 metadata: components["schemas"]["InfoBlobMetadata"];
+                /** Original Available */
+                original_available: boolean;
                 /** Score */
                 score: number;
                 /** Updated At */
@@ -44786,18 +45673,6 @@ export interface operations {
               UseTools: {
                 /** Assistants */
                 assistants: components["schemas"]["ToolAssistant"][];
-              };
-              /** WebSearchResultPublic */
-              WebSearchResultPublic: {
-                /**
-                 * Id
-                 * Format: uuid
-                 */
-                id: string;
-                /** Title */
-                title: string;
-                /** Url */
-                url: string;
               };
             };
           };
@@ -46479,6 +47354,8 @@ export interface operations {
                      */
                     id: string;
                     metadata: components["schemas"]["InfoBlobMetadata"];
+                    /** Original Available */
+                    original_available: boolean;
                     /** Score */
                     score: number;
                     /** Updated At */
@@ -46598,6 +47475,10 @@ export interface operations {
                     } | null;
                     /** Mcp Tool Name */
                     mcp_tool_name?: string | null;
+                    /** Meta */
+                    meta?: {
+                      [key: string]: unknown;
+                    } | null;
                     /** Result */
                     result?: string | null;
                     /** Result Status */
@@ -46649,6 +47530,10 @@ export interface operations {
                     } | null;
                     /** Mcp Tool Name */
                     mcp_tool_name?: string | null;
+                    /** Meta */
+                    meta?: {
+                      [key: string]: unknown;
+                    } | null;
                     /** Result */
                     result?: string | null;
                     /** Result Status */
@@ -46700,6 +47585,10 @@ export interface operations {
                     } | null;
                     /** Mcp Tool Name */
                     mcp_tool_name?: string | null;
+                    /** Meta */
+                    meta?: {
+                      [key: string]: unknown;
+                    } | null;
                     /** Result */
                     result?: string | null;
                     /** Result Status */
@@ -46792,8 +47681,6 @@ export interface operations {
                 tools: components["schemas"]["UseTools"];
                 /** Updated At */
                 updated_at?: string | null;
-                /** Web Search References */
-                web_search_references: components["schemas"]["WebSearchResultPublic"][];
                 $defs: {
                   /** CompletionModelPublic */
                   CompletionModelPublic: {
@@ -46947,6 +47834,8 @@ export interface operations {
                      */
                     id: string;
                     metadata: components["schemas"]["InfoBlobMetadata"];
+                    /** Original Available */
+                    original_available: boolean;
                     /** Score */
                     score: number;
                     /** Updated At */
@@ -47068,18 +47957,6 @@ export interface operations {
                   UseTools: {
                     /** Assistants */
                     assistants: components["schemas"]["ToolAssistant"][];
-                  };
-                  /** WebSearchResultPublic */
-                  WebSearchResultPublic: {
-                    /**
-                     * Id
-                     * Format: uuid
-                     */
-                    id: string;
-                    /** Title */
-                    title: string;
-                    /** Url */
-                    url: string;
                   };
                 };
               }
@@ -54994,6 +55871,8 @@ export interface operations {
                  */
                 id: string;
                 metadata: components["schemas"]["InfoBlobMetadata"];
+                /** Original Available */
+                original_available: boolean;
                 /** Score */
                 score: number;
                 /** Updated At */
@@ -55208,6 +56087,8 @@ export interface operations {
                  */
                 id: string;
                 metadata: components["schemas"]["InfoBlobMetadata"];
+                /** Original Available */
+                original_available: boolean;
                 /** Score */
                 score: number;
                 /** Updated At */
@@ -55425,6 +56306,88 @@ export interface operations {
       };
     };
   };
+  get_image_models_api_v1_image_models__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_ImageModelPublic_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  update_image_model_api_v1_image_models__id___post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ImageModelUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ImageModelPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   get_info_blob_ids_api_v1_info_blobs__get: {
     parameters: {
       query?: never;
@@ -55614,6 +56577,143 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["InfoBlobPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  download_original_api_v1_info_blobs__id__original_download__get: {
+    parameters: {
+      query: {
+        token: string;
+      };
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Exact uploaded bytes */
+      200: {
+        headers: {
+          /** @description Requested inline or attachment disposition */
+          "Content-Disposition"?: string;
+          /** @description Original size in bytes */
+          "Content-Length"?: number;
+          /** @description SHA-256 digest of the original representation */
+          "Repr-Digest"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "*/*": string;
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  generate_original_signed_url_api_v1_info_blobs__id__original_signed_url__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["OriginalSignedURLRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SignedURLResponse"];
         };
       };
       /** @description Forbidden */
@@ -56487,6 +57587,7 @@ export interface operations {
     parameters: {
       query?: {
         tags?: string[] | null;
+        purpose?: ("general" | "web_search" | "image_generation") | null;
       };
       header?: never;
       path?: never;
@@ -56585,7 +57686,9 @@ export interface operations {
   };
   get_tenant_mcp_settings_api_v1_mcp_servers_settings__get: {
     parameters: {
-      query?: never;
+      query?: {
+        purpose?: ("general" | "web_search" | "image_generation") | null;
+      };
       header?: never;
       path?: never;
       cookie?: never;
@@ -56603,6 +57706,15 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
         headers: {
           [name: string]: unknown;
         };
@@ -56994,6 +58106,122 @@ export interface operations {
       };
     };
   };
+  activate_capability_provider_api_v1_mcp_servers__id__activate__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CapabilityActivationResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  deactivate_capability_provider_api_v1_mcp_servers__id__deactivate__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MCPServerPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   get_mcp_server_tools_api_v1_mcp_servers__id__tools__get: {
     parameters: {
       query?: never;
@@ -57297,6 +58525,69 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["MCPServerToolPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  update_tool_display_name_api_v1_mcp_servers__id__tools__tool_id__display_name__put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+        tool_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MCPServerToolRename"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MCPServerToolPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */

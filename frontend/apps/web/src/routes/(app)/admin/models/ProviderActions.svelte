@@ -14,7 +14,8 @@
     CompletionModel,
     EmbeddingModel,
     ModelProviderPublic,
-    TranscriptionModel
+    TranscriptionModel,
+    ImageModel
   } from "@eneo/eneo-js";
   import { getEneo } from "$lib/core/Eneo";
   import { invalidate } from "$app/navigation";
@@ -25,6 +26,7 @@
   import Box from "lucide-svelte/icons/box";
   import Sparkles from "lucide-svelte/icons/sparkles";
   import AudioLines from "lucide-svelte/icons/audio-lines";
+  import Image from "lucide-svelte/icons/image";
   import MoreHorizontal from "lucide-svelte/icons/more-horizontal";
   import Check from "lucide-svelte/icons/check";
   import { m } from "$lib/paraglide/messages";
@@ -33,8 +35,8 @@
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
 
-  type ModelKind = "completion" | "embedding" | "transcription";
-  type ProviderModel = CompletionModel | EmbeddingModel | TranscriptionModel;
+  type ModelKind = "completion" | "embedding" | "transcription" | "image";
+  type ProviderModel = CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel;
 
   type BlockingModel = {
     id: string;
@@ -117,7 +119,8 @@
           "transcription",
           m.transcription_model(),
           AudioLines
-        )
+        ),
+        ...tagModels(models.imageModels, "image", m.image_model(), Image)
       ].sort((a, b) => a.name.localeCompare(b.name));
       modelsLoaded = true;
     } catch (e: unknown) {

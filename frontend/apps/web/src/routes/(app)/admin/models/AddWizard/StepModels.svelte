@@ -139,7 +139,9 @@
       ? m.model_type_completion()
       : modelType === "embedding"
         ? m.model_type_embedding()
-        : m.model_type_transcription()
+        : modelType === "image"
+          ? m.model_type_image()
+          : m.model_type_transcription()
   );
 
   // --- Handlers ----------------------------------------------------------

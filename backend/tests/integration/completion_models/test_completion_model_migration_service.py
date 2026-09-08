@@ -12,6 +12,7 @@ These tests verify end-to-end migration functionality including:
 import pytest
 from sqlalchemy import select
 
+from eneo.database.tables.ai_models_table import CompletionModelUsageStats
 from eneo.database.tables.app_table import Apps
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.service_table import Services
@@ -24,19 +25,22 @@ from eneo.main.exceptions import ValidationException
 class TestCompletionModelMigration:
     """Test suite for model migration functionality."""
 
-    async def test_migrate_assistants_successfully(
+    @pytest.mark.parametrize("migration_auto_recalc_threshold", [0, 1])
+    async def test_migrate_assistants_from_inactive_source_model(
         self,
         db_container,
         completion_model_factory,
         assistant_factory,
         admin_user,
+        monkeypatch,
+        migration_auto_recalc_threshold,
     ):
-        """Test successful migration of assistants from one model to another."""
+        """Inactive source models can be retired into an active replacement."""
         async with db_container() as container:
             session = container.session()
 
             old_model = await completion_model_factory(
-                session, "gpt-3.5-turbo", provider="openai"
+                session, "gpt-3.5-turbo", provider="openai", is_enabled=False
             )
             new_model = await completion_model_factory(
                 session, "gpt-4", provider="openai"
@@ -45,9 +49,23 @@ class TestCompletionModelMigration:
             assistant1 = await assistant_factory(
                 session, "Test Assistant 1", old_model.id, kwargs={"temperature": 1.25}
             )
+            session.add(
+                CompletionModelUsageStats(
+                    model_id=old_model.id,
+                    tenant_id=admin_user.tenant_id,
+                    assistants_count=1,
+                    total_usage=1,
+                )
+            )
+            await session.flush()
 
             # Act: Perform migration
             migration_service = container.completion_model_migration_service()
+            monkeypatch.setattr(
+                migration_service.settings,
+                "migration_auto_recalc_threshold",
+                migration_auto_recalc_threshold,
+            )
             result = await migration_service.migrate_model_usage(
                 from_model_id=old_model.id,
                 to_model_id=new_model.id,
@@ -80,6 +98,14 @@ class TestCompletionModelMigration:
             assert len(assistants_with_old_model) == 0, (
                 "No assistants should still be using the old model"
             )
+
+            stats = await session.scalar(
+                select(CompletionModelUsageStats).where(
+                    CompletionModelUsageStats.model_id == old_model.id
+                )
+            )
+            assert stats is not None
+            assert stats.assistants_count == 0
 
     async def test_migrate_spaces_successfully(
         self,
@@ -583,11 +609,70 @@ class TestCompletionModelMigration:
             # Note: When model doesn't exist in repo, it's caught and wrapped in generic error
             assert "validation failed" in str(exc_info.value).lower()
 
-    # NOTE: test_reject_migration_source_model_not_org_enabled and
-    # test_reject_migration_target_model_not_org_enabled were removed.
-    # With the per-tenant model architecture, is_org_enabled validation
-    # is no longer enforced in the migration service. Models are now
-    # tenant-specific with their own providers.
+    async def test_reject_migration_from_global_source_model(
+        self,
+        db_container,
+        completion_model_factory,
+        admin_user,
+    ):
+        """A tenant migration cannot modify a shared global source model."""
+        async with db_container() as container:
+            session = container.session()
+
+            source_model = await completion_model_factory(
+                session, "global-source", provider="openai", is_enabled=False
+            )
+            source_model.tenant_id = None
+            source_model.provider_id = None
+            target_model = await completion_model_factory(
+                session, "tenant-target", provider="openai"
+            )
+            await session.flush()
+
+            migration_service = container.completion_model_migration_service()
+            with pytest.raises(ValidationException) as exc_info:
+                await migration_service.migrate_model_usage(
+                    from_model_id=source_model.id,
+                    to_model_id=target_model.id,
+                    entity_types=["assistants"],
+                    user=admin_user,
+                    confirm_migration=True,
+                )
+
+            assert "does not belong to your organization" in str(exc_info.value)
+            await session.refresh(source_model)
+            assert source_model.migrated_to_model_id is None
+
+    async def test_reject_migration_to_inactive_target_model(
+        self,
+        db_container,
+        completion_model_factory,
+        admin_user,
+    ):
+        """The replacement model must be active for the tenant."""
+        async with db_container() as container:
+            session = container.session()
+
+            source_model = await completion_model_factory(
+                session, "active-source", provider="openai"
+            )
+            target_model = await completion_model_factory(
+                session, "inactive-target", provider="openai", is_enabled=False
+            )
+
+            migration_service = container.completion_model_migration_service()
+            with pytest.raises(ValidationException) as exc_info:
+                await migration_service.migrate_model_usage(
+                    from_model_id=source_model.id,
+                    to_model_id=target_model.id,
+                    entity_types=["assistants"],
+                    user=admin_user,
+                    confirm_migration=True,
+                )
+
+            assert "is not enabled for your organization" in str(exc_info.value)
+            await session.refresh(source_model)
+            assert source_model.migrated_to_model_id is None
 
     # ============================================================================
     # Compatibility Validation Tests

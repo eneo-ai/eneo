@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.assistants.api.assistant_models import KnowledgeMode
 from eneo.main.models import NOT_PROVIDED, NotProvided
+from eneo.mcp_servers.domain.capabilities import CapabilityPurpose
 from eneo.prompts.api.prompt_models import PromptCreate
 from eneo.skills.domain.skill import SkillBindingIntent
 
@@ -22,6 +23,7 @@ AssistantUpdateField: TypeAlias = Literal[
     "websites",
     "integration_knowledge_ids",
     "mcp_server_ids",
+    "enabled_capabilities",
     "mcp_tools",
     "attachment_ids",
     "description",
@@ -64,6 +66,7 @@ class AssistantUpdateCommand(BaseModel):
     websites: list[UUID] | None = None
     integration_knowledge_ids: list[UUID] | None = None
     mcp_server_ids: list[UUID] | None = None
+    enabled_capabilities: list[CapabilityPurpose] | None = None
     mcp_tools: list[tuple[UUID, bool]] | None = None
     attachment_ids: list[UUID] | None = None
     description: str | None | NotProvided = Field(default=NOT_PROVIDED)

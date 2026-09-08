@@ -21,6 +21,7 @@ from eneo.authentication.auth_dependencies import (
     CONVERSATIONS_READ_OVERRIDES,
     FILES_READ_OVERRIDES,
     FLOW_METHOD_PERMISSION_OVERRIDES,
+    INFO_BLOBS_READ_OVERRIDES,
     KNOWLEDGE_READ_OVERRIDES,
     require_api_key_permission,
     require_api_key_scope_check,
@@ -68,6 +69,12 @@ from eneo.help_assistants.api.run_router import (
     router as help_assistants_run_router,
 )
 from eneo.icons.api.icon_router import router as icons_router
+from eneo.image_models.presentation.image_models_router import (
+    router as image_models_router,
+)
+from eneo.image_models.presentation.tenant_image_models_router import (
+    router as tenant_image_models_router,
+)
 from eneo.info_blobs.info_blobs_router import router as info_blobs_router
 from eneo.integration.presentation.admin_sharepoint_router import (
     router as admin_sharepoint_router,
@@ -233,7 +240,11 @@ router.include_router(
     prefix="/info-blobs",
     tags=["info-blobs"],
     dependencies=[
-        Depends(require_resource_permission_for_method("knowledge")),
+        Depends(
+            require_resource_permission_for_method(
+                "knowledge", read_override_endpoints=INFO_BLOBS_READ_OVERRIDES
+            )
+        ),
         Depends(
             require_api_key_scope_check(resource_type="info_blob", path_param=None)
         ),
@@ -398,6 +409,12 @@ router.include_router(
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(
+    image_models_router,
+    prefix="/image-models",
+    tags=["image-models"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+router.include_router(
     model_providers_router,
     prefix="/admin/model-providers",
     tags=["admin", "model-providers"],
@@ -418,6 +435,12 @@ router.include_router(
 router.include_router(
     tenant_transcription_models_router,
     prefix="/admin/tenant-models/transcription",
+    tags=["admin", "tenant-models"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+router.include_router(
+    tenant_image_models_router,
+    prefix="/admin/tenant-models/image",
     tags=["admin", "tenant-models"],
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )

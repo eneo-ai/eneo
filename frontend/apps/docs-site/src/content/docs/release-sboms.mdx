@@ -13,12 +13,14 @@ The release workflow covers:
 
 - `ghcr.io/eneo-ai/eneo-backend:<version>`
 - `ghcr.io/eneo-ai/eneo-frontend:<version>`
-- `ghcr.io/eneo-ai/eneo-seaweedfs:<Eneo source SHA>`
+- `ghcr.io/eneo-ai/eneo-seaweedfs:<bundled store version>`
 
-For a release tag such as `v2.0.0`, the image tag is `2.0.0`.
-The SBOM filenames use the release tag, including the `v` prefix. Prereleases
-use the same process, so a tag such as `v2.0.0-rc.2` gets SBOM files for that
-prerelease.
+For a release tag such as `v2.0.0`, the application image tag is `2.0.0`.
+The bundled SeaweedFS store is versioned on its own: the file
+`docker/seaweedfs/VERSION` at the release tag (for example `4.40-eneo.3`)
+names the exact image the release was verified against. The SBOM filenames use
+the release tag, including the `v` prefix. Prereleases use the same process, so
+a tag such as `v2.0.0-rc.2` gets SBOM files for that prerelease.
 
 ## How the release flow works
 
@@ -26,9 +28,10 @@ When maintainers publish a GitHub Release, the release SBOM workflow runs
 automatically:
 
 1. The workflow reads the release tag and derives the container image tag.
-2. It checks out the release tag for source-based dependency inventory.
-3. It waits for the matching backend, frontend, and Eneo SeaweedFS images in GitHub Container
-   Registry.
+2. It checks out the release tag for source-based dependency inventory and
+   reads the bundled store version from `docker/seaweedfs/VERSION`.
+3. It waits for the matching backend and frontend images in GitHub Container
+   Registry and resolves the already-published Eneo SeaweedFS version tag.
 4. It resolves immutable `linux/amd64` digests and the SeaweedFS `linux/arm64`
    digest.
 5. It scans those digest references, not only the mutable image tags.
@@ -36,7 +39,9 @@ automatically:
    frontend source dependency SBOM.
 7. It uploads the generated files to the same GitHub Release page.
 8. It verifies the SeaweedFS image provenance and both platform SBOM
-   attestations against the expected repository, workflow, tag, and source SHA.
+   attestations against the expected repository, the SeaweedFS image workflow,
+   and the `develop` branch that publishes it, and checks that each platform
+   image carries the version label the release names.
 9. It attests the release SBOM assets with GitHub artifact attestations.
 
 Each release keeps its own SBOM files. Older release pages keep their original
@@ -45,8 +50,10 @@ container images also get provenance attestations when they are built and pushed
 to GitHub Container Registry.
 
 The SeaweedFS image is built and attested by Eneo from a pinned upstream source
-commit. These attestations establish Eneo's build identity and inputs; they do
-not claim that the image or source commit was signed by the SeaweedFS supplier.
+commit by its own workflow, which runs only when the image inputs change and
+publishes one immutable tag per `docker/seaweedfs/VERSION`. These attestations
+establish Eneo's build identity and inputs; they do not claim that the image or
+source commit was signed by the SeaweedFS supplier.
 
 The same workflow can also run manually as a dry run. In dry-run mode it creates
 the files as a temporary workflow artifact and does not attach them to the
@@ -267,13 +274,17 @@ through the OCI registry, constraining the signer workflow:
 gh attestation verify \
   oci://ghcr.io/eneo-ai/eneo-seaweedfs@sha256:<manifest-digest> \
   --repo eneo-ai/eneo \
-  --signer-workflow github.com/eneo-ai/eneo/.github/workflows/build_and_push_images.yml \
+  --signer-workflow github.com/eneo-ai/eneo/.github/workflows/seaweedfs_image.yml \
+  --source-ref refs/heads/develop \
+  --deny-self-hosted-runners \
   --bundle-from-oci
 
 gh attestation verify \
   oci://ghcr.io/eneo-ai/eneo-seaweedfs@sha256:<platform-digest> \
   --repo eneo-ai/eneo \
-  --signer-workflow github.com/eneo-ai/eneo/.github/workflows/build_and_push_images.yml \
+  --signer-workflow github.com/eneo-ai/eneo/.github/workflows/seaweedfs_image.yml \
+  --source-ref refs/heads/develop \
+  --deny-self-hosted-runners \
   --predicate-type https://spdx.dev/Document/v2.3 \
   --bundle-from-oci
 ```

@@ -70,4 +70,5 @@ async def test_get_model_defaults_endpoint_returns_found_payload():
         "input_cost_per_token": None,
         "output_cost_per_token": None,
         "cost_per_minute": None,
+        "cost_per_image": None,
     }

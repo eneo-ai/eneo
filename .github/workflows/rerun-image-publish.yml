@@ -2,7 +2,7 @@ name: Rerun Failed Image Publish
 
 on:
   workflow_run:
-    workflows: ["Build and Push Docker Images"]
+    workflows: ["Build and Push Docker Images", "SeaweedFS Image"]
     types: [completed]
 
 permissions:

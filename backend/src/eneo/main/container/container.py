@@ -189,6 +189,8 @@ from eneo.help_assistants.infrastructure.org_space_assistant_role_repo import (
 )
 from eneo.icons.icon_repo import IconRepository
 from eneo.icons.icon_service import IconService
+from eneo.image_models.application import ImageModelCRUDService
+from eneo.image_models.domain import ImageModelRepository
 from eneo.info_blobs.info_blob_chunk_repo import InfoBlobChunkRepo
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
 from eneo.info_blobs.info_blob_service import InfoBlobService
@@ -775,6 +777,9 @@ class Container(containers.DeclarativeContainer):
     transcription_model_repo = providers.Factory(
         TranscriptionModelRepository, session=session, tenant=tenant
     )
+    image_model_repo = providers.Factory(
+        ImageModelRepository, session=session, tenant=tenant
+    )
     embedding_model_repo = providers.Factory(
         AdminEmbeddingModelsService, session=session
     )
@@ -1085,6 +1090,12 @@ class Container(containers.DeclarativeContainer):
         TranscriptionModelCRUDService,
         user=user,
         transcription_model_repo=transcription_model_repo,
+        security_classification_repo=security_classification_repo,
+    )
+    image_model_crud_service = providers.Factory(
+        ImageModelCRUDService,
+        user=user,
+        image_model_repo=image_model_repo,
         security_classification_repo=security_classification_repo,
     )
     embedding_model_crud_service = providers.Factory(
@@ -1715,6 +1726,8 @@ class Container(containers.DeclarativeContainer):
         mcp_server_tool_repo=mcp_server_tool_repo,
         user=user,
         encryption_service=encryption_service,
+        user_groups_repo=user_groups_repo,
+        image_model_repo=image_model_repo,
     )
     tenant_integration_service = providers.Factory(
         TenantIntegrationService,

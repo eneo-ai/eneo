@@ -1,0 +1,139 @@
+name: SeaweedFS platform check
+description: >-
+  Build one SeaweedFS platform candidate by digest, prove it reproduces, smoke
+  test the reference deployment, generate SBOMs, and gate vulnerabilities.
+  The caller decides whether the registry is GHCR (trusted publication) or an
+  ephemeral local registry (read-only audit); this action never attests.
+
+inputs:
+  image:
+    description: Registry image name to push candidates to by digest.
+    required: true
+  platform:
+    description: Linux platform, linux/amd64 or linux/arm64.
+    required: true
+  slug:
+    description: Platform slug used in evidence file names, for example linux-amd64.
+    required: true
+  curl-image:
+    description: Pinned curl image digest for the smoke test on this platform.
+    required: true
+  version:
+    description: Contents of docker/seaweedfs/VERSION, written into the image label.
+    required: true
+  buildx-version:
+    description: Pinned Buildx version.
+    required: true
+  buildkit-image:
+    description: Pinned BuildKit image digest.
+    required: true
+  source-date-epoch:
+    description: Fixed SOURCE_DATE_EPOCH for reproducible timestamps.
+    required: true
+  syft-version:
+    description: Pinned Syft version.
+    required: true
+  grype-version:
+    description: Pinned Grype version.
+    required: true
+
+outputs:
+  digest:
+    description: The reproducible platform image digest.
+    value: ${{ steps.build.outputs.digest }}
+
+runs:
+  using: composite
+  steps:
+    - name: Build immutable platform candidate by digest
+      id: build
+      uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+      with:
+        context: docker/seaweedfs
+        file: docker/seaweedfs/Dockerfile
+        platforms: ${{ inputs.platform }}
+        provenance: false
+        sbom: false
+        build-args: |
+          SOURCE_DATE_EPOCH=${{ inputs.source-date-epoch }}
+          IMAGE_VERSION=${{ inputs.version }}
+        outputs: type=image,name=${{ inputs.image }},push-by-digest=true,name-canonical=true,push=true,oci-mediatypes=true,rewrite-timestamp=true
+        cache-from: type=gha,scope=seaweedfs-${{ inputs.slug }}
+        cache-to: type=gha,mode=max,scope=seaweedfs-${{ inputs.slug }}
+
+    - name: Set up an isolated reproducibility builder
+      id: reproducibility-builder
+      uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      with:
+        version: ${{ inputs.buildx-version }}
+        driver-opts: image=${{ inputs.buildkit-image }},network=host
+        use: false
+
+    - name: Rebuild independently to prove reproducibility
+      id: rebuild
+      uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+      with:
+        builder: ${{ steps.reproducibility-builder.outputs.name }}
+        context: docker/seaweedfs
+        file: docker/seaweedfs/Dockerfile
+        platforms: ${{ inputs.platform }}
+        provenance: false
+        sbom: false
+        no-cache: true
+        build-args: |
+          SOURCE_DATE_EPOCH=${{ inputs.source-date-epoch }}
+          IMAGE_VERSION=${{ inputs.version }}
+        outputs: type=image,name=${{ inputs.image }},push-by-digest=true,name-canonical=true,push=true,oci-mediatypes=true,rewrite-timestamp=true
+
+    - name: Verify reproducible platform digest
+      shell: bash
+      env:
+        FIRST_DIGEST: ${{ steps.build.outputs.digest }}
+        SECOND_DIGEST: ${{ steps.rebuild.outputs.digest }}
+      run: |
+        set -euo pipefail
+        [[ "$FIRST_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+        [[ "$FIRST_DIGEST" == "$SECOND_DIGEST" ]]
+
+    - name: Smoke test the reference deployment bootstrap
+      shell: bash
+      env:
+        IMAGE_REF: ${{ inputs.image }}@${{ steps.build.outputs.digest }}
+        PLATFORM: ${{ inputs.platform }}
+        CURL_IMAGE: ${{ inputs.curl-image }}
+      run: docker/seaweedfs/smoke-reference-deployment.sh "$IMAGE_REF" "$PLATFORM"
+
+    - name: Download Syft
+      id: syft
+      uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+      with:
+        syft-version: ${{ inputs.syft-version }}
+
+    - name: Verify runtime and generate CycloneDX 1.6 and SPDX SBOMs
+      shell: bash
+      env:
+        IMAGE_REF: ${{ inputs.image }}@${{ steps.build.outputs.digest }}
+        PLATFORM: ${{ inputs.platform }}
+        SLUG: ${{ inputs.slug }}
+        SYFT_CMD: ${{ steps.syft.outputs.cmd }}
+      run: |
+        docker/seaweedfs/verify-supply-chain.sh image \
+          "$IMAGE_REF" "$PLATFORM" "seaweedfs-$SLUG-evidence"
+
+    - name: Block HIGH and CRITICAL vulnerabilities, including unfixed findings
+      uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+      with:
+        image: ${{ inputs.image }}@${{ steps.build.outputs.digest }}
+        fail-build: true
+        severity-cutoff: high
+        only-fixed: false
+        output-format: json
+        output-file: seaweedfs-${{ inputs.slug }}-evidence/grype-${{ inputs.slug }}.json
+        grype-version: ${{ inputs.grype-version }}
+
+    - name: Record exact platform digest
+      shell: bash
+      env:
+        DIGEST: ${{ steps.build.outputs.digest }}
+        SLUG: ${{ inputs.slug }}
+      run: printf '%s\n' "$DIGEST" >"seaweedfs-$SLUG-evidence/DIGEST-$SLUG"

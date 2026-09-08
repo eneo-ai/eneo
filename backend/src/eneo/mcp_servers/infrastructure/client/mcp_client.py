@@ -44,6 +44,17 @@ RESOURCE_TEXT_MAX_BYTES = 8 * 1024
 RESOURCE_META_MAX_BYTES = 16 * 1024
 MCP_SSE_READ_TIMEOUT_SECONDS = 300.0
 
+
+def transport_read_timeout(tool_call_timeout: float) -> float:
+    """HTTP read timeout that never undercuts the tool-call budget.
+
+    A tool call is bounded by ``tool_call_timeout``; the transport's read
+    timeout must be at least as long or a slow but legitimate call (image
+    generation) is cut by the transport before the tool-call timeout fires.
+    """
+    return max(MCP_SSE_READ_TIMEOUT_SECONDS, float(tool_call_timeout))
+
+
 MCPStreams = tuple[
     MemoryObjectReceiveStream[SessionMessage | Exception],
     MemoryObjectSendStream[SessionMessage],
@@ -447,10 +458,11 @@ async def _open_streamable_http_client(
     *,
     headers: dict[str, str],
     timeout_seconds: float,
+    read_timeout_seconds: float = MCP_SSE_READ_TIMEOUT_SECONDS,
     tool_catalog_max_count: int,
     tool_catalog_max_bytes: int,
 ) -> AsyncGenerator[MCPStreams]:
-    timeout = httpx.Timeout(timeout_seconds, read=MCP_SSE_READ_TIMEOUT_SECONDS)
+    timeout = httpx.Timeout(timeout_seconds, read=read_timeout_seconds)
     http_headers = {"Accept-Encoding": "identity", **headers}
     async with create_mcp_http_client(
         headers=http_headers, timeout=timeout
@@ -663,12 +675,21 @@ class MCPClient:
         """Build authentication headers for this connection."""
         headers: dict[str, str] = {}
 
-        token: Optional[str] = None
-        if self.mcp_server.http_auth_type == "bearer":
+        if self.mcp_server.http_auth_type in ("bearer", "internal"):
+            # "internal" is a built-in provider on Eneo's own loopback server:
+            # the token is a per-request scoped access token minted by the
+            # ask path, never a stored credential.
             token = self.auth_credentials.get("token")
-
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+        elif self.mcp_server.http_auth_type == "api_key_header":
+            # Admin-chosen header (e.g. X-Api-Key). The name is validated at
+            # configuration time against HTTP token syntax and a deny-list of
+            # transport/session headers, so it can be emitted as-is here.
+            header_name = self.auth_credentials.get("header_name")
+            token = self.auth_credentials.get("token")
+            if header_name and token:
+                headers[header_name] = token
 
         # Forward acting user/tenant identity only when this server opted in.
         # Added after the bearer token; the builder never emits Authorization,
@@ -746,6 +767,7 @@ class MCPClient:
             url=self.mcp_server.http_url,
             headers=headers,
             timeout_seconds=float(self.timeout),
+            read_timeout_seconds=transport_read_timeout(self.tool_call_timeout),
             tool_catalog_max_count=self.mcp_server.tool_catalog_max_count,
             tool_catalog_max_bytes=self.mcp_server.tool_catalog_max_bytes,
         )
@@ -977,6 +999,14 @@ class MCPClient:
                 "content": content_list,
                 "is_error": bool(response.isError),
             }
+            # Result-level `_meta` (MCP spec "General fields"): servers attach
+            # metadata such as OpenTelemetry GenAI usage attributes here.
+            # Capped like resource meta; absent when the server sent none.
+            result_meta = _truncate_meta(
+                getattr(response, "meta", None) or {}, RESOURCE_META_MAX_BYTES
+            )
+            if result_meta:
+                result["meta"] = result_meta
 
             logger.info(f"Called tool {tool_name} on {self.mcp_server.name}")
             return result

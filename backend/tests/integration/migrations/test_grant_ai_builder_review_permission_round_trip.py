@@ -19,7 +19,7 @@ from alembic.config import Config
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
-PRE_REVISION = "202609041000"
+PRE_REVISION = "202609041001"
 GRANT_REVISION = "202609052200"
 PERMISSION = "flows_ai_builder_review"
 

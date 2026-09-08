@@ -86,6 +86,7 @@ class ErrorCodes(int, Enum):
     SKILL_BLOCKED_FOR_BINDING = 9054
     SKILL_RUNTIME_POLICY_CHANGED = 9055
     INVALID_FILENAME = 9058
+    INFO_BLOB_ORIGINAL_UNAVAILABLE = 9059
 
 
 class NotFoundException(Exception):

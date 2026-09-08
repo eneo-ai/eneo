@@ -735,6 +735,7 @@ class ObjectContentRepository:
         self,
         *,
         content_id: UUID,
+        object_key: str,
         first_chunk_index: int,
         chunk_count: int,
     ) -> tuple[bytes, ...]:
@@ -751,7 +752,10 @@ class ObjectContentRepository:
                     (first_chunk_index * _SHA256_BYTES) + 1,
                     chunk_count * _SHA256_BYTES,
                 )
-            ).where(ObjectStoreObjects.content_id == content_id)
+            ).where(
+                ObjectStoreObjects.content_id == content_id,
+                ObjectStoreObjects.object_key == object_key,
+            )
         )
         expected_bytes = chunk_count * _SHA256_BYTES
         if not isinstance(packed, bytes) or len(packed) != expected_bytes:
@@ -778,12 +782,39 @@ class ObjectContentRepository:
         *,
         content_id: UUID,
         failure_code: ContentFailureCode,
-    ) -> None:
+        observed_storage_kind: StorageKind,
+        observed_object_key: str | None = None,
+        missing_before: datetime | None = None,
+        observed_at: datetime | None = None,
+        observed_size_bytes: int | None = None,
+    ) -> bool:
         if failure_code not in {
             ContentFailureCode.BACKEND_MISSING,
             ContentFailureCode.BACKEND_CORRUPT,
         }:
             raise ValueError("mark_backend_failure requires a backend failure code")
+        if (observed_storage_kind is StorageKind.OBJECT_STORE) != (
+            observed_object_key is not None
+        ):
+            raise ValueError(
+                "A remote backend failure requires its observed object key"
+            )
+        if (observed_at is None) != (observed_size_bytes is None):
+            raise ValueError("An inventory size observation requires its timestamp")
+        if missing_before is not None and (
+            failure_code is not ContentFailureCode.BACKEND_MISSING
+            or observed_at is not None
+        ):
+            raise ValueError("Missing inventory evidence requires only its cutoff")
+        if (missing_before is not None or observed_at is not None) and (
+            observed_storage_kind is not StorageKind.OBJECT_STORE
+        ):
+            raise ValueError("Inventory evidence requires an object-store placement")
+        if (
+            observed_at is not None
+            and failure_code is not ContentFailureCode.BACKEND_CORRUPT
+        ):
+            raise ValueError("An inventory size mismatch requires a corrupt failure")
         completed_item_exists = await self._has_completed_file_icon_item(content_id)
         if not completed_item_exists:
             async with self._session.begin_nested() as savepoint:
@@ -792,12 +823,18 @@ class ObjectContentRepository:
                     content_id
                 )
                 if not completed_item_exists:
-                    if self._mark_available_content_backend_failed(
+                    changed = await self._mark_observed_backend_failed(
                         row,
                         failure_code,
-                    ):
+                        observed_storage_kind=observed_storage_kind,
+                        observed_object_key=observed_object_key,
+                        missing_before=missing_before,
+                        observed_at=observed_at,
+                        observed_size_bytes=observed_size_bytes,
+                    )
+                    if changed:
                         await self._session.flush()
-                    return
+                    return changed
                 await savepoint.rollback()
 
         admission_state = await self._session.scalar(
@@ -822,8 +859,17 @@ class ObjectContentRepository:
             )
         ).all()
         row = await self._content_for_update(content_id)
-        if self._mark_available_content_backend_failed(row, failure_code):
-            if completed_items:
+        changed = await self._mark_observed_backend_failed(
+            row,
+            failure_code,
+            observed_storage_kind=observed_storage_kind,
+            observed_object_key=observed_object_key,
+            missing_before=missing_before,
+            observed_at=observed_at,
+            observed_size_bytes=observed_size_bytes,
+        )
+        if changed:
+            if completed_items and row.state == ContentState.FAILED.value:
                 await self._reopen_failed_file_icon_items(
                     completed_items,
                     admission_state=admission_state,
@@ -831,6 +877,45 @@ class ObjectContentRepository:
                     failure_code=failure_code,
                 )
             await self._session.flush()
+        return changed
+
+    async def _mark_observed_backend_failed(
+        self,
+        row: ObjectContents,
+        failure_code: ContentFailureCode,
+        *,
+        observed_storage_kind: StorageKind,
+        observed_object_key: str | None,
+        missing_before: datetime | None,
+        observed_at: datetime | None,
+        observed_size_bytes: int | None,
+    ) -> bool:
+        if row.storage_kind != observed_storage_kind.value:
+            return False
+        if observed_storage_kind is StorageKind.OBJECT_STORE:
+            descriptor = await self._session.scalar(
+                select(ObjectStoreObjects)
+                .where(ObjectStoreObjects.content_id == row.id)
+                .with_for_update()
+            )
+            if descriptor is None or descriptor.object_key != observed_object_key:
+                return False
+            if missing_before is not None and (
+                row.available_at is None
+                or row.available_at >= missing_before
+                or descriptor.created_at >= missing_before
+                or (
+                    descriptor.remote_observed_at is not None
+                    and descriptor.remote_observed_at >= missing_before
+                )
+            ):
+                return False
+            if observed_at is not None and (
+                descriptor.remote_observed_at != observed_at
+                or row.size_bytes == observed_size_bytes
+            ):
+                return False
+        return self._mark_served_content_backend_failed(row, failure_code)
 
     async def _has_completed_file_icon_item(self, content_id: UUID) -> bool:
         return bool(
@@ -847,16 +932,20 @@ class ObjectContentRepository:
         )
 
     @staticmethod
-    def _mark_available_content_backend_failed(
+    def _mark_served_content_backend_failed(
         row: ObjectContents,
         failure_code: ContentFailureCode,
     ) -> bool:
-        if row.state != ContentState.AVAILABLE.value:
+        if row.state == ContentState.AVAILABLE.value:
+            row.state = ContentState.FAILED.value
+            row.next_attempt_at = None
+        elif (
+            row.state != ContentState.RETAINED.value
+            or row.failure_code == failure_code.value
+        ):
             return False
-        row.state = ContentState.FAILED.value
         row.failure_code = failure_code.value
         row.failure_detail = "durable object bytes are unavailable or untrusted"
-        row.next_attempt_at = None
         return True
 
     async def _reopen_failed_file_icon_items(

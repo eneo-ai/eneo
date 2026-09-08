@@ -147,6 +147,7 @@ class AssistantFactory:
 
         assert assistant_in_db.space_id is not None, "Assistants must belong to a space"
         return Assistant(
+            enabled_capabilities=[c.purpose for c in assistant_in_db.capabilities],
             id=assistant_in_db.id,
             user=user,
             space_id=assistant_in_db.space_id,
@@ -268,6 +269,7 @@ class AssistantFactory:
 
         assert assistant_in_db.space_id is not None, "Assistants must belong to a space"
         return Assistant(
+            enabled_capabilities=[c.purpose for c in assistant_in_db.capabilities],
             id=assistant_in_db.id,
             user=user_sparse,
             space_id=assistant_in_db.space_id,
@@ -280,7 +282,7 @@ class AssistantFactory:
             websites=assistant_websites,
             collections=collections,
             integration_knowledge_list=integration_knowledge_list,
-            mcp_servers=mcp_servers,
+            mcp_servers=[s for s in mcp_servers if s.purpose == "general"],
             created_at=assistant_in_db.created_at,
             updated_at=assistant_in_db.updated_at,
             published=assistant_in_db.published,

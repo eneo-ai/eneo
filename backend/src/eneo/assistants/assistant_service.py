@@ -1,3 +1,4 @@
+import copy
 import re
 from collections import defaultdict
 from collections.abc import AsyncGenerator, Callable, Sequence
@@ -8,6 +9,7 @@ from uuid import UUID
 
 from eneo.ai_models.completion_models.completion_model import (
     Completion,
+    GeneratedImage,
     McpToolReference,
     ModelKwargs,
     ResponseType,
@@ -33,7 +35,6 @@ from eneo.authentication.auth_service import AuthService
 from eneo.completion_models.infrastructure.context_builder import (
     count_tokens,
 )
-from eneo.completion_models.infrastructure.web_search import WebSearch
 from eneo.files.attachment_budget import (
     assert_prompt_and_files_fit_context,
     attachment_token_ceiling,
@@ -70,6 +71,20 @@ from eneo.main.models import (
     NotProvided,
     ResourcePermission,
     is_provided,
+)
+from eneo.mcp_servers.application.capability_resolver import (
+    general_servers_for_space,
+    resolve_capability_servers,
+)
+from eneo.mcp_servers.domain.capabilities import (
+    CapabilityPurpose,
+)
+from eneo.mcp_servers.domain.entities.mcp_server import (
+    GENERAL_PURPOSE,
+    allowed_capability_purposes,
+    duplicate_capability_purposes,
+    is_builtin_provider,
+    is_capability_purpose,
 )
 from eneo.prompts.prompt import Prompt
 from eneo.prompts.prompt_service import PromptService
@@ -116,6 +131,18 @@ from eneo.users.user import UserInDB
 from eneo.workflows.step_repo import StepRepository
 
 logger = get_logger(__name__)
+
+_IMAGE_EXTENSIONS = {
+    "image/jpeg": "jpeg",
+    "image/png": "png",
+    "image/webp": "webp",
+    "image/gif": "gif",
+}
+
+
+def _extension_for_mime(mime_type: str) -> str:
+    return _IMAGE_EXTENSIONS.get(mime_type.lower().split(";", 1)[0].strip(), "png")
+
 
 # Personal defaults are validated tenant-wide; pages keep a fleet-sized
 # tenant from being resident in memory all at once.
@@ -183,9 +210,6 @@ if TYPE_CHECKING:
     )
     from eneo.completion_models.infrastructure.completion_service import (
         CompletionService,
-    )
-    from eneo.completion_models.infrastructure.web_search import (
-        WebSearchResult,
     )
     from eneo.files.file_models import File
     from eneo.governance_policy.application.effective_config_service import (
@@ -363,9 +387,33 @@ class AssistantService:
         self.api_key_scope_revoker = api_key_scope_revoker
         self.effective_config_service = effective_config_service
 
-    @property
-    async def web_search(self):
-        return WebSearch()
+    def _with_builtin_provider_token(
+        self, server: "MCPServer", *, assistant_id: UUID
+    ) -> "MCPServer":
+        """Authenticate a built-in capability provider for this completion.
+
+        A built-in provider stores no credentials: its endpoint is Eneo's own
+        loopback server, which reads the provider row named by the token. The
+        token is minted per completion on a copy, so the persisted entity
+        never carries it. External providers pass through untouched.
+        """
+        if not is_builtin_provider(server.http_auth_type):
+            return server
+        token = self.auth_service.create_scoped_mcp_token(
+            self.user, assistant_id=assistant_id, mcp_server_id=server.id
+        )
+        authenticated = copy.copy(server)
+        authenticated.http_auth_config_schema = {"token": token}
+        return authenticated
+
+    async def _save_generated_image(self, image: "GeneratedImage") -> "File":
+        """Persist a tool-produced image as a generated file."""
+        extension = _extension_for_mime(image.mime_type)
+        return await self.file_service.save_image_from_bytes(
+            image.data,
+            name=f"generated_image.{extension}",
+            mimetype=image.mime_type,
+        )
 
     def validate_space_assistant(
         self,
@@ -550,6 +598,7 @@ class AssistantService:
         hidden: bool = False,
         origin: AssistantOrigin = AssistantOrigin.USER,
         managing_flow_id: UUID | None = None,
+        enabled_capabilities: list[CapabilityPurpose] | None = None,
     ) -> tuple[Assistant, list[ResourcePermission]]:
         space = await self.space_service.get_space(space_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
@@ -562,6 +611,21 @@ class AssistantService:
         completion_model = await self.get_completion_model(space=space)
         assert space.id is not None
 
+        if enabled_capabilities:
+            from eneo.mcp_servers.application.capability_resolver import (
+                validate_capability_additions,
+            )
+
+            if set(enabled_capabilities) - set(space.enabled_capabilities):
+                raise BadRequestException("Capability is not enabled in this space")
+            await validate_capability_additions(
+                self.repo.session,
+                self.user.tenant_id,
+                enabled_capabilities,
+                [],
+                space.security_classification,
+            )
+
         if not template_data:
             assistant = self.factory.create_assistant(
                 name=name,
@@ -573,6 +637,7 @@ class AssistantService:
                 managing_flow_id=managing_flow_id,
             )
 
+            assistant.enabled_capabilities = sorted(set(enabled_capabilities or []))
             space.add_assistant(assistant)
             refreshed_space = await self.space_repo.update(space)
             try:
@@ -595,6 +660,7 @@ class AssistantService:
                 template_data=template_data,
                 completion_model=completion_model,
                 name=name,
+                enabled_capabilities=enabled_capabilities,
             )
 
         # TODO: Review how we get the permissions to the presentation layer
@@ -610,6 +676,7 @@ class AssistantService:
         template_data: "TemplateCreate",
         completion_model: Optional["CompletionModel"],
         name: str | None = None,
+        enabled_capabilities: list[CapabilityPurpose] | None = None,
     ):
         template = await self.assistant_template_service.get_assistant_template(
             assistant_template_id=template_data.id
@@ -657,6 +724,8 @@ class AssistantService:
             template=template,
             description=template.description,
         )
+
+        assistant.enabled_capabilities = sorted(set(enabled_capabilities or []))
 
         # Validate before persisting: the factory-built assistant already carries
         # the final model + attachments, so a set that doesn't fit is rejected
@@ -879,6 +948,26 @@ class AssistantService:
             effective_mcp_servers = assistant.mcp_servers
         if assistant.has_knowledge():
             effective_mcp_servers = []
+        requested_capabilities = set(assistant.enabled_capabilities)
+        if not space.is_personal():
+            requested_capabilities &= set(space.enabled_capabilities)
+        if effective_config is not None and effective_config.mcp_enforced:
+            requested_capabilities = set(effective_config.enabled_capabilities)
+        if requested_capabilities:
+            resolution = await resolve_capability_servers(
+                self.repo.session,
+                self.user.tenant_id,
+                effective_mcp_servers,
+                requested_capabilities=sorted(requested_capabilities),
+                supports_tool_calling=model.supports_tool_calling,
+                user_group_ids=self.user.user_groups_ids,
+                allowed_purposes=allowed_capability_purposes(self.user.permissions),
+                space_security_classification=space.security_classification,
+            )
+            effective_mcp_servers = [
+                *resolution.general_servers,
+                *resolution.capability_servers,
+            ]
         await self._validate_skill_activation_fit(
             validation_plan=validation_plan,
             candidate_skill_ids=candidate_skill_ids,
@@ -1289,6 +1378,7 @@ class AssistantService:
         completion_model_id = update.completion_model_id
         completion_model_kwargs = update.completion_model_kwargs
         logging_enabled = update.logging_enabled
+        enabled_capabilities = update.enabled_capabilities
         groups = update.groups
         websites = update.websites
         integration_knowledge_ids = update.integration_knowledge_ids
@@ -1375,6 +1465,7 @@ class AssistantService:
                 websites,
                 integration_knowledge_ids,
                 mcp_server_ids,
+                enabled_capabilities,
                 mcp_tools,
                 attachment_ids,
                 insight_enabled,
@@ -1542,14 +1633,35 @@ class AssistantService:
                 MCPServers as MCPServersTable,
             )
 
+            # Capability servers are markers resolved to the active provider
+            # at ask time, so a deactivated one may legitimately stay
+            # attached; only general servers must be currently enabled.
             mcp_servers_query = (
-                sa.select(MCPServersTable.id)
+                sa.select(MCPServersTable.id, MCPServersTable.purpose)
                 .where(MCPServersTable.tenant_id == self.user.tenant_id)
-                .where(MCPServersTable.is_enabled == True)  # noqa: E712
+                .where(
+                    sa.or_(
+                        MCPServersTable.is_enabled == True,  # noqa: E712
+                        MCPServersTable.purpose != GENERAL_PURPOSE,
+                    )
+                )
                 .where(MCPServersTable.id.in_(mcp_server_ids))
             )
             mcp_servers_result = await self.repo.session.execute(mcp_servers_query)
-            enabled_server_ids = {row[0] for row in mcp_servers_result.fetchall()}
+            enabled_server_rows = mcp_servers_result.fetchall()
+            if any(is_capability_purpose(row[1]) for row in enabled_server_rows):
+                raise BadRequestException(
+                    "Use enabled_capabilities for functions, not MCP server IDs"
+                )
+            enabled_server_ids = {row[0] for row in enabled_server_rows}
+            duplicate_purposes = duplicate_capability_purposes(
+                row[1] for row in enabled_server_rows
+            )
+            if duplicate_purposes:
+                raise BadRequestException(
+                    "Only one MCP server per capability can be attached: "
+                    + ", ".join(duplicate_purposes)
+                )
 
             missing_tenant_enabled_ids = [
                 str(server_id)
@@ -1634,6 +1746,32 @@ class AssistantService:
         # Store MCP server IDs and tool settings for repository to handle.
         setattr(assistant, "_mcp_server_ids", mcp_server_ids)
         setattr(assistant, "_mcp_tool_settings", mcp_tools)
+
+        if enabled_capabilities is not None:
+            from eneo.mcp_servers.application.capability_resolver import (
+                validate_capability_additions,
+            )
+
+            added = set(enabled_capabilities) - set(assistant.enabled_capabilities)
+            offered = set(space.enabled_capabilities)
+            if (
+                update_effective_config is not None
+                and not isinstance(update_effective_config, NotProvided)
+                and update_effective_config.mcp_enforced
+            ):
+                offered = set(update_effective_config.enabled_capabilities)
+            if added - offered:
+                raise BadRequestException(
+                    "Capability is not enabled in this space or policy"
+                )
+            await validate_capability_additions(
+                self.repo.session,
+                self.user.tenant_id,
+                enabled_capabilities,
+                assistant.enabled_capabilities,
+                space.security_classification,
+            )
+            assistant.enabled_capabilities = sorted(set(enabled_capabilities))
 
         assistant.update(
             name=name,
@@ -2084,7 +2222,6 @@ class AssistantService:
         selected_model_route: str,
         initial_skill_context_tokens: int,
         version: int = 1,
-        web_search_results: Sequence["WebSearchResult"] | None = None,
         assistant_selector_tokens: int = 0,
     ) -> str | AsyncGenerator[Completion, None]:
         # Capture tenant_id outside the generator so the abort-path background save
@@ -2166,11 +2303,11 @@ class AssistantService:
                             )
                             yield chunk
 
-                        if chunk.response_type == ResponseType.FILES:
-                            image_file = await self.file_service.save_image_from_bytes(
-                                chunk.image_data
-                            )
-
+                        if (
+                            chunk.response_type == ResponseType.FILES
+                            and chunk.image is not None
+                        ):
+                            image_file = await self._save_generated_image(chunk.image)
                             generated_files.append(image_file)
                             chunk.generated_file = image_file
                             yield chunk
@@ -2213,6 +2350,8 @@ class AssistantService:
                                         # tool output; keep it so later turns can replay.
                                         if tc.result is not None:
                                             existing.result = tc.result
+                                        if tc.meta is not None:
+                                            existing.meta = tc.meta
                                     else:
                                         # Add new tool call
                                         tool_calls.append(
@@ -2229,6 +2368,7 @@ class AssistantService:
                                                 result_status=tc.result_status,
                                                 result=tc.result,
                                                 mcp_tool_name=tc.mcp_tool_name,
+                                                meta=tc.meta,
                                             )
                                         )
                             yield chunk
@@ -2399,7 +2539,6 @@ class AssistantService:
                         generated_files=generated_files,
                         logging_details=response.extended_logging
                         or LoggingDetails(model_kwargs={}),
-                        web_search_results=list(web_search_results or []),
                         tool_calls=tool_calls if tool_calls else None,
                         mcp_tool_references=filter_mcp_tool_references(
                             response_string=response_string,
@@ -2508,10 +2647,16 @@ class AssistantService:
                             result_status=tc.result_status,
                             result=tc.result,
                             mcp_tool_name=tc.mcp_tool_name,
+                            meta=tc.meta,
                         )
                         for tc in non_streaming_tool_metadata
                     ]
                     final_reasoning = getattr(answer, "reasoning_content", None)
+                    for image in cast(
+                        list[GeneratedImage],
+                        getattr(answer, "generated_images", None) or [],
+                    ):
+                        generated_files.append(await self._save_generated_image(image))
 
             non_streaming_mcp_refs = filter_mcp_tool_references(
                 response_string=final_answer,
@@ -2605,7 +2750,6 @@ class AssistantService:
                 info_blob_chunks=reference_chunks,
                 logging_details=response.extended_logging
                 or LoggingDetails(model_kwargs={}),
-                web_search_results=list(web_search_results or []),
                 tool_calls=non_streaming_tool_calls or None,
                 mcp_tool_references=non_streaming_mcp_refs or None,
                 reasoning=final_reasoning,
@@ -2737,10 +2881,10 @@ class AssistantService:
         stream: bool = False,
         tool_assistant_id: Optional["UUID"] = None,
         version: int = 1,
-        use_web_search: bool = False,
         assistant_selector_tokens: int = 0,
         require_tool_approval: bool = False,
         disabled_mcp_server_ids: list["UUID"] | None = None,
+        disabled_capabilities: list[CapabilityPurpose] | None = None,
     ):
         # PRD §6 "Critical tests #2": defense-in-depth — never run a Help
         # Assistant via the normal ask path. Both ``POST /assistants/{id}/sessions/``
@@ -2910,6 +3054,46 @@ class AssistantService:
                 server for server in base_mcp_servers if server.id not in disabled_ids
             ]
 
+        # Resolve stored purposes independently of provider attachments. User group
+        # routing, permissions, classification, tool calling and opt-outs are
+        # checked for this turn without modifying saved selections.
+        capability_base = (
+            mcp_servers_override
+            if mcp_servers_override is not None
+            else list(assistant_to_ask.mcp_servers)
+        )
+        # Provider IDs never grant a capability, including old attachments
+        # after a purpose edit. A general server whose classification has
+        # dropped below the space's is skipped this turn rather than called.
+        mcp_servers_override = general_servers_for_space(
+            capability_base, space.security_classification
+        )
+        capability_mcp_servers: list["MCPServer"] = []
+        requested_capabilities = set(assistant_to_ask.enabled_capabilities)
+        if not space.is_personal():
+            requested_capabilities &= set(space.enabled_capabilities)
+        if effective_config is not None and effective_config.mcp_enforced:
+            requested_capabilities = set(effective_config.enabled_capabilities)
+        requested_capabilities -= set(disabled_capabilities or [])
+        if requested_capabilities:
+            resolution = await resolve_capability_servers(
+                self.repo.session,
+                self.user.tenant_id,
+                capability_base,
+                requested_capabilities=sorted(requested_capabilities),
+                supports_tool_calling=effective_completion_model.supports_tool_calling,
+                user_group_ids=self.user.user_groups_ids,
+                allowed_purposes=allowed_capability_purposes(self.user.permissions),
+                space_security_classification=space.security_classification,
+            )
+            mcp_servers_override = resolution.general_servers
+            capability_mcp_servers = [
+                self._with_builtin_provider_token(
+                    server, assistant_id=assistant_to_ask.id
+                )
+                for server in resolution.capability_servers
+            ]
+
         # This message's own uploads have no save-time fit gate and are inlined
         # whole, so reject an upload that can't fit before any session/question
         # row is created — same "fail before persisting" carve-out as governance.
@@ -3009,12 +3193,6 @@ class AssistantService:
             )
         assert question_id is not None
 
-        if use_web_search and version == 2:
-            web_search = await self.web_search
-            web_search_results = await web_search.search(search_query=question)
-        else:
-            web_search_results = []
-
         # Internal (loopback) MCP servers are scoped by one short-lived token
         # per completion, minted only when some server actually attaches.
         scoped_token: str | None = None
@@ -3104,7 +3282,7 @@ class AssistantService:
                 files=completion_file_inputs.completion_message_files,
                 stream=stream,
                 version=version,
-                web_search_results=web_search_results,
+                capability_mcp_servers=capability_mcp_servers,
                 require_tool_approval=require_tool_approval,
                 completion_model_override=completion_model_override,
                 model_kwargs_override=model_kwargs_override,
@@ -3159,7 +3337,6 @@ class AssistantService:
             selected_model_route=model_route,
             initial_skill_context_tokens=(initial_skill_snapshot.measurement.tokens),
             version=version,
-            web_search_results=web_search_results,
             assistant_selector_tokens=assistant_selector_tokens,
         )
 
@@ -3190,7 +3367,6 @@ class AssistantService:
                 ]
             ),
             description=assistant_to_ask.description,
-            web_search_results=web_search_results,
             question_id=question_id,
             mcp_tool_references=mcp_tool_references,
         )
@@ -3294,6 +3470,11 @@ class AssistantService:
         mcp_server_db = await self.repo.session.scalar(mcp_server_query)
         if mcp_server_db is None:
             raise BadRequestException("MCP server is not enabled for this tenant")
+
+        if is_capability_purpose(mcp_server_db.purpose):
+            raise BadRequestException(
+                "Use enabled_capabilities for functions, not MCP server IDs"
+            )
 
         effective_config = await self._resolve_effective_config(
             space=space, assistant=assistant

@@ -79,6 +79,8 @@ class FileIconBackfillSettings(BaseSettings):
 
 
 class FileIconBackfillState(StrEnum):
+    PREPARING = "preparing"
+    PAUSED = "paused"
     WAITING_FOR_CAPACITY = "waiting_for_capacity"
     WAITING_FOR_OBJECT_STORE = "waiting_for_object_store"
     ACTIVE = "active"
@@ -96,6 +98,20 @@ class FileIconBackfillResult:
     cancelled_count: int
     failed_count: int
     detail: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class FileIconBackfillStatus:
+    state: FileIconBackfillState
+    paused: bool
+    target_kind: StorageKind | None
+    detail: str | None
+    capacity_required_bytes: int | None
+    capacity_admitted_bytes: int
+    configured_auto_inline_max_bytes: int
+    configured_capacity_ack_bytes: int
+    configured_resume_revision: int
+    campaign_resume_revision: int | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,6 +175,76 @@ class _AdmissionContended(Exception):
     pass
 
 
+async def set_file_icon_backfill_paused(session: AsyncSession, *, paused: bool) -> None:
+    """Change only the temporary pause, within the caller's transaction."""
+    changed = await session.execute(
+        sa.update(FileIconBackfillAdmissionState)
+        .where(FileIconBackfillAdmissionState.singleton.is_(True))
+        .values(paused=paused)
+    )
+    if affected_row_count(changed) != 1:
+        raise ObjectContentStateError("File/Icon backfill admission state is missing")
+
+
+async def read_file_icon_backfill_status(
+    session: AsyncSession, settings: FileIconBackfillSettings
+) -> FileIconBackfillStatus:
+    """Read migration facts; callers use a read-only, consistent snapshot.
+
+    Pre-campaign capacity sums ledger metadata on demand. It neither reads
+    payloads nor persists a second copy of the worker's capacity decision.
+    """
+    repository = _FileIconBackfillRepository(session)
+    paused = await repository.is_paused()
+    campaign = await session.scalar(sa.select(FileIconBackfillCampaign))
+    required_bytes = None
+    if campaign is not None:
+        state = FileIconBackfillState(campaign.state)
+        target_kind = StorageKind(campaign.target_kind)
+        detail = campaign.halt_reason
+    else:
+        state = FileIconBackfillState.PREPARING
+        target_kind = None
+        pending = await session.scalar(
+            sa.select(sa.exists().where(FileIconBackfillItems.state == "pending"))
+        )
+        detail = "The worker is finalizing legacy metadata before the capacity decision"
+        if not pending:
+            target_kind = await repository.policy_target()
+            if (
+                await repository.has_source_items()
+                and target_kind is StorageKind.OBJECT_STORE
+            ):
+                state = FileIconBackfillState.WAITING_FOR_OBJECT_STORE
+                detail = (
+                    "Select PostgreSQL inline for legacy adoption; optional object "
+                    "storage moves can follow after the migration completes"
+                )
+            else:
+                required_bytes = await repository.capacity_required_bytes()
+                if not repository.capacity_granted(settings, required_bytes):
+                    state = FileIconBackfillState.WAITING_FOR_CAPACITY
+                    detail = repository.capacity_detail(required_bytes)
+                else:
+                    detail = "Admission is ready for the next migration worker run"
+    return FileIconBackfillStatus(
+        state=state,
+        paused=paused,
+        target_kind=target_kind,
+        detail=detail,
+        capacity_required_bytes=required_bytes,
+        capacity_admitted_bytes=(
+            0 if campaign is None else campaign.capacity_admitted_bytes
+        ),
+        configured_auto_inline_max_bytes=settings.auto_inline_max_bytes,
+        configured_capacity_ack_bytes=settings.inline_capacity_ack,
+        configured_resume_revision=settings.resume_revision,
+        campaign_resume_revision=(
+            None if campaign is None else campaign.resume_revision
+        ),
+    )
+
+
 class _FileIconBackfillRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -199,11 +285,11 @@ class _FileIconBackfillRepository:
                         settings.resume_revision,
                     )
                     required_bytes = campaign.capacity_admitted_bytes + additional_bytes
-                    if additional_bytes > 0 and not self._capacity_granted(
+                    if additional_bytes > 0 and not self.capacity_granted(
                         settings,
                         required_bytes,
                     ):
-                        campaign.halt_reason = self._capacity_detail(required_bytes)
+                        campaign.halt_reason = self.capacity_detail(required_bytes)
                     else:
                         campaign.state = FileIconBackfillState.ACTIVE.value
                         campaign.halt_reason = None
@@ -240,12 +326,12 @@ class _FileIconBackfillRepository:
 
         admission_generation = await self.admission_generation()
         required_bytes = await self.capacity_required_bytes()
-        capacity_granted = self._capacity_granted(settings, required_bytes)
+        capacity_granted = self.capacity_granted(settings, required_bytes)
         if not capacity_granted:
             return _Campaign(
                 state=FileIconBackfillState.WAITING_FOR_CAPACITY,
                 target_kind=StorageKind.POSTGRES_INLINE,
-                detail=self._capacity_detail(required_bytes),
+                detail=self.capacity_detail(required_bytes),
                 admission_generation=admission_generation,
             )
         return await self._insert_campaign(
@@ -262,6 +348,18 @@ class _FileIconBackfillRepository:
             raise ObjectContentStateError(
                 "File/Icon backfill admission state is missing"
             )
+
+    async def is_paused(self) -> bool:
+        paused = await self._session.scalar(
+            sa.select(FileIconBackfillAdmissionState.paused).where(
+                FileIconBackfillAdmissionState.singleton.is_(True)
+            )
+        )
+        if paused is None:
+            raise ObjectContentStateError(
+                "File/Icon backfill admission state is missing"
+            )
+        return paused
 
     async def _insert_campaign(
         self,
@@ -295,7 +393,7 @@ class _FileIconBackfillRepository:
         )
 
     @staticmethod
-    def _capacity_granted(
+    def capacity_granted(
         settings: FileIconBackfillSettings,
         required_bytes: int,
     ) -> bool:
@@ -305,7 +403,7 @@ class _FileIconBackfillRepository:
         )
 
     @staticmethod
-    def _capacity_detail(required_bytes: int) -> str:
+    def capacity_detail(required_bytes: int) -> str:
         return (
             "The upgrade is complete and existing File/Icon content remains "
             "readable, but legacy adoption is waiting for an inline capacity "
@@ -1126,6 +1224,9 @@ class FileIconBackfill:
         self._waiting_capacity_result: tuple[FileIconBackfillResult, int] | None = None
 
     async def run_once(self) -> FileIconBackfillResult:
+        async with self._database.session() as session, session.begin():
+            if await _FileIconBackfillRepository(session).is_paused():
+                return self._paused_result()
         if self._completed_result is not None:
             async with self._database.session() as session, session.begin():
                 state = await _FileIconBackfillRepository(session).campaign_state()
@@ -1195,6 +1296,10 @@ class FileIconBackfill:
             async with self._database.session() as session, session.begin():
                 repository = _FileIconBackfillRepository(session)
                 await repository.lock_admission()
+                # Serialize the pause with admission/claims on every replica.
+                # Already claimed work may finish after the pause commits.
+                if await repository.is_paused():
+                    return self._paused_result(), None
                 if not await repository.has_campaign():
                     admission = await repository.admit(self._settings)
                     if not admission.terminal:
@@ -1321,6 +1426,15 @@ class FileIconBackfill:
                 failed_count=failed_count,
             ),
             None,
+        )
+
+    def _paused_result(self) -> FileIconBackfillResult:
+        return self._result(
+            _Campaign(
+                state=FileIconBackfillState.PAUSED,
+                target_kind=None,
+                detail="File/Icon legacy adoption is paused by the operator",
+            )
         )
 
     async def _contended_result(self) -> FileIconBackfillResult:

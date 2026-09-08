@@ -75,6 +75,9 @@
         toggleMcp={draft.toggleMcp}
         toggleMcpDefault={draft.toggleMcpDefault}
         toggleMcpTool={draft.toggleMcpTool}
+        capabilityRows={draft.capabilityRows}
+        toggleCapability={draft.toggleCapability}
+        toggleCapabilityDefault={draft.toggleCapabilityDefault}
       />
       <PromptEnforcementSection
         bind:promptEnabled={draft.promptEnabled}

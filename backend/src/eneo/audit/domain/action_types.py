@@ -75,6 +75,9 @@ class ActionType(str, Enum):
     FILE_DELETED = "file_deleted"
     FILE_ORIGINAL_DOWNLOAD_LINK_CREATED = "file_original_download_link_created"
     FILE_SIGNED_URL_MINTED = "file_signed_url_minted"
+    INFO_BLOB_ORIGINAL_DOWNLOAD_LINK_CREATED = (
+        "info_blob_original_download_link_created"
+    )
     WEBSITE_CREATED = "website_created"
     WEBSITE_UPDATED = "website_updated"
     WEBSITE_DELETED = "website_deleted"
@@ -102,6 +105,9 @@ class ActionType(str, Enum):
     TRANSCRIPTION_MODEL_UPDATED = "transcription_model_updated"
     TRANSCRIPTION_MODEL_DELETED = "transcription_model_deleted"
     TRANSCRIPTION_MODEL_MIGRATED = "transcription_model_migrated"
+    IMAGE_MODEL_CREATED = "image_model_created"
+    IMAGE_MODEL_UPDATED = "image_model_updated"
+    IMAGE_MODEL_DELETED = "image_model_deleted"
     TEMPLATE_CREATED = "template_created"
     TEMPLATE_UPDATED = "template_updated"
     TEMPLATE_DELETED = "template_deleted"

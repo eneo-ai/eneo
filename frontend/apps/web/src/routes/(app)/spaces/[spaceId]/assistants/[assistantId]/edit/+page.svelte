@@ -16,6 +16,9 @@
   import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";
   import SelectKnowledge from "$lib/features/knowledge/components/select/SelectKnowledge.svelte";
   import SelectMCPServers from "$lib/features/mcp/components/SelectMCPServers.svelte";
+  import PolicyFunctions from "$lib/features/mcp/components/PolicyFunctions.svelte";
+  import CapabilityToggle from "$lib/features/mcp/components/CapabilityToggle.svelte";
+  import { CAPABILITIES, getCapability } from "$lib/features/mcp/capabilities";
   import PromptVersionDialog from "$lib/features/prompts/components/PromptVersionDialog.svelte";
   import PromptGuideModal from "$lib/features/prompt-guide/components/PromptGuideModal.svelte";
   import dayjs from "dayjs";
@@ -639,9 +642,9 @@
         </Settings.Row>
       </Settings.Group>
 
-      <Settings.Group title={m.mcp_servers()}>
+      <Settings.Group title={m.tools()}>
         <Settings.Row
-          title={m.mcp_servers()}
+          title={m.tools()}
           description={m.select_mcp_servers_description()}
           hasChanges={$currentChanges.diff.mcp_servers !== undefined ||
             $currentChanges.diff.mcp_tools !== undefined}
@@ -656,7 +659,11 @@
             {#if availableMCPServers && availableMCPServers.length > 0}
               <div class="border-default bg-secondary/30 divide-default divide-y rounded-lg border">
                 {#each availableMCPServers as server (server.id)}
-                  <p class="text-default px-3 py-2 text-sm font-medium">{server.name}</p>
+                  <!-- Capability providers are policy-granted capabilities, not
+                       servers: show the capability, never the provider. -->
+                  <p class="text-default px-3 py-2 text-sm font-medium">
+                    {getCapability(server.purpose)?.label() ?? server.name}
+                  </p>
                 {/each}
               </div>
             {:else}
@@ -677,6 +684,35 @@
           {/if}
         </Settings.Row>
       </Settings.Group>
+
+      {#if !mcpEnforced}
+        <Settings.Group title={m.capabilities()}>
+          <Settings.Row
+            title={m.capabilities()}
+            description={m.capabilities_row_description()}
+            hasChanges={$currentChanges.diff.enabled_capabilities !== undefined}
+            revertFn={() => {
+              discardChanges("enabled_capabilities");
+            }}
+          >
+            <div class="border-default overflow-hidden rounded-xl border">
+              {#each CAPABILITIES as capability (capability.purpose)}
+                <CapabilityToggle
+                  {capability}
+                  selectedModel={$update.completion_model}
+                  bind:enabledCapabilities={$update.enabled_capabilities}
+                />
+              {/each}
+            </div>
+          </Settings.Row>
+        </Settings.Group>
+      {:else if effectiveConfig}
+        <Settings.Group title={m.capabilities()}>
+          <Settings.Row title={m.capabilities()} description={m.functions_policy_description()}>
+            <PolicyFunctions config={effectiveConfig} selectedModel={$update.completion_model} />
+          </Settings.Row>
+        </Settings.Group>
+      {/if}
 
       <Settings.Group title={m.security_and_privacy()}>
         {#if isHelpAssistant}

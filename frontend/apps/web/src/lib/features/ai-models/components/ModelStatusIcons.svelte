@@ -1,7 +1,12 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <script context="module" lang="ts">
-  import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@eneo/eneo-js";
+  import type {
+    CompletionModel,
+    EmbeddingModel,
+    ImageModel,
+    TranscriptionModel
+  } from "@eneo/eneo-js";
   import { getDeprecationStatus } from "$lib/features/ai-models/formatModelStats";
   import { m } from "$lib/paraglide/messages";
 
@@ -13,7 +18,7 @@
   };
 
   export function getStatusIcons(
-    model: CompletionModel | EmbeddingModel | TranscriptionModel
+    model: CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel
   ): StatusIcon[] {
     const icons: StatusIcon[] = [];
 
@@ -76,7 +81,7 @@
   import Clock from "lucide-svelte/icons/clock";
   import ModelCostBadge from "./ModelCostBadge.svelte";
 
-  export let model: CompletionModel | EmbeddingModel | TranscriptionModel;
+  export let model: CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel;
   /** Suppress the cost badge — used by surfaces where cost is shown elsewhere. */
   export let showCost: boolean = true;
 

@@ -134,6 +134,9 @@ CATEGORY_MAPPINGS = {
     ActionType.AI_BUILDER_CLIENT_ERROR_REPORTED.value: "user_actions",
     ActionType.TRANSCRIPTION_MODEL_DELETED.value: "user_actions",
     ActionType.TRANSCRIPTION_MODEL_MIGRATED.value: "user_actions",
+    ActionType.IMAGE_MODEL_CREATED.value: "user_actions",
+    ActionType.IMAGE_MODEL_UPDATED.value: "user_actions",
+    ActionType.IMAGE_MODEL_DELETED.value: "user_actions",
     # Security Events
     ActionType.SECURITY_CLASSIFICATION_CREATED.value: "security_events",
     ActionType.SECURITY_CLASSIFICATION_UPDATED.value: "security_events",
@@ -149,6 +152,7 @@ CATEGORY_MAPPINGS = {
     ActionType.FILE_DELETED.value: "file_operations",
     ActionType.FILE_ORIGINAL_DOWNLOAD_LINK_CREATED.value: "file_operations",
     ActionType.FILE_SIGNED_URL_MINTED.value: "file_operations",
+    ActionType.INFO_BLOB_ORIGINAL_DOWNLOAD_LINK_CREATED.value: "file_operations",
     # Integration Events
     ActionType.INTEGRATION_ADDED.value: "integration_events",
     ActionType.INTEGRATION_REMOVED.value: "integration_events",

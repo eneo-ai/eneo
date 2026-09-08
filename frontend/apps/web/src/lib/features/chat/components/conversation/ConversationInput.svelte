@@ -26,10 +26,10 @@
   import { getAppContext } from "$lib/core/AppContext";
   import { m } from "$lib/paraglide/messages";
   import { SvelteSet } from "svelte/reactivity";
-  import Globe from "lucide-svelte/icons/globe";
   import AlertTriangle from "lucide-svelte/icons/alert-triangle";
   import X from "lucide-svelte/icons/x";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
+  import { canUseCapability, isCapabilityPurpose } from "$lib/features/mcp/capabilities";
   import { getContextErrorInfo, isConversationSubmitDisabled } from "./conversationInputState";
 
   type McpServerSummary = {
@@ -37,10 +37,15 @@
     name: string;
     description?: string | null;
     icon_url?: string | null;
+    /** "general" for ordinary MCP servers, otherwise a capability purpose (web search, image generation). */
+    purpose?: string | null;
+    /** Org-level availability: a deactivated server stays attached but is never called. */
+    is_enabled?: boolean;
+    readiness_reason?: string | null;
   };
 
   const chat = getChatService();
-  const { featureFlags, tenant, user } = getAppContext();
+  const { tenant, user } = getAppContext();
 
   const {
     state: { attachments, isUploading, uploadError },
@@ -91,11 +96,7 @@
     const context = mcpServerPreferencesContext();
     if (!context) return;
 
-    saveMcpServerPreferences(
-      context,
-      mcpServers.map((server) => server.id),
-      disabledServerIds
-    );
+    saveMcpServerPreferences(context, toolPreferenceIds, disabledServerIds);
   }
 
   onMount(() => {
@@ -155,7 +156,6 @@
   async function ask() {
     if (isAskingDisabled) return;
     inputError = null;
-    const webSearchEnabled = featureFlags.showWebSearch && useWebSearch;
     const files = $attachments.map((file) => file?.fileRef).filter((file) => file !== undefined);
     abortController = new AbortController();
     const tools =
@@ -176,7 +176,6 @@
         $question,
         files,
         tools,
-        webSearchEnabled,
         toolApprovalEnabled,
         abortController,
         disabledMcpServerIds.size > 0 ? Array.from(disabledMcpServerIds) : undefined
@@ -255,8 +254,6 @@
     chat.requestPreflight($question, fileIds, tools);
   });
 
-  let useWebSearch = $state(false);
-
   const shouldShowMentionButton = $derived.by(() => {
     const hasTools = chat.partner.tools.assistants.length > 0;
     const isEnabled =
@@ -281,8 +278,51 @@
     return [];
   });
 
+  // The tenant's capability providers (web search, image generation) flow
+  // through the same MCP inheritance chain as other servers but are presented
+  // as capabilities, not servers: split them out of the generic rows and give
+  // each its own popover entry. A capability the user's role may not use is
+  // hidden; the backend never attaches its tools for that user anyway.
+  const generalMcpServers = $derived(
+    mcpServers
+      .filter((server) => !isCapabilityPurpose(server.purpose))
+      .map((server) => ({
+        ...server,
+        available: server.is_enabled !== false,
+        reason: server.is_enabled === false ? "server_disabled" : null
+      }))
+  );
+  const capabilityServers = $derived.by(() => {
+    const partner = chat.partner;
+    if (!partner) return [];
+    const effective = "effective_config" in partner ? partner.effective_config : undefined;
+    const purposes = effective?.mcp_enforced
+      ? effective.enabled_capabilities
+      : "enabled_capabilities" in partner
+        ? partner.enabled_capabilities
+        : [];
+    const availability = effective?.mcp_enforced
+      ? effective.available_capabilities
+      : "available_capabilities" in partner
+        ? partner.available_capabilities
+        : [];
+    return (purposes ?? [])
+      .filter((p) => canUseCapability(user, p))
+      .map((purpose) => {
+        const state = availability?.find((c) => c.purpose === purpose);
+        return {
+          id: "capability:" + purpose,
+          purpose,
+          name: purpose,
+          available: state?.available ?? false,
+          reason: state?.reason ?? "no_active_provider"
+        };
+      });
+  });
+  const toolPreferenceIds = $derived([...generalMcpServers, ...capabilityServers].map((s) => s.id));
+
   $effect(() => {
-    const validIds = new Set(mcpServers.map((server) => server.id));
+    const validIds = new Set(toolPreferenceIds);
     let selectionChanged = false;
     for (const id of Array.from(disabledMcpServerIds)) {
       if (!validIds.has(id)) {
@@ -304,10 +344,15 @@
     if (conversation === seededConversation) return;
     seededConversation = conversation;
     untrack(() => {
-      const availableServerIds = mcpServers.map((server) => server.id);
+      const availableServerIds = toolPreferenceIds;
       const defaultDisabledServerIds =
         partner && "effective_config" in partner
-          ? (partner.effective_config?.default_disabled_mcp_server_ids ?? [])
+          ? [
+              ...(partner.effective_config?.default_disabled_mcp_server_ids ?? []),
+              ...(partner.effective_config?.default_disabled_capabilities ?? []).map(
+                (p) => "capability:" + p
+              )
+            ]
           : [];
       const preferencesContext = mcpServerPreferencesContext();
       const preferences =
@@ -330,8 +375,10 @@
     });
   });
 
-  // Check if the assistant has MCP servers/tools
-  const hasMcpTools = $derived(mcpServers.length > 0);
+  // Whether the popover has anything to show: general servers plus the
+  // capabilities this user may use (a capability the role withholds is not a
+  // row, so it must not open an empty popover either).
+  const hasMcpTools = $derived(generalMcpServers.length + capabilityServers.length > 0);
 
   // Knowledge sources attached to the partner (read-only indicator; knowledge
   // cannot be toggled per conversation the way MCP servers can).
@@ -401,9 +448,6 @@
     }).map((name) => ({ name }));
   });
 
-  const showWebSearch = $derived(
-    chat.partner.type === "default-assistant" && featureFlags.showWebSearch
-  );
   // ChatModelSelect edits the personal space's default assistant via the
   // SpacesManager context, which only the spaces route tree provides. Other
   // mounts of the default assistant (e.g. a deep link into the dashboard chat)
@@ -533,23 +577,13 @@
 
       {#if hasMcpTools || internalMcpServers.length > 0}
         <ChatMcpServers
-          servers={mcpServers}
+          servers={generalMcpServers}
+          {capabilityServers}
           internalServers={internalMcpServers}
           disabledServerIds={disabledMcpServerIds}
           onSelectionChange={persistMcpServerSelection}
           bind:autoAcceptTools
         />
-      {/if}
-
-      {#if showWebSearch}
-        <PromptInput.Button
-          variant={useWebSearch ? "secondary" : "ghost"}
-          onclick={() => (useWebSearch = !useWebSearch)}
-          title={m.search()}
-        >
-          <Globe class="size-4" />
-          <span class="hidden sm:inline">{m.search()}</span>
-        </PromptInput.Button>
       {/if}
     </PromptInput.Tools>
 

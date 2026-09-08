@@ -247,6 +247,8 @@ ASSISTANTS_READ_OVERRIDES: frozenset[str] = frozenset(
 )
 KNOWLEDGE_READ_OVERRIDES: frozenset[str] = frozenset({"run_semantic_search"})
 
+INFO_BLOBS_READ_OVERRIDES: frozenset[str] = frozenset({"generate_original_signed_url"})
+
 CONVERSATIONS_READ_OVERRIDES: frozenset[str] = frozenset(
     {
         "chat",

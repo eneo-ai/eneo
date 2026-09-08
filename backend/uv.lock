@@ -794,7 +794,6 @@ dependencies = [
     { name = "soundfile" },
     { name = "sqlalchemy-mixins" },
     { name = "sse-starlette" },
-    { name = "tavily-python" },
     { name = "tenacity" },
     { name = "tiktoken" },
     { name = "typing-extensions" },
@@ -889,7 +888,6 @@ requires-dist = [
     { name = "soundfile", specifier = ">=0.12.1,<0.13" },
     { name = "sqlalchemy-mixins", specifier = ">=2.0.5,<3" },
     { name = "sse-starlette", specifier = ">=1.6.1,<2" },
-    { name = "tavily-python", specifier = ">=0.5.1,<0.6" },
     { name = "tenacity", specifier = ">=8.2.1,<9" },
     { name = "tiktoken", specifier = ">=0,<1" },
     { name = "typing-extensions", specifier = ">=4.12.0,<5" },
@@ -3072,20 +3070,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/b5/b4/205b0d5241d934e8add0c38aa924c4f9fb7330834ff11e5444db964ec3f9/starlette-1.6.0.tar.gz", hash = "sha256:d4e3ac5e546444960c710297a3c9fc3f7ebae1b7e963f3d36173b49da535be9b", size = 2716969, upload-time = "2026-08-08T18:27:57.512Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c8/cb/6a6a47d5b464bd08695d254f3da6e7986cc70c9fa5d778eda57538edfe56/starlette-1.6.0-py3-none-any.whl", hash = "sha256:a86dd39d14bb45f85a3d18525215a9ef0cfd1f192ac793220e72598c90335f0c", size = 75969, upload-time = "2026-08-08T18:27:56.196Z" },
-]
-
-[[package]]
-name = "tavily-python"
-version = "0.5.4"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "httpx" },
-    { name = "requests" },
-    { name = "tiktoken" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/2c/72/f36a49c2fd344b45e6f1ddab59a7f809bff4f46dcc78af7ac9758461a5bf/tavily_python-0.5.4.tar.gz", hash = "sha256:fdad5303f9f6603a06fddcc7e21b128bebc1adf7694e553a664caf87eb2d2d9d", size = 109050, upload-time = "2025-04-02T22:01:06.477Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/2f/dd/63d1d2fddcaaee040745ea58d13b54c0b1483260ddae52eb59abf691f757/tavily_python-0.5.4-py3-none-any.whl", hash = "sha256:47f8c0b41283d44849fe9531596cd26d3de42a59618ef66f9e1244d8fedba404", size = 44419, upload-time = "2025-04-02T22:01:04.637Z" },
 ]
 
 [[package]]

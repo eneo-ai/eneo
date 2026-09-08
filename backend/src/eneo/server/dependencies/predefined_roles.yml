@@ -7,6 +7,8 @@ roles:
       - apps
       - collections
       - shared_spaces
+      - web_search
+      - image_generation
 
   - name: 'AI Configurator'
     permissions:
@@ -22,6 +24,8 @@ roles:
       - shared_spaces
       - flows_trace
       - assistant_debug
+      - web_search
+      - image_generation
 
   - name: 'Owner'
     permissions:
@@ -49,3 +53,5 @@ roles:
       - flows_ai_builder_review
       - flows_trace
       - assistant_debug
+      - web_search
+      - image_generation

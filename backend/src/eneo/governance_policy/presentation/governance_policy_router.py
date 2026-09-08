@@ -13,6 +13,7 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.governance_policy.domain.governance_policy import (
     GovernancePolicy,
+    PolicyCapability,
     PolicyCompletionModel,
     PolicyMcpServer,
 )
@@ -46,6 +47,10 @@ def _policy_changes(
     after_skills: list[ResolvedSkillBinding],
 ) -> dict[str, object]:
     changes: dict[str, object] = {}
+    before_caps = {c.purpose: c.is_default_enabled for c in before.capabilities}
+    after_caps = {c.purpose: c.is_default_enabled for c in after.capabilities}
+    if before_caps != after_caps:
+        changes["capabilities"] = {"old": before_caps, "new": after_caps}
 
     def _model_entries(policy: GovernancePolicy) -> list[dict[str, object]]:
         # Sort by id so a reordered-but-identical model set is not logged as a
@@ -229,6 +234,12 @@ async def update_governance_policy(
     policy = await service.update_policy(
         models_restriction=models_restriction,
         mcp_restriction=mcp_restriction,
+        capabilities=[
+            PolicyCapability(purpose=c.purpose, is_default_enabled=c.is_default_enabled)
+            for c in payload.mcp_restriction.capabilities
+        ]
+        if payload.mcp_restriction is not None
+        else None,
         prompt_enforcement=prompt_enforcement,
         reasoning_policy=reasoning_policy,
         skill_intents=skill_intents,

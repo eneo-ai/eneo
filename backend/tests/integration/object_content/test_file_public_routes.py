@@ -191,6 +191,11 @@ async def test_used_file_delete_returns_the_typed_preview_before_mutation(
     assert deletion.status_code == 409, deletion.text
     assert deletion.json()["code"] == "file_in_use"
     assert deletion.json()["eneo_error_code"] == 9044
+    assert deletion.json()["message"] == (
+        "File is still in use and cannot be deleted. "
+        "See details.blockers for the remaining references; "
+        "retry only after those references have been removed."
+    )
     assert deletion.json()["details"] == expected_preview
 
     async with db_container() as container:

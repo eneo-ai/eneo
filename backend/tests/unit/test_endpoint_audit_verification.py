@@ -140,6 +140,7 @@ class TestModelRouterAdminChecks:
         ("completion_models/presentation/tenant_completion_models_router.py", 3),
         ("embedding_models/presentation/tenant_embedding_models_router.py", 3),
         ("transcription_models/presentation/tenant_transcription_models_router.py", 3),
+        ("image_models/presentation/tenant_image_models_router.py", 3),
     ]
 
     @pytest.mark.parametrize("rel_path,expected_count", _ROUTER_FILES)

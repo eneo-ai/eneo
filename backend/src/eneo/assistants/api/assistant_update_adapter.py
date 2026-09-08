@@ -53,6 +53,8 @@ def _extract_common_update_fields(
         command_fields["mcp_server_ids"] = [
             server.id for server in (assistant.mcp_servers or [])
         ]
+    if "enabled_capabilities" in payload:
+        command_fields["enabled_capabilities"] = assistant.enabled_capabilities
     if "mcp_tools" in payload:
         command_fields["mcp_tools"] = [
             (tool.tool_id, tool.is_enabled) for tool in (assistant.mcp_tools or [])

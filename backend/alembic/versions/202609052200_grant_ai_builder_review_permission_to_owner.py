@@ -1,7 +1,7 @@
 """grant flows_ai_builder_review to existing Owner roles
 
 Revision ID: 202609052200
-Revises: 202609041000
+Revises: 202609041001
 Create Date: 2026-09-05 22:00:00.000000
 
 Reviewing a published flow's runs with the AI Builder becomes its own role
@@ -18,7 +18,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "202609052200"
-down_revision: str = "202609041000"
+down_revision: str = "202609041001"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
