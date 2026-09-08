@@ -18,6 +18,7 @@
   import { invalidate } from "$app/navigation";
   import { untrack } from "svelte";
   import type { Eneo, components } from "@eneo/eneo-js";
+  import { builtinToolCatalogLabels } from "$lib/features/chat/internalToolLabels";
 
   type MCPTool = components["schemas"]["MCPServerToolPublic"];
 
@@ -26,9 +27,17 @@
     serverName: string;
     tools: MCPTool[];
     eneoClient: Eneo;
+    /** Purpose and auth type of the server; a built-in provider's tools get localized labels. */
+    server?: { purpose?: string | null; http_auth_type?: string | null };
   };
 
-  const { mcpServerId, serverName: _serverName, tools: initialTools, eneoClient }: Props = $props();
+  const {
+    mcpServerId,
+    serverName: _serverName,
+    tools: initialTools,
+    eneoClient,
+    server = {}
+  }: Props = $props();
 
   let tools: MCPTool[] = $state(untrack(() => initialTools));
   let syncing = $state(false);
@@ -77,7 +86,16 @@
 
   /** Admin-facing label: rename override, then the tool's own title, then the protocol name. */
   function toolLabel(tool: MCPTool): string {
-    return tool.display_name ?? tool.title ?? tool.name;
+    return (
+      tool.display_name ??
+      builtinToolCatalogLabels(server, tool.name)?.title ??
+      tool.title ??
+      tool.name
+    );
+  }
+
+  function toolDescription(tool: MCPTool): string | null {
+    return builtinToolCatalogLabels(server, tool.name)?.description ?? tool.description ?? null;
   }
 
   // Derived: tools needing review
@@ -454,6 +472,7 @@
                   </div>
                 </div>
               {:else}
+                {@const description = toolDescription(tool)}
                 <!-- Normal tool -->
                 <div
                   class="hover:bg-hover-dimmer flex items-center gap-3 px-3 py-2.5 transition-all {tool.is_enabled_by_default
@@ -540,10 +559,10 @@
                           </button>
                         </Tooltip>
                       </div>
-                      {#if tool.description}
-                        <Tooltip text={tool.description} placement="bottom">
+                      {#if description}
+                        <Tooltip text={description} placement="bottom">
                           <p class="text-muted cursor-help truncate text-xs leading-snug">
-                            {tool.description}
+                            {description}
                           </p>
                         </Tooltip>
                       {/if}

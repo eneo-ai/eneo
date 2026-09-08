@@ -321,7 +321,7 @@ async def test_legacy_image_is_not_exposed_as_an_exact_original(
                 """
                 INSERT INTO files (
                     id, name, text, blob, checksum, size, mimetype, file_type,
-                    transcription, user_id, tenant_id, parent_file_id
+                    transcription, owner_user_id, tenant_id, parent_file_id
                 ) VALUES (
                     :id, 'legacy.png', NULL, :payload, :checksum, :size,
                     'image/png', 'image', NULL, :user_id, :tenant_id, NULL
@@ -354,6 +354,7 @@ async def test_legacy_image_is_not_exposed_as_an_exact_original(
         file_id=file_id,
         expires_at=int(time.time()) + 60,
         content_disposition=ContentDisposition.ATTACHMENT,
+        tenant_id=user.tenant_id,
     )
     original_download = await client.get(
         f"/api/v1/files/{file_id}/original/download/",
@@ -386,7 +387,7 @@ async def test_legacy_original_mint_does_not_read_payload(
                 """
                 INSERT INTO files (
                     id, name, text, blob, checksum, size, mimetype, file_type,
-                    transcription, user_id, tenant_id, parent_file_id
+                    transcription, owner_user_id, tenant_id, parent_file_id
                 ) VALUES (
                     :id, 'legacy.pdf', 'legacy text', :payload, :checksum,
                     :size, 'application/pdf', 'text', NULL,

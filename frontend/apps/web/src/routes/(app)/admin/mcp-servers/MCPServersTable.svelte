@@ -192,6 +192,7 @@
                   serverName={server.name}
                   tools={server.tools || []}
                   eneoClient={eneo}
+                  {server}
                 />
               </td>
             </tr>

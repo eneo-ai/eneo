@@ -13,8 +13,12 @@ const TRANSCRIPT = [
 const SEEK_LABEL = /Spela upp från|Play from/;
 const EDIT_LABEL = /Redigera repliken vid|Edit the turn at/;
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  // Let the dialog release its body scroll lock before jsdom is torn down.
+  await waitFor(() => {
+    expect(document.body.style.overflow).not.toBe("hidden");
+  });
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });

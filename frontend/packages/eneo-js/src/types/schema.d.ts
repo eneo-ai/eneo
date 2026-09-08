@@ -33044,6 +33044,8 @@ export interface components {
       arguments?: {
         [key: string]: unknown;
       } | null;
+      /** Generated File Ids */
+      generated_file_ids?: string[] | null;
       /** Mcp Tool Name */
       mcp_tool_name?: string | null;
       /** Meta */
@@ -47506,6 +47508,8 @@ export interface operations {
                     arguments?: {
                       [key: string]: unknown;
                     } | null;
+                    /** Generated File Ids */
+                    generated_file_ids?: string[] | null;
                     /** Mcp Tool Name */
                     mcp_tool_name?: string | null;
                     /** Meta */
@@ -47561,6 +47565,8 @@ export interface operations {
                     arguments?: {
                       [key: string]: unknown;
                     } | null;
+                    /** Generated File Ids */
+                    generated_file_ids?: string[] | null;
                     /** Mcp Tool Name */
                     mcp_tool_name?: string | null;
                     /** Meta */
@@ -47616,6 +47622,8 @@ export interface operations {
                     arguments?: {
                       [key: string]: unknown;
                     } | null;
+                    /** Generated File Ids */
+                    generated_file_ids?: string[] | null;
                     /** Mcp Tool Name */
                     mcp_tool_name?: string | null;
                     /** Meta */

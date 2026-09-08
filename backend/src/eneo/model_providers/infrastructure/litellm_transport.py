@@ -107,19 +107,36 @@ async def aimage_generation(**kwargs: Any) -> Any:
     return await call(**kwargs)
 
 
-_UNSUPPORTED_PARAM_RE = re.compile(r"Setting `(\w+)` is not supported")
+async def aimage_edit(**kwargs: Any) -> Any:
+    call = cast(Callable[..., Any], getattr(litellm, "aimage_edit"))
+    return await call(**kwargs)
+
+
+# LiteLLM's pre-call refusal ("Setting `response_format` is not supported by
+# openai, gpt-image-1"), its per-model list variant ("The following parameters
+# are not supported for model gpt-image-1: response_format, quality"), and the
+# provider's own rejection once the request was sent ("Unknown parameter:
+# 'quality'").
+_UNSUPPORTED_PARAM_RES = (
+    re.compile(r"Setting `(\w+)` is not supported"),
+    re.compile(r"not supported for model [^:]*: *(\w+)"),
+    re.compile(r"Unknown parameter: '(\w+)'"),
+)
 
 
 def unsupported_param(exc: BaseException) -> str | None:
     """The request parameter a model rejected, when that is what ``exc`` says.
 
     LiteLLM refuses parameters a model does not support before any network
-    call ("Setting `response_format` is not supported by openai, gpt-image-1")
-    and only names one per error, so callers drop it and retry.
+    call and providers reject unknown ones after it; each error names at least
+    one parameter, so callers drop the first and retry.
     """
     for candidate in _exception_chain(exc):
-        if isinstance(candidate, UnsupportedParamsError):
-            match = _UNSUPPORTED_PARAM_RE.search(str(candidate))
+        if not isinstance(candidate, (UnsupportedParamsError, BadRequestError)):
+            continue
+        text = str(candidate)
+        for pattern in _UNSUPPORTED_PARAM_RES:
+            match = pattern.search(text)
             if match:
                 return match.group(1)
     return None

@@ -59,6 +59,7 @@ from eneo.internal_mcp import (
     build_knowledge_mcp_server,
     resolve_internal_mcp_availability,
 )
+from eneo.internal_mcp.builtin_tools import with_live_builtin_tools
 from eneo.logging.logging import LoggingDetails
 from eneo.main.exceptions import (
     BadRequestException,
@@ -142,6 +143,21 @@ _IMAGE_EXTENSIONS = {
 
 def _extension_for_mime(mime_type: str) -> str:
     return _IMAGE_EXTENSIONS.get(mime_type.lower().split(";", 1)[0].strip(), "png")
+
+
+def _attach_generated_file_ids(
+    tool_calls: list[ToolCallInfo], ids_by_call: dict[str, list[UUID]]
+) -> None:
+    """Record on each tool call which generated files it produced.
+
+    Image chunks arrive before the tool-call metadata that references them
+    (and approval entries may pre-exist), so the link is applied once every
+    chunk is in rather than at either event.
+    """
+    for tool_call in tool_calls:
+        ids = ids_by_call.get(tool_call.tool_call_id or "")
+        if ids:
+            tool_call.generated_file_ids = list(ids)
 
 
 # Personal defaults are validated tenant-wide; pages keep a fleet-sized
@@ -387,7 +403,7 @@ class AssistantService:
         self.api_key_scope_revoker = api_key_scope_revoker
         self.effective_config_service = effective_config_service
 
-    def _with_builtin_provider_token(
+    async def _with_builtin_provider_token(
         self, server: "MCPServer", *, assistant_id: UUID
     ) -> "MCPServer":
         """Authenticate a built-in capability provider for this completion.
@@ -395,7 +411,10 @@ class AssistantService:
         A built-in provider stores no credentials: its endpoint is Eneo's own
         loopback server, which reads the provider row named by the token. The
         token is minted per completion on a copy, so the persisted entity
-        never carries it. External providers pass through untouched.
+        never carries it. The copy also carries the loopback server's live
+        tool definitions: the persisted rows are an admin-time snapshot that
+        goes stale with every deploy. External providers pass through
+        untouched.
         """
         if not is_builtin_provider(server.http_auth_type):
             return server
@@ -404,6 +423,7 @@ class AssistantService:
         )
         authenticated = copy.copy(server)
         authenticated.http_auth_config_schema = {"token": token}
+        authenticated.tools = await with_live_builtin_tools(server)
         return authenticated
 
     async def _save_generated_image(self, image: "GeneratedImage") -> "File":
@@ -2250,6 +2270,7 @@ class AssistantService:
                 response_string = ""
                 reasoning_string = ""
                 generated_files: list[File] = []
+                generated_file_ids_by_call: dict[str, list[UUID]] = {}
                 tool_calls: list[ToolCallInfo] = []
                 mcp_tool_references: list[McpToolReference] = []
                 # TOOL_CALL chunks can fire twice in the approval flow. IDs
@@ -2309,6 +2330,13 @@ class AssistantService:
                         ):
                             image_file = await self._save_generated_image(chunk.image)
                             generated_files.append(image_file)
+                            # The image chunk precedes the tool-call chunk that
+                            # references it; the ids are attached to the tool
+                            # call once the stream has ended.
+                            if chunk.image.tool_call_id:
+                                generated_file_ids_by_call.setdefault(
+                                    chunk.image.tool_call_id, []
+                                ).append(image_file.id)
                             chunk.generated_file = image_file
                             yield chunk
 
@@ -2526,6 +2554,7 @@ class AssistantService:
                     )
 
                     skill_provenance, skill_activation = _final_skill_runtime_state()
+                    _attach_generated_file_ids(tool_calls, generated_file_ids_by_call)
                     await self.session_service.complete_question_with_answer(
                         question_id=question_id,
                         answer=response_string,
@@ -2652,11 +2681,20 @@ class AssistantService:
                         for tc in non_streaming_tool_metadata
                     ]
                     final_reasoning = getattr(answer, "reasoning_content", None)
+                    generated_file_ids_by_call: dict[str, list[UUID]] = {}
                     for image in cast(
                         list[GeneratedImage],
                         getattr(answer, "generated_images", None) or [],
                     ):
-                        generated_files.append(await self._save_generated_image(image))
+                        image_file = await self._save_generated_image(image)
+                        generated_files.append(image_file)
+                        if image.tool_call_id:
+                            generated_file_ids_by_call.setdefault(
+                                image.tool_call_id, []
+                            ).append(image_file.id)
+                    _attach_generated_file_ids(
+                        non_streaming_tool_calls, generated_file_ids_by_call
+                    )
 
             non_streaming_mcp_refs = filter_mcp_tool_references(
                 response_string=final_answer,
@@ -3088,7 +3126,7 @@ class AssistantService:
             )
             mcp_servers_override = resolution.general_servers
             capability_mcp_servers = [
-                self._with_builtin_provider_token(
+                await self._with_builtin_provider_token(
                     server, assistant_id=assistant_to_ask.id
                 )
                 for server in resolution.capability_servers
@@ -3206,7 +3244,9 @@ class AssistantService:
             return scoped_token
 
         history_files = [
-            file for _question in session.questions for file in _question.files
+            file
+            for _question in session.questions
+            for file in [*_question.files, *_question.generated_files]
         ]
         internal_mcp = resolve_internal_mcp_availability(
             assistant=assistant_to_ask,

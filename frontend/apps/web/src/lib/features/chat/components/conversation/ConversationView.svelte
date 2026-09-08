@@ -12,6 +12,8 @@
   import { browser } from "$app/environment";
   import { Tooltip } from "@eneo/ui";
   import { getChatService } from "../../ChatService.svelte";
+  import { chatCapabilityAvailable } from "../../chatCapabilities";
+  import { getAppContext } from "$lib/core/AppContext";
   import type { Snippet } from "svelte";
   import { m } from "$lib/paraglide/messages";
 
@@ -23,17 +25,25 @@
   let { children, onNewConversation }: Props = $props();
 
   const chat = getChatService();
+  const { user } = getAppContext();
 
   // Validate uploads client-side against the backend's per-format size limits
   // (and the partner model's vision support) so oversized or unsupported files
   // are rejected instantly with a clear message instead of silently failing the
   // server-side request. Group-chat partners have no completion_model, so vision
-  // formats are simply omitted from the accepted set.
+  // formats are simply omitted from the accepted set. Images are also accepted
+  // when image generation is available: the model can hand them to the image
+  // tool as reference images even without seeing them itself.
   const attachmentRules = getAttachmentRulesStore(
     toStore(() => {
       const partner = chat.partner;
+      const completion_model =
+        partner && "completion_model" in partner ? partner.completion_model : null;
       return {
-        completion_model: partner && "completion_model" in partner ? partner.completion_model : null
+        completion_model,
+        acceptsImageAttachments:
+          completion_model?.vision === true ||
+          chatCapabilityAvailable(partner, user, "image_generation")
       };
     })
   );

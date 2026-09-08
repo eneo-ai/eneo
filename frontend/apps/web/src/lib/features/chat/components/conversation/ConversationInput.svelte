@@ -29,7 +29,8 @@
   import AlertTriangle from "lucide-svelte/icons/alert-triangle";
   import X from "lucide-svelte/icons/x";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
-  import { canUseCapability, isCapabilityPurpose } from "$lib/features/mcp/capabilities";
+  import { isCapabilityPurpose } from "$lib/features/mcp/capabilities";
+  import { chatCapabilities } from "../../chatCapabilities";
   import { getContextErrorInfo, isConversationSubmitDisabled } from "./conversationInputState";
 
   type McpServerSummary = {
@@ -292,33 +293,7 @@
         reason: server.is_enabled === false ? "server_disabled" : null
       }))
   );
-  const capabilityServers = $derived.by(() => {
-    const partner = chat.partner;
-    if (!partner) return [];
-    const effective = "effective_config" in partner ? partner.effective_config : undefined;
-    const purposes = effective?.mcp_enforced
-      ? effective.enabled_capabilities
-      : "enabled_capabilities" in partner
-        ? partner.enabled_capabilities
-        : [];
-    const availability = effective?.mcp_enforced
-      ? effective.available_capabilities
-      : "available_capabilities" in partner
-        ? partner.available_capabilities
-        : [];
-    return (purposes ?? [])
-      .filter((p) => canUseCapability(user, p))
-      .map((purpose) => {
-        const state = availability?.find((c) => c.purpose === purpose);
-        return {
-          id: "capability:" + purpose,
-          purpose,
-          name: purpose,
-          available: state?.available ?? false,
-          reason: state?.reason ?? "no_active_provider"
-        };
-      });
-  });
+  const capabilityServers = $derived(chatCapabilities(chat.partner, user));
   const toolPreferenceIds = $derived([...generalMcpServers, ...capabilityServers].map((s) => s.id));
 
   $effect(() => {

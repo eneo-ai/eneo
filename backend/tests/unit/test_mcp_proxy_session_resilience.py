@@ -178,6 +178,42 @@ async def test_builtin_image_provider_gets_its_own_tool_call_budget(monkeypatch)
     )
 
 
+def test_builtin_provider_tool_calls_are_reported_under_the_loopback_server():
+    """A built-in provider's tools are Eneo's own: the trace names the
+    loopback server (its purpose), not the admin-named row, so clients can
+    localize them like the other internal servers. External servers keep
+    their own name."""
+    general = _make_server("general")
+    provider_id = uuid4()
+    image_provider = MCPServer(
+        id=provider_id,
+        tenant_id=general.tenant_id,
+        name="Image Studio",
+        http_url="http://localhost/internal-mcp/image_generation/mcp",
+        http_auth_type="internal",
+        purpose="image_generation",
+        image_model_id=uuid4(),
+        tools=[
+            MCPServerTool(
+                mcp_server_id=provider_id,
+                name="generate_image",
+                title="Generate image",
+                description="Generate an image from a text description.",
+                input_schema={"type": "object", "properties": {}},
+                is_enabled_by_default=True,
+            )
+        ],
+    )
+    proxy = MCPProxySession([general, image_provider])
+
+    assert proxy.get_tool_info("image_studio__generate_image") == (
+        "image_generation",
+        "generate_image",
+        "Generate image",
+    )
+    assert proxy.get_tool_info("general__tool") == ("general", "tool", None)
+
+
 class _InMemoryToolRepo:
     def __init__(self, tools: list[MCPServerTool]) -> None:
         self.tools = {tool.id: tool for tool in tools}
@@ -884,7 +920,9 @@ class TestReferenceFallbackHint:
         texts = [block["text"] for block in result["content"]]
         assert not any("files__read_file" in text for text in texts)
 
-    async def test_no_hint_when_read_file_is_not_registered(self):
+    async def test_reference_stays_valid_when_read_file_is_not_registered(self):
+        # Image references register no reader; the notice keeps the model from
+        # asking for a re-upload when a remote tool could not fetch the url.
         external = _make_server(name="tabular")
         proxy = MCPProxySession([external])
         proxy._clients[external.id] = self._failing_client()
@@ -893,6 +931,7 @@ class TestReferenceFallbackHint:
 
         texts = [block["text"] for block in result["content"]]
         assert not any("read_file" in text for text in texts)
+        assert any("do not ask the user to re-upload" in text for text in texts)
 
     async def test_unavailable_server_result_carries_the_hint(self):
         external = _make_server(name="tabular")

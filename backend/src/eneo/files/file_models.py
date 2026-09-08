@@ -194,9 +194,10 @@ class File(InDB, FileBaseWithContent):
     owner_service_id: UUID | None = None
     tenant_id: UUID
     parent_file_id: Optional[UUID] = None
-    # True when the exact original upload is durably stored (an ORIGINAL content
-    # reference exists), i.e. a signed original-download URL can serve it. False
-    # for rows predating durable originals and for generated files.
+    # True when a signed original-download URL can serve this file: the exact
+    # original upload is durably stored, or (for images) the generated artifact
+    # that is the file's only original. False for rows predating durable
+    # originals and for derived images (rendered pages, embedded images).
     original_available: bool = False
 
 

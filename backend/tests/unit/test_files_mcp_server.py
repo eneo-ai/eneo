@@ -85,7 +85,9 @@ def _patch_tool_context(
             return {entry.id: file for entry in metadata}
 
     monkeypatch.setattr("eneo.internal_mcp.files.internal_tool_context", fake_context)
-    monkeypatch.setattr("eneo.internal_mcp.files.FileContentLoader", _FakeLoader)
+    monkeypatch.setattr(
+        "eneo.internal_mcp.file_references.FileContentLoader", _FakeLoader
+    )
 
 
 class TestBuildFilesMcpServer:

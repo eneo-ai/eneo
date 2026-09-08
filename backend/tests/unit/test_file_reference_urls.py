@@ -6,6 +6,7 @@ the completion-layer mint audit. Original bytes themselves are stored by the
 object-content subsystem; these tests only exercise the reference surface.
 """
 
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
@@ -32,7 +33,12 @@ from eneo.files.file_models import (
     ContentDisposition,
     FileType,
 )
-from eneo.files.file_reference import referenced_file_ids, url_only_file_ids
+from eneo.files.file_reference import (
+    image_reference_file_ids,
+    reference_url_file_ids,
+    referenced_file_ids,
+    url_only_file_ids,
+)
 
 
 class TestSignedTokenTenantClaim:
@@ -112,7 +118,11 @@ class TestBuildSignedOriginalDownloadUrl:
 class TestFileReferencesString:
     def _file(self, file_id):
         return SimpleNamespace(
-            id=file_id, name="report.pdf", mimetype="application/pdf", size=1234
+            id=file_id,
+            name="report.pdf",
+            mimetype="application/pdf",
+            size=1234,
+            file_type=FileType.TEXT,
         )
 
     def test_emits_entry_only_for_files_in_map(self):
@@ -132,7 +142,7 @@ class TestFileReferencesString:
         # (ATTACHED_FILE_REFERENCES_INSTRUCTION), stated once per request.
         fid = uuid4()
         block = build_file_references_string([self._file(fid)], {fid: "https://x/dl"})
-        assert "signed attachment reference" in block
+        assert "signed file reference" in block
         assert "raw bytes are NOT in this prompt" in block
         assert "read_file" not in block
         assert "re-upload" not in block
@@ -146,6 +156,7 @@ class TestInlineFileTextToggle:
             text=text,
             mimetype="text/csv",
             size=999,
+            file_type=FileType.TEXT,
         )
 
     def test_inline_on_keeps_text_and_adds_url(self):
@@ -456,17 +467,25 @@ class TestBuildFileReferenceUrls:
             encryption_service=MagicMock(),
         )
 
-    def test_mints_only_for_text_files_with_original(self):
+    def test_mints_for_text_and_image_files_with_original(self, monkeypatch):
+        _enable_file_references(monkeypatch)
         service = self._service()
         text_with_original = _stub_file()
         image_with_original = _stub_file(file_type=FileType.IMAGE)
+        derived_page = _stub_file(file_type=FileType.IMAGE, parent_file_id=uuid4())
         text_without_original = _stub_file(original_available=False)
 
         urls = service._build_file_reference_urls(
-            [text_with_original, image_with_original, text_without_original]
+            [
+                text_with_original,
+                image_with_original,
+                derived_page,
+                text_without_original,
+            ]
         )
-        assert set(urls) == {text_with_original.id}
+        assert set(urls) == {text_with_original.id, image_with_original.id}
         assert "/original/download/" in urls[text_with_original.id]
+        assert "/original/download/" in urls[image_with_original.id]
 
     def test_empty_without_base_url(self):
         assert (
@@ -478,3 +497,124 @@ class TestBuildFileReferenceUrls:
         assert (
             self._service(tenant=None)._build_file_reference_urls([_stub_file()]) == {}
         )
+
+
+class TestImageReferenceFileIds:
+    def test_attached_and_generated_images_are_referenced(self, monkeypatch):
+        _enable_file_references(monkeypatch, object_store=False)
+        uploaded = _stub_file(file_type=FileType.IMAGE, name="photo.png")
+        generated = _stub_file(file_type=FileType.IMAGE, name="generated_image.png")
+        derived_page = _stub_file(
+            file_type=FileType.IMAGE, parent_file_id=uuid4(), name="page-1.png"
+        )
+        unavailable = _stub_file(file_type=FileType.IMAGE, original_available=False)
+        text = _stub_file()
+
+        ids = image_reference_file_ids(
+            [uploaded, generated, derived_page, unavailable, text]
+        )
+
+        # No object store needed: generated artifacts are stored inline.
+        assert ids == {uploaded.id, generated.id}
+
+    def test_empty_without_base_url(self, monkeypatch):
+        _enable_file_references(monkeypatch, base_url=None)
+        assert image_reference_file_ids([_stub_file(file_type=FileType.IMAGE)]) == set()
+
+    def test_reference_url_ids_union_text_and_images(self, monkeypatch):
+        _enable_file_references(monkeypatch)
+        text, image = _stub_file(), _stub_file(file_type=FileType.IMAGE)
+        assert reference_url_file_ids([text, image]) == {text.id, image.id}
+        # The files-server gate stays TEXT-only.
+        assert referenced_file_ids([text, image]) == {text.id}
+
+
+class TestImageReferenceRendering:
+    def _image(self, file_id):
+        return SimpleNamespace(
+            id=file_id,
+            name="photo.png",
+            mimetype="image/png",
+            size=4321,
+            file_type=FileType.IMAGE,
+            text=None,
+        )
+
+    def test_entries_carry_their_kind(self):
+        image_id, doc_id = uuid4(), uuid4()
+        doc = SimpleNamespace(
+            id=doc_id,
+            name="report.pdf",
+            mimetype="application/pdf",
+            size=1,
+            file_type=FileType.TEXT,
+        )
+        block = build_file_references_string(
+            [self._image(image_id), doc],
+            {image_id: "https://x/i", doc_id: "https://x/d"},
+        )
+        lines = [json.loads(line) for line in block.split("\n\n", 1)[1].splitlines()]
+        assert [(entry["kind"], entry["url"]) for entry in lines] == [
+            ("image", "https://x/i"),
+            ("document", "https://x/d"),
+        ]
+
+    def test_image_gets_a_reference_entry_but_no_inline_text(self):
+        image_id = uuid4()
+        out = ContextBuilder()._build_input(
+            input_str="make it blue",
+            files=[self._image(image_id)],
+            file_reference_urls={image_id: "https://x/i"},
+        )
+        assert '"kind": "image"' in out
+        assert "https://x/i" in out
+        assert out.endswith("make it blue")
+        # Images carry no text to inline; the reference block is the only addition.
+        assert out.count("photo.png") == 1
+
+
+class TestGeneratedImageMintAudit:
+    async def test_previous_turn_generated_images_are_audited_once(self, monkeypatch):
+        _enable_file_references(monkeypatch, object_store=False)
+        audit_service = AsyncMock()
+        service = CompletionService(
+            context_builder=MagicMock(),
+            tenant=SimpleNamespace(id=uuid4(), name="Kommun"),
+            user=SimpleNamespace(
+                id=uuid4(), username="anna", email="anna@kommun.se", active_api_key=None
+            ),
+            config=SimpleNamespace(
+                file_reference_base_url="http://host.docker.internal:8123",
+                public_origin=None,
+                file_reference_url_expiry_seconds=3600,
+            ),
+            encryption_service=MagicMock(),
+            audit_service=audit_service,
+        )
+        older = _stub_file(file_type=FileType.IMAGE, name="generated_image.png")
+        latest = _stub_file(file_type=FileType.IMAGE, name="generated_image.png")
+        session = SimpleNamespace(
+            id=uuid4(),
+            questions=[
+                SimpleNamespace(files=[], generated_files=[older]),
+                SimpleNamespace(files=[], generated_files=[latest]),
+            ],
+        )
+        history_files = [
+            file
+            for question in session.questions
+            for file in [*question.files, *question.generated_files]
+        ]
+        urls = service._build_file_reference_urls(history_files)
+        assert set(urls) == {older.id, latest.id}
+
+        await service._audit_file_reference_mints(
+            files=[*session.questions[-1].generated_files],
+            file_reference_urls=urls,
+            session=session,
+        )
+
+        audited = [
+            c.kwargs["entity_id"] for c in audit_service.log_async.await_args_list
+        ]
+        assert audited == [latest.id]

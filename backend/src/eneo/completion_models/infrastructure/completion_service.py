@@ -31,8 +31,11 @@ from eneo.completion_models.infrastructure.tenant_model_capabilities import (
     enrich_reasoning_effort_capability,
     normalize_reasoning_effort,
 )
-from eneo.files.file_models import File, FileType
-from eneo.files.file_reference import file_reference_base_url
+from eneo.files.file_models import File
+from eneo.files.file_reference import (
+    file_reference_base_url,
+    reference_url_file_ids,
+)
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from eneo.main.config import SETTINGS, Settings
 from eneo.main.exceptions import ProviderInactiveException
@@ -510,12 +513,12 @@ class CompletionService:
             return {}
 
         expires_in = self.config.file_reference_url_expiry_seconds
+        # Mint only what the reference block can actually expose (the shared
+        # predicate), which also keeps the mint audit truthful.
+        referenced = reference_url_file_ids(files)
         urls: dict[UUID, str] = {}
         for file in files:
-            # Only TEXT files are surfaced in the reference block (images ride
-            # as vision inputs), so mint only what can actually be exposed —
-            # which also keeps the mint audit truthful.
-            if file.file_type == FileType.TEXT and file.original_available:
+            if file.id in referenced and file.id not in urls:
                 urls[file.id] = build_signed_original_download_url(
                     file_id=file.id,
                     base_url=base_url,
@@ -530,11 +533,12 @@ class CompletionService:
         file_reference_urls: dict[UUID, str],
         session: SessionInDB | None,
     ) -> None:
-        """Audit the signed-URL mints for this turn's newly attached files.
+        """Audit the signed-URL mints for files first referenced on this turn.
 
         History files are re-minted every turn but represent the same exposure
         of the same file to the same session — the initial mint is the audited
-        event, so only current-turn files are logged. Skipped without a user
+        event, so only newly referenced files (this turn's attachments and the
+        previous turn's generated images) are logged. Skipped without a user
         (worker/service contexts): the mint has no attributable actor.
         """
         if self.audit_service is None or self.tenant is None or self.user is None:
@@ -756,14 +760,28 @@ class CompletionService:
         # same way the current turn does, or the skipped text leaks back into
         # context on every follow-up. Requires a reference base URL for absolute
         # URLs.
+        # Generated images count as history files too: a follow-up edit needs
+        # a reference URL for the image the assistant produced last turn.
         history_files = [
             file
             for question in (session.questions if session else [])
-            for file in question.files
+            for file in [*question.files, *question.generated_files]
         ]
         file_reference_urls = self._build_file_reference_urls(files + history_files)
+        # The previous turn's generated files are minted for the first time on
+        # this turn, so they are "new" exactly once, here.
+        newly_referenced = [
+            *files,
+            *(
+                session.questions[-1].generated_files
+                if session and session.questions
+                else []
+            ),
+        ]
         await self._audit_file_reference_mints(
-            files=files, file_reference_urls=file_reference_urls, session=session
+            files=newly_referenced,
+            file_reference_urls=file_reference_urls,
+            session=session,
         )
 
         # Create MCP proxy session before building the context, so the tool

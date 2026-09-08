@@ -2,8 +2,28 @@
   import { Wrench } from "lucide-svelte";
   import { m } from "$lib/paraglide/messages";
   import type { components } from "@eneo/eneo-js";
+  import { builtinToolCatalogLabels } from "$lib/features/chat/internalToolLabels";
 
-  let { tools }: { tools: components["schemas"]["MCPServerToolPublic"][] } = $props();
+  type Tool = components["schemas"]["MCPServerToolPublic"];
+
+  let {
+    tools,
+    server
+  }: {
+    tools: Tool[];
+    /** The provider the tools belong to; built-in providers get localized labels. */
+    server: { purpose?: string | null; http_auth_type?: string | null };
+  } = $props();
+
+  const title = (tool: Tool) =>
+    tool.display_name ??
+    builtinToolCatalogLabels(server, tool.name)?.title ??
+    tool.title ??
+    tool.name;
+  const description = (tool: Tool) =>
+    builtinToolCatalogLabels(server, tool.name)?.description ??
+    tool.description?.split(/\n\s*\n/)[0] ??
+    null;
 </script>
 
 <section class="border-dimmer bg-secondary/20 mt-4 rounded-lg border p-4" aria-label={m.tools()}>
@@ -16,11 +36,9 @@
       {#each tools as tool (tool.id)}
         <li class="flex flex-wrap items-start justify-between gap-2">
           <div class="min-w-0 flex-1">
-            <p class="text-default text-sm font-medium">
-              {tool.display_name ?? tool.title ?? tool.name}
-            </p>
-            {#if tool.description}
-              <p class="text-secondary mt-1 text-sm">{tool.description.split(/\n\s*\n/)[0]}</p>
+            <p class="text-default text-sm font-medium">{title(tool)}</p>
+            {#if description(tool)}
+              <p class="text-secondary mt-1 text-sm">{description(tool)}</p>
             {/if}
           </div>
           <span
