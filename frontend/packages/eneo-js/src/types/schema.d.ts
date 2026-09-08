@@ -5267,6 +5267,9 @@ export interface paths {
      *     runs, tenant admins can inspect runs across the tenant, trusted in-space operators can
      *     inspect content for runs in their space, and service-key principals can inspect only
      *     their own runs.
+     *
+     *     Content access is audit-logged before the response. If the required audit cannot
+     *     be committed, the endpoint returns 503 and exposes no transcript words.
      */
     get: operations["get_flow_run_transcript_words"];
     put?: never;
@@ -5302,6 +5305,9 @@ export interface paths {
      *     runs, tenant admins can inspect runs across the tenant, trusted in-space operators can
      *     inspect content for runs in their space, and service-key principals can inspect only
      *     their own runs.
+     *
+     *     Content access is audit-logged before the response. If the required audit cannot
+     *     be committed, the endpoint returns 503 and exposes no transcript corrections.
      */
     get: operations["list_flow_run_transcript_corrections"];
     put?: never;
@@ -13027,7 +13033,7 @@ export interface components {
      *           ]
      *         },
      *         {
-     *           "action_count": 79,
+     *           "action_count": 81,
      *           "category": "user_actions",
      *           "enabled": true,
      *           "example_actions": [
@@ -54239,6 +54245,25 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Required access audit logging is unavailable; no transcript words were returned. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_evidence_audit_logging_failed",
+           *       "context": {
+           *         "audit_required": true
+           *       },
+           *       "eneo_error_code": 9024,
+           *       "message": "Evidence audit logging is unavailable."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   list_flow_run_transcript_corrections: {
@@ -54305,6 +54330,25 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Required access audit logging is unavailable; no transcript corrections were returned. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_evidence_audit_logging_failed",
+           *       "context": {
+           *         "audit_required": true
+           *       },
+           *       "eneo_error_code": 9024,
+           *       "message": "Evidence audit logging is unavailable."
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };

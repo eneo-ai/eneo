@@ -26,9 +26,17 @@ from eneo.flows.api.flow_runtime_paths import (
     FLOW_RUN_STEP_TRANSCRIPT_CORRECTIONS_PATH,
     FLOW_RUN_TRANSCRIPT_CORRECTIONS_PATH,
 )
+from eneo.flows.application.flow_run_evidence_snapshot import (
+    flow_run_evidence_snapshot_transaction,
+)
+from eneo.flows.application.flow_trace_audit import (
+    log_flow_trace_audit_or_raise,
+    raise_flow_trace_audit_unavailable,
+)
 from eneo.flows.application.flow_transcript_corrections_service import (
     FlowTranscriptCorrectionsView,
 )
+from eneo.flows.domain.flow import FlowRun
 from eneo.flows.domain.transcript_corrections import (
     TranscriptCorrectionOccurrence,
     TranscriptSpeakerEdit,
@@ -36,11 +44,11 @@ from eneo.flows.domain.transcript_corrections import (
 from eneo.flows.flow_access_policy import FlowApiAction
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.main.container.container import Container
-from eneo.main.exceptions import ErrorCodes
+from eneo.main.exceptions import AuditLoggingUnavailableException, ErrorCodes
 from eneo.server.dependencies.container import (
-    get_container,
     get_container_for_explicit_transaction,
 )
+from eneo.users.user import UserInDB
 
 router = APIRouter()
 
@@ -61,6 +69,9 @@ Current content visibility follows run-detail visibility: callers can inspect th
 runs, tenant admins can inspect runs across the tenant, trusted in-space operators can
 inspect content for runs in their space, and service-key principals can inspect only
 their own runs.
+
+Content access is audit-logged before the response. If the required audit cannot
+be committed, the endpoint returns 503 and exposes no transcript corrections.
     """
 
 _FLOW_RUN_TRANSCRIPT_CORRECTIONS_EDIT_DESCRIPTION = (
@@ -196,6 +207,13 @@ def _present_transcript_corrections(
             eneo_error_code=ErrorCodes.NOT_FOUND,
             code="not_found",
         ),
+        503: error_response(
+            description="Required access audit logging is unavailable; no transcript corrections were returned.",
+            message="Evidence audit logging is unavailable.",
+            eneo_error_code=ErrorCodes.INTERNAL_SERVER_ERROR,
+            code=FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED,
+            context={"audit_required": True},
+        ),
     },
 )
 async def list_flow_run_transcript_corrections(
@@ -207,20 +225,51 @@ async def list_flow_run_transcript_corrections(
         Path(description="Identifier of the run whose corrections should be listed."),
     ],
     request: Request,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = Depends(
+        get_container_for_explicit_transaction(with_user=True)
+    ),
 ):
-    await flow_access_context.enforce_flow_scope(
-        request,
-        container,
-        flow_id=id,
-        required_access=FlowApiAction.VIEW,
-        allow_service_key_principals=True,
-    )
-    views = await container.flow_transcript_corrections_service().list_for_run(
-        flow_id=id,
-        run_id=run_id,
-    )
-    return [_present_transcript_corrections(view) for view in views]
+    committed_audit_context: tuple[UserInDB, FlowRun] | None = None
+    try:
+        async with flow_run_evidence_snapshot_transaction(container):
+            await flow_access_context.enforce_flow_scope(
+                request,
+                container,
+                flow_id=id,
+                required_access=FlowApiAction.VIEW,
+                allow_service_key_principals=True,
+            )
+            run = await container.flow_run_service().get_run(
+                run_id=run_id, flow_id=id, access_kind="content"
+            )
+            views = await container.flow_transcript_corrections_service().list_for_run(
+                flow_id=id,
+                run_id=run_id,
+            )
+            response = [_present_transcript_corrections(view) for view in views]
+            user = container.user()
+            await log_flow_trace_audit_or_raise(
+                container=container,
+                user=user,
+                run=run,
+                action=ActionType.FLOW_EVIDENCE_VIEWED,
+                description=f"Viewed transcript corrections for flow run {run.id}",
+                extra={"evidence_detail": "transcript_corrections"},
+            )
+            committed_audit_context = (user, run)
+    except AuditLoggingUnavailableException:
+        raise
+    except Exception as exc:
+        if committed_audit_context is not None:
+            audit_user, audited_run = committed_audit_context
+            raise_flow_trace_audit_unavailable(
+                user=audit_user,
+                run=audited_run,
+                action=ActionType.FLOW_EVIDENCE_VIEWED,
+                cause=exc,
+            )
+        raise
+    return response
 
 
 @router.patch(

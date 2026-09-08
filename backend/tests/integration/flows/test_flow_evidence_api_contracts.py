@@ -67,6 +67,9 @@ from eneo.flows.infrastructure.flow_provider_call_repo import (
     FlowProviderCallRepository,
 )
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
+from eneo.flows.infrastructure.flow_transcript_words_repo import (
+    FlowTranscriptWordsRepository,
+)
 from eneo.flows.published_definition import (
     build_published_definition_json,
     published_definition_checksum,
@@ -668,6 +671,28 @@ async def _seed_trace_view_flow_run_contract_data(
         include_review_checkpoint_lineage=include_review_checkpoint_lineage,
     )
     return seeded, trace_user, trace_token
+
+
+async def _seed_transcript_words_for_audit_read(
+    *, db_container, seeded: dict[str, str], tenant_id: UUID
+) -> None:
+    async with db_container() as container:
+        await FlowTranscriptWordsRepository(session=container.session()).upsert(
+            tenant_id=tenant_id,
+            flow_id=UUID(seeded["flow_id"]),
+            run_id=UUID(seeded["run_id"]),
+            step_id=UUID(seeded["step_id"]),
+            segments_hash="0" * 64,
+            alignment="provider_words",
+            words_json=[
+                {
+                    "segment_index": 0,
+                    "words": [
+                        {"word": "Protected transcript", "start": 0.0, "end": 1.0}
+                    ],
+                }
+            ],
+        )
 
 
 async def _replace_flow_definition_with_outbound_http_snapshot(
@@ -1834,8 +1859,10 @@ async def test_flow_run_evidence_export_marks_corrupt_attempt_provenance(
             b"format=json",
             ActionType.FLOW_EVIDENCE_EXPORTED_JSON,
         ),
+        ("transcript-corrections/", b"", ActionType.FLOW_EVIDENCE_VIEWED),
+        ("steps/{step_id}/transcript-words/", b"", ActionType.FLOW_EVIDENCE_VIEWED),
     ],
-    ids=["view", "export"],
+    ids=["view", "export", "transcript-corrections", "transcript-words"],
 )
 async def test_flow_run_evidence_audit_is_committed_before_response_start(
     client,
@@ -1858,6 +1885,11 @@ async def test_flow_run_evidence_audit_is_committed_before_response_start(
         assistant_factory=assistant_factory,
         admin_user=admin_user,
     )
+    if "transcript-words" in path_suffix:
+        await _seed_transcript_words_for_audit_read(
+            db_container=db_container, seeded=seeded, tenant_id=admin_user.tenant_id
+        )
+    path_suffix = path_suffix.format(step_id=seeded["step_id"])
     path = f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/{path_suffix}"
     scope: Scope = {
         "type": "http",
@@ -1918,8 +1950,10 @@ async def test_flow_run_evidence_audit_is_committed_before_response_start(
     [
         ("evidence/", b""),
         ("evidence/export", b"format=json"),
+        ("transcript-corrections/", b""),
+        ("steps/{step_id}/transcript-words/", b""),
     ],
-    ids=["view", "export"],
+    ids=["view", "export", "transcript-corrections", "transcript-words"],
 )
 async def test_flow_run_evidence_commit_failure_precedes_typed_error_response(
     client,
@@ -1942,6 +1976,11 @@ async def test_flow_run_evidence_commit_failure_precedes_typed_error_response(
         assistant_factory=assistant_factory,
         admin_user=admin_user,
     )
+    if "transcript-words" in path_suffix:
+        await _seed_transcript_words_for_audit_read(
+            db_container=db_container, seeded=seeded, tenant_id=admin_user.tenant_id
+        )
+    path_suffix = path_suffix.format(step_id=seeded["step_id"])
     events: list[str] = []
     original_commit = SessionTransaction.commit
     original_create_audit = AuditLogRepositoryImpl.create
@@ -2013,10 +2052,16 @@ async def test_flow_run_evidence_commit_failure_precedes_typed_error_response(
     assert payload["context"]["audit_required"] is True
     assert seeded["run_id"].encode() not in response_body
     assert b'"manifest"' not in response_body
+    assert b"Protected transcript" not in response_body
 
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+@pytest.mark.parametrize(
+    "path_suffix",
+    ["evidence/", "transcript-corrections/", "steps/{step_id}/transcript-words/"],
+    ids=["evidence", "transcript-corrections", "transcript-words"],
+)
 async def test_flow_run_evidence_fails_closed_when_audit_logging_is_unavailable(
     client,
     db_container,
@@ -2025,6 +2070,7 @@ async def test_flow_run_evidence_fails_closed_when_audit_logging_is_unavailable(
     space_factory,
     assistant_factory,
     admin_user,
+    path_suffix: str,
 ):
     seeded, _, trace_token = await _seed_trace_view_flow_run_contract_data(
         db_container=db_container,
@@ -2034,6 +2080,11 @@ async def test_flow_run_evidence_fails_closed_when_audit_logging_is_unavailable(
         assistant_factory=assistant_factory,
         admin_user=admin_user,
     )
+    if "transcript-words" in path_suffix:
+        await _seed_transcript_words_for_audit_read(
+            db_container=db_container, seeded=seeded, tenant_id=admin_user.tenant_id
+        )
+    path_suffix = path_suffix.format(step_id=seeded["step_id"])
 
     class FailingAuditService:
         async def log(self, **_kwargs: object) -> None:
@@ -2044,7 +2095,7 @@ async def test_flow_run_evidence_fails_closed_when_audit_logging_is_unavailable(
     Container.audit_service.override(providers.Object(audit_service))
     try:
         response = await client.get(
-            f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/",
+            f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/{path_suffix}",
             headers={"Authorization": f"Bearer {trace_token}"},
         )
     finally:
@@ -2054,6 +2105,7 @@ async def test_flow_run_evidence_fails_closed_when_audit_logging_is_unavailable(
     payload = response.json()
     assert payload["code"] == "flow_evidence_audit_logging_failed"
     assert payload["context"]["audit_required"] is True
+    assert "Protected transcript" not in response.text
 
 
 @pytest.mark.asyncio

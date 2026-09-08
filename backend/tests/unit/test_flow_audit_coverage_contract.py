@@ -396,6 +396,28 @@ FLOW_ROUTE_AUDIT_CONTRACTS: dict[str, FlowAuditContract] = {
         owner="flow_run_steps_router.list_flow_run_steps",
         metadata_keys=("flow_id", "run_id", "evidence_detail"),
     ),
+    "list_flow_run_transcript_corrections": _required_read(
+        ActionType.FLOW_EVIDENCE_VIEWED,
+        owner="flow_trace_audit.log_flow_trace_audit_or_raise",
+        metadata_keys=("flow_id", "run_id", "evidence_detail"),
+    ),
+    "get_flow_run_transcript_words": _required_read(
+        ActionType.FLOW_EVIDENCE_VIEWED,
+        owner="flow_trace_audit.log_flow_trace_audit_or_raise",
+        metadata_keys=("flow_id", "run_id", "step_id", "evidence_detail"),
+    ),
+    "edit_flow_run_transcript_corrections": _configurable(
+        ActionType.FLOW_RUN_TRANSCRIPT_CORRECTIONS_EDITED,
+        owner="flow_run_transcript_corrections_router.edit_flow_run_transcript_corrections",
+        metadata_keys=(
+            "flow_id",
+            "run_id",
+            "step_id",
+            "occurrence_count",
+            "speaker_edit_count",
+            "revision",
+        ),
+    ),
     "get_flow_run": _required_read(
         ActionType.FLOW_EVIDENCE_VIEWED,
         owner="flow_trace_audit.log_flow_trace_audit_or_raise",

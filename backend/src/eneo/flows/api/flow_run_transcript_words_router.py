@@ -5,6 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Request, status
 
+from eneo.audit.domain.action_types import ActionType
 from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_api_common import (
     FLOW_RUN_FORBIDDEN_DESCRIPTION,
@@ -16,13 +17,23 @@ from eneo.flows.api.flow_models import (
     TranscriptWordPublic,
 )
 from eneo.flows.api.flow_runtime_paths import FLOW_RUN_STEP_TRANSCRIPT_WORDS_PATH
+from eneo.flows.application.flow_run_evidence_snapshot import (
+    flow_run_evidence_snapshot_transaction,
+)
+from eneo.flows.application.flow_trace_audit import (
+    log_flow_trace_audit_or_raise,
+    raise_flow_trace_audit_unavailable,
+)
 from eneo.flows.application.flow_transcript_words_service import (
     FlowTranscriptWordsView,
 )
+from eneo.flows.domain.flow import FlowRun
 from eneo.flows.flow_access_policy import FlowApiAction
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.main.container.container import Container
-from eneo.main.exceptions import ErrorCodes
-from eneo.server.dependencies.container import get_container
+from eneo.main.exceptions import AuditLoggingUnavailableException, ErrorCodes
+from eneo.server.dependencies.container import get_container_for_explicit_transaction
+from eneo.users.user import UserInDB
 
 router = APIRouter()
 
@@ -44,6 +55,9 @@ Current content visibility follows run-detail visibility: callers can inspect th
 runs, tenant admins can inspect runs across the tenant, trusted in-space operators can
 inspect content for runs in their space, and service-key principals can inspect only
 their own runs.
+
+Content access is audit-logged before the response. If the required audit cannot
+be committed, the endpoint returns 503 and exposes no transcript words.
     """
 
 
@@ -95,6 +109,13 @@ def _present_transcript_words(
             eneo_error_code=ErrorCodes.NOT_FOUND,
             code="not_found",
         ),
+        503: error_response(
+            description="Required access audit logging is unavailable; no transcript words were returned.",
+            message="Evidence audit logging is unavailable.",
+            eneo_error_code=ErrorCodes.INTERNAL_SERVER_ERROR,
+            code=FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED,
+            context={"audit_required": True},
+        ),
     },
 )
 async def get_flow_run_transcript_words(
@@ -106,18 +127,52 @@ async def get_flow_run_transcript_words(
     ],
     step_id: Annotated[UUID, Path(description="Identifier of the transcription step.")],
     request: Request,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = Depends(
+        get_container_for_explicit_transaction(with_user=True)
+    ),
 ):
-    await flow_access_context.enforce_flow_scope(
-        request,
-        container,
-        flow_id=id,
-        required_access=FlowApiAction.VIEW,
-        allow_service_key_principals=True,
-    )
-    view = await container.flow_transcript_words_service().get_for_step(
-        flow_id=id,
-        run_id=run_id,
-        step_id=step_id,
-    )
-    return _present_transcript_words(view)
+    committed_audit_context: tuple[UserInDB, FlowRun] | None = None
+    try:
+        async with flow_run_evidence_snapshot_transaction(container):
+            await flow_access_context.enforce_flow_scope(
+                request,
+                container,
+                flow_id=id,
+                required_access=FlowApiAction.VIEW,
+                allow_service_key_principals=True,
+            )
+            run = await container.flow_run_service().get_run(
+                run_id=run_id, flow_id=id, access_kind="content"
+            )
+            view = await container.flow_transcript_words_service().get_for_step(
+                flow_id=id,
+                run_id=run_id,
+                step_id=step_id,
+            )
+            response = _present_transcript_words(view)
+            user = container.user()
+            await log_flow_trace_audit_or_raise(
+                container=container,
+                user=user,
+                run=run,
+                action=ActionType.FLOW_EVIDENCE_VIEWED,
+                description=f"Viewed transcript words for flow run {run.id}",
+                extra={"evidence_detail": "transcript_words", "step_id": str(step_id)},
+            )
+            committed_audit_context = (user, run)
+    except AuditLoggingUnavailableException:
+        raise
+    except Exception as exc:
+        if committed_audit_context is not None:
+            audit_user, audited_run = committed_audit_context
+            raise_flow_trace_audit_unavailable(
+                user=audit_user,
+                run=audited_run,
+                action=ActionType.FLOW_EVIDENCE_VIEWED,
+                cause=exc,
+            )
+        raise
+    return response
+
+
+__all__ = ["router"]
