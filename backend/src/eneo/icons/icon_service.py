@@ -7,7 +7,7 @@ from fastapi import UploadFile
 
 from eneo.files.file_size_service import FileSizeService
 from eneo.icons.icon import IconMetadata, IconMetadataCreate
-from eneo.icons.icon_repo import IconRepository
+from eneo.icons.icon_repo import IconRepository, LegacyIconContentRecord
 from eneo.main.exceptions import (
     BadRequestException,
     FileTooLargeException,
@@ -192,10 +192,20 @@ class IconService:
             if metadata is None:
                 raise NotFoundException(f"Icon with id {icon_id} not found")
             reference = await self.icon_repo.get_primary_reference(icon_id)
-            if reference is None:
+            legacy = (
+                await self.icon_repo.get_legacy_primary(icon_id)
+                if reference is None
+                else None
+            )
+            if reference is None and legacy is None:
                 raise NotFoundException(
                     f"Icon with id {icon_id} has no durable content"
                 )
+
+        if legacy is not None:
+            return self._legacy_download(legacy)
+
+        assert reference is not None
 
         opened = await detach_content_read(
             self.object_content.open_content(
@@ -212,6 +222,21 @@ class IconService:
             content_length=opened.content_length,
             media_type=opened.media_type,
             _close=opened.aclose,
+        )
+
+    @staticmethod
+    def _legacy_download(content: LegacyIconContentRecord) -> IconDownload:
+        async def stream() -> AsyncGenerator[bytes]:
+            yield content.payload
+
+        async def close() -> None:
+            return None
+
+        return IconDownload(
+            chunks=stream(),
+            content_length=len(content.payload),
+            media_type=content.media_type,
+            _close=close,
         )
 
     async def delete_icon(self, icon_id: UUID, tenant_id: UUID) -> None:

@@ -11,6 +11,7 @@ from eneo.database.tables.object_content_table import (
 )
 from eneo.icons.icon import IconMetadata, IconMetadataCreate
 from eneo.object_content.content import ContentAccessClass, ContentState
+from eneo.object_content.file_icon_cleanup import file_icon_legacy_is_cleaned
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +23,12 @@ class IconContentReferenceRecord:
     access_class: ContentAccessClass
 
 
+@dataclass(frozen=True, slots=True)
+class LegacyIconContentRecord:
+    payload: bytes
+    media_type: str
+
+
 class IconRepository:
     """Persist Icon identity and its primary durable-content reference."""
 
@@ -29,9 +36,18 @@ class IconRepository:
         self.session = session
 
     async def add_metadata(self, icon: IconMetadataCreate) -> IconMetadata:
-        row = Icons(**icon.model_dump())
-        self.session.add(row)
-        await self.session.flush()
+        row = (
+            await self.session.execute(
+                sa.insert(Icons)
+                .values(**icon.model_dump())
+                .returning(
+                    Icons.id,
+                    Icons.created_at,
+                    Icons.updated_at,
+                    Icons.tenant_id,
+                )
+            )
+        ).one()
         return IconMetadata.model_validate(row)
 
     async def add_primary_reference(
@@ -61,10 +77,13 @@ class IconRepository:
                 ObjectContents.state == ContentState.AVAILABLE.value,
             )
         )
+        visible = available_reference
+        if not await file_icon_legacy_is_cleaned(self.session):
+            visible = sa.or_(visible, Icons.legacy_blob.is_not(None))
         row = await self.session.scalar(
             sa.select(Icons).where(
                 Icons.id == icon_id,
-                available_reference,
+                visible,
             )
         )
         return None if row is None else IconMetadata.model_validate(row)
@@ -104,6 +123,27 @@ class IconRepository:
             size_bytes=row.size_bytes,
             media_type=row.verified_media_type,
             access_class=ContentAccessClass(row.access_class),
+        )
+
+    async def get_legacy_primary(
+        self,
+        icon_id: UUID,
+    ) -> LegacyIconContentRecord | None:
+        if await file_icon_legacy_is_cleaned(self.session):
+            return None
+        row = (
+            await self.session.execute(
+                sa.select(
+                    Icons.legacy_blob,
+                    Icons.legacy_mimetype,
+                ).where(Icons.id == icon_id)
+            )
+        ).one_or_none()
+        if row is None or row.legacy_blob is None or row.legacy_mimetype is None:
+            return None
+        return LegacyIconContentRecord(
+            payload=bytes(row.legacy_blob),
+            media_type=row.legacy_mimetype,
         )
 
     async def delete_by_tenant(self, icon_id: UUID, tenant_id: UUID) -> bool:

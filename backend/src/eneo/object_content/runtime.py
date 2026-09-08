@@ -34,6 +34,11 @@ from eneo.object_content.content import (
     StorageKind,
 )
 from eneo.object_content.content_service import ObjectContentService
+from eneo.object_content.file_icon_backfill import (
+    FileIconBackfill,
+    FileIconBackfillResult,
+    FileIconBackfillSettings,
+)
 from eneo.object_content.object_store_connection import (
     DestinationSwitch,
     ObjectStoreConnectionDatabaseUnavailable,
@@ -106,6 +111,7 @@ class ObjectContentRuntime:
         self._configuration_initialized = False
         self._service: ObjectContentService | None = None
         self._reconciler: ObjectContentReconciler | None = None
+        self._file_icon_backfill: FileIconBackfill | None = None
         self._readiness_lock = asyncio.Lock()
         self._readiness_cache: tuple[ObjectContentReadiness, float] | None = None
 
@@ -116,6 +122,7 @@ class ObjectContentRuntime:
         settings: ObjectContentSettings | None = None,
         store: S3ObjectStore | None = None,
         operator_settings: ObjectStoreOperatorSettings | None = None,
+        file_icon_backfill_settings: FileIconBackfillSettings | None = None,
         encryption: EncryptionService | None = None,
         store_factory: Callable[[ObjectContentSettings], S3ObjectStore] = S3ObjectStore,
     ) -> None:
@@ -171,6 +178,11 @@ class ObjectContentRuntime:
             self._database,
             object_store_provider=provider,
         )
+        self._file_icon_backfill = FileIconBackfill(
+            file_icon_backfill_settings or FileIconBackfillSettings(),
+            self._service,
+            self._database,
+        )
         self._state = ObjectContentRuntimeState.ENABLED
 
     async def stop(self) -> None:
@@ -183,6 +195,7 @@ class ObjectContentRuntime:
         self._configuration_initialized = False
         self._service = None
         self._reconciler = None
+        self._file_icon_backfill = None
         self._state = ObjectContentRuntimeState.NOT_STARTED
         if provider is not None:
             await provider.close()
@@ -626,6 +639,14 @@ class ObjectContentRuntime:
                 # treats a transient object-store outage as a bounded no-op.
                 pass
         return await self.reconciler.run_once()
+
+    async def backfill_file_icons_once(self) -> FileIconBackfillResult:
+        backfill = self._file_icon_backfill
+        if backfill is None:
+            raise ObjectContentUnavailableError(
+                "Durable object content is not initialized"
+            )
+        return await backfill.run_once()
 
     async def health_facts(self) -> ObjectContentHealthFacts:
         return await self.reconciler.health_facts()

@@ -102,7 +102,7 @@ async def test_delete_does_not_mask_database_failures() -> None:
 @pytest.mark.asyncio
 async def test_repository_delete_contains_all_owner_predicates() -> None:
     result = MagicMock()
-    result.scalar_one_or_none.return_value = None
+    result.one_or_none.return_value = None
     session = AsyncMock()
     session.execute.return_value = result
     repository = FileRepository(session=session)
