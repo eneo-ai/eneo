@@ -12,37 +12,35 @@ template, template fill writes into each content control.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Sequence
+from typing import Any, Sequence, cast
 
 from docx.enum.style import WD_STYLE_TYPE
 from docx.opc.constants import RELATIONSHIP_TYPE as RT
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
+from docx.oxml.text.run import CT_R
+from lxml.etree import Element
 
-from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.runtime.document_rendering.blocks import (
     MAX_HEADING_LEVEL,
     DocumentBlock,
+    DocumentStructureError,
     InlineRuns,
     InlineTextRun,
 )
-from eneo.main.exceptions import TypedIOValidationException
 
 _MONOSPACE_FONT = "Consolas"
 _LIST_BULLET_STYLES = ("List Bullet", "List Bullet 2", "List Bullet 3")
 _LIST_NUMBER_STYLES = ("List Number", "List Number 2", "List Number 3")
 
 
-class DocumentStructureError(TypedIOValidationException):
-    """The content's outline cannot be expressed in the target document.
+def word_element(tag: str) -> Element:
+    """Create registered Word XML with the common lxml element interface.
 
-    Raised for skipped heading levels, headings deeper than the document
-    supports and similar structural defects: the writer refuses rather than
-    flattening, so an accessible outline is never silently broken.
+    A document contains both registered python-docx subclasses and generic
+    lxml elements, including content controls. Parents must accept both.
     """
-
-    def __init__(self, message: str) -> None:
-        super().__init__(message, code=FlowApiErrorCode.TYPED_IO_RENDER_FAILED.value)
+    return OxmlElement(tag)
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,15 +148,27 @@ class DocxBlockWriter:
 
     def _list(self, block: DocumentBlock, *, ordered: bool) -> list[Any]:
         ladder = self._list_styles.number if ordered else self._list_styles.bullet
-        restart_num_id = (
-            self._restart_numbering(ladder[0], start=block.start) if ordered else None
-        )
+        numbering_by_level: list[int | None] = []
         elements: list[Any] = []
         for index, item in enumerate(block.items):
-            level = min(block.item_level(index), len(ladder) - 1)
+            level = block.item_level(index)
+            if level >= len(ladder):
+                raise DocumentStructureError(
+                    f"The document template has no list style for level {level + 1}."
+                )
             paragraph = self._document.add_paragraph(style=ladder[level])
-            if restart_num_id is not None and level == 0:
-                _set_numbering(paragraph, num_id=restart_num_id, level=0)
+            if ordered:
+                del numbering_by_level[level + 1 :]
+                while len(numbering_by_level) <= level:
+                    depth = len(numbering_by_level)
+                    numbering_by_level.append(
+                        self._restart_numbering(
+                            ladder[depth], start=block.start if depth == 0 else 1
+                        )
+                    )
+                num_id = numbering_by_level[level]
+                if num_id is not None:
+                    _set_numbering(paragraph, num_id=num_id, level=0)
             runs = block.item_runs[index] if index < len(block.item_runs) else ()
             self._append_runs(paragraph, runs, fallback=item)
             elements.append(paragraph._p)
@@ -235,16 +245,16 @@ class DocxBlockWriter:
         relationship_id = paragraph.part.relate_to(
             inline_run.href, RT.HYPERLINK, is_external=True
         )
-        hyperlink = OxmlElement("w:hyperlink")
+        hyperlink = word_element("w:hyperlink")
         hyperlink.set(qn("r:id"), relationship_id)
-        run_element = OxmlElement("w:r")
-        text = OxmlElement("w:t")
+        run_element = word_element("w:r")
+        text = word_element("w:t")
         text.set(qn("xml:space"), "preserve")
         text.text = inline_run.text
         run_element.append(text)
         hyperlink.append(run_element)
         paragraph._p.append(hyperlink)
-        run = Run(run_element, paragraph)
+        run = Run(cast(CT_R, run_element), paragraph)
         if self._hyperlink_style is not None:
             run.style = self._document.styles[self._hyperlink_style]
         return run
@@ -258,15 +268,13 @@ class DocxBlockWriter:
         return None
 
     def _resolve_ladder(self, candidates: tuple[str, ...]) -> tuple[str, ...]:
-        """Keep the leading run of existing list styles; fall back to plain text."""
+        """Keep the leading run of existing list styles."""
 
         ladder: list[str] = []
         for candidate in candidates:
             if candidate not in self._style_names:
                 break
             ladder.append(candidate)
-        if not ladder:
-            ladder.append(self._first_existing("List Paragraph") or "Normal")
         return tuple(ladder)
 
     def _resolve_table_style(self) -> str | None:
@@ -344,11 +352,11 @@ def _mark_header_row(table: Any) -> None:
         return
     row_properties = table.rows[0]._tr.get_or_add_trPr()
     if row_properties.find(qn("w:tblHeader")) is None:
-        row_properties.append(OxmlElement("w:tblHeader"))
+        row_properties.append(word_element("w:tblHeader"))
     table_properties = table._tbl.tblPr
     look = table_properties.find(qn("w:tblLook"))
     if look is None:
-        look = OxmlElement("w:tblLook")
+        look = word_element("w:tblLook")
         table_properties.append(look)
     look.set(qn("w:firstRow"), "1")
 

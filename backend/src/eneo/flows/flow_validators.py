@@ -60,6 +60,7 @@ from eneo.flows.flow_validators_http import (
 from eneo.flows.flow_validators_template import (
     validate_template_fill_output_config,
 )
+from eneo.flows.flow_variable_definitions import VariableShape, runtime_variable_shape
 from eneo.flows.input_binding_contract_rules import (
     FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
     InputBindingContractError,
@@ -385,10 +386,13 @@ def collect_step_graph_issues(
                 FlowGraphIssueCode.TEMPLATE_FILL_REQUIRES_DOCX
                 if step.output_type != "docx"
                 else FlowGraphIssueCode.FLOW_STEP_INVALID,
-                lambda: validate_template_fill_output_config(
+                lambda: _validate_template_fill_config(
                     step=step,
                     available_orders=seen,
                     require_complete_config=require_complete_template_fill_config,
+                    steps_by_order=steps_by_order,
+                    form_field_types=form_field_types,
+                    step_ref_mapping=step_ref_mapping,
                 ),
             )
         input_policy = INPUT_TYPE_POLICIES.get(step.input_type)
@@ -861,6 +865,95 @@ def _validate_supported_input_binding_keys(*, step: FlowStepValidationView) -> N
             context={"field": "input_bindings", "key": exc.key},
             step_order=step.step_order,
         ) from exc
+
+
+def _validate_template_fill_config(
+    *,
+    step: FlowStepValidationView,
+    available_orders: set[int],
+    require_complete_config: bool,
+    steps_by_order: dict[int, FlowStepValidationView],
+    form_field_types: dict[str, str],
+    step_ref_mapping: dict[str, int],
+) -> None:
+    validate_template_fill_output_config(
+        step=step,
+        available_orders=available_orders,
+        require_complete_config=require_complete_config,
+    )
+    if not require_complete_config:
+        return
+    # The syntax validator above establishes an object of exact expressions or
+    # explicit empty values. Publishing additionally requires a known scalar.
+    bindings = cast(dict[str, str], (step.output_config or {})["bindings"])
+    for placeholder, binding in bindings.items():
+        if not binding.strip():
+            continue
+        reference = analyze_template(
+            binding,
+            step_refs=step_ref_mapping,
+            form_field_names=set(form_field_types),
+        )[0]
+        scalar = False
+        if reference.kind is TemplateReferenceKind.STEP:
+            source = steps_by_order.get(reference.step_order or 0)
+            if source is not None and source.step_order < step.step_order:
+                scalar = reference.tail in {"output.text", "status", "error_message"}
+                if reference.structured_path and source.output_contract is not None:
+                    schema = _source_ref_schema(
+                        contract=source.output_contract,
+                        field_path=reference.structured_path,
+                        current_step_order=step.step_order,
+                        path_label=f"template binding '{placeholder}'",
+                        context={
+                            "field": "output_config.bindings",
+                            "placeholder": placeholder,
+                        },
+                    )
+                    scalar = _schema_type_hint(schema) in {
+                        "string",
+                        "number",
+                        "integer",
+                        "boolean",
+                        "null",
+                    }
+        elif reference.kind is TemplateReferenceKind.FORM_FIELD:
+            scalar = not reference.tail and form_field_types.get(reference.head) in {
+                "text",
+                "number",
+                "date",
+                "select",
+            }
+        elif reference.kind is TemplateReferenceKind.RUNTIME:
+            if not reference.tail:
+                scalar = runtime_variable_shape(reference.head) is VariableShape.SCALAR
+            elif reference.head in {"flow_input", "flow"}:
+                field_name = reference.tail
+                if reference.head == "flow":
+                    field_name = (
+                        field_name.removeprefix("input.")
+                        if field_name.startswith("input.")
+                        else ""
+                    )
+                scalar = form_field_types.get(field_name) in {
+                    "text",
+                    "number",
+                    "date",
+                    "select",
+                } or field_name in {
+                    "text",
+                    "transcribed_text",
+                    "transcription",
+                    "transcript",
+                    "transkribering",
+                }
+        if not scalar or reference.path_error_code is not None:
+            raise FlowStepValidationError(
+                f"Step {step.step_order}: template binding '{placeholder}' must resolve "
+                "to a scalar value; select a text output or a scalar field from a declared contract.",
+                context={"field": "output_config.bindings", "placeholder": placeholder},
+                step_order=step.step_order,
+            )
 
 
 def _schema_type_hint(schema: dict[str, Any]) -> str:

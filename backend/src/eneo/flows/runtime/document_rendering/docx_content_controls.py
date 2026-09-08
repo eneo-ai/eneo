@@ -26,9 +26,9 @@ import re
 from dataclasses import dataclass
 from typing import Any, Iterator, Literal, Sequence
 
-from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
+from eneo.flows.runtime.document_rendering.docx_writer import word_element
 from eneo.main.exceptions import BadRequestException
 
 ContentControlKind = Literal["rich", "text"]
@@ -150,10 +150,20 @@ def inspect_content_controls(document: Any) -> tuple[ContentControl, ...]:
                 )
             seen[tag_value] = label
             parent = sdt.getparent()
-            kind: ContentControlKind = "rich" if parent is body else "text"
             text_properties = (
                 properties.find(qn("w:text")) if properties is not None else None
             )
+            if parent is body and text_properties is None:
+                kind: ContentControlKind = "rich"
+            elif parent is not None and parent.tag == qn("w:p"):
+                kind = "text"
+            else:
+                raise DocxTemplateContractError(
+                    f"The content control '{tag_value}' has an unsupported "
+                    "placement. Place rich text controls directly in the document "
+                    "body and inline text controls directly inside a paragraph.",
+                    code="flow_template_control_placement",
+                )
             multiline = text_properties is not None and text_properties.get(
                 qn("w:multiLine")
             ) in ("1", "true", "on")
@@ -182,7 +192,7 @@ def fill_rich_control(control: ContentControl, elements: Sequence[Any]) -> None:
     for element in elements:
         content.append(element)
     if len(content) == 0:
-        content.append(OxmlElement("w:p"))
+        content.append(word_element("w:p"))
 
 
 def fill_text_control(control: ContentControl, value: str) -> None:
@@ -193,14 +203,14 @@ def fill_text_control(control: ContentControl, value: str) -> None:
     """
 
     content = _clear_content(control)
-    run = OxmlElement("w:r")
+    run = word_element("w:r")
     lines = [line.strip() for line in value.splitlines() if line.strip()]
     if not control.multiline:
         lines = [" ".join(lines)]
     for index, line in enumerate(lines):
         if index:
-            run.append(OxmlElement("w:br"))
-        text = OxmlElement("w:t")
+            run.append(word_element("w:br"))
+        text = word_element("w:t")
         text.set(qn("xml:space"), "preserve")
         text.text = line
         run.append(text)
@@ -228,8 +238,8 @@ def append_rich_control(
     """Append a body-level rich text control showing ``hint`` as placeholder text."""
 
     sdt = _control_element(tag=tag, label=label)
-    content = OxmlElement("w:sdtContent")
-    paragraph = OxmlElement("w:p")
+    content = word_element("w:sdtContent")
+    paragraph = word_element("w:p")
     paragraph.append(_placeholder_run(hint))
     content.append(paragraph)
     sdt.append(content)
@@ -251,11 +261,11 @@ def append_text_control(
 
     sdt = _control_element(tag=tag, label=label)
     properties = sdt.find(qn("w:sdtPr"))
-    text = OxmlElement("w:text")
+    text = word_element("w:text")
     if multiline:
         text.set(qn("w:multiLine"), "1")
     properties.append(text)
-    content = OxmlElement("w:sdtContent")
+    content = word_element("w:sdtContent")
     content.append(_placeholder_run(hint))
     sdt.append(content)
     paragraph._p.append(sdt)
@@ -270,30 +280,30 @@ _control_ids = iter(range(100_000, 10_000_000))
 
 
 def _control_element(*, tag: str, label: str) -> Any:
-    sdt = OxmlElement("w:sdt")
-    properties = OxmlElement("w:sdtPr")
-    alias = OxmlElement("w:alias")
+    sdt = word_element("w:sdt")
+    properties = word_element("w:sdtPr")
+    alias = word_element("w:alias")
     alias.set(qn("w:val"), label)
     properties.append(alias)
-    tag_element = OxmlElement("w:tag")
+    tag_element = word_element("w:tag")
     tag_element.set(qn("w:val"), tag)
     properties.append(tag_element)
-    identifier = OxmlElement("w:id")
+    identifier = word_element("w:id")
     identifier.set(qn("w:val"), str(next(_control_ids)))
     properties.append(identifier)
-    properties.append(OxmlElement("w:showingPlcHdr"))
+    properties.append(word_element("w:showingPlcHdr"))
     sdt.append(properties)
     return sdt
 
 
 def _placeholder_run(hint: str) -> Any:
-    run = OxmlElement("w:r")
-    run_properties = OxmlElement("w:rPr")
-    run_style = OxmlElement("w:rStyle")
+    run = word_element("w:r")
+    run_properties = word_element("w:rPr")
+    run_style = word_element("w:rStyle")
     run_style.set(qn("w:val"), _PLACEHOLDER_STYLE_ID)
     run_properties.append(run_style)
     run.append(run_properties)
-    text = OxmlElement("w:t")
+    text = word_element("w:t")
     text.set(qn("xml:space"), "preserve")
     text.text = hint
     run.append(text)
@@ -320,7 +330,7 @@ def _clear_content(control: ContentControl) -> Any:
             properties.remove(showing)
     content = sdt.find(qn("w:sdtContent"))
     if content is None:
-        content = OxmlElement("w:sdtContent")
+        content = word_element("w:sdtContent")
         sdt.append(content)
     for child in list(content):
         content.remove(child)

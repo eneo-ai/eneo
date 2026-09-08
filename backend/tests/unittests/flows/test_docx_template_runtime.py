@@ -8,12 +8,12 @@ from docx import Document
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
+from eneo.flows.runtime.document_rendering.blocks import DocumentStructureError
 from eneo.flows.runtime.document_rendering.docx_content_controls import (
     DocxTemplateContractError,
     append_rich_control,
     append_text_control,
 )
-from eneo.flows.runtime.document_rendering.docx_writer import DocumentStructureError
 from eneo.flows.runtime.document_rendering.limits import DocumentRenderLimits
 from eneo.flows.runtime.docx_template_runtime import (
     extract_docx_template_text_preview,
@@ -164,6 +164,22 @@ def test_inspect_rejects_unsupported_control_kinds() -> None:
         inspect_docx_template_bytes(_bytes(document), filename="t.docx")
     assert info.value.code == "flow_template_control_unsupported"
     assert "date control" in str(info.value)
+
+
+@pytest.mark.parametrize("shape", ["body_text", "custom_xml_parent"])
+def test_inspect_rejects_controls_outside_the_structural_profile(shape: str) -> None:
+    document = Document()
+    sdt = append_rich_control(document, tag="value", label="Value", hint="v")
+    if shape == "body_text":
+        sdt.find(qn("w:sdtPr")).append(OxmlElement("w:text"))
+    else:
+        wrapper = OxmlElement("w:customXml")
+        document.element.body.insert(0, wrapper)
+        wrapper.append(sdt)
+
+    with pytest.raises(DocxTemplateContractError) as info:
+        inspect_docx_template_bytes(_bytes(document), filename="t.docx")
+    assert info.value.code == "flow_template_control_placement"
 
 
 def test_inspect_rejects_controls_in_table_cells_and_headers() -> None:
@@ -331,6 +347,33 @@ def test_render_holds_the_whole_document_to_the_render_limits() -> None:
             step_order=1,
             limits=DocumentRenderLimits(max_blocks=3),
         )
+
+
+@pytest.mark.parametrize("second_kind", ["text", "rich"])
+@pytest.mark.parametrize(
+    ("limits", "metric"),
+    [
+        (DocumentRenderLimits(max_source_chars=7), "source_chars"),
+        (DocumentRenderLimits(max_text_chars=7), "text_chars"),
+    ],
+)
+def test_render_counts_inline_values_in_aggregate_limits(
+    second_kind: str, limits: DocumentRenderLimits, metric: str
+) -> None:
+    second = ("second", "Second", "s")
+    template = control_template_bytes(
+        text=[("first", "First", "f"), *([second] if second_kind == "text" else [])],
+        rich=[second] if second_kind == "rich" else [],
+    )
+    with pytest.raises(TypedIOValidationException) as info:
+        render_docx_template(
+            template_bytes=template,
+            context={"first": "abcd", "second": "efgh"},
+            step_order=1,
+            limits=limits,
+        )
+    assert info.value.context is not None
+    assert info.value.context["metric"] == metric
 
 
 def test_render_refuses_a_template_that_left_the_supported_profile() -> None:

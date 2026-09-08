@@ -149,6 +149,9 @@ def render_docx_template(
         ) from exc
 
     _require_values(controls, context)
+    ensure_source_within_limits(
+        "\n".join(context[control.name] or "" for control in controls), limits=limits
+    )
     sections = _parse_rich_sections(controls, context, limits=limits)
 
     writer = DocxBlockWriter(document)
@@ -259,7 +262,6 @@ def _parse_rich_sections(
         for control in controls
         if control.kind == "rich" and str(context[control.name]).strip()
     }
-    ensure_source_within_limits("\n".join(rich_values.values()), limits=limits)
     sections = {
         name: parse_markdown_blocks(value.splitlines())
         for name, value in rich_values.items()
@@ -267,5 +269,10 @@ def _parse_rich_sections(
     ensure_blocks_within_limits(
         [block for blocks in sections.values() for block in blocks],
         limits=limits,
+        additional_text_chars=sum(
+            len(context[control.name] or "")
+            for control in controls
+            if control.kind == "text"
+        ),
     )
     return sections

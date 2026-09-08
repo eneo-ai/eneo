@@ -1,0 +1,13 @@
+{"python": "3.11.14", "platform": "macOS-26.5.2-arm64-arm-64bit"}
+{"cells_including_header": 250, "repetition": 1, "seconds": 0.289322, "output_bytes": 37612}
+{"cells_including_header": 250, "repetition": 2, "seconds": 0.287888, "output_bytes": 37612}
+{"cells_including_header": 250, "repetition": 3, "seconds": 0.289142, "output_bytes": 37612}
+{"cells_including_header": 500, "repetition": 1, "seconds": 1.086113, "output_bytes": 38409}
+{"cells_including_header": 500, "repetition": 2, "seconds": 1.105487, "output_bytes": 38409}
+{"cells_including_header": 500, "repetition": 3, "seconds": 1.101421, "output_bytes": 38409}
+{"cells_including_header": 1000, "repetition": 1, "seconds": 4.409997, "output_bytes": 40033}
+{"cells_including_header": 1000, "repetition": 2, "seconds": 4.568606, "output_bytes": 40033}
+{"cells_including_header": 1000, "repetition": 3, "seconds": 4.373416, "output_bytes": 40033}
+{"cells_including_header": 2000, "repetition": 1, "seconds": 17.483891, "output_bytes": 43175}
+{"cells_including_header": 2000, "repetition": 2, "seconds": 17.237209, "output_bytes": 43175}
+{"cells_including_header": 2000, "repetition": 3, "seconds": 17.198176, "output_bytes": 43175}

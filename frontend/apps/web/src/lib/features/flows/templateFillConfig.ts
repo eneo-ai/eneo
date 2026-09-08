@@ -1,17 +1,10 @@
-import type { FlowStep } from "@eneo/eneo-js";
+import type { FlowStep, FlowTemplatePlaceholder } from "@eneo/eneo-js";
 import { getFlowFormFieldVariableToken } from "./flowFormSchema";
 
-/**
- * One fill target of a DOCX template: a Word content control. `name` is the
- * control's tag, `label` its title, `kind` whether it takes a whole section
- * ("rich") or one line ("text"), `hint` the placeholder text the author wrote.
- */
-export type FlowTemplatePlaceholder = {
-  name: string;
-  location: string;
-  label?: string;
-  kind?: "rich" | "text";
-  hint?: string | null;
+export type { FlowTemplatePlaceholder } from "@eneo/eneo-js";
+
+type TemplatePlaceholderDisplay = Omit<FlowTemplatePlaceholder, "kind"> & {
+  kind: FlowTemplatePlaceholder["kind"] | null;
 };
 
 export type FlowTemplateInspection = {
@@ -212,13 +205,15 @@ export function updateTemplateBinding(
 export function listTemplatePlaceholders(
   inspection: FlowTemplateInspection | null,
   currentConfig: TemplateFillOutputConfig
-): FlowTemplatePlaceholder[] {
+): TemplatePlaceholderDisplay[] {
   if (inspection?.placeholders?.length) {
     return inspection.placeholders;
   }
   return (currentConfig.placeholders ?? []).map((name) => ({
     name,
-    location: "template"
+    location: "template",
+    label: name,
+    kind: null
   }));
 }
 
@@ -246,6 +241,7 @@ export function buildTemplateBindingSuggestions(params: {
     (params.formSchema?.fields ?? []).map((field) => field.name.trim().toLowerCase())
   );
   for (const field of params.formSchema?.fields ?? []) {
+    if (!["text", "number", "date", "select"].includes(field.type)) continue;
     const variableToken = getFlowFormFieldVariableToken(field.name);
     if (variableToken) {
       addSuggestion(variableToken, params.labels.formFieldItem(field.name), "form", "text");
@@ -253,7 +249,7 @@ export function buildTemplateBindingSuggestions(params: {
   }
 
   for (const step of params.steps) {
-    if (step.step_order >= params.currentStepOrder) continue;
+    if (step.step_order >= params.currentStepOrder || step.output_type !== "text") continue;
     const stepLabel = step.user_description?.trim() || `Steg ${step.step_order}`;
     addSuggestion(
       `{{step_${step.step_order}.output.text}}`,
@@ -261,14 +257,6 @@ export function buildTemplateBindingSuggestions(params: {
       "step",
       "text"
     );
-    if (step.output_type === "json") {
-      addSuggestion(
-        `{{step_${step.step_order}.output.structured}}`,
-        params.labels.stepJsonItem(stepLabel),
-        "step",
-        "json"
-      );
-    }
   }
 
   if (!fieldNames.has("datum")) {
@@ -310,6 +298,7 @@ export function buildTemplateBindingAutoSuggestions(params: {
 }): Record<string, string> {
   const fieldMatches = new Map<string, string>();
   for (const field of params.formSchema?.fields ?? []) {
+    if (!["text", "number", "date", "select"].includes(field.type)) continue;
     const variableToken = getFlowFormFieldVariableToken(field.name);
     if (variableToken) {
       fieldMatches.set(normalizeTemplateToken(field.name), variableToken);
@@ -318,11 +307,8 @@ export function buildTemplateBindingAutoSuggestions(params: {
 
   const stepMatches = new Map<string, string>();
   for (const step of params.steps) {
-    if (step.step_order >= params.currentStepOrder) continue;
-    const expression =
-      step.output_type === "json"
-        ? `{{step_${step.step_order}.output.structured}}`
-        : `{{step_${step.step_order}.output.text}}`;
+    if (step.step_order >= params.currentStepOrder || step.output_type !== "text") continue;
+    const expression = `{{step_${step.step_order}.output.text}}`;
     const label = step.user_description?.trim();
     if (label) {
       stepMatches.set(normalizeTemplateToken(label), expression);

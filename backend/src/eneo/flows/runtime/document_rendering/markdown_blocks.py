@@ -8,7 +8,9 @@ from markdown_it.token import Token
 
 from eneo.flows.runtime.document_rendering.blocks import (
     MAX_HEADING_LEVEL,
+    MAX_LIST_LEVEL,
     DocumentBlock,
+    DocumentStructureError,
     InlineRuns,
     InlineTextRun,
 )
@@ -121,12 +123,7 @@ def _consume_list(
     *,
     ordered: bool,
 ) -> tuple[DocumentBlock, int]:
-    """Consume one list including nested lists; every item keeps its depth.
-
-    Nested lists render as indented items of the outer list's kind, so a
-    bullet nested in a numbered list stays a numbered sub-item. The outer
-    kind and its starting number are the block's identity.
-    """
+    """Consume a homogeneous list, preserving each item's supported depth."""
 
     items: list[str] = []
     item_run_groups: list[InlineRuns] = []
@@ -137,6 +134,17 @@ def _consume_list(
     while index < len(tokens):
         token = tokens[index]
         if token.type in _LIST_OPEN_TYPES:
+            if token.type != tokens[start_index].type:
+                raise DocumentStructureError(
+                    "Mixed bullet and numbered list nesting is not supported. "
+                    "Use the same list kind at every nested level."
+                )
+            if depth > MAX_LIST_LEVEL:
+                raise DocumentStructureError(
+                    f"Lists support at most {MAX_LIST_LEVEL + 1} levels."
+                )
+            if depth and ordered and _list_start(token) != 1:
+                raise DocumentStructureError("Nested numbered lists must start at 1.")
             depth += 1
             index += 1
             continue
@@ -154,6 +162,11 @@ def _consume_list(
                 item_run_groups.append(item_runs)
                 item_levels.append(depth - 1)
             continue
+        if token.type == "inline":
+            raise DocumentStructureError(
+                "Text after a nested list is not supported. "
+                "Place all parent-item text before its nested list."
+            )
         index += 1
 
     return (

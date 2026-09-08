@@ -461,8 +461,8 @@ def _resolve_template_bindings(
             )
             match = _FULL_TEMPLATE_EXPRESSION_PATTERN.fullmatch(expression)
             if match is not None:
-                # Evidence hashes the raw value, while template fill preserves compact
-                # JSON for bindings that consist of one complete expression.
+                # Validate the raw value before interpolation can serialize a
+                # structured value into text and hide an invalid binding.
                 raw_value = variable_resolver.resolve_path(
                     context, match.group(1).strip()
                 )

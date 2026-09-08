@@ -101,6 +101,7 @@ dev = [
     "mypy-boto3-s3>=1.43,<2",
     "botocore-stubs>=1.43,<2",
     "mutmut>=3.7,<4",
+    "types-lxml>=2026.2.16",
 ]
 
 [build-system]

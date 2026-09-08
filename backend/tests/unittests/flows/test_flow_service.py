@@ -1020,7 +1020,7 @@ async def test_publish_flow_pins_template_metadata_for_template_fill(user):
         created_by_user_id=user.id,
         owner_user_id=user.id,
         published_version=None,
-        metadata_json=None,
+        metadata_json={"form_schema": {"fields": [{"name": "title", "type": "text"}]}},
         data_retention_days=None,
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),

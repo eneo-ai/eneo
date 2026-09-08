@@ -55,7 +55,12 @@ from eneo.flows.flow_template_asset_service import (
     AttachedTemplateFileUnavailableError,
 )
 from eneo.flows.runtime.document_rendering.docx_content_controls import (
+    append_rich_control,
     append_text_control,
+)
+from eneo.flows.runtime.docx_template_runtime import (
+    extract_docx_text,
+    render_docx_template,
 )
 from eneo.main.exceptions import BadRequestException
 
@@ -123,7 +128,9 @@ def _template_changeset():
     return compile_flow_draft_changeset(spec, current_flow=None)
 
 
-async def _create_flow_and_file(container, *, placeholder: str):
+async def _create_flow_and_file(
+    container, *, placeholder: str, content: bytes | None = None
+):
     user = container.user()
     space = Spaces(
         tenant_id=user.tenant_id,
@@ -138,7 +145,7 @@ async def _create_flow_and_file(container, *, placeholder: str):
         description="",
         steps=[],
     )
-    content = _template_bytes(placeholder)
+    content = content if content is not None else _template_bytes(placeholder)
     file = await _save_template_file(
         container,
         name="template.docx",
@@ -513,19 +520,34 @@ async def test_changed_template_contract_rolls_back_promoted_asset(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_materialized_template_attachment_publishes_with_pinned_identity(
+@pytest.mark.parametrize("mapping_case", ["valid", "missing", "structured"])
+async def test_materialized_template_attachment_publish_validates_controls_and_pins_identity(
     db_container,
+    mapping_case: str,
 ) -> None:
+    document = Document(io.BytesIO(_template_bytes("case_id")))
+    append_rich_control(document, tag="body", label="Bakgrund", hint="Skriv bakgrunden")
+    payload = io.BytesIO()
+    document.save(payload)
     async with db_container() as setup_container:
         user, _space, flow, file = await _create_flow_and_file(
             setup_container,
             placeholder="case_id",
+            content=payload.getvalue(),
         )
 
     async with db_container(user=user) as container:
         changeset = FlowDraftChangeSet(
             flow_name=flow.name,
             flow_description="",
+            metadata_json={
+                "form_schema": {
+                    "fields": [
+                        {"name": "case_id", "type": "text"},
+                        {"name": "body", "type": "text"},
+                    ]
+                }
+            },
             compiled_steps=[
                 FlowDraftCompiledStep(
                     plan_step_ref="step_a",
@@ -536,7 +558,12 @@ async def test_materialized_template_attachment_publishes_with_pinned_identity(
                     input_type="text",
                     output_mode="template_fill",
                     output_type="docx",
-                    output_config={"bindings": {"case_id": "{{ flow_input.case_id }}"}},
+                    output_config={
+                        "bindings": {
+                            "case_id": "{{ flow_input.case_id }}",
+                            "body": "{{ flow_input.body }}",
+                        }
+                    },
                 )
             ],
         )
@@ -554,6 +581,13 @@ async def test_materialized_template_attachment_publishes_with_pinned_identity(
             name="template-fill",
         )
         terminal = materialized.changeset.compiled_steps[0]
+        output_config = dict(terminal.output_config or {})
+        bindings = dict(output_config["bindings"])
+        if mapping_case == "missing":
+            del bindings["body"]
+        elif mapping_case == "structured":
+            bindings["body"] = "{{flow_input}}"
+        output_config["bindings"] = bindings
         updated = await container.flow_service().update_flow(
             flow_id=flow.id,
             metadata_json=materialized.changeset.metadata_json,
@@ -566,7 +600,7 @@ async def test_materialized_template_attachment_publishes_with_pinned_identity(
                     input_type=terminal.input_type,
                     output_mode=terminal.output_mode,
                     output_type=terminal.output_type,
-                    output_config=terminal.output_config,
+                    output_config=output_config,
                 )
             ],
         )
@@ -575,6 +609,20 @@ async def test_materialized_template_attachment_publishes_with_pinned_identity(
             bindings=(materialized.binding,),
             source=FlowResourceBindingSource.AI_BUILDER,
         )
+
+        if mapping_case != "valid":
+            with pytest.raises(
+                BadRequestException,
+                match="missing bindings" if mapping_case == "missing" else "scalar",
+            ):
+                await container.flow_service().publish_flow(flow_id=updated.id)
+            version_count = await container.session().scalar(
+                sa.select(sa.func.count(FlowVersions.version)).where(
+                    FlowVersions.flow_id == flow.id
+                )
+            )
+            assert version_count == 0
+            return
 
         published = await container.flow_service().publish_flow(flow_id=updated.id)
 
@@ -590,5 +638,26 @@ async def test_materialized_template_attachment_publishes_with_pinned_identity(
         output_config = definition["steps"][0]["output_config"]
         assert output_config["template_asset_id"] == str(materialized.binding.local_id)
         assert output_config["template_checksum"] == file.checksum
-        assert output_config["placeholders"] == ["case_id"]
-        assert output_config["bindings"] == {"case_id": "{{ flow_input.case_id }}"}
+        assert output_config["placeholders"] == ["case_id", "body"]
+        assert output_config["bindings"] == {
+            "case_id": "{{ flow_input.case_id }}",
+            "body": "{{ flow_input.body }}",
+        }
+        (
+            _asset,
+            pinned_file,
+        ) = await container.flow_template_asset_service().get_asset_with_file(
+            flow_id=flow.id,
+            asset_id=materialized.binding.local_id,
+        )
+        assert pinned_file.blob is not None
+        rendered, _mime, _name = render_docx_template(
+            template_bytes=pinned_file.blob,
+            context={"case_id": "KS-2026-42", "body": "**Verifierad** bakgrund."},
+            step_order=1,
+        )
+        text = extract_docx_text(rendered)
+        assert "KS-2026-42" in text
+        assert "Verifierad" in text
+        assert "bakgrund." in text
+        assert "Skriv bakgrunden" not in text

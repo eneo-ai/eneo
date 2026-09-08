@@ -1,8 +1,8 @@
-"""Build the standard DOCX templates shipped with Eneo, reproducibly.
+"""Build the neutral runtime DOCX template and developer example templates.
 
 Run from ``backend/``::
 
-    uv run python scripts/build_standard_docx_templates.py
+    uv run --no-sync python scripts/build_standard_docx_templates.py
 
 The templates land in ``src/eneo/flows/runtime/templates/standard/`` and are
 committed, so a build here is a reviewable change. Every fill target is a Word
@@ -10,8 +10,9 @@ content control (see ``eneo.flows.runtime.document_rendering.docx_content_contro
 the flow binds to, a label, and placeholder text that doubles as the authoring
 hint the AI Builder reads. The template owns everything visual: sv-SE
 language, the built-in heading styles with a house look, list styles, a table
-style with a marked header row, a header logo with alt text, page numbers and
-core properties. Authors copy these files, replace the logo and colours, and
+style with a marked header row, page numbers and core properties. The report
+and meeting templates are examples, not runtime defaults. Authors copy these
+files, add their organisation's branding, and
 add or rename controls from Word's Developer tab; no code is needed.
 """
 
@@ -34,7 +35,6 @@ from eneo.flows.runtime.document_rendering.docx_content_controls import (  # noq
 )
 
 LANGUAGE = "sv-SE"
-ORGANISATION = "Sundsvalls kommun"
 OUTPUT_DIR = (
     Path(__file__).resolve().parents[1]
     / "src"
@@ -158,10 +158,11 @@ def _base(*, title: str, accent: RGBColor):
     document = Document()
     _set_language(document)
     _house_styles(document, accent=accent)
-    _header_and_footer(document)
+    _page_layout(document)
     document.core_properties.title = title
     document.core_properties.language = LANGUAGE
-    document.core_properties.author = ORGANISATION
+    document.core_properties.author = ""
+    document.core_properties.last_modified_by = ""
     return document
 
 
@@ -211,30 +212,11 @@ def _house_styles(document, *, accent: RGBColor) -> None:
     table_grid.font.size = Pt(10)
 
 
-def _logo_png(text: str) -> bytes:
-    from PIL import Image, ImageDraw
-
-    image = Image.new("RGB", (640, 160), (0, 91, 140))
-    draw = ImageDraw.Draw(image)
-    draw.rectangle((0, 0, 40, 160), fill=(255, 255, 255))
-    draw.text((70, 60), text, fill=(255, 255, 255))
-    buffer = io.BytesIO()
-    image.save(buffer, "PNG")
-    return buffer.getvalue()
-
-
-def _header_and_footer(document) -> None:
+def _page_layout(document) -> None:
     section = document.sections[0]
     for side in ("top_margin", "bottom_margin", "left_margin", "right_margin"):
         setattr(section, side, Cm(2.5))
-    header_paragraph = section.header.paragraphs[0]
-    run = header_paragraph.add_run()
-    run.add_picture(io.BytesIO(_logo_png(ORGANISATION)), width=Cm(4))
-    for doc_pr in run._r.iter(qn("wp:docPr")):
-        doc_pr.set("descr", f"{ORGANISATION} logotyp")
-        doc_pr.set("title", "Logotyp")
     footer_paragraph = section.footer.paragraphs[0]
-    footer_paragraph.text = f"{ORGANISATION} · Sida "
     field = OxmlElement("w:fldSimple")
     field.set(qn("w:instr"), "PAGE")
     run_element = OxmlElement("w:r")

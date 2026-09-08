@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.main.exceptions import TypedIOValidationException
+
 DocumentBlockKind = Literal[
     "empty",
     "heading",
@@ -18,8 +21,15 @@ DocumentBlockKind = Literal[
 # silently flattened.
 MAX_HEADING_LEVEL = 6
 # Nested list depth the writers can express with the built-in list styles
-# ("List Bullet", "List Bullet 2", "List Bullet 3"); deeper items are clamped.
+# ("List Bullet", "List Bullet 2", "List Bullet 3").
 MAX_LIST_LEVEL = 2
+
+
+class DocumentStructureError(TypedIOValidationException):
+    """Document structure is outside the supported rendering profile."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, code=FlowApiErrorCode.TYPED_IO_RENDER_FAILED.value)
 
 
 @dataclass(frozen=True)
@@ -52,7 +62,12 @@ class DocumentBlock:
 
     def item_level(self, index: int) -> int:
         if index < len(self.item_levels):
-            return min(max(self.item_levels[index], 0), MAX_LIST_LEVEL)
+            level = self.item_levels[index]
+            if not 0 <= level <= MAX_LIST_LEVEL:
+                raise DocumentStructureError(
+                    f"Lists support at most {MAX_LIST_LEVEL + 1} levels."
+                )
+            return level
         return 0
 
 

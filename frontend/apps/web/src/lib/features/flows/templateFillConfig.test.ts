@@ -100,8 +100,8 @@ describe("templateFillConfig", () => {
         file_id: "new-file",
         file_name: "rapport.docx",
         placeholders: [
-          { name: "summary", location: "body" },
-          { name: "author", location: "header" }
+          { name: "summary", location: "body", label: "summary", kind: "rich" },
+          { name: "author", location: "body", label: "author", kind: "rich" }
         ]
       },
       { author: "{{författare}}" }
@@ -151,7 +151,7 @@ describe("templateFillConfig", () => {
         asset_id: "new-asset",
         file_id: "new-file",
         file_name: "rapport.docx",
-        placeholders: [{ name: "summary", location: "body" }]
+        placeholders: [{ name: "summary", location: "body", label: "summary", kind: "rich" }]
       }
     );
 
@@ -167,8 +167,8 @@ describe("templateFillConfig", () => {
         placeholders: ["summary", "author"]
       })
     ).toEqual([
-      { name: "summary", location: "template" },
-      { name: "author", location: "template" }
+      { name: "summary", location: "template", label: "summary", kind: null },
+      { name: "author", location: "template", label: "author", kind: null }
     ]);
   });
 
@@ -194,7 +194,9 @@ describe("templateFillConfig", () => {
       formSchema: {
         fields: [
           { name: "titel", type: "text" },
-          { name: "författare", type: "text" }
+          { name: "författare", type: "text" },
+          { name: "recipients", type: "multiselect" },
+          { name: "items", type: "list" }
         ]
       },
       steps: [
@@ -224,16 +226,12 @@ describe("templateFillConfig", () => {
           group: "step",
           outputType: "text"
         },
-        {
-          value: "{{step_2.output.structured}}",
-          label: "Analys -> json",
-          group: "step",
-          outputType: "json"
-        },
         { value: "{{datum}}", label: "Today", group: "system", outputType: "text" }
       ])
     );
     expect(suggestions.some((item) => item.value === "{{step_4.output.text}}")).toBe(false);
+    expect(suggestions.some((item) => item.value.includes("step_2"))).toBe(false);
+    expect(suggestions.some((item) => /recipients|items/.test(item.value))).toBe(false);
   });
 
   it("groups suggestions by source type", () => {
@@ -270,12 +268,13 @@ describe("templateFillConfig", () => {
   it("builds auto-bindings from matching form fields and prior step names", () => {
     expect(
       buildTemplateBindingAutoSuggestions({
-        placeholders: ["författare", "sammanfatta", "unknown_field"],
+        placeholders: ["författare", "sammanfatta", "transkribera", "recipients", "unknown_field"],
         currentStepOrder: 4,
         formSchema: {
           fields: [
             { name: "Författare", type: "text" },
-            { name: "kurs", type: "text" }
+            { name: "kurs", type: "text" },
+            { name: "recipients", type: "multiselect" }
           ]
         },
         steps: [
@@ -286,7 +285,7 @@ describe("templateFillConfig", () => {
       })
     ).toEqual({
       författare: "{{flow_input.Författare}}",
-      sammanfatta: "{{step_2.output.structured}}"
+      transkribera: "{{step_1.output.text}}"
     });
   });
 
@@ -452,7 +451,7 @@ describe("templateFillConfig", () => {
             kind: "rich",
             hint: "Bakgrund..."
           },
-          { name: "författare", location: "header" }
+          { name: "författare", location: "body", label: "författare", kind: "rich" }
         ]
       },
       currentConfig: {
@@ -485,7 +484,7 @@ describe("templateFillConfig", () => {
         expect.objectContaining({
           placeholderName: "removed",
           status: "orphaned",
-          sourceOutputType: "json"
+          sourceOutputType: null
         })
       ])
     );
@@ -496,7 +495,9 @@ describe("templateFillConfig", () => {
       inspection: {
         file_id: "f1",
         file_name: "mall.docx",
-        placeholders: [{ name: "optional_section", location: "body" }]
+        placeholders: [
+          { name: "optional_section", location: "body", label: "optional_section", kind: "rich" }
+        ]
       },
       currentConfig: {
         placeholders: ["optional_section"],

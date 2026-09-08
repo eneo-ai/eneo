@@ -487,9 +487,7 @@ async def test_execute_template_fill_step_renders_and_persists_docx() -> None:
 
 
 @pytest.mark.asyncio
-async def test_builder_approved_template_contract_materializes_and_renders_without_tokens() -> (
-    None
-):
+async def test_template_contract_materializes_and_renders_without_tokens() -> None:
     run = _run()
     run.input_payload_json = FlowRunInputEnvelopePatch.transcription(
         transcript="Verifierad transkribering",

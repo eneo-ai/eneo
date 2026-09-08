@@ -793,17 +793,38 @@ def _docx_styled(blob: bytes) -> list[tuple[str, str]]:
     return docx_styled_paragraphs(blob)
 
 
-def test_render_docx_drops_a_chat_lead_in_before_the_title() -> None:
+def test_generic_docx_contains_no_fixed_organisation_or_logo() -> None:
     blob, _, _ = _render_service.render_document(
-        "Här följer rapporten, sammanställd som ett formellt dokument.\n\n"
-        "# Rapport\n\nBrödtext.",
+        "# Rapport\n\nText.", "docx", step_order=1
+    )
+    document = Document(io.BytesIO(blob))
+    assert document.core_properties.author == ""
+    assert document.core_properties.last_modified_by == ""
+    assert document.core_properties.language == "sv-SE"
+    with zipfile.ZipFile(io.BytesIO(blob)) as archive:
+        assert not any(name.startswith("word/media/") for name in archive.namelist())
+        furniture = [
+            archive.read(name).decode()
+            for name in archive.namelist()
+            if name.startswith(("word/header", "word/footer")) and name.endswith(".xml")
+        ]
+        assert all("Sundsvall" not in xml and "logotyp" not in xml for xml in furniture)
+        assert any('w:instr="PAGE"' in xml for xml in furniture)
+    for section in document.sections:
+        assert all(not paragraph.text for paragraph in section.header.paragraphs)
+        assert all(not paragraph.text for paragraph in section.footer.paragraphs)
+
+
+def test_render_docx_preserves_a_short_pre_title_paragraph() -> None:
+    blob, _, _ = _render_service.render_document(
+        "Sekretessklass: Begränsad\n\n# Rapport\n\nBrödtext.",
         "docx",
         step_order=1,
     )
 
     styled = _docx_styled(blob)
-    assert styled[0] == ("Heading 1", "Rapport")
-    assert all("Här följer" not in text for _, text in styled)
+    assert styled[0] == ("Normal", "Sekretessklass: Begränsad")
+    assert styled[1] == ("Heading 1", "Rapport")
     assert Document(io.BytesIO(blob)).core_properties.title == "Rapport"
 
 
@@ -834,6 +855,48 @@ def test_render_docx_nested_lists_use_level_styles_and_numbering_restarts() -> N
     # Each numbered list gets its own numbering instance with a start override.
     assert numbering.count("<w:startOverride") == 2
     assert xml.count("<w:numPr>") == 3
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "- Parent\n  1. Numbered child",
+        "1. Parent\n   - Bullet child",
+        "- A\n  - B\n    - C\n      - D",
+        "1. A\n\n   3. Child",
+        "1. Parent\n   1. Child\n\n   Continuation text.\n2. Next",
+    ],
+)
+def test_document_render_rejects_unsupported_list_nesting(text: str) -> None:
+    with pytest.raises(TypedIOValidationException) as info:
+        _render_service.render_document(text, "docx", step_order=1)
+    assert info.value.code == "typed_io_render_failed"
+
+
+def test_nested_numbered_lists_restart_under_each_parent() -> None:
+    text = "1. A\n   1. A1\n   2. A2\n2. B\n   1. B1"
+    blob, _, _ = _render_service.render_document(text, "docx", step_order=1)
+    document = Document(io.BytesIO(blob))
+    numbers = {
+        paragraph.text: paragraph._p.pPr.numPr.numId.val
+        for paragraph in docx_paragraphs(document)
+        if paragraph._p.pPr is not None and paragraph._p.pPr.numPr is not None
+    }
+    assert numbers["A"] == numbers["B"]
+    assert numbers["A1"] == numbers["A2"]
+    assert numbers["B1"] != numbers["A1"]
+    assert len(set(numbers.values())) == 3
+    numbering = document.part.numbering_part.element
+    starts = {
+        label: numbering.num_having_numId(num_id)
+        .find(".//" + qn("w:startOverride"))
+        .get(qn("w:val"))
+        for label, num_id in numbers.items()
+    }
+    assert starts["A1"] == "1"
+    assert starts["B1"] == "1"
+    html = blocks_to_html_document(parse_markdown_blocks(text.splitlines()), title="T")
+    assert html.count("<ol>") == 3
 
 
 def test_render_docx_writes_links_as_hyperlinks_and_inherits_style_emphasis() -> None:

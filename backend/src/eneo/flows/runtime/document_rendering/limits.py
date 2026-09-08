@@ -116,11 +116,13 @@ def ensure_blocks_within_limits(
     blocks: Sequence[DocumentBlock],
     *,
     limits: DocumentRenderLimits = DEFAULT_DOCUMENT_RENDER_LIMITS,
+    additional_text_chars: int = 0,
 ) -> None:
     if len(blocks) > limits.max_blocks:
         _raise_document_too_large("blocks", len(blocks), limits.max_blocks)
 
-    total_text_chars = 0
+    total_text_chars = additional_text_chars
+    _check_text_limit(total_text_chars, limits)
     total_table_rows = 0
     total_table_cells = 0
     total_list_items = 0

@@ -468,7 +468,15 @@ def _apply_attachment_output_evidence(
         if attachment_context is not None
         else None
     )
-    if state.output_schema_evidence is None and attachment_output_evidence is not None:
+    if attachment_context is not None and attachment_context.template_controls_by_file:
+        templates = [item for item in state.file_roles if item.role == "template"]
+        attachment_output_evidence = (
+            attachment_context.template_schema_evidence(templates[0].file_id)
+            if len(templates) == 1
+            else None
+        )
+    existing = state.output_schema_evidence
+    if existing is None or existing.source == "template_placeholders":
         state.replace_schema_resolution(
             input_evidence=state.input_schema_evidence,
             output_evidence=attachment_output_evidence,

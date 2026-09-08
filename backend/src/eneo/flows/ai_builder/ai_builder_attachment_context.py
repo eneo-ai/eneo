@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
+from itertools import islice
 from typing import NoReturn, cast
 from uuid import UUID
 
@@ -13,6 +14,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorCode,
 )
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
+    SCHEMA_FIELD_PROJECTION_MAX_ITEMS,
     SCHEMA_MAX_JSON_BYTES,
     DeclaredSchemaCandidate,
     SchemaCandidateRefusal,
@@ -41,6 +43,7 @@ from eneo.flows.flow_ai_builder_budget_settings import (
     AI_BUILDER_TEMPLATE_INSPECTION_HARD_LIMIT_BYTES,
 )
 from eneo.flows.runtime.docx_template_runtime import (
+    ContentControlKind,
     TemplatePlaceholderSpec,
     inspect_docx_template_placeholders,
 )
@@ -107,6 +110,18 @@ class AIBuilderAttachmentContext:
         repr=False,
         compare=False,
     )
+    template_controls_by_file: Mapping[
+        UUID, tuple[TemplatePlaceholderSpec, ...] | None
+    ] = field(
+        default_factory=dict[UUID, tuple[TemplatePlaceholderSpec, ...] | None],
+        repr=False,
+        compare=False,
+    )
+
+    def template_schema_evidence(self, file_id: UUID) -> SchemaEvidence | None:
+        return _template_placeholder_output_schema_evidence(
+            {file_id: self.template_controls_by_file.get(file_id)}
+        )
 
 
 def readable_attachment_text(file: File) -> str | None:
@@ -153,7 +168,15 @@ _FILE_ROLE_PRIORITY: tuple[FileRole, ...] = (
     "context_only",
 )
 
-_MAX_TEMPLATE_PLACEHOLDER_EVIDENCE = 8
+_MAX_TEMPLATE_PLACEHOLDER_EVIDENCE = SCHEMA_FIELD_PROJECTION_MAX_ITEMS
+
+
+@dataclass(frozen=True, slots=True)
+class TemplatePlaceholderProjection:
+    name: str
+    kind: ContentControlKind
+    label: str
+    hint: str | None
 
 
 def _attachment_schema_discovery(
@@ -225,17 +248,6 @@ def _attachment_schema_discovery(
     )
 
 
-def _template_output_schema_evidence(
-    files: list[File],
-    template_placeholders_by_file: Mapping[
-        UUID, tuple[TemplatePlaceholderSpec, ...] | None
-    ],
-) -> SchemaEvidence | None:
-    return _template_placeholder_output_schema_evidence(
-        files, template_placeholders_by_file
-    )
-
-
 def _is_json_attachment(file: File) -> bool:
     mimetype = (file.mimetype or "").casefold().split(";", 1)[0].strip()
     return mimetype in {"application/json", "application/schema+json"} or (
@@ -251,7 +263,6 @@ def _is_declared_schema_attachment(file: File) -> bool:
 
 
 def _template_placeholder_output_schema_evidence(
-    files: list[File],
     template_placeholders_by_file: Mapping[
         UUID, tuple[TemplatePlaceholderSpec, ...] | None
     ],
@@ -262,8 +273,9 @@ def _template_placeholder_output_schema_evidence(
     source_file_ids: list[UUID] = []
     placeholder_markers: list[str] = []
 
-    for file in sorted(files, key=lambda item: str(item.id)):
-        placeholders = template_placeholders_by_file[file.id]
+    for file_id, placeholders in sorted(
+        template_placeholders_by_file.items(), key=lambda item: str(item[0])
+    ):
         if not placeholders:
             continue
         file_placeholders: set[str] = set()
@@ -279,12 +291,12 @@ def _template_placeholder_output_schema_evidence(
                 and placeholder.name not in file_placeholders
             ):
                 placeholder_markers.append(
-                    f"file:{file.id}:{TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX}{placeholder.name}"
+                    f"file:{file_id}:{TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX}{placeholder.name}"
                 )
                 file_placeholders.add(placeholder.name)
-        source_file_ids.append(file.id)
+        source_file_ids.append(file_id)
         source_markers.append(
-            f"file:{file.id}{TEMPLATE_PLACEHOLDER_SOURCE_EVIDENCE_SUFFIX}"
+            f"file:{file_id}{TEMPLATE_PLACEHOLDER_SOURCE_EVIDENCE_SUFFIX}"
         )
 
     if not selected:
@@ -315,7 +327,9 @@ def _template_placeholder_schema(
     properties = {
         placeholder.name: {
             "type": "string",
-            "description": _template_placeholder_description(placeholder),
+            "title": placeholder.label,
+            "description": placeholder.hint or "",
+            "x-eneo-control-kind": placeholder.kind,
         }
         for placeholder in placeholders
     }
@@ -328,11 +342,32 @@ def _template_placeholder_schema(
     )
 
 
-def _template_placeholder_description(placeholder: TemplatePlaceholderSpec) -> str:
-    hint = f" {placeholder.hint}" if placeholder.hint else ""
-    if placeholder.kind == "rich":
-        return f"Section '{placeholder.label}' of the Word template.{hint}"
-    return f"Single-line field '{placeholder.label}' of the Word template.{hint}"
+def project_template_placeholders(
+    schema: JsonObject,
+) -> tuple[TemplatePlaceholderProjection, ...]:
+    """Read bounded control metadata from the persisted template schema evidence."""
+
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        return ()
+    placeholders: list[TemplatePlaceholderProjection] = []
+    for name, value in islice(properties.items(), _MAX_TEMPLATE_PLACEHOLDER_EVIDENCE):
+        if not isinstance(value, dict):
+            continue
+        kind = value.get("x-eneo-control-kind")
+        if not isinstance(kind, str) or (kind != "rich" and kind != "text"):
+            continue
+        label = value.get("title")
+        hint = value.get("description")
+        placeholders.append(
+            TemplatePlaceholderProjection(
+                name=name,
+                kind=kind,
+                label=label if isinstance(label, str) else name,
+                hint=hint if isinstance(hint, str) and hint else None,
+            )
+        )
+    return tuple(placeholders)
 
 
 def _infer_file_role(
@@ -433,8 +468,7 @@ def build_ai_builder_attachment_context(
         files,
         readable_text_by_file,
     )
-    output_schema_evidence = _template_output_schema_evidence(
-        files,
+    output_schema_evidence = _template_placeholder_output_schema_evidence(
         template_placeholders_by_file,
     )
     evidence: list[AIBuilderAttachmentEvidence] = []
@@ -471,6 +505,7 @@ def build_ai_builder_attachment_context(
         total_chars=0,
         truncated=any(text is not None for text in readable_text_by_file.values()),
         output_schema_evidence=output_schema_evidence,
+        template_controls_by_file=template_placeholders_by_file,
         schema_discovery=schema_discovery,
         readable_text_by_file={
             file_id: text

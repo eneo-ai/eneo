@@ -15,7 +15,11 @@ from eneo.flows.runtime.document_rendering.blocks import (
 _SUPPORTED_MARKDOWN = (
     "Supported Markdown: headings, paragraphs separated by blank lines, "
     f"'-' bullet lists and '1.' numbered lists nested at most {MAX_LIST_LEVEL + 1} "
-    "levels, pipe tables with a header row, **bold**, *italic*, `code` and "
+    "levels (keep the same list kind at every nested level; mixed bullet/number "
+    "nesting and deeper lists are rejected; nested numbered lists start at 1), "
+    "with all parent-item text before its nested list, "
+    "pipe tables with a header row, "
+    "**bold**, *italic*, `code` and "
     "[text](https://…) links. HTML, images and other syntax are not rendered."
 )
 _NO_PLACEHOLDERS = (

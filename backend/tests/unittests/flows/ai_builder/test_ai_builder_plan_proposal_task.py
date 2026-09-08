@@ -4,6 +4,15 @@ import json
 from datetime import datetime, timezone
 from uuid import UUID
 
+from eneo.authentication.principal_types import PrincipalType
+from eneo.files.file_models import File, FileType
+from eneo.flows.ai_builder.ai_builder_attachment_context import (
+    attachment_file_roles,
+    build_ai_builder_attachment_context,
+)
+from eneo.flows.ai_builder.ai_builder_discovery_runtime import (
+    _apply_attachment_output_evidence,
+)
 from eneo.flows.ai_builder.ai_builder_event_models import (
     RequirementsSummaryPayload,
 )
@@ -40,6 +49,7 @@ from eneo.flows.ai_builder.planning_state import (
     SlotSource,
     StepTriple,
 )
+from tests.docx_template_fixtures import control_template_bytes
 
 
 def _requirements(**overrides: object) -> RequirementsSummaryPayload:
@@ -544,6 +554,91 @@ def test_plan_proposal_prompt_renders_template_placeholder_evidence() -> None:
     assert "Prefer source-derived output_fields" in prompt
     assert "the backend owns runtime values" in prompt
     assert "Use output_fields consistent with these user-declared fields." not in prompt
+
+
+def test_plan_proposal_prompt_preserves_inspected_control_metadata() -> None:
+    blob = control_template_bytes(
+        text=[("titel", "Rapportens titel", "Ange ärendets namn")],
+        rich=[("analys", "Ekonomisk analys", "Jämför kostnaderna i en tabell")],
+    )
+    attachment = File(
+        id=UUID(int=1),
+        name="rapport.docx",
+        checksum="checksum",
+        size=len(blob),
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        file_type=FileType.DOCUMENT,
+        blob=blob,
+        owner_type=PrincipalType.USER,
+        owner_user_id=UUID(int=2),
+        tenant_id=UUID(int=3),
+    )
+    other_blob = control_template_bytes(
+        rich=[("analys", "Miljöanalys", "Beskriv påverkan på naturen")],
+    )
+    other = attachment.model_copy(update={"id": UUID(int=4), "blob": other_blob})
+    context = build_ai_builder_attachment_context([attachment, other])
+    assert context is not None
+    state = PlanningState.empty()
+    state.output_schema_evidence = context.output_schema_evidence
+    state.file_roles = [
+        role.model_copy(
+            update={
+                "role": "template"
+                if role.file_id == attachment.id
+                else "reference_material",
+                "candidate_roles": ["template", "reference_material"],
+            }
+        )
+        for role in attachment_file_roles(context)
+    ]
+    state = _apply_attachment_output_evidence(state, context)
+    # Exercise the persisted representation used between Builder turns too.
+    state = PlanningState.model_validate_json(state.model_dump_json())
+
+    for edit_mode in (False, True):
+        prompt = build_plan_proposal_system_prompt(
+            planning_state=state,
+            confirmed_requirements=_requirements(summary="Fill the Word template."),
+            attachment_context=None,
+            flow_context=None,
+            is_edit_mode=edit_mode,
+            resource_catalog=_empty_catalog(),
+        )
+        assert 'name: "titel"; kind: text; label: "Rapportens titel"' in prompt
+        assert 'hint: "Ange ärendets namn"' in prompt
+        assert 'name: "analys"; kind: rich; label: "Ekonomisk analys"' in prompt
+        assert 'hint: "Jämför kostnaderna i en tabell"' in prompt
+
+    # Changing the selected template must replace metadata carried from an
+    # earlier turn, even when both files use the same control tag.
+    state.file_roles = [
+        role.model_copy(
+            update={
+                "role": "template"
+                if role.file_id == other.id
+                else "reference_material",
+                "candidate_roles": ["template", "reference_material"],
+            }
+        )
+        for role in state.file_roles
+    ]
+    state = _apply_attachment_output_evidence(state, context)
+    state = PlanningState.model_validate_json(state.model_dump_json())
+    prompt = build_plan_proposal_system_prompt(
+        planning_state=state,
+        confirmed_requirements=_requirements(
+            summary="Fill the selected Word template."
+        ),
+        attachment_context=None,
+        flow_context=None,
+        is_edit_mode=False,
+        resource_catalog=_empty_catalog(),
+    )
+    assert 'name: "analys"; kind: rich; label: "Miljöanalys"' in prompt
+    assert 'hint: "Beskriv påverkan på naturen"' in prompt
+    assert "Ekonomisk analys" not in prompt
+    assert 'name: "titel"' not in prompt
 
 
 def test_plan_proposal_prompt_visibly_clips_long_evidence_and_field_names() -> None:

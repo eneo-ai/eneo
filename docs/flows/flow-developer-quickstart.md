@@ -594,13 +594,19 @@ nested up to three levels, tables, code, bold, italic, code spans, links) into
 WordprocessingML using the target document's own styles: `Heading N`, `List
 Bullet`/`List Number` and their level variants, the template's default table
 style with the first row marked as a repeating header row, and a fresh numbering
-instance per numbered list. It never writes direct paragraph formatting, so a
-template's look and accessibility properties survive whatever the model wrote.
-Skipped heading levels and headings deeper than six are refused, not flattened.
+instance per numbered list, including a restart for each new nested list. Mixed
+bullet/number nesting, nesting beyond three levels, nested numbered lists
+that do not start at one, and parent-item text after a nested list are refused
+with a typed error. Put all parent-item text before its nested list. The writer
+uses the template's styles and preserves its static content; authors still need
+to check their template and filled output in Word. Skipped heading levels and
+headings deeper than six are refused.
 
 `render_verbatim` fills the standard body template
-(`runtime/templates/standard/dokument.docx`) and drops a single short lead-in
-paragraph written before the level-1 title. `template_fill` writes into Word
+(`runtime/templates/standard/dokument.docx`). It preserves text before the title;
+writer guidance asks the model to start with a title. The runtime template has
+styles, Swedish language and page numbering, with no organisation name or logo.
+`template_fill` writes into Word
 content controls (`runtime/document_rendering/docx_content_controls.py`): the control's tag is the
 placeholder name a binding addresses, the title is its label, and the
 placeholder text is the authoring hint the AI Builder reads. Two kinds are
@@ -609,15 +615,29 @@ and sub-headings are placed relative to the nearest preceding heading) and
 inline text controls (one line, or several with `multiLine`). Controls without
 a tag, duplicate tags, nested controls, XML-mapped controls, other control
 kinds and controls in table cells, headers or footers are refused at
-inspection, before a template can be selected. A binding that resolves to
-nothing is an error; an explicit empty binding removes the control and keeps the
-surrounding static content; structured values are refused (bind a text field).
+inspection, before a template can be selected. Rich controls must be direct
+children of the document body; text controls must be inside body paragraphs.
+Every control must have a binding before publication. Bindings must select text
+outputs, scalar fields in declared output contracts, scalar form fields or known
+scalar system values. Whole objects, arrays and unknown value shapes are refused
+at publication. A binding that resolves to nothing at runtime is an error; an
+explicit empty binding removes the control and keeps the surrounding static
+content. Source and text size limits include both inline fields and rich sections.
 The finished document's text is read through `docx2python`, which sees control
 content; python-docx's paragraph API does not.
 
-The standard templates (`dokument`, `rapport`, `motesprotokoll`) are built by
-`backend/scripts/build_standard_docx_templates.py` and committed; authors copy
-them and add or rename controls from Word's Developer tab. Writer guidance for
+The templates (`dokument`, `rapport`, `motesprotokoll`) are built by
+`backend/scripts/build_standard_docx_templates.py` and committed under
+`backend/src/eneo/flows/runtime/templates/standard/`. Only `dokument` is a runtime
+default. `rapport` and `motesprotokoll` are neutral developer examples: copy a
+file from that directory, add branding and edit controls in Word's Developer
+tab, then upload it as a DOCX template in the Flow editor or attach it in the
+AI Builder. There is currently no example-template download in the editor.
+
+The Builder projects each selected control's tag, kind, label and hint into its
+proposal prompt as bounded, untrusted template evidence. Selecting a different
+template replaces the previous template's evidence. Preparation values remain
+one string per control. Writer guidance for
 the model derives from the block model in `document_rendering/guidance.py` and
 is the single owner of what the prompts say about markdown and structure.
 

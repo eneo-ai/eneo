@@ -1862,6 +1862,98 @@ def test_validate_steps_allows_explicit_empty_template_bindings_for_publish():
     )
 
 
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "step_1.output.structured",
+        "step_1.output.structured.details",
+        "step_1.output.structured.items",
+        "step_1.output",
+        "flow_input",
+        "flow_input.recipients",
+        "recipients",
+        "indata_json",
+    ],
+)
+def test_template_fill_publish_rejects_non_scalar_bindings(expression: str) -> None:
+    steps = [
+        _step(
+            output_contract={
+                "type": "object",
+                "properties": {
+                    "details": {"type": "object", "properties": {}},
+                    "items": {"type": "array", "items": {"type": "string"}},
+                },
+            }
+        ),
+        _step(
+            step_order=2,
+            output_type="docx",
+            output_mode="template_fill",
+            output_config={
+                "template_asset_id": str(uuid4()),
+                "bindings": {"body": "{{" + expression + "}}"},
+            },
+        ),
+    ]
+    with pytest.raises(FlowStepValidationError, match="scalar"):
+        validate_steps(
+            steps,
+            metadata_json={
+                "form_schema": {
+                    "fields": [
+                        {
+                            "name": "recipients",
+                            "type": "multiselect",
+                            "options": ["A", "B"],
+                        },
+                    ]
+                }
+            },
+            require_complete_template_fill_config=True,
+        )
+
+
+def test_template_fill_publish_accepts_scalar_contract_fields_and_form_values() -> None:
+    validate_steps(
+        [
+            _step(
+                output_contract={
+                    "type": "object",
+                    "properties": {
+                        "details": {
+                            "type": "object",
+                            "properties": {
+                                "title": {"type": ["string", "null"]},
+                            },
+                        },
+                        "count": {"type": "integer"},
+                    },
+                }
+            ),
+            _step(
+                step_order=2,
+                output_type="docx",
+                output_mode="template_fill",
+                output_config={
+                    "template_asset_id": str(uuid4()),
+                    "bindings": {
+                        "title": "{{step_1.output.structured.details.title}}",
+                        "count": "{{step_1.output.structured.count}}",
+                        "body": "{{step_1.output.text}}",
+                        "date": "{{datum}}",
+                        "author": "{{flow_input.author}}",
+                        "author_alias": "{{author}}",
+                        "input": "{{flow_input.text}}",
+                    },
+                },
+            ),
+        ],
+        metadata_json=_form_metadata("author"),
+        require_complete_template_fill_config=True,
+    )
+
+
 def test_validate_steps_rejects_inline_citation_mode_for_non_text_output() -> None:
     steps = [
         _step(
