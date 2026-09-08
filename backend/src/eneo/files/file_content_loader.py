@@ -12,14 +12,10 @@ from eneo.files.file_models import (
 from eneo.files.file_repo import (
     FileContentReferenceRecord,
     FileRepository,
-    LegacyFileContentRecord,
-    LegacyFileInfoRecord,
-    binary_file_variants,
-    legacy_primary_file_variant,
     original_download_variants,
-    primary_file_variants,
     project_file_media_type,
     select_binary_file_reference,
+    select_primary_file_reference,
 )
 from eneo.main.exceptions import NotFoundException
 from eneo.object_content.content import ContentReadGrant
@@ -52,10 +48,10 @@ class FileContentTenantMismatchError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class _FileContentSelection:
-    hydrated_reference: FileContentReferenceRecord | LegacyFileContentRecord
-    text_reference: FileContentReferenceRecord | LegacyFileContentRecord | None
-    blob_reference: FileContentReferenceRecord | LegacyFileContentRecord | None
-    transcription_reference: FileContentReferenceRecord | LegacyFileContentRecord | None
+    hydrated_reference: FileContentReferenceRecord
+    text_reference: FileContentReferenceRecord | None
+    blob_reference: FileContentReferenceRecord | None
+    transcription_reference: FileContentReferenceRecord | None
     original_available: bool
 
     @property
@@ -67,7 +63,7 @@ class _FileContentSelection:
                 self.blob_reference,
                 self.transcription_reference,
             )
-            if isinstance(reference, FileContentReferenceRecord)
+            if reference is not None
         )
 
 
@@ -100,11 +96,9 @@ class FileContentLoader:
 
         unique_metadata = {file.id: file for file in metadata}
         references = await self._repo.get_content_references(list(unique_metadata))
-        legacy_infos = await self._repo.get_legacy_infos(list(unique_metadata))
         return await self._load_from_facts(
             unique_metadata,
             references,
-            legacy_infos,
             include_transcription=include_transcription,
         )
 
@@ -112,65 +106,36 @@ class FileContentLoader:
         self,
         metadata: dict[UUID, FileMetadata],
         references: list[FileContentReferenceRecord],
-        legacy_infos: list[LegacyFileInfoRecord],
         *,
         include_transcription: bool,
     ) -> dict[UUID, File]:
-        selections = await self._select_content_from_facts(
+        selections = self._select_content_from_facts(
             metadata,
             references,
-            legacy_infos,
             include_transcription=include_transcription,
         )
         return await self._hydrate_selected_files(metadata, selections)
 
-    async def _select_content_from_facts(
+    def _select_content_from_facts(
         self,
         metadata: dict[UUID, FileMetadata],
         references: list[FileContentReferenceRecord],
-        legacy_infos: list[LegacyFileInfoRecord],
         *,
         include_transcription: bool,
     ) -> dict[UUID, _FileContentSelection]:
         by_file: defaultdict[UUID, list[FileContentReferenceRecord]] = defaultdict(list)
         for reference in references:
             by_file[reference.file_id].append(reference)
-        legacy_info_by_file = {info.file_id: info for info in legacy_infos}
-        legacy_requests: dict[UUID, set[FileContentVariant]] = {}
-        for file in metadata.values():
-            file_references = by_file[file.id]
-            requested = self._legacy_requests(
-                file,
-                file_references,
-                legacy_info_by_file.get(file.id),
-                include_transcription=include_transcription,
-            )
-            if requested:
-                legacy_requests[file.id] = requested
-        legacy_content = (
-            await self._repo.get_legacy_content(legacy_requests)
-            if legacy_requests
-            else []
-        )
-        legacy_by_file: defaultdict[UUID, list[LegacyFileContentRecord]] = defaultdict(
-            list
-        )
-        for content in legacy_content:
-            legacy_by_file[content.file_id].append(content)
-
         selections: dict[UUID, _FileContentSelection] = {}
         for file in metadata.values():
             file_references = by_file[file.id]
-            file_legacy_content = legacy_by_file[file.id]
             primary = self._primary_content(
                 file,
                 file_references,
-                file_legacy_content,
             )
             if file.file_type is FileType.TEXT:
-                text_reference = self._first_content(
+                text_reference = self._first_reference(
                     file_references,
-                    file_legacy_content,
                     FileContentVariant.EXTRACTED_TEXT,
                 )
                 if text_reference is None and primary.media_type.startswith("text/"):
@@ -186,14 +151,12 @@ class FileContentLoader:
                 blob_reference = self._preferred_binary_reference(
                     file,
                     file_references,
-                    file_legacy_content,
                 )
                 hydrated_reference = blob_reference
 
             transcription_reference = (
-                self._first_content(
+                self._first_reference(
                     file_references,
-                    file_legacy_content,
                     FileContentVariant.TRANSCRIPTION,
                 )
                 if include_transcription
@@ -205,10 +168,9 @@ class FileContentLoader:
                 blob_reference=blob_reference,
                 transcription_reference=transcription_reference,
                 original_available=any(
-                    self._first_content(file_references, [], variant) is not None
+                    self._first_reference(file_references, variant) is not None
                     for variant in original_download_variants(file.file_type)
-                )
-                or self._legacy_original_available(legacy_info_by_file.get(file.id)),
+                ),
             )
             selections[file.id] = selection
         return selections
@@ -309,35 +271,11 @@ class FileContentLoader:
 
         metadata_by_id, ids_by_group = self._index_attachment_groups(groups)
         references = await self._repo.get_content_references(list(metadata_by_id))
-        legacy_infos = await self._repo.get_legacy_infos(list(metadata_by_id))
-        legacy_info_by_file = {info.file_id: info for info in legacy_infos}
         by_file: defaultdict[UUID, list[FileContentReferenceRecord]] = defaultdict(list)
         for reference in references:
             by_file[reference.file_id].append(reference)
-        legacy_requests_by_file = {
-            file.id: requests
-            for file in metadata_by_id.values()
-            if (
-                requests := self._legacy_requests(
-                    file,
-                    by_file[file.id],
-                    legacy_info_by_file.get(file.id),
-                    include_transcription=include_transcription,
-                )
-            )
-        }
-        legacy_size_by_key = {
-            (file_id, variant): (
-                info.size_bytes if variant is info.variant else max_batch_bytes + 1
-            )
-            for file_id, variants in legacy_requests_by_file.items()
-            if (info := legacy_info_by_file.get(file_id)) is not None
-            for variant in variants
-        }
-
         batch_groups: list[FileAttachmentGroup] = []
         batch_content_ids: set[UUID] = set()
-        batch_legacy_keys: set[tuple[UUID, FileContentVariant]] = set()
         batch_bytes = 0
 
         async def load_known_groups(
@@ -360,11 +298,6 @@ class FileContentLoader:
                     for file_id in selected_file_ids
                     for reference in by_file[file_id]
                 ],
-                [
-                    legacy_info_by_file[file_id]
-                    for file_id in selected_file_ids
-                    if file_id in legacy_info_by_file
-                ],
                 include_transcription=include_transcription,
             )
             return {
@@ -377,7 +310,6 @@ class FileContentLoader:
         for group in groups:
             file_ids = ids_by_group[group.key]
             group_content_sizes: dict[UUID, int] = {}
-            group_legacy_sizes: dict[tuple[UUID, FileContentVariant], int] = {}
             for file_id in file_ids:
                 file = metadata_by_id[file_id]
                 for reference in self._readable_object_references(
@@ -386,20 +318,10 @@ class FileContentLoader:
                     include_transcription=include_transcription,
                 ):
                     group_content_sizes[reference.content_id] = reference.size_bytes
-                for variant in legacy_requests_by_file.get(file_id, set()):
-                    key = (file_id, variant)
-                    group_legacy_sizes[key] = legacy_size_by_key.get(
-                        key,
-                        max_batch_bytes + 1,
-                    )
             additional_bytes = sum(
                 size
                 for content_id, size in group_content_sizes.items()
                 if content_id not in batch_content_ids
-            ) + sum(
-                size
-                for key, size in group_legacy_sizes.items()
-                if key not in batch_legacy_keys
             )
             if (
                 batch_groups
@@ -409,17 +331,12 @@ class FileContentLoader:
                 yield await load_known_groups(batch_groups)
                 batch_groups = []
                 batch_content_ids = set()
-                batch_legacy_keys = set()
                 batch_bytes = 0
 
             batch_groups.append(group)
             for content_id, size in group_content_sizes.items():
                 if content_id not in batch_content_ids:
                     batch_content_ids.add(content_id)
-                    batch_bytes += size
-            for key, size in group_legacy_sizes.items():
-                if key not in batch_legacy_keys:
-                    batch_legacy_keys.add(key)
                     batch_bytes += size
 
         if batch_groups:
@@ -458,45 +375,6 @@ class FileContentLoader:
         )
 
     @staticmethod
-    def _legacy_requests(
-        file: FileMetadata,
-        references: list[FileContentReferenceRecord],
-        legacy_info: LegacyFileInfoRecord | None,
-        *,
-        include_transcription: bool,
-    ) -> set[FileContentVariant]:
-        requested: set[FileContentVariant] = set()
-        if legacy_info is None:
-            return requested
-        if file.file_type is FileType.TEXT:
-            if (
-                FileContentLoader._first_reference(
-                    references,
-                    FileContentVariant.EXTRACTED_TEXT,
-                )
-                is None
-            ):
-                requested.add(FileContentVariant.EXTRACTED_TEXT)
-        elif select_binary_file_reference(file.file_type, references) is None:
-            requested.add(
-                legacy_primary_file_variant(
-                    file.file_type,
-                    parent_file_id=file.parent_file_id,
-                )
-            )
-        if (
-            include_transcription
-            and legacy_info.transcription_available
-            and FileContentLoader._first_reference(
-                references,
-                FileContentVariant.TRANSCRIPTION,
-            )
-            is None
-        ):
-            requested.add(FileContentVariant.TRANSCRIPTION)
-        return requested
-
-    @staticmethod
     def _readable_object_references(
         file: FileMetadata,
         references: list[FileContentReferenceRecord],
@@ -528,61 +406,28 @@ class FileContentLoader:
         return tuple(readable)
 
     @staticmethod
-    def _legacy_original_available(info: LegacyFileInfoRecord | None) -> bool:
-        return info is not None and info.original_available
-
-    @classmethod
-    def _first_content(
-        cls,
-        references: Sequence[FileContentReferenceRecord],
-        legacy_content: Sequence[LegacyFileContentRecord],
-        variant: FileContentVariant,
-    ) -> FileContentReferenceRecord | LegacyFileContentRecord | None:
-        reference = cls._first_reference(references, variant)
-        if reference is not None:
-            return reference
-        return next(
-            (content for content in legacy_content if content.variant is variant),
-            None,
-        )
-
-    @staticmethod
     def _primary_content(
         file: FileMetadata,
         references: list[FileContentReferenceRecord],
-        legacy_content: list[LegacyFileContentRecord],
-    ) -> FileContentReferenceRecord | LegacyFileContentRecord:
-        for variant in primary_file_variants(file.file_type):
-            content = FileContentLoader._first_content(
-                references,
-                legacy_content,
-                variant,
-            )
-            if content is not None:
-                return content
+    ) -> FileContentReferenceRecord:
+        reference = select_primary_file_reference(file.file_type, references)
+        if reference is not None:
+            return reference
         raise NotFoundException(f"File {file.id} has no durable content")
 
     @staticmethod
     def _preferred_binary_reference(
         file: FileMetadata,
         references: list[FileContentReferenceRecord],
-        legacy_content: list[LegacyFileContentRecord],
-    ) -> FileContentReferenceRecord | LegacyFileContentRecord:
-        for variant in binary_file_variants(file.file_type):
-            content = FileContentLoader._first_content(
-                references,
-                legacy_content,
-                variant,
-            )
-            if content is not None:
-                return content
+    ) -> FileContentReferenceRecord:
+        reference = select_binary_file_reference(file.file_type, references)
+        if reference is not None:
+            return reference
         raise NotFoundException(f"File {file.id} has no readable binary content")
 
     @staticmethod
     def _payload(
-        content: FileContentReferenceRecord | LegacyFileContentRecord,
+        content: FileContentReferenceRecord,
         payloads: dict[UUID, bytes],
     ) -> bytes:
-        if isinstance(content, LegacyFileContentRecord):
-            return content.payload
         return payloads[content.content_id]

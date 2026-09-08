@@ -9,11 +9,6 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.affected_rows import affected_row_count
-from eneo.database.tables.file_icon_backfill_table import (
-    FileIconBackfillAdmissionState,
-    FileIconBackfillCampaign,
-    FileIconBackfillItems,
-)
 from eneo.database.tables.object_content_table import (
     InlineContentPayloads,
     ObjectContentHolds,
@@ -815,49 +810,6 @@ class ObjectContentRepository:
             and failure_code is not ContentFailureCode.BACKEND_CORRUPT
         ):
             raise ValueError("An inventory size mismatch requires a corrupt failure")
-        completed_item_exists = await self._has_completed_file_icon_item(content_id)
-        if not completed_item_exists:
-            async with self._session.begin_nested() as savepoint:
-                row = await self._content_for_update(content_id)
-                completed_item_exists = await self._has_completed_file_icon_item(
-                    content_id
-                )
-                if not completed_item_exists:
-                    changed = await self._mark_observed_backend_failed(
-                        row,
-                        failure_code,
-                        observed_storage_kind=observed_storage_kind,
-                        observed_object_key=observed_object_key,
-                        missing_before=missing_before,
-                        observed_at=observed_at,
-                        observed_size_bytes=observed_size_bytes,
-                    )
-                    if changed:
-                        await self._session.flush()
-                    return changed
-                await savepoint.rollback()
-
-        admission_state = await self._session.scalar(
-            select(FileIconBackfillAdmissionState).with_for_update()
-        )
-        if admission_state is None:
-            raise ObjectContentStateError(
-                "File/Icon backfill admission state is missing"
-            )
-        campaign = await self._session.scalar(
-            select(FileIconBackfillCampaign).with_for_update()
-        )
-        completed_items = (
-            await self._session.scalars(
-                select(FileIconBackfillItems)
-                .where(
-                    FileIconBackfillItems.content_id == content_id,
-                    FileIconBackfillItems.state == "done",
-                )
-                .order_by(FileIconBackfillItems.id)
-                .with_for_update()
-            )
-        ).all()
         row = await self._content_for_update(content_id)
         changed = await self._mark_observed_backend_failed(
             row,
@@ -869,13 +821,6 @@ class ObjectContentRepository:
             observed_size_bytes=observed_size_bytes,
         )
         if changed:
-            if completed_items and row.state == ContentState.FAILED.value:
-                await self._reopen_failed_file_icon_items(
-                    completed_items,
-                    admission_state=admission_state,
-                    campaign=campaign,
-                    failure_code=failure_code,
-                )
             await self._session.flush()
         return changed
 
@@ -917,20 +862,6 @@ class ObjectContentRepository:
                 return False
         return self._mark_served_content_backend_failed(row, failure_code)
 
-    async def _has_completed_file_icon_item(self, content_id: UUID) -> bool:
-        return bool(
-            await self._session.scalar(
-                select(
-                    select(FileIconBackfillItems.id)
-                    .where(
-                        FileIconBackfillItems.content_id == content_id,
-                        FileIconBackfillItems.state == "done",
-                    )
-                    .exists()
-                )
-            )
-        )
-
     @staticmethod
     def _mark_served_content_backend_failed(
         row: ObjectContents,
@@ -947,44 +878,6 @@ class ObjectContentRepository:
         row.failure_code = failure_code.value
         row.failure_detail = "durable object bytes are unavailable or untrusted"
         return True
-
-    async def _reopen_failed_file_icon_items(
-        self,
-        items: Sequence[FileIconBackfillItems],
-        *,
-        admission_state: FileIconBackfillAdmissionState,
-        campaign: FileIconBackfillCampaign | None,
-        failure_code: ContentFailureCode,
-    ) -> None:
-        now = await self._database_now()
-        for item in items:
-            item.content_id = None
-            item.capacity_admitted = False
-            item.lease_owner = None
-            item.lease_expires_at = None
-            item.updated_at = now
-            if campaign is None:
-                item.state = "ready"
-                item.last_error_code = None
-                item.last_error_detail = None
-                item.failure_revision = None
-                continue
-            item.state = "failed"
-            item.last_error_code = failure_code.value
-            item.last_error_detail = (
-                "Adopted content failed durable backend verification"
-            )
-            item.failure_revision = campaign.resume_revision
-
-        if campaign is None:
-            admission_state.generation += 1
-            return
-
-        campaign.state = "halted"
-        campaign.resume_cursor_id = None
-        campaign.halt_reason = (
-            "Adopted File/Icon content failed durable backend verification"
-        )
 
     async def apply_hold(
         self,

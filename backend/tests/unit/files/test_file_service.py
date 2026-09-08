@@ -84,17 +84,15 @@ class TestOriginalContent:
 
     def test_generated_artifact_is_an_image_original(self):
         artifact = _reference("generated_artifact")
-        assert FileService._original_content([artifact], [], FileType.IMAGE) is artifact
+        assert FileService._original_content([artifact], FileType.IMAGE) is artifact
 
     def test_stored_original_wins_over_the_artifact(self):
         original, artifact = _reference("original"), _reference("generated_artifact")
         assert (
-            FileService._original_content([artifact, original], [], FileType.IMAGE)
+            FileService._original_content([artifact, original], FileType.IMAGE)
             is original
         )
 
     def test_text_file_without_original_is_not_served(self):
         with pytest.raises(FileOriginalNotFoundError):
-            FileService._original_content(
-                [_reference("extracted_text")], [], FileType.TEXT
-            )
+            FileService._original_content([_reference("extracted_text")], FileType.TEXT)
