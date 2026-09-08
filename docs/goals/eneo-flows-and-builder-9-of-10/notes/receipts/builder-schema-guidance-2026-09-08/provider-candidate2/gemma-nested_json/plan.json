@@ -1,0 +1,97 @@
+{
+  "plan_id": "d9b2846d-2128-4930-ac99-8a9e11302ca5",
+  "session_id": "58feee8f-5aae-42f8-8652-537ae7b563cf",
+  "status": "proposed",
+  "spec_hash": "3378074b51fbcc9cd40636b6ae20156aff0a02b04de025ed8f41c0eb2411b421",
+  "proposal": {
+    "spec": {
+      "flow_name": "Extrahera mötesanteckningar till JSON",
+      "flow_description": "Flödet analyserar inklistade mötesanteckningar för att extrahera en övergripande sammanfattning samt en lista över åtgärder med tillhörande ansvarig och tidsfrist i ett strikt JSON-format.",
+      "steps": [
+        {
+          "plan_step_ref": "step_a",
+          "name": "Extrahera mötesdata",
+          "assistant_spec": {
+            "instructions": "Analysera mötesanteckningarna och extrahera en sammanfattning av mötet samt en lista över alla identifierade åtgärder. För varje åtgärd, identifiera uppgiften, vem som är ansvarig och vilken tidsfrist som gäller. Om en uppgift inte framgår tydligt, skriv 'Uppgift saknas'.\n\nRequired JSON fields:\n- sammanfattning: Kort sammanfattning av mötet.\n- atgarder: Lista över åtgärder från mötet.\nAllowed fields for items of atgarder: uppgift, ansvarig, tidsfrist. Do not emit other fields.",
+            "model_ref": "model.gpt-5-6-luna",
+            "knowledge_refs": []
+          },
+          "input_source": "flow_input",
+          "input_type": "text",
+          "output_mode": "pass_through",
+          "output_type": "json",
+          "input_bindings": {
+            "question": "{{ indata_text }}"
+          },
+          "output_contract": {
+            "additionalProperties": false,
+            "properties": {
+              "atgarder": {
+                "description": "Lista över åtgärder från mötet.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "ansvarig": {
+                      "description": "Person ansvarig för åtgärden.",
+                      "title": "Ansvarig",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "tidsfrist": {
+                      "description": "Deadline eller tidsfrist för åtgärden.",
+                      "title": "Tidsfrist",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "uppgift": {
+                      "description": "Beskrivning av åtgärden. Skriv 'Uppgift saknas' om den inte framgår.",
+                      "title": "Uppgift",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "uppgift",
+                    "ansvarig",
+                    "tidsfrist"
+                  ],
+                  "type": "object"
+                },
+                "title": "Atgarder",
+                "type": "array"
+              },
+              "sammanfattning": {
+                "description": "Kort sammanfattning av mötet.",
+                "title": "Sammanfattning",
+                "type": "string"
+              }
+            },
+            "required": [
+              "sammanfattning",
+              "atgarder"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    "assumptions": [
+      "Högst 99 filer behandlas i samma körning."
+    ],
+    "lint_warnings": [],
+    "plan_rationale": "Enkel extraktionsprocess där AI:n läser texten och mappar informationen direkt till de begärda fälten. JSON-strukturen säkerställs genom explicita fältdefinitioner.",
+    "description_override_manual": false,
+    "execution_shape": {
+      "completion_model_step_count": 1,
+      "transcription_model_step_count": 0,
+      "deterministic_step_count": 0,
+      "schema_constrained_step_count": 1,
+      "mapped_step_upper_bounds": []
+    }
+  },
+  "created_at": "2026-09-08T17:50:51.678516Z",
+  "updated_at": "2026-09-08T17:50:51.678516Z"
+}

@@ -1,0 +1,238 @@
+[
+  {
+    "revision": "parent",
+    "case": "gemma-template_report",
+    "session_id": "1b7aad1b-7e05-418d-ab71-8dca26b52e5c",
+    "plan_id": "285ef3bd-4263-4698-af85-651cab5c4d30",
+    "proposal_calls": 4,
+    "proposal_repairs": 3,
+    "proposal_elapsed_ms": 45115,
+    "proposal_total_tokens": 26503,
+    "session_wall_seconds": 61.689,
+    "checks": {
+      "plan_proposed": true,
+      "no_lint_warnings": true,
+      "template_fill_docx": true,
+      "seven_bindings": true,
+      "seven_string_fields": true
+    },
+    "requirements_pass": true
+  },
+  {
+    "revision": "parent",
+    "case": "gemma-nested_json",
+    "session_id": "248620d2-be82-4959-ba59-146b856798fb",
+    "plan_id": "295f796a-a5df-479a-ab6b-11cf6fc1bc80",
+    "proposal_calls": 2,
+    "proposal_repairs": 1,
+    "proposal_elapsed_ms": 9787,
+    "proposal_total_tokens": 8518,
+    "session_wall_seconds": 25.222,
+    "checks": {
+      "plan_proposed": true,
+      "no_lint_warnings": true,
+      "top_level_fields": true,
+      "summary_string": true,
+      "array_of_objects": false,
+      "exact_item_members": false,
+      "string_item_members": false
+    },
+    "requirements_pass": false
+  },
+  {
+    "revision": "parent",
+    "case": "luna-template_report",
+    "session_id": "fe9a77f4-951f-49ff-99b1-d5919fda01c5",
+    "plan_id": "51dc5ef5-b37c-4db9-971d-319fc4c94be1",
+    "proposal_calls": 1,
+    "proposal_repairs": 0,
+    "proposal_elapsed_ms": 27771,
+    "proposal_total_tokens": 5540,
+    "session_wall_seconds": 85.934,
+    "checks": {
+      "plan_proposed": true,
+      "no_lint_warnings": true,
+      "template_fill_docx": true,
+      "seven_bindings": true,
+      "seven_string_fields": true
+    },
+    "requirements_pass": true
+  },
+  {
+    "revision": "candidate",
+    "case": "gemma-template_report",
+    "session_id": "eb193ab2-61e7-44cd-9af0-8548bd35bd7b",
+    "plan_id": "a7c78635-3857-469c-88c9-bd90488e77b6",
+    "proposal_calls": 1,
+    "proposal_repairs": 0,
+    "proposal_elapsed_ms": 9832,
+    "proposal_total_tokens": 5816,
+    "session_wall_seconds": 25.581,
+    "checks": {
+      "plan_proposed": true,
+      "no_lint_warnings": true,
+      "template_fill_docx": true,
+      "seven_bindings": true,
+      "seven_string_fields": true
+    },
+    "requirements_pass": true
+  },
+  {
+    "revision": "candidate",
+    "case": "gemma-nested_json",
+    "session_id": "0e415b11-aade-4f68-b370-d61d37b15bb2",
+    "plan_id": "7db7a5cc-8915-4b4d-815a-ffb5fc16d1dc",
+    "proposal_calls": 1,
+    "proposal_repairs": 0,
+    "proposal_elapsed_ms": 4945,
+    "proposal_total_tokens": 4076,
+    "session_wall_seconds": 22.02,
+    "checks": {
+      "plan_proposed": true,
+      "no_lint_warnings": true,
+      "top_level_fields": true,
+      "summary_string": true,
+      "array_of_objects": false,
+      "exact_item_members": false,
+      "string_item_members": false
+    },
+    "requirements_pass": false
+  },
+  {
+    "revision": "candidate",
+    "case": "luna-template_report",
+    "session_id": "228eef24-ff16-4e67-9b83-7762a05ac6f2",
+    "plan_id": "419a0326-7d32-4fac-8fc8-fb7e68b2d522",
+    "proposal_calls": 1,
+    "proposal_repairs": 0,
+    "proposal_elapsed_ms": 19460,
+    "proposal_total_tokens": 6478,
+    "session_wall_seconds": 55.134,
+    "checks": {
+      "plan_proposed": true,
+      "no_lint_warnings": true,
+      "template_fill_docx": true,
+      "seven_bindings": true,
+      "seven_string_fields": true
+    },
+    "requirements_pass": true
+  },
+  {
+    "revision": "candidate2",
+    "case": "gemma-template_report",
+    "session_id": "273245d4-dead-4ad5-b372-94406a997313",
+    "plan_id": "1fd3542d-0f9c-42ed-85c4-6e4257e9daa3",
+    "proposal_calls": 1,
+    "proposal_repairs": 0,
+    "proposal_elapsed_ms": 14929,
+    "proposal_total_tokens": 6374,
+    "session_wall_seconds": 31.544,
+    "checks": {
+      "plan_proposed": true,
+      "no_lint_warnings": true,
+      "template_fill_docx": true,
+      "seven_bindings": true,
+      "seven_string_fields": true
+    },
+    "requirements_pass": true
+  },
+  {
+    "revision": "candidate2",
+    "case": "gemma-nested_json",
+    "session_id": "58feee8f-5aae-42f8-8652-537ae7b563cf",
+    "plan_id": "d9b2846d-2128-4930-ac99-8a9e11302ca5",
+    "proposal_calls": 1,
+    "proposal_repairs": 0,
+    "proposal_elapsed_ms": 5662,
+    "proposal_total_tokens": 4236,
+    "session_wall_seconds": 23.243,
+    "checks": {
+      "plan_proposed": true,
+      "no_lint_warnings": true,
+      "top_level_fields": true,
+      "summary_string": true,
+      "array_of_objects": true,
+      "exact_item_members": true,
+      "string_item_members": false
+    },
+    "requirements_pass": false
+  },
+  {
+    "revision": "candidate2",
+    "case": "luna-template_report",
+    "session_id": "c76c3359-4540-4ac3-a6e1-c9e197682348",
+    "plan_id": "b16d405c-73c7-4dff-98ce-d015d1bc6c6d",
+    "proposal_calls": 1,
+    "proposal_repairs": 0,
+    "proposal_elapsed_ms": 28253,
+    "proposal_total_tokens": 6608,
+    "session_wall_seconds": 72.358,
+    "checks": {
+      "plan_proposed": true,
+      "no_lint_warnings": true,
+      "template_fill_docx": true,
+      "seven_bindings": true,
+      "seven_string_fields": true
+    },
+    "requirements_pass": true
+  },
+  {
+    "revision": "candidate3",
+    "case": "gemma-template_report",
+    "session_id": "1e8e19fc-948d-445a-996a-fcb7c75ab822",
+    "plan_id": "52c316ab-ba53-4a85-bfe3-1103bf01d991",
+    "proposal_calls": 1,
+    "proposal_repairs": 0,
+    "proposal_elapsed_ms": 14331,
+    "proposal_total_tokens": 6340,
+    "session_wall_seconds": 31.05,
+    "checks": {
+      "plan_proposed": true,
+      "no_lint_warnings": true,
+      "template_fill_docx": true,
+      "seven_bindings": true,
+      "seven_string_fields": true
+    },
+    "requirements_pass": true
+  },
+  {
+    "revision": "candidate3",
+    "case": "gemma-nested_json",
+    "session_id": "903df032-adbd-4fe9-b367-bf4135669b42",
+    "plan_id": "d546b521-9f27-4177-8bf6-ac6358eff30f",
+    "proposal_calls": 1,
+    "proposal_repairs": 0,
+    "proposal_elapsed_ms": 5432,
+    "proposal_total_tokens": 4251,
+    "session_wall_seconds": 19.172,
+    "checks": {
+      "plan_proposed": true,
+      "no_lint_warnings": true,
+      "top_level_fields": true,
+      "summary_string": true,
+      "array_of_objects": true,
+      "exact_item_members": true,
+      "string_item_members": false
+    },
+    "requirements_pass": false
+  },
+  {
+    "revision": "candidate3",
+    "case": "luna-template_report",
+    "session_id": "867eb0e3-487e-495e-b78f-50d0eaf67e4b",
+    "plan_id": "535c291f-b376-40cc-a5ec-a48a8752c46f",
+    "proposal_calls": 1,
+    "proposal_repairs": 0,
+    "proposal_elapsed_ms": 19345,
+    "proposal_total_tokens": 5596,
+    "session_wall_seconds": 61.73,
+    "checks": {
+      "plan_proposed": true,
+      "no_lint_warnings": true,
+      "template_fill_docx": true,
+      "seven_bindings": true,
+      "seven_string_fields": true
+    },
+    "requirements_pass": true
+  }
+]

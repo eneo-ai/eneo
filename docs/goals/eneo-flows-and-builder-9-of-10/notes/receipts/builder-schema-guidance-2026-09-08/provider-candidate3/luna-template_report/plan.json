@@ -1,0 +1,129 @@
+{
+  "plan_id": "535c291f-b376-40cc-a5ec-a48a8752c46f",
+  "session_id": "867eb0e3-487e-495e-b78f-50d0eaf67e4b",
+  "status": "proposed",
+  "spec_hash": "f729ed6527876b4e11deb09f7d3eae1ddc1021c0f6a896e04694241ff1cec27d",
+  "proposal": {
+    "spec": {
+      "flow_name": "Kort svensk rapport",
+      "flow_description": "Tar emot ett inklistrat svenskt textunderlag och fyller den bifogade Word-mallen med en kort, tydligt strukturerad och källnära rapport.",
+      "steps": [
+        {
+          "plan_step_ref": "step_a",
+          "name": "Strukturera rapportinnehållet",
+          "assistant_spec": {
+            "instructions": "Läs hela det inklistrade svenska textunderlaget och förbered komplett innehåll för rapportens samtliga namngivna kontroller. Välj en kort titel som är tydligt grundad i underlaget. Ange dagens datum som ÅÅÅÅ-MM-DD. Hämta författare om det uttryckligen framgår; annars skriv tydligt att författaruppgiften saknas. Skriv en kort sammanfattning på två till fyra stycken utan egen rubrik. Beskriv bakgrund och syfte endast utifrån underlaget och markera uttryckligen om någon del saknas. Redovisa analysen med en underrubrik per relevant delområde; använd tabeller med rubrikrad när underlaget innehåller siffror eller jämförbara uppgifter. Skriv slutsatser som löpande text och rekommendationer som en numrerad lista. Separera tydligt vad som stöds av underlaget från bedömningar, bevara osäkerheter och hitta inte på saknade uppgifter. Förbered innehållet färdigt för direkt infogning i den befintliga Word-mallen, utan att ändra mallens fasta rubriker eller layout. Fält för löpande text ska använda stödd Markdown enligt mallens begränsningar och ska inte upprepa den fasta sektionsrubriken.\n\nRequired JSON fields:\n- titel: Kort rapporttitel grundad i textunderlaget; ange tydligt att uppgiften saknas om ingen titel kan fastställas.\n- datum: Dagens datum i formatet ÅÅÅÅ-MM-DD.\n- forfattare: Författare och funktion när det framgår av underlaget; annars en tydlig uppgift om att författaren saknas.\n- sammanfattning: Kort källnära sammanfattning av rapportens viktigaste innehåll i två till fyra stycken, utan egen sektionsrubrik.\n- bakgrund: Källnära beskrivning av bakgrund och syfte, med relevanta underrubriker eller punktlistor och tydlig markering av saknad information.\n- analys: Strukturerad källnära analys med en underrubrik per relevant delområde; använd tabeller med rubrikrad för siffror och markera osäkerheter eller saknade uppgifter.\n- slutsatser: Slutsatser i löpande text följda av rekommendationer i en numrerad lista, tydligt grundade i underlaget och med saknade uppgifter uttryckligen angivna.",
+            "knowledge_refs": []
+          },
+          "input_source": "flow_input",
+          "input_type": "text",
+          "output_mode": "pass_through",
+          "output_type": "json",
+          "input_bindings": {
+            "question": "{{ indata_text }}"
+          },
+          "output_contract": {
+            "additionalProperties": false,
+            "properties": {
+              "analys": {
+                "description": "Strukturerad källnära analys med en underrubrik per relevant delområde; använd tabeller med rubrikrad för siffror och markera osäkerheter eller saknade uppgifter.",
+                "title": "Analys",
+                "type": "string"
+              },
+              "bakgrund": {
+                "description": "Källnära beskrivning av bakgrund och syfte, med relevanta underrubriker eller punktlistor och tydlig markering av saknad information.",
+                "title": "Bakgrund",
+                "type": "string"
+              },
+              "datum": {
+                "description": "Dagens datum i formatet ÅÅÅÅ-MM-DD.",
+                "title": "Datum",
+                "type": "string"
+              },
+              "forfattare": {
+                "description": "Författare och funktion när det framgår av underlaget; annars en tydlig uppgift om att författaren saknas.",
+                "title": "Forfattare",
+                "type": "string"
+              },
+              "sammanfattning": {
+                "description": "Kort källnära sammanfattning av rapportens viktigaste innehåll i två till fyra stycken, utan egen sektionsrubrik.",
+                "title": "Sammanfattning",
+                "type": "string"
+              },
+              "slutsatser": {
+                "description": "Slutsatser i löpande text följda av rekommendationer i en numrerad lista, tydligt grundade i underlaget och med saknade uppgifter uttryckligen angivna.",
+                "title": "Slutsatser",
+                "type": "string"
+              },
+              "titel": {
+                "description": "Kort rapporttitel grundad i textunderlaget; ange tydligt att uppgiften saknas om ingen titel kan fastställas.",
+                "title": "Titel",
+                "type": "string"
+              }
+            },
+            "required": [
+              "titel",
+              "datum",
+              "forfattare",
+              "sammanfattning",
+              "bakgrund",
+              "analys",
+              "slutsatser"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "plan_step_ref": "step_b",
+          "name": "Fyll DOCX-mall",
+          "assistant_spec": {
+            "instructions": "Fyll DOCX-mallen med det förberedda innehållet. Bevara användarens önskade omfattning och terminologi.",
+            "knowledge_refs": []
+          },
+          "input_source": "previous_step",
+          "input_type": "text",
+          "output_mode": "template_fill",
+          "output_type": "docx",
+          "input_bindings": {
+            "source_refs": [
+              {
+                "output": "structured",
+                "step_ref": "step_a"
+              }
+            ]
+          },
+          "output_config": {
+            "bindings": {
+              "analys": "{{ step_a.output.structured.analys }}",
+              "bakgrund": "{{ step_a.output.structured.bakgrund }}",
+              "datum": "{{ datum }}",
+              "forfattare": "{{ step_a.output.structured.forfattare }}",
+              "sammanfattning": "{{ step_a.output.structured.sammanfattning }}",
+              "slutsatser": "{{ step_a.output.structured.slutsatser }}",
+              "titel": "{{ step_a.output.structured.titel }}"
+            }
+          }
+        }
+      ],
+      "form_fields": []
+    },
+    "assumptions": [
+      "Användaren klistrar in ett textunderlag vid varje körning.",
+      "Dagens datum ska anges i formatet ÅÅÅÅ-MM-DD.",
+      "När titel, författare eller annan efterfrågad information inte finns i underlaget ska motsvarande rapportdel tydligt ange att uppgiften saknas.",
+      "Ingen extern källa eller kunskapsbas ska användas; rapporten ska endast bygga på det inklistrade underlaget och dagens datum."
+    ],
+    "lint_warnings": [],
+    "plan_rationale": "Ett förberedande steg läser och strukturerar hela textunderlaget till samtliga namngivna innehållskontroller. Den fasta mallen används därefter för att bevara rubriker, layout och Word-format vid leveransen.",
+    "description_override_manual": false,
+    "execution_shape": {
+      "completion_model_step_count": 1,
+      "transcription_model_step_count": 0,
+      "deterministic_step_count": 1,
+      "schema_constrained_step_count": 1,
+      "mapped_step_upper_bounds": []
+    }
+  },
+  "created_at": "2026-09-08T17:59:00.036100Z",
+  "updated_at": "2026-09-08T17:59:00.036100Z"
+}

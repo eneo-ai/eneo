@@ -1,0 +1,97 @@
+{
+  "plan_id": "d546b521-9f27-4177-8bf6-ac6358eff30f",
+  "session_id": "903df032-adbd-4fe9-b367-bf4135669b42",
+  "status": "proposed",
+  "spec_hash": "96b3428e160bb67025ce6c643250641f7b88ed57a49ec273bdc46a80f730eb09",
+  "proposal": {
+    "spec": {
+      "flow_name": "Extrahera mötesanteckningar till JSON",
+      "flow_description": "Flödet extraherar en sammanfattning och en lista över åtgärder (med uppgift, ansvarig och tidsfrist) från inklistade mötesanteckningar och levererar detta som strukturerad JSON.",
+      "steps": [
+        {
+          "plan_step_ref": "step_a",
+          "name": "Extrahera mötesdata",
+          "assistant_spec": {
+            "instructions": "Analysera mötesanteckningarna och extrahera en sammanfattning av mötet samt en lista över alla åtgärder. För varje åtgärd, identifiera uppgiften, den ansvariga personen och tidsfristen. Om en specifik uppgift inte framgår i texten, sätt värdet till 'Uppgift saknas'.\n\nRequired JSON fields:\n- sammanfattning: Kort sammanfattning av mötet.\n- atgarder: Lista över identifierade åtgärder.\nAllowed fields for items of atgarder: uppgift, ansvarig, tidsfrist. Do not emit other fields.",
+            "model_ref": "model.gpt-5-6-luna",
+            "knowledge_refs": []
+          },
+          "input_source": "flow_input",
+          "input_type": "text",
+          "output_mode": "pass_through",
+          "output_type": "json",
+          "input_bindings": {
+            "question": "{{ indata_text }}"
+          },
+          "output_contract": {
+            "additionalProperties": false,
+            "properties": {
+              "atgarder": {
+                "description": "Lista över identifierade åtgärder.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "ansvarig": {
+                      "description": "Person ansvarig för åtgärden.",
+                      "title": "Ansvarig",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "tidsfrist": {
+                      "description": "Sista datum för genomförande.",
+                      "title": "Tidsfrist",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "uppgift": {
+                      "description": "Beskrivning av åtgärden.",
+                      "title": "Uppgift",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "uppgift",
+                    "ansvarig",
+                    "tidsfrist"
+                  ],
+                  "type": "object"
+                },
+                "title": "Atgarder",
+                "type": "array"
+              },
+              "sammanfattning": {
+                "description": "Kort sammanfattning av mötet.",
+                "title": "Sammanfattning",
+                "type": "string"
+              }
+            },
+            "required": [
+              "sammanfattning",
+              "atgarder"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    "assumptions": [
+      "Högst 99 filer behandlas i samma körning."
+    ],
+    "lint_warnings": [],
+    "plan_rationale": "En enkel process i ett steg som analyserar texten och mappar informationen direkt till den begärda JSON-strukturen, inklusive hantering av saknade värden för uppgifter.",
+    "description_override_manual": false,
+    "execution_shape": {
+      "completion_model_step_count": 1,
+      "transcription_model_step_count": 0,
+      "deterministic_step_count": 0,
+      "schema_constrained_step_count": 1,
+      "mapped_step_upper_bounds": []
+    }
+  },
+  "created_at": "2026-09-08T17:57:58.225737Z",
+  "updated_at": "2026-09-08T17:57:58.225737Z"
+}

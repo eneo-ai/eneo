@@ -1,0 +1,58 @@
+{
+  "session_id": "c76c3359-4540-4ac3-a6e1-c9e197682348",
+  "architecture": {
+    "aggregation_intent": "linear",
+    "chosen_patterns": [
+      "text_to_artifact_report"
+    ],
+    "tuples_chain": [
+      {
+        "input_type": "text",
+        "output_type": "docx",
+        "output_mode": "template_fill"
+      }
+    ]
+  },
+  "proposal_turns": [
+    {
+      "message_id": "01a08226-01f8-7461-b9d2-0eb3ca488c36",
+      "repair_attempts": 0,
+      "parse_repair_attempts": 0,
+      "total_tokens": 6608,
+      "admission_normalization_hits": {},
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "initial",
+          "elapsed_ms": 28253,
+          "prompt_tokens": 3587,
+          "completion_tokens": 3021,
+          "total_tokens": 6608,
+          "failure_kind": null,
+          "failure_codes": []
+        }
+      ]
+    }
+  ],
+  "provider_calls": [
+    {
+      "message_id": "01a08225-9276-7410-a0c8-fa5b4dff0230",
+      "call_kind": "slot_classification",
+      "attempt": 1,
+      "prompt_tokens": 6074,
+      "completion_tokens": 4789,
+      "total_tokens": 10863,
+      "provider_failure_kind": null
+    },
+    {
+      "message_id": "01a08226-01f8-7461-b9d2-0eb3ca488c36",
+      "call_kind": "proposal_initial",
+      "attempt": 1,
+      "prompt_tokens": 3587,
+      "completion_tokens": 3021,
+      "total_tokens": 6608,
+      "provider_failure_kind": null
+    }
+  ],
+  "provider_call_records_skipped": 0
+}

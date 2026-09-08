@@ -1,0 +1,56 @@
+{
+  "base_source": "19f309c7d1f6374f916fb720bb815a4ddc2efe79",
+  "base_image_source": "2c23f4a2545dd79f39ddca1025c86d3b242da836",
+  "space_id": "321a943d-7e9d-4117-a683-955ba91984ef",
+  "legs": [
+    {
+      "case": "template_report",
+      "message": "Skapa ett flöde för en kort svensk rapport från ett textunderlag som användaren klistrar in vid körning. Använd bifogade rapport.docx som slutlig Word-mall. Läs mallens namngivna innehållskontroller och använd deras etiketter och instruktioner. Förbered och koppla innehåll till samtliga kontroller, inklusive titel och datum. Använd dagens datum och en kort titel från underlaget; om underlaget saknar en uppgift ska rapporten tydligt säga att uppgiften saknas. Behåll mallens fasta rubriker och layout. Slutresultatet ska vara en nedladdningsbar DOCX. Använd tillgänglig standardmodell och inga externa källor. Ge ett granskningsbart planförslag.",
+      "file_ids": [
+        "93bcfe01-c97c-43ab-950c-b7f6fd1b4566"
+      ],
+      "answers": {
+        "post_processing_goal": "structure_key_information",
+        "primary_runtime_input": "text",
+        "terminal_output": "docx_document"
+      },
+      "model_id": "cd1719c9-1223-4149-82da-feaa21674692",
+      "model": "gemma"
+    },
+    {
+      "case": "nested_json",
+      "message": "Skapa ett flöde som läser inklistrade mötesanteckningar och returnerar JSON. Resultatet ska ha sammanfattning som en sträng och atgarder som en lista av objekt. Varje åtgärd har uppgift som sträng, ansvarig som sträng och tidsfrist som sträng. Behåll dessa exakta fältnamn. Skriv Uppgift saknas om en uppgift inte framgår. Ingen dokumentfil, mänsklig granskning eller externa källor behövs. Använd standardmodellen. Ge ett planförslag.",
+      "answers": {
+        "post_processing_goal": "extract_key_information",
+        "primary_runtime_input": "text",
+        "terminal_output": "structured_json"
+      },
+      "model_id": "cd1719c9-1223-4149-82da-feaa21674692",
+      "model": "gemma"
+    },
+    {
+      "case": "template_report",
+      "message": "Skapa ett flöde för en kort svensk rapport från ett textunderlag som användaren klistrar in vid körning. Använd bifogade rapport.docx som slutlig Word-mall. Läs mallens namngivna innehållskontroller och använd deras etiketter och instruktioner. Förbered och koppla innehåll till samtliga kontroller, inklusive titel och datum. Använd dagens datum och en kort titel från underlaget; om underlaget saknar en uppgift ska rapporten tydligt säga att uppgiften saknas. Behåll mallens fasta rubriker och layout. Slutresultatet ska vara en nedladdningsbar DOCX. Använd tillgänglig standardmodell och inga externa källor. Ge ett granskningsbart planförslag.",
+      "file_ids": [
+        "93bcfe01-c97c-43ab-950c-b7f6fd1b4566"
+      ],
+      "answers": {
+        "post_processing_goal": "structure_key_information",
+        "primary_runtime_input": "text",
+        "terminal_output": "docx_document"
+      },
+      "model_id": "69ea7ad9-19e1-4dac-bcbe-9eb715e12644",
+      "model": "luna",
+      "reasoning_effort": "high"
+    }
+  ],
+  "protocol": {
+    "order": "all parent legs then all candidate legs in listed order",
+    "repetitions": 1,
+    "max_turns_per_session": 6,
+    "http_timeout_seconds": 240,
+    "external_retries": 0,
+    "provider_retries": "unchanged product call budget",
+    "acceptance": "candidate must yield valid compiled plans for all three legs, complete report bindings and requested JSON fields; preserve each parent success. Report first-pass/repair and timings without inferring population rates. No retry after provider ambiguity or product failure."
+  }
+}

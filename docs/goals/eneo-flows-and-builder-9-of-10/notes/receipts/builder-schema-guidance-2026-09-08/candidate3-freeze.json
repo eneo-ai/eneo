@@ -1,0 +1,15 @@
+{
+  "candidate_source": "8c5c8e24cf8e5853c0d83d0789e5ea1c35d0db2b",
+  "parent_source": "19f309c7d1f6374f916fb720bb815a4ddc2efe79",
+  "previous_candidate_source": "1c4d4d97239b801ae21aa2dd12d7ee76f1d3ee1d",
+  "previous_candidate_failure": "Nested members are present, but ansvarig and tidsfrist allow null despite requested string values and text fallback.",
+  "workload": "provider-manifest.json unchanged",
+  "workload_sha256": "ce671c01b4ec307c9e16631f6a519b9a3928922495c1ea46c4d72992e7b57947",
+  "launcher": "probe_api.py unchanged; argument candidate3",
+  "launcher_sha256": "8cd29d425d4fe62e68dcbe10960079c26a724941a74610e1f02650f6490a5fa9",
+  "output_root": "provider-candidate3",
+  "order": "Gemma template, Gemma nested JSON, Luna template",
+  "repetitions": 1,
+  "external_retries": 0,
+  "acceptance": "Same original workload requirements: all three valid plans, seven template bindings, exact nested JSON members typed as strings, parent report successes preserved. Report every outcome."
+}

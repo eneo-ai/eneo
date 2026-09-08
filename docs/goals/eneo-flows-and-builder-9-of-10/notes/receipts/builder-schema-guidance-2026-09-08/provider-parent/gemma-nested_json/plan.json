@@ -1,0 +1,68 @@
+{
+  "plan_id": "295f796a-a5df-479a-ab6b-11cf6fc1bc80",
+  "session_id": "248620d2-be82-4959-ba59-146b856798fb",
+  "status": "proposed",
+  "spec_hash": "3071ea11c1645899bea01c3b11d9da223156bc146062fe9fca60c2dcc1836b39",
+  "proposal": {
+    "spec": {
+      "flow_name": "Extrahera mötesåtgärder till JSON",
+      "flow_description": "Flödet analyserar inklistade mötesanteckningar för att extrahera en sammanfattning samt en lista över åtgärder med tillhörande ansvarig och tidsfrist i ett strikt JSON-format.",
+      "steps": [
+        {
+          "plan_step_ref": "step_a",
+          "name": "Extrahera nyckeluppgifter",
+          "assistant_spec": {
+            "instructions": "Analysera mötesanteckningarna och extrahera följande information:\n1. En sammanfattning av mötet.\n2. En lista över åtgärder. För varje åtgärd, identifiera uppgiften, vem som är ansvarig och vilken tidsfrist som gäller.\n\nOm en uppgift inte framgår explicit i texten, skriv \"Uppgift saknas\". Om ansvarig eller tidsfrist saknas, använd null eller lämna tomt enligt JSON-strukturen.\n\nBehåll exakt dessa fältnamn i utdata:\n- sammanfattning (string)\n- atgarder (array of objects)\n  - uppgift (string)\n  - ansvarig (string)\n  - tidsfrist (string)\n\nRequired JSON fields:\n- sammanfattning: Sammanfattning av mötet\n- atgarder: Lista över åtgärder med uppgift, ansvarig och tidsfrist",
+            "model_ref": "model.gpt-5-6-luna",
+            "knowledge_refs": []
+          },
+          "input_source": "flow_input",
+          "input_type": "text",
+          "output_mode": "pass_through",
+          "output_type": "json",
+          "input_bindings": {
+            "question": "{{ indata_text }}"
+          },
+          "output_contract": {
+            "additionalProperties": false,
+            "properties": {
+              "atgarder": {
+                "description": "Lista över åtgärder med uppgift, ansvarig och tidsfrist",
+                "items": {
+                  "type": "string"
+                },
+                "title": "Atgarder",
+                "type": "array"
+              },
+              "sammanfattning": {
+                "description": "Sammanfattning av mötet",
+                "title": "Sammanfattning",
+                "type": "string"
+              }
+            },
+            "required": [
+              "sammanfattning",
+              "atgarder"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    "assumptions": [
+      "Högst 99 filer behandlas i samma körning."
+    ],
+    "lint_warnings": [],
+    "plan_rationale": "Eftersom målet är ett specifikt JSON-format med exakta fältnamn och fallback-texter för saknade värden, används ett enda strukturerat extraktionssteg. Detta säkerställer att modellen följer schemat och hanterar saknad information enligt instruktionerna.",
+    "description_override_manual": false,
+    "execution_shape": {
+      "completion_model_step_count": 1,
+      "transcription_model_step_count": 0,
+      "deterministic_step_count": 0,
+      "schema_constrained_step_count": 1,
+      "mapped_step_upper_bounds": []
+    }
+  },
+  "created_at": "2026-09-08T17:22:22.940217Z",
+  "updated_at": "2026-09-08T17:22:22.940217Z"
+}

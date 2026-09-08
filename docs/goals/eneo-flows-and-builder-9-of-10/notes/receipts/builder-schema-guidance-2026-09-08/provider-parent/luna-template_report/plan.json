@@ -1,0 +1,242 @@
+{
+  "plan_id": "51dc5ef5-b37c-4db9-971d-319fc4c94be1",
+  "session_id": "fe9a77f4-951f-49ff-99b1-d5919fda01c5",
+  "status": "proposed",
+  "spec_hash": "d78ff0dd79aadba27535ec92e4e7668647ec2aca90f34935fcc46415afd2300e",
+  "proposal": {
+    "spec": {
+      "flow_name": "Kort svensk rapport",
+      "flow_description": "Tar emot ett textunderlag vid körning och fyller den bifogade Word-mallen med en kort, källnära svensk rapport som kan laddas ned som DOCX.",
+      "steps": [
+        {
+          "plan_step_ref": "step_a",
+          "name": "Läs och strukturera underlaget",
+          "assistant_spec": {
+            "instructions": "Läs det inklistrade svenska textunderlaget noggrant och använd endast uppgifter som faktiskt finns där. Identifiera en kort titel från underlaget. Ta fram ett sakligt underlag till mallens alla innehållskontroller: titel, datum, författare, sammanfattning, bakgrund, analys samt slutsatser och rekommendationer. Markera uttryckligen när en uppgift saknas i underlaget i stället för att gissa. För analysen, ordna innehållet per tydligt delområde och skilj källuppgifter från tolkningar. Formulera rekommendationer endast när de stöds av underlaget och redovisa annars att underlag saknas för rekommendationer.\n\nRequired JSON fields:\n- titel: Kort rapporttitel härledd enbart från textunderlaget; ange tydligt att titel saknas om den inte kan fastställas.\n- datum: Dagens datum i formatet ÅÅÅÅ-MM-DD.\n- forfattare: Författare och funktion om detta framgår av textunderlaget; annars en tydlig uppgift om att författaruppgift saknas.\n- sammanfattning: En kort svensk sammanfattning av textunderlagets viktigaste innehåll i två till fyra stycken löpande text, utan egna rubriker och utan tillagda fakta.\n- bakgrund: Källnära beskrivning av bakgrund och syfte, med underrubriker eller punktlistor vid behov; ange tydligt vad som saknas.\n- analys: Strukturerad, svensk analys med en underrubrik per relevant delområde och tabell med rubrikrad när siffror behöver redovisas; skilj belägg från bedömningar och markera saknad information.\n- slutsatser: Källgrundade slutsatser i löpande text följda av rekommendationer i numrerad lista; ange uttryckligen när underlaget inte räcker för slutsatser eller rekommendationer.",
+            "knowledge_refs": []
+          },
+          "input_source": "flow_input",
+          "input_type": "text",
+          "output_mode": "pass_through",
+          "output_type": "json",
+          "input_bindings": {
+            "question": "{{ indata_text }}"
+          },
+          "output_contract": {
+            "additionalProperties": false,
+            "properties": {
+              "analys": {
+                "description": "Strukturerad, svensk analys med en underrubrik per relevant delområde och tabell med rubrikrad när siffror behöver redovisas; skilj belägg från bedömningar och markera saknad information.",
+                "title": "Analys",
+                "type": "string"
+              },
+              "bakgrund": {
+                "description": "Källnära beskrivning av bakgrund och syfte, med underrubriker eller punktlistor vid behov; ange tydligt vad som saknas.",
+                "title": "Bakgrund",
+                "type": "string"
+              },
+              "datum": {
+                "description": "Dagens datum i formatet ÅÅÅÅ-MM-DD.",
+                "title": "Datum",
+                "type": "string"
+              },
+              "forfattare": {
+                "description": "Författare och funktion om detta framgår av textunderlaget; annars en tydlig uppgift om att författaruppgift saknas.",
+                "title": "Forfattare",
+                "type": "string"
+              },
+              "sammanfattning": {
+                "description": "En kort svensk sammanfattning av textunderlagets viktigaste innehåll i två till fyra stycken löpande text, utan egna rubriker och utan tillagda fakta.",
+                "title": "Sammanfattning",
+                "type": "string"
+              },
+              "slutsatser": {
+                "description": "Källgrundade slutsatser i löpande text följda av rekommendationer i numrerad lista; ange uttryckligen när underlaget inte räcker för slutsatser eller rekommendationer.",
+                "title": "Slutsatser",
+                "type": "string"
+              },
+              "titel": {
+                "description": "Kort rapporttitel härledd enbart från textunderlaget; ange tydligt att titel saknas om den inte kan fastställas.",
+                "title": "Titel",
+                "type": "string"
+              }
+            },
+            "required": [
+              "titel",
+              "datum",
+              "forfattare",
+              "sammanfattning",
+              "bakgrund",
+              "analys",
+              "slutsatser"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "plan_step_ref": "step_b",
+          "name": "Kvalitetssäkra och färdigställ rapportinnehållet",
+          "assistant_spec": {
+            "instructions": "Skriv det kompletta innehållet som ska placeras i rapport.docx:s namngivna kontroller. Behåll mallens fasta rubriker och ordning genom att leverera endast innehållet för respektive kontroll, inte nya ersättande huvudrubriker. Titel och författare ska vara enradig oformaterad text. Datum ska vara dagens datum i formatet ÅÅÅÅ-MM-DD. Sammanfattningen ska vara två till fyra stycken löpande text. Bakgrund, analys och slutsatser ska följa mallens avsedda struktur; analysen ska ha underrubriker per delområde och slutsatser ska följas av en numrerad rekommendationslista. Använd endast information från textunderlaget, bevara osäkerhet och skriv tydligt att en uppgift saknas när den inte finns. Kontrollera att inga externa källor, osaknade antaganden, platshållare eller granskningskommentarer återstår och att allt innehåll är färdigt för direkt rendering i Word-mallen.\n\nRequired JSON fields:\n- titel: Färdig kort rapporttitel för mallens titelkontroll, härledd från underlaget eller med tydlig markering att titel saknas.\n- datum: Färdigt dagens datum i formatet ÅÅÅÅ-MM-DD för mallens datumkontroll.\n- forfattare: Färdig enradig författaruppgift från underlaget eller tydlig markering att uppgiften saknas.\n- sammanfattning: Färdig sammanfattning i två till fyra stycken löpande text, utan egen sektionsrubrik och utan osaknade fakta.\n- bakgrund: Färdig text för bakgrundskontrollen med källgrundad bakgrund och syfte samt tydlig markering av saknad information.\n- analys: Färdig text för analyskontrollen med relevanta underrubriker, eventuella tabeller med rubrikrad, tydlig åtskillnad mellan belägg och bedömning samt markerade informationsluckor.\n- slutsatser: Färdig text för kontrollen Slutsatser och rekommendationer: slutsatser i löpande text och rekommendationer i numrerad lista, eller tydlig markering att underlaget saknar grund för sådana.",
+            "knowledge_refs": []
+          },
+          "input_source": "previous_step",
+          "input_type": "json",
+          "output_mode": "pass_through",
+          "output_type": "json",
+          "input_contract": {
+            "additionalProperties": false,
+            "properties": {
+              "analys": {
+                "description": "Strukturerad, svensk analys med en underrubrik per relevant delområde och tabell med rubrikrad när siffror behöver redovisas; skilj belägg från bedömningar och markera saknad information.",
+                "title": "Analys",
+                "type": "string"
+              },
+              "bakgrund": {
+                "description": "Källnära beskrivning av bakgrund och syfte, med underrubriker eller punktlistor vid behov; ange tydligt vad som saknas.",
+                "title": "Bakgrund",
+                "type": "string"
+              },
+              "datum": {
+                "description": "Dagens datum i formatet ÅÅÅÅ-MM-DD.",
+                "title": "Datum",
+                "type": "string"
+              },
+              "forfattare": {
+                "description": "Författare och funktion om detta framgår av textunderlaget; annars en tydlig uppgift om att författaruppgift saknas.",
+                "title": "Forfattare",
+                "type": "string"
+              },
+              "sammanfattning": {
+                "description": "En kort svensk sammanfattning av textunderlagets viktigaste innehåll i två till fyra stycken löpande text, utan egna rubriker och utan tillagda fakta.",
+                "title": "Sammanfattning",
+                "type": "string"
+              },
+              "slutsatser": {
+                "description": "Källgrundade slutsatser i löpande text följda av rekommendationer i numrerad lista; ange uttryckligen när underlaget inte räcker för slutsatser eller rekommendationer.",
+                "title": "Slutsatser",
+                "type": "string"
+              },
+              "titel": {
+                "description": "Kort rapporttitel härledd enbart från textunderlaget; ange tydligt att titel saknas om den inte kan fastställas.",
+                "title": "Titel",
+                "type": "string"
+              }
+            },
+            "required": [
+              "titel",
+              "datum",
+              "forfattare",
+              "sammanfattning",
+              "bakgrund",
+              "analys",
+              "slutsatser"
+            ],
+            "type": "object"
+          },
+          "output_contract": {
+            "additionalProperties": false,
+            "properties": {
+              "analys": {
+                "description": "Färdig text för analyskontrollen med relevanta underrubriker, eventuella tabeller med rubrikrad, tydlig åtskillnad mellan belägg och bedömning samt markerade informationsluckor.",
+                "title": "Analys",
+                "type": "string"
+              },
+              "bakgrund": {
+                "description": "Färdig text för bakgrundskontrollen med källgrundad bakgrund och syfte samt tydlig markering av saknad information.",
+                "title": "Bakgrund",
+                "type": "string"
+              },
+              "datum": {
+                "description": "Färdigt dagens datum i formatet ÅÅÅÅ-MM-DD för mallens datumkontroll.",
+                "title": "Datum",
+                "type": "string"
+              },
+              "forfattare": {
+                "description": "Färdig enradig författaruppgift från underlaget eller tydlig markering att uppgiften saknas.",
+                "title": "Forfattare",
+                "type": "string"
+              },
+              "sammanfattning": {
+                "description": "Färdig sammanfattning i två till fyra stycken löpande text, utan egen sektionsrubrik och utan osaknade fakta.",
+                "title": "Sammanfattning",
+                "type": "string"
+              },
+              "slutsatser": {
+                "description": "Färdig text för kontrollen Slutsatser och rekommendationer: slutsatser i löpande text och rekommendationer i numrerad lista, eller tydlig markering att underlaget saknar grund för sådana.",
+                "title": "Slutsatser",
+                "type": "string"
+              },
+              "titel": {
+                "description": "Färdig kort rapporttitel för mallens titelkontroll, härledd från underlaget eller med tydlig markering att titel saknas.",
+                "title": "Titel",
+                "type": "string"
+              }
+            },
+            "required": [
+              "titel",
+              "datum",
+              "forfattare",
+              "sammanfattning",
+              "bakgrund",
+              "analys",
+              "slutsatser"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "plan_step_ref": "step_c",
+          "name": "Fyll DOCX-mall",
+          "assistant_spec": {
+            "instructions": "Fyll DOCX-mallen med det förberedda innehållet. Bevara användarens önskade omfattning och terminologi.",
+            "knowledge_refs": []
+          },
+          "input_source": "previous_step",
+          "input_type": "text",
+          "output_mode": "template_fill",
+          "output_type": "docx",
+          "input_bindings": {
+            "source_refs": [
+              {
+                "output": "structured",
+                "step_ref": "step_b"
+              }
+            ]
+          },
+          "output_config": {
+            "bindings": {
+              "analys": "{{ step_b.output.structured.analys }}",
+              "bakgrund": "{{ step_b.output.structured.bakgrund }}",
+              "datum": "{{ datum }}",
+              "forfattare": "{{ step_b.output.structured.forfattare }}",
+              "sammanfattning": "{{ step_b.output.structured.sammanfattning }}",
+              "slutsatser": "{{ step_b.output.structured.slutsatser }}",
+              "titel": "{{ step_b.output.structured.titel }}"
+            }
+          }
+        }
+      ],
+      "form_fields": []
+    },
+    "assumptions": [
+      "Textunderlaget är den enda informationskällan och inga externa källor ska användas.",
+      "Datum ska anges som dagens datum i formatet ÅÅÅÅ-MM-DD.",
+      "Titeln ska vara kort och härledd från underlaget; om titel, datum, författare eller annan efterfrågad information saknas ska detta anges tydligt i relevant fält.",
+      "Mallens fasta rubriker, layout och namngivna innehållskontroller ska bevaras av den slutliga DOCX-renderingen.",
+      "Högst 99 textunderlag kan behandlas i samma körning."
+    ],
+    "lint_warnings": [],
+    "plan_rationale": "Flödet läser och strukturerar det inklistrade underlaget, tar fram ett kort underlagsbaserat innehåll för varje namngiven mallkontroll och gör därefter en slutlig sammanställning som fyller rapport.docx utan externa källor eller påhittade uppgifter.",
+    "description_override_manual": false,
+    "execution_shape": {
+      "completion_model_step_count": 2,
+      "transcription_model_step_count": 0,
+      "deterministic_step_count": 1,
+      "schema_constrained_step_count": 2,
+      "mapped_step_upper_bounds": []
+    }
+  },
+  "created_at": "2026-09-08T17:23:48.975093Z",
+  "updated_at": "2026-09-08T17:23:48.975093Z"
+}

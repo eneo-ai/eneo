@@ -1,0 +1,239 @@
+{
+  "plan_id": "1fd3542d-0f9c-42ed-85c4-6e4257e9daa3",
+  "session_id": "273245d4-dead-4ad5-b372-94406a997313",
+  "status": "proposed",
+  "spec_hash": "e41b4ec9481714188e9f5a9abeef72b8bc5380b5b237a635f99ed352634de4b3",
+  "proposal": {
+    "spec": {
+      "flow_name": "Strukturera Rapport till Word-mall",
+      "flow_description": "Flödet analyserar ett inklistrat textunderlag och strukturerar informationen för att fylla i en specifik Word-mall (rapport.docx). Det extraherar eller genererar innehåll för titel, datum, författare, sammanfattning, bakgrund, analys och slutsatser, och hanterar saknad information explicit.",
+      "steps": [
+        {
+          "plan_step_ref": "step_a",
+          "name": "extrahera_rapportdata",
+          "assistant_spec": {
+            "instructions": "Analysera det tillhandahållna textunderlaget. Extrahera eller formulera innehåll för följande delar:\n- En kort och beskrivande titel.\n- Dagens datum i formatet ÅÅÅÅ-MM-DD.\n- Författare (om angivet, annars markera som saknas).\n- En sammanfattning av det viktigaste innehållet.\n- Bakgrund och syfte.\n- Analys uppdelad per delområde.\n- Slutsatser och rekommendationer.\n\nOm någon uppgift helt saknas i underlaget, skriv explicit att uppgiften saknas för det specifika fältet.\n\nRequired JSON fields:\n- titel: Rapportens titel\n- datum: Datum i formatet ÅÅÅÅ-MM-DD\n- forfattare: Författare och funktion\n- sammanfattning: Sammanfattning av innehållet\n- bakgrund: Bakgrund och syfte\n- analys: Analys per delområde\n- slutsatser: Slutsatser och rekommendationer",
+            "knowledge_refs": []
+          },
+          "input_source": "flow_input",
+          "input_type": "text",
+          "output_mode": "pass_through",
+          "output_type": "json",
+          "input_bindings": {
+            "question": "{{ indata_text }}"
+          },
+          "output_contract": {
+            "additionalProperties": false,
+            "properties": {
+              "analys": {
+                "description": "Analys per delområde",
+                "title": "Analys",
+                "type": "string"
+              },
+              "bakgrund": {
+                "description": "Bakgrund och syfte",
+                "title": "Bakgrund",
+                "type": "string"
+              },
+              "datum": {
+                "description": "Datum i formatet ÅÅÅÅ-MM-DD",
+                "title": "Datum",
+                "type": "string"
+              },
+              "forfattare": {
+                "description": "Författare och funktion",
+                "title": "Forfattare",
+                "type": "string"
+              },
+              "sammanfattning": {
+                "description": "Sammanfattning av innehållet",
+                "title": "Sammanfattning",
+                "type": "string"
+              },
+              "slutsatser": {
+                "description": "Slutsatser och rekommendationer",
+                "title": "Slutsatser",
+                "type": "string"
+              },
+              "titel": {
+                "description": "Rapportens titel",
+                "title": "Titel",
+                "type": "string"
+              }
+            },
+            "required": [
+              "titel",
+              "datum",
+              "forfattare",
+              "sammanfattning",
+              "bakgrund",
+              "analys",
+              "slutsatser"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "plan_step_ref": "step_b",
+          "name": "formatera_mallinnehåll",
+          "assistant_spec": {
+            "instructions": "Formatera den extraherade informationen för att passa mallens kontroller. \n\nFör fälten 'sammanfattning', 'bakgrund', 'analys' och 'slutsatser' (som är rich-text):\n- Skriv innehållet som Markdown.\n- Använd inte huvudrubrik för sektionen, utan börja direkt med texten.\n- Använd ## för underrubriker.\n- Använd punktlistor (-) eller numrerade listor (1.) där det är lämpligt.\n- För 'analys', använd tabeller med rubrikrad för siffror om sådana finns.\n- För 'slutsatser', skriv slutsatserna som löpande text och rekommendationerna som en numrerad lista.\n\nFör 'titel', 'datum' och 'forfattare' (som är text-fält):\n- Leverera endast en rad ren text utan Markdown.\n\nRequired JSON fields:\n- titel: Rapportens titel (ren text)\n- datum: Datum (ren text)\n- forfattare: Författare (ren text)\n- sammanfattning: Sammanfattning (Markdown)\n- bakgrund: Bakgrund (Markdown)\n- analys: Analys (Markdown)\n- slutsatser: Slutsatser och rekommendationer (Markdown)",
+            "knowledge_refs": []
+          },
+          "input_source": "previous_step",
+          "input_type": "json",
+          "output_mode": "pass_through",
+          "output_type": "json",
+          "input_contract": {
+            "additionalProperties": false,
+            "properties": {
+              "analys": {
+                "description": "Analys per delområde",
+                "title": "Analys",
+                "type": "string"
+              },
+              "bakgrund": {
+                "description": "Bakgrund och syfte",
+                "title": "Bakgrund",
+                "type": "string"
+              },
+              "datum": {
+                "description": "Datum i formatet ÅÅÅÅ-MM-DD",
+                "title": "Datum",
+                "type": "string"
+              },
+              "forfattare": {
+                "description": "Författare och funktion",
+                "title": "Forfattare",
+                "type": "string"
+              },
+              "sammanfattning": {
+                "description": "Sammanfattning av innehållet",
+                "title": "Sammanfattning",
+                "type": "string"
+              },
+              "slutsatser": {
+                "description": "Slutsatser och rekommendationer",
+                "title": "Slutsatser",
+                "type": "string"
+              },
+              "titel": {
+                "description": "Rapportens titel",
+                "title": "Titel",
+                "type": "string"
+              }
+            },
+            "required": [
+              "titel",
+              "datum",
+              "forfattare",
+              "sammanfattning",
+              "bakgrund",
+              "analys",
+              "slutsatser"
+            ],
+            "type": "object"
+          },
+          "output_contract": {
+            "additionalProperties": false,
+            "properties": {
+              "analys": {
+                "description": "Analys (Markdown)",
+                "title": "Analys",
+                "type": "string"
+              },
+              "bakgrund": {
+                "description": "Bakgrund (Markdown)",
+                "title": "Bakgrund",
+                "type": "string"
+              },
+              "datum": {
+                "description": "Datum (ren text)",
+                "title": "Datum",
+                "type": "string"
+              },
+              "forfattare": {
+                "description": "Författare (ren text)",
+                "title": "Forfattare",
+                "type": "string"
+              },
+              "sammanfattning": {
+                "description": "Sammanfattning (Markdown)",
+                "title": "Sammanfattning",
+                "type": "string"
+              },
+              "slutsatser": {
+                "description": "Slutsatser och rekommendationer (Markdown)",
+                "title": "Slutsatser",
+                "type": "string"
+              },
+              "titel": {
+                "description": "Rapportens titel (ren text)",
+                "title": "Titel",
+                "type": "string"
+              }
+            },
+            "required": [
+              "titel",
+              "datum",
+              "forfattare",
+              "sammanfattning",
+              "bakgrund",
+              "analys",
+              "slutsatser"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "plan_step_ref": "step_c",
+          "name": "Fyll DOCX-mall",
+          "assistant_spec": {
+            "instructions": "Fyll DOCX-mallen med det förberedda innehållet. Bevara användarens önskade omfattning och terminologi.",
+            "knowledge_refs": []
+          },
+          "input_source": "previous_step",
+          "input_type": "text",
+          "output_mode": "template_fill",
+          "output_type": "docx",
+          "input_bindings": {
+            "source_refs": [
+              {
+                "output": "structured",
+                "step_ref": "step_b"
+              }
+            ]
+          },
+          "output_config": {
+            "bindings": {
+              "analys": "{{ step_b.output.structured.analys }}",
+              "bakgrund": "{{ step_b.output.structured.bakgrund }}",
+              "datum": "{{ datum }}",
+              "forfattare": "{{ step_b.output.structured.forfattare }}",
+              "sammanfattning": "{{ step_b.output.structured.sammanfattning }}",
+              "slutsatser": "{{ step_b.output.structured.slutsatser }}",
+              "titel": "{{ step_b.output.structured.titel }}"
+            }
+          }
+        }
+      ],
+      "form_fields": []
+    },
+    "assumptions": [
+      "Högst 99 filer behandlas i samma körning.",
+      "Bilageunderlag – Bilaga \"rapport.docx\" (#93bcfe01-c97c-43ab-950c-b7f6fd1b4566): vald roll Mall; läsbar text: ja; täckning: hela den läsbara texten ingår. Mallen följer med flödet och fylls i vid varje körning."
+    ],
+    "lint_warnings": [],
+    "plan_rationale": "Designen följer en linjär process: först extraheras och struktureras all nödvändig information från källtexten i ett JSON-steg för att säkerställa att alla mallplatshållare täcks. Därefter omvandlas dessa strukturerade data till Markdown-formaterade texter som passar mallens 'rich' och 'text' kontroller. Slutligen fylls mallen i. Genom att använda specifika fältnamn som matchar mallens kontroller (titel, datum, etc.) möjliggörs automatisk ifyllnad.",
+    "description_override_manual": false,
+    "execution_shape": {
+      "completion_model_step_count": 2,
+      "transcription_model_step_count": 0,
+      "deterministic_step_count": 1,
+      "schema_constrained_step_count": 2,
+      "mapped_step_upper_bounds": []
+    }
+  },
+  "created_at": "2026-09-08T17:50:28.294966Z",
+  "updated_at": "2026-09-08T17:50:28.294966Z"
+}

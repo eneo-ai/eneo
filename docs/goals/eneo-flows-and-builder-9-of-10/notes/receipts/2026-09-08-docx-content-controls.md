@@ -1,5 +1,7 @@
 # DOCX content controls: verification, 2026-09-08
 
+Follow-up: [Builder field guidance and baseline test fixes](2026-09-08-builder-schema-guidance.md) records the resolved backend/frontend failures and first-pass Gemma report proposals. A wider nested-JSON nullability mismatch remains open in `eneo-3te`.
+
 The candidate addresses the DOCX gate findings: neutral templates, preserved pre-title content, structural control inspection, aggregate inline limits, scalar bindings before publish, selected-template metadata in the final Builder prompt, and explicit list limits. A final regression also prevents silent loss of parent-item text after a nested list; that form now fails explicitly. Builder preparation remains one string per placeholder. Templates with no controls are rejected at upload, publish and runtime; ordinary source attachments remain valid. Declared scalar enum, const and union fields are accepted without admitting objects or arrays.
 
 Base: `60436fd4d47cd1777646b519c947cdffad1e281e` (tidy). Original feature: `5993a56aa561c684b3d8393e9be52ff5b39fbe87`. Corrected source identity is recorded in the accompanying SHA-256 manifest; the final commit is linked from `eneo-ytn`. Machine: macOS 26.5.2 arm64, Python 3.11.14. Commands below ran from `/Users/ccimen/eneo/eneo-ai-builder-review-ui` unless another directory is given.

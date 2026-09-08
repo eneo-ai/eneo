@@ -1,0 +1,79 @@
+{
+  "session_id": "248620d2-be82-4959-ba59-146b856798fb",
+  "architecture": {
+    "aggregation_intent": "linear",
+    "chosen_patterns": [
+      "extract_structured_fields"
+    ],
+    "tuples_chain": [
+      {
+        "input_type": "text",
+        "output_type": "json",
+        "output_mode": "pass_through"
+      }
+    ]
+  },
+  "proposal_turns": [
+    {
+      "message_id": "01a0820a-d45a-7b31-bba2-180e68d83a8f",
+      "repair_attempts": 1,
+      "parse_repair_attempts": 0,
+      "total_tokens": 8518,
+      "admission_normalization_hits": {},
+      "attempts": [
+        {
+          "attempt": 1,
+          "kind": "initial",
+          "elapsed_ms": 4882,
+          "prompt_tokens": 3580,
+          "completion_tokens": 426,
+          "total_tokens": 4006,
+          "failure_kind": "parse",
+          "failure_codes": [
+            "proposal_parse_schema"
+          ]
+        },
+        {
+          "attempt": 2,
+          "kind": "repair",
+          "elapsed_ms": 4905,
+          "prompt_tokens": 4066,
+          "completion_tokens": 446,
+          "total_tokens": 4512,
+          "failure_kind": null,
+          "failure_codes": []
+        }
+      ]
+    }
+  ],
+  "provider_calls": [
+    {
+      "message_id": "01a0820a-abdd-7520-92ea-693f07d433d0",
+      "call_kind": "slot_classification",
+      "attempt": 1,
+      "prompt_tokens": 3332,
+      "completion_tokens": 1357,
+      "total_tokens": 4689,
+      "provider_failure_kind": null
+    },
+    {
+      "message_id": "01a0820a-d45a-7b31-bba2-180e68d83a8f",
+      "call_kind": "proposal_initial",
+      "attempt": 1,
+      "prompt_tokens": 3580,
+      "completion_tokens": 426,
+      "total_tokens": 4006,
+      "provider_failure_kind": null
+    },
+    {
+      "message_id": "01a0820a-d45a-7b31-bba2-180e68d83a8f",
+      "call_kind": "proposal_repair",
+      "attempt": 2,
+      "prompt_tokens": 4066,
+      "completion_tokens": 446,
+      "total_tokens": 4512,
+      "provider_failure_kind": null
+    }
+  ],
+  "provider_call_records_skipped": 0
+}

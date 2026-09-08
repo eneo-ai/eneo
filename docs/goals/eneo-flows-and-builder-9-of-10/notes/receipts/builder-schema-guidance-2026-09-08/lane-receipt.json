@@ -1,0 +1,32 @@
+{
+  "source_commit": "8c5c8e24cf8e5853c0d83d0789e5ea1c35d0db2b",
+  "image_id": "sha256:dae18be2f45018cf788ef05aa5de6c06c5581a07bb1baf6d9310ee886ebb95a8",
+  "containers": [
+    {
+      "name": "eneo-ai-builder-simplify-api",
+      "id": "81191ec47310ccf6ae6427bdcbb36cad299210dc744d9bc130e0ec27b6bf20b2",
+      "running": true
+    },
+    {
+      "name": "eneo-ai-builder-simplify-worker",
+      "id": "1f4e3f4c013b33422b43460fc80f080a14aac1a7a2887b6641a8808f3982ffbd",
+      "running": true
+    },
+    {
+      "name": "eneo-ai-builder-simplify-execution",
+      "id": "612ddf95b8ecdc45fd9da4d8235fe27af796a3830829a06b429f4b0143bb0195",
+      "running": true
+    },
+    {
+      "name": "eneo-ai-builder-simplify-maintenance",
+      "id": "21fcf30b281a87b7accb93e11dc84d9f9bdba3a0dc2ccdbbd3d97b281e1c68ab",
+      "running": true
+    }
+  ],
+  "rollback_containers": [
+    "eneo-ai-builder-simplify-api-before-builder-8c5c8e24cf8e",
+    "eneo-ai-builder-simplify-worker-before-builder-8c5c8e24cf8e",
+    "eneo-ai-builder-simplify-execution-before-builder-8c5c8e24cf8e",
+    "eneo-ai-builder-simplify-maintenance-before-builder-8c5c8e24cf8e"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "candidate_source": "1c4d4d97239b801ae21aa2dd12d7ee76f1d3ee1d",
+  "parent_source": "19f309c7d1f6374f916fb720bb815a4ddc2efe79",
+  "previous_candidate_source": "19bd535294270595df6a1c2ad885c939f70420fd",
+  "previous_candidate_failure": "Both parent and candidate nested JSON plans used array<string> instead of requested object members.",
+  "workload": "provider-manifest.json unchanged",
+  "launcher": "probe_api.py unchanged; argument candidate2",
+  "output_root": "provider-candidate2",
+  "order": "Gemma template, Gemma nested JSON, Luna template",
+  "repetitions": 1,
+  "external_retries": 0,
+  "acceptance": "Same frozen manifest floors: all three valid plans, seven template bindings, exact nested JSON members, parent successes preserved. Report every outcome."
+}

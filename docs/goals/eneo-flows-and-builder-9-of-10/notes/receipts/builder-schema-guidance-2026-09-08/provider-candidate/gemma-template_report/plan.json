@@ -1,0 +1,127 @@
+{
+  "plan_id": "a7c78635-3857-469c-88c9-bd90488e77b6",
+  "session_id": "eb193ab2-61e7-44cd-9af0-8548bd35bd7b",
+  "status": "proposed",
+  "spec_hash": "2e1be6ed7532dbf08b542478bcce7a538e9ded92b1223cf3e4a2276873970261",
+  "proposal": {
+    "spec": {
+      "flow_name": "Strukturera rapport från text",
+      "flow_description": "Flödet tar emot en textmassa från användaren och strukturerar om denna information för att fylla i en specifik Word-mall (rapport.docx). Det extraherar eller genererar innehåll för titel, datum, författare, sammanfattning, bakgrund, analys och slutsatser baserat på underlaget. Om information saknas i underlaget markeras detta tydligt i dokumentet.",
+      "steps": [
+        {
+          "plan_step_ref": "step_a",
+          "name": "Extrahera och strukturera rapportinnehåll",
+          "assistant_spec": {
+            "instructions": "Analysera det tillhandahållna textunderlaget. Extrahera eller formulera innehåll för följande fält:\n- titel: En kort, beskrivande titel baserad på underlaget.\n- datum: Använd dagens datum.\n- forfattare: Identifiera författare om det finns, annars ange att uppgiften saknas.\n- sammanfattning: Skapa en sammanfattning i två till fyra stycken löpande text.\n- bakgrund: Beskriv bakgrund och syfte med hjälp av underrubriker och punktlistor.\n- analys: Redovisa analysen med en underrubrik per delområde och använd tabeller för siffror där det är lämpligt.\n- slutsatser: Ange slutsatser som löpande text och rekommendationer som en numrerad lista.\n\nOm information för något av fälten helt saknas i underlaget, skriv explicit \"Uppgiften saknas\" för det specifika fältet.\n\nRequired JSON fields:\n- titel: Rapportens titel\n- datum: Aktuellt datum\n- forfattare: Författarens namn och funktion\n- sammanfattning: Sammanfattning av rapportens viktigaste innehåll\n- bakgrund: Beskrivning av bakgrund och syfte\n- analys: Detaljerad analys med underrubriker och tabeller\n- slutsatser: Slutsatser och numrerade rekommendationer",
+            "knowledge_refs": []
+          },
+          "input_source": "flow_input",
+          "input_type": "text",
+          "output_mode": "pass_through",
+          "output_type": "json",
+          "input_bindings": {
+            "question": "{{ indata_text }}"
+          },
+          "output_contract": {
+            "additionalProperties": false,
+            "properties": {
+              "analys": {
+                "description": "Detaljerad analys med underrubriker och tabeller",
+                "title": "Analys",
+                "type": "string"
+              },
+              "bakgrund": {
+                "description": "Beskrivning av bakgrund och syfte",
+                "title": "Bakgrund",
+                "type": "string"
+              },
+              "datum": {
+                "description": "Aktuellt datum",
+                "title": "Datum",
+                "type": "string"
+              },
+              "forfattare": {
+                "description": "Författarens namn och funktion",
+                "title": "Forfattare",
+                "type": "string"
+              },
+              "sammanfattning": {
+                "description": "Sammanfattning av rapportens viktigaste innehåll",
+                "title": "Sammanfattning",
+                "type": "string"
+              },
+              "slutsatser": {
+                "description": "Slutsatser och numrerade rekommendationer",
+                "title": "Slutsatser",
+                "type": "string"
+              },
+              "titel": {
+                "description": "Rapportens titel",
+                "title": "Titel",
+                "type": "string"
+              }
+            },
+            "required": [
+              "titel",
+              "datum",
+              "forfattare",
+              "sammanfattning",
+              "bakgrund",
+              "analys",
+              "slutsatser"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "plan_step_ref": "step_b",
+          "name": "Fyll DOCX-mall",
+          "assistant_spec": {
+            "instructions": "Fyll DOCX-mallen med det förberedda innehållet. Bevara användarens önskade omfattning och terminologi.",
+            "knowledge_refs": []
+          },
+          "input_source": "previous_step",
+          "input_type": "text",
+          "output_mode": "template_fill",
+          "output_type": "docx",
+          "input_bindings": {
+            "source_refs": [
+              {
+                "output": "structured",
+                "step_ref": "step_a"
+              }
+            ]
+          },
+          "output_config": {
+            "bindings": {
+              "analys": "{{ step_a.output.structured.analys }}",
+              "bakgrund": "{{ step_a.output.structured.bakgrund }}",
+              "datum": "{{ datum }}",
+              "forfattare": "{{ step_a.output.structured.forfattare }}",
+              "sammanfattning": "{{ step_a.output.structured.sammanfattning }}",
+              "slutsatser": "{{ step_a.output.structured.slutsatser }}",
+              "titel": "{{ step_a.output.structured.titel }}"
+            }
+          }
+        }
+      ],
+      "form_fields": []
+    },
+    "assumptions": [
+      "Högst 99 filer behandlas i samma körning.",
+      "Bilageunderlag – Bilaga \"rapport.docx\" (#93bcfe01-c97c-43ab-950c-b7f6fd1b4566): vald roll Mall; läsbar text: ja; täckning: hela den läsbara texten ingår. Mallen följer med flödet och fylls i vid varje körning. Platshållare: titel, datum, forfattare, sammanfattning, bakgrund, analys, slutsatser."
+    ],
+    "lint_warnings": [],
+    "plan_rationale": "Planen är utformad för att först analysera och extrahera all nödvändig information från indata i ett strukturerat format (JSON). Detta säkerställer att varje platshållare i mallen får rätt innehåll och att saknad information hanteras konsekvent innan det slutgiltiga dokumentet genereras via mallfyllning.",
+    "description_override_manual": false,
+    "execution_shape": {
+      "completion_model_step_count": 1,
+      "transcription_model_step_count": 0,
+      "deterministic_step_count": 1,
+      "schema_constrained_step_count": 1,
+      "mapped_step_upper_bounds": []
+    }
+  },
+  "created_at": "2026-09-08T17:43:37.995569Z",
+  "updated_at": "2026-09-08T17:43:37.995569Z"
+}
