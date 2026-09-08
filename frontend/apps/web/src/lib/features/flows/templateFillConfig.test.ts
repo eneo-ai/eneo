@@ -167,8 +167,8 @@ describe("templateFillConfig", () => {
         placeholders: ["summary", "author"]
       })
     ).toEqual([
-      { name: "summary", location: "template", preview: null },
-      { name: "author", location: "template", preview: null }
+      { name: "summary", location: "template" },
+      { name: "author", location: "template" }
     ]);
   });
 
@@ -445,8 +445,14 @@ describe("templateFillConfig", () => {
         file_id: "f1",
         file_name: "mall.docx",
         placeholders: [
-          { name: "bakgrund", location: "body", preview: "Bakgrund..." },
-          { name: "författare", location: "header", preview: null }
+          {
+            name: "bakgrund",
+            location: "body",
+            label: "Bakgrund",
+            kind: "rich",
+            hint: "Bakgrund..."
+          },
+          { name: "författare", location: "header" }
         ]
       },
       currentConfig: {
@@ -490,7 +496,7 @@ describe("templateFillConfig", () => {
       inspection: {
         file_id: "f1",
         file_name: "mall.docx",
-        placeholders: [{ name: "optional_section", location: "body", preview: null }]
+        placeholders: [{ name: "optional_section", location: "body" }]
       },
       currentConfig: {
         placeholders: ["optional_section"],

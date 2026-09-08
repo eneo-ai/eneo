@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import io
 import json
 from typing import get_args
 from uuid import UUID, uuid4
 
 import pytest
-from docx import Document
 
 from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_models import File, FileType
@@ -37,6 +35,7 @@ from eneo.flows.ai_builder.planning_state import (
     FileRole,
     PlanningState,
 )
+from tests.docx_template_fixtures import template_bytes_from_expressions
 
 
 def _make_file(
@@ -67,11 +66,7 @@ def _make_file(
 
 
 def _docx_bytes(text: str) -> bytes:
-    document = Document()
-    document.add_paragraph(text)
-    payload = io.BytesIO()
-    document.save(payload)
-    return payload.getvalue()
+    return template_bytes_from_expressions(text)
 
 
 def _build_with_text_budget(

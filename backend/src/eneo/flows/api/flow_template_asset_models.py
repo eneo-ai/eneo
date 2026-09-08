@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Self
+from typing import Literal, Self
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -15,10 +15,22 @@ FLOW_TEMPLATE_INSPECTION_PUBLIC_EXAMPLE: JsonDict = {
     "file_id": "00000000-0000-0000-0000-000000000602",
     "file_name": "ibic-template.docx",
     "placeholders": [
-        {"name": "brukare_namn", "location": "body", "preview": "{{ brukare_namn }}"},
-        {"name": "handlaggare", "location": "header", "preview": "{{ handlaggare }}"},
+        {
+            "name": "sammanfattning",
+            "label": "Sammanfattning",
+            "kind": "rich",
+            "hint": "Sammanfatta ärendet i två till fyra stycken.",
+            "location": "body",
+        },
+        {
+            "name": "handlaggare",
+            "label": "Handläggare",
+            "kind": "text",
+            "hint": "Namn och titel",
+            "location": "body",
+        },
     ],
-    "extracted_text_preview": "IBIC plan template with placeholders.",
+    "extracted_text_preview": "IBIC plan template with content controls.",
     "status": "ready",
 }
 
@@ -29,7 +41,7 @@ FLOW_TEMPLATE_ASSET_PUBLIC_EXAMPLE: JsonDict = {
     "name": "ibic-template.docx",
     "checksum": "sha256:abc123",
     "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "placeholders": ["brukare_namn", "handlaggare"],
+    "placeholders": ["sammanfattning", "handlaggare"],
     "status": "ready",
     "last_updated_by_name": "Case Worker Admin",
     "can_edit": True,
@@ -42,9 +54,20 @@ FLOW_TEMPLATE_ASSET_PUBLIC_EXAMPLE: JsonDict = {
 
 
 class FlowTemplatePlaceholderPublic(BaseModel):
+    """One fill target of a DOCX template: a Word content control.
+
+    ``name`` is the control's tag (what bindings address), ``label`` its
+    title, ``kind`` whether it takes a whole section (``rich``: paragraphs,
+    lists, tables) or one line of text (``text``), and ``hint`` the
+    placeholder text the author wrote, which the AI Builder reads as the
+    instruction for that target.
+    """
+
     name: str
+    label: str
+    kind: Literal["rich", "text"]
+    hint: str | None = None
     location: str
-    preview: str | None = None
 
 
 class FlowTemplateInspectionPublic(BaseModel):

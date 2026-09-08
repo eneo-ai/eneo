@@ -54,6 +54,10 @@ from eneo.flows.ai_builder.planning_state import (
     PlanningState,
     ResolvedSlot,
 )
+from eneo.flows.runtime.document_rendering.guidance import (
+    section_markdown_guidance,
+    text_field_guidance,
+)
 
 # Keeps the example-output evidence block bounded in the proposal prompt.
 _MAX_VISIBLE_EXAMPLE_EVIDENCE = 8
@@ -372,6 +376,10 @@ def _output_schema_evidence_block(planning_state: PlanningState) -> str | None:
                 "placeholder (source references belong inside the text, not as "
                 f"nested objects). Nesting deeper than {MAX_STRUCTURED_FIELD_DEPTH} "
                 "levels is rejected.",
+                "- A field described as a 'Section' of the template takes the whole "
+                f"section text: {section_markdown_guidance()}",
+                "- A field described as a 'Single-line field' takes "
+                f"{text_field_guidance()}",
                 "- Name each preparation field with the placeholder's ASCII "
                 "identifier form: lowercase, diacritics folded (å/ä→a, ö→o), "
                 'dots and spaces replaced with underscores ("sections.ärendet'

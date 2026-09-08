@@ -138,7 +138,13 @@ async def test_inspect_flow_template_enforces_scope_and_calls_service(monkeypatc
         "file_id": file_id,
         "file_name": "rapport.docx",
         "placeholders": [
-            {"name": "summary", "location": "body", "preview": "{{summary}}"}
+            {
+                "name": "summary",
+                "label": "Sammanfattning",
+                "kind": "rich",
+                "hint": "Sammanfatta ärendet.",
+                "location": "body",
+            }
         ],
         "extracted_text_preview": "Titel: {{summary}}",
     }

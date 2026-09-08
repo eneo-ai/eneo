@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 import io
-import sys
 import zipfile
-from types import SimpleNamespace
 
 import pytest
 from docx import Document
+from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
+from eneo.flows.runtime.document_rendering.docx_content_controls import (
+    DocxTemplateContractError,
+    append_rich_control,
+    append_text_control,
+)
+from eneo.flows.runtime.document_rendering.docx_writer import DocumentStructureError
+from eneo.flows.runtime.document_rendering.limits import DocumentRenderLimits
 from eneo.flows.runtime.docx_template_runtime import (
-    _iter_section_footers,
-    _iter_section_headers,
     extract_docx_template_text_preview,
     extract_docx_text,
     inspect_docx_template_bytes,
@@ -22,333 +26,346 @@ from eneo.main.exceptions import (
     FileNotSupportedException,
     TypedIOValidationException,
 )
+from tests.docx_template_fixtures import (
+    control_template_bytes,
+    docx_paragraph_texts,
+    docx_paragraphs,
+    docx_styled_paragraphs,
+    docx_tables,
+)
+
+_RAPPORT_TEXT = [
+    ("titel", "Titel", "Rapportens titel"),
+    ("datum", "Datum", "ÅÅÅÅ-MM-DD"),
+]
+_RAPPORT_RICH = [
+    ("sammanfattning", "Sammanfattning", "Två till fyra stycken."),
+    ("analys", "Analys", "Underrubriker och tabeller."),
+]
 
 
-def _build_template_bytes() -> bytes:
-    doc = Document()
-    doc.add_paragraph("Titel: {{title}}")
-    split = doc.add_paragraph()
-    split.add_run("{{")
-    split.add_run("introduction")
-    split.add_run("}}")
+def _rapport() -> bytes:
+    return control_template_bytes(text=_RAPPORT_TEXT, rich=_RAPPORT_RICH)
 
-    table = doc.add_table(rows=1, cols=1)
-    table.cell(0, 0).text = "{{methodology}}"
 
-    header = doc.sections[0].header
-    header.add_paragraph("Rapport för {{author}}")
+def _document_xml(blob: bytes) -> str:
+    return zipfile.ZipFile(io.BytesIO(blob)).read("word/document.xml").decode()
 
-    footer = doc.sections[0].footer
-    footer.add_paragraph("Version {{version}}")
 
+def _bytes(document) -> bytes:
     buffer = io.BytesIO()
-    doc.save(buffer)
+    document.save(buffer)
     return buffer.getvalue()
 
 
-def test_inspect_docx_template_bytes_finds_placeholders_across_document_regions() -> (
-    None
-):
-    placeholders = inspect_docx_template_bytes(
-        _build_template_bytes(), filename="rapport.docx"
-    )
-
-    assert {(item["name"], item["location"]) for item in placeholders} >= {
-        ("title", "body"),
-        ("introduction", "body"),
-        ("methodology", "table"),
-        ("author", "header"),
-        ("version", "footer"),
-    }
+# --- discovery ------------------------------------------------------------------
 
 
-def test_render_docx_template_replaces_split_run_placeholders() -> None:
-    blob, mimetype, filename = render_docx_template(
-        template_bytes=_build_template_bytes(),
-        context={
-            "title": "Demokratiskt deltagande",
-            "introduction": "Inledningstext",
-            "methodology": "Metodavsnitt",
-            "author": "Anders Svensson",
-            "version": "3",
+def test_inspect_lists_controls_with_kind_label_and_hint_in_document_order() -> None:
+    placeholders = inspect_docx_template_bytes(_rapport(), filename="rapport.docx")
+
+    assert placeholders == [
+        {
+            "name": "titel",
+            "label": "Titel",
+            "kind": "text",
+            "hint": "Rapportens titel",
+            "location": "body",
         },
-        step_order=11,
+        {
+            "name": "datum",
+            "label": "Datum",
+            "kind": "text",
+            "hint": "ÅÅÅÅ-MM-DD",
+            "location": "body",
+        },
+        {
+            "name": "sammanfattning",
+            "label": "Sammanfattning",
+            "kind": "rich",
+            "hint": "Två till fyra stycken.",
+            "location": "body",
+        },
+        {
+            "name": "analys",
+            "label": "Analys",
+            "kind": "rich",
+            "hint": "Underrubriker och tabeller.",
+            "location": "body",
+        },
+    ]
+
+
+def test_inspect_rejects_macro_enabled_filenames_before_reading() -> None:
+    with pytest.raises(FileNotSupportedException):
+        inspect_docx_template_bytes(_rapport(), filename="rapport.docm")
+
+
+def test_inspect_rejects_a_control_without_a_tag() -> None:
+    document = Document()
+    sdt = append_rich_control(document, tag="tmp", label="Avsnitt", hint="x")
+    properties = sdt.find(qn("w:sdtPr"))
+    properties.remove(properties.find(qn("w:tag")))
+
+    with pytest.raises(DocxTemplateContractError) as info:
+        inspect_docx_template_bytes(_bytes(document), filename="t.docx")
+    assert info.value.code == "flow_template_control_untagged"
+
+
+def test_inspect_rejects_duplicate_tags() -> None:
+    document = Document()
+    append_rich_control(document, tag="avsnitt", label="A", hint="a")
+    append_rich_control(document, tag="avsnitt", label="B", hint="b")
+
+    with pytest.raises(DocxTemplateContractError) as info:
+        inspect_docx_template_bytes(_bytes(document), filename="t.docx")
+    assert info.value.code == "flow_template_control_duplicate"
+
+
+def test_inspect_rejects_nested_controls() -> None:
+    document = Document()
+    outer = append_rich_control(document, tag="outer", label="Outer", hint="o")
+    inner = OxmlElement("w:sdt")
+    inner_properties = OxmlElement("w:sdtPr")
+    tag = OxmlElement("w:tag")
+    tag.set(qn("w:val"), "inner")
+    inner_properties.append(tag)
+    inner.append(inner_properties)
+    inner.append(OxmlElement("w:sdtContent"))
+    outer.find(qn("w:sdtContent")).append(inner)
+
+    with pytest.raises(DocxTemplateContractError) as info:
+        inspect_docx_template_bytes(_bytes(document), filename="t.docx")
+    assert info.value.code == "flow_template_control_nested"
+
+
+def test_inspect_rejects_controls_mapped_to_custom_xml() -> None:
+    document = Document()
+    sdt = append_rich_control(document, tag="mapped", label="Mapped", hint="m")
+    binding = OxmlElement("w:dataBinding")
+    binding.set(qn("w:xpath"), "/root/value")
+    binding.set(qn("w:storeItemID"), "{00000000-0000-0000-0000-000000000000}")
+    sdt.find(qn("w:sdtPr")).append(binding)
+
+    with pytest.raises(DocxTemplateContractError) as info:
+        inspect_docx_template_bytes(_bytes(document), filename="t.docx")
+    assert info.value.code == "flow_template_control_mapped"
+
+
+def test_inspect_rejects_unsupported_control_kinds() -> None:
+    document = Document()
+    paragraph = document.add_paragraph("Datum: ")
+    sdt = append_text_control(paragraph, tag="datum", label="Datum", hint="d")
+    properties = sdt.find(qn("w:sdtPr"))
+    properties.remove(properties.find(qn("w:text")))
+    properties.append(OxmlElement("w:date"))
+
+    with pytest.raises(DocxTemplateContractError) as info:
+        inspect_docx_template_bytes(_bytes(document), filename="t.docx")
+    assert info.value.code == "flow_template_control_unsupported"
+    assert "date control" in str(info.value)
+
+
+def test_inspect_rejects_controls_in_table_cells_and_headers() -> None:
+    in_cell = Document()
+    cell_paragraph = in_cell.add_table(rows=1, cols=1).cell(0, 0).paragraphs[0]
+    append_text_control(cell_paragraph, tag="cell", label="Cell", hint="c")
+    with pytest.raises(DocxTemplateContractError) as info:
+        inspect_docx_template_bytes(_bytes(in_cell), filename="t.docx")
+    assert info.value.code == "flow_template_control_placement"
+
+    in_header = Document()
+    header_paragraph = in_header.sections[0].header.paragraphs[0]
+    append_text_control(header_paragraph, tag="header", label="Header", hint="h")
+    with pytest.raises(DocxTemplateContractError) as info:
+        inspect_docx_template_bytes(_bytes(in_header), filename="t.docx")
+    assert info.value.code == "flow_template_control_placement"
+
+
+def test_inspect_normalizes_corrupt_archives() -> None:
+    with pytest.raises(BadRequestException):
+        inspect_docx_template_bytes(b"not a docx", filename="t.docx")
+
+
+# --- fill -------------------------------------------------------------------------
+
+
+def test_render_writes_markdown_sections_with_the_template_styles() -> None:
+    blob, mimetype, filename = render_docx_template(
+        template_bytes=_rapport(),
+        context={
+            "titel": "Översyn 2026",
+            "datum": "2026-09-08",
+            "sammanfattning": "Första stycket.\n\nAndra stycket med **fetstil**.",
+            "analys": (
+                "## Kostnader\n\n| Förvaltning | 2025 |\n|---|---|\n| Skola | 131 |\n\n"
+                "## Orsaker\n\n- Hyra\n  - Index\n- Nya lokaler\n\n1. Ett\n2. Två"
+            ),
+        },
+        step_order=4,
     )
 
-    rendered = Document(io.BytesIO(blob))
-    all_text = "\n".join(paragraph.text for paragraph in rendered.paragraphs)
-    header_text = "\n".join(
-        paragraph.text for paragraph in rendered.sections[0].header.paragraphs
-    )
-    footer_text = "\n".join(
-        paragraph.text for paragraph in rendered.sections[0].footer.paragraphs
-    )
+    assert mimetype.endswith("wordprocessingml.document")
+    assert filename == "step_4_output.docx"
+    styled = docx_styled_paragraphs(blob)
+    assert ("Normal", "Titel: Översyn 2026") in styled
+    assert ("Heading 1", "Sammanfattning") in styled
+    assert ("Normal", "Första stycket.") in styled
+    assert ("Heading 2", "Kostnader") in styled
+    assert ("Heading 2", "Orsaker") in styled
+    assert ("List Bullet", "Hyra") in styled
+    assert ("List Bullet 2", "Index") in styled
+    assert ("List Number", "Ett") in styled
+    bold_runs = [
+        run.text
+        for paragraph in docx_paragraphs(blob)
+        for run in paragraph.runs
+        if run.bold
+    ]
+    assert bold_runs == ["fetstil"]
+    tables = docx_tables(blob)
+    assert len(tables) == 1
+    header_row = tables[0].rows[0]
+    assert header_row._tr.trPr.find(qn("w:tblHeader")) is not None
+    assert [cell.paragraphs[0].runs[0].bold for cell in header_row.cells] == [
+        True,
+        True,
+    ]
+    assert tables[0].rows[1].cells[0].paragraphs[0].runs[0].bold is None
+    xml = _document_xml(blob)
+    assert "showingPlcHdr" not in xml
+    assert "PlaceholderText" not in xml
 
-    assert (
-        mimetype
-        == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+def test_render_keeps_relative_heading_levels_under_the_section_heading() -> None:
+    template = control_template_bytes(
+        rich=[("avsnitt", "Avsnitt", "x")], heading_level=2
     )
-    assert filename == "step_11_output.docx"
-    assert "Demokratiskt deltagande" in all_text
-    assert "Inledningstext" in all_text
-    assert rendered.tables[0].cell(0, 0).text == "Metodavsnitt"
-    assert "Anders Svensson" in header_text
-    assert "Version 3" in footer_text
-
-
-def test_render_docx_template_supports_flat_context_for_dotted_placeholder_names() -> (
-    None
-):
-    doc = Document()
-    doc.add_paragraph("{{step_1.output.text}}")
-    buffer = io.BytesIO()
-    doc.save(buffer)
 
     blob, _, _ = render_docx_template(
-        template_bytes=buffer.getvalue(),
-        context={"step_1.output.text": "Dotted binding rendered"},
-        step_order=12,
+        template_bytes=template,
+        context={"avsnitt": "# Delrubrik\n\nText\n\n## Underrubrik"},
+        step_order=1,
     )
 
-    rendered = Document(io.BytesIO(blob))
-    assert "Dotted binding rendered" in "\n".join(
-        paragraph.text for paragraph in rendered.paragraphs
-    )
+    styles = docx_styled_paragraphs(blob)
+    assert ("Heading 2", "Avsnitt") in styles
+    assert ("Heading 3", "Delrubrik") in styles
+    assert ("Heading 4", "Underrubrik") in styles
 
 
-def test_render_docx_template_supports_placeholders_with_spaces() -> None:
-    doc = Document()
-    doc.add_paragraph("Rubrik: {{Planering och Hälsa}}")
-    buffer = io.BytesIO()
-    doc.save(buffer)
+def test_render_rejects_skipped_heading_levels_by_section() -> None:
+    with pytest.raises(DocumentStructureError, match="section 'Analys'"):
+        render_docx_template(
+            template_bytes=_rapport(),
+            context={
+                "titel": "T",
+                "datum": "D",
+                "sammanfattning": "S",
+                "analys": "## A\n\n#### Hoppar över en nivå",
+            },
+            step_order=1,
+        )
+
+
+def test_render_text_controls_take_one_line_unless_multiline() -> None:
+    document = Document()
+    single = document.add_paragraph("En rad: ")
+    append_text_control(single, tag="en", label="En", hint="e")
+    multi = document.add_paragraph("Flera: ")
+    append_text_control(multi, tag="flera", label="Flera", hint="f", multiline=True)
 
     blob, _, _ = render_docx_template(
-        template_bytes=buffer.getvalue(),
-        context={"Planering och Hälsa": "Kort sammanfattning"},
-        step_order=13,
+        template_bytes=_bytes(document),
+        context={"en": "första\nandra", "flera": "första\nandra"},
+        step_order=1,
     )
 
-    rendered = Document(io.BytesIO(blob))
-    assert "Rubrik: Kort sammanfattning" in "\n".join(
-        paragraph.text for paragraph in rendered.paragraphs
+    texts = docx_paragraph_texts(blob)
+    assert texts[0] == "En rad: första andra"
+    assert _document_xml(blob).count("<w:br/>") == 1
+    assert "Flera: första" in texts[1]
+
+
+def test_render_removes_a_control_bound_to_empty_and_keeps_static_content() -> None:
+    blob, _, _ = render_docx_template(
+        template_bytes=_rapport(),
+        context={"titel": "T", "datum": "", "sammanfattning": "S", "analys": ""},
+        step_order=1,
     )
 
+    texts = docx_paragraph_texts(blob)
+    assert "Datum: " in texts
+    assert "Analys" in texts
+    assert _document_xml(blob).count("<w:sdt>") == 2
+    assert "Underrubriker" not in extract_docx_text(blob)
 
-def test_inspect_docx_template_bytes_rejects_macro_enabled_payloads() -> None:
-    template_bytes = _build_template_bytes()
-    mutated = io.BytesIO(template_bytes)
-    with zipfile.ZipFile(mutated, mode="a") as archive:
-        archive.writestr("word/vbaProject.bin", b"macro")
 
+def test_render_rejects_missing_and_valueless_bindings_before_writing() -> None:
     with pytest.raises(
-        FileNotSupportedException,
-        match="(?i)macro-enabled",
-    ) as exc_info:
-        inspect_docx_template_bytes(mutated.getvalue(), filename="rapport.docm")
-
-    assert exc_info.value.code == "flow_template_macro_not_allowed"
-
-
-def test_inspect_docx_template_bytes_normalizes_malformed_ooxml() -> None:
-    source = zipfile.ZipFile(io.BytesIO(_build_template_bytes()))
-    malformed = io.BytesIO()
-    with source, zipfile.ZipFile(malformed, mode="w") as target:
-        for info in source.infolist():
-            content = source.read(info.filename)
-            if info.filename == "word/document.xml":
-                content = b"<w:document><invalid"
-            target.writestr(info, content)
-
-    with pytest.raises(BadRequestException) as exc_info:
-        inspect_docx_template_bytes(malformed.getvalue(), filename="rapport.docx")
-
-    assert exc_info.value.code == "flow_template_invalid_archive"
-
-
-def test_render_docx_template_rejects_missing_context_placeholders() -> None:
-    with pytest.raises(
-        TypedIOValidationException, match="Unresolved template placeholders"
+        TypedIOValidationException, match="Unresolved template placeholders: analys"
     ):
         render_docx_template(
-            template_bytes=_build_template_bytes(),
-            context={"title": "Only title"},
-            step_order=4,
+            template_bytes=_rapport(),
+            context={"titel": "T", "datum": "D", "sammanfattning": "S"},
+            step_order=1,
         )
+    with pytest.raises(TypedIOValidationException, match="without a value: datum"):
+        render_docx_template(
+            template_bytes=_rapport(),
+            context={"titel": "T", "datum": None, "sammanfattning": "S", "analys": "A"},
+            step_order=1,
+        )
+
+
+def test_render_holds_the_whole_document_to_the_render_limits() -> None:
+    with pytest.raises(TypedIOValidationException):
+        render_docx_template(
+            template_bytes=_rapport(),
+            context={
+                "titel": "T",
+                "datum": "D",
+                "sammanfattning": "Ett\n\nTvå",
+                "analys": "Tre\n\nFyra",
+            },
+            step_order=1,
+            limits=DocumentRenderLimits(max_blocks=3),
+        )
+
+
+def test_render_refuses_a_template_that_left_the_supported_profile() -> None:
+    document = Document()
+    append_rich_control(document, tag="a", label="A", hint="a")
+    append_rich_control(document, tag="a", label="B", hint="b")
+
+    with pytest.raises(TypedIOValidationException, match="no longer fillable"):
+        render_docx_template(
+            template_bytes=_bytes(document), context={"a": "x"}, step_order=1
+        )
+
+
+# --- extraction ---------------------------------------------------------------------
+
+
+def test_extract_docx_text_reads_control_content_and_skips_page_furniture() -> None:
+    document = Document()
+    document.sections[0].header.paragraphs[0].text = "Sidhuvud"
+    document.add_paragraph("Före")
+    append_rich_control(document, tag="mitt", label="Mitt", hint="Placeholder")
+    document.add_paragraph("Efter")
+    blob, _, _ = render_docx_template(
+        template_bytes=_bytes(document),
+        context={"mitt": "Inuti kontrollen\n\n| A | B |\n|---|---|\n| 1 | 2 |"},
+        step_order=1,
+    )
+
+    text = extract_docx_text(blob)
+
+    assert text.index("Före") < text.index("Inuti kontrollen") < text.index("Efter")
+    assert "1" in text and "B" in text
+    assert "Sidhuvud" not in text
+    assert "Placeholder" not in text
 
 
 def test_extract_docx_template_text_preview_returns_readable_text() -> None:
-    preview = extract_docx_template_text_preview(_build_template_bytes())
-
-    assert "Titel: {{title}}" in preview
-    assert "Rapport för {{author}}" in preview
-
-
-def test_render_docx_template_wraps_undefined_render_errors_with_actionable_message(
-    monkeypatch,
-) -> None:
-    class _FakeDocxTemplate:
-        def __init__(self, _path: str) -> None:
-            pass
-
-        def render(self, _context, jinja_env=None) -> None:
-            raise RuntimeError("'summary' is undefined")
-
-        def save(self, _path: str) -> None:
-            raise AssertionError("save should not be reached")
-
-    monkeypatch.setitem(
-        sys.modules, "docxtpl", SimpleNamespace(DocxTemplate=_FakeDocxTemplate)
-    )
-
-    with pytest.raises(
-        TypedIOValidationException, match="written directly in the DOCX"
-    ):
-        render_docx_template(
-            template_bytes=_build_template_bytes(),
-            context={
-                "title": "Demokratiskt deltagande",
-                "introduction": "Inledningstext",
-                "methodology": "Metodavsnitt",
-                "author": "Anders Svensson",
-                "version": "3",
-            },
-            step_order=8,
-        )
-
-
-# ---------------------------------------------------------------------------
-# Header/footer traversal edge cases (regression for FileNotFoundError crash)
-# ---------------------------------------------------------------------------
-
-
-def _build_no_header_footer_bytes() -> bytes:
-    """Build a DOCX with body content only — no headers or footers."""
-    doc = Document()
-    doc.add_paragraph("Body text with {{placeholder}}")
-    buffer = io.BytesIO()
-    doc.save(buffer)
-    return buffer.getvalue()
-
-
-def _build_first_page_header_only_bytes() -> bytes:
-    """Build a DOCX with a first-page header but no default header."""
-    doc = Document()
-    doc.add_paragraph("Body: {{body_var}}")
-    section = doc.sections[0]
-    section.different_first_page_header_footer = True
-    first_hdr = section.first_page_header
-    first_hdr.add_paragraph("First page: {{first_var}}")
-    buffer = io.BytesIO()
-    doc.save(buffer)
-    return buffer.getvalue()
-
-
-def _build_even_page_header_bytes() -> bytes:
-    """Build a DOCX with both default and even-page headers."""
-    doc = Document()
-    doc.add_paragraph("Body: {{body_var}}")
-    section = doc.sections[0]
-    # Add default header
-    section.header.add_paragraph("Default: {{default_hdr}}")
-    # Add even-page header (requires document setting)
-    even_hdr = section.even_page_header
-    even_hdr.add_paragraph("Even page: {{even_hdr}}")
-    buffer = io.BytesIO()
-    doc.save(buffer)
-    return buffer.getvalue()
-
-
-def test_inspect_no_header_no_footer_does_not_crash() -> None:
-    """Regression: DOCX without headers/footers must not trigger FileNotFoundError."""
-    template = _build_no_header_footer_bytes()
-    placeholders = inspect_docx_template_bytes(template, filename="plain.docx")
-
-    names = {item["name"] for item in placeholders}
-    assert "placeholder" in names
-    # No header/footer placeholders expected
-    locations = {item["location"] for item in placeholders}
-    assert "header" not in locations
-    assert "footer" not in locations
-
-
-def test_extract_text_no_header_no_footer_does_not_crash() -> None:
-    """Regression: extract_docx_text on headerless DOCX must not crash."""
-    text = extract_docx_text(_build_no_header_footer_bytes())
-    assert "Body text" in text
-
-
-def test_inspect_finds_first_page_header_placeholders() -> None:
-    """First-page headers must be inspected — not just default headers."""
-    template = _build_first_page_header_only_bytes()
-    placeholders = inspect_docx_template_bytes(template, filename="first.docx")
-
-    names = {item["name"] for item in placeholders}
-    assert "first_var" in names
-    assert "body_var" in names
-
-
-def test_inspect_finds_even_page_header_placeholders() -> None:
-    """Even-page headers must be inspected alongside default headers."""
-    template = _build_even_page_header_bytes()
-    placeholders = inspect_docx_template_bytes(template, filename="even.docx")
-
-    names = {item["name"] for item in placeholders}
-    assert "default_hdr" in names
-    assert "even_hdr" in names
-    assert "body_var" in names
-
-
-def test_extract_text_includes_first_page_header() -> None:
-    """extract_docx_text must include text from first-page headers."""
-    text = extract_docx_text(_build_first_page_header_only_bytes())
-    assert "First page" in text
-
-
-def test_iter_section_headers_skips_corrupted_header_gracefully() -> None:
-    """If a header reference exists but the part is inaccessible, skip it."""
-    doc = Document()
-    doc.add_paragraph("Body")
-    section = doc.sections[0]
-
-    # Manually inject a header reference into the XML without a real part
-    from lxml import etree
-
-    ref = etree.SubElement(
-        section._sectPr,
-        qn("w:headerReference"),
-    )
-    ref.set(qn("w:type"), "default")
-    ref.set(qn("r:id"), "rIdBogus")
-
-    # This should not raise — the safety net catches the error
-    headers = _iter_section_headers(section)
-    # May return 0 or 1 depending on whether python-docx can resolve the ref
-    assert isinstance(headers, list)
-
-
-def test_iter_section_footers_returns_empty_for_no_references() -> None:
-    """Sections without footer references must return an empty list."""
-    doc = Document()
-    doc.add_paragraph("Body")
-    section = doc.sections[0]
-    footers = _iter_section_footers(section)
-    assert footers == []
-
-
-def test_iter_section_headers_ignores_unknown_type() -> None:
-    """Unknown w:type values in header references must be safely skipped."""
-    doc = Document()
-    doc.add_paragraph("Body")
-    section = doc.sections[0]
-
-    from lxml import etree
-
-    ref = etree.SubElement(
-        section._sectPr,
-        qn("w:headerReference"),
-    )
-    ref.set(qn("w:type"), "unknown_type")
-    ref.set(qn("r:id"), "rId999")
-
-    headers = _iter_section_headers(section)
-    assert headers == []
+    assert "Sammanfattning" in extract_docx_template_text_preview(_rapport())

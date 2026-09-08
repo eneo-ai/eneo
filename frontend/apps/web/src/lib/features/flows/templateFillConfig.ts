@@ -1,10 +1,17 @@
 import type { FlowStep } from "@eneo/eneo-js";
 import { getFlowFormFieldVariableToken } from "./flowFormSchema";
 
+/**
+ * One fill target of a DOCX template: a Word content control. `name` is the
+ * control's tag, `label` its title, `kind` whether it takes a whole section
+ * ("rich") or one line ("text"), `hint` the placeholder text the author wrote.
+ */
 export type FlowTemplatePlaceholder = {
   name: string;
   location: string;
-  preview?: string | null;
+  label?: string;
+  kind?: "rich" | "text";
+  hint?: string | null;
 };
 
 export type FlowTemplateInspection = {
@@ -56,9 +63,11 @@ export type TemplateBindingStatus = "matched" | "missing" | "invalid" | "orphane
 export type TemplateBindingRow = {
   key: string;
   placeholderName: string;
+  label: string;
+  kind: "rich" | "text" | null;
+  hint: string | null;
   binding?: string;
   location: string;
-  preview?: string | null;
   sourceLabel: string | null;
   status: TemplateBindingStatus;
   autoSuggested: boolean;
@@ -209,8 +218,7 @@ export function listTemplatePlaceholders(
   }
   return (currentConfig.placeholders ?? []).map((name) => ({
     name,
-    location: "template",
-    preview: null
+    location: "template"
   }));
 }
 
@@ -457,9 +465,11 @@ export function listTemplateBindingRows(params: {
     rows.push({
       key: placeholder.name,
       placeholderName: placeholder.name,
+      label: placeholder.label ?? placeholder.name,
+      kind: placeholder.kind ?? null,
+      hint: placeholder.hint ?? null,
       binding,
       location: placeholder.location,
-      preview: placeholder.preview,
       sourceLabel:
         binding === params.labels.emptyValue
           ? params.labels.leaveEmpty
@@ -479,9 +489,11 @@ export function listTemplateBindingRows(params: {
     rows.push({
       key: `orphaned:${placeholderName}`,
       placeholderName,
+      label: placeholderName,
+      kind: null,
+      hint: null,
       binding,
       location: "template",
-      preview: null,
       sourceLabel:
         binding === params.labels.emptyValue
           ? params.labels.leaveEmpty

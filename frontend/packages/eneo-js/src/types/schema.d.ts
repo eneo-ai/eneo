@@ -23079,7 +23079,7 @@ export interface components {
      *       "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
      *       "name": "ibic-template.docx",
      *       "placeholders": [
-     *         "brukare_namn",
+     *         "sammanfattning",
      *         "handlaggare"
      *       ],
      *       "status": "ready",
@@ -23147,19 +23147,23 @@ export interface components {
      * FlowTemplateInspectionPublic
      * @example {
      *       "asset_id": "00000000-0000-0000-0000-000000000601",
-     *       "extracted_text_preview": "IBIC plan template with placeholders.",
+     *       "extracted_text_preview": "IBIC plan template with content controls.",
      *       "file_id": "00000000-0000-0000-0000-000000000602",
      *       "file_name": "ibic-template.docx",
      *       "placeholders": [
      *         {
+     *           "hint": "Sammanfatta ärendet i två till fyra stycken.",
+     *           "kind": "rich",
+     *           "label": "Sammanfattning",
      *           "location": "body",
-     *           "name": "brukare_namn",
-     *           "preview": "{{ brukare_namn }}"
+     *           "name": "sammanfattning"
      *         },
      *         {
-     *           "location": "header",
-     *           "name": "handlaggare",
-     *           "preview": "{{ handlaggare }}"
+     *           "hint": "Namn och titel",
+     *           "kind": "text",
+     *           "label": "Handläggare",
+     *           "location": "body",
+     *           "name": "handlaggare"
      *         }
      *       ],
      *       "status": "ready"
@@ -23181,14 +23185,30 @@ export interface components {
       placeholders: components["schemas"]["FlowTemplatePlaceholderPublic"][];
       status?: components["schemas"]["FlowTemplateAssetStatus"] | null;
     };
-    /** FlowTemplatePlaceholderPublic */
+    /**
+     * FlowTemplatePlaceholderPublic
+     * @description One fill target of a DOCX template: a Word content control.
+     *
+     *     ``name`` is the control's tag (what bindings address), ``label`` its
+     *     title, ``kind`` whether it takes a whole section (``rich``: paragraphs,
+     *     lists, tables) or one line of text (``text``), and ``hint`` the
+     *     placeholder text the author wrote, which the AI Builder reads as the
+     *     instruction for that target.
+     */
     FlowTemplatePlaceholderPublic: {
+      /** Hint */
+      hint?: string | null;
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: "rich" | "text";
+      /** Label */
+      label: string;
       /** Location */
       location: string;
       /** Name */
       name: string;
-      /** Preview */
-      preview?: string | null;
     };
     /** FlowTemplateReadinessPublic */
     FlowTemplateReadinessPublic: {

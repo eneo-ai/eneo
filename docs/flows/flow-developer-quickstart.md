@@ -239,7 +239,7 @@ Examples:
 | Plain model step | `output_mode=pass_through`, `output_type=text` or `json`. |
 | Deterministic text assembly | `output_mode=compose_text`, usually before document rendering. |
 | Audio transcription | `output_mode=transcribe_only`, `output_type=text`. |
-| DOCX template fill | `output_mode=template_fill`, `output_type=docx`. |
+| DOCX template fill | `output_mode=template_fill`, `output_type=docx`; targets are Word content controls. |
 | PDF or DOCX rendering from final body | `output_mode=render_verbatim`, `output_type=pdf` or `docx`. |
 | Outbound API delivery | `output_mode=http_post`, final delivery is `outbound_http`. |
 
@@ -585,6 +585,41 @@ are not resent at runtime. Runtime files, when the published Flow accepts them,
 are uploaded separately when a run starts. A template may bind `datum`; a
 transcription binding makes the Flow's audio input required. Template fill
 itself is deterministic and reports zero model tokens.
+
+### How do DOCX templates and DOCX rendering work?
+
+Both DOCX modes write through one owner, `document_rendering/docx_writer.py`,
+which turns the block model (headings, paragraphs, bullet and numbered lists
+nested up to three levels, tables, code, bold, italic, code spans, links) into
+WordprocessingML using the target document's own styles: `Heading N`, `List
+Bullet`/`List Number` and their level variants, the template's default table
+style with the first row marked as a repeating header row, and a fresh numbering
+instance per numbered list. It never writes direct paragraph formatting, so a
+template's look and accessibility properties survive whatever the model wrote.
+Skipped heading levels and headings deeper than six are refused, not flattened.
+
+`render_verbatim` fills the standard body template
+(`runtime/templates/standard/dokument.docx`) and drops a single short lead-in
+paragraph written before the level-1 title. `template_fill` writes into Word
+content controls (`runtime/document_rendering/docx_content_controls.py`): the control's tag is the
+placeholder name a binding addresses, the title is its label, and the
+placeholder text is the authoring hint the AI Builder reads. Two kinds are
+supported: body-level rich text controls (a whole section; markdown is parsed
+and sub-headings are placed relative to the nearest preceding heading) and
+inline text controls (one line, or several with `multiLine`). Controls without
+a tag, duplicate tags, nested controls, XML-mapped controls, other control
+kinds and controls in table cells, headers or footers are refused at
+inspection, before a template can be selected. A binding that resolves to
+nothing is an error; an explicit empty binding removes the control and keeps the
+surrounding static content; structured values are refused (bind a text field).
+The finished document's text is read through `docx2python`, which sees control
+content; python-docx's paragraph API does not.
+
+The standard templates (`dokument`, `rapport`, `motesprotokoll`) are built by
+`backend/scripts/build_standard_docx_templates.py` and committed; authors copy
+them and add or rename controls from Word's Developer tab. Writer guidance for
+the model derives from the block model in `document_rendering/guidance.py` and
+is the single owner of what the prompts say about markdown and structure.
 
 ### Where should a developer start when changing Flow behavior?
 

@@ -12,6 +12,9 @@ from eneo.flows.output_processing import (
     prune_extras_to_strict_schema,
     schema_yields_top_level_object,
 )
+from eneo.flows.runtime.document_rendering.guidance import (
+    document_markdown_guidance,
+)
 
 _MAX_DROPPED_PATHS_REPORTED = 20
 _MAX_DROPPED_PATH_LENGTH = 200
@@ -131,9 +134,7 @@ def document_prompt_instructions(
 ) -> tuple[str, ...]:
     if output_contract is None:
         return (
-            f"The system will render your answer into a {artifact_name} file after you respond.",
-            "Return only the document body as Markdown/plain text content.",
-            "Do not output binary file contents, base64, XML/ZIP internals, or PDF object syntax.",
+            *document_markdown_guidance(artifact_name=artifact_name),
             "For PDF output specifically, do not start the response with %PDF-.",
         )
     schema_json = json.dumps(output_contract, ensure_ascii=False, sort_keys=True)

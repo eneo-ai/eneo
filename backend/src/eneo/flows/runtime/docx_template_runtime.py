@@ -1,82 +1,95 @@
+"""DOCX template inspection, fill and text extraction.
+
+Templates carry their fill targets as Word content controls (see
+``docx_content_controls``). Inspection lists them, fill writes each bound
+value into its control with the template's own styles, and extraction reads
+the finished document through the same reader every uploaded DOCX goes
+through, so control content is never invisible to the run's text output.
+"""
+
 from __future__ import annotations
 
 import io
 import logging
-import re
 import tempfile
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Iterator, cast
 
 from docx import Document
-from docx.oxml.ns import qn
-from jinja2.sandbox import SandboxedEnvironment
+from docx2python import docx2python
 
 from eneo.files.docx_template_validation import (
     normalize_template_extraction_error,
     validate_docx_template_archive,
 )
+from eneo.files.text import CorruptFileError
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.runtime.document_rendering.blocks import DocumentBlock
+from eneo.flows.runtime.document_rendering.docx_content_controls import (
+    ContentControl,
+    ContentControlKind,
+    DocxTemplateContractError,
+    fill_rich_control,
+    fill_text_control,
+    inspect_content_controls,
+    remove_control,
+)
+from eneo.flows.runtime.document_rendering.docx_writer import DocxBlockWriter
+from eneo.flows.runtime.document_rendering.limits import (
+    DEFAULT_DOCUMENT_RENDER_LIMITS,
+    DocumentRenderLimits,
+    ensure_blocks_within_limits,
+    ensure_source_within_limits,
+)
+from eneo.flows.runtime.document_rendering.markdown_blocks import (
+    parse_markdown_blocks,
+)
 from eneo.main.exceptions import TypedIOValidationException
 
 logger = logging.getLogger(__name__)
 
-_PLACEHOLDER_PATTERN = re.compile(r"\{\{\s*([^{}]+)\s*\}\}")
-_SAFE_TEMPLATE_NAME_PATTERN = re.compile(
-    r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$"
-)
 _DOCX_MIMETYPE = (
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 )
-
-# OOXML header/footer reference types → python-docx section properties
-_HEADER_TYPE_TO_ATTR = {
-    "default": "header",
-    "first": "first_page_header",
-    "even": "even_page_header",
-}
-_FOOTER_TYPE_TO_ATTR = {
-    "default": "footer",
-    "first": "first_page_footer",
-    "even": "even_page_footer",
-}
+_PREVIEW_CHARS = 2000
 
 
-def _iter_section_headers(section: Any) -> list[Any]:
-    """Return headers explicitly defined in the section XML.
+@dataclass(frozen=True, slots=True)
+class TemplatePlaceholderSpec:
+    """One fill target as callers outside the runtime see it."""
 
-    Only accesses the python-docx property matching the reference type
-    (default/first/even) to avoid triggering implicit header creation
-    which requires template files that may not be installed.
-    """
-    headers: list[Any] = []
-    for ref in section._sectPr.findall(qn("w:headerReference")):
-        hdr_type = ref.get(qn("w:type"), "default")
-        attr = _HEADER_TYPE_TO_ATTR.get(hdr_type)
-        if attr and hasattr(section, attr):
-            try:
-                headers.append(getattr(section, attr))
-            except (FileNotFoundError, KeyError):
-                logger.warning("Skipping inaccessible %s header in section", hdr_type)
-    return headers
+    name: str
+    label: str
+    kind: ContentControlKind
+    hint: str | None
+    location: str
 
 
-def _iter_section_footers(section: Any) -> list[Any]:
-    """Return footers explicitly defined in the section XML.
+def inspect_docx_template_placeholders(
+    template_bytes: bytes,
+    *,
+    filename: str,
+) -> tuple[TemplatePlaceholderSpec, ...]:
+    """List the template's fill targets in document order."""
 
-    Only accesses the python-docx property matching the reference type
-    (default/first/even) to avoid triggering implicit footer creation
-    which requires template files that may not be installed.
-    """
-    footers: list[Any] = []
-    for ref in section._sectPr.findall(qn("w:footerReference")):
-        ftr_type = ref.get(qn("w:type"), "default")
-        attr = _FOOTER_TYPE_TO_ATTR.get(ftr_type)
-        if attr and hasattr(section, attr):
-            try:
-                footers.append(getattr(section, attr))
-            except (FileNotFoundError, KeyError):
-                logger.warning("Skipping inaccessible %s footer in section", ftr_type)
-    return footers
+    try:
+        controls = _inspect_controls(template_bytes, filename=filename)
+    except Exception as exc:
+        normalized = normalize_template_extraction_error(exc)
+        if normalized is exc:
+            raise
+        raise normalized from exc
+    return tuple(
+        TemplatePlaceholderSpec(
+            name=control.name,
+            label=control.label,
+            kind=control.kind,
+            hint=control.hint or None,
+            location=control.location,
+        )
+        for control in controls
+    )
 
 
 def inspect_docx_template_bytes(
@@ -84,59 +97,14 @@ def inspect_docx_template_bytes(
     *,
     filename: str,
 ) -> list[dict[str, str | None]]:
-    try:
-        return _inspect_docx_template_bytes(template_bytes, filename=filename)
-    except Exception as exc:
-        normalized = normalize_template_extraction_error(exc)
-        if normalized is exc:
-            raise
-        raise normalized from exc
+    """List the fill targets as plain records: name, label, kind, hint, location."""
 
-
-def _inspect_docx_template_bytes(
-    template_bytes: bytes,
-    *,
-    filename: str,
-) -> list[dict[str, str | None]]:
-    validate_docx_template_archive(template_bytes, filename=filename)
-    document = Document(io.BytesIO(template_bytes))
-
-    discovered: list[dict[str, str | None]] = []
-    seen: set[tuple[str, str]] = set()
-
-    def record(text: str, *, location: str) -> None:
-        preview = text.strip()[:160] or None
-        for match in _PLACEHOLDER_PATTERN.finditer(text):
-            name = match.group(1).strip()
-            key = (name, location)
-            if not name or key in seen:
-                continue
-            seen.add(key)
-            discovered.append({"name": name, "location": location, "preview": preview})
-
-    for paragraph in document.paragraphs:
-        record(paragraph.text, location="body")
-    for table in document.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                record(cell.text, location="table")
-    for section in document.sections:
-        for hdr in _iter_section_headers(section):
-            for paragraph in hdr.paragraphs:
-                record(paragraph.text, location="header")
-            for table in hdr.tables:
-                for row in table.rows:
-                    for cell in row.cells:
-                        record(cell.text, location="header")
-        for ftr in _iter_section_footers(section):
-            for paragraph in ftr.paragraphs:
-                record(paragraph.text, location="footer")
-            for table in ftr.tables:
-                for row in table.rows:
-                    for cell in row.cells:
-                        record(cell.text, location="footer")
-
-    return discovered
+    return [
+        asdict(spec)
+        for spec in inspect_docx_template_placeholders(
+            template_bytes, filename=filename
+        )
+    ]
 
 
 def docx_template_placeholder_names(
@@ -144,199 +112,160 @@ def docx_template_placeholder_names(
     *,
     filename: str,
 ) -> tuple[str, ...]:
-    """Return each exact placeholder name once, in document discovery order."""
+    """Return each target name once, in document order."""
 
-    names: list[str] = []
-    seen: set[str] = set()
-    for item in inspect_docx_template_bytes(template_bytes, filename=filename):
-        name = str(item.get("name", "")).strip()
-        if not name or name in seen:
-            continue
-        names.append(name)
-        seen.add(name)
-    return tuple(names)
+    return tuple(
+        str(item["name"])
+        for item in inspect_docx_template_bytes(template_bytes, filename=filename)
+    )
 
 
 def render_docx_template(
     *,
     template_bytes: bytes,
-    context: dict[str, Any],
+    context: Mapping[str, str | None],
     step_order: int,
+    limits: DocumentRenderLimits = DEFAULT_DOCUMENT_RENDER_LIMITS,
 ) -> tuple[bytes, str, str]:
-    placeholders = inspect_docx_template_bytes(
-        template_bytes, filename=f"step_{step_order}.docx"
+    """Fill every control from ``context`` and return the finished document.
+
+    Value semantics per target: a missing key or a ``None`` value is an error
+    (nothing was produced for a target the template requires); an empty
+    string is a deliberate omission and removes the control while the static
+    content around it stays; rich targets parse their text as markdown and
+    text targets take the text as is. The whole document is held to the
+    render limits before anything is written.
+    """
+
+    filename = f"step_{step_order}_output.docx"
+    try:
+        validate_docx_template_archive(template_bytes, filename=filename)
+        document = Document(io.BytesIO(template_bytes))
+        controls = inspect_content_controls(document)
+    except DocxTemplateContractError as exc:
+        raise TypedIOValidationException(
+            f"The published DOCX template is no longer fillable: {exc}",
+            code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
+        ) from exc
+
+    _require_values(controls, context)
+    sections = _parse_rich_sections(controls, context, limits=limits)
+
+    writer = DocxBlockWriter(document)
+    for control in controls:
+        value = context[control.name]
+        assert value is not None  # _require_values
+        if not value.strip():
+            remove_control(control)
+            continue
+        if control.kind == "rich":
+            fill_rich_control(
+                control,
+                writer.elements(
+                    sections[control.name],
+                    heading_base=control.heading_level,
+                    section_label=f"the section '{control.label}'",
+                ),
+            )
+        else:
+            fill_text_control(control, value)
+
+    output = io.BytesIO()
+    document.save(output)
+    return output.getvalue(), _DOCX_MIMETYPE, filename
+
+
+def extract_docx_text(document_bytes: bytes) -> str:
+    """Read the body text, including content inside controls and tables.
+
+    Uses the same reader as uploaded DOCX files (``docx2python``), which walks
+    structured document tags; python-docx's paragraph API does not. Headers
+    and footers are left out: they hold page furniture (logo, page numbers),
+    never step content.
+    """
+
+    with tempfile.TemporaryDirectory(prefix="flow-docx-text-") as temp_dir:
+        path = Path(temp_dir) / "document.docx"
+        path.write_bytes(document_bytes)
+        try:
+            with docx2python(path) as content:
+                paragraphs = [
+                    paragraph.strip()
+                    for table in content.body
+                    for row in table
+                    for cell in row
+                    for paragraph in cell
+                    if paragraph.strip()
+                ]
+        except Exception as exc:
+            raise CorruptFileError("document.docx", str(exc)) from exc
+    return "\n\n".join(paragraphs)
+
+
+def extract_docx_template_text_preview(template_bytes: bytes) -> str:
+    return extract_docx_text(template_bytes)[:_PREVIEW_CHARS]
+
+
+def _inspect_controls(
+    template_bytes: bytes, *, filename: str
+) -> tuple[ContentControl, ...]:
+    validate_docx_template_archive(template_bytes, filename=filename)
+    document = Document(io.BytesIO(template_bytes))
+    return inspect_content_controls(document)
+
+
+def _require_values(
+    controls: tuple[ContentControl, ...],
+    context: Mapping[str, str | None],
+) -> None:
+    missing = sorted(
+        control.name for control in controls if control.name not in context
     )
-    required_names = {str(item["name"]) for item in placeholders}
-    missing = sorted(name for name in required_names if name not in context)
     if missing:
         raise TypedIOValidationException(
             f"Unresolved template placeholders: {', '.join(missing)}",
             code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
         )
-
-    try:
-        from docxtpl import DocxTemplate  # pyright: ignore[reportMissingTypeStubs]
-    except Exception as exc:  # pragma: no cover - environment guard
+    absent = sorted(
+        control.name for control in controls if context[control.name] is None
+    )
+    if absent:
         raise TypedIOValidationException(
-            f"DOCX template rendering dependency is unavailable: {exc}",
+            "Template placeholders without a value: "
+            f"{', '.join(absent)}. The bound step or field produced nothing; bind "
+            "another source or leave the placeholder empty on purpose.",
             code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
-        ) from exc
-
-    normalized_template_bytes, alias_by_name = _normalize_docx_template_placeholders(
-        template_bytes,
-        required_names=required_names,
+        )
+    non_text = sorted(
+        control.name
+        for control in controls
+        if not isinstance(context[control.name], str)
     )
-    render_context = _build_docxtpl_context(context)
-    for name, alias in alias_by_name.items():
-        render_context[alias] = context[name]
-
-    with tempfile.TemporaryDirectory(prefix="flow-docx-template-") as temp_dir:
-        template_path = Path(temp_dir) / "template.docx"
-        output_path = Path(temp_dir) / f"step_{step_order}_output.docx"
-        template_path.write_bytes(normalized_template_bytes)
-        try:
-            template = DocxTemplate(str(template_path))
-            template.render(
-                render_context, jinja_env=SandboxedEnvironment(autoescape=False)
-            )
-            template.save(str(output_path))  # pyright: ignore[reportUnknownMemberType]
-            blob = output_path.read_bytes()
-        except TypedIOValidationException:
-            raise
-        except Exception as exc:
-            message = str(exc)
-            if "UndefinedError" in message or "is undefined" in message:
-                raise TypedIOValidationException(
-                    "Template rendering failed. Check that placeholders are written directly in the DOCX without extra formatting inside the braces.",
-                    code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
-                ) from exc
-            raise TypedIOValidationException(
-                f"DOCX template render failed: {exc}",
-                code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
-            ) from exc
-
-    return blob, _DOCX_MIMETYPE, f"step_{step_order}_output.docx"
+    if non_text:
+        raise TypedIOValidationException(
+            f"Template placeholders must be bound to text: {', '.join(non_text)}",
+            code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
+        )
 
 
-def _normalize_docx_template_placeholders(
-    template_bytes: bytes,
+def _parse_rich_sections(
+    controls: tuple[ContentControl, ...],
+    context: Mapping[str, str | None],
     *,
-    required_names: set[str],
-) -> tuple[bytes, dict[str, str]]:
-    alias_by_name = {
-        name: f"placeholder_{index}"
-        for index, name in enumerate(sorted(required_names), start=1)
-        if _SAFE_TEMPLATE_NAME_PATTERN.fullmatch(name) is None
+    limits: DocumentRenderLimits,
+) -> dict[str, list[DocumentBlock]]:
+    rich_values = {
+        control.name: str(context[control.name])
+        for control in controls
+        if control.kind == "rich" and str(context[control.name]).strip()
     }
-    if not alias_by_name:
-        return template_bytes, {}
-
-    document = Document(io.BytesIO(template_bytes))
-    for paragraph in _iter_story_paragraphs(document):
-        _replace_placeholder_aliases_in_paragraph(paragraph, alias_by_name)
-
-    output = io.BytesIO()
-    document.save(output)
-    return output.getvalue(), alias_by_name
-
-
-def _build_docxtpl_context(context: dict[str, Any]) -> dict[str, Any]:
-    """Expose flat placeholder bindings both directly and as nested dotted aliases."""
-    render_context: dict[str, Any] = dict(context)
-
-    for key, value in context.items():
-        if "." not in key:
-            continue
-
-        path = [segment.strip() for segment in key.split(".") if segment.strip()]
-        if len(path) < 2:
-            continue
-
-        current: dict[str, Any] = render_context
-        for segment in path[:-1]:
-            existing = current.get(segment)
-            if existing is None:
-                next_level: dict[str, Any] = {}
-                current[segment] = next_level
-                current = next_level
-                continue
-            if not isinstance(existing, dict):
-                current = cast(dict[str, Any], {})
-                break
-            current = cast(dict[str, Any], existing)
-        else:
-            current[path[-1]] = value
-
-    return render_context
-
-
-def _iter_story_paragraphs(container: Any) -> Iterator[Any]:
-    for paragraph in getattr(container, "paragraphs", []):
-        yield paragraph
-    for table in getattr(container, "tables", []):
-        for row in table.rows:
-            for cell in row.cells:
-                yield from _iter_story_paragraphs(cell)
-    for section in getattr(container, "sections", []):
-        for hdr in _iter_section_headers(section):
-            yield from _iter_story_paragraphs(hdr)
-        for ftr in _iter_section_footers(section):
-            yield from _iter_story_paragraphs(ftr)
-
-
-def _replace_placeholder_aliases_in_paragraph(
-    paragraph: Any,
-    alias_by_name: dict[str, str],
-) -> None:
-    original_text = paragraph.text
-    if not original_text or "{{" not in original_text:
-        return
-
-    replaced_text = _PLACEHOLDER_PATTERN.sub(
-        lambda match: "{{"
-        + alias_by_name.get(match.group(1).strip(), match.group(1).strip())
-        + "}}",
-        original_text,
+    ensure_source_within_limits("\n".join(rich_values.values()), limits=limits)
+    sections = {
+        name: parse_markdown_blocks(value.splitlines())
+        for name, value in rich_values.items()
+    }
+    ensure_blocks_within_limits(
+        [block for blocks in sections.values() for block in blocks],
+        limits=limits,
     )
-    if replaced_text == original_text:
-        return
-
-    text_nodes = list(paragraph._p.iter(qn("w:t")))
-    if not text_nodes:
-        return
-
-    text_nodes[0].text = replaced_text
-    for node in text_nodes[1:]:
-        node.text = ""
-
-
-def extract_docx_text(document_bytes: bytes) -> str:
-    document = Document(io.BytesIO(document_bytes))
-    segments: list[str] = []
-    segments.extend(
-        paragraph.text.strip()
-        for paragraph in document.paragraphs
-        if paragraph.text.strip()
-    )
-    for table in document.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                text = cell.text.strip()
-                if text:
-                    segments.append(text)
-    for section in document.sections:
-        for hdr in _iter_section_headers(section):
-            for paragraph in hdr.paragraphs:
-                text = paragraph.text.strip()
-                if text:
-                    segments.append(text)
-        for ftr in _iter_section_footers(section):
-            for paragraph in ftr.paragraphs:
-                text = paragraph.text.strip()
-                if text:
-                    segments.append(text)
-    return "\n\n".join(segments)
-
-
-def extract_docx_template_text_preview(template_bytes: bytes) -> str:
-    return extract_docx_text(template_bytes)[:2000]
+    return sections

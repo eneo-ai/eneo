@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import hashlib
-import io
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
-from docx import Document
 
 from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_models import FileType
@@ -22,7 +20,6 @@ from eneo.flows.application.flow_draft_materialization import (
 from eneo.flows.application.flow_template_attachment_materialization import (
     materialize_template_attachment,
 )
-from eneo.flows.domain.canonical_json_hash import canonical_json_bytes
 from eneo.flows.domain.flow import (
     FlowRun,
     FlowRunStatus,
@@ -57,50 +54,40 @@ from eneo.main.exceptions import (
     NotFoundException,
     TypedIOValidationException,
 )
+from tests.docx_template_fixtures import control_template_bytes
 
 
 def _build_template_bytes() -> bytes:
-    document = Document()
-    document.add_paragraph("Titel: {{title}}")
-    document.add_paragraph("Författare: {{author}}")
-    document.add_paragraph("Sammanfattning: {{summary}}")
-    buffer = io.BytesIO()
-    document.save(buffer)
-    return buffer.getvalue()
+    return control_template_bytes(
+        text=[("title", "Titel", "Titel"), ("author", "Författare", "Namn")],
+        rich=[("summary", "Sammanfattning", "Sammanfattning i löpande text")],
+    )
 
 
 def _build_builder_template_bytes() -> bytes:
-    document = Document()
-    document.add_paragraph("Titel: {{title}}")
-    document.add_paragraph("Författare: {{author}}")
-    document.add_paragraph("Sammanfattning: {{step_a.output.text}}")
-    document.add_paragraph("Analys: {{step_b.output.structured.summary}}")
-    document.add_paragraph("Malltext: {{föregående_steg}}")
-    document.add_paragraph("Kund: {{customer   name}}")
-    document.add_paragraph("Transkribering: {{transkribering}}")
-    document.add_paragraph("Flow-indata: {{flow_input.transkribering}}")
-    document.add_paragraph("Flow: {{flow.input.transkribering}}")
-    buffer = io.BytesIO()
-    document.save(buffer)
-    return buffer.getvalue()
+    return control_template_bytes(
+        text=[
+            ("title", "Titel", "Titel"),
+            ("author", "Författare", "Namn"),
+            ("step_a.output.text", "Sammanfattning", "Sammanfattning"),
+            ("step_b.output.structured.summary", "Analys", "Analys"),
+            ("föregående_steg", "Malltext", "Malltext"),
+            ("customer   name", "Kund", "Kund"),
+            ("transkribering", "Transkribering", "Transkribering"),
+            ("flow_input.transkribering", "Flow-indata", "Flow-indata"),
+            ("flow.input.transkribering", "Flow", "Flow"),
+        ],
+    )
 
 
 def _build_unicode_template_bytes() -> bytes:
-    document = Document()
-    document.add_paragraph("Ämne: {{ämne}}")
-    document.add_paragraph("Sammanfattning: {{summary}}")
-    buffer = io.BytesIO()
-    document.save(buffer)
-    return buffer.getvalue()
+    return control_template_bytes(
+        text=[("ämne", "Ämne", "Ämne"), ("summary", "Sammanfattning", "Text")],
+    )
 
 
 def _build_summary_only_template_bytes() -> bytes:
-    document = Document()
-    document.add_paragraph("Slutsats")
-    document.add_paragraph("{{slutsats}}")
-    buffer = io.BytesIO()
-    document.save(buffer)
-    return buffer.getvalue()
+    return control_template_bytes(rich=[("slutsats", "Slutsats", "Slutsatsen")])
 
 
 def _run() -> FlowRun:
@@ -1363,7 +1350,7 @@ async def test_execute_template_fill_step_supports_datum_system_variable() -> No
 
 
 @pytest.mark.asyncio
-async def test_execute_template_fill_step_formats_json_binding_in_summary() -> None:
+async def test_execute_template_fill_step_rejects_structured_json_binding() -> None:
     run = _run()
     result = _completed_result(run=run)
     result = result.model_copy(
@@ -1392,27 +1379,8 @@ async def test_execute_template_fill_step_formats_json_binding_in_summary() -> N
     step = _step()
     step.output_config["bindings"]["summary"] = "{{step_1.output.structured}}"
 
-    prepared = await prepare_template_fill_step(
-        step=step,
-        run=run,
-        state=state,
-        deps=deps,
-    )
-    structured_edge = next(
-        edge
-        for edge in prepared.resolved_input_edges
-        if edge.binding_ref.endswith(":step_1.output.structured")
-    )
-    selected = canonical_json_bytes({"status": "approved", "score": 5})
-    assert structured_edge.selection.encoding == "canonical_json"
-    assert structured_edge.selection.byte_size == len(selected)
-    assert structured_edge.selection.sha256 == hashlib.sha256(selected).hexdigest()
-
-    output = await execute_template_fill_step(
-        step=step, run=run, state=state, deps=deps
-    )
-
-    assert '## summary\n\n{"status": "approved", "score": 5}' in output.persisted_text
+    with pytest.raises(TypedIOValidationException, match="structured data"):
+        await execute_template_fill_step(step=step, run=run, state=state, deps=deps)
 
 
 @pytest.mark.asyncio

@@ -5,6 +5,9 @@ import json
 import pytest
 
 from eneo.flows.enums import FlowOutputType
+from eneo.flows.runtime.document_rendering.guidance import (
+    document_markdown_guidance,
+)
 from eneo.flows.runtime.output_formats import OUTPUT_FORMAT_SPECS, resolve_format_spec
 from eneo.flows.runtime.output_formats.base import append_output_format_instructions
 from eneo.main.exceptions import TypedIOValidationException
@@ -125,12 +128,12 @@ def test_document_output_prompt_without_schema_matches_current_instructions(
         [
             "Generate report",
             "",
-            f"The system will render your answer into a {artifact_name} file after you respond.",
-            "Return only the document body as Markdown/plain text content.",
-            "Do not output binary file contents, base64, XML/ZIP internals, or PDF object syntax.",
+            *document_markdown_guidance(artifact_name=artifact_name),
             "For PDF output specifically, do not start the response with %PDF-.",
         ]
     )
+    assert "begin with the document title as a level-1 heading" in prompt
+    assert "Never write bracketed placeholders" in prompt
 
 
 @pytest.mark.parametrize(

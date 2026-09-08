@@ -57,7 +57,10 @@ class DocumentRenderService:
             step_order=step_order,
         )
         return self.render_blocks(
-            parse_markdown_blocks(source_text.splitlines()),
+            _drop_lead_in(
+                parse_markdown_blocks(source_text.splitlines()),
+                step_order=step_order,
+            ),
             output_type,
             step_order=step_order,
         )
@@ -152,6 +155,38 @@ def _unwrap_single_field_text_envelope(text: str, *, step_order: int) -> str:
         extra={"step_order": step_order, "field_name": field_name},
     )
     return value
+
+
+_LEAD_IN_MAX_CHARS = 200
+
+
+def _drop_lead_in(
+    blocks: list[DocumentBlock], *, step_order: int
+) -> list[DocumentBlock]:
+    """A document starts at its title: drop a chat lead-in written before it.
+
+    Weaker models open with one sentence such as "Här följer rapporten…" and
+    then the real title. One short, single-line paragraph directly before a
+    level-1 heading is that lead-in and never document content; it is
+    dropped and logged. Anything longer or structured is kept.
+    """
+
+    if len(blocks) < 2:
+        return blocks
+    first, second = blocks[0], blocks[1]
+    if (
+        first.kind != "paragraph"
+        or second.kind != "heading"
+        or second.level != 1
+        or "\n" in first.text
+        or len(first.text) > _LEAD_IN_MAX_CHARS
+    ):
+        return blocks
+    logger.info(
+        "document_render_lead_in_dropped",
+        extra={"step_order": step_order, "chars": len(first.text)},
+    )
+    return blocks[1:]
 
 
 def _raise_render_failed(

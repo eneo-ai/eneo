@@ -4,6 +4,7 @@ from html import escape
 from typing import Sequence
 
 from eneo.flows.runtime.document_rendering.blocks import (
+    MAX_HEADING_LEVEL,
     DocumentBlock,
     InlineRuns,
     InlineTextRun,
@@ -39,12 +40,12 @@ def _block_to_html(block: DocumentBlock) -> str:
     if block.kind == "empty":
         return '<div class="block-spacer" aria-hidden="true"></div>'
     if block.kind == "heading":
-        level = min(max(block.level or 1, 1), 4)
+        level = min(max(block.level or 1, 1), MAX_HEADING_LEVEL)
         return f"<h{level}>{_runs_html(block.runs, fallback=block.text)}</h{level}>"
     if block.kind == "bullet_list":
-        return _list_to_html("ul", block.items, block.item_runs)
+        return _list_to_html("ul", block)
     if block.kind == "numbered_list":
-        return _list_to_html("ol", block.items, block.item_runs)
+        return _list_to_html("ol", block)
     if block.kind == "code":
         return f"<pre><code>{escape(block.text)}</code></pre>"
     if block.kind == "table":
@@ -52,18 +53,50 @@ def _block_to_html(block: DocumentBlock) -> str:
     return f"<p>{_runs_html(block.runs, fallback=block.text)}</p>"
 
 
-def _list_to_html(
-    tag: str,
-    items: tuple[str, ...],
-    item_runs: tuple[InlineRuns, ...],
-) -> str:
-    if not items:
+def _list_to_html(tag: str, block: DocumentBlock) -> str:
+    """Emit nested lists from the flat item/level pairs.
+
+    A deeper item opens a sublist inside the previous item and closing tags
+    follow the depth back down, so the HTML stays well formed for the PDF
+    renderer and for assistive technology.
+    """
+
+    if not block.items:
         return ""
-    item_html = "\n".join(
-        f"<li>{_runs_html(_runs_at(item_runs, index), fallback=item)}</li>"
-        for index, item in enumerate(items)
+    start_attribute = (
+        f' start="{block.start}"' if tag == "ol" and block.start != 1 else ""
     )
-    return f"<{tag}>\n{item_html}\n</{tag}>"
+    parts: list[str] = [f"<{tag}{start_attribute}>"]
+    depth = 0
+    open_item = False
+    for index, item in enumerate(block.items):
+        level = block.item_level(index)
+        while level > depth:
+            parts.append(f"<{tag}>")
+            depth += 1
+            open_item = False
+        while level < depth:
+            if open_item:
+                parts.append("</li>")
+            parts.append(f"</{tag}>")
+            depth -= 1
+            open_item = True
+        if open_item:
+            parts.append("</li>")
+        parts.append(
+            f"<li>{_runs_html(_runs_at(block.item_runs, index), fallback=item)}"
+        )
+        open_item = True
+    while depth > 0:
+        if open_item:
+            parts.append("</li>")
+        parts.append(f"</{tag}>")
+        depth -= 1
+        open_item = True
+    if open_item:
+        parts.append("</li>")
+    parts.append(f"</{tag}>")
+    return "\n".join(parts)
 
 
 def _table_to_html(
@@ -156,6 +189,8 @@ def _run_html(run: InlineTextRun) -> str:
         text = f"<em>{text}</em>"
     if run.strikethrough:
         text = f"<s>{text}</s>"
+    if run.href:
+        text = f'<a href="{escape(run.href, quote=True)}">{text}</a>'
     return text
 
 

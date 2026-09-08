@@ -54,6 +54,9 @@ from eneo.flows.flow_resource_bindings import FlowResourceBindingSource
 from eneo.flows.flow_template_asset_service import (
     AttachedTemplateFileUnavailableError,
 )
+from eneo.flows.runtime.document_rendering.docx_content_controls import (
+    append_text_control,
+)
 from eneo.main.exceptions import BadRequestException
 
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -61,7 +64,12 @@ DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.docu
 
 def _template_bytes(placeholder: str) -> bytes:
     document = Document()
-    document.add_paragraph("{{ " + placeholder + " }}")
+    append_text_control(
+        document.add_paragraph("Ärende: "),
+        tag=placeholder,
+        label=placeholder,
+        hint=placeholder,
+    )
     payload = io.BytesIO()
     document.save(payload)
     return payload.getvalue()

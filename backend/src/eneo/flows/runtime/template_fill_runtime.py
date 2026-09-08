@@ -59,14 +59,14 @@ class PreparedTemplateFillStep:
     template_file_name: str
     template_blob: bytes
     placeholders: tuple[str, ...]
-    resolved_bindings: dict[str, str]
+    resolved_bindings: dict[str, str | None]
     persisted_text: str
     resolved_input_edges: tuple[FlowResolvedInputEdge, ...]
 
 
 @dataclass(frozen=True)
 class ResolvedTemplateBindings:
-    values: dict[str, str]
+    values: dict[str, str | None]
     edges: tuple[FlowResolvedInputEdge, ...]
 
 
@@ -447,7 +447,7 @@ def _resolve_template_bindings(
         step_names_by_order=state.step_names_by_order,
         step_ref_mapping=state.step_ref_mapping,
     )
-    resolved: dict[str, str] = {}
+    resolved: dict[str, str | None] = {}
     edges: list[FlowResolvedInputEdge] = []
     for placeholder, expression in bindings.items():
         if not expression.strip():
@@ -466,7 +466,9 @@ def _resolve_template_bindings(
                 raw_value = variable_resolver.resolve_path(
                     context, match.group(1).strip()
                 )
-                resolved[placeholder] = _stringify_template_binding_value(raw_value)
+                resolved[placeholder] = _template_binding_text(
+                    placeholder=placeholder, value=raw_value
+                )
             else:
                 resolved[placeholder] = interpolation.text
             edges.extend(interpolation.edges)
@@ -493,13 +495,13 @@ def _resolve_template_bindings(
 def _build_template_fill_summary(
     *,
     placeholders: list[str],
-    resolved_bindings: dict[str, str],
+    resolved_bindings: dict[str, str | None],
 ) -> str:
     sections: list[str] = []
     for placeholder in placeholders:
         body = _strip_leading_placeholder_heading(
             placeholder=placeholder,
-            body=resolved_bindings.get(placeholder, ""),
+            body=resolved_bindings.get(placeholder) or "",
         )
         section = f"## {placeholder}"
         if body:
@@ -541,13 +543,24 @@ def _optional_string(value: Any) -> str | None:
     return None
 
 
-def _stringify_template_binding_value(value: Any) -> str:
+def _template_binding_text(*, placeholder: str, value: Any) -> str | None:
+    """Text for a binding that consists of one complete expression.
+
+    ``None`` stays ``None`` so the renderer can tell "the source produced
+    nothing" from a deliberate empty binding; structured values are refused
+    because a section or field takes text, never serialized data.
+    """
+
     if value is None:
-        return ""
+        return None
     if isinstance(value, str):
         return value
     if isinstance(value, (dict, list)):
-        return json.dumps(value, ensure_ascii=False)
+        raise TypedIOValidationException(
+            f"Template binding '{placeholder}' resolved to structured data. Bind a "
+            "text field of the step instead of the whole JSON result.",
+            code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
+        )
     return str(value)
 
 

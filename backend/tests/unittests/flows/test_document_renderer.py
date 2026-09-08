@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import io
+import zipfile
 from collections.abc import Sequence
+from pathlib import Path
 from unittest.mock import patch
 
 import pdfplumber
 import pytest
 from docx import Document
+from docx.oxml.ns import qn
 
 from eneo.flows.runtime.document_rendering.blocks import DocumentBlock, InlineTextRun
+from eneo.flows.runtime.document_rendering.docx_renderer import DocxDocumentRenderer
 from eneo.flows.runtime.document_rendering.html_blocks import (
     blocks_to_html_document,
 )
@@ -30,6 +34,7 @@ from eneo.flows.runtime.document_rendering.weasyprint_renderer import (
     configure_weasyprint_dependency_logging,
 )
 from eneo.main.exceptions import TypedIOValidationException
+from tests.docx_template_fixtures import docx_paragraphs, docx_tables
 
 _render_service = default_document_render_service()
 
@@ -231,7 +236,7 @@ def test_render_docx_empty_output_still_valid():
     blob, _, _ = _render_service.render_document("", "docx", step_order=1)
     doc = Document(io.BytesIO(blob))
     assert isinstance(blob, bytes)
-    assert len(doc.paragraphs) >= 1
+    assert len(docx_paragraphs(doc)) >= 1
 
 
 def test_render_docx_preserves_swedish_characters():
@@ -239,7 +244,7 @@ def test_render_docx_preserves_swedish_characters():
     text = "Svenska tecken: å ä ö"
     blob, _, _ = _render_service.render_document(text, "docx", step_order=1)
     doc = Document(io.BytesIO(blob))
-    all_text = "\n".join(paragraph.text for paragraph in doc.paragraphs)
+    all_text = "\n".join(paragraph.text for paragraph in docx_paragraphs(doc))
     assert "å" in all_text
     assert "ä" in all_text
     assert "ö" in all_text
@@ -250,9 +255,9 @@ def test_render_docx_markdown_table_creates_table():
     text = "| Namn | Värde |\n| --- | --- |\n| Kommun | Sundsvall |"
     blob, _, _ = _render_service.render_document(text, "docx", step_order=1)
     doc = Document(io.BytesIO(blob))
-    assert len(doc.tables) == 1
-    assert doc.tables[0].cell(0, 0).text == "Namn"
-    assert doc.tables[0].cell(1, 1).text == "Sundsvall"
+    assert len(docx_tables(doc)) == 1
+    assert docx_tables(doc)[0].cell(0, 0).text == "Namn"
+    assert docx_tables(doc)[0].cell(1, 1).text == "Sundsvall"
 
 
 def test_render_docx_markdown_inline_syntax_as_readable_text():
@@ -266,7 +271,7 @@ def test_render_docx_markdown_inline_syntax_as_readable_text():
     blob, _, _ = _render_service.render_document(text, "docx", step_order=1)
 
     doc = Document(io.BytesIO(blob))
-    all_text = "\n".join(paragraph.text for paragraph in doc.paragraphs)
+    all_text = "\n".join(paragraph.text for paragraph in docx_paragraphs(doc))
     assert "Medarbetare: Leona" in all_text
     assert "Sammanfattning" in all_text
     assert "Träna skrivande och gamla mål." in all_text
@@ -282,7 +287,7 @@ def test_render_docx_preserves_inline_bold_runs():
     )
 
     doc = Document(io.BytesIO(blob))
-    paragraph = doc.paragraphs[0]
+    paragraph = docx_paragraphs(doc)[0]
     assert paragraph.runs[0].text == "Medarbetare:"
     assert paragraph.runs[0].bold is True
     assert "".join(run.text for run in paragraph.runs) == "Medarbetare: Leona"
@@ -321,14 +326,14 @@ def test_render_structured_docx_uses_schema_titles_and_tables():
     )
 
     doc = Document(io.BytesIO(blob))
-    all_text = "\n".join(paragraph.text for paragraph in doc.paragraphs)
+    all_text = "\n".join(paragraph.text for paragraph in docx_paragraphs(doc))
     assert "Utvecklingsrapport" in all_text
     assert "Sammanfattning" in all_text
     assert "Kort sammanfattning" in all_text
-    assert len(doc.tables) == 1
-    assert doc.tables[0].cell(0, 0).text == "Ansvarig"
-    assert doc.tables[0].cell(0, 1).text == "Uppgift"
-    assert doc.tables[0].cell(1, 1).text == "Läsa mer"
+    assert len(docx_tables(doc)) == 1
+    assert docx_tables(doc)[0].cell(0, 0).text == "Ansvarig"
+    assert docx_tables(doc)[0].cell(0, 1).text == "Uppgift"
+    assert docx_tables(doc)[0].cell(1, 1).text == "Läsa mer"
 
 
 def test_render_structured_docx_pins_null_and_empty_array_values():
@@ -347,7 +352,7 @@ def test_render_structured_docx_pins_null_and_empty_array_values():
     )
 
     doc = Document(io.BytesIO(blob))
-    all_text = "\n".join(paragraph.text for paragraph in doc.paragraphs)
+    all_text = "\n".join(paragraph.text for paragraph in docx_paragraphs(doc))
     assert "Sammanfattning: -" in all_text
     assert "Anteckningar" in all_text
     assert "-" in all_text
@@ -368,7 +373,7 @@ def test_render_structured_docx_escapes_scalar_markdown_control_text():
     )
 
     doc = Document(io.BytesIO(blob))
-    paragraph_texts = [paragraph.text for paragraph in doc.paragraphs]
+    paragraph_texts = [paragraph.text for paragraph in docx_paragraphs(doc)]
     assert (
         "Sammanfattning: Rad ett\n# Inte en rubrik\n'''inte kod'''" in paragraph_texts
     )
@@ -385,8 +390,8 @@ def test_render_structured_docx_table_cells_preserve_pipe_characters():
     )
 
     doc = Document(io.BytesIO(blob))
-    assert len(doc.tables) == 1
-    assert doc.tables[0].cell(1, 0).text == "A | B"
+    assert len(docx_tables(doc)) == 1
+    assert docx_tables(doc)[0].cell(1, 0).text == "A | B"
 
 
 @requires_weasyprint_native_stack
@@ -699,7 +704,7 @@ def test_render_docx_markdown_lists_and_code_blocks():
     text = "# Titel\n\n- punkt ett\n- punkt två\n\n```python\nprint('hej')\n```"
     blob, _, _ = _render_service.render_document(text, "docx", step_order=1)
     doc = Document(io.BytesIO(blob))
-    all_text = "\n".join(paragraph.text for paragraph in doc.paragraphs)
+    all_text = "\n".join(paragraph.text for paragraph in docx_paragraphs(doc))
     assert "Titel" in all_text
     assert "punkt ett" in all_text
     assert "print('hej')" in all_text
@@ -711,18 +716,7 @@ def test_render_docx_very_long_output():
     blob, _, _ = _render_service.render_document(text, "docx", step_order=1)
     doc = Document(io.BytesIO(blob))
     assert len(blob) > 0
-    assert any("åäö" in paragraph.text for paragraph in doc.paragraphs)
-
-
-def test_render_docx_still_works_when_package_default_template_is_missing():
-    """Renderer should not depend on python-docx package template layout."""
-    with patch("docx.api._default_docx_path", return_value="/tmp/missing-default.docx"):
-        blob, _, _ = _render_service.render_document(
-            "Fallback template test", "docx", step_order=1
-        )
-    doc = Document(io.BytesIO(blob))
-    all_text = "\n".join(paragraph.text for paragraph in doc.paragraphs)
-    assert "Fallback template test" in all_text
+    assert any("åäö" in paragraph.text for paragraph in docx_paragraphs(doc))
 
 
 # --- Error handling ---
@@ -773,7 +767,7 @@ def test_single_field_json_envelope_unwraps_to_formatted_document() -> None:
     blob, _, _ = _render_service.render_document(envelope, "docx", step_order=5)
 
     document = Document(io.BytesIO(blob))
-    texts = [paragraph.text for paragraph in document.paragraphs]
+    texts = [paragraph.text for paragraph in docx_paragraphs(document)]
     assert "Mötesdokument" in texts[0]
     assert not any("document_body" in text for text in texts)
     assert not any(text.strip().startswith("{") for text in texts)
@@ -787,4 +781,114 @@ def test_multi_field_json_text_renders_verbatim() -> None:
     blob, _, _ = _render_service.render_document(text, "docx", step_order=2)
 
     document = Document(io.BytesIO(blob))
-    assert any("first" in paragraph.text for paragraph in document.paragraphs)
+    assert any("first" in paragraph.text for paragraph in docx_paragraphs(document))
+
+
+# --- DOCX writer contract (content-control body template) -------------------------
+
+
+def _docx_styled(blob: bytes) -> list[tuple[str, str]]:
+    from tests.docx_template_fixtures import docx_styled_paragraphs
+
+    return docx_styled_paragraphs(blob)
+
+
+def test_render_docx_drops_a_chat_lead_in_before_the_title() -> None:
+    blob, _, _ = _render_service.render_document(
+        "Här följer rapporten, sammanställd som ett formellt dokument.\n\n"
+        "# Rapport\n\nBrödtext.",
+        "docx",
+        step_order=1,
+    )
+
+    styled = _docx_styled(blob)
+    assert styled[0] == ("Heading 1", "Rapport")
+    assert all("Här följer" not in text for _, text in styled)
+    assert Document(io.BytesIO(blob)).core_properties.title == "Rapport"
+
+
+def test_render_docx_keeps_a_real_opening_paragraph() -> None:
+    blob, _, _ = _render_service.render_document(
+        "Inledning som är innehåll.\n\nAndra stycket.\n\n# Rubrik",
+        "docx",
+        step_order=1,
+    )
+
+    assert ("Normal", "Inledning som är innehåll.") in _docx_styled(blob)
+
+
+def test_render_docx_nested_lists_use_level_styles_and_numbering_restarts() -> None:
+    blob, _, _ = _render_service.render_document(
+        "# T\n\n- A\n  - A1\n    - A2\n- B\n\n1. Ett\n2. Två\n\nText\n\n1. Ny",
+        "docx",
+        step_order=1,
+    )
+
+    styled = _docx_styled(blob)
+    assert ("List Bullet", "A") in styled
+    assert ("List Bullet 2", "A1") in styled
+    assert ("List Bullet 3", "A2") in styled
+    assert ("List Number", "Ny") in styled
+    xml = zipfile.ZipFile(io.BytesIO(blob)).read("word/document.xml").decode()
+    numbering = zipfile.ZipFile(io.BytesIO(blob)).read("word/numbering.xml").decode()
+    # Each numbered list gets its own numbering instance with a start override.
+    assert numbering.count("<w:startOverride") == 2
+    assert xml.count("<w:numPr>") == 3
+
+
+def test_render_docx_writes_links_as_hyperlinks_and_inherits_style_emphasis() -> None:
+    blob, _, _ = _render_service.render_document(
+        "# Titel\n\nLäs [riktlinjen](https://example.se/r) och **viktigt**.",
+        "docx",
+        step_order=1,
+    )
+
+    xml = zipfile.ZipFile(io.BytesIO(blob)).read("word/document.xml").decode()
+    assert xml.count("<w:hyperlink") == 1
+    relationships = (
+        zipfile.ZipFile(io.BytesIO(blob)).read("word/_rels/document.xml.rels").decode()
+    )
+    assert 'Target="https://example.se/r"' in relationships
+    # Absent emphasis is not written as an explicit "off", so a bold heading
+    # style keeps its weight.
+    assert '<w:b w:val="0"/>' not in xml and '<w:b w:val="false"/>' not in xml
+    document = Document(io.BytesIO(blob))
+    from tests.docx_template_fixtures import docx_paragraphs
+
+    title = next(p for p in docx_paragraphs(document) if p.text == "Titel")
+    assert title.runs[0].bold is None
+
+
+def test_render_docx_tables_carry_a_repeating_header_row_and_table_style() -> None:
+    blob, _, _ = _render_service.render_document(
+        "# T\n\n| A | B |\n|---|---|\n| 1 | 2 |",
+        "docx",
+        step_order=1,
+    )
+
+    from tests.docx_template_fixtures import docx_tables
+
+    table = docx_tables(blob)[0]
+    assert table.style.name == "Table Grid"
+    assert table.rows[0]._tr.trPr.find(qn("w:tblHeader")) is not None
+    assert table._tbl.tblPr.find(qn("w:tblLook")).get(qn("w:firstRow")) == "1"
+
+
+def test_render_docx_supports_six_heading_levels_and_rejects_skips() -> None:
+    blob, _, _ = _render_service.render_document(
+        "# 1\n\n## 2\n\n### 3\n\n#### 4\n\n##### 5\n\n###### 6",
+        "docx",
+        step_order=1,
+    )
+    assert ("Heading 6", "6") in _docx_styled(blob)
+
+    with pytest.raises(TypedIOValidationException, match="skip a level"):
+        _render_service.render_document("# 1\n\n### 3", "docx", step_order=1)
+
+
+def test_render_docx_requires_the_standard_template() -> None:
+    renderer = DocxDocumentRenderer(template_path=Path("/nonexistent/dokument.docx"))
+    service = DocumentRenderService(renderers=(renderer,))
+
+    with pytest.raises(TypedIOValidationException):
+        service.render_document("# T", "docx", step_order=1)

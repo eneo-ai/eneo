@@ -164,6 +164,9 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
+from eneo.flows.runtime.document_rendering.docx_content_controls import (
+    append_text_control,
+)
 from eneo.main.container.container import Container
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.main.models import ModelId
@@ -9747,7 +9750,9 @@ async def test_template_create_rolls_back_then_retries_and_replays_one_asset(
     )
 
     document = Document()
-    document.add_paragraph("Case: {{ case_id }}")
+    append_text_control(
+        document.add_paragraph("Case: "), tag="case_id", label="Case", hint="case_id"
+    )
     payload = io.BytesIO()
     document.save(payload)
     template_bytes = payload.getvalue()

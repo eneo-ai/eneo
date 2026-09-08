@@ -340,15 +340,7 @@
                 {m.flow_template_fill_no_placeholders()}
               </p>
               <p class="text-muted text-xs leading-relaxed">
-                {m.flow_template_fill_placeholder_guidance_prefix()}
-                <span class="font-mono">{"{{nuläge}}"}</span>,
-                <span class="font-mono">{"{{mål}}"}</span>
-                {m.or()}
-                <span class="font-mono">{"{{bedömning}}"}</span>
-                {m.flow_template_fill_placeholder_guidance_suffix()}
-              </p>
-              <p class="text-muted text-xs leading-relaxed">
-                {m.flow_template_fill_placeholder_formatting_warning()}
+                {m.flow_template_fill_control_guidance()}
               </p>
               {#if templateInspection?.extracted_text_preview}
                 <Card.Root class="mt-1">
@@ -378,9 +370,17 @@
                 <Card.Content class="flex flex-col gap-2 px-3 py-3">
                   <div class="flex items-center justify-between gap-2">
                     <div class="flex min-w-0 flex-wrap items-center gap-2">
-                      <span class="text-primary text-sm font-medium">
-                        {`{{${row.placeholderName}}}`}
-                      </span>
+                      <span class="text-primary text-sm font-medium">{row.label}</span>
+                      {#if row.kind}
+                        <Badge variant="outline">
+                          {row.kind === "rich"
+                            ? m.flow_template_fill_kind_rich()
+                            : m.flow_template_fill_kind_text()}
+                        </Badge>
+                      {/if}
+                      {#if row.label !== row.placeholderName}
+                        <span class="text-muted font-mono text-xs">{row.placeholderName}</span>
+                      {/if}
                       <Badge class={getTemplateRowStatusClass(row.status)}>
                         {getTemplateRowStatusText(row.status)}
                       </Badge>
@@ -420,9 +420,9 @@
                     </button>
                   </div>
 
-                  {#if row.preview}
+                  {#if row.hint}
                     <p class="text-muted -mt-1 text-xs leading-relaxed">
-                      {row.preview}
+                      {row.hint}
                     </p>
                   {/if}
 

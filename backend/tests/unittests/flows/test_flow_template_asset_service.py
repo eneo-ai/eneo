@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
-from docx import Document
 from fastapi import UploadFile
 
 from eneo.authentication.principal_types import PrincipalType
@@ -31,6 +30,7 @@ from eneo.main.exceptions import (
     FileTooLargeException,
     NotFoundException,
 )
+from tests.docx_template_fixtures import control_template_bytes
 
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
@@ -41,11 +41,7 @@ class _ReadGuard(io.BytesIO):
 
 
 def _build_template_bytes() -> bytes:
-    document = Document()
-    document.add_paragraph("{{Body}}")
-    payload = io.BytesIO()
-    document.save(payload)
-    return payload.getvalue()
+    return control_template_bytes(rich=["Body"])
 
 
 def _upload(filename: str, content: bytes) -> UploadFile:

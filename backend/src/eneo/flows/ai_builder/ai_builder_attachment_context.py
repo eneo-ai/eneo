@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import NoReturn, cast
 from uuid import UUID
@@ -41,9 +41,9 @@ from eneo.flows.flow_ai_builder_budget_settings import (
     AI_BUILDER_TEMPLATE_INSPECTION_HARD_LIMIT_BYTES,
 )
 from eneo.flows.runtime.docx_template_runtime import (
-    docx_template_placeholder_names,
+    TemplatePlaceholderSpec,
+    inspect_docx_template_placeholders,
 )
-from eneo.flows.variable_resolver import iter_template_expressions
 from eneo.json_types import JsonObject
 from eneo.main.exceptions import BadRequestException, FileNotSupportedException
 from eneo.tokens.token_utils import count_message_tokens
@@ -227,7 +227,9 @@ def _attachment_schema_discovery(
 
 def _template_output_schema_evidence(
     files: list[File],
-    template_placeholders_by_file: Mapping[UUID, tuple[str, ...] | None],
+    template_placeholders_by_file: Mapping[
+        UUID, tuple[TemplatePlaceholderSpec, ...] | None
+    ],
 ) -> SchemaEvidence | None:
     return _template_placeholder_output_schema_evidence(
         files, template_placeholders_by_file
@@ -250,9 +252,11 @@ def _is_declared_schema_attachment(file: File) -> bool:
 
 def _template_placeholder_output_schema_evidence(
     files: list[File],
-    template_placeholders_by_file: Mapping[UUID, tuple[str, ...] | None],
+    template_placeholders_by_file: Mapping[
+        UUID, tuple[TemplatePlaceholderSpec, ...] | None
+    ],
 ) -> SchemaEvidence | None:
-    selected: list[str] = []
+    selected: list[TemplatePlaceholderSpec] = []
     all_placeholders: set[str] = set()
     source_markers: list[str] = []
     source_file_ids: list[UUID] = []
@@ -263,16 +267,21 @@ def _template_placeholder_output_schema_evidence(
         if not placeholders:
             continue
         file_placeholders: set[str] = set()
+        selected_names = {spec.name for spec in selected}
         for placeholder in placeholders:
-            if placeholder not in all_placeholders:
-                all_placeholders.add(placeholder)
+            if placeholder.name not in all_placeholders:
+                all_placeholders.add(placeholder.name)
                 if len(selected) < _MAX_TEMPLATE_PLACEHOLDER_EVIDENCE:
                     selected.append(placeholder)
-            if placeholder in selected and placeholder not in file_placeholders:
+                    selected_names.add(placeholder.name)
+            if (
+                placeholder.name in selected_names
+                and placeholder.name not in file_placeholders
+            ):
                 placeholder_markers.append(
-                    f"file:{file.id}:{TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX}{placeholder}"
+                    f"file:{file.id}:{TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX}{placeholder.name}"
                 )
-                file_placeholders.add(placeholder)
+                file_placeholders.add(placeholder.name)
         source_file_ids.append(file.id)
         source_markers.append(
             f"file:{file.id}{TEMPLATE_PLACEHOLDER_SOURCE_EVIDENCE_SUFFIX}"
@@ -300,11 +309,13 @@ def _template_placeholder_output_schema_evidence(
         )
 
 
-def _template_placeholder_schema(placeholders: tuple[str, ...]) -> JsonObject:
+def _template_placeholder_schema(
+    placeholders: tuple[TemplatePlaceholderSpec, ...],
+) -> JsonObject:
     properties = {
-        placeholder: {
+        placeholder.name: {
             "type": "string",
-            "description": f"Value for template placeholder '{placeholder}'.",
+            "description": _template_placeholder_description(placeholder),
         }
         for placeholder in placeholders
     }
@@ -317,11 +328,17 @@ def _template_placeholder_schema(placeholders: tuple[str, ...]) -> JsonObject:
     )
 
 
+def _template_placeholder_description(placeholder: TemplatePlaceholderSpec) -> str:
+    hint = f" {placeholder.hint}" if placeholder.hint else ""
+    if placeholder.kind == "rich":
+        return f"Section '{placeholder.label}' of the Word template.{hint}"
+    return f"Single-line field '{placeholder.label}' of the Word template.{hint}"
+
+
 def _infer_file_role(
     file: File,
-    readable_text: str | None,
+    template_placeholders: tuple[TemplatePlaceholderSpec, ...] | None,
 ) -> tuple[FileRole, SignalConfidence, tuple[str, ...], tuple[FileRole, ...]]:
-    text = readable_text or ""
     candidate_confidence: dict[FileRole, SignalConfidence] = {}
     candidate_evidence: dict[FileRole, list[str]] = {}
 
@@ -333,7 +350,7 @@ def _infer_file_role(
             confidence="high",
             evidence="file_type:audio",
         )
-    placeholder_evidence = _template_placeholder_evidence(text)
+    placeholder_evidence = _template_placeholder_evidence(template_placeholders)
     if placeholder_evidence:
         for evidence in placeholder_evidence:
             _add_role_candidate(
@@ -381,23 +398,20 @@ def _add_role_candidate(
     candidate_evidence.setdefault(role, []).append(evidence)
 
 
-def _template_placeholder_evidence(text: str) -> tuple[str, ...]:
+def _template_placeholder_evidence(
+    template_placeholders: tuple[TemplatePlaceholderSpec, ...] | None,
+) -> tuple[str, ...]:
+    """Markers for the controls a DOCX carries; a file with controls is a template."""
+
     evidence: list[str] = []
-    for placeholder in _iter_normalized_template_placeholders(text):
-        marker = f"{TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX}{placeholder}"
+    for placeholder in template_placeholders or ():
+        marker = f"{TEMPLATE_PLACEHOLDER_EVIDENCE_PREFIX}{placeholder.name}"
         if marker in evidence:
             continue
         evidence.append(marker)
         if len(evidence) >= _MAX_TEMPLATE_PLACEHOLDER_EVIDENCE:
             break
     return tuple(evidence)
-
-
-def _iter_normalized_template_placeholders(text: str) -> Iterator[str]:
-    for expression in iter_template_expressions(text):
-        normalized = " ".join(expression.split())
-        if normalized:
-            yield normalized
 
 
 def build_ai_builder_attachment_context(
@@ -429,7 +443,7 @@ def build_ai_builder_attachment_context(
         text = readable_text_by_file[file.id]
         role, role_confidence, role_evidence, candidate_roles = _infer_file_role(
             file,
-            text,
+            template_placeholders_by_file[file.id],
         )
 
         attachment_evidence = AIBuilderAttachmentEvidence(
@@ -444,7 +458,9 @@ def build_ai_builder_attachment_context(
             role_confidence=role_confidence,
             role_evidence=role_evidence,
             candidate_roles=candidate_roles,
-            template_placeholders=template_placeholders_by_file[file.id],
+            template_placeholders=_placeholder_names(
+                template_placeholders_by_file[file.id]
+            ),
         )
         evidence.append(attachment_evidence)
 
@@ -649,8 +665,8 @@ def _inspect_template_placeholders(
     files: list[File],
     *,
     policy: AIBuilderAttachmentContextPolicy,
-) -> dict[UUID, tuple[str, ...] | None]:
-    placeholders_by_file: dict[UUID, tuple[str, ...] | None] = {}
+) -> dict[UUID, tuple[TemplatePlaceholderSpec, ...] | None]:
+    placeholders_by_file: dict[UUID, tuple[TemplatePlaceholderSpec, ...] | None] = {}
     total_uncompressed_bytes = 0
     unique_placeholders: set[str] = set()
 
@@ -675,7 +691,7 @@ def _inspect_template_placeholders(
             )
 
         try:
-            placeholders = docx_template_placeholder_names(
+            placeholders = inspect_docx_template_placeholders(
                 file.blob,
                 filename=file.name,
             )
@@ -684,7 +700,7 @@ def _inspect_template_placeholders(
                 error.code or "invalid_docx",
                 file_id=file.id,
             )
-        unique_placeholders.update(placeholders)
+        unique_placeholders.update(spec.name for spec in placeholders)
         if len(unique_placeholders) > policy.max_template_placeholders:
             _template_inspection_limit_exceeded(
                 "placeholder_count",
@@ -694,6 +710,14 @@ def _inspect_template_placeholders(
         placeholders_by_file[file.id] = placeholders
 
     return placeholders_by_file
+
+
+def _placeholder_names(
+    placeholders: tuple[TemplatePlaceholderSpec, ...] | None,
+) -> tuple[str, ...] | None:
+    if placeholders is None:
+        return None
+    return tuple(spec.name for spec in placeholders)
 
 
 def _render_reference_material(parts: list[str]) -> str | None:

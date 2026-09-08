@@ -19,7 +19,6 @@ dependencies = [
     "pyjwt>=2.13.0,<3",
     "black>=24.3.0,<25",
     "python-docx>=1.2.0,<2",
-    "docxtpl>=0.20.1,<1",
     "pycryptodome~=3.17",
     "sse-starlette>=1.6.1,<2",
     "gunicorn>=23.0.0,<24",

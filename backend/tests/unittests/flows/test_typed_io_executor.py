@@ -4497,7 +4497,7 @@ def test_document_output_prompt_instructs_model_to_return_markdown_not_binary() 
     )
 
     assert "system will render" in prompt
-    assert "Markdown/plain text" in prompt
+    assert "document body as Markdown" in prompt
     assert "%PDF-" in prompt
 
 
