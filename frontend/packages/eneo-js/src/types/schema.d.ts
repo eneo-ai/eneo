@@ -20126,6 +20126,8 @@ export interface components {
       meta?: {
         [key: string]: unknown;
       } | null;
+      /** Generated File Ids */
+      generated_file_ids?: string[] | null;
     };
     /**
      * ToolCallResultPublic
@@ -27771,6 +27773,8 @@ export interface operations {
                     meta?: {
                       [key: string]: unknown;
                     } | null;
+                    /** Generated File Ids */
+                    generated_file_ids?: string[] | null;
                   };
                 };
               }
@@ -27826,6 +27830,8 @@ export interface operations {
                     meta?: {
                       [key: string]: unknown;
                     } | null;
+                    /** Generated File Ids */
+                    generated_file_ids?: string[] | null;
                   };
                 };
               }
@@ -27881,6 +27887,8 @@ export interface operations {
                     meta?: {
                       [key: string]: unknown;
                     } | null;
+                    /** Generated File Ids */
+                    generated_file_ids?: string[] | null;
                   };
                 };
               }

@@ -890,7 +890,9 @@ class TestReferenceFallbackHint:
         texts = [block["text"] for block in result["content"]]
         assert not any("files__read_file" in text for text in texts)
 
-    async def test_no_hint_when_read_file_is_not_registered(self):
+    async def test_reference_stays_valid_when_read_file_is_not_registered(self):
+        # Image references register no reader; the notice keeps the model from
+        # asking for a re-upload when a remote tool could not fetch the url.
         external = _make_server(name="tabular")
         proxy = MCPProxySession([external])
         proxy._clients[external.id] = self._failing_client()
@@ -899,6 +901,7 @@ class TestReferenceFallbackHint:
 
         texts = [block["text"] for block in result["content"]]
         assert not any("read_file" in text for text in texts)
+        assert any("do not ask the user to re-upload" in text for text in texts)
 
     async def test_unavailable_server_result_carries_the_hint(self):
         external = _make_server(name="tabular")

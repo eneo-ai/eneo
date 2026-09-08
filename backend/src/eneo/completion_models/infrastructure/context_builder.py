@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 
 def _replayable_tool_calls(
     tool_calls: Optional[list[ToolCallInfo]],
+    file_reference_urls: Optional[dict[UUID, str]] = None,
 ) -> list[MessageToolCall]:
     """Filter persisted tool calls down to those that can be replayed to the LLM.
 
@@ -52,6 +53,11 @@ def _replayable_tool_calls(
     The emitted `tool_name` is the prefixed MCP identifier (what the LLM sees
     on the current turn's tool registration) — we prefer `mcp_tool_name` and
     fall back to the split `tool_name` for legacy rows that predate this field.
+
+    Images the call generated are named in `result` only by placeholder. When
+    a fresh reference URL exists for one, it is appended here (never
+    persisted: the URL is short-lived), so the model can hand the image back
+    to an image tool on a later turn.
     """
     if not tool_calls:
         return []
@@ -66,10 +72,31 @@ def _replayable_tool_calls(
                 tool_call_id=tc.tool_call_id,
                 tool_name=tc.mcp_tool_name or tc.tool_name,
                 arguments=tc.arguments,
-                result=tc.result,
+                result=_with_generated_image_references(tc, file_reference_urls),
             )
         )
     return replayable
+
+
+def _with_generated_image_references(
+    tc: ToolCallInfo, file_reference_urls: Optional[dict[UUID, str]]
+) -> str:
+    """The persisted result plus one reference line per generated image.
+
+    Numbering follows the "[Image N ...]" placeholders the result already
+    carries, in the order the files were persisted for this call.
+    """
+    result = tc.result or ""
+    if not tc.generated_file_ids or not file_reference_urls:
+        return result
+    lines = [
+        f"Reference url for Image {index}: {file_reference_urls[file_id]}"
+        for index, file_id in enumerate(tc.generated_file_ids, start=1)
+        if file_id in file_reference_urls
+    ]
+    if not lines:
+        return result
+    return "\n".join([result, *lines]) if result else "\n".join(lines)
 
 
 def _image_files_tokens(images: list[File], model_name: str) -> int:
@@ -164,6 +191,7 @@ def build_file_references_string(
     entries = [
         json.dumps(
             {
+                "kind": "image" if file.file_type == FileType.IMAGE else "document",
                 "filename": file.name,
                 "mimetype": file.mimetype,
                 "size_bytes": file.size,
@@ -178,13 +206,14 @@ def build_file_references_string(
 
     references = "\n".join(entries)
     # Mechanics only: the behavioral rules (never judge readability from the
-    # url, never ask for re-upload, read_file as fallback) live in
-    # ATTACHED_FILE_REFERENCES_INSTRUCTION, stated once in the system prompt.
-    # This block repeats per message with referenced files, history included.
+    # url, never ask for re-upload, read_file as fallback, images go to image
+    # tools) live in ATTACHED_FILE_REFERENCES_INSTRUCTION, stated once in the
+    # system prompt. This block repeats per message with referenced files,
+    # history included.
     return (
-        "The user attached these files to the conversation (one JSON entry "
-        'per file). Their raw bytes are NOT in this prompt; each "url" is a '
-        "signed attachment reference for tools that accept a URL input.\n\n"
+        "Files in this message (one JSON entry per file). Their raw bytes are "
+        'NOT in this prompt; each "url" is a signed file reference for tools '
+        "that accept a URL input.\n\n"
         f"{references}"
     )
 
@@ -469,13 +498,15 @@ class ContextBuilder:
             files = []
         if transcription_inputs is None:
             transcription_inputs = []
+        # Only TEXT files inline; images ride as vision parts but still get a
+        # reference entry below so an image tool can take them as input.
         # When the assistant has inlining disabled, files whose original is
         # reachable via a signed URL are represented by that URL only (skips the
         # extracted text — e.g. a large CSV that would blow the context window).
         # Files without a URL are always inlined so the model still sees them.
-        text_files = files
+        text_files = self._get_files_by_type(files, FileType.TEXT)
         if not inline_file_text and file_reference_urls:
-            text_files = [f for f in files if f.id not in file_reference_urls]
+            text_files = [f for f in text_files if f.id not in file_reference_urls]
         if text_files:
             files_string = build_files_string(text_files, model_name=model_name)
             input_str = f"{files_string}\n\n{input_str}"
@@ -525,7 +556,7 @@ class ContextBuilder:
             # text re-inlined on follow-ups.
             question = self._build_input(
                 message.question,
-                self._get_files_by_type(message.files, FileType.TEXT),
+                message.files,
                 model_name=model_name,
                 file_reference_urls=file_reference_urls,
                 inline_file_text=inline_file_text,
@@ -546,7 +577,7 @@ class ContextBuilder:
             else:
                 images = []
                 generated_images = []
-            tool_calls = _replayable_tool_calls(message.tool_calls)
+            tool_calls = _replayable_tool_calls(message.tool_calls, file_reference_urls)
 
             message_tokens = _turn_tokens(
                 question=question,
@@ -611,7 +642,7 @@ class ContextBuilder:
         # is counted in exactly that shape.
         _input_string = self._build_input(
             input_str=input_str,
-            files=self._get_files_by_type(files, FileType.TEXT),
+            files=files,
             transcription_inputs=transcription_inputs,
             model_name=model_name,
             file_reference_urls=file_reference_urls,

@@ -83,9 +83,13 @@ const INTERNAL_SERVERS: Record<
   image_generation: {
     label: () => m.image_generation(),
     tools: {
+      // One tool covers both: a call carrying reference images is an edit or
+      // variation of those images, which reads differently to the user.
       generate_image: {
-        running: () => m.tool_generate_image(),
-        done: () => m.tool_generate_image_done()
+        running: (args) =>
+          hasReferenceImages(args) ? m.tool_edit_image() : m.tool_generate_image(),
+        done: (args) =>
+          hasReferenceImages(args) ? m.tool_edit_image_done() : m.tool_generate_image_done()
       }
     },
     catalog: {
@@ -152,8 +156,8 @@ export function serverDisplayName(serverName: string): string {
   return INTERNAL_SERVERS[serverName]?.label() ?? serverName;
 }
 
-/** Path of a signed attachment download URL, mirroring the backend's parser. */
-const FILE_DOWNLOAD_PATH = /\/api\/v1\/files\/([0-9a-fA-F-]{36})\/download\/?$/;
+/** Path of a signed file reference URL, mirroring the backend's parser. */
+const FILE_DOWNLOAD_PATH = /\/api\/v1\/files\/([0-9a-fA-F-]{36})\/original\/download\/?$/;
 
 /**
  * File id referenced by a read_file call on Eneo's internal files server, or
@@ -173,6 +177,12 @@ export function internalReadFileId(
   } catch {
     return null;
   }
+}
+
+/** Whether a generate_image call edits reference images rather than starting from text. */
+function hasReferenceImages(args?: ToolArgs): boolean {
+  const references = args?.reference_images;
+  return Array.isArray(references) && references.length > 0;
 }
 
 /** Longest query shown inline in a tool label before being cut with an ellipsis. */

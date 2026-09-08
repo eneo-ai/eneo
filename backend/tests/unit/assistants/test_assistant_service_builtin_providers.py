@@ -1,4 +1,5 @@
-"""Built-in capability providers reach the proxy with a per-completion token."""
+"""Built-in capability providers reach the proxy with a per-completion token and
+the loopback server's live tool definitions."""
 
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -32,12 +33,12 @@ def _builtin_provider() -> MCPServer:
     )
 
 
-def test_builtin_provider_is_authenticated_with_a_token_naming_its_row():
+async def test_builtin_provider_is_authenticated_with_a_token_naming_its_row():
     service = _service()
     server = _builtin_provider()
     assistant_id = uuid4()
 
-    authenticated = service._with_builtin_provider_token(
+    authenticated = await service._with_builtin_provider_token(
         server, assistant_id=assistant_id
     )
 
@@ -49,21 +50,40 @@ def test_builtin_provider_is_authenticated_with_a_token_naming_its_row():
     )
 
 
-def test_persisted_builtin_provider_entity_never_carries_the_token():
+async def test_persisted_builtin_provider_entity_never_carries_the_token():
     service = _service()
     server = _builtin_provider()
 
-    authenticated = service._with_builtin_provider_token(server, assistant_id=uuid4())
+    authenticated = await service._with_builtin_provider_token(
+        server, assistant_id=uuid4()
+    )
 
     assert authenticated is not server
     assert server.http_auth_config_schema is None
 
 
-def test_external_provider_passes_through_unchanged():
+async def test_external_provider_passes_through_unchanged():
     service = _service()
     server = _provider(
         http_auth_type="bearer", http_auth_config_schema={"token": "encrypted"}
     )
 
-    assert service._with_builtin_provider_token(server, assistant_id=uuid4()) is server
+    assert (
+        await service._with_builtin_provider_token(server, assistant_id=uuid4())
+        is server
+    )
     service.auth_service.create_scoped_mcp_token.assert_not_called()
+
+
+async def test_builtin_provider_carries_live_tool_definitions():
+    service = _service()
+    server = _builtin_provider()
+
+    authenticated = await service._with_builtin_provider_token(
+        server, assistant_id=uuid4()
+    )
+
+    assert [tool.name for tool in authenticated.tools] == ["generate_image"]
+    assert "reference_images" in authenticated.tools[0].input_schema["properties"]
+    # The persisted entity keeps its snapshot; only the per-completion copy is live.
+    assert server.tools == []

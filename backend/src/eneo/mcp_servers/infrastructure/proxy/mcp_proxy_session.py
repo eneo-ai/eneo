@@ -48,6 +48,18 @@ _settings = get_settings()
 MCP_IMAGE_MIME_TYPES: frozenset[str] = frozenset(
     {"image/png", "image/jpeg", "image/webp", "image/gif"}
 )
+# Appended to a failed tool call that carried a reference url when no built-in
+# reader is registered (image references). The url is the file, so a re-upload
+# or a "public link" changes nothing; the honest outcome is that the tool's host
+# cannot reach this deployment.
+REFERENCE_URL_VALID_NOTICE = (
+    "The url passed is a valid signed reference to the file; uploading the "
+    "file again would yield the same kind of url, so do not ask the user to "
+    "re-upload it or to provide another link. If the tool could not fetch the "
+    "url, the tool runs somewhere that cannot reach this deployment's file "
+    "references: tell the user that the tool cannot access the file from where "
+    "it runs."
+)
 MCP_IDENTITY_CATALOG_PREPARATION_TIMEOUT_SECONDS = float(
     _settings.mcp_client_connect_timeout_seconds
     + _settings.mcp_client_list_tools_timeout_seconds
@@ -853,13 +865,15 @@ class MCPProxySession:
     def _reference_fallback_hint(
         self, failing_tool_name: str, arguments: dict[str, Any]
     ) -> str:
-        """Pointer to the built-in reader for a failed reference-URL call.
+        """Guidance appended to a failed tool call that carried a reference URL.
 
         Keys on the argument shape (a signed attachment reference URL), not on
-        which server failed: any tool call that carried a reference url can be
-        retried against the loopback read_file, which registers exactly when
-        reference entries render in the prompt. Empty when no argument is a
-        reference, read_file is not registered, or read_file itself failed.
+        which server failed. Points at the loopback read_file when it is
+        registered (it registers exactly when text references render in the
+        prompt); otherwise, e.g. for image references, states that the url is
+        valid so the model neither asks for a re-upload nor blames the file
+        when a remote tool could not fetch it. Empty when no argument is a
+        reference or read_file itself failed.
         """
         if not any(
             isinstance(value, str) and looks_like_reference_url(value)
@@ -868,7 +882,7 @@ class MCPProxySession:
             return ""
         entry = self._files_read_file_entry()
         if entry is None:
-            return ""
+            return REFERENCE_URL_VALID_NOTICE
         prefixed_name, title = entry
         if prefixed_name == failing_tool_name:
             return ""
