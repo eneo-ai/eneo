@@ -344,7 +344,8 @@ async def generate_image(
     references (images the user attached, or images generated earlier in the
     conversation). Then the prompt describes the change or the variation
     wanted, and the result is based on those images. Never construct or
-    modify the urls.
+    modify the urls, and leave ``reference_images`` out entirely when the
+    conversation lists no image reference entry.
     """
     server_id = mcp_server_id_from_token(bearer_from_ctx(ctx))
     async with internal_tool_context(ctx) as tool_ctx:
