@@ -4,6 +4,10 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderBadRequestException,
+    AIBuilderErrorCode,
+)
 from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
     FlowInputFieldProvenance,
 )
@@ -45,7 +49,6 @@ from eneo.flows.flow_authoring_spec import (
     StepSpec,
     strip_inapplicable_completion_model,
 )
-from eneo.main.exceptions import BadRequestException
 
 
 class MaterializedAddStep(BaseModel):
@@ -239,9 +242,10 @@ def apply_existing_step_patch(
 
     if "name" in fields:
         if patch.name is None or not patch.name.strip():
-            raise BadRequestException(
+            raise AIBuilderBadRequestException(
                 f"Step {patch.existing_step_ref}: name cannot be cleared; omit "
-                "name to keep the current one."
+                "name to keep the current one.",
+                code=AIBuilderErrorCode.BAD_REQUEST,
             )
         updates["name"] = patch.name.strip()
     for field_name in (
@@ -257,9 +261,10 @@ def apply_existing_step_patch(
         updates["review_policy"] = compile_review_policy(patch.review_mode)
     if "assistant_spec" in fields:
         if patch.assistant_spec is None:
-            raise BadRequestException(
+            raise AIBuilderBadRequestException(
                 f"Step {patch.existing_step_ref}: assistant_spec cannot be "
-                "cleared; omit it to keep the current one."
+                "cleared; omit it to keep the current one.",
+                code=AIBuilderErrorCode.BAD_REQUEST,
             )
         updates["assistant_spec"] = merge_assistant_spec_patch(
             existing.assistant_spec,
@@ -377,9 +382,10 @@ def merge_assistant_spec_patch(
     instructions = existing.instructions
     if "instructions" in patched_fields:
         if patch.instructions is None or not patch.instructions.strip():
-            raise BadRequestException(
+            raise AIBuilderBadRequestException(
                 "assistant_spec.instructions cannot be cleared; omit it to keep "
-                "the current instructions."
+                "the current instructions.",
+                code=AIBuilderErrorCode.BAD_REQUEST,
             )
         instructions = patch.instructions.strip()
 
