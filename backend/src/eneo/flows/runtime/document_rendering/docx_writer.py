@@ -39,6 +39,8 @@ def word_element(tag: str) -> Element:
 
     A document contains both registered python-docx subclasses and generic
     lxml elements, including content controls. Parents must accept both.
+    With postponed annotations, Element uses types-lxml's public element alias;
+    OxmlElement remains the runtime factory that registers Word-specific types.
     """
     return OxmlElement(tag)
 
@@ -102,21 +104,6 @@ class DocxBlockWriter:
             else:
                 elements.append(self._paragraph(block))
         return elements
-
-    def write(
-        self,
-        blocks: Sequence[DocumentBlock],
-        *,
-        into: Any,
-        heading_base: int = 0,
-        section_label: str = "the document",
-    ) -> None:
-        """Append the rendered elements to ``into`` (a body or ``w:sdtContent``)."""
-
-        for element in self.elements(
-            blocks, heading_base=heading_base, section_label=section_label
-        ):
-            into.append(element)
 
     # -- block builders -------------------------------------------------------
 

@@ -45,6 +45,7 @@ from eneo.flows.flow_capability_manifest import (
     is_citation_capable_step,
 )
 from eneo.flows.flow_metadata import (
+    FlowFormFieldType,
     FlowFormSchemaParseMode,
     parse_flow_form_schema,
 )
@@ -60,7 +61,11 @@ from eneo.flows.flow_validators_http import (
 from eneo.flows.flow_validators_template import (
     validate_template_fill_output_config,
 )
-from eneo.flows.flow_variable_definitions import VariableShape, runtime_variable_shape
+from eneo.flows.flow_variable_definitions import (
+    VariableShape,
+    flow_input_key_shape,
+    runtime_variable_shape,
+)
 from eneo.flows.input_binding_contract_rules import (
     FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
     InputBindingContractError,
@@ -867,6 +872,16 @@ def _validate_supported_input_binding_keys(*, step: FlowStepValidationView) -> N
         ) from exc
 
 
+_SCALAR_FORM_FIELD_TYPES = frozenset(
+    {
+        FlowFormFieldType.TEXT,
+        FlowFormFieldType.NUMBER,
+        FlowFormFieldType.DATE,
+        FlowFormFieldType.SELECT,
+    }
+)
+
+
 def _validate_template_fill_config(
     *,
     step: FlowStepValidationView,
@@ -909,21 +924,14 @@ def _validate_template_fill_config(
                             "field": "output_config.bindings",
                             "placeholder": placeholder,
                         },
+                        error_code=None,
                     )
-                    scalar = _schema_type_hint(schema) in {
-                        "string",
-                        "number",
-                        "integer",
-                        "boolean",
-                        "null",
-                    }
+                    scalar = _schema_is_scalar(schema)
         elif reference.kind is TemplateReferenceKind.FORM_FIELD:
-            scalar = not reference.tail and form_field_types.get(reference.head) in {
-                "text",
-                "number",
-                "date",
-                "select",
-            }
+            scalar = (
+                not reference.tail
+                and form_field_types.get(reference.head) in _SCALAR_FORM_FIELD_TYPES
+            )
         elif reference.kind is TemplateReferenceKind.RUNTIME:
             if not reference.tail:
                 scalar = runtime_variable_shape(reference.head) is VariableShape.SCALAR
@@ -935,18 +943,10 @@ def _validate_template_fill_config(
                         if field_name.startswith("input.")
                         else ""
                     )
-                scalar = form_field_types.get(field_name) in {
-                    "text",
-                    "number",
-                    "date",
-                    "select",
-                } or field_name in {
-                    "text",
-                    "transcribed_text",
-                    "transcription",
-                    "transcript",
-                    "transkribering",
-                }
+                scalar = (
+                    form_field_types.get(field_name) in _SCALAR_FORM_FIELD_TYPES
+                    or flow_input_key_shape(field_name) is VariableShape.SCALAR
+                )
         if not scalar or reference.path_error_code is not None:
             raise FlowStepValidationError(
                 f"Step {step.step_order}: template binding '{placeholder}' must resolve "
@@ -954,6 +954,47 @@ def _validate_template_fill_config(
                 context={"field": "output_config.bindings", "placeholder": placeholder},
                 step_order=step.step_order,
             )
+
+
+def _schema_is_scalar(schema: FlowPersistedJsonObject) -> bool:
+    """Prove that a declared field excludes objects and arrays."""
+    scalar_types = {"string", "number", "integer", "boolean", "null"}
+    raw_type = schema.get("type")
+    if isinstance(raw_type, str) and raw_type in scalar_types:
+        return True
+    if (
+        isinstance(raw_type, list)
+        and raw_type
+        and all(
+            isinstance(item, str) and item in scalar_types
+            for item in cast(list[object], raw_type)
+        )
+    ):
+        return True
+    if "const" in schema and not isinstance(schema["const"], (dict, list)):
+        return True
+    values = schema.get("enum")
+    if (
+        isinstance(values, list)
+        and values
+        and all(
+            not isinstance(value, (dict, list)) for value in cast(list[object], values)
+        )
+    ):
+        return True
+    for keyword in ("anyOf", "oneOf"):
+        branches = schema.get(keyword)
+        if (
+            isinstance(branches, list)
+            and branches
+            and all(
+                isinstance(branch, dict)
+                and _schema_is_scalar(cast(FlowPersistedJsonObject, branch))
+                for branch in cast(list[object], branches)
+            )
+        ):
+            return True
+    return False
 
 
 def _schema_type_hint(schema: dict[str, Any]) -> str:
@@ -1435,13 +1476,14 @@ def _source_ref_schema(
     current_step_order: int,
     path_label: str,
     context: dict[str, object],
+    error_code: str | None = FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
 ) -> FlowPersistedJsonObject:
     current: FlowPersistedJsonObject = contract
     for segment in field_path:
         if _schema_type_hint(current) != "object":
             raise FlowStepValidationError(
                 f"Step {current_step_order}: {path_label} does not resolve through an object contract.",
-                code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+                code=error_code,
                 context=context,
                 step_order=current_step_order,
             )
@@ -1449,7 +1491,7 @@ def _source_ref_schema(
         if not isinstance(raw_properties, dict):
             raise FlowStepValidationError(
                 f"Step {current_step_order}: {path_label} references a contract without object properties.",
-                code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+                code=error_code,
                 context=context,
                 step_order=current_step_order,
             )
@@ -1458,7 +1500,7 @@ def _source_ref_schema(
         if not isinstance(next_schema, dict):
             raise FlowStepValidationError(
                 f"Step {current_step_order}: {path_label} references unknown field '{segment}'.",
-                code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+                code=error_code,
                 context=context,
                 step_order=current_step_order,
             )

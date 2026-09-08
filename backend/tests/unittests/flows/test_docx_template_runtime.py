@@ -19,6 +19,7 @@ from eneo.flows.runtime.docx_template_runtime import (
     extract_docx_template_text_preview,
     extract_docx_text,
     inspect_docx_template_bytes,
+    inspect_docx_template_placeholders,
     render_docx_template,
 )
 from eneo.main.exceptions import (
@@ -59,6 +60,28 @@ def _bytes(document) -> bytes:
 
 
 # --- discovery ------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("text", ["Ordinary source document", "Case: {{ case_id }}"])
+def test_empty_control_discovery_is_allowed_but_template_use_is_rejected(
+    text: str,
+) -> None:
+    document = Document()
+    document.add_paragraph(text)
+    blob = _bytes(document)
+
+    assert inspect_docx_template_placeholders(blob, filename="source.docx") == ()
+    with pytest.raises(DocxTemplateContractError, match="at least one") as info:
+        inspect_docx_template_bytes(blob, filename="template.docx")
+    assert info.value.code == "flow_template_no_controls"
+    with pytest.raises(TypedIOValidationException, match="at least one"):
+        render_docx_template(template_bytes=blob, context={}, step_order=1)
+
+
+def test_corrupt_pinned_template_has_typed_runtime_failure() -> None:
+    with pytest.raises(TypedIOValidationException) as info:
+        render_docx_template(template_bytes=b"not a docx", context={}, step_order=1)
+    assert info.value.code == "typed_io_template_render_failed"
 
 
 def test_inspect_lists_controls_with_kind_label_and_hint_in_document_order() -> None:

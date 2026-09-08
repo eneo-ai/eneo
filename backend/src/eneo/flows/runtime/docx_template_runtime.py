@@ -12,7 +12,7 @@ from __future__ import annotations
 import io
 import logging
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -99,12 +99,18 @@ def inspect_docx_template_bytes(
 ) -> list[dict[str, str | None]]:
     """List the fill targets as plain records: name, label, kind, hint, location."""
 
-    return [
-        asdict(spec)
-        for spec in inspect_docx_template_placeholders(
-            template_bytes, filename=filename
+    placeholders = inspect_docx_template_placeholders(template_bytes, filename=filename)
+    _require_fill_targets(placeholders)
+    return [asdict(spec) for spec in placeholders]
+
+
+def _require_fill_targets(controls: Sequence[object]) -> None:
+    if not controls:
+        raise DocxTemplateContractError(
+            "A DOCX template must contain at least one supported Word content control. "
+            "Replace any {{...}} placeholders with tagged content controls in Word.",
+            code="flow_template_no_controls",
         )
-    ]
 
 
 def docx_template_placeholder_names(
@@ -142,9 +148,11 @@ def render_docx_template(
         validate_docx_template_archive(template_bytes, filename=filename)
         document = Document(io.BytesIO(template_bytes))
         controls = inspect_content_controls(document)
-    except DocxTemplateContractError as exc:
+        _require_fill_targets(controls)
+    except Exception as exc:
+        normalized = normalize_template_extraction_error(exc)
         raise TypedIOValidationException(
-            f"The published DOCX template is no longer fillable: {exc}",
+            f"The published DOCX template is no longer fillable: {normalized}",
             code=FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED.value,
         ) from exc
 

@@ -1914,7 +1914,19 @@ def test_template_fill_publish_rejects_non_scalar_bindings(expression: str) -> N
         )
 
 
-def test_template_fill_publish_accepts_scalar_contract_fields_and_form_values() -> None:
+@pytest.mark.parametrize(
+    "title_schema",
+    [
+        {"type": ["string", "null"]},
+        {"enum": ["draft", "final", None]},
+        {"const": "final"},
+        {"anyOf": [{"type": "string"}, {"type": "null"}]},
+        {"oneOf": [{"type": "string"}, {"type": "number"}]},
+    ],
+)
+def test_template_fill_publish_accepts_scalar_contract_fields_and_form_values(
+    title_schema,
+) -> None:
     validate_steps(
         [
             _step(
@@ -1924,7 +1936,7 @@ def test_template_fill_publish_accepts_scalar_contract_fields_and_form_values() 
                         "details": {
                             "type": "object",
                             "properties": {
-                                "title": {"type": ["string", "null"]},
+                                "title": title_schema,
                             },
                         },
                         "count": {"type": "integer"},
@@ -1952,6 +1964,36 @@ def test_template_fill_publish_accepts_scalar_contract_fields_and_form_values() 
         metadata_json=_form_metadata("author"),
         require_complete_template_fill_config=True,
     )
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {"enum": ["text", {"title": "object"}]},
+        {"const": ["array"]},
+        {"anyOf": [{"type": "string"}, {"type": "object"}]},
+        {"oneOf": [{"type": "number"}, {}]},
+    ],
+)
+def test_template_fill_publish_rejects_schemas_that_allow_containers(schema) -> None:
+    with pytest.raises(FlowStepValidationError, match="scalar"):
+        validate_steps(
+            [
+                _step(
+                    output_contract={"type": "object", "properties": {"value": schema}}
+                ),
+                _step(
+                    step_order=2,
+                    output_type="docx",
+                    output_mode="template_fill",
+                    output_config={
+                        "template_asset_id": str(uuid4()),
+                        "bindings": {"body": "{{step_1.output.structured.value}}"},
+                    },
+                ),
+            ],
+            require_complete_template_fill_config=True,
+        )
 
 
 def test_validate_steps_rejects_inline_citation_mode_for_non_text_output() -> None:

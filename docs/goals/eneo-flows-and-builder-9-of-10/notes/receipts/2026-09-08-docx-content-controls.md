@@ -1,6 +1,6 @@
 # DOCX content controls: verification, 2026-09-08
 
-The candidate addresses the DOCX gate findings: neutral templates, preserved pre-title content, structural control inspection, aggregate inline limits, scalar bindings before publish, selected-template metadata in the final Builder prompt, and explicit list limits. A final regression also prevents silent loss of parent-item text after a nested list; that form now fails explicitly. Builder preparation remains one string per placeholder.
+The candidate addresses the DOCX gate findings: neutral templates, preserved pre-title content, structural control inspection, aggregate inline limits, scalar bindings before publish, selected-template metadata in the final Builder prompt, and explicit list limits. A final regression also prevents silent loss of parent-item text after a nested list; that form now fails explicitly. Builder preparation remains one string per placeholder. Templates with no controls are rejected at upload, publish and runtime; ordinary source attachments remain valid. Declared scalar enum, const and union fields are accepted without admitting objects or arrays.
 
 Base: `60436fd4d47cd1777646b519c947cdffad1e281e` (tidy). Original feature: `5993a56aa561c684b3d8393e9be52ff5b39fbe87`. Corrected source identity is recorded in the accompanying SHA-256 manifest; the final commit is linked from `eneo-ytn`. Machine: macOS 26.5.2 arm64, Python 3.11.14. Commands below ran from `/Users/ccimen/eneo/eneo-ai-builder-review-ui` unless another directory is given.
 
@@ -41,6 +41,8 @@ PATH=/Users/ccimen/.local/bin:/opt/homebrew/bin:$PATH \
 | Final affected `test_document_renderer.py`, `test_docx_template_runtime.py`, `test_flow_service.py` | 151 passed, 10 skipped; 7.74 s. Includes the corrected publish fixture. |
 | Actual materialized attachment publish, rich + text controls | 3 passed: valid publish pins/reloads/renders; missing and structured bindings leave zero versions; 30.51 s. |
 | Final list-continuation regression, DOCX runtime and Builder proposal prompt suites | 99 passed, 10 skipped; 1.70 s. The new unsupported-form test failed before the parser correction. |
+| Final contract corrections: renderer, DOCX runtime, template assets, Flow service, graph validators, Builder proposal prompt, template references and variable definitions | 381 passed, 10 skipped; 3.23 s. New empty-template, corrupt-template and scalar-schema cases reproduced before correction. |
+| Final `tests/integration/flows/test_flow_template_attachment_persistence.py` | 9 passed; 29.74 s. Actual publish and pinned-template rendering remain valid after the empty-template guard. |
 | Strict backend Pyright, `.venv/bin/pyright --pythonpath .venv/bin/python` | 0 errors, 0 warnings. Official `types-lxml` is a development dependency; checking remains strict. |
 | Ruff and frontend ESLint | Changed files pass; Ruff formatting and `git diff --check` pass. |
 | Frontend `bun run check` | 0 errors, 0 warnings. |
@@ -51,7 +53,7 @@ PATH=/Users/ccimen/.local/bin:/opt/homebrew/bin:$PATH \
 
 The ten remaining backend failures were rerun as exact node IDs on the clean tidy archive: **all ten reproduced**, in 35.75 s. The [node list](docx-content-controls-2026-09-08/baseline-unit-nodeids.txt) is owned by cleanup issue **eneo-wqq**. They cover remote transcription, AI Builder public error/OpenAPI contracts, audit mappings, route audit coverage and router exports. The two frontend baseline failures both concern the checkpoint panel's audio context and missing `Hej` button. These comparisons establish provenance; they do not make either full suite green.
 
-The ten Mac skips require the native WeasyPrint stack. DOCX rendering tests ran; this receipt does not claim that the native PDF tests passed on macOS.
+The ten Mac skips require the native WeasyPrint stack. DOCX rendering tests ran; this receipt does not claim that the native PDF tests passed on macOS. The built Linux image also rendered a 9,713-byte PDF through the public renderer as a smoke check; that is separate from the skipped Mac tests.
 
 ## Word and visual inspection
 

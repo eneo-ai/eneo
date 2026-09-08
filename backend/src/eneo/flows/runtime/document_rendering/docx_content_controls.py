@@ -72,15 +72,6 @@ class ContentControl:
     multiline: bool
     element: Any
 
-    def as_placeholder(self) -> dict[str, str | None]:
-        return {
-            "name": self.name,
-            "label": self.label,
-            "kind": self.kind,
-            "hint": self.hint or None,
-            "location": self.location,
-        }
-
 
 def inspect_content_controls(document: Any) -> tuple[ContentControl, ...]:
     """Return the fill targets of ``document`` in reading order.

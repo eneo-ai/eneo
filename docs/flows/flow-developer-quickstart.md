@@ -617,6 +617,11 @@ a tag, duplicate tags, nested controls, XML-mapped controls, other control
 kinds and controls in table cells, headers or footers are refused at
 inspection, before a template can be selected. Rich controls must be direct
 children of the document body; text controls must be inside body paragraphs.
+Templates must contain at least one supported control. Existing templates that
+use `{{...}}` text placeholders must be converted to tagged Word content controls
+and uploaded again before publication. Upload, publish and runtime reject a
+template with no controls; ordinary DOCX attachments can still be used as source
+documents in the Builder.
 Every control must have a binding before publication. Bindings must select text
 outputs, scalar fields in declared output contracts, scalar form fields or known
 scalar system values. Whole objects, arrays and unknown value shapes are refused

@@ -303,15 +303,25 @@ async def test_upload_asset_persists_docx_template_bytes_and_body_placeholder(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("payload", "error_code"),
+    [
+        (b"not-a-docx", "flow_template_invalid_archive"),
+        (control_template_bytes(), "flow_template_no_controls"),
+    ],
+    ids=["invalid_archive", "no_controls"],
+)
 async def test_upload_asset_rejects_invalid_docx_before_file_persistence(
     user,
+    payload: bytes,
+    error_code: str,
 ) -> None:
     flow = _flow_for_user(user)
     file_repo = AsyncMock()
     flow_repo = AsyncMock()
     flow_repo.get.return_value = flow
     template_asset_repo = AsyncMock()
-    prepared = _prepared_template(b"not-a-docx")
+    prepared = _prepared_template(payload)
     file_service = MagicMock()
     file_service.prepare_document_upload.return_value = _prepared_context(prepared)
     file_service.save_prepared_file = AsyncMock()
@@ -328,10 +338,10 @@ async def test_upload_asset_rejects_invalid_docx_before_file_persistence(
     with pytest.raises(BadRequestException) as exc_info:
         await service.upload_asset(
             flow_id=flow.id,
-            upload_file=_upload("template.docx", b"not-a-docx"),
+            upload_file=_upload("template.docx", payload),
         )
 
-    assert exc_info.value.code == "flow_template_invalid_archive"
+    assert exc_info.value.code == error_code
     file_service.save_prepared_file.assert_not_awaited()
     template_asset_repo.create.assert_not_awaited()
 

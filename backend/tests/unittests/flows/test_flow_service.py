@@ -32,6 +32,7 @@ from eneo.flows.http_transport import SECRET_SENTINEL
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.main.models import NOT_PROVIDED
 from eneo.prompts.api.prompt_models import PromptCreate
+from tests.docx_template_fixtures import control_template_bytes
 
 
 class _FakeEncryptionService:
@@ -1190,7 +1191,11 @@ async def test_update_flow_allows_incomplete_template_fill_during_draft_editing(
 
 
 @pytest.mark.asyncio
-async def test_publish_flow_rejects_empty_template_bindings(user):
+@pytest.mark.parametrize(
+    ("targets", "message"),
+    [(["section"], "missing bindings"), ([], "at least one")],
+)
+async def test_publish_flow_rejects_incomplete_template(user, targets, message):
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
     service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
@@ -1230,13 +1235,12 @@ async def test_publish_flow_rejects_empty_template_bindings(user):
         flow_id=flow_id,
         file_id=template_file_id,
         asset_id=template_asset_id,
-    )
-    service._inspect_docx_template = MagicMock(  # type: ignore[attr-defined]
-        return_value=[{"name": "section", "location": "body", "preview": "{{section}}"}]
+        blob=control_template_bytes(rich=targets),
     )
 
-    with pytest.raises(BadRequestException, match="missing bindings"):
+    with pytest.raises(BadRequestException, match=message):
         await service.publish_flow(flow_id=flow_id)
+    version_repo.create.assert_not_awaited()
 
 
 @pytest.mark.asyncio

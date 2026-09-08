@@ -54,18 +54,17 @@ FORM_FIELD_NAMESPACE_HEADS: frozenset[str] = frozenset(
 FORM_FIELD_NAMESPACE_HEADS_NORMALIZED: frozenset[str] = frozenset(
     name.casefold() for name in FORM_FIELD_NAMESPACE_HEADS
 )
-PRIMARY_FLOW_INPUT_KEYS: frozenset[str] = frozenset(
-    {
-        "file_ids",
-        "json",
-        "structured",
-        "text",
-        "transcribed_text",
-        "transcription",
-        "transcript",
-        FLOW_INPUT_TRANSCRIPTION_KEY,
-    }
-)
+FLOW_INPUT_KEY_SHAPES: dict[str, VariableShape] = {
+    "file_ids": VariableShape.SEQUENCE,
+    "json": VariableShape.MAPPING,
+    "structured": VariableShape.MAPPING,
+    "text": VariableShape.SCALAR,
+    "transcribed_text": VariableShape.SCALAR,
+    "transcription": VariableShape.SCALAR,
+    "transcript": VariableShape.SCALAR,
+    FLOW_INPUT_TRANSCRIPTION_KEY: VariableShape.SCALAR,
+}
+PRIMARY_FLOW_INPUT_KEYS: frozenset[str] = frozenset(FLOW_INPUT_KEY_SHAPES)
 RESERVED_FORM_FIELD_INPUT_KEYS: frozenset[str] = (
     PRIMARY_FLOW_INPUT_KEYS | FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS
 )
@@ -100,6 +99,10 @@ def runtime_variable_shape(root: str) -> VariableShape | None:
 
 def step_input_key_shape(key: str) -> VariableShape | None:
     return STEP_INPUT_KEY_SHAPES.get(key)
+
+
+def flow_input_key_shape(key: str) -> VariableShape | None:
+    return FLOW_INPUT_KEY_SHAPES.get(key)
 
 
 def is_reserved_runtime_variable(name: str) -> bool:
