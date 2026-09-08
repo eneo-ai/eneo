@@ -139,6 +139,53 @@ test("older history has a loading state and retries without losing the current r
   await expect.element(page.getByRole("button", { name: label })).not.toBeInTheDocument();
 });
 
+test.each([terminal, null])(
+  "a pending poll preserves the last older history page (%#)",
+  async (latest) => {
+    let resolveLatest: (run: CrawlRun | null) => void = () => {};
+    latestRun.mockImplementationOnce(
+      () =>
+        new Promise<CrawlRun | null>((resolve) => {
+          resolveLatest = resolve;
+        })
+    );
+    listRuns.mockResolvedValue({
+      ...emptyPage,
+      total_count: 2,
+      items: [{ ...terminal, id: "older", outcome: "empty" }]
+    });
+    render(WebsiteDetailPage, {
+      data: {
+        ...data,
+        crawlRuns: [running],
+        nextCrawlRunCursor: "older-page",
+        totalCrawlRunCount: 2
+      } as never
+    });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(latestRun).toHaveBeenCalledOnce();
+
+    const label = m.website_crawl_history_load_more({ current: 1, total: 2 });
+    await page.getByRole("button", { name: label }).click();
+    await expect
+      .element(page.getByText(m.crawl_status_empty(), { exact: true }).first())
+      .toBeVisible();
+    await expect.element(page.getByRole("button", { name: label })).not.toBeInTheDocument();
+
+    resolveLatest(latest);
+    await vi.advanceTimersByTimeAsync(0);
+    if (latest) {
+      await expect
+        .element(page.getByText(m.crawl_status_succeeded(), { exact: true }))
+        .toBeVisible();
+    }
+    await expect
+      .element(page.getByText(m.crawl_status_empty(), { exact: true }).first())
+      .toBeVisible();
+    expect(listRuns).toHaveBeenCalledOnce();
+  }
+);
+
 test("an idle mounted page discovers and displays a scheduled crawl, then refreshes its results", async () => {
   render(WebsiteDetailPage, { data: data as never });
   await vi.advanceTimersByTimeAsync(10_000);

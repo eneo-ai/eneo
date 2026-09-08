@@ -63,7 +63,9 @@
       try {
         const result = await pollWebsiteDetail(eneo, data.website, crawlRuns);
         if (!mounted || websiteId !== data.website.id || pageCrawlRuns !== data.crawlRuns) return;
-        crawlRuns = result.crawlRuns;
+        if (result.latestRun) {
+          crawlRuns = mergeLatestCrawlRun(crawlRuns, result.latestRun);
+        }
         // Status is independent of content availability. Retry an unsuccessful
         // content refresh on the next poll without reverting the terminal state.
         if (
