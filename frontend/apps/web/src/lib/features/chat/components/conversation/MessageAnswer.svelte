@@ -408,7 +408,7 @@
                   </span>
                 {/if}
               </div>
-              <span class="text-muted text-xs">{toolCall.server_name}</span>
+              <span class="text-muted text-xs">{serverDisplayName(toolCall.server_name)}</span>
             </div>
 
             <!-- Expand indicator -->

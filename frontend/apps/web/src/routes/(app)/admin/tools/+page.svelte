@@ -279,7 +279,7 @@
                   {#if expanded}
                     <div id={"source-tools-" + source.mcp_server_id} class="mt-4 ml-9">
                       {#if source.http_auth_type === "internal"}
-                        <ProviderToolsSummary tools={source.tools ?? []} />
+                        <ProviderToolsSummary tools={source.tools ?? []} server={source} />
                       {:else}
                         <MCPToolsPanel
                           mcpServerId={source.mcp_server_id}
