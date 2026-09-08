@@ -426,7 +426,10 @@ def _terminal_output_policies(
     if terminal_output == "structured_json":
         return (
             "Use the requested schema or fields as the output contract.",
-            "Use null or unspecified placeholders for missing source values; do not add extra keys unless requested.",
+            "Follow the user's requested representation for missing source values. "
+            "When the user specifies a text fallback, keep those string fields non-nullable "
+            "and use that fallback in the step instructions. Otherwise, follow the "
+            "requested schema's nullability. Do not add extra keys unless requested.",
         )
     if terminal_output in {
         "pdf_document",

@@ -915,7 +915,10 @@ def test_plan_proposal_prompt_renders_machine_readable_result_contract() -> None
     assert "Result contract:" in prompt
     assert "- terminal_output: structured_json" in prompt
     assert "Use the requested schema or fields as the output contract" in prompt
-    assert "Use null or unspecified placeholders for missing source values" in prompt
+    assert (
+        "Follow the user's requested representation for missing source values" in prompt
+    )
+    assert "text fallback, keep those string fields non-nullable" in prompt
     assert "Brief summary" not in prompt
 
 
