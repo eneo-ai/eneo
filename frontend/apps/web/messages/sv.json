@@ -1077,6 +1077,8 @@
   "tool_read_file_done": "Läste bifogad fil",
   "tool_generate_image": "Genererar bild",
   "tool_generate_image_done": "Genererade bild",
+  "tool_generate_image_title": "Generera bild",
+  "tool_generate_image_description": "Genererar en bild utifrån en textbeskrivning.",
   "tool_edit_image": "Redigerar bild",
   "tool_edit_image_done": "Redigerade bild",
   "internal_files_server": "Bilagor",

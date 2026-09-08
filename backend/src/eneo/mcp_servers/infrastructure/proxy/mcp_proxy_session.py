@@ -68,6 +68,21 @@ _CIRCUIT_BREAKER_STATE: dict[UUID, dict[str, float | int]] = {}
 _CIRCUIT_BREAKER_LOCK = asyncio.Lock()
 
 
+def _trace_server_name(server: MCPServer) -> str:
+    """Server name a tool call is reported under to clients.
+
+    A built-in provider is an admin-named row whose endpoint is one of Eneo's
+    loopback servers, mounted under its purpose (see
+    ``MCPServerService.builtin_provider_url``). Its tools are Eneo's own, so
+    they are reported under the loopback server's name like the knowledge and
+    files servers are; that lets the chat label them in the UI language
+    instead of showing the server-side English title under the row's name.
+    """
+    if is_builtin_provider(server.http_auth_type) and server.purpose:
+        return server.purpose
+    return server.name
+
+
 def _tool_call_timeout_for(server: MCPServer) -> int | None:
     """Per-server tool-call budget; ``None`` keeps the client default.
 
@@ -755,7 +770,7 @@ class MCPProxySession:
         if prefixed_tool_name not in self._tool_registry:
             return None
         server, original_tool_name, title = self._tool_registry[prefixed_tool_name]
-        return (server.name, original_tool_name, title)
+        return (_trace_server_name(server), original_tool_name, title)
 
     def _capture_owner_task(self) -> None:
         """Bind this proxy session to the current asyncio.Task on first connect.

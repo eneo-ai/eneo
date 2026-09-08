@@ -1080,6 +1080,8 @@
   "tool_read_file_done": "Read attached file",
   "tool_generate_image": "Generating image",
   "tool_generate_image_done": "Generated image",
+  "tool_generate_image_title": "Generate image",
+  "tool_generate_image_description": "Generate an image from a text description.",
   "tool_edit_image": "Editing image",
   "tool_edit_image_done": "Edited image",
   "internal_files_server": "Attachments",
