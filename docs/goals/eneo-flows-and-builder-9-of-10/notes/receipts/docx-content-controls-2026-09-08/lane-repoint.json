@@ -1,0 +1,83 @@
+{
+  "source_commit": "2c23f4a2545dd79f39ddca1025c86d3b242da836",
+  "image_id": "sha256:42b57157064dfd6cefd38119c6429f37d37a9fca1510674095045d7bd984cf51",
+  "containers": [
+    {
+      "name": "eneo-ai-builder-simplify-api",
+      "id": "1ec8da5431d4fac5a47e060b99c3655ba8eb993b419678c0d9414798db1987f6",
+      "running": true,
+      "exit_code": 0,
+      "image_id": "sha256:42b57157064dfd6cefd38119c6429f37d37a9fca1510674095045d7bd984cf51",
+      "source_commit": "2c23f4a2545dd79f39ddca1025c86d3b242da836",
+      "mount_targets": [
+        "/runtime-src",
+        "/captures"
+      ]
+    },
+    {
+      "name": "eneo-ai-builder-simplify-worker",
+      "id": "e0176dfefacc0a6196dc8c9396b7293a6809fe1dcac80681ec9fe378a733f7eb",
+      "running": true,
+      "exit_code": 0,
+      "image_id": "sha256:42b57157064dfd6cefd38119c6429f37d37a9fca1510674095045d7bd984cf51",
+      "source_commit": "2c23f4a2545dd79f39ddca1025c86d3b242da836",
+      "mount_targets": [
+        "/runtime-src",
+        "/captures"
+      ]
+    },
+    {
+      "name": "eneo-ai-builder-simplify-execution",
+      "id": "88a6b40f198c45ef2e5c7cad2ff58195f1d68fced94524ca455088c5027ede15",
+      "running": true,
+      "exit_code": 0,
+      "image_id": "sha256:42b57157064dfd6cefd38119c6429f37d37a9fca1510674095045d7bd984cf51",
+      "source_commit": "2c23f4a2545dd79f39ddca1025c86d3b242da836",
+      "mount_targets": [
+        "/runtime-src",
+        "/captures"
+      ]
+    },
+    {
+      "name": "eneo-ai-builder-simplify-maintenance",
+      "id": "00a1c44c5653379932af9c2ceb4ace4c85448cf2b4638513ea85a95ba6a7fe95",
+      "running": true,
+      "exit_code": 0,
+      "image_id": "sha256:42b57157064dfd6cefd38119c6429f37d37a9fca1510674095045d7bd984cf51",
+      "source_commit": "2c23f4a2545dd79f39ddca1025c86d3b242da836",
+      "mount_targets": [
+        "/runtime-src",
+        "/captures"
+      ]
+    }
+  ],
+  "backup_container_names": [
+    "eneo-ai-builder-simplify-api-before-docx-2c23f4a2545d",
+    "eneo-ai-builder-simplify-worker-before-docx-2c23f4a2545d",
+    "eneo-ai-builder-simplify-execution-before-docx-2c23f4a2545d",
+    "eneo-ai-builder-simplify-maintenance-before-docx-2c23f4a2545d"
+  ],
+  "health": {
+    "status_code": 200,
+    "body": {
+      "detail": {
+        "status": "HEALTHY",
+        "timestamp": "2026-09-08T16:17:45.629313+00:00",
+        "backend": {
+          "status": "HEALTHY",
+          "last_heartbeat": "2026-09-08T16:17:45.629304+00:00",
+          "details": "Backend API server operational"
+        },
+        "worker": {
+          "status": "HEALTHY",
+          "last_heartbeat": "2026-09-08T16:17:45.625466+00:00",
+          "details": "Sep-08 16:17:27 j_complete=5 j_failed=2 j_retried=0 j_ongoing=0 queued=0"
+        },
+        "object_content": {
+          "status": "NOT_CONFIGURED",
+          "code": "object_store_not_configured"
+        }
+      }
+    }
+  }
+}
