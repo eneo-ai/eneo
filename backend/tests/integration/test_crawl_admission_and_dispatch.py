@@ -42,6 +42,7 @@ from eneo.database.tables.users_table import Users
 from eneo.database.tables.websites_table import CrawlAttempts, CrawlRunFailures
 from eneo.database.tables.websites_table import CrawlRuns as CrawlRunsTable
 from eneo.database.tables.websites_table import Websites as WebsitesTable
+from eneo.files.text import ExtractionLimitError
 from eneo.jobs.job_models import Task
 from eneo.jobs.job_repo import JobRepository
 from eneo.jobs.job_service import JobService
@@ -2218,6 +2219,75 @@ async def test_published_files_are_not_reduced_by_unrelated_download_failures(
         assert persisted.consecutive_failures == 0
         assert persisted.next_retry_at is None
         assert persisted.last_crawled_at is not None
+
+
+async def test_extraction_limit_records_file_failure_and_continues_crawl(
+    db_session,
+    admin_user,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    async with db_session() as session:
+        website = await _persist_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            label="Bounded document extraction",
+        )
+        run = await _admit(session, website=website, user=admin_user)
+        attempt = await session.scalar(
+            sa.select(CrawlAttempts).where(CrawlAttempts.crawl_run_id == run.id)
+        )
+        assert attempt is not None
+        task = CrawlTask.model_validate(attempt.dispatch_payload)
+        dispatch_id = attempt.dispatch_id
+        run_id = cast(UUID, run.id)
+
+    first_path, second_path = tmp_path / "oversized.pdf", tmp_path / "useful.pdf"
+    useful_url = f"{website.url}/{second_path.name}"
+    monkeypatch.setattr(
+        crawl_tasks_module,
+        "persist_batch",
+        AsyncMock(return_value=(1, 0, [useful_url], {})),
+    )
+    container = Container(session=providers.Object(SessionProxy()))
+    container.crawler.override(
+        providers.Object(_UsefulFilePartialCrawlEngine((first_path, second_path)))
+    )
+    container.text_extractor.override(
+        providers.Object(
+            SimpleNamespace(
+                extract_bounded=AsyncMock(
+                    side_effect=[
+                        ExtractionLimitError(
+                            first_path.name, "document resource limit"
+                        ),
+                        "Useful document content",
+                    ]
+                )
+            )
+        )
+    )
+
+    result = await crawl_task(job_id=dispatch_id, params=task, container=container)
+
+    assert result["status"] == CrawlOutcome.PARTIAL.value
+    async with db_session() as session:
+        finished = await CrawlRunRepository(session).one(run_id)
+        assert finished.files_downloaded == 1
+        assert finished.files_failed == 2
+        failures = (
+            await session.scalars(
+                sa.select(CrawlRunFailures).where(
+                    CrawlRunFailures.crawl_run_id == run_id
+                )
+            )
+        ).all()
+        assert any(
+            failure.url == f"{website.url}/{first_path.name}"
+            and failure.reason == "processing_failed"
+            for failure in failures
+        )
 
 
 async def test_worker_closes_crawl_stream_when_file_processing_aborts(

@@ -999,7 +999,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                             "website_id": str(params.website_id),
                             "tenant_id": str(crawl_context.tenant_id),
                             "file_url": event.url,
-                            "filename": filename,
+                            "document_name": filename,
                         },
                     )
                 finally:

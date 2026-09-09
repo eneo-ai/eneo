@@ -201,27 +201,16 @@ class Worker:
         self.after_job_end = self._after_job_end
 
     async def _after_job_end(self, ctx: ARQContext) -> None:
-        """ARQ hook: Called after each job ends AND result is recorded.
-
-        This is the final hook in the job lifecycle. The job's actual status
-        should already be set by the task itself (complete/failed), so we just
-        log for observability. Could be extended to sync with external systems.
-
-        Args:
-            ctx: ARQ context containing job_id, result, and any exception
-        """
+        """Log completion; ARQ does not provide the job result in this context."""
         job_id = _job_id_from_ctx(ctx)
         if not job_id:
             return
 
-        # Log job completion for observability
-        result = ctx.get("result")
         logger.debug(
             "Job ended (ARQ hook)",
             extra={
                 "job_id": str(job_id),
                 "job_try": ctx.get("job_try", 1),
-                "success": not isinstance(result, Exception),
             },
         )
 
