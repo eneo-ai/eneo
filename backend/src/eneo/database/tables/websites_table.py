@@ -117,6 +117,13 @@ class CrawlRuns(BasePublic):
         ),
         Index("ix_crawl_runs_tenant_phase", "tenant_id", "phase"),
         Index(
+            "ix_crawl_runs_tenant_active_created",
+            "tenant_id",
+            "created_at",
+            "id",
+            postgresql_where=text("phase <> 'terminal'"),
+        ),
+        Index(
             "ix_crawl_runs_tenant_finished",
             "tenant_id",
             "finished_at",

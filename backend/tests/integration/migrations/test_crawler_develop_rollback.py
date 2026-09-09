@@ -20,7 +20,7 @@ from tests.integration.migrations.test_crawl_lifecycle_round_trip import (
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 _DEVELOP_HEAD = "202609071000"
-_CRAWLER_HEAD = "202609091600"
+_CRAWLER_HEAD = "202609091830"
 # The qualifier keeps the other side of both merge revisions at develop's head.
 _CRAWLER_ROLLBACK = "202608311430@202608121500"
 
@@ -514,11 +514,25 @@ def test_used_crawler_database_returns_to_develop_and_can_upgrade_again(
         assert cursor.fetchone() == ("https://example.test/download?id=1",)
 
 
-def test_tenant_crawl_history_index_round_trip(
+@pytest.mark.parametrize(
+    ("previous_revision", "index_name", "columns"),
+    [
+        ("202609091300", "ix_crawl_runs_tenant_finished", "tenant_id, finished_at, id"),
+        (
+            "202609091600",
+            "ix_crawl_runs_tenant_active_created",
+            "tenant_id, created_at, id",
+        ),
+    ],
+)
+def test_tenant_crawl_overview_index_round_trip(
     rollback_database: RollbackDatabase,
+    previous_revision: str,
+    index_name: str,
+    columns: str,
 ) -> None:
     database = rollback_database
-    command.upgrade(database.config, "202609091300")
+    command.upgrade(database.config, previous_revision)
     run_id = uuid4()
     with psycopg2.connect(database.url) as connection, connection.cursor() as cursor:
         tenant_id, _, website_id = _insert_crawl_owner(
@@ -532,18 +546,21 @@ def test_tenant_crawl_history_index_round_trip(
     command.upgrade(database.config, _CRAWLER_HEAD)
     with psycopg2.connect(database.url) as connection, connection.cursor() as cursor:
         cursor.execute(
-            "SELECT indexdef FROM pg_indexes WHERE indexname = 'ix_crawl_runs_tenant_finished'"
+            "SELECT indexdef FROM pg_indexes WHERE indexname = %s", (index_name,)
         )
-        definition = cursor.fetchone()[0]
-        assert "(tenant_id, finished_at, id)" in definition
+        row = cursor.fetchone()
+        assert row is not None
+        definition = row[0]
+        assert f"({columns})" in definition
         assert "terminal" in definition
         cursor.execute(
-            "SELECT indisvalid FROM pg_index WHERE indexrelid = 'ix_crawl_runs_tenant_finished'::regclass"
+            "SELECT indisvalid FROM pg_index WHERE indexrelid = %s::regclass",
+            (index_name,),
         )
         assert cursor.fetchone() == (True,)
-    command.downgrade(database.config, "202609091300")
+    command.downgrade(database.config, previous_revision)
     with psycopg2.connect(database.url) as connection, connection.cursor() as cursor:
-        cursor.execute("SELECT to_regclass('ix_crawl_runs_tenant_finished')")
+        cursor.execute("SELECT to_regclass(%s)", (index_name,))
         assert cursor.fetchone() == (None,)
         cursor.execute("SELECT outcome FROM crawl_runs WHERE id = %s", (run_id,))
         assert cursor.fetchone() == ("succeeded",)

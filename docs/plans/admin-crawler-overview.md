@@ -30,7 +30,7 @@ Tabellen har en rad per körning:
 
 | Information | Visning |
 | --- | --- |
-| Webbplats | Namn och adress. En tydlig knapp på namnet öppnar körningsdetaljer. |
+| Webbplats | Namn och adress. Om namn saknas används adressen som etikett. Knappen öppnar körningsdetaljer. |
 | Yta | Ytans namn så att samma webbplats i olika ytor går att skilja åt. |
 | Status | Befintliga översatta statusetiketter. Köad, pågår, slutförs och stoppas går att skilja åt. |
 | Resultat | Antal indexerade sidor och filer samt misslyckade resurser när sådana finns. Okända räknare visas som okända. |
@@ -96,11 +96,13 @@ innehåller underlaget. Jobblistan är användarspecifik och den befintliga
 hälsosammanfattningen gäller hela installationen; ingen av dem kan användas
 direkt som tenantöversikt. Nya statuslager, köer, summeringstabeller och ändringar
 av crawlerns körning behövs inte. Historikfrågorna använder ett partiellt index på tenant, avslutningstid och id
-för avslutade körningar. Det befintliga indexet för aktiva körningar återanvänds.
+för avslutade körningar. Aktiva körningar har ett separat partiellt index på
+tenant, skapandetid och id, vilket låter databasen läsa tabellens sorteringsordning
+direkt. Inget av dessa index duplicerar webbplatsindexets sorteringsordning.
 
 ## Verifiering och drift
 
-Verifieringen omfattar 80 PostgreSQL-integrationstester för adminåtkomst,
+Den första versionen verifierades med 80 PostgreSQL-integrationstester för adminåtkomst,
 körningshistorik och crawlerns körningsflöde, åtta migrationstester och 37
 frontendtester för översikten, adminmenyn och statuspresentationen. Testerna
 kontrollerar tenantisolering, privata ytors innehållsrättigheter, köstatus,
@@ -115,7 +117,8 @@ SQL-frågorna från 7,617/5,123 ms till 0,014/0,017 ms, med 3–4 bufferträffar
 stället för 1 819. Detta visar att tomma aktuella vyer kan hoppa över gammal
 historik; det är ingen mätning av produktionslatens eller hela HTTP-anropet.
 
-Migration `202609091600` skapar historikindexet med `CREATE INDEX CONCURRENTLY`.
+Migrationerna `202609091600` och `202609091830` skapar indexen för avslutad
+respektive aktiv historik med `CREATE INDEX CONCURRENTLY`.
 Ett avbrutet indexbygge kan lämna ett ogiltigt index; en ny uppgradering tar bort
 det och bygger om det. Nedgradering tar bort indexet i samma transaktion som
 övrig återställning, så att befintliga spärrar för aktiva körningar eller sparade
@@ -128,6 +131,69 @@ fortsätta. Ett integrationstest reproducerade kraschen före rättningen och vi
 sedan fortsatt bearbetning, sparad feladress och avslutning med varningar.
 Resursgränsen är oförändrad. ARQ-hooken loggar inte längre `success: true` utan
 belägg, eftersom ARQ inte tillhandahåller jobbresultatet i dess kontext.
+
+## Många aktiva körningar
+
+Webbplatsnamn är valfria i datamodellen. API-projektionen och den genererade
+klienttypen bevarar därför `null`; användargränssnittet använder adressen som
+etikett. Regressionstestet omfattar en namnlös webbplats under pågående körning,
+sökning på adress och efter avslutning. Webbläsartestet öppnar dess feldetaljer
+och kontrollerar att tangentbordsfokus återgår till samma knapp. Korrigeringen
+verifieras med åtta API-tester och sju webbläsartester. Nio migrationstester
+kontrollerar upp- och nedgradering, inklusive att spärrad återställning lämnar
+schemat och sparade data intakta.
+
+Prestandaprovet använder den riktiga HTTP-endpointen, inklusive autentisering
+och serialisering, mot PostgreSQL 16 i en disponibel testcontainer. Underlaget
+är 100 000 äldre avslutade körningar plus 100, 1 000 eller 10 000 aktiva körningar,
+hälften köade och hälften pågående. En fjärdedel av webbplatserna saknar namn.
+Efter uppvärmning mäts sju hämtningar per fall; dataskapande, frågeplansanalys och
+allokeringsmätning ligger utanför tidsmätningen.
+
+Miljö: CPython 3.11.16 med GIL, optimerad releasebyggnad med LTO, Linux aarch64,
+SQLAlchemy 2.0.51, asyncpg 0.27.0, FastAPI 0.138.2 och Pydantic 2.13.4.
+Testprocessen har fyra CPU:er och 6 GiB minnesgräns. Databascachen är varm.
+
+| Aktiva körningar | Första sidan före indexet, median (min–max) | Med indexet, median (min–max) |
+| --- | --- | --- |
+| 100 | 14,01 ms (12,31–14,58) | 11,18 ms (10,40–12,27) |
+| 1 000 | 13,90 ms (12,76–14,46) | 10,62 ms (10,50–11,84) |
+| 10 000 | 28,55 ms (27,63–36,44) | 12,88 ms (12,49–13,33) |
+
+Frågeplanen för 10 000 aktiva körningar visar den avgörande skillnaden: tidigare
+lästes och sorterades hela den aktiva mängden. Indexet läser 51 rader i rätt
+ordning för en sida med 50 resultat och en fortsättningsmarkör. Den isolerade
+sidfrågan tog 11,98 ms före och 0,17 ms efter. Sammanfattningsfrågan läser fortfarande
+alla relevanta körningar och tog omkring 1,8 ms i båda fallen.
+
+Antalet crawlerfrågor är två på första sidan och tre med cursor, oberoende av
+antalet körningar. API:t tillåter högst 100 resultat; gränssnittet begär 50 och
+behåller bara aktuell sida. Svaren för 50 rader var cirka 35 kB och toppvärdet för
+spårade Python-allokeringar cirka 0,50 MiB vid samtliga storlekar. Processens
+CPU-tid för en sida var ungefär 10–12 ms. Hela testprocessens RSS-topp, inklusive
+uppstart och dataskapande, var cirka 452–465 MiB; det är inte endpointens minnesåtgång.
+Tio samtidiga HTTP-hämtningar slutfördes utan fel. Provet är ingen mätning av
+produktionens p95/p99 eller av genomströmningen när crawlerarbetare också belastar
+systemet.
+
+Med `A` aktiva körningar, `R` avslutade senaste dygnet och `P` resultat per sida
+är sammanfattningen fortfarande linjär i `A + R`. Den ofiltrerade sidans sökning
+i indexet undviker den tidigare sorteringen av `A` rader. API-materialisering
+och rendering är linjära i det begränsade `P`. Fritextsökning kan behöva läsa
+webbplatsernas namn och adresser; den mätta sökningen vid 10 000 aktiva körningar
+tog cirka 20 ms inklusive hela HTTP-anropet. En ytterligare körning efter den färdiga migrationen gav 14,51 ms för
+första sidans median vid 10 000 aktiva körningar. Indexet förbättrar ordnad läsning
+och kostar ett extra indexunderhåll när en körning skapas eller avslutas.
+
+Det återanvändbara provet finns i
+[test_admin_crawler_benchmark.py](../../backend/tests/integration/test_admin_crawler_benchmark.py)
+och körs separat från vanliga tester:
+
+```bash
+cd backend
+ENEO_RUN_CRAWLER_OVERVIEW_BENCHMARK=1 uv run pytest -s -m integration \
+  tests/integration/test_admin_crawler_benchmark.py
+```
 
 ## Kontrollerat källunderlag
 

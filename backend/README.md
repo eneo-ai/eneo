@@ -103,8 +103,9 @@ Administrators can read current and recent tenant-wide crawl activity at
 API-key scope. It includes operational metadata and failed addresses from private
 spaces without granting access to their indexed content.
 
-Apply migration `202609091600` before starting the updated backend. It creates a
-partial index for completed tenant crawl history concurrently; a retry replaces
+Apply migrations through `202609091830` before starting the updated backend. They
+create partial indexes for completed history and active tenant creation order
+concurrently; a retry replaces
 an invalid index left by an interrupted build. See the [overview contract and
 verification](../docs/plans/admin-crawler-overview.md) for query bounds and rollback
 behavior.
