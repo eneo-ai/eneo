@@ -10,9 +10,9 @@
 
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import * as Tabs from "$lib/components/ui/tabs/index.js";
   import { IconSparkles } from "@eneo/icons/sparkles";
   import { Button, Dialog } from "@eneo/ui";
+  import { createTabs } from "@melt-ui/svelte";
   import { writable } from "svelte/store";
   import { getInsightsService } from "../InsightsService.svelte";
   import { getInsightsChatService } from "../InsightsChatService.svelte";
@@ -26,8 +26,14 @@
 
   let question = $state("");
   let inputRef = $state<HTMLTextAreaElement | null>(null);
-  let activeTab = $state<"chat" | "history">("chat");
   const showCitedConversation = writable(false);
+
+  // Same tabs as the page-level tab bar (melt tabs + active-state buttons),
+  // scoped to this panel so they never touch the page's ?tab= parameter.
+  const {
+    elements: { list, trigger, content },
+    states: { value: activeTab }
+  } = createTabs({ defaultValue: "chat", loop: true, activateOnFocus: false });
 
   const hasMessages = $derived(chat.messages.length > 0);
   const examples = $derived([
@@ -42,19 +48,19 @@
   );
 
   async function send(text: string) {
-    activeTab = "chat";
+    activeTab.set("chat");
     await chat.send(text);
     inputRef?.focus();
   }
 
   async function openFromHistory(conversation: { id: string }) {
-    activeTab = "chat";
+    activeTab.set("chat");
     await chat.openConversation(conversation);
   }
 
   function startNew() {
     chat.reset();
-    activeTab = "chat";
+    activeTab.set("chat");
     inputRef?.focus();
   }
 
@@ -74,36 +80,40 @@
 </script>
 
 <div class="bg-primary border-default flex w-full flex-col rounded-lg border shadow-md">
-  <div class="border-default flex flex-wrap items-center gap-3 border-b px-6 pt-4 pb-2">
-    <IconSparkles data-dynamic-colour="moss" class="text-dynamic-default size-6" aria-hidden="true"
-    ></IconSparkles>
-    <div class="flex min-w-0 flex-col">
-      <span class="text-primary font-medium">{m.insights_chat()}</span>
-      <span class="text-secondary text-sm">{m.insights_chat_description()}</span>
+  <div class="border-default flex flex-wrap items-center gap-x-6 gap-y-3 border-b px-6 py-4">
+    <div class="flex min-w-0 items-center gap-3">
+      <IconSparkles
+        data-dynamic-colour="moss"
+        class="text-dynamic-default size-6 shrink-0"
+        aria-hidden="true"
+      ></IconSparkles>
+      <div class="flex min-w-0 flex-col">
+        <span class="text-primary font-medium">{m.insights_chat()}</span>
+        <span class="text-secondary text-sm">{m.insights_chat_description()}</span>
+      </div>
     </div>
     <div class="ml-auto flex items-center gap-3">
+      <div {...$list} use:list class="flex items-center gap-1" aria-label={m.insights_chat()}>
+        <Button is={[$trigger("chat")]} displayActiveState>{m.insights_chat_tab_chat()}</Button>
+        <Button is={[$trigger("history")]} displayActiveState>{historyLabel}</Button>
+      </div>
       {#if hasMessages}
         <Button variant="outlined" disabled={chat.isStreaming} onclick={startNew}
           >{m.insights_chat_new_conversation()}</Button
         >
       {/if}
     </div>
-    <Tabs.Root bind:value={activeTab} class="w-full">
-      <Tabs.List variant="line" class="w-full justify-start">
-        <Tabs.Trigger value="chat">{m.insights_chat_tab_chat()}</Tabs.Trigger>
-        <Tabs.Trigger value="history">{historyLabel}</Tabs.Trigger>
-      </Tabs.List>
-    </Tabs.Root>
   </div>
 
   <!-- Fixed height from the first render so the panel never grows under the
        operator's hands when the first answer streams in. -->
-  {#if activeTab === "chat"}
+  {#if $activeTab === "chat"}
     <div
+      {...$content("chat")}
+      use:content
       {@attach followLatestTurn}
       class="insights-chat-scroll h-[min(60vh,40rem)] overflow-y-auto px-6 py-6"
-      role="log"
-      aria-label={m.insights_chat()}
+      aria-label={m.insights_chat_tab_chat()}
     >
       {#if hasMessages}
         <InsightsChatMessages
@@ -148,7 +158,11 @@
       />
     </div>
   {:else}
-    <div class="insights-chat-scroll h-[min(60vh,40rem)] overflow-y-auto px-6 py-6">
+    <div
+      {...$content("history")}
+      use:content
+      class="insights-chat-scroll h-[min(60vh,40rem)] overflow-y-auto px-6 py-6"
+    >
       <InsightsChatHistory onOpen={openFromHistory} />
     </div>
   {/if}
