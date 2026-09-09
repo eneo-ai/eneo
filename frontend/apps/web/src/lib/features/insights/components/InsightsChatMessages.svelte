@@ -5,7 +5,8 @@
 
     Turns of the insights chat. Built only from context-free chat pieces
     (InternalToolStep, ReasoningTrace, TypingIndicator, Markdown) so it never
-    reaches for the regular ChatService.
+    reaches for the regular ChatService. Session citations in the answer
+    become links that open the cited conversation.
 -->
 
 <script lang="ts">
@@ -20,14 +21,19 @@
     toolDisplayName
   } from "$lib/features/chat/internalToolLabels";
   import type { InsightsChatMessage, InsightsToolCall } from "../InsightsChatService.svelte";
+  import { citedSessionId, linkSessionCitations } from "../sessionCitations";
 
   type Props = {
     messages: InsightsChatMessage[];
     /** True while the last message is still streaming. */
     isStreaming: boolean;
+    /** Loads one tool call's result text for the expandable step. */
+    loadToolResult?: (toolCallId: string) => Promise<string | null>;
+    /** Called when the operator clicks a cited conversation. */
+    onOpenSession?: (sessionId: string) => void;
   };
 
-  let { messages, isStreaming }: Props = $props();
+  let { messages, isStreaming, loadToolResult, onOpenSession }: Props = $props();
 
   type StepStatus = "preparing" | "running" | "complete" | "failed" | "denied";
 
@@ -46,6 +52,22 @@
     if (call.result_status === "approved" && streamingTurn) return "running";
     if (streamingTurn && !answerStarted && isLastCall) return "running";
     return "complete";
+  }
+
+  // The markdown link renderer opens every link in a new tab; a citation
+  // link is intercepted here before that happens and opened in the preview.
+  // Attached as a delegated listener: the anchors themselves stay the
+  // keyboard-accessible controls, the wrapper is not interactive.
+  function interceptCitations(node: HTMLElement) {
+    const handle = (event: MouseEvent) => {
+      const anchor = (event.target as HTMLElement | null)?.closest("a");
+      const sessionId = citedSessionId(anchor?.getAttribute("href"));
+      if (!anchor || !sessionId) return;
+      event.preventDefault();
+      onOpenSession?.(sessionId);
+    };
+    node.addEventListener("click", handle);
+    return () => node.removeEventListener("click", handle);
   }
 </script>
 
@@ -80,25 +102,31 @@
             call.title,
             args
           )}
+          {@const toolCallId = call.tool_call_id ?? undefined}
           <InternalToolStep
             {runningLabel}
             doneLabel={internalToolDoneLabel(call.tool_name, call.server_name, args) ??
               runningLabel}
             serverName={serverDisplayName(call.server_name)}
             {args}
-            toolCallId={call.tool_call_id ?? undefined}
+            {toolCallId}
             status={stepStatus(
               call,
               callIndex === message.toolCalls.length - 1,
               streamingTurn,
               answerStarted
             )}
+            onLoadResult={toolCallId && loadToolResult
+              ? () => loadToolResult(toolCallId)
+              : undefined}
           />
         {/each}
 
         {#if answerStarted}
-          <div class="prose max-w-[70ch] pt-2">
-            <Markdown source={message.answer}></Markdown>
+          <div class="prose max-w-[70ch] pt-2" {@attach interceptCitations}>
+            <Markdown
+              source={linkSessionCitations(message.answer, m.insights_chat_cited_conversation())}
+            ></Markdown>
           </div>
         {:else if streamingTurn}
           <div class="flex items-center gap-3 pt-2">
