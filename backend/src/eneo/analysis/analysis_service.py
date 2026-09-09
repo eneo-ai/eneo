@@ -26,6 +26,7 @@ from eneo.assistants.assistant_service import AssistantService
 from eneo.completion_models.infrastructure.completion_service import CompletionService
 from eneo.completion_models.infrastructure.static_prompts import ANALYSIS_PROMPT
 from eneo.group_chat.application.group_chat_service import GroupChatService
+from eneo.group_chat.domain.entities.group_chat import GroupChat
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -375,7 +376,7 @@ class AnalysisService:
         include_followup: bool,
     ) -> tuple[Assistant, list[str]]:
         if assistant_id:
-            await self._check_insight_access(assistant_id=assistant_id)
+            await self.assert_insight_access(assistant_id=assistant_id)
             assistant, _ = await self.assistant_service.get_assistant(assistant_id)
             rows = await self.repo.get_assistant_question_texts_since(
                 assistant_id=assistant_id,
@@ -391,7 +392,7 @@ class AnalysisService:
                 "Either assistant_id or group_chat_id must be provided"
             )
 
-        await self._check_insight_access(group_chat_id=group_chat_id)
+        await self.assert_insight_access(group_chat_id=group_chat_id)
         space = await self.space_service.get_space_by_group_chat(
             group_chat_id=group_chat_id
         )
@@ -435,7 +436,7 @@ class AnalysisService:
             )
 
         if assistant_id:
-            await self._check_insight_access(assistant_id=assistant_id)
+            await self.assert_insight_access(assistant_id=assistant_id)
             question_count = await self.repo.count_assistant_questions_since(
                 assistant_id=assistant_id,
                 from_date=from_date,
@@ -447,7 +448,7 @@ class AnalysisService:
                 raise BadRequestException(
                     "Either assistant_id or group_chat_id must be provided"
                 )
-            await self._check_insight_access(group_chat_id=group_chat_id)
+            await self.assert_insight_access(group_chat_id=group_chat_id)
             question_count = await self.repo.count_group_chat_questions_since(
                 group_chat_id=group_chat_id,
                 from_date=from_date,
@@ -565,6 +566,16 @@ class AnalysisService:
             active_user_count=active_users,
         )
 
+    async def check_space_permissions(self, space_id: UUID | None):
+        if space_id is None:
+            return
+
+        space = await self.space_service.get_space(space_id)
+        if space.is_personal() and Permission.INSIGHTS not in self.user.permissions:
+            raise UnauthorizedException(
+                f"Need permission {Permission.INSIGHTS.value} in order to access"
+            )
+
     async def _check_assistant_question_access(
         self, *, assistant_id: UUID, space_id: UUID | None
     ) -> None:
@@ -603,7 +614,7 @@ class AnalysisService:
             raise NotFoundException("Message not found")
 
         try:
-            await self._check_insight_access(
+            await self.assert_insight_access(
                 assistant_id=partner.assistant_id,
                 group_chat_id=partner.group_chat_id,
             )
@@ -618,19 +629,25 @@ class AnalysisService:
             raise NotFoundException("Message not found")
         return question
 
-    async def _check_insight_access(
+    async def assert_insight_access(
         self,
         group_chat_id: UUID | None = None,
         assistant_id: UUID | None = None,
-    ):
+    ) -> tuple["Assistant | GroupChat", "Space"]:
+        """Raise unless the user may view insights for the target.
+
+        Returns the target and its space so callers that need them (the
+        insights chat resolves a model from the space) do not load twice.
+        """
         if assistant_id:
             space = await self.space_service.get_space_by_assistant(
                 assistant_id=assistant_id
             )
             assistant = space.get_assistant(assistant_id=assistant_id)
             self._require_assistant_insight_access(space=space, assistant=assistant)
+            return assistant, space
 
-        elif group_chat_id:
+        if group_chat_id:
             space = await self.space_service.get_space_by_group_chat(
                 group_chat_id=group_chat_id
             )
@@ -643,10 +660,11 @@ class AnalysisService:
                 raise UnauthorizedException(
                     "Insights are not enabled for this group chat"
                 )
-        else:
-            raise BadRequestException(
-                "Either assistant_id or group_chat_id must be provided"
-            )
+            return group_chat, space
+
+        raise BadRequestException(
+            "Either assistant_id or group_chat_id must be provided"
+        )
 
     async def authorize_insight_job(self, job: AnalysisJob) -> None:
         """Recheck access to the resource behind a persisted insight result."""
@@ -654,7 +672,7 @@ class AnalysisService:
             raise NotFoundException("Insights analysis job not found")
         if (job.assistant_id is None) == (job.group_chat_id is None):
             raise NotFoundException("Insights analysis job not found")
-        await self._check_insight_access(
+        await self.assert_insight_access(
             assistant_id=job.assistant_id,
             group_chat_id=job.group_chat_id,
         )
@@ -924,7 +942,7 @@ class AnalysisService:
             UnauthorizedException: If the user doesn't have insight access
         """
 
-        await self._check_insight_access(assistant_id=assistant_id)
+        await self.assert_insight_access(assistant_id=assistant_id)
 
         sessions, total = await self.session_repo.get_metadata_by_assistant(
             assistant_id=assistant_id,
@@ -966,7 +984,7 @@ class AnalysisService:
             UnauthorizedException: If the user doesn't have insight access
         """
 
-        await self._check_insight_access(group_chat_id=group_chat_id)
+        await self.assert_insight_access(group_chat_id=group_chat_id)
 
         sessions, total = await self.session_repo.get_metadata_by_group_chat(
             group_chat_id=group_chat_id,
@@ -1002,11 +1020,11 @@ class AnalysisService:
         assert session is not None
 
         if session.group_chat_id is not None:
-            await self._check_insight_access(group_chat_id=session.group_chat_id)
+            await self.assert_insight_access(group_chat_id=session.group_chat_id)
         else:
             if session.assistant is None:
                 raise NotFoundException("Session assistant not found")
-            await self._check_insight_access(assistant_id=session.assistant.id)
+            await self.assert_insight_access(assistant_id=session.assistant.id)
 
         return session
 
@@ -1047,9 +1065,9 @@ class AnalysisService:
             )
 
         if assistant_id:
-            await self._check_insight_access(assistant_id=assistant_id)
+            await self.assert_insight_access(assistant_id=assistant_id)
         elif group_chat_id:
-            await self._check_insight_access(group_chat_id=group_chat_id)
+            await self.assert_insight_access(group_chat_id=group_chat_id)
 
         # Use default date range if not provided
         if start_time is None:

@@ -25,6 +25,7 @@ from eneo.internal_mcp.constants import KNOWLEDGE_SERVER_NAME
 from eneo.internal_mcp.foundation import (
     build_ephemeral_server,
     default_page_cap,
+    fit_lines,
     internal_tool_context,
 )
 from eneo.main.exceptions import NotFoundException
@@ -455,17 +456,11 @@ def _fit_titles(
     order of magnitude, and a fixed page would either waste the budget or force
     a source-heavy collection through many more calls than it needs.
     """
-    kept: list[InfoBlobListing] = []
-    lines: list[str] = []
-    used = 0
-    for listing in listings:
-        line = f"- {listing.label}  document_id: {listing.id}"
-        if used + len(line) + 1 > budget and kept:
-            break
-        used += len(line) + 1
-        kept.append(listing)
-        lines.append(line)
-    return kept, lines
+    lines = fit_lines(
+        [f"- {listing.label}  document_id: {listing.id}" for listing in listings],
+        budget,
+    )
+    return list(listings[: len(lines)]), lines
 
 
 def _excerpts_per_document(document_count: int) -> int:

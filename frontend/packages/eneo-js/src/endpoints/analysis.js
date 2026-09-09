@@ -376,6 +376,118 @@ export function initAnalytics(client) {
           }
         });
         return res;
+      },
+
+      chat: {
+        /**
+         * Start an insights analysis conversation about an assistant or group chat.
+         * The answer streams as the regular conversation events (first_chunk, text,
+         * reasoning, tool_call, token_usage, error); the model drives Eneo's own
+         * insights tools over the target's conversations.
+         * @param {Object} params
+         * @param {import('./conversations').ChatPartner} params.chatPartner Which assistant or group chat to analyse
+         * @param {string} params.question The operator's question
+         * @param {string} params.timezone IANA zone the operator is in, e.g. "Europe/Stockholm"
+         * @param {{start: string, end: string} | undefined} [params.selectedRange] The Insights tab's date picker as inclusive YYYY-MM-DD dates
+         * @param {Object} [params.callbacks]
+         * @param {(data: import("../types/resources").SSE.FirstChunk) => void} [params.callbacks.onFirstChunk]
+         * @param {(data: import("../types/resources").SSE.Text) => void} [params.callbacks.onText]
+         * @param {(data: import("../types/resources").SSE.Reasoning) => void} [params.callbacks.onReasoning]
+         * @param {(data: import("../types/resources").SSE.ToolCall) => void} [params.callbacks.onToolCall]
+         * @param {(data: import("../types/resources").SSE.TokenUsage) => void} [params.callbacks.onTokenUsage]
+         * @param {(data: {session_id: string, error: string, error_code?: number | null}) => void} [params.callbacks.onError]
+         * @param {(response: Response) => Promise<void>} [params.callbacks.onOpen]
+         * @param {AbortController} [params.abortController]
+         * @returns {Promise<import("../types/resources").ConversationMessage>} The turn as initialised by first_chunk and filled by the stream
+         * @throws {EneoError}
+         */
+        ask: async ({
+          chatPartner,
+          question,
+          timezone,
+          selectedRange,
+          abortController,
+          callbacks
+        }) => {
+          /**  @type {{assistant_id?: string, group_chat_id?: string}} */
+          const target = { assistant_id: undefined, group_chat_id: undefined };
+
+          if (chatPartner.type === "assistant" || chatPartner.type === "default-assistant") {
+            target.assistant_id = chatPartner.id;
+          } else if (chatPartner.type === "group-chat") {
+            target.group_chat_id = chatPartner.id;
+          } else {
+            throw new EneoError(
+              "Asking a question requires one of 'assistant' or 'groupChat' to be specified",
+              "CONNECTION",
+              0,
+              0
+            );
+          }
+
+          /** @type {import("../types/resources").ConversationMessage} */
+          // @ts-expect-error We rely on the fact that the first_chunk event will initialise the response
+          let response = {};
+
+          await client.stream(
+            "/api/v1/analysis/conversation-insights/chat/",
+            {
+              requestBody: {
+                "application/json": {
+                  ...target,
+                  question,
+                  timezone,
+                  stream: true,
+                  selected_range: selectedRange
+                }
+              }
+            },
+            {
+              onOpen: async (res) => {
+                callbacks?.onOpen?.(res);
+              },
+              onMessage: (ev) => {
+                if (ev.data == "") return;
+                try {
+                  const data = JSON.parse(ev.data);
+
+                  switch (ev.event) {
+                    case "first_chunk":
+                      response = data;
+                      callbacks?.onFirstChunk?.(data);
+                      break;
+
+                    case "text":
+                      response.answer += data.answer;
+                      callbacks?.onText?.(data);
+                      break;
+
+                    case "reasoning":
+                      callbacks?.onReasoning?.(data);
+                      break;
+
+                    case "tool_call":
+                      callbacks?.onToolCall?.(data);
+                      break;
+
+                    case "token_usage":
+                      callbacks?.onTokenUsage?.(data);
+                      break;
+
+                    case "error":
+                      callbacks?.onError?.(data);
+                      break;
+                  }
+                } catch (e) {
+                  return;
+                }
+              }
+            },
+            abortController
+          );
+
+          return response;
+        }
       }
     }
   };

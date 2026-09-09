@@ -263,7 +263,7 @@ class TestCategoryDistribution:
         """Verify exact counts for each category."""
         expected_counts = {
             "admin_actions": 49,
-            "user_actions": 49,
+            "user_actions": 50,
             "security_events": 12,
             "file_operations": 6,
             "integration_events": 22,

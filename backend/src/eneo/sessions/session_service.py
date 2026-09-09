@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import AsyncGenerator, Callable, Coroutine, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine, Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -412,8 +412,17 @@ class SessionService:
         completion_model: CompletionModel | None = None,
         skill_provenance: Sequence[SkillExecutionReference] | None = None,
         skill_activation: SkillActivationEvidenceV1 | None = None,
+        on_created: Callable[[AsyncSession, SessionInDB], Awaitable[None]]
+        | None = None,
     ) -> tuple[SessionInDB, UUID, datetime | None]:
-        """Commit a new conversation and its first user message atomically."""
+        """Commit a new conversation and its first user message atomically.
+
+        ``on_created`` runs inside the same transaction after the placeholder
+        is inserted, for callers that must attach a row to the new session
+        (e.g. the link row that hides an insights conversation). Doing it in
+        one commit means a failed request never leaves a visible orphan and
+        the session is never briefly visible to analytics.
+        """
         session_add = self._build_session_add(
             name=name,
             assistant_id=session_assistant_id,
@@ -432,6 +441,8 @@ class SessionService:
             question_id, question_created_at = await self._insert_question_placeholder(
                 self._question_repository(db_session), question_add, files
             )
+            if on_created is not None:
+                await on_created(db_session, session_record)
         return session_record, question_id, question_created_at
 
     async def create_question_placeholder(

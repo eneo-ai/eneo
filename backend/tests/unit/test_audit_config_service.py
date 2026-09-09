@@ -28,7 +28,7 @@ ALL_CATEGORIES = [
 # Expected action counts per category
 EXPECTED_CATEGORY_COUNTS = {
     "admin_actions": 49,
-    "user_actions": 49,
+    "user_actions": 50,
     "security_events": 12,
     "file_operations": 6,
     "integration_events": 22,

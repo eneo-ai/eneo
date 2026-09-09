@@ -6,6 +6,10 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 
+from eneo.analysis.insight_exceptions import (
+    InsightsModelUnavailableError,
+    InvalidTimezoneError,
+)
 from eneo.files.file_models import (
     FileInUseError,
     FileOriginalNotFoundError,
@@ -218,6 +222,9 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
         "Crawler cleanup is still in progress; retry deletion shortly.",
         ErrorCodes.WEBSITE_CRAWL_CLEANUP_PENDING,
     ),
+    # --- Insights chat ---
+    InsightsModelUnavailableError: (400, None, ErrorCodes.BAD_REQUEST),
+    InvalidTimezoneError: (400, None, ErrorCodes.BAD_REQUEST),
     # --- Object content and files ---
     ObjectContentUnavailableError: (503, None, ErrorCodes.RESOURCE_NOT_READY),
     ObjectContentIntegrityError: (503, None, ErrorCodes.RESOURCE_NOT_READY),
