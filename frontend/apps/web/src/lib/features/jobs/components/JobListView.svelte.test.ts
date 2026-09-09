@@ -123,4 +123,27 @@ describe("JobListView failure presentation", () => {
       .not.toBeInTheDocument();
     await expect.element(page.getByText(m.failed(), { exact: true })).not.toBeInTheDocument();
   });
+
+  it("shows the reason when a crawl completes with partial results", async () => {
+    render(JobListView, {
+      jobs: [
+        failedJob({
+          name: "partial.example",
+          task: "crawl",
+          status: "complete",
+          failure_code: "remote_unreachable"
+        })
+      ],
+      title: "Crawls"
+    });
+
+    await page.getByRole("button", { name: /partial\.example/ }).click();
+    await expect
+      .element(page.getByText(m.crawl_completed_with_warnings(), { exact: true }))
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.crawl_failure_remote_unreachable(), { exact: true }))
+      .toBeVisible();
+    await expect.element(page.getByText(m.done(), { exact: true })).not.toBeInTheDocument();
+  });
 });

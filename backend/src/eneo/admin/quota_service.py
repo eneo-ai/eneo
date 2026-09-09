@@ -9,7 +9,10 @@ from sqlalchemy.orm import Session, SessionTransaction
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
-from eneo.main.exceptions import QuotaExceededException
+from eneo.main.exceptions import (
+    TenantQuotaExceededException,
+    UserQuotaExceededException,
+)
 from eneo.users.user import UserInDB
 
 _PENDING_QUOTA_OWNERS = "knowledge_publication_quota_owners"
@@ -105,9 +108,9 @@ def ensure_quota_capacity(
     size_in_bytes: int,
 ) -> None:
     if tenant_usage + size_in_bytes > tenant_limit:
-        raise QuotaExceededException("Tenant quota limit exceeded.")
+        raise TenantQuotaExceededException("Tenant quota limit exceeded.")
     if user_limit is not None and user_usage + size_in_bytes > user_limit:
-        raise QuotaExceededException("User quota limit exceeded.")
+        raise UserQuotaExceededException("User quota limit exceeded.")
 
 
 class QuotaService:

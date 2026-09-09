@@ -18,6 +18,8 @@ const JOB_FAILURE_MESSAGES: Record<JobFailureCode, (task: JobTask) => string> = 
   processing_interrupted: () => m.job_failure_processing_interrupted(),
   invalid_job_payload: () => m.job_failure_invalid_job_payload(),
   quota_exceeded: () => m.job_failure_quota_exceeded(),
+  tenant_quota_exceeded: () => crawlFailureMessage("tenant_quota_exceeded"),
+  user_quota_exceeded: () => crawlFailureMessage("user_quota_exceeded"),
   storage_limit_exceeded: () => m.job_failure_storage_limit_exceeded(),
   storage_unavailable: () => m.job_failure_storage_unavailable(),
   storage_verification_failed: () => m.job_failure_storage_verification_failed(),

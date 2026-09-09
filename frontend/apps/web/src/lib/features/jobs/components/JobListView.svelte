@@ -31,11 +31,17 @@
     >
       {#each jobs as job (job.id)}
         {@const message = failureMessage(job)}
-        {#if job.status === "failed" && message}
+        {@const warning =
+          job.task === "crawl" &&
+          job.status === "complete" &&
+          !!job.failure_code &&
+          !isCancelledCrawl(job)}
+        {#if (job.status === "failed" || warning) && message}
           <ExpandableErrorRow
             label={`${prefix ? prefix + " " : ""}${job.name ?? job.id}`}
             tooltip={job.name ?? job.id}
             {message}
+            {warning}
             borderClass="border-dimmer"
           />
         {:else}

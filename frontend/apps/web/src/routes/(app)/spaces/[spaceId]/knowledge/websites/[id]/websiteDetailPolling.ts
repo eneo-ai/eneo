@@ -6,9 +6,7 @@ type WebsiteDetailPoll = {
 };
 
 export function mergeLatestCrawlRun(currentRuns: CrawlRun[], latestRun: CrawlRun): CrawlRun[] {
-  return currentRuns.some((run) => run.id === latestRun.id)
-    ? currentRuns.map((run) => (run.id === latestRun.id ? latestRun : run))
-    : [...currentRuns, latestRun];
+  return [latestRun, ...currentRuns.filter((run) => run.id !== latestRun.id)];
 }
 
 export async function pollWebsiteDetail(

@@ -86,6 +86,10 @@ export function crawlFailureMessage(failureCode: string | null | undefined): str
       return m.crawl_failure_timed_out();
     case "processing_failed":
       return m.crawl_failure_processing_failed();
+    case "tenant_quota_exceeded":
+      return m.crawl_failure_tenant_quota_exceeded();
+    case "user_quota_exceeded":
+      return m.crawl_failure_user_quota_exceeded();
     case "cancelled":
       return m.crawl_failure_cancelled();
     default:

@@ -204,8 +204,9 @@ def mock_embeddings_service():
     service = MagicMock()
 
     async def mock_get_embeddings(model, chunks):
-        # Return list of (chunk, embedding) tuples
-        return [(chunk, [0.1, 0.2, 0.3] * 128) for chunk in chunks]
+        results = ChunkEmbeddingList()
+        results.add(chunks, [[0.1, 0.2, 0.3] * 128 for _ in chunks])
+        return results
 
     service.get_embeddings = AsyncMock(side_effect=mock_get_embeddings)
     return service
@@ -701,14 +702,28 @@ class TestPhase2SavepointBehavior:
         assert commit_idx > first_insert_idx, "COMMIT must be after INSERTs"
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("tenant_limit", "user_limit", "reason"),
+        [
+            (10, None, "TENANT_QUOTA_EXCEEDED"),
+            (1_000_000, 10, "USER_QUOTA_EXCEEDED"),
+        ],
+    )
     async def test_retained_quota_rejects_page_before_publication(
-        self, crawl_context, embedding_model_spec, mock_embeddings_service
+        self,
+        crawl_context,
+        embedding_model_spec,
+        mock_embeddings_service,
+        tenant_limit,
+        user_limit,
+        reason,
     ):
         page_buffer = [
             {
-                "url": "https://example.com/over-quota",
+                "url": f"https://example.com/over-quota/{index}",
                 "content": "Content that cannot fit",
             }
+            for index in range(3)
         ]
         statements: list[str] = []
         savepoint = AsyncMock()
@@ -716,13 +731,13 @@ class TestPhase2SavepointBehavior:
         savepoint.rollback = AsyncMock()
         mock_session = create_mock_session()
         mock_session.begin_nested = AsyncMock(return_value=savepoint)
-        mock_session.scalar = AsyncMock(side_effect=[9, 0])
+        mock_session.scalar = AsyncMock(return_value=9)
 
         async def execute(stmt, params=None):
             statement = str(stmt)
             statements.append(statement)
             if "tenants" in statement and "users" in statement:
-                return MagicMock(one=lambda: (10, None))
+                return MagicMock(one=lambda: (tenant_limit, user_limit))
             if "FROM info_blobs" in statement:
                 return MagicMock(one_or_none=lambda: None)
             return create_mock_result()
@@ -739,18 +754,20 @@ class TestPhase2SavepointBehavior:
         ):
             from eneo.worker.crawl_tasks import persist_batch
 
-            success, failed, urls, _ = await persist_batch(
+            success, failed, urls, failures = await persist_batch(
                 page_buffer=page_buffer,
-                ctx=crawl_context,
+                ctx=replace(crawl_context, max_batch_embedding_bytes=1),
                 embedding_model=embedding_model_spec,
                 container=create_mock_container(mock_embeddings_service),
             )
 
-        assert (success, failed, urls) == (0, 1, [])
+        assert (success, failed, urls) == (0, 3, [])
+        assert failures == {reason: [page["url"] for page in page_buffer]}
         assert not any(
             "INSERT INTO info_blobs" in statement for statement in statements
         )
         savepoint.rollback.assert_awaited_once()
+        mock_session.begin_nested.assert_awaited_once()
 
 
 # =============================================================================

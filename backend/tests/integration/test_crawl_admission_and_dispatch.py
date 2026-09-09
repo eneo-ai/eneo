@@ -1904,6 +1904,112 @@ async def test_persistence_failure_is_not_counted_as_a_successful_page(
 
 
 @pytest.mark.parametrize(
+    ("reason", "published_prefix", "expected_outcome", "quota_on_file"),
+    [
+        ("TENANT_QUOTA_EXCEEDED", False, CrawlOutcome.FAILED, False),
+        ("USER_QUOTA_EXCEEDED", True, CrawlOutcome.PARTIAL, False),
+        ("USER_QUOTA_EXCEEDED", False, CrawlOutcome.FAILED, True),
+    ],
+)
+async def test_quota_exhaustion_stops_crawl_and_finishes_the_job(
+    db_session,
+    admin_user,
+    monkeypatch,
+    tmp_path: Path,
+    reason: str,
+    published_prefix: bool,
+    expected_outcome: CrawlOutcome,
+    quota_on_file: bool,
+) -> None:
+    monkeypatch.setattr(get_settings(), "crawl_page_batch_size", 10)
+    async with db_session() as session:
+        website = await _persist_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            label="Quota stopped crawl",
+        )
+        run = await _admit(session, website=website, user=admin_user)
+        attempt = await session.scalar(
+            sa.select(CrawlAttempts).where(CrawlAttempts.crawl_run_id == run.id)
+        )
+        assert attempt is not None
+        task = CrawlTask.model_validate(attempt.dispatch_payload)
+        dispatch_id = attempt.dispatch_id
+        run_id = cast(UUID, run.id)
+
+    file_path = tmp_path / "quota.pdf"
+
+    class CrawlEngine:
+        closed = False
+
+        async def crawl(self, request: CrawlRequest) -> AsyncIterator[CrawlEvent]:
+            try:
+                for index in range(30):
+                    if quota_on_file and index == 5:
+                        file_path.write_bytes(b"file content")
+                        yield FileDownloaded(
+                            url=f"{request.url}/quota.pdf",
+                            filename=file_path.name,
+                            path=file_path,
+                        )
+                    yield PageCrawled(
+                        url=f"{request.url}/{index}",
+                        title="Page",
+                        content="Page content",
+                        etag=None,
+                        last_modified=None,
+                    )
+            finally:
+                self.closed = True
+                file_path.unlink(missing_ok=True)
+
+    published_batches = 0
+
+    async def publish(*, page_buffer, **kwargs):
+        nonlocal published_batches
+        urls = [page["url"] for page in page_buffer]
+        published_batches += 1
+        if published_prefix and published_batches == 1:
+            return len(urls), 0, urls, {}
+        return 0, len(urls), [], {reason: urls}
+
+    publisher = AsyncMock(side_effect=publish)
+    monkeypatch.setattr(crawl_tasks_module, "persist_batch", publisher)
+    engine = CrawlEngine()
+    container = Container(session=providers.Object(SessionProxy()))
+    container.crawler.override(providers.Object(engine))
+    container.text_extractor.override(
+        providers.Object(
+            SimpleNamespace(extract_bounded=AsyncMock(return_value="file text"))
+        )
+    )
+
+    result = await crawl_task(job_id=dispatch_id, params=task, container=container)
+
+    assert publisher.await_count == (2 if published_prefix else 1)
+    assert engine.closed
+    assert not file_path.exists()
+    assert result["status"] == expected_outcome.value
+    async with db_session() as session:
+        finished = await CrawlRunRepository(session).one(run_id)
+        assert finished.phase == CrawlPhase.TERMINAL
+        assert finished.outcome == expected_outcome
+        assert finished.failure_code == reason.lower()
+        assert finished.pages_crawled == (10 if published_prefix else 0)
+        assert finished.pages_failed == (5 if quota_on_file else 10)
+        assert finished.files_failed == (1 if quota_on_file else 0)
+        assert finished.failure_summary == {reason: 6 if quota_on_file else 10}
+        job = await session.get(Jobs, dispatch_id)
+        assert job is not None
+        assert job.status == (
+            Status.COMPLETE.value if published_prefix else Status.FAILED.value
+        )
+        assert job.failure_code == reason.lower()
+        assert job.finished_at is not None
+
+
+@pytest.mark.parametrize(
     ("engine", "expected_failures", "expects_backoff"),
     [
         (_PageLimitedCrawlEngine(), 0, False),

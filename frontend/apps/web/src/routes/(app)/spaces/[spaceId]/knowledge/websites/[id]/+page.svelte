@@ -33,8 +33,8 @@
   let infoBlobPageGeneration = 0;
   let loadingMoreInfoBlobs = false;
   let pollingCrawlRuns = false;
-  let historyRunId = data.crawlRuns.at(-1)?.id;
-  let contentRunId = data.crawlRuns.filter((run) => !isActiveCrawlRun(run)).at(-1)?.id;
+  let historyRunId = data.crawlRuns[0]?.id;
+  let contentRunId = data.crawlRuns.find((run) => !isActiveCrawlRun(run))?.id;
 
   $: if (data.crawlRuns !== serverCrawlRuns) {
     serverCrawlRuns = data.crawlRuns;
@@ -43,13 +43,13 @@
     totalCrawlRunCount = data.totalCrawlRunCount;
     crawlRunPageGeneration += 1;
     loadingMoreCrawlRuns = false;
-    historyRunId = data.crawlRuns.at(-1)?.id;
+    historyRunId = data.crawlRuns[0]?.id;
   }
 
   $: if (data.infoBlobPage !== serverInfoBlobPage) {
     serverInfoBlobPage = data.infoBlobPage;
     replaceInfoBlobPage(data.infoBlobPage);
-    contentRunId = data.crawlRuns.filter((run) => !isActiveCrawlRun(run)).at(-1)?.id;
+    contentRunId = data.crawlRuns.find((run) => !isActiveCrawlRun(run))?.id;
   }
 
   onMount(() => {
@@ -92,7 +92,7 @@
             limit: PAGINATION.PAGE_SIZE
           });
           if (!mounted || websiteId !== data.website.id || pageCrawlRuns !== data.crawlRuns) return;
-          const history = [...historyPage.items].reverse();
+          const history = historyPage.items;
           crawlRuns = mergeLatestCrawlRun(history, result.latestRun);
           nextCrawlRunCursor = historyPage.next_cursor ?? null;
           totalCrawlRunCount = historyPage.total_count;
@@ -124,7 +124,7 @@
   } = getSpacesManager();
 
   // History may contain an older last-known active state while its refresh fails.
-  $: latestKnownRun = crawlRuns.at(-1);
+  $: latestKnownRun = crawlRuns[0];
   $: activeRun = latestKnownRun && isActiveCrawlRun(latestKnownRun) ? latestKnownRun : undefined;
 
   async function loadMoreCrawlRuns() {
@@ -141,7 +141,7 @@
       });
       if (generation !== crawlRunPageGeneration || websiteId !== data.website.id) return;
       const knownIds = new Set(crawlRuns.map((run) => run.id));
-      crawlRuns = [...page.items.filter((run) => !knownIds.has(run.id)).reverse(), ...crawlRuns];
+      crawlRuns = [...crawlRuns, ...page.items.filter((run) => !knownIds.has(run.id))];
       nextCrawlRunCursor = page.next_cursor ?? null;
       totalCrawlRunCount = page.total_count;
     } catch (error) {

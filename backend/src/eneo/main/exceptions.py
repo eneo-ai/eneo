@@ -176,6 +176,14 @@ class QuotaExceededException(Exception):
     pass
 
 
+class TenantQuotaExceededException(QuotaExceededException):
+    pass
+
+
+class UserQuotaExceededException(QuotaExceededException):
+    pass
+
+
 class UniqueException(Exception):
     pass
 

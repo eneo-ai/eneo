@@ -293,6 +293,9 @@ async def test_concurrent_crawls_cannot_overrun_retained_tenant_quota(
     assert retained == 92
     assert sum(len(published) for published, _ in results) == 1
     assert sum(len(urls) for _, failures in results for urls in failures.values()) == 1
+    assert [reason for _, failures in results for reason in failures] == [
+        "TENANT_QUOTA_EXCEEDED"
+    ]
 
 
 async def _seed_active_document(

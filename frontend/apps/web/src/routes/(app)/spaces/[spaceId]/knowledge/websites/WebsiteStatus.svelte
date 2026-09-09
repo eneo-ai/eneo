@@ -22,7 +22,11 @@
   // eslint-disable-next-line svelte/no-immutable-reactive-statements
   $: dayjs.locale(getLocale());
   /* TODO colours */
-  function statusInfo(): { label: string; color: Label.LabelColor; tooltip?: string } {
+  function statusInfo(website: WebsiteSparse): {
+    label: string;
+    color: Label.LabelColor;
+    tooltip?: string;
+  } {
     const crawl = website.latest_crawl;
     if (!crawl) {
       return {
@@ -60,7 +64,13 @@
           return {
             color: "yellow",
             label: stateLabel,
-            tooltip: `${m.synced_on({ date: completed.format("YYYY-MM-DD HH:mm") })} - ${failureText}`
+            tooltip: [
+              m.synced_on({ date: completed.format("YYYY-MM-DD HH:mm") }),
+              failureText,
+              crawl.failure_code ? crawlRunFailureMessage(crawl) : undefined
+            ]
+              .filter(Boolean)
+              .join(" - ")
           };
         }
 
@@ -120,4 +130,4 @@
   }
 </script>
 
-<Label.Single item={statusInfo()}></Label.Single>
+<Label.Single item={statusInfo(website)}></Label.Single>

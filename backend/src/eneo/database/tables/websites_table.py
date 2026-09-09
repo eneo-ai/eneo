@@ -88,7 +88,8 @@ class CrawlRuns(BasePublic):
             "failure_code IS NULL OR failure_code IN ("
             "'dispatch_failed', 'invalid_dispatch', 'worker_interrupted', "
             "'lease_expired', 'remote_unreachable', 'remote_blocked', "
-            "'timed_out', 'processing_failed', 'cancelled')",
+            "'timed_out', 'processing_failed', 'cancelled', "
+            "'tenant_quota_exceeded', 'user_quota_exceeded')",
             name="ck_crawl_runs_failure_code",
         ),
         CheckConstraint(
@@ -204,7 +205,8 @@ class CrawlAttempts(BasePublic):
             "failure_code IS NULL OR failure_code IN ("
             "'dispatch_failed', 'invalid_dispatch', 'worker_interrupted', "
             "'lease_expired', 'remote_unreachable', 'remote_blocked', "
-            "'timed_out', 'processing_failed', 'cancelled')",
+            "'timed_out', 'processing_failed', 'cancelled', "
+            "'tenant_quota_exceeded', 'user_quota_exceeded')",
             name="ck_crawl_attempts_failure_code",
         ),
         CheckConstraint(

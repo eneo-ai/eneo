@@ -50,6 +50,8 @@ class JobFailureCode(StrEnum):
     PROCESSING_INTERRUPTED = "processing_interrupted"
     INVALID_JOB_PAYLOAD = "invalid_job_payload"
     QUOTA_EXCEEDED = "quota_exceeded"
+    TENANT_QUOTA_EXCEEDED = "tenant_quota_exceeded"
+    USER_QUOTA_EXCEEDED = "user_quota_exceeded"
     STORAGE_LIMIT_EXCEEDED = "storage_limit_exceeded"
     STORAGE_UNAVAILABLE = "storage_unavailable"
     STORAGE_VERIFICATION_FAILED = "storage_verification_failed"

@@ -22,7 +22,7 @@
   import { toast } from "$lib/components/toast";
   import { toastError } from "$lib/core/errors";
   import type { IntegrationKnowledge, WebsiteSparse } from "@eneo/eneo-js";
-  import { jobCompletionEvents } from "$lib/features/jobs/JobManager";
+  import { getJobManager, jobCompletionEvents } from "$lib/features/jobs/JobManager";
   import { untrack } from "svelte";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -39,6 +39,7 @@
   let { data } = $props<{ data: any }>();
 
   const eneo = getEneo();
+  const { startFastUpdatePolling } = getJobManager();
   const {
     state: { currentSpace },
     refreshCurrentSpace
@@ -128,6 +129,9 @@
       const result = await runWebsiteBatches(Array.from($selectedWebsiteIds), (websiteIds) =>
         eneo.websites.bulkRun({ website_ids: websiteIds })
       );
+      if (result.queued > 0) {
+        await startFastUpdatePolling();
+      }
 
       if (result.failed > 0) {
         toast.error(
@@ -140,7 +144,7 @@
           $selectedWebsiteIds = new Set(failedWebsiteIds);
         }
       } else {
-        toast.success(m.bulk_crawl_started({ count: result.queued }));
+        toast.success(m.bulk_crawl_started({ count: result.queued, total: result.total }));
         $selectedWebsiteIds = new Set();
       }
     } catch (error) {

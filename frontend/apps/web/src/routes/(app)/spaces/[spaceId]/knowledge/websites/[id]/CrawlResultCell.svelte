@@ -32,6 +32,8 @@
       embedding_timeout: () => m.failure_reason_EMBEDDING_TIMEOUT(),
       embedding_error: () => m.failure_reason_EMBEDDING_ERROR(),
       db_error: () => m.failure_reason_DB_ERROR(),
+      tenant_quota_exceeded: () => m.failure_reason_TENANT_QUOTA_EXCEEDED(),
+      user_quota_exceeded: () => m.failure_reason_USER_QUOTA_EXCEEDED(),
       no_embedding_model: () => m.failure_reason_NO_EMBEDDING_MODEL(),
       missing_provider: () => m.failure_reason_MISSING_PROVIDER(),
       redirect_rejected: () => m.failure_reason_redirect_rejected(),

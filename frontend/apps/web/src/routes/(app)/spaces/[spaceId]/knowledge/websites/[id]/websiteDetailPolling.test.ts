@@ -35,7 +35,7 @@ describe("website detail polling", () => {
       const result = await pollWebsiteDetail(eneo as never, website, [previous]);
       expect(latest).toHaveBeenCalledWith(website);
       expect(list).not.toHaveBeenCalled();
-      expect(result).toEqual({ crawlRuns: [previous, latestRun], latestRun });
+      expect(result).toEqual({ crawlRuns: [latestRun, previous], latestRun });
 
       await pollWebsiteDetail(eneo as never, website, result.crawlRuns);
       expect(list).not.toHaveBeenCalled();

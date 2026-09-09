@@ -40,12 +40,17 @@ from eneo.embedding_models.infrastructure.adapters.base import (
 from eneo.info_blobs.info_blob import InfoBlobChunk
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
 from eneo.main.config import get_settings
+from eneo.main.exceptions import (
+    TenantQuotaExceededException,
+    UserQuotaExceededException,
+)
 from eneo.main.logging import get_logger
 from eneo.websites.domain.crawl_run import CrawlPhase
 from eneo.websites.domain.crawl_run_repo import CrawlRunRepository
 from eneo.websites.domain.source_url import normalize_url
 from eneo.worker.crawl.heartbeat import CrawlLeaseLostError
 from eneo.worker.crawl_context import (
+    QUOTA_FAILURE_REASONS,
     CrawlContext,
     EmbeddingModelSpec,
     FailureReason,
@@ -163,6 +168,16 @@ async def _refresh_http_validators(
     return True
 
 
+def _quota_failure_reason(
+    error: TenantQuotaExceededException | UserQuotaExceededException,
+) -> FailureReason:
+    return (
+        FailureReason.TENANT_QUOTA_EXCEEDED
+        if isinstance(error, TenantQuotaExceededException)
+        else FailureReason.USER_QUOTA_EXCEEDED
+    )
+
+
 async def _publish_prepared_pages(
     *,
     prepared_pages: list[PreparedPage],
@@ -174,10 +189,8 @@ async def _publish_prepared_pages(
     successful_identities: list[str] = []
     failures_by_reason: dict[str, list[str]] = {}
 
-    def fail_all() -> None:
-        failures_by_reason[FailureReason.DB_ERROR.value] = [
-            page.url for page in prepared_pages
-        ]
+    def fail_all(reason: FailureReason = FailureReason.DB_ERROR) -> None:
+        failures_by_reason[reason.value] = [page.url for page in prepared_pages]
 
     logger.debug(
         "Phase 2: Persisting batch to database",
@@ -213,7 +226,7 @@ async def _publish_prepared_pages(
                     else 0
                 )
 
-                for prepared in prepared_pages:
+                for prepared_index, prepared in enumerate(prepared_pages):
                     savepoint = await session.begin_nested()
                     try:
                         source_url = normalize_url(prepared.url)
@@ -364,6 +377,24 @@ async def _publish_prepared_pages(
                         tenant_usage += stored_size
                         user_usage += stored_size
                         successful_identities.append(source_url)
+                    except (
+                        TenantQuotaExceededException,
+                        UserQuotaExceededException,
+                    ) as error:
+                        await savepoint.rollback()
+                        reason = _quota_failure_reason(error)
+                        failures_by_reason[reason.value] = [
+                            page.url for page in prepared_pages[prepared_index:]
+                        ]
+                        logger.warning(
+                            "Crawl publication stopped because storage quota was exceeded",
+                            extra={
+                                "website_id": str(ctx.website_id),
+                                "tenant_id": str(ctx.tenant_id),
+                                "reason": reason.value,
+                            },
+                        )
+                        break
                     except Exception as error:
                         await savepoint.rollback()
                         failures_by_reason.setdefault(
@@ -389,6 +420,20 @@ async def _publish_prepared_pages(
         )
     except CrawlLeaseLostError:
         raise
+    except (TenantQuotaExceededException, UserQuotaExceededException) as error:
+        # Concurrent publications can exhaust quota at the outer commit. None
+        # of this group's savepoints survive that transaction rollback.
+        successful_identities = []
+        failures_by_reason = {}
+        fail_all(_quota_failure_reason(error))
+        logger.warning(
+            "Crawl publication rolled back because storage quota was exceeded",
+            extra={
+                "website_id": str(ctx.website_id),
+                "tenant_id": str(ctx.tenant_id),
+                "reason": _quota_failure_reason(error).value,
+            },
+        )
     except TimeoutError:
         successful_identities = []
         failures_by_reason = {}
@@ -780,6 +825,19 @@ async def persist_batch(
             published_count, publication_failed_count = await flush_prepared_pages()
             success_count += published_count
             failed_count += publication_failed_count
+            quota_reasons = QUOTA_FAILURE_REASONS.intersection(failures_by_reason)
+            if quota_reasons:
+                reason = next(iter(quota_reasons))
+                remaining_urls = [tail.page["url"] for tail in plans[plan_index + 1 :]]
+                failures_by_reason[reason].extend(remaining_urls)
+                failed_count += len(remaining_urls)
+                embedding_results.close()
+                return (
+                    success_count,
+                    failed_count,
+                    successful_identities,
+                    failures_by_reason,
+                )
 
     # Advance once after an exact successful result set so ChunkEmbeddingList
     # closes its temporary spool at StopIteration.

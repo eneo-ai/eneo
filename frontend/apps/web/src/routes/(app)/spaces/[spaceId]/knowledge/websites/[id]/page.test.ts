@@ -42,7 +42,7 @@ describe("Website detail loader", () => {
     expect(listInfoBlobs).toHaveBeenCalledWith({ id: website.id, limit: 100 });
     expect(result).toEqual({
       website,
-      crawlRuns: [{ id: "older" }, { id: "newer" }],
+      crawlRuns: [{ id: "newer" }, { id: "older" }],
       nextCrawlRunCursor: "older-page",
       totalCrawlRunCount: 120,
       infoBlobPage,

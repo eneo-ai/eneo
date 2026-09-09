@@ -14,7 +14,7 @@ export const load = async (event) => {
   const isOrgWebsite = organizationSpaceId != null && website.space_id === organizationSpaceId;
 
   return {
-    crawlRuns: [...crawlRunPage.items].reverse(),
+    crawlRuns: crawlRunPage.items,
     nextCrawlRunCursor: crawlRunPage.next_cursor ?? null,
     totalCrawlRunCount: crawlRunPage.total_count,
     infoBlobPage,

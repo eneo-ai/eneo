@@ -54,7 +54,11 @@ from eneo.worker.crawl import (
     persist_batch,
 )
 from eneo.worker.crawl.persistence import CrawlPageData
-from eneo.worker.crawl_context import CrawlContext, EmbeddingModelSpec
+from eneo.worker.crawl_context import (
+    QUOTA_FAILURE_REASONS,
+    CrawlContext,
+    EmbeddingModelSpec,
+)
 
 logger = get_logger(__name__)
 
@@ -220,6 +224,10 @@ def _failure_code_for_crawl(
 ) -> CrawlFailureCode:
     reasons = {reason.lower() for reason in failure_counts}
     reasons.add(termination_reason.lower())
+    if "tenant_quota_exceeded" in reasons:
+        return CrawlFailureCode.TENANT_QUOTA_EXCEEDED
+    if "user_quota_exceeded" in reasons:
+        return CrawlFailureCode.USER_QUOTA_EXCEEDED
     if any(
         reason == "robots_disallowed"
         or reason.startswith(
@@ -247,6 +255,10 @@ def _failure_code_for_crawl(
 
 
 def _failure_detail(code: CrawlFailureCode, outcome: CrawlOutcome) -> str:
+    if code == CrawlFailureCode.TENANT_QUOTA_EXCEEDED:
+        return "The crawl stopped because the organization's storage quota was exceeded"
+    if code == CrawlFailureCode.USER_QUOTA_EXCEEDED:
+        return "The crawl stopped because the user's storage quota was exceeded"
     if outcome == CrawlOutcome.PARTIAL:
         return {
             CrawlFailureCode.REMOTE_BLOCKED: (
@@ -838,6 +850,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
             crawl_is_partial = False
             crawl_termination_reason = "completed"
+            quota_exceeded = False
             new_sitemap_state: dict[str, Any] | None = None
 
             # Session-per-batch page processing: persist_batch opens a fresh,
@@ -851,6 +864,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             async def _flush_pages() -> None:
                 nonlocal num_failed_pages, num_published_pages
                 nonlocal page_buffer_bytes, processing_page_seconds
+                nonlocal quota_exceeded
                 if not page_buffer:
                     return
                 batch = list(page_buffer)
@@ -876,6 +890,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     failure_counts[reason] += len(titles)
                     failed_urls.update(titles)
                 num_failed_pages += failed_count
+                quota_exceeded = not QUOTA_FAILURE_REASONS.isdisjoint(
+                    batch_failures_by_reason
+                )
                 logger.debug(
                     "Flushed crawled page batch",
                     extra={
@@ -891,6 +908,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 nonlocal num_files, num_published_files
                 nonlocal num_failed_files, num_skipped_files
                 nonlocal processing_file_seconds
+                nonlocal quota_exceeded
                 file_started = time.time()
                 num_files += 1
                 filename = (
@@ -942,6 +960,7 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         for reason, titles in file_failures.items():
                             failure_counts[reason] += len(titles)
                             failed_urls.update(titles)
+                    quota_exceeded = not QUOTA_FAILURE_REASONS.isdisjoint(file_failures)
                 except CrawlLeaseLostError:
                     raise
                 except Exception:
@@ -1064,13 +1083,30 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     finally:
                         if acknowledgement is not None:
                             acknowledgement.set()
+                    if quota_exceeded:
+                        break
 
-                await producer_task
-                await _flush_pages()
+                if not quota_exceeded:
+                    await producer_task
+                    await _flush_pages()
             finally:
                 if not producer_task.done():
                     producer_task.cancel()
                 await asyncio.gather(producer_task, return_exceptions=True)
+
+            if quota_exceeded:
+                crawl_is_partial = True
+                crawl_termination_reason = "quota_exceeded"
+                # A file can exhaust quota while earlier fetched pages are
+                # still buffered. Retain their previous publications too.
+                if page_buffer:
+                    reason = next(
+                        iter(QUOTA_FAILURE_REASONS.intersection(failure_counts))
+                    )
+                    failure_counts[reason] += len(page_buffer)
+                    num_failed_pages += len(page_buffer)
+                    failed_urls.update(page["url"] for page in page_buffer)
+                    page_buffer.clear()
 
             total_crawl_seconds = time.time() - crawl_started
             timings["process_pages"] = processing_page_seconds

@@ -38,9 +38,20 @@ class FailureReason(str, Enum):
     # Database issues
     DB_ERROR = "DB_ERROR"  # Database error during persistence
 
+    TENANT_QUOTA_EXCEEDED = "TENANT_QUOTA_EXCEEDED"
+    USER_QUOTA_EXCEEDED = "USER_QUOTA_EXCEEDED"
+
     # Configuration issues
     NO_EMBEDDING_MODEL = "NO_EMBEDDING_MODEL"  # No embedding model configured
     MISSING_PROVIDER = "MISSING_PROVIDER"  # Embedding model has no provider_id
+
+
+QUOTA_FAILURE_REASONS = frozenset(
+    {
+        FailureReason.TENANT_QUOTA_EXCEEDED.value,
+        FailureReason.USER_QUOTA_EXCEEDED.value,
+    }
+)
 
 
 @dataclass(frozen=True)

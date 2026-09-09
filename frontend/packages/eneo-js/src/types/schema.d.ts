@@ -11367,6 +11367,8 @@ export interface components {
       | "remote_blocked"
       | "timed_out"
       | "processing_failed"
+      | "tenant_quota_exceeded"
+      | "user_quota_exceeded"
       | "cancelled";
     /**
      * CrawlLifecycleHealth
@@ -13887,6 +13889,8 @@ export interface components {
       | "processing_interrupted"
       | "invalid_job_payload"
       | "quota_exceeded"
+      | "tenant_quota_exceeded"
+      | "user_quota_exceeded"
       | "storage_limit_exceeded"
       | "storage_unavailable"
       | "storage_verification_failed"

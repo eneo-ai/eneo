@@ -20,7 +20,7 @@ from tests.integration.migrations.test_crawl_lifecycle_round_trip import (
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 _DEVELOP_HEAD = "202609071000"
-_CRAWLER_HEAD = "202609071200"
+_CRAWLER_HEAD = "202609091230"
 # The qualifier keeps the other side of both merge revisions at develop's head.
 _CRAWLER_ROLLBACK = "202608311430@202608121500"
 
@@ -137,6 +137,65 @@ def test_legacy_failure_summaries_survive_upgrade_and_rollback(
     assert summaries() == original
     command.upgrade(database.config, _CRAWLER_HEAD)
     assert summaries() == original
+
+
+def test_quota_failures_remain_readable_after_downgrade(
+    rollback_database: RollbackDatabase,
+) -> None:
+    database = rollback_database
+    command.upgrade(database.config, _CRAWLER_HEAD)
+    with psycopg2.connect(database.url) as connection, connection.cursor() as cursor:
+        tenant_id, user_id, website_id = _insert_crawl_owner(
+            cursor, label="Quota history"
+        )
+        for code in ("tenant_quota_exceeded", "user_quota_exceeded"):
+            run_id, job_id = uuid4(), uuid4()
+            cursor.execute(
+                "INSERT INTO jobs (id, user_id, task, status, failure_code) "
+                "VALUES (%s, %s, 'crawl', 'failed', %s)",
+                (str(job_id), str(user_id), code),
+            )
+            cursor.execute(
+                "INSERT INTO crawl_runs (id, tenant_id, website_id, job_id, phase, "
+                "origin, outcome, failure_code, failure_detail, failure_summary, "
+                "finished_at, attempt_count) VALUES (%s, %s, %s, %s, 'terminal', "
+                "'manual', 'failed', %s, 'Storage quota is full', %s::jsonb, now(), 1)",
+                (
+                    str(run_id),
+                    str(tenant_id),
+                    str(website_id),
+                    str(job_id),
+                    code,
+                    '{"' + code.upper() + '": 2}',
+                ),
+            )
+            cursor.execute(
+                "INSERT INTO crawl_attempts (crawl_run_id, attempt_number, dispatch_id, "
+                "dispatch_payload, finished_at, failure_code) "
+                "VALUES (%s, 1, %s, '{}'::jsonb, now(), %s)",
+                (str(run_id), str(job_id), code),
+            )
+
+    command.downgrade(database.config, "202609071200")
+    with psycopg2.connect(database.url) as connection, connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT cr.failure_code, ca.failure_code, j.failure_code, "
+            "cr.failure_detail, cr.failure_summary FROM crawl_runs cr "
+            "JOIN crawl_attempts ca ON ca.crawl_run_id = cr.id "
+            "JOIN jobs j ON j.id = cr.job_id"
+        )
+        rows = cursor.fetchall()
+        assert len(rows) == 2
+        for run_code, attempt_code, job_code, detail, summary in rows:
+            assert (run_code, attempt_code, job_code) == (
+                "processing_failed",
+                "processing_failed",
+                "quota_exceeded",
+            )
+            assert detail == "Storage quota is full"
+            assert summary in ({"TENANT_QUOTA_EXCEEDED": 2}, {"USER_QUOTA_EXCEEDED": 2})
+    command.upgrade(database.config, _CRAWLER_HEAD)
+    assert database.revisions() == {_CRAWLER_HEAD}
 
 
 def test_malformed_failure_summaries_block_upgrade_without_changing_legacy_data(
