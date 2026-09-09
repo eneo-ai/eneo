@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { CrawlRun, CrawlResourceFailure } from "@eneo/eneo-js";
+  import type { CrawlRun, CrawlResourceFailure, Eneo } from "@eneo/eneo-js";
   import { untrack } from "svelte";
   import dayjs from "dayjs";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
@@ -14,8 +14,16 @@
     isActiveCrawlRun
   } from "$lib/features/knowledge/crawlRunState";
 
-  let { run, open = $bindable(false) }: { run: CrawlRun; open?: boolean } = $props();
   const eneo = getEneo();
+  let {
+    run,
+    open = $bindable(false),
+    fetchFailures = eneo.websites.crawlRuns.failures
+  }: {
+    run: CrawlRun;
+    open?: boolean;
+    fetchFailures?: Eneo["websites"]["crawlRuns"]["failures"];
+  } = $props();
   const runId = $derived(run.id);
   let loadedRun = $state<CrawlRun | null>(null);
   let failures = $state<CrawlResourceFailure[]>([]);
@@ -35,7 +43,7 @@
     loadFailed = false;
     retryCursor = cursor;
     try {
-      const result = await eneo.websites.crawlRuns.failures({ id: runId, limit: 100, cursor });
+      const result = await fetchFailures({ id: runId, limit: 100, cursor });
       if (request !== generation) return;
       loadedRun = result.run;
       detailsAvailable = result.details_available;
@@ -95,11 +103,18 @@
     <div class="space-y-2 pr-6">
       <p class="font-medium">{crawlRunStateLabel(crawlRunState(displayedRun))}</p>
       <div class="text-secondary flex flex-wrap gap-x-4 gap-y-1 text-sm">
-        <span>{m.pages_succeeded({ count: displayedRun.pages_crawled ?? 0 })}</span>
-        <span>{m.files_succeeded({ count: displayedRun.files_downloaded ?? 0 })}</span>
-        <span>{m.pages_failed({ count: displayedRun.pages_failed ?? 0 })}</span>
-        <span>{m.files_failed({ count: displayedRun.files_failed ?? 0 })}</span>
+        <span>{m.pages_succeeded({ count: displayedRun.pages_crawled ?? "—" })}</span>
+        <span>{m.files_succeeded({ count: displayedRun.files_downloaded ?? "—" })}</span>
+        <span>{m.pages_failed({ count: displayedRun.pages_failed ?? "—" })}</span>
+        <span>{m.files_failed({ count: displayedRun.files_failed ?? "—" })}</span>
       </div>
+      <p class="text-secondary text-sm">
+        {displayedRun.origin === "manual"
+          ? m.crawl_origin_manual()
+          : displayedRun.origin === "scheduled"
+            ? m.crawl_origin_scheduled()
+            : m.crawl_origin_legacy()}
+      </p>
       {#if displayedRun.failure_code}
         <p class="text-secondary text-sm">{crawlRunFailureMessage(displayedRun)}</p>
       {/if}

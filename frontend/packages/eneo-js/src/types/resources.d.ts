@@ -110,6 +110,10 @@ export type Role = components["schemas"]["RolePublic"];
 export type Permission = components["schemas"]["Permission"];
 export type ResourcePermission = components["schemas"]["ResourcePermission"];
 export type CrawlRun = components["schemas"]["CrawlRunPublic"];
+export type AdminCrawlerOverview = components["schemas"]["AdminCrawlerOverview"];
+export type AdminCrawlerQuery = NonNullable<
+  import("./schema").paths["/api/v1/admin/crawler/"]["get"]["parameters"]["query"]
+>;
 export type CrawlResourceFailure = components["schemas"]["CrawlResourceFailurePublic"];
 export type CrawlFailurePage = components["schemas"]["CrawlFailurePagePublic"];
 export type WebsiteCrawlRunPage = components["schemas"]["CursorPaginatedResponse_CrawlRunPublic_"];

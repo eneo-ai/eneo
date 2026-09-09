@@ -487,3 +487,8 @@ Den varaktiga regressionsevidensen finns i repositoryts beteendetester:
 De kontrollerade timing- och RSS-harnessen bör göras till separata körbara
 verktyg först om teamet vill följa dessa mått över tid. Det är medvetet inte en
 del av runtimeförändringen.
+
+## Tenantens crawleröversikt
+
+[Adminöversikten](admin-crawler-overview.md) beskriver den genomförda läsvyn,
+behörighetsgränsen, historikindexets frågeplansmätning och migrationens driftkrav.

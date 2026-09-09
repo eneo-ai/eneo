@@ -11,7 +11,7 @@
   import "dayjs/locale/sv";
   import "dayjs/locale/en";
   import CrawlResultCell from "./CrawlResultCell.svelte";
-  import CrawlRunDetails from "./CrawlRunDetails.svelte";
+  import CrawlRunDetails from "$lib/features/knowledge/CrawlRunDetails.svelte";
   import { crawlRunState, crawlRunStateLabel } from "$lib/features/knowledge/crawlRunState";
   dayjs.extend(relativeTime);
   dayjs.extend(utc);

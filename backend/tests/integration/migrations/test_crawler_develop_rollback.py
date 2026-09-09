@@ -20,7 +20,7 @@ from tests.integration.migrations.test_crawl_lifecycle_round_trip import (
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 _DEVELOP_HEAD = "202609071000"
-_CRAWLER_HEAD = "202609091300"
+_CRAWLER_HEAD = "202609091600"
 # The qualifier keeps the other side of both merge revisions at develop's head.
 _CRAWLER_ROLLBACK = "202608311430@202608121500"
 
@@ -512,3 +512,39 @@ def test_used_crawler_database_returns_to_develop_and_can_upgrade_again(
             "SELECT website_source_url FROM info_blobs WHERE id = %s", (str(new_blob),)
         )
         assert cursor.fetchone() == ("https://example.test/download?id=1",)
+
+
+def test_tenant_crawl_history_index_round_trip(
+    rollback_database: RollbackDatabase,
+) -> None:
+    database = rollback_database
+    command.upgrade(database.config, "202609091300")
+    run_id = uuid4()
+    with psycopg2.connect(database.url) as connection, connection.cursor() as cursor:
+        tenant_id, _, website_id = _insert_crawl_owner(
+            cursor, label="Tenant history index"
+        )
+        cursor.execute(
+            "INSERT INTO crawl_runs (id, website_id, tenant_id, phase, outcome, origin, finished_at) "
+            "VALUES (%s, %s, %s, 'terminal', 'succeeded', 'manual', now())",
+            (run_id, website_id, tenant_id),
+        )
+    command.upgrade(database.config, _CRAWLER_HEAD)
+    with psycopg2.connect(database.url) as connection, connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT indexdef FROM pg_indexes WHERE indexname = 'ix_crawl_runs_tenant_finished'"
+        )
+        definition = cursor.fetchone()[0]
+        assert "(tenant_id, finished_at, id)" in definition
+        assert "terminal" in definition
+        cursor.execute(
+            "SELECT indisvalid FROM pg_index WHERE indexrelid = 'ix_crawl_runs_tenant_finished'::regclass"
+        )
+        assert cursor.fetchone() == (True,)
+    command.downgrade(database.config, "202609091300")
+    with psycopg2.connect(database.url) as connection, connection.cursor() as cursor:
+        cursor.execute("SELECT to_regclass('ix_crawl_runs_tenant_finished')")
+        assert cursor.fetchone() == (None,)
+        cursor.execute("SELECT outcome FROM crawl_runs WHERE id = %s", (run_id,))
+        assert cursor.fetchone() == ("succeeded",)
+    command.upgrade(database.config, _CRAWLER_HEAD)

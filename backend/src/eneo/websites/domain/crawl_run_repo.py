@@ -2,13 +2,14 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Literal, cast
 from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from eneo.database.tables.job_table import Jobs
+from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.websites_table import CrawlAttempts, CrawlRunFailures
 from eneo.database.tables.websites_table import CrawlRuns as CrawlRunsTable
 from eneo.database.tables.websites_table import Websites as WebsitesTable
@@ -90,6 +91,26 @@ class CrawlFailurePage:
     next_cursor: UUID | None
 
 
+@dataclass(frozen=True, slots=True)
+class CrawlOverviewItem:
+    run: CrawlRun
+    website_id: UUID
+    website_name: str
+    website_url: str
+    space_name: str | None
+    started_at: datetime | None
+    last_indexed_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class CrawlOverview:
+    ongoing: int
+    queued: int
+    issues: int
+    items: list[CrawlOverviewItem]
+    next_cursor: UUID | None
+
+
 class CrawlDeletionBlocker(StrEnum):
     ACTIVE_CRAWL = "active_crawl"
     TRANSPORT_CLEANUP = "transport_cleanup_pending"
@@ -145,6 +166,137 @@ class CrawlRunRepository:
             .execution_options(populate_existing=True)
         )
         return CrawlRun.to_domain(record=record) if record is not None else None
+
+    async def one_for_tenant(self, id: UUID, tenant_id: UUID) -> CrawlRun:
+        record = await self.session.scalar(
+            sa.select(CrawlRunsTable).where(
+                CrawlRunsTable.id == id, CrawlRunsTable.tenant_id == tenant_id
+            )
+        )
+        if record is None:
+            raise NotFoundException()
+        return CrawlRun.to_domain(record)
+
+    async def tenant_overview(
+        self,
+        tenant_id: UUID,
+        *,
+        as_of: datetime,
+        view: Literal["active", "recent"] = "active",
+        status: CrawlPhase | CrawlOutcome | Literal["issues"] | None = None,
+        search: str = "",
+        limit: int = 50,
+        cursor: UUID | None = None,
+    ) -> CrawlOverview:
+        if not 1 <= limit <= 100:
+            raise BadRequestException("Page size must be between 1 and 100")
+        run = CrawlRunsTable
+        cutoff = as_of - timedelta(hours=24)
+        active = run.phase != CrawlPhase.TERMINAL
+        recent = sa.and_(run.phase == CrawlPhase.TERMINAL, run.finished_at >= cutoff)
+        queued = run.phase.in_((CrawlPhase.PENDING_DISPATCH, CrawlPhase.QUEUED))
+        issues = run.outcome.in_(
+            (CrawlOutcome.PARTIAL, CrawlOutcome.FAILED, CrawlOutcome.INTERRUPTED)
+        )
+        counts = (
+            await self.session.execute(
+                sa.select(
+                    sa.func.count().filter(run.phase.in_(_LEASED_PHASES)),
+                    sa.func.count().filter(queued),
+                    sa.func.count().filter(sa.and_(recent, issues)),
+                ).where(run.tenant_id == tenant_id, sa.or_(active, recent))
+            )
+        ).one()
+
+        # Select metadata columns only: hydrating Spaces would load its content.
+        query = (
+            sa.select(
+                run,
+                WebsitesTable.name,
+                WebsitesTable.url,
+                Spaces.name.label("space_name"),
+                CrawlAttempts.started_at,
+                WebsitesTable.last_indexed_at,
+            )
+            .join(
+                WebsitesTable,
+                sa.and_(
+                    WebsitesTable.id == run.website_id,
+                    WebsitesTable.tenant_id == tenant_id,
+                ),
+            )
+            .outerjoin(
+                Spaces,
+                sa.and_(
+                    Spaces.id == WebsitesTable.space_id, Spaces.tenant_id == tenant_id
+                ),
+            )
+            .outerjoin(
+                CrawlAttempts,
+                sa.and_(
+                    CrawlAttempts.crawl_run_id == run.id,
+                    CrawlAttempts.attempt_number == run.attempt_count,
+                ),
+            )
+            .where(run.tenant_id == tenant_id, active if view == "active" else recent)
+            .limit(limit + 1)
+        )
+        if status == "issues":
+            query = query.where(issues)
+        elif status == CrawlPhase.QUEUED:
+            query = query.where(queued)
+        elif isinstance(status, CrawlPhase):
+            query = query.where(run.phase == status)
+        elif isinstance(status, CrawlOutcome):
+            query = query.where(run.outcome == status)
+        if search.strip():
+            query = query.where(
+                sa.or_(
+                    WebsitesTable.name.icontains(search.strip(), autoescape=True),
+                    WebsitesTable.url.icontains(search.strip(), autoescape=True),
+                )
+            )
+        timestamp = run.created_at if view == "active" else run.finished_at
+        if cursor is not None:
+            anchor = (
+                await self.session.execute(
+                    sa.select(timestamp).where(
+                        run.id == cursor, run.tenant_id == tenant_id
+                    )
+                )
+            ).one_or_none()
+            if anchor is None or anchor[0] is None:
+                raise BadRequestException("Invalid crawl overview cursor")
+            position = sa.tuple_(timestamp, run.id)
+            boundary = sa.tuple_(sa.literal(anchor[0]), sa.literal(cursor))
+            query = query.where(
+                position > boundary if view == "active" else position < boundary
+            )
+        query = (
+            query.order_by(timestamp, run.id)
+            if view == "active"
+            else query.order_by(timestamp.desc(), run.id.desc())
+        )
+        rows = (await self.session.execute(query)).all()
+        items = [
+            CrawlOverviewItem(
+                run=CrawlRun.to_domain(row[0]),
+                website_id=row[0].website_id,
+                website_name=row[1],
+                website_url=row[2],
+                space_name=row[3],
+                started_at=row[4],
+                last_indexed_at=row[5],
+            )
+            for row in rows[:limit]
+        ]
+        return CrawlOverview(
+            ongoing=counts[0],
+            queued=counts[1],
+            issues=counts[2],
+            items=items,
+            next_cursor=items[-1].run.id if len(rows) > limit else None,
+        )
 
     async def get_failures(
         self, run_id: UUID, *, limit: int = 100, cursor: UUID | None = None

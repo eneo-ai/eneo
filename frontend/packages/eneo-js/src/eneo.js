@@ -17,6 +17,7 @@ import { initUserGroups } from "./endpoints/user-groups.js";
 import { initUser } from "./endpoints/users.js";
 import { initVersion } from "./endpoints/version.js";
 import { initWebsites } from "./endpoints/websites.js";
+import { initAdminCrawler } from "./endpoints/adminCrawler.js";
 import { initPrompts } from "./endpoints/prompts.js";
 import { initApps } from "./endpoints/apps.js";
 import { initTemplates } from "./endpoints/templates.js";
@@ -71,6 +72,7 @@ export function createEneo(args) {
     models: initModels(client),
     limits: initLimits(client),
     websites: initWebsites(client),
+    adminCrawler: initAdminCrawler(client),
     spaces: initSpaces(client),
     dashboard: initDashboard(client),
     prompts: initPrompts(client),

@@ -1989,6 +1989,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/crawler/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Crawler Overview
+     * @description Read tenant-wide crawl metadata and totals. Requires admin permission; includes private-space operational metadata without granting content access.
+     */
+    get: operations["get_crawler_overview_api_v1_admin_crawler__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/crawler/runs/{id}/failures/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Crawler Failures
+     * @description Read recorded failure addresses for a crawl in the administrator's tenant.
+     */
+    get: operations["get_crawler_failures_api_v1_admin_crawler_runs__id__failures__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/users/": {
     parameters: {
       query?: never;
@@ -8684,6 +8724,47 @@ export interface components {
       value: {
         [key: string]: string;
       }[];
+    };
+    /** AdminCrawlerItem */
+    AdminCrawlerItem: {
+      run: components["schemas"]["CrawlRunPublic"];
+      /**
+       * Website Id
+       * Format: uuid
+       */
+      website_id: string;
+      /** Website Name */
+      website_name: string;
+      /** Website Url */
+      website_url: string;
+      /** Space Name */
+      space_name: string | null;
+      /** Started At */
+      started_at: string | null;
+      /** Last Indexed At */
+      last_indexed_at: string | null;
+    };
+    /** AdminCrawlerOverview */
+    AdminCrawlerOverview: {
+      /**
+       * As Of
+       * Format: date-time
+       */
+      as_of: string;
+      summary: components["schemas"]["AdminCrawlerSummary"];
+      /** Items */
+      items: components["schemas"]["AdminCrawlerItem"][];
+      /** Next Cursor */
+      next_cursor: string | null;
+    };
+    /** AdminCrawlerSummary */
+    AdminCrawlerSummary: {
+      /** Ongoing */
+      ongoing: number;
+      /** Queued */
+      queued: number;
+      /** Issues */
+      issues: number;
     };
     /** AllowedOriginCreate */
     AllowedOriginCreate: {
@@ -30145,6 +30226,124 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["SessionPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_crawler_overview_api_v1_admin_crawler__get: {
+    parameters: {
+      query?: {
+        view?: "active" | "recent";
+        status?:
+          | components["schemas"]["CrawlPhase"]
+          | components["schemas"]["CrawlOutcome"]
+          | "issues"
+          | null;
+        search?: string;
+        limit?: number;
+        cursor?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminCrawlerOverview"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_crawler_failures_api_v1_admin_crawler_runs__id__failures__get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        cursor?: string | null;
+      };
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlFailurePagePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */

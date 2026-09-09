@@ -116,6 +116,13 @@ class CrawlRuns(BasePublic):
             "id",
         ),
         Index("ix_crawl_runs_tenant_phase", "tenant_id", "phase"),
+        Index(
+            "ix_crawl_runs_tenant_finished",
+            "tenant_id",
+            "finished_at",
+            "id",
+            postgresql_where=text("phase = 'terminal'"),
+        ),
     )
 
     pages_crawled: Mapped[Optional[int]] = mapped_column()
