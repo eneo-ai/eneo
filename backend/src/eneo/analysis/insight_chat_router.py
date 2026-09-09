@@ -32,6 +32,7 @@ from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.auth_dependencies import require_user_for_creation
 from eneo.authentication.auth_models import audit_actor_for
 from eneo.main.container.container import Container
+from eneo.main.exceptions import NotFoundException
 from eneo.main.logging import get_logger
 from eneo.main.models import CursorPaginatedResponse
 from eneo.questions.question import UseTools
@@ -42,6 +43,7 @@ from eneo.sessions.session import (
     SessionMetadataPublic,
     SessionPublic,
     SSEFirstChunk,
+    ToolCallResultPublic,
 )
 from eneo.sessions.session_protocol import to_session_public
 
@@ -208,6 +210,31 @@ async def get_insight_conversation(
         session_id
     )
     return to_session_public(session)
+
+
+@router.get(
+    "/{session_id}/tool-calls/{tool_call_id}/result/",
+    response_model=ToolCallResultPublic,
+    description="Lazy-load one tool call's result text from an insights conversation.",
+    responses=responses.get_responses([403, 404]),
+)
+async def get_insight_tool_call_result(
+    session_id: UUID,
+    tool_call_id: str,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    """Mirrors the conversations endpoint: results stay out of the SSE payload."""
+    session = await container.insight_conversation_service().get_conversation(
+        session_id
+    )
+    result, mcp_tool_name = await container.session_service().get_tool_call_result(
+        session=session, tool_call_id=tool_call_id
+    )
+    if result is None and mcp_tool_name is None:
+        raise NotFoundException("Tool call not found in this conversation")
+    return ToolCallResultPublic(
+        tool_call_id=tool_call_id, result=result, mcp_tool_name=mcp_tool_name
+    )
 
 
 @router.post(

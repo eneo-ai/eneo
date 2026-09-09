@@ -59,6 +59,7 @@ class InsightsChatService {
   #streamGeneration = 0;
   #historyRequestId = 0;
   #openRequestId = 0;
+  #toolCallResultCache = new Map<string, Promise<string | null>>();
 
   messages = $state<InsightsChatMessage[]>([]);
   conversationId = $state<string | null>(null);
@@ -154,6 +155,26 @@ class InsightsChatService {
       this.error = "failed";
     }
   });
+
+  /** Result text of one tool call in the open conversation, cached per call. */
+  getToolCallResult(toolCallId: string): Promise<string | null> {
+    const conversationId = this.conversationId;
+    if (!conversationId) {
+      return Promise.resolve(null);
+    }
+    const cacheKey = `${conversationId}:${toolCallId}`;
+    const cached = this.#toolCallResultCache.get(cacheKey);
+    if (cached) return cached;
+    const request = this.#eneo.analytics.insights.chat
+      .getToolCallResult({ conversation: { id: conversationId }, toolCallId })
+      .then((response) => response.result ?? null)
+      .catch((error) => {
+        this.#toolCallResultCache.delete(cacheKey);
+        throw error;
+      });
+    this.#toolCallResultCache.set(cacheKey, request);
+    return request;
+  }
 
   deleteConversation = createAsyncState(async (conversation: { id: string }) => {
     try {

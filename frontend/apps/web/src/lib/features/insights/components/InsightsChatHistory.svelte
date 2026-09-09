@@ -14,6 +14,13 @@
   import { Trash2 } from "lucide-svelte";
   import { getInsightsChatService } from "../InsightsChatService.svelte";
 
+  type Props = {
+    /** Called when the operator picks an analysis to resume. */
+    onOpen: (conversation: { id: string }) => void;
+  };
+
+  let { onOpen }: Props = $props();
+
   const chat = getInsightsChatService();
 
   const dateFormatter = new Intl.DateTimeFormat(undefined, {
@@ -52,7 +59,7 @@
           <button
             type="button"
             class="hover:bg-secondary flex min-w-0 flex-1 flex-col items-start gap-0.5 rounded-lg px-3 py-2 text-left transition-colors"
-            onclick={() => chat.openConversation(conversation)}
+            onclick={() => onOpen(conversation)}
           >
             <span class="text-primary w-full truncate text-sm">{conversation.name}</span>
             <span class="text-muted text-xs">{formatDate(conversation.created_at)}</span>

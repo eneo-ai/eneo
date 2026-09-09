@@ -2001,6 +2001,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/analysis/conversation-insights/chat/{session_id}/tool-calls/{tool_call_id}/result/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Insight Tool Call Result
+     * @description Lazy-load one tool call's result text from an insights conversation.
+     */
+    get: operations["get_insight_tool_call_result_api_v1_analysis_conversation_insights_chat__session_id__tool_calls__tool_call_id__result__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/users/": {
     parameters: {
       query?: never;
@@ -30912,6 +30932,56 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_insight_tool_call_result_api_v1_analysis_conversation_insights_chat__session_id__tool_calls__tool_call_id__result__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        session_id: string;
+        tool_call_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ToolCallResultPublic"];
+        };
       };
       /** @description Forbidden */
       403: {

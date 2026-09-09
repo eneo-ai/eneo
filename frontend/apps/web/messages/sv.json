@@ -4716,5 +4716,8 @@
   "insights_chat_history_error": "Tidigare analyser kunde inte hämtas.",
   "insights_chat_load_more": "Visa fler",
   "audit_action_insight_conversation_deleted": "Insiktskonversation borttagen",
-  "audit_action_insight_conversation_deleted_description": "En operatör tog bort en av sina insiktsanalyser."
+  "audit_action_insight_conversation_deleted_description": "En operatör tog bort en av sina insiktsanalyser.",
+  "insights_chat_tab_chat": "Analys",
+  "insights_chat_tab_history": "Tidigare analyser",
+  "insights_chat_cited_conversation": "Konversation"
 }

@@ -4716,5 +4716,8 @@
   "insights_chat_history_error": "Previous analyses could not be loaded.",
   "insights_chat_load_more": "Show more",
   "audit_action_insight_conversation_deleted": "Insights Conversation Deleted",
-  "audit_action_insight_conversation_deleted_description": "An operator deleted one of their insights analysis conversations."
+  "audit_action_insight_conversation_deleted_description": "An operator deleted one of their insights analysis conversations.",
+  "insights_chat_tab_chat": "Analysis",
+  "insights_chat_tab_history": "Previous analyses",
+  "insights_chat_cited_conversation": "Conversation"
 }

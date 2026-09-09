@@ -385,6 +385,17 @@ async def test_follow_up_history_and_delete_round_trip(
             == "top_questions"
         )
 
+        result = await client.get(
+            f"{PATH}{session_id}/tool-calls/call-1/result/", headers=headers
+        )
+        assert result.status_code == 200, result.text
+        assert result.json()["result"] == "Top 1 exact-text question groups ..."
+        assert result.json()["mcp_tool_name"] == "insights__top_questions"
+        missing = await client.get(
+            f"{PATH}{session_id}/tool-calls/no-such-call/result/", headers=headers
+        )
+        assert missing.status_code == 404
+
         deleted = await client.delete(f"{PATH}{session_id}/", headers=headers)
         assert deleted.status_code == 204, deleted.text
         gone = await client.get(f"{PATH}{session_id}/", headers=headers)

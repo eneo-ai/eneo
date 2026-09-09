@@ -604,6 +604,22 @@ export function initAnalytics(client) {
         },
 
         /**
+         * Lazy-load one tool call's result text from an insights conversation.
+         * @param {{ conversation: {id: string}, toolCallId: string }} params
+         * @returns {Promise<{tool_call_id: string, result?: string | null, mcp_tool_name?: string | null}>}
+         * @throws {EneoError}
+         */
+        getToolCallResult: async ({ conversation, toolCallId }) => {
+          return await client.fetch(
+            "/api/v1/analysis/conversation-insights/chat/{session_id}/tool-calls/{tool_call_id}/result/",
+            {
+              method: "get",
+              params: { path: { session_id: conversation.id, tool_call_id: toolCallId } }
+            }
+          );
+        },
+
+        /**
          * Delete one of the caller's insights conversations.
          * @param {{id: string}} conversation
          * @returns {Promise<true>}
