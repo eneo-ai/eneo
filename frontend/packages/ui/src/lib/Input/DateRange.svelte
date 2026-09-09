@@ -5,7 +5,7 @@
   import { Tooltip } from "$lib/Tooltip/index.js";
   import { IconCalendar } from "@eneo/icons/calendar";
   import { cva } from "class-variance-authority";
-  import { getUIMessage } from "$lib/utils/messages.js";
+  import { getUILocale, getUIMessage } from "$lib/utils/messages.js";
 
   const now = new Date();
   const today = new CalendarDate(now.getFullYear(), now.getMonth() + 1, now.getDate());
@@ -51,7 +51,7 @@
   } = createDateRangePicker({
     defaultValue: value,
     weekdayFormat: "short",
-    locale: "en-GB",
+    locale: getUILocale(),
     onValueChange: ({ next }: { next: DateRange }) => {
       value = next;
       if (onValueCommit && next.start && next.end) {
