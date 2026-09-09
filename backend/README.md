@@ -96,6 +96,19 @@ refuses to drop recorded failure addresses. Before reverting this migration, sto
 those services and preserve the database in a backup. Keep the upgraded schema,
 or export the details and explicitly approve their removal before downgrading.
 
+## Tenant crawler overview
+
+Administrators can read current and recent tenant-wide crawl activity at
+`/admin/crawler`. The API requires the existing `admin` permission and tenant-admin
+API-key scope. It includes operational metadata and failed addresses from private
+spaces without granting access to their indexed content.
+
+Apply migration `202609091600` before starting the updated backend. It creates a
+partial index for completed tenant crawl history concurrently; a retry replaces
+an invalid index left by an interrupted build. See the [overview contract and
+verification](../docs/plans/admin-crawler-overview.md) for query bounds and rollback
+behavior.
+
 ## Environment variables
 
 | Variable                         | Required | Explanation                                              |
