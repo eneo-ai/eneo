@@ -1,15 +1,15 @@
 import logging
 from typing import TYPE_CHECKING
 
-from sqlalchemy import asc, desc, exists, func, select, union_all
+from sqlalchemy import asc, desc, func, select, union_all
 
 from eneo.database.tables.ai_models_table import CompletionModels
 from eneo.database.tables.app_table import AppRuns
-from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
 from eneo.database.tables.model_providers_table import ModelProviders
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.users_table import Users
+from eneo.sessions.hidden_sessions import hidden_session_clause
 from eneo.token_usage.domain.token_usage_models import (
     ModelTokenUsage,
     TokenUsageSummary,
@@ -76,17 +76,12 @@ class UserTokenUsageAnalyzer:
                 & (Questions.created_at <= end_date),
             )
             .where(Users.tenant_id == tenant_id)
-            # Helper-assistant runs (e.g. Prompt Guide) live in the regular
-            # sessions/questions tables but must never surface in per-user
-            # analytics — they are a platform helper, not user content. Same
-            # exclusion as sessions_repo / analysis_repo (PRD §4).
-            .where(
-                ~exists(
-                    select(HelpAssistantRuns.id).where(
-                        HelpAssistantRuns.session_id == Sessions.id
-                    )
-                )
-            )
+            # Hidden sessions (helper runs such as the Prompt Guide, insight
+            # conversations) live in the regular sessions/questions tables but
+            # must never surface in per-user analytics — they are platform
+            # activity, not user content. Same exclusion as sessions_repo /
+            # analysis_repo (PRD §4).
+            .where(hidden_session_clause(Sessions.id))
         )
 
         if user_id:
@@ -417,14 +412,8 @@ class UserTokenUsageAnalyzer:
             .where(Sessions.user_id == user_id)
             .where(Questions.created_at >= start_date)
             .where(Questions.created_at <= end_date)
-            # Exclude helper-assistant runs from per-user model breakdown too.
-            .where(
-                ~exists(
-                    select(HelpAssistantRuns.id).where(
-                        HelpAssistantRuns.session_id == Sessions.id
-                    )
-                )
-            )
+            # Exclude hidden sessions from the per-user model breakdown too.
+            .where(hidden_session_clause(Sessions.id))
             .group_by(
                 Questions.completion_model_id,
                 CompletionModels.name,

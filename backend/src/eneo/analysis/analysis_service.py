@@ -25,6 +25,7 @@ from eneo.assistants.assistant_service import AssistantService
 from eneo.completion_models.infrastructure.completion_service import CompletionService
 from eneo.completion_models.infrastructure.static_prompts import ANALYSIS_PROMPT
 from eneo.group_chat.application.group_chat_service import GroupChatService
+from eneo.group_chat.domain.entities.group_chat import GroupChat
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -37,6 +38,7 @@ from eneo.roles.permissions import Permission, validate_permissions
 from eneo.sessions.session import SessionInDB, SessionMetadataPublic
 from eneo.sessions.session_service import SessionService
 from eneo.sessions.sessions_repo import SessionRepository
+from eneo.spaces.space import Space
 from eneo.spaces.space_service import SpaceService
 from eneo.users.user import UserInDB
 
@@ -373,7 +375,7 @@ class AnalysisService:
         include_followup: bool,
     ) -> tuple[Assistant, list[str]]:
         if assistant_id:
-            await self._check_insight_access(assistant_id=assistant_id)
+            await self.assert_insight_access(assistant_id=assistant_id)
             assistant, _ = await self.assistant_service.get_assistant(assistant_id)
             rows = await self.repo.get_assistant_question_texts_since(
                 assistant_id=assistant_id,
@@ -389,7 +391,7 @@ class AnalysisService:
                 "Either assistant_id or group_chat_id must be provided"
             )
 
-        await self._check_insight_access(group_chat_id=group_chat_id)
+        await self.assert_insight_access(group_chat_id=group_chat_id)
         space = await self.space_service.get_space_by_group_chat(
             group_chat_id=group_chat_id
         )
@@ -433,7 +435,7 @@ class AnalysisService:
             )
 
         if assistant_id:
-            await self._check_insight_access(assistant_id=assistant_id)
+            await self.assert_insight_access(assistant_id=assistant_id)
             question_count = await self.repo.count_assistant_questions_since(
                 assistant_id=assistant_id,
                 from_date=from_date,
@@ -445,7 +447,7 @@ class AnalysisService:
                 raise BadRequestException(
                     "Either assistant_id or group_chat_id must be provided"
                 )
-            await self._check_insight_access(group_chat_id=group_chat_id)
+            await self.assert_insight_access(group_chat_id=group_chat_id)
             question_count = await self.repo.count_group_chat_questions_since(
                 group_chat_id=group_chat_id,
                 from_date=from_date,
@@ -563,7 +565,7 @@ class AnalysisService:
             active_user_count=active_users,
         )
 
-    async def _check_space_permissions(self, space_id: UUID | None):
+    async def check_space_permissions(self, space_id: UUID | None):
         if space_id is None:
             return
 
@@ -585,7 +587,7 @@ class AnalysisService:
             raise NotFoundException("Message not found")
 
         try:
-            await self._check_insight_access(
+            await self.assert_insight_access(
                 assistant_id=partner.assistant_id,
                 group_chat_id=partner.group_chat_id,
             )
@@ -600,11 +602,16 @@ class AnalysisService:
             raise NotFoundException("Message not found")
         return question
 
-    async def _check_insight_access(
+    async def assert_insight_access(
         self,
         group_chat_id: UUID | None = None,
         assistant_id: UUID | None = None,
-    ):
+    ) -> tuple["Assistant | GroupChat", "Space"]:
+        """Raise unless the user may view insights for the target.
+
+        Returns the target and its space so callers that need them (the
+        insights chat resolves a model from the space) do not load twice.
+        """
         if assistant_id:
             space = await self.space_service.get_space_by_assistant(
                 assistant_id=assistant_id
@@ -618,8 +625,9 @@ class AnalysisService:
                 raise UnauthorizedException(
                     "Insights are not enabled for this assistant"
                 )
+            return assistant, space
 
-        elif group_chat_id:
+        if group_chat_id:
             space = await self.space_service.get_space_by_group_chat(
                 group_chat_id=group_chat_id
             )
@@ -632,10 +640,11 @@ class AnalysisService:
                 raise UnauthorizedException(
                     "Insights are not enabled for this group chat"
                 )
-        else:
-            raise BadRequestException(
-                "Either assistant_id or group_chat_id must be provided"
-            )
+            return group_chat, space
+
+        raise BadRequestException(
+            "Either assistant_id or group_chat_id must be provided"
+        )
 
     async def get_questions_since(
         self,
@@ -645,7 +654,7 @@ class AnalysisService:
         include_followups: bool = False,
     ) -> list[Question]:
         assistant, _ = await self.assistant_service.get_assistant(assistant_id)
-        await self._check_space_permissions(assistant.space_id)
+        await self.check_space_permissions(assistant.space_id)
 
         sessions = await self.repo.get_assistant_sessions_since(
             assistant_id=assistant_id,
@@ -715,7 +724,7 @@ class AnalysisService:
         include_followup: bool = False,
     ) -> CompletionModelResponse:
         assistant, _ = await self.assistant_service.get_assistant(assistant_id)
-        await self._check_space_permissions(assistant.space_id)
+        await self.check_space_permissions(assistant.space_id)
         rows = await self.repo.get_assistant_question_texts_since(
             assistant_id=assistant_id,
             from_date=from_date,
@@ -814,7 +823,7 @@ class AnalysisService:
         cursor: str | None = None,
     ) -> tuple[list[AssistantInsightQuestion], int, str | None]:
         assistant, _ = await self.assistant_service.get_assistant(assistant_id)
-        await self._check_space_permissions(assistant.space_id)
+        await self.check_space_permissions(assistant.space_id)
 
         cursor_created_at, cursor_id = self._decode_question_cursor(cursor)
         started = perf_counter()
@@ -896,7 +905,7 @@ class AnalysisService:
             UnauthorizedException: If the user doesn't have insight access
         """
 
-        await self._check_insight_access(assistant_id=assistant_id)
+        await self.assert_insight_access(assistant_id=assistant_id)
 
         sessions, total = await self.session_repo.get_metadata_by_assistant(
             assistant_id=assistant_id,
@@ -938,7 +947,7 @@ class AnalysisService:
             UnauthorizedException: If the user doesn't have insight access
         """
 
-        await self._check_insight_access(group_chat_id=group_chat_id)
+        await self.assert_insight_access(group_chat_id=group_chat_id)
 
         sessions, total = await self.session_repo.get_metadata_by_group_chat(
             group_chat_id=group_chat_id,
@@ -974,11 +983,11 @@ class AnalysisService:
         assert session is not None
 
         if session.group_chat_id is not None:
-            await self._check_insight_access(group_chat_id=session.group_chat_id)
+            await self.assert_insight_access(group_chat_id=session.group_chat_id)
         else:
             if session.assistant is None:
                 raise NotFoundException("Session assistant not found")
-            await self._check_insight_access(assistant_id=session.assistant.id)
+            await self.assert_insight_access(assistant_id=session.assistant.id)
 
         return session
 
@@ -1019,9 +1028,9 @@ class AnalysisService:
             )
 
         if assistant_id:
-            await self._check_insight_access(assistant_id=assistant_id)
+            await self.assert_insight_access(assistant_id=assistant_id)
         elif group_chat_id:
-            await self._check_insight_access(group_chat_id=group_chat_id)
+            await self.assert_insight_access(group_chat_id=group_chat_id)
 
         # Use default date range if not provided
         if start_time is None:

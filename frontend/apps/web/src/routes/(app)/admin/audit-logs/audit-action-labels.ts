@@ -556,6 +556,14 @@ const ACTION_MESSAGES = {
   help_assistant_uninstalled: {
     name: m.audit_action_help_assistant_uninstalled,
     description: m.audit_action_help_assistant_uninstalled_description
+  },
+  insight_conversation_started: {
+    name: m.audit_action_insight_conversation_started,
+    description: m.audit_action_insight_conversation_started_description
+  },
+  insight_conversation_deleted: {
+    name: m.audit_action_insight_conversation_deleted,
+    description: m.audit_action_insight_conversation_deleted_description
   }
 } satisfies Record<ActionType, { name: MessageFn; description: MessageFn }>;
 

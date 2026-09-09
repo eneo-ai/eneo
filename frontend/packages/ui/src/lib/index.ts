@@ -14,4 +14,9 @@ export * as Select from "./Select/index.js";
 export * as Table from "./Table/index.js";
 
 // Export messages utility
-export { MESSAGES_CONTEXT_KEY, getUIMessage } from "./utils/messages.js";
+export {
+  LOCALE_CONTEXT_KEY,
+  MESSAGES_CONTEXT_KEY,
+  getUILocale,
+  getUIMessage
+} from "./utils/messages.js";
