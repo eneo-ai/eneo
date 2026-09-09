@@ -141,8 +141,9 @@ CATEGORY_MAPPINGS = {
     ActionType.HELP_ASSISTANT_ROLE_TOGGLED_VISIBLE.value: "admin_actions",
     ActionType.HELP_ASSISTANT_INSTALLED.value: "admin_actions",
     ActionType.HELP_ASSISTANT_UNINSTALLED.value: "admin_actions",
-    # Insights Actions (1 action)
+    # Insights Actions (2 actions)
     ActionType.INSIGHT_CONVERSATION_STARTED.value: "user_actions",
+    ActionType.INSIGHT_CONVERSATION_DELETED.value: "user_actions",
     # System Actions (3 actions)
     ActionType.RETENTION_POLICY_APPLIED.value: "system_actions",
     ActionType.ENCRYPTION_KEY_ROTATED.value: "system_actions",

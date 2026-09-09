@@ -4701,5 +4701,20 @@
   "insights_chat_empty": "Ställ en fråga om hur den här assistenten har använts. Analysen läser konversationerna i den valda tidsramen och visar varje steg den tar.",
   "insights_chat_example_yesterday": "Vad frågade användarna om igår?",
   "insights_chat_example_top": "Vilka är de fem vanligaste frågorna?",
-  "insights_chat_example_trend": "Hur har användningen förändrats vecka för vecka?"
+  "insights_chat_example_trend": "Hur har användningen förändrats vecka för vecka?",
+  "insights_tool_search_questions": "Söker bland frågor",
+  "insights_tool_search_questions_query": "Söker frågor om ”{query}”",
+  "insights_tool_search_questions_done": "Sökte bland frågor",
+  "insights_tool_search_questions_query_done": "Sökte frågor om ”{query}”",
+  "insights_tool_read_conversation": "Läser en konversation",
+  "insights_tool_read_conversation_done": "Läste en konversation",
+  "insights_tool_find_gaps": "Letar efter obesvarade frågor",
+  "insights_tool_find_gaps_done": "Letade efter obesvarade frågor",
+  "insights_chat_history": "Tidigare analyser",
+  "insights_chat_empty_history": "Inga tidigare analyser ännu.",
+  "insights_chat_delete_conversation": "Ta bort analys",
+  "insights_chat_history_error": "Tidigare analyser kunde inte hämtas.",
+  "insights_chat_load_more": "Visa fler",
+  "audit_action_insight_conversation_deleted": "Insiktskonversation borttagen",
+  "audit_action_insight_conversation_deleted_description": "En operatör tog bort en av sina insiktsanalyser."
 }

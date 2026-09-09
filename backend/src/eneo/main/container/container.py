@@ -19,6 +19,7 @@ from eneo.allowed_origins.allowed_origin_repo import AllowedOriginRepository
 from eneo.allowed_origins.allowed_origin_service import AllowedOriginService
 from eneo.analysis.analysis_repo import AnalysisRepository
 from eneo.analysis.analysis_service import AnalysisService
+from eneo.analysis.insight_conversation_repo import InsightConversationRepository
 from eneo.analysis.insight_conversation_service import InsightConversationService
 from eneo.analysis.insights_repo import InsightsRepository
 from eneo.apps import (
@@ -778,6 +779,9 @@ class Container(containers.DeclarativeContainer):
         file_content_loader=file_content_loader,
     )
     insights_repo = providers.Factory(InsightsRepository, session=session)
+    insight_conversation_repo = providers.Factory(
+        InsightConversationRepository, session=session
+    )
     session_repo = providers.Factory(
         SessionRepository,
         session=session,
@@ -1585,6 +1589,8 @@ class Container(containers.DeclarativeContainer):
         session_service=session_service,
         completion_service=completion_service,
         auth_service=auth_service,
+        session_repo=session_repo,
+        insight_conversation_repo=insight_conversation_repo,
     )
 
     conversation_service = providers.Factory(

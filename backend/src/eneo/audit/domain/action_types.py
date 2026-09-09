@@ -139,6 +139,7 @@ class ActionType(str, Enum):
 
     # Insights Actions
     INSIGHT_CONVERSATION_STARTED = "insight_conversation_started"
+    INSIGHT_CONVERSATION_DELETED = "insight_conversation_deleted"
 
     # SCIM Provisioning Actions
     SCIM_USER_PROVISIONED = "scim_user_provisioned"

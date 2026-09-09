@@ -560,6 +560,10 @@ const ACTION_MESSAGES = {
   insight_conversation_started: {
     name: m.audit_action_insight_conversation_started,
     description: m.audit_action_insight_conversation_started_description
+  },
+  insight_conversation_deleted: {
+    name: m.audit_action_insight_conversation_deleted,
+    description: m.audit_action_insight_conversation_deleted_description
   }
 } satisfies Record<ActionType, { name: MessageFn; description: MessageFn }>;
 

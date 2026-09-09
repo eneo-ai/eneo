@@ -36,8 +36,8 @@ async def test_session_repo_hides_insight_conversations(
         ids = {s.id for s in sessions}
         assert seed["insight_session"] not in ids
         assert seed["helper_session"] not in ids
-        assert {seed["s1"], seed["s2"], seed["s3"]} <= ids
-        assert total == len(sessions) == 3
+        assert {seed["s1"], seed["s2"], seed["s3"], seed["s4"], seed["s5"]} <= ids
+        assert total == len(sessions) == 5
 
         metadata, _ = await repo.get_metadata_by_assistant(
             assistant_id=seed["bygg"], tenant_id=seed["tenant_id"]
@@ -71,7 +71,7 @@ async def test_analysis_and_question_repos_hide_insight_conversations(
             to_date=_TO,
             tenant_id=seed["tenant_id"],
         )
-        assert count == 4
+        assert count == 8
 
         tenant_questions = await question_repo.get_by_tenant(
             tenant_id=seed["tenant_id"], start_date=_FROM, end_date=_TO

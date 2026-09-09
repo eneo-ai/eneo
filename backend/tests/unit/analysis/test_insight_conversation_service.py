@@ -28,7 +28,11 @@ from eneo.analysis.insight_exceptions import (
     InvalidTimezoneError,
 )
 from eneo.assistants.assistant import Assistant
-from eneo.main.exceptions import BadRequestException
+from eneo.main.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    UnauthorizedException,
+)
 from eneo.questions.question import ToolCallInfo
 
 
@@ -229,7 +233,54 @@ class _Harness:
             ),
             completion_service=SimpleNamespace(get_response=get_response),
             auth_service=SimpleNamespace(create_scoped_mcp_token=create_token),
+            session_repo=SimpleNamespace(
+                get_for_insight_conversation=self._get_session,
+                delete=self._delete_session,
+            ),
+            insight_conversation_repo=SimpleNamespace(
+                get_by_session_id=self._get_link, list_for_actor=self._list
+            ),
         )
+        self.link = None
+        self.deleted = []
+        self.placeholders = []
+
+    async def _get_link(self, session_id, tenant_id):
+        return self.link
+
+    async def _get_session(self, session_id, tenant_id):
+        return self.session
+
+    async def _delete_session(self, session_id):
+        self.deleted.append(session_id)
+        return self.session
+
+    async def _list(self, **kwargs):
+        self.list_kwargs = kwargs
+        return [], 0, None
+
+    def with_link(self, *, own=True, kind="assistant"):
+        from eneo.analysis.insight_conversation_repo import InsightConversation
+
+        target = uuid4()
+        self.link = InsightConversation(
+            id=uuid4(),
+            tenant_id=self.user.tenant_id,
+            session_id=self.session.id,
+            assistant_id=target if kind == "assistant" else None,
+            group_chat_id=target if kind == "group_chat" else None,
+            actor_user_id=self.user.id if own else uuid4(),
+            completion_model_id=self.model.id,
+            timezone="Europe/Stockholm",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        self.service.session_service.create_question_placeholder = self._placeholder
+        return self.link
+
+    async def _placeholder(self, **kwargs):
+        self.placeholders.append(kwargs)
+        return self.question_id, datetime.now(timezone.utc)
 
     async def start(self, **overrides):
         kwargs = dict(
@@ -491,3 +542,102 @@ class TestStreaming:
 
         assert scheduled == []
         assert harness.completed == []
+
+
+class TestContinueTurn:
+    @pytest.mark.asyncio
+    async def test_unknown_conversation_is_not_found(self):
+        harness = _Harness(response=None)
+
+        with pytest.raises(NotFoundException):
+            await harness.service.continue_turn(
+                session_id=uuid4(), question="q", stream=False, selected_range=None
+            )
+
+    @pytest.mark.asyncio
+    async def test_another_actors_conversation_is_forbidden(self):
+        harness = _Harness(response=None)
+        harness.with_link(own=False)
+
+        with pytest.raises(UnauthorizedException) as excinfo:
+            await harness.service.continue_turn(
+                session_id=harness.session.id,
+                question="q",
+                stream=False,
+                selected_range=None,
+            )
+        assert excinfo.value.code == "forbidden_action"
+        assert harness.access_checks == []
+
+    @pytest.mark.asyncio
+    async def test_follow_up_reuses_the_session_and_rechecks_access(self):
+        harness = _Harness(
+            response=SimpleNamespace(
+                completion="Följdsvar", usage=None, total_token_count=3
+            )
+        )
+        link = harness.with_link(kind="group_chat")
+        harness.target = SimpleNamespace(name="Team")
+
+        turn = await harness.service.continue_turn(
+            session_id=harness.session.id,
+            question="Och förra veckan?",
+            stream=False,
+            selected_range=None,
+        )
+
+        assert harness.access_checks[0] == {
+            "assistant_id": None,
+            "group_chat_id": link.group_chat_id,
+        }
+        (placeholder,) = harness.placeholders
+        assert placeholder["session"] is harness.session
+        assert placeholder["assistant_id"] is None
+        assert harness.token_kwargs["insight_target"] == (
+            "group_chat",
+            link.group_chat_id,
+        )
+        assert harness.completion_kwargs["session"] is harness.session
+        assert "timezone Europe/Stockholm" in harness.completion_kwargs["prompt"]
+        assert turn.answer == "Följdsvar"
+        assert turn.question_id == harness.question_id
+
+
+class TestConversationManagement:
+    @pytest.mark.asyncio
+    async def test_list_requires_one_target_and_checks_access(self):
+        harness = _Harness(response=None)
+
+        with pytest.raises(BadRequestException):
+            await harness.service.list_conversations(
+                assistant_id=None, group_chat_id=None, limit=10, cursor=None
+            )
+
+        assistant_id = uuid4()
+        await harness.service.list_conversations(
+            assistant_id=assistant_id, group_chat_id=None, limit=10, cursor=None
+        )
+        assert harness.access_checks == [
+            {"assistant_id": assistant_id, "group_chat_id": None}
+        ]
+        assert harness.list_kwargs["actor_user_id"] == harness.user.id
+        assert harness.list_kwargs["assistant_id"] == assistant_id
+
+    @pytest.mark.asyncio
+    async def test_get_and_delete_are_actor_scoped(self):
+        harness = _Harness(response=None)
+        harness.with_link(own=False)
+
+        with pytest.raises(UnauthorizedException):
+            await harness.service.get_conversation(harness.session.id)
+        with pytest.raises(UnauthorizedException):
+            await harness.service.delete_conversation(harness.session.id)
+        assert harness.deleted == []
+
+        link = harness.with_link(own=True)
+        assert (
+            await harness.service.get_conversation(harness.session.id)
+            is harness.session
+        )
+        assert await harness.service.delete_conversation(harness.session.id) is link
+        assert harness.deleted == [harness.session.id]

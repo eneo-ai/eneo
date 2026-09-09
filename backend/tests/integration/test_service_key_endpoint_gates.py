@@ -369,6 +369,11 @@ _CREATION_ENDPOINTS: list[tuple[str, str, dict | None]] = [
         "/api/v1/analysis/conversation-insights/chat/",
         {"assistant_id": _STUB_ID, "question": "x"},
     ),
+    (
+        "POST",
+        f"/api/v1/analysis/conversation-insights/chat/{_STUB_ID}/",
+        {"question": "x"},
+    ),
 ]
 
 

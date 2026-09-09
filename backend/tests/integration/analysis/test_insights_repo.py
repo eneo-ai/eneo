@@ -40,9 +40,9 @@ async def test_count_usage_totals_and_local_day_buckets(
         stockholm = await repo.count_usage(_scope(seed), _window(), "day")
         utc_summary = await repo.count_usage(_scope(seed), _window("UTC"), "day")
 
-    assert stockholm.questions == 4
-    assert stockholm.conversations == 3
-    assert stockholm.followups == 1
+    assert stockholm.questions == 8
+    assert stockholm.conversations == 5
+    assert stockholm.followups == 3
     assert stockholm.users == 1
     assert stockholm.api_key_conversations == 0
     # 22:30 UTC on the 7th is already the 8th in Stockholm.
@@ -50,14 +50,14 @@ async def test_count_usage_totals_and_local_day_buckets(
         (b.bucket_start.date().isoformat(), b.questions) for b in stockholm.buckets
     ] == [
         ("2026-09-06", 1),
-        ("2026-09-07", 2),
+        ("2026-09-07", 6),
         ("2026-09-08", 1),
     ]
     assert [
         (b.bucket_start.date().isoformat(), b.questions) for b in utc_summary.buckets
     ] == [
         ("2026-09-06", 1),
-        ("2026-09-07", 3),
+        ("2026-09-07", 7),
     ]
 
 
@@ -80,21 +80,31 @@ async def test_list_questions_is_newest_first_and_hides_hidden_sessions(
             _scope(seed), _window(), include_followups=True, offset=1, limit=2
         )
 
-    assert total == 3
-    assert [row.session_id for row in opening] == [seed["s2"], seed["s1"], seed["s3"]]
+    assert total == 5
+    assert [row.session_id for row in opening] == [
+        seed["s2"],
+        seed["s5"],
+        seed["s4"],
+        seed["s1"],
+        seed["s3"],
+    ]
     assert all(not row.is_followup for row in opening)
 
-    assert total_all == 4
-    assert [row.question for row in everything] == [
+    assert total_all == 8
+    assert [row.question for row in everything][:3] == [
         "hur ansöker jag om bygglov",
+        "var parkerar jag??",
+        "Var parkerar jag i centrum?",
+    ]
+    assert [row.question for row in everything][-3:] == [
         "Vad kostar det?",
         "Hur ansöker jag om bygglov?",
         "Öppettider?",
     ]
-    assert [row.is_followup for row in everything] == [False, True, False, False]
+    assert [row.is_followup for row in everything][-3:] == [True, False, False]
     assert [row.question for row in page] == [
-        "Vad kostar det?",
-        "Hur ansöker jag om bygglov?",
+        "var parkerar jag??",
+        "Var parkerar jag i centrum?",
     ]
 
     texts = {row.question for row in everything}
@@ -120,11 +130,15 @@ async def test_window_is_on_question_time(db_container, admin_user, seed_insight
             _scope(seed), window, include_followups=True, offset=0, limit=50
         )
 
-    assert total == 2
-    assert [(row.question, row.is_followup) for row in rows] == [
-        ("hur ansöker jag om bygglov", False),
+    assert total == 6
+    assert [(row.question, row.is_followup) for row in rows][-2:] == [
+        ("Kan ni hjälpa mig med deklarationen?", False),
         ("Vad kostar det?", True),
     ]
+    assert (rows[0].question, rows[0].is_followup) == (
+        "hur ansöker jag om bygglov",
+        False,
+    )
 
 
 @pytest.mark.asyncio
@@ -143,17 +157,14 @@ async def test_top_questions_merges_exact_text_after_normalisation(
             _scope(seed), _window(), n=1, include_followups=True
         )
 
-    assert total == 3
+    assert total == 5
     assert [
         (normalize_question_text(r.display_text), r.occurrences, r.conversations)
         for r in rows
-    ] == [
-        ("hur ansöker jag om bygglov", 2, 2),
-        ("öppettider", 1, 1),
-    ]
+    ][0] == ("hur ansöker jag om bygglov", 2, 2)
     assert set(rows[0].sample_session_ids) == {seed["s1"], seed["s2"]}
 
-    assert total_with == 4
+    assert total_with == 8
     assert len(with_followups) == 1
     assert with_followups[0].occurrences == 2
 
@@ -182,3 +193,89 @@ async def test_group_chat_scope_sees_only_its_own_questions(
     assert rows[0].question == "gc question"
     assert rows[0].session_id == seed["gc_session"]
     assert summary.conversations == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_search_questions_substring_first_then_trigram(
+    db_container, admin_user, seed_insights
+):
+    async with db_container() as container:
+        seed = await seed_insights(container, admin_user)
+        repo = container.insights_repo()
+
+        hits, total = await repo.search_questions(
+            _scope(seed), _window(), query="bygglov", offset=0, limit=10
+        )
+        fuzzy, fuzzy_total = await repo.search_questions(
+            _scope(seed), _window(), query="parkerar jag", offset=0, limit=10
+        )
+        none, none_total = await repo.search_questions(
+            _scope(seed), _window(), query="zzzzqqq", offset=0, limit=10
+        )
+
+    assert total == 2
+    assert all(hit.exact for hit in hits)
+    assert {hit.session_id for hit in hits} == {seed["s1"], seed["s2"]}
+    assert fuzzy_total == 3 and {hit.session_id for hit in fuzzy} == {seed["s5"]}
+    assert none == [] and none_total == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_transcript_returns_turns_in_order_and_none_for_hidden_or_foreign(
+    db_container, admin_user, seed_insights
+):
+    async with db_container() as container:
+        seed = await seed_insights(container, admin_user)
+        repo = container.insights_repo()
+
+        transcript = await repo.get_transcript(_scope(seed), seed["s1"])
+        hidden = await repo.get_transcript(_scope(seed), seed["insight_session"])
+        foreign = await repo.get_transcript(_scope(seed), seed["other_session"])
+
+    assert transcript is not None
+    assert transcript.session_id == seed["s1"]
+    assert [turn.question for turn in transcript.turns] == [
+        "Hur ansöker jag om bygglov?",
+        "Vad kostar det?",
+    ]
+    assert transcript.turns[0].answer.startswith("answer to")
+    assert transcript.turns[0].cited_passages == 0
+    assert hidden is None and foreign is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_gap_signals(db_container, admin_user, seed_insights):
+    async with db_container() as container:
+        seed = await seed_insights(container, admin_user)
+        repo = container.insights_repo()
+
+        unanswered, unanswered_total = await repo.find_unanswered(
+            _scope(seed), _window(), offset=0, limit=10
+        )
+        no_knowledge, no_knowledge_total, median = await repo.find_no_knowledge(
+            _scope(seed), _window(), offset=0, limit=50
+        )
+        rephrasing, rephrasing_total = await repo.find_rephrasing(
+            _scope(seed), _window(), offset=0, limit=10
+        )
+
+    assert unanswered_total == 1
+    assert unanswered[0].session_id == seed["s4"]
+    assert unanswered[0].evidence.lower() == "kan tyvärr inte hjälpa"
+
+    # No seeded turn cites knowledge, so every turn is flagged as uncited and
+    # there is no median score to report.
+    assert no_knowledge_total == 8 and median is None
+    assert {row.reason for row in no_knowledge} == {"answer cited no knowledge"}
+
+    assert rephrasing_total == 1
+    assert rephrasing[0].session_id == seed["s5"]
+    assert rephrasing[0].similar_pairs >= 1
+    assert rephrasing[0].questions == [
+        "Var parkerar jag?",
+        "Var parkerar jag i centrum?",
+        "var parkerar jag??",
+    ]

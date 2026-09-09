@@ -9,6 +9,7 @@
   import { IconSparkles } from "@eneo/icons/sparkles";
   import { Button } from "@eneo/ui";
   import { getInsightsChatService } from "../InsightsChatService.svelte";
+  import InsightsChatHistory from "./InsightsChatHistory.svelte";
   import InsightsChatInput from "./InsightsChatInput.svelte";
   import InsightsChatMessages from "./InsightsChatMessages.svelte";
 
@@ -54,6 +55,7 @@
         disabled={chat.isStreaming}
         onclick={() => {
           chat.reset();
+          chat.loadHistory();
           inputRef?.focus();
         }}>{m.insights_chat_new_conversation()}</Button
       >
@@ -70,8 +72,12 @@
   >
     {#if hasMessages}
       <InsightsChatMessages messages={chat.messages} isStreaming={chat.isStreaming} />
+    {:else if chat.openConversation.isLoading}
+      <div class="text-secondary flex h-full items-center justify-center text-sm">
+        {m.loading()}
+      </div>
     {:else}
-      <div class="flex h-full flex-col items-center justify-center gap-4 text-center">
+      <div class="flex min-h-full flex-col items-center justify-center gap-6 text-center">
         <p class="text-secondary max-w-[40ch] text-sm">{m.insights_chat_empty()}</p>
         <ul class="flex flex-wrap justify-center gap-2">
           {#each examples as example (example)}
@@ -86,6 +92,10 @@
             </li>
           {/each}
         </ul>
+        {#if chat.error}
+          <p class="text-negative-default text-sm" role="alert">{m.insights_chat_error()}</p>
+        {/if}
+        <InsightsChatHistory />
       </div>
     {/if}
   </div>

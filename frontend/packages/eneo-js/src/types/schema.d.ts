@@ -1956,7 +1956,11 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    get?: never;
+    /**
+     * List Insight Conversations
+     * @description The caller's own insights conversations about an assistant or group chat, newest first.
+     */
+    get: operations["list_insight_conversations_api_v1_analysis_conversation_insights_chat__get"];
     put?: never;
     /**
      * Start Insight Conversation
@@ -1964,6 +1968,34 @@ export interface paths {
      */
     post: operations["start_insight_conversation_api_v1_analysis_conversation_insights_chat__post"];
     delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/analysis/conversation-insights/chat/{session_id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Insight Conversation
+     * @description One of the caller's insights conversations with all its turns.
+     */
+    get: operations["get_insight_conversation_api_v1_analysis_conversation_insights_chat__session_id___get"];
+    put?: never;
+    /**
+     * Continue Insight Conversation
+     * @description Follow-up turn on one of the caller's insights conversations. Streams Server-Sent Events when stream is true.
+     */
+    post: operations["continue_insight_conversation_api_v1_analysis_conversation_insights_chat__session_id___post"];
+    /**
+     * Delete Insight Conversation
+     * @description Delete one of the caller's insights conversations.
+     */
+    delete: operations["delete_insight_conversation_api_v1_analysis_conversation_insights_chat__session_id___delete"];
     options?: never;
     head?: never;
     patch?: never;
@@ -8563,6 +8595,7 @@ export interface components {
       | "help_assistant_installed"
       | "help_assistant_uninstalled"
       | "insight_conversation_started"
+      | "insight_conversation_deleted"
       | "scim_user_provisioned"
       | "scim_user_reconciled"
       | "scim_user_reactivated"
@@ -13608,6 +13641,20 @@ export interface components {
      */
     InputFieldType:
       "text-field" | "text-upload" | "audio-upload" | "audio-recorder" | "image-upload";
+    /**
+     * InsightChatContinueRequest
+     * @description Follow-up turn on an existing insights conversation.
+     */
+    InsightChatContinueRequest: {
+      /** Question */
+      question: string;
+      /**
+       * Stream
+       * @default false
+       */
+      stream?: boolean;
+      selected_range?: components["schemas"]["InsightSelectedRange"] | null;
+    };
     /**
      * InsightChatStartRequest
      * @description Start a new insights conversation about one assistant or group chat.
@@ -30034,6 +30081,67 @@ export interface operations {
       };
     };
   };
+  list_insight_conversations_api_v1_analysis_conversation_insights_chat__get: {
+    parameters: {
+      query?: {
+        assistant_id?: string | null;
+        group_chat_id?: string | null;
+        limit?: number;
+        cursor?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CursorPaginatedResponse_SessionMetadataPublic_"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   start_insight_conversation_api_v1_analysis_conversation_insights_chat__post: {
     parameters: {
       query?: never;
@@ -30355,6 +30463,455 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["GeneralError"];
         };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_insight_conversation_api_v1_analysis_conversation_insights_chat__session_id___get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SessionPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  continue_insight_conversation_api_v1_analysis_conversation_insights_chat__session_id___post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["InsightChatContinueRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AskChatResponse"];
+          "text/event-stream": {
+            /** Id */
+            id?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+            completion_model?: components["schemas"]["CompletionModelPublic"] | null;
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+            /** Question */
+            question: string;
+            /** Answer */
+            answer: string;
+            /** Files */
+            files: components["schemas"]["FilePublic"][];
+            /** Generated Files */
+            generated_files: components["schemas"]["FilePublic"][];
+            /** References */
+            references: components["schemas"]["InfoBlobAskAssistantPublic"][];
+            tools: components["schemas"]["UseTools"];
+            /**
+             * Mcp Tool References
+             * @default []
+             */
+            mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
+            $defs: {
+              /** CompletionModelPublic */
+              CompletionModelPublic: {
+                /** Created At */
+                created_at?: string | null;
+                /** Updated At */
+                updated_at?: string | null;
+                /**
+                 * Id
+                 * Format: uuid
+                 */
+                id: string;
+                /** Name */
+                name: string;
+                /** Nickname */
+                nickname?: string | null;
+                /** Family */
+                family?: string | null;
+                /** Max Input Tokens */
+                max_input_tokens: number;
+                /** Max Output Tokens */
+                max_output_tokens: number;
+                /** Is Deprecated */
+                is_deprecated: boolean;
+                /** Nr Billion Parameters */
+                nr_billion_parameters?: number | null;
+                /** Hf Link */
+                hf_link?: string | null;
+                /** Stability */
+                stability?: string | null;
+                /** Hosting */
+                hosting?: string | null;
+                /** Open Source */
+                open_source?: boolean | null;
+                /** Description */
+                description?: string | null;
+                /** Deployment Name */
+                deployment_name?: string | null;
+                /** Org */
+                org?: string | null;
+                /** Vision */
+                vision: boolean;
+                /** Reasoning */
+                reasoning: boolean;
+                /**
+                 * Supports Tool Calling
+                 * @default false
+                 */
+                supports_tool_calling?: boolean;
+                /** Base Url */
+                base_url?: string | null;
+                /** Litellm Model Name */
+                litellm_model_name?: string | null;
+                model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
+                /** Input Cost Per Token */
+                input_cost_per_token?: number | string | null;
+                /** Output Cost Per Token */
+                output_cost_per_token?: number | string | null;
+                /**
+                 * Is Org Enabled
+                 * @default false
+                 */
+                is_org_enabled?: boolean;
+                /**
+                 * Is Org Default
+                 * @default false
+                 */
+                is_org_default?: boolean;
+                /** Tenant Id */
+                tenant_id?: string | null;
+                /** Provider Id */
+                provider_id?: string | null;
+                /** Provider Type */
+                provider_type?: string | null;
+                /** Migrated To Model Id */
+                migrated_to_model_id?: string | null;
+                /**
+                 * Can Access
+                 * @default false
+                 */
+                can_access?: boolean;
+                /**
+                 * Is Locked
+                 * @default true
+                 */
+                is_locked?: boolean;
+                /** Lock Reason */
+                lock_reason?: string | null;
+                /** Credential Provider */
+                credential_provider?: string | null;
+                security_classification?:
+                  components["schemas"]["SecurityClassificationPublic"] | null;
+                /** Provider Name */
+                provider_name?: string | null;
+                /** Deprecation Date */
+                deprecation_date?: string | null;
+              };
+              /** FilePublic */
+              FilePublic: {
+                /** Created At */
+                created_at?: string | null;
+                /** Updated At */
+                updated_at?: string | null;
+                /**
+                 * Id
+                 * Format: uuid
+                 */
+                id: string;
+                /** Name */
+                name: string;
+                /** Mimetype */
+                mimetype: string;
+                /** Size */
+                size: number;
+                /** Transcription */
+                transcription?: string | null;
+                /** Token Count */
+                token_count?: number | null;
+                /**
+                 * Has Download Reference
+                 * @default false
+                 */
+                has_download_reference?: boolean;
+              };
+              /** InfoBlobAskAssistantPublic */
+              InfoBlobAskAssistantPublic: {
+                /** Created At */
+                created_at?: string | null;
+                /** Updated At */
+                updated_at?: string | null;
+                /**
+                 * Id
+                 * Format: uuid
+                 */
+                id: string;
+                metadata: components["schemas"]["InfoBlobMetadata"];
+                /** Group Id */
+                group_id?: string | null;
+                /** Website Id */
+                website_id?: string | null;
+                /** Original Available */
+                original_available: boolean;
+                /** Score */
+                score: number;
+              };
+              /** InfoBlobMetadata */
+              InfoBlobMetadata: {
+                /** Url */
+                url?: string | null;
+                /** Title */
+                title?: string | null;
+                /**
+                 * Embedding Model Id
+                 * Format: uuid
+                 */
+                embedding_model_id: string;
+                /** Size */
+                size: number;
+              };
+              /**
+               * McpToolReferencePublic
+               * @description One MCP resource block captured from a tool call.
+               *
+               *     Generic across MCP servers: only `uri`, `mime_type`, `content`, and the
+               *     raw `meta` dict are exposed. Frontend may read generic keys from `meta`
+               *     (e.g. `sourceType`, `title`) to drive richer affordances but must degrade
+               *     gracefully when meta is empty.
+               */
+              McpToolReferencePublic: {
+                /** Created At */
+                created_at?: string | null;
+                /** Updated At */
+                updated_at?: string | null;
+                /**
+                 * Id
+                 * Format: uuid
+                 */
+                id: string;
+                /** Uri */
+                uri: string;
+                /** Mime Type */
+                mime_type?: string | null;
+                /** Content */
+                content?: string | null;
+                /**
+                 * Meta
+                 * @default {}
+                 */
+                meta?: {
+                  [key: string]: unknown;
+                };
+                /** Tool Call Id */
+                tool_call_id?: string | null;
+                /** Mcp Tool Name */
+                mcp_tool_name?: string | null;
+              };
+              /** ModelKwargCapability */
+              ModelKwargCapability: {
+                /**
+                 * Supported
+                 * @default false
+                 */
+                supported?: boolean;
+                /** Control */
+                control?: ("slider" | "select") | null;
+                /** Minimum */
+                minimum?: number | null;
+                /** Maximum */
+                maximum?: number | null;
+                /** Step */
+                step?: number | null;
+                /** Options */
+                options?: string[] | null;
+              };
+              /**
+               * SecurityClassificationPublic
+               * @description Basic security classification information.
+               */
+              SecurityClassificationPublic: {
+                /** Created At */
+                created_at?: string | null;
+                /** Updated At */
+                updated_at?: string | null;
+                /**
+                 * Id
+                 * Format: uuid
+                 */
+                id: string;
+                /** Name */
+                name: string;
+                /** Description */
+                description: string | null;
+                /** Security Level */
+                security_level: number;
+              };
+              /** SupportedModelKwargs */
+              SupportedModelKwargs: {
+                temperature?: components["schemas"]["ModelKwargCapability"];
+                top_p?: components["schemas"]["ModelKwargCapability"];
+                reasoning_effort?: components["schemas"]["ModelKwargCapability"];
+                verbosity?: components["schemas"]["ModelKwargCapability"];
+                presence_penalty?: components["schemas"]["ModelKwargCapability"];
+                frequency_penalty?: components["schemas"]["ModelKwargCapability"];
+                top_k?: components["schemas"]["ModelKwargCapability"];
+              };
+              /** ToolAssistant */
+              ToolAssistant: {
+                /**
+                 * Id
+                 * Format: uuid
+                 */
+                id: string;
+                /** Handle */
+                handle: string;
+              };
+              /** UseTools */
+              UseTools: {
+                /** Assistants */
+                assistants: components["schemas"]["ToolAssistant"][];
+              };
+            };
+          };
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_insight_conversation_api_v1_analysis_conversation_insights_chat__session_id___delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Forbidden */
       403: {

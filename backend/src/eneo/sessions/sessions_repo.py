@@ -12,6 +12,7 @@ from eneo.database.tables.api_keys_v2_table import ApiKeysV2
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.info_blobs_table import InfoBlobs
+from eneo.database.tables.insight_conversations_table import InsightConversations
 from eneo.database.tables.questions_table import (
     InfoBlobReferences,
     Questions,
@@ -211,6 +212,33 @@ class SessionRepository:
         """
         query = self._filter_by_tenant(
             sa.select(Sessions).where(Sessions.id == id), tenant_id
+        )
+        return await self._hydrate_optional(
+            await self.delegate.get_model_from_query(query)
+        )
+
+    async def get_for_insight_conversation(
+        self, id: UUID, tenant_id: UUID
+    ) -> SessionInDB | None:
+        """Load an insights conversation with its prior questions eager-loaded.
+
+        Documented exception to ``_exclude_helper_run_sessions``: the
+        InsightConversationService needs the hidden session for follow-up
+        turns, resume and delete. Restricted to sessions that carry an
+        ``insight_conversations`` link row and tenant-scoped via
+        :meth:`_filter_by_tenant`; the caller authorises against the link
+        row's actor. No other code path may call this method.
+        """
+        query = self._filter_by_tenant(
+            sa.select(Sessions).where(
+                Sessions.id == id,
+                sa.exists(
+                    sa.select(InsightConversations.id).where(
+                        InsightConversations.session_id == Sessions.id
+                    )
+                ),
+            ),
+            tenant_id,
         )
         return await self._hydrate_optional(
             await self.delegate.get_model_from_query(query)

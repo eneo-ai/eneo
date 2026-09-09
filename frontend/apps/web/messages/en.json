@@ -4701,5 +4701,20 @@
   "insights_chat_empty": "Ask a question about how this assistant has been used. The analysis reads the conversations in the selected timeframe and shows each step it takes.",
   "insights_chat_example_yesterday": "What did users ask about yesterday?",
   "insights_chat_example_top": "What are the five most common questions?",
-  "insights_chat_example_trend": "How has usage changed week by week?"
+  "insights_chat_example_trend": "How has usage changed week by week?",
+  "insights_tool_search_questions": "Searching questions",
+  "insights_tool_search_questions_query": "Searching questions for “{query}”",
+  "insights_tool_search_questions_done": "Searched questions",
+  "insights_tool_search_questions_query_done": "Searched questions for “{query}”",
+  "insights_tool_read_conversation": "Reading a conversation",
+  "insights_tool_read_conversation_done": "Read a conversation",
+  "insights_tool_find_gaps": "Looking for unanswered questions",
+  "insights_tool_find_gaps_done": "Looked for unanswered questions",
+  "insights_chat_history": "Previous analyses",
+  "insights_chat_empty_history": "No previous analyses yet.",
+  "insights_chat_delete_conversation": "Delete analysis",
+  "insights_chat_history_error": "Previous analyses could not be loaded.",
+  "insights_chat_load_more": "Show more",
+  "audit_action_insight_conversation_deleted": "Insights Conversation Deleted",
+  "audit_action_insight_conversation_deleted_description": "An operator deleted one of their insights analysis conversations."
 }

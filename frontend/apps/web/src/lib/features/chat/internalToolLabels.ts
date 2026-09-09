@@ -83,6 +83,28 @@ const INTERNAL_SERVERS: Record<
       top_questions: {
         running: () => m.insights_tool_top_questions(),
         done: () => m.insights_tool_top_questions_done()
+      },
+      search_questions: {
+        running: (args) => {
+          const query = searchQuery(args);
+          return query
+            ? m.insights_tool_search_questions_query({ query })
+            : m.insights_tool_search_questions();
+        },
+        done: (args) => {
+          const query = searchQuery(args);
+          return query
+            ? m.insights_tool_search_questions_query_done({ query })
+            : m.insights_tool_search_questions_done();
+        }
+      },
+      read_conversation: {
+        running: () => m.insights_tool_read_conversation(),
+        done: () => m.insights_tool_read_conversation_done()
+      },
+      find_gaps: {
+        running: () => m.insights_tool_find_gaps(),
+        done: () => m.insights_tool_find_gaps_done()
       }
     }
   },
