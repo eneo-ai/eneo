@@ -6,6 +6,7 @@ from eneo.allowed_origins.allowed_origin_router import (
     router as allowed_origins_router,
 )
 from eneo.analysis.analysis_router import router as analysis_router
+from eneo.analysis.insight_chat_router import router as insight_chat_router
 from eneo.api.audit.routes import router as audit_router
 from eneo.api.documentation.openapi_endpoints import router as documentation_router
 from eneo.apps.app_runs.api.app_run_router import router as app_run_router
@@ -324,6 +325,12 @@ router.include_router(
 router.include_router(
     analysis_router,
     prefix="/analysis",
+    tags=["analysis"],
+    dependencies=TENANT_ADMIN_SCOPE_GUARDS,
+)
+router.include_router(
+    insight_chat_router,
+    prefix="/analysis/conversation-insights/chat",
     tags=["analysis"],
     dependencies=TENANT_ADMIN_SCOPE_GUARDS,
 )

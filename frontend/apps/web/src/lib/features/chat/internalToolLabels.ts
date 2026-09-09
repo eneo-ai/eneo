@@ -67,6 +67,25 @@ const INTERNAL_SERVERS: Record<
       }
     }
   },
+  // Insights analysis tools over a target's conversations, attached only by
+  // the Insights tab's analysis chat.
+  insights: {
+    label: () => m.insights(),
+    tools: {
+      usage_summary: {
+        running: () => m.insights_tool_usage_summary(),
+        done: () => m.insights_tool_usage_summary_done()
+      },
+      list_questions: {
+        running: () => m.insights_tool_list_questions(),
+        done: () => m.insights_tool_list_questions_done()
+      },
+      top_questions: {
+        running: () => m.insights_tool_top_questions(),
+        done: () => m.insights_tool_top_questions_done()
+      }
+    }
+  },
   files: {
     label: () => m.internal_files_server(),
     tools: {

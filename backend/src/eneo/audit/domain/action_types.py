@@ -137,6 +137,9 @@ class ActionType(str, Enum):
     HELP_ASSISTANT_INSTALLED = "help_assistant_installed"
     HELP_ASSISTANT_UNINSTALLED = "help_assistant_uninstalled"
 
+    # Insights Actions
+    INSIGHT_CONVERSATION_STARTED = "insight_conversation_started"
+
     # SCIM Provisioning Actions
     SCIM_USER_PROVISIONED = "scim_user_provisioned"
     SCIM_USER_RECONCILED = "scim_user_reconciled"

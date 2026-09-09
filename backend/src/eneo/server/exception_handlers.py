@@ -5,6 +5,10 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 
+from eneo.analysis.insight_exceptions import (
+    InsightsModelUnavailableError,
+    InvalidTimezoneError,
+)
 from eneo.files.file_models import (
     FileInUseError,
     FileOriginalNotFoundError,
@@ -150,6 +154,9 @@ logger = logging.getLogger(__name__)
 # server adapter may depend on a domain package without reversing that
 # dependency. One map, so "where do I register this?" has one answer.
 DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] = {
+    # --- Insights chat ---
+    InsightsModelUnavailableError: (400, None, ErrorCodes.BAD_REQUEST),
+    InvalidTimezoneError: (400, None, ErrorCodes.BAD_REQUEST),
     # --- Object content and files ---
     ObjectContentUnavailableError: (503, None, ErrorCodes.RESOURCE_NOT_READY),
     ObjectContentIntegrityError: (503, None, ErrorCodes.RESOURCE_NOT_READY),

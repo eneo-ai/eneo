@@ -868,6 +868,12 @@ MUTATING_ALLOWLIST_EXACT: dict[tuple[str, str], str] = {
         "/analysis/conversation-insights/",
     ): "Admin scope check rejects non-tenant keys; basic method check requires write.",
     (
+        "POST",
+        "/analysis/conversation-insights/chat/",
+    ): "Admin scope check rejects non-tenant keys; basic method check requires write. "
+    "Service keys are rejected outright by require_user_for_creation, and "
+    "InsightConversationService re-checks insight-view access on the body's target.",
+    (
         "PATCH",
         "/prompts/{id}/",
     ): "Scope=prompt gates which prompt the key can reach; basic PATCH→write blocks read keys. "

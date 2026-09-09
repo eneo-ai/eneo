@@ -2,7 +2,7 @@ import base64
 import secrets
 import string
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 from uuid import UUID
 
 import bcrypt
@@ -122,8 +122,9 @@ class AuthService:
         self,
         user: UserInDB,
         *,
-        assistant_id: UUID,
+        assistant_id: UUID | None = None,
         mcp_server_id: UUID | None = None,
+        insight_target: tuple[Literal["assistant", "group_chat"], UUID] | None = None,
         expires_in: int = 15,
     ) -> str:
         """Mint a short-lived access token for a loopback MCP server.
@@ -131,16 +132,24 @@ class AuthService:
         Eneo attaches an ephemeral MCP server pointing at its own loopback
         endpoint, authenticated with this token. The token authenticates as
         ``user`` exactly like a normal access token (so the loopback endpoint
-        reuses ``authenticate``), and additionally carries an ``assistant_id``
-        claim so tools need no scope argument and cannot be redirected to
-        another assistant. Unknown claims ride through ``JWTPayload`` (which
-        ignores them on decode) and are read out separately by the loopback
-        endpoint.
+        reuses ``authenticate``), and additionally carries scope claims so
+        tools need no scope argument and cannot be redirected elsewhere.
+        Unknown claims ride through ``JWTPayload`` (which ignores them on
+        decode) and are read out separately by the loopback endpoint.
+
+        Scopes are distinct claims on purpose: ``assistant_id`` scopes the
+        knowledge and files tools to one assistant, while ``insight_target``
+        (``insight_target_type`` / ``insight_target_id``) scopes the insights
+        tools to one analysed assistant or group chat. An insights token must
+        not double as a knowledge-search token for its target, so at least one
+        scope is required and each server reads only its own claim.
 
         ``mcp_server_id`` is set for a built-in provider: the loopback tool
         reads its configuration from that ``mcp_servers`` row, so the row
         cannot be chosen by the caller.
         """
+        if assistant_id is None and insight_target is None:
+            raise ValueError("A scoped MCP token needs at least one scope.")
         secret_key = str(JWT_SECRET)
 
         jwt_meta = JWTMeta(
@@ -156,8 +165,13 @@ class AuthService:
                 **jwt_meta.model_dump(),
                 **jwt_creds.model_dump(),
             ).model_dump(),
-            "assistant_id": str(assistant_id),
         }
+        if assistant_id is not None:
+            payload["assistant_id"] = str(assistant_id)
+        if insight_target is not None:
+            target_type, target_id = insight_target
+            payload["insight_target_type"] = target_type
+            payload["insight_target_id"] = str(target_id)
         if mcp_server_id is not None:
             payload["mcp_server_id"] = str(mcp_server_id)
         return jwt.encode(payload, secret_key, algorithm=JWT_ALGORITHM)

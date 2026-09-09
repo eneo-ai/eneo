@@ -189,11 +189,6 @@
       "count": 1
     }
   },
-  "src/lib/components/toast/Toaster.svelte": {
-    "eneo/no-raw-color": {
-      "count": 3
-    }
-  },
   "src/routes/(app)/admin/mcp-servers/MCPServerPrimaryCell.svelte": {
     "eneo/no-raw-color": {
       "count": 14
@@ -292,11 +287,6 @@
   "src/routes/(app)/spaces/[spaceId]/assistants/AssistantTile.svelte": {
     "eneo/no-raw-color": {
       "count": 3
-    }
-  },
-  "src/routes/(app)/spaces/[spaceId]/chat/insights/InsightsPage.svelte": {
-    "eneo/no-raw-color": {
-      "count": 1
     }
   },
   "src/routes/(app)/spaces/[spaceId]/knowledge/integrations/IntegrationSyncStatusCell.svelte": {

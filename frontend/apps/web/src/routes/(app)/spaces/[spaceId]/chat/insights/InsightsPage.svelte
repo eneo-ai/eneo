@@ -8,19 +8,22 @@
   import { Settings } from "$lib/components/layout";
   import { getEneo } from "$lib/core/Eneo";
   import { getChatService } from "$lib/features/chat/ChatService.svelte";
+  import InsightsChat from "$lib/features/insights/components/InsightsChat.svelte";
   import InsightsExploreConversationsDialog from "$lib/features/insights/components/InsightsExploreConversationsDialog.svelte";
+  import { initInsightsChatService } from "$lib/features/insights/InsightsChatService.svelte";
   import { initInsightsService } from "$lib/features/insights/InsightsService.svelte";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
-  import { IconSendArrow } from "@eneo/icons/send-arrow";
-  import { IconSparkles } from "@eneo/icons/sparkles";
-  import { Button, Input, Markdown } from "@eneo/ui";
+  import { Input } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
 
   const eneo = getEneo();
   const chat = getChatService();
   const insights = initInsightsService(eneo, () => chat.partner);
-
-  let question = $state("");
+  initInsightsChatService(
+    eneo,
+    () => chat.partner,
+    () => insights.dateRange
+  );
 </script>
 
 <div class="h-full overflow-y-auto pt-4">
@@ -90,108 +93,9 @@
       >
         <InsightsExploreConversationsDialog></InsightsExploreConversationsDialog>
       </Settings.Row>
-      <Settings.Row
-        title={m.generate_insights()}
-        description={m.ask_question_about_how_users_used_assistant()}
-      >
-        <IconSparkles
-          data-dynamic-colour="moss"
-          class="text-dynamic-default ml-2 size-6"
-          slot="title"
-          aria-hidden="true"
-        ></IconSparkles>
-
-        <form
-          class="placeholder:text-muted focus-within:border-strongest hover:border-strongest border-default flex min-h-14 items-center gap-4 border-b px-2"
-          onsubmit={(e) => {
-            e.preventDefault();
-            if (!question.trim() || insights.askQuestion.isLoading) {
-              return;
-            }
-            insights.askQuestion(question);
-            question = "";
-          }}
-        >
-          <label class="sr-only" for="insights-question">{m.ask_a_question()}</label>
-          <input
-            id="insights-question"
-            name="insights-question"
-            type="text"
-            bind:value={question}
-            class="flex-grow appearance-none p-2 text-lg focus:outline-none"
-            placeholder={m.ask_a_question()}
-            autocomplete="off"
-            aria-describedby="insights-question-status-live"
-          />
-          <Button
-            padding="icon"
-            aria-label={m.send_the_question()}
-            disabled={insights.askQuestion.isLoading || !question.trim()}
-            ><IconSendArrow aria-hidden="true"></IconSendArrow></Button
-          >
-        </form>
-        <p id="insights-question-status-live" class="sr-only" aria-live="polite">
-          {#if insights.askQuestion.isLoading}
-            {m.loading()}
-          {:else if insights.analysisJobStatus === "queued" || insights.analysisJobStatus === "processing"}
-            {m.loading_ellipsis()}
-          {:else if insights.analysisJobError}
-            {m.error_connecting_to_server()}
-          {/if}
-        </p>
-      </Settings.Row>
-
-      {#if insights.answer || insights.askQuestion.isLoading || insights.analysisJobStatus}
-        <div
-          class="bg-primary border-default flex min-h-[14rem] w-full flex-col items-center justify-start rounded-lg border p-8 shadow-md md:p-12"
-        >
-          <div
-            class="insights-answer-scroll prose max-h-[min(65vh,42rem)] w-full max-w-[70ch] flex-grow overflow-y-auto pr-6 md:pr-8"
-            tabindex="-1"
-            role="region"
-            aria-label={m.generate_insights()}
-          >
-            <h3 class="m-0 flex gap-2 pb-4 text-lg font-medium">
-              <IconSparkles
-                data-dynamic-colour="moss"
-                class="text-dynamic-default size-6"
-                aria-hidden="true"
-              ></IconSparkles>
-              {insights.question}
-            </h3>
-            <Markdown source={insights.answer}></Markdown>
-            {#if !insights.answer && (insights.analysisJobStatus === "queued" || insights.analysisJobStatus === "processing")}
-              <p class="text-secondary text-base">{m.loading_ellipsis()}</p>
-            {/if}
-            {#if insights.askQuestion.isLoading}
-              <div
-                class="text-secondary flex items-center gap-2 pt-4"
-                role="status"
-                aria-live="polite"
-              >
-                <IconLoadingSpinner class="animate-spin" aria-hidden="true"></IconLoadingSpinner>
-                <span>{m.loading()}</span>
-              </div>
-            {/if}
-          </div>
-          {#if insights.analysisJobStatus === "queued" || insights.analysisJobStatus === "processing"}
-            <p class="text-secondary self-start pt-4 text-sm" role="status" aria-live="polite">
-              {m.loading_ellipsis()}
-            </p>
-          {/if}
-          {#if insights.analysisJobError}
-            <p class="self-start pt-4 text-sm text-red-700" role="alert">
-              {m.error_connecting_to_server()}
-            </p>
-          {/if}
-        </div>
-      {/if}
+    </Settings.Group>
+    <Settings.Group title={m.insights_chat()}>
+      <InsightsChat />
     </Settings.Group>
   </Settings.Page>
 </div>
-
-<style lang="postcss">
-  .insights-answer-scroll {
-    scrollbar-gutter: stable both-edges;
-  }
-</style>

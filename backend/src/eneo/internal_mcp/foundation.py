@@ -22,7 +22,7 @@ on their throwaway ids never accumulates (by design).
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from contextlib import asynccontextmanager
 from typing import Any, NamedTuple
 from uuid import UUID, uuid4
@@ -52,15 +52,23 @@ def bearer_from_ctx(ctx: Context) -> str:
     return header.split(" ", 1)[1].strip()
 
 
-def assistant_id_from_token(token: str) -> UUID:
+def verified_claims(token: str) -> dict[str, Any]:
+    """Signature-verified raw claims of a loopback token.
+
+    Scope claims are read from here by each server; the token itself is
+    verified again by ``authenticate`` when the container is bootstrapped.
+    """
     settings = get_settings()
-    claims = jwt.decode(
+    return jwt.decode(
         token,
         key=str(settings.jwt_secret),
         audience=settings.jwt_audience,
         algorithms=[settings.jwt_algorithm],
     )
-    raw = claims.get("assistant_id")
+
+
+def assistant_id_from_token(token: str) -> UUID:
+    raw = verified_claims(token).get("assistant_id")
     if not raw:
         raise ValueError("Access token is not scoped to an assistant.")
     return UUID(str(raw))
@@ -68,41 +76,64 @@ def assistant_id_from_token(token: str) -> UUID:
 
 def mcp_server_id_from_token(token: str) -> UUID:
     """The built-in provider row this token was minted for."""
-    settings = get_settings()
-    claims = jwt.decode(
-        token,
-        key=str(settings.jwt_secret),
-        audience=settings.jwt_audience,
-        algorithms=[settings.jwt_algorithm],
-    )
-    raw = claims.get("mcp_server_id")
+    raw = verified_claims(token).get("mcp_server_id")
     if not raw:
         raise ValueError("Access token is not scoped to a built-in provider.")
     return UUID(str(raw))
 
 
 @asynccontextmanager
-async def internal_tool_context(ctx: Context):
-    """Bootstrap a user-bound container for the token's user + assistant.
+async def bootstrap_tool_container(token: str):
+    """Bootstrap a user-bound container for the token's user.
 
-    Yields :class:`ToolContext`. The container is bound to the authenticated
+    Yields ``(container, user)``. The container is bound to the authenticated
     user, so loading resources runs the normal permission checks (e.g.
     ``SpaceActor`` for assistants). Internal tools are read-only; the
-    transaction simply closes on exit.
+    transaction simply closes on exit. Scope claims are the caller's concern:
+    each server reads its own claim before bootstrapping.
     """
     # Imported lazily: the Container pulls in the whole service graph, so a
     # top-level import would create a cycle.
     from eneo.main.container.container import Container
     from eneo.main.container.container_overrides import override_user
 
-    token = bearer_from_ctx(ctx)
-    assistant_id = assistant_id_from_token(token)
     async with sessionmanager.session() as session:
         async with session.begin():
             container = Container(session=providers.Object(session))
             user = await container.user_service().authenticate(token=token)
             override_user(container=container, user=user)
-            yield ToolContext(container=container, user=user, assistant_id=assistant_id)
+            yield container, user
+
+
+@asynccontextmanager
+async def internal_tool_context(ctx: Context):
+    """Bootstrap a user-bound container for the token's user + assistant.
+
+    Yields :class:`ToolContext` for the assistant-scoped servers (knowledge,
+    files, built-in providers). See :func:`bootstrap_tool_container`.
+    """
+    token = bearer_from_ctx(ctx)
+    assistant_id = assistant_id_from_token(token)
+    async with bootstrap_tool_container(token) as (container, user):
+        yield ToolContext(container=container, user=user, assistant_id=assistant_id)
+
+
+def fit_lines(lines: Sequence[str], budget: int) -> list[str]:
+    """As many leading lines as fit the character budget, in order.
+
+    Cut by characters rather than a fixed row count: line lengths vary by an
+    order of magnitude, and a fixed page would either waste the budget or
+    force a large listing through many more calls than it needs. Always keeps
+    at least the first line so a single oversized line cannot stall paging.
+    """
+    kept: list[str] = []
+    used = 0
+    for line in lines:
+        if used + len(line) + 1 > budget and kept:
+            break
+        used += len(line) + 1
+        kept.append(line)
+    return kept
 
 
 def default_page_cap() -> int:
