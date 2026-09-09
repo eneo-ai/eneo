@@ -487,6 +487,134 @@ export function initAnalytics(client) {
           );
 
           return response;
+        },
+
+        /**
+         * Follow-up turn on one of the caller's insights conversations. Same
+         * events and callbacks as `ask`.
+         * @param {Object} params
+         * @param {{id: string}} params.conversation The insights conversation to continue
+         * @param {string} params.question
+         * @param {{start: string, end: string} | undefined} [params.selectedRange]
+         * @param {Object} [params.callbacks]
+         * @param {(data: import("../types/resources").SSE.FirstChunk) => void} [params.callbacks.onFirstChunk]
+         * @param {(data: import("../types/resources").SSE.Text) => void} [params.callbacks.onText]
+         * @param {(data: import("../types/resources").SSE.Reasoning) => void} [params.callbacks.onReasoning]
+         * @param {(data: import("../types/resources").SSE.ToolCall) => void} [params.callbacks.onToolCall]
+         * @param {(data: import("../types/resources").SSE.TokenUsage) => void} [params.callbacks.onTokenUsage]
+         * @param {(data: {session_id: string, error: string, error_code?: number | null}) => void} [params.callbacks.onError]
+         * @param {(response: Response) => Promise<void>} [params.callbacks.onOpen]
+         * @param {AbortController} [params.abortController]
+         * @returns {Promise<import("../types/resources").ConversationMessage>}
+         * @throws {EneoError}
+         */
+        continue: async ({ conversation, question, selectedRange, abortController, callbacks }) => {
+          /** @type {import("../types/resources").ConversationMessage} */
+          // @ts-expect-error We rely on the fact that the first_chunk event will initialise the response
+          let response = {};
+
+          await client.stream(
+            "/api/v1/analysis/conversation-insights/chat/{session_id}/",
+            {
+              params: { path: { session_id: conversation.id } },
+              requestBody: {
+                "application/json": { question, stream: true, selected_range: selectedRange }
+              }
+            },
+            {
+              onOpen: async (res) => {
+                callbacks?.onOpen?.(res);
+              },
+              onMessage: (ev) => {
+                if (ev.data == "") return;
+                try {
+                  const data = JSON.parse(ev.data);
+                  switch (ev.event) {
+                    case "first_chunk":
+                      response = data;
+                      callbacks?.onFirstChunk?.(data);
+                      break;
+                    case "text":
+                      response.answer += data.answer;
+                      callbacks?.onText?.(data);
+                      break;
+                    case "reasoning":
+                      callbacks?.onReasoning?.(data);
+                      break;
+                    case "tool_call":
+                      callbacks?.onToolCall?.(data);
+                      break;
+                    case "token_usage":
+                      callbacks?.onTokenUsage?.(data);
+                      break;
+                    case "error":
+                      callbacks?.onError?.(data);
+                      break;
+                  }
+                } catch (e) {
+                  return;
+                }
+              }
+            },
+            abortController
+          );
+
+          return response;
+        },
+
+        /**
+         * The caller's own insights conversations about an assistant or group chat, newest first.
+         * @param {Object} params
+         * @param {import('./conversations').ChatPartner} params.chatPartner
+         * @param {number} [params.limit]
+         * @param {string} [params.cursor] `next_cursor` of the previous page
+         * @throws {EneoError}
+         */
+        list: async ({ chatPartner, limit, cursor }) => {
+          /**  @type {{assistant_id?: string, group_chat_id?: string}} */
+          const target = { assistant_id: undefined, group_chat_id: undefined };
+          if (chatPartner.type === "assistant" || chatPartner.type === "default-assistant") {
+            target.assistant_id = chatPartner.id;
+          } else if (chatPartner.type === "group-chat") {
+            target.group_chat_id = chatPartner.id;
+          } else {
+            throw new EneoError(
+              "Listing requires one of 'assistant' or 'groupChat' to be specified",
+              "CONNECTION",
+              0,
+              0
+            );
+          }
+          return await client.fetch("/api/v1/analysis/conversation-insights/chat/", {
+            method: "get",
+            params: { query: { ...target, limit, cursor } }
+          });
+        },
+
+        /**
+         * One of the caller's insights conversations with all its turns.
+         * @param {{id: string}} conversation
+         * @throws {EneoError}
+         */
+        get: async ({ id }) => {
+          return await client.fetch("/api/v1/analysis/conversation-insights/chat/{session_id}/", {
+            method: "get",
+            params: { path: { session_id: id } }
+          });
+        },
+
+        /**
+         * Delete one of the caller's insights conversations.
+         * @param {{id: string}} conversation
+         * @returns {Promise<true>}
+         * @throws {EneoError}
+         */
+        delete: async ({ id }) => {
+          await client.fetch("/api/v1/analysis/conversation-insights/chat/{session_id}/", {
+            method: "delete",
+            params: { path: { session_id: id } }
+          });
+          return true;
         }
       }
     }

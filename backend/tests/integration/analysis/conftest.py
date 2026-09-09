@@ -12,6 +12,10 @@ Question times, all UTC:
   * s2: "hur ansöker jag om bygglov" 2026-09-07 22:30
         (already 2026-09-08 00:30 in Europe/Stockholm)
   * s3: "Öppettider?" 2026-09-06 08:00
+  * s4: "Kan ni hjälpa mig med deklarationen?" 2026-09-07 15:00, answered
+        with an admission of not knowing
+  * s5: three near-identical "Var parkerar jag?" questions 2026-09-07 16:00
+        (a rephrasing conversation)
   * helper-run session (hidden): 2026-09-07 11:00
   * insight-conversation session (hidden): 2026-09-07 12:00
   * other assistant: 2026-09-07 13:00
@@ -182,6 +186,12 @@ async def _seed_insights(container, admin_user) -> dict[str, UUID]:
     s3 = await _insert_session(
         session, name="s3", user_id=admin_user.id, assistant_id=bygg
     )
+    s4 = await _insert_session(
+        session, name="s4", user_id=admin_user.id, assistant_id=bygg
+    )
+    s5 = await _insert_session(
+        session, name="s5", user_id=admin_user.id, assistant_id=bygg
+    )
     helper_session = await _insert_session(
         session, name="helper", user_id=admin_user.id, assistant_id=bygg
     )
@@ -216,6 +226,29 @@ async def _seed_insights(container, admin_user) -> dict[str, UUID]:
     s3_q1 = await _insert_question(
         session, session_id=s3, text="Öppettider?", at=utc(2026, 9, 6, 8, 0), **q
     )
+    s4_q1 = uuid4()
+    await session.execute(
+        sa.insert(Questions).values(
+            id=s4_q1,
+            tenant_id=tenant_id,
+            session_id=s4,
+            assistant_id=bygg,
+            question="Kan ni hjälpa mig med deklarationen?",
+            answer="Jag kan tyvärr inte hjälpa till med deklarationen.",
+            num_tokens_question=1,
+            num_tokens_answer=1,
+            created_at=utc(2026, 9, 7, 15, 0),
+            updated_at=utc(2026, 9, 7, 15, 0),
+        )
+    )
+    for minute, text in (
+        (0, "Var parkerar jag?"),
+        (2, "Var parkerar jag i centrum?"),
+        (4, "var parkerar jag??"),
+    ):
+        await _insert_question(
+            session, session_id=s5, text=text, at=utc(2026, 9, 7, 16, minute), **q
+        )
     await _insert_question(
         session,
         session_id=helper_session,
@@ -284,6 +317,9 @@ async def _seed_insights(container, admin_user) -> dict[str, UUID]:
         "s1_q2": s1_q2,
         "s2_q1": s2_q1,
         "s3_q1": s3_q1,
+        "s4": s4,
+        "s4_q1": s4_q1,
+        "s5": s5,
         "helper_session": helper_session,
         "insight_session": insight_session,
         "other_session": other_session,

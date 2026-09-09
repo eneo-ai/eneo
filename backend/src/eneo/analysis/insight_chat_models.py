@@ -21,6 +21,14 @@ class InsightSelectedRange(BaseModel):
         return self
 
 
+class InsightChatContinueRequest(BaseModel):
+    """Follow-up turn on an existing insights conversation."""
+
+    question: str = Field(min_length=1)
+    stream: bool = False
+    selected_range: InsightSelectedRange | None = None
+
+
 class InsightChatStartRequest(BaseModel):
     """Start a new insights conversation about one assistant or group chat."""
 

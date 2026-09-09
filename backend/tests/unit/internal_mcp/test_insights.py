@@ -14,24 +14,36 @@ import pytest
 
 from eneo.analysis.insight_scope import InsightScope, InsightWindow
 from eneo.analysis.insights_repo import (
+    NoKnowledgeRow,
     QuestionRow,
+    RephrasingRow,
+    SearchHit,
     TopQuestionRow,
+    Transcript,
+    TranscriptTurn,
+    UnansweredRow,
     UsageBucket,
     UsageSummary,
 )
 from eneo.internal_mcp import insights
 from eneo.internal_mcp.foundation import fit_lines
 from eneo.internal_mcp.insights import (
+    CONVERSATION_NOT_FOUND_MESSAGE,
     INSIGHTS_SERVER_NAME,
     MAX_WINDOW_DAYS,
     _bucket_count,
     _list_questions_text,
     _parse_window,
+    _search_text,
     _top_questions_text,
+    _transcript_text,
     _usage_summary_text,
     build_insights_mcp_server,
+    find_gaps,
     list_questions,
     mcp,
+    read_conversation,
+    search_questions,
     target_label,
     top_questions,
     usage_summary,
@@ -248,7 +260,7 @@ class TestFormatting:
         assert "merge near-duplicates yourself" in text
 
 
-def _patch_tool_context(monkeypatch, *, repo):
+def _patch_tool_context(monkeypatch, *, repo, has_knowledge=True):
     scope = InsightScope(kind="assistant", target_id=uuid4(), tenant_id=uuid4())
 
     @asynccontextmanager
@@ -258,6 +270,7 @@ def _patch_tool_context(monkeypatch, *, repo):
             user=SimpleNamespace(),
             scope=scope,
             target_label="assistant 'Bygg'",
+            has_knowledge=has_knowledge,
         )
 
     monkeypatch.setattr(insights, "insight_tool_context", fake_context)
@@ -395,9 +408,14 @@ class TestBuildInsightsMcpServer:
 
         live_tools = await mcp.list_tools()
         assert [t.name for t in server.tools] == [t.name for t in live_tools]
-        assert {"usage_summary", "list_questions", "top_questions"} == {
-            t.name for t in server.tools
-        }
+        assert {
+            "usage_summary",
+            "list_questions",
+            "top_questions",
+            "search_questions",
+            "read_conversation",
+            "find_gaps",
+        } == {t.name for t in server.tools}
         for entity, live in zip(server.tools, live_tools):
             assert entity.description.startswith(live.description)
             assert entity.description.endswith("\n\nTarget: assistant 'Bygg'.")
@@ -421,3 +439,213 @@ class TestBuildInsightsMcpServer:
     def test_target_label(self):
         assert target_label("assistant", "Bygg") == "assistant 'Bygg'"
         assert target_label("group_chat", "Team") == "group chat 'Team'"
+
+
+class TestPhaseTwoFormatting:
+    def test_search_text_marks_exact_and_similar_hits_and_answers(self):
+        session_id = uuid4()
+        hits = [
+            SearchHit(
+                datetime(2026, 9, 7, 12, 0, tzinfo=timezone.utc),
+                session_id,
+                "Var parkerar jag?",
+                "Vid torget.",
+                False,
+                True,
+            ),
+            SearchHit(
+                datetime(2026, 9, 6, 12, 0, tzinfo=timezone.utc),
+                uuid4(),
+                "Parkering centrum",
+                "x",
+                True,
+                False,
+            ),
+        ]
+
+        text = _search_text(
+            hits,
+            query="parkera",
+            total=2,
+            offset=0,
+            include_answers=True,
+            window=_window(),
+            label="assistant 'A'",
+            page_cap=10_000,
+        )
+
+        assert text.startswith("Questions 1-2 of 2 matching 'parkera'")
+        assert (
+            f"session_id={session_id} | exact | Q: Var parkerar jag? | A: Vid torget."
+            in text
+        )
+        assert "| similar | Q: Parkering centrum" in text
+
+    def test_search_text_empty_suggests_shorter_query(self):
+        text = _search_text(
+            [],
+            query="hela meningen här",
+            total=0,
+            offset=0,
+            include_answers=False,
+            window=_window(),
+            label="assistant 'A'",
+            page_cap=100,
+        )
+
+        assert "No questions matching" in text and "shorter" in text
+
+    def test_transcript_pages_by_characters(self):
+        transcript = Transcript(
+            session_id=uuid4(),
+            started_at=datetime(2026, 9, 7, 8, 0, tzinfo=timezone.utc),
+            turns=[
+                TranscriptTurn(
+                    datetime(2026, 9, 7, 8, 0, tzinfo=timezone.utc),
+                    "Hur ansöker jag om bygglov?",
+                    "Via e-tjänsten.",
+                    2,
+                    0.81,
+                    ["knowledge.search_knowledge"],
+                ),
+                TranscriptTurn(
+                    datetime(2026, 9, 7, 8, 3, tzinfo=timezone.utc),
+                    "Vad kostar det?",
+                    "",
+                    0,
+                    None,
+                    [],
+                ),
+            ],
+        )
+
+        full = _transcript_text(
+            transcript, offset=0, timezone=STOCKHOLM, page_cap=10_000
+        )
+        assert "2 turns" in full
+        assert "### Turn 1 (10:00)" in full
+        assert "User: Hur ansöker jag om bygglov?" in full
+        assert (
+            "[cited passages: 2; best score: 0.81; tools: knowledge.search_knowledge]"
+            in full
+        )
+        assert "Assistant: (no answer)" in full
+
+        first = _transcript_text(transcript, offset=0, timezone=STOCKHOLM, page_cap=80)
+        assert "read_conversation again with offset=80" in first
+        past = _transcript_text(
+            transcript, offset=10_000, timezone=STOCKHOLM, page_cap=80
+        )
+        assert "past the end" in past
+
+
+class TestPhaseTwoTools:
+    @pytest.mark.asyncio
+    async def test_search_questions_rejects_empty_query_without_a_call(
+        self, monkeypatch
+    ):
+        called = []
+
+        async def search(*args, **kwargs):
+            called.append(1)
+            return [], 0
+
+        _patch_tool_context(monkeypatch, repo=SimpleNamespace(search_questions=search))
+
+        text = await search_questions(ctx=None, query="   ", start=START, end=END)
+
+        assert "must not be empty" in text and called == []
+
+    @pytest.mark.asyncio
+    async def test_search_questions_passes_query_and_paging(self, monkeypatch):
+        calls = []
+
+        async def search(scope, window, *, query, offset, limit):
+            calls.append((query, offset, limit))
+            return [], 0
+
+        _patch_tool_context(monkeypatch, repo=SimpleNamespace(search_questions=search))
+
+        await search_questions(
+            ctx=None, query=" bygglov ", start=START, end=END, offset=-1, limit=999
+        )
+
+        assert calls == [("bygglov", 0, insights.LIST_LIMIT_CEILING)]
+
+    @pytest.mark.asyncio
+    async def test_read_conversation_not_found_parity(self, monkeypatch):
+        async def transcript(scope, session_id):
+            return None
+
+        _patch_tool_context(
+            monkeypatch, repo=SimpleNamespace(get_transcript=transcript)
+        )
+
+        missing = await read_conversation(ctx=None, session_id=str(uuid4()))
+        malformed = await read_conversation(ctx=None, session_id="not-a-uuid")
+
+        assert missing == CONVERSATION_NOT_FOUND_MESSAGE
+        assert malformed == CONVERSATION_NOT_FOUND_MESSAGE
+
+    @pytest.mark.asyncio
+    async def test_find_gaps_all_pages_every_signal(self, monkeypatch):
+        session_id = uuid4()
+        at = datetime(2026, 9, 7, 10, 0, tzinfo=timezone.utc)
+
+        async def unanswered(scope, window, *, offset, limit):
+            row = UnansweredRow(at, session_id, "Vad kostar det?", "hittar tyvärr inte")
+            return [row], 1
+
+        async def no_knowledge(scope, window, *, offset, limit):
+            row = NoKnowledgeRow(at, session_id, "Q", "answer cited no knowledge", None)
+            return [row], 1, 0.7
+
+        async def rephrasing(scope, window, *, offset, limit):
+            return [RephrasingRow(session_id, at, ["a?", "a igen?", "a???"], 2)], 1
+
+        repo = SimpleNamespace(
+            find_unanswered=unanswered,
+            find_no_knowledge=no_knowledge,
+            find_rephrasing=rephrasing,
+        )
+        _patch_tool_context(monkeypatch, repo=repo)
+
+        text = await find_gaps(ctx=None, start=START, end=END, signal="all")
+
+        assert "Unanswered (1 turns admit not knowing)" in text
+        assert 'admits: "hittar tyvärr inte"' in text
+        assert "No knowledge used (1 turns; window median best score 0.70)" in text
+        assert "Rephrasing (1 conversations)" in text
+        assert '"a?" -> "a igen?" -> "a???"' in text
+        assert "heuristic candidates" in text
+
+    @pytest.mark.asyncio
+    async def test_find_gaps_skips_no_knowledge_without_knowledge(self, monkeypatch):
+        called = []
+
+        async def no_knowledge(scope, window, *, offset, limit):
+            called.append(1)
+            return [], 0, None
+
+        _patch_tool_context(
+            monkeypatch,
+            repo=SimpleNamespace(find_no_knowledge=no_knowledge),
+            has_knowledge=False,
+        )
+
+        text = await find_gaps(ctx=None, start=START, end=END, signal="no_knowledge")
+
+        assert "No-knowledge signal skipped" in text and called == []
+
+    @pytest.mark.asyncio
+    async def test_find_gaps_single_signal_reports_none(self, monkeypatch):
+        async def unanswered(scope, window, *, offset, limit):
+            return [], 0
+
+        _patch_tool_context(
+            monkeypatch, repo=SimpleNamespace(find_unanswered=unanswered)
+        )
+
+        text = await find_gaps(ctx=None, start=START, end=END, signal="unanswered")
+
+        assert "(none)" in text

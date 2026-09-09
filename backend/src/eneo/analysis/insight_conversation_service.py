@@ -37,7 +37,10 @@ from eneo.ai_models.completion_models.completion_model import (
     ToolCallMetadata,
 )
 from eneo.analysis.insight_chat_prompt import build_insights_system_prompt
-from eneo.analysis.insight_conversation_repo import InsightConversationRepository
+from eneo.analysis.insight_conversation_repo import (
+    InsightConversation,
+    InsightConversationRepository,
+)
 from eneo.analysis.insight_exceptions import (
     InsightsModelUnavailableError,
     InvalidTimezoneError,
@@ -46,10 +49,14 @@ from eneo.analysis.insight_scope import InsightTargetKind
 from eneo.assistants.assistant import Assistant
 from eneo.internal_mcp.insights import build_insights_mcp_server, target_label
 from eneo.main.datetime_utils import datetime_or_utc_min
-from eneo.main.exceptions import BadRequestException
+from eneo.main.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    UnauthorizedException,
+)
 from eneo.main.logging import get_logger
 from eneo.questions.question import ToolCallInfo
-from eneo.sessions.session import SessionInDB
+from eneo.sessions.session import SessionInDB, SessionMetadataPublic
 from eneo.sessions.session_service import (
     persist_partial_question_answer,
     safe_count_tokens,
@@ -70,6 +77,7 @@ if TYPE_CHECKING:
     from eneo.database.database import AsyncSession
     from eneo.group_chat.domain.entities.group_chat import GroupChat
     from eneo.sessions.session_service import SessionService
+    from eneo.sessions.sessions_repo import SessionRepository
     from eneo.spaces.space import Space
 
 logger = get_logger(__name__)
@@ -179,12 +187,16 @@ class InsightConversationService:
         session_service: "SessionService",
         completion_service: "CompletionService",
         auth_service: "AuthService",
+        session_repo: "SessionRepository",
+        insight_conversation_repo: InsightConversationRepository,
     ) -> None:
         self.user = user
         self.analysis_service = analysis_service
         self.session_service = session_service
         self.completion_service = completion_service
         self.auth_service = auth_service
+        self.session_repo = session_repo
+        self.insight_conversation_repo = insight_conversation_repo
 
     async def start(
         self,
@@ -273,6 +285,128 @@ class InsightConversationService:
             target_name=target.name,
             space_id=space.id,
         )
+
+    async def continue_turn(
+        self,
+        *,
+        session_id: UUID,
+        question: str,
+        stream: bool,
+        selected_range: tuple[date, date] | None,
+    ) -> InsightTurn:
+        """Append a follow-up turn to one of the operator's own conversations.
+
+        Access and model resolution are re-run every turn: insights may have
+        been disabled for the target, or its model replaced, since the
+        conversation started. Prior turns replay through the session's
+        history, tool calls included.
+        """
+        link = await self._own_conversation(session_id)
+        target, space = await self.analysis_service.assert_insight_access(
+            assistant_id=link.assistant_id, group_chat_id=link.group_chat_id
+        )
+        await self.analysis_service.check_space_permissions(space.id)
+        model = self._resolve_model(target, space)
+        zone = self._parse_timezone(link.timezone)
+
+        session = await self.session_repo.get_for_insight_conversation(
+            session_id, self.user.tenant_id
+        )
+        if session is None:
+            raise NotFoundException("Insights conversation not found.")
+
+        (
+            question_id,
+            created_at,
+        ) = await self.session_service.create_question_placeholder(
+            question=question,
+            session=session,
+            assistant_id=link.assistant_id,
+            completion_model=cast("AICompletionModel", model),
+        )
+        answer = await self._run_turn(
+            session=session,
+            question=question,
+            question_id=question_id,
+            model=model,
+            kind=link.target_kind,
+            target_id=link.target_id,
+            target_name=target.name,
+            timezone=link.timezone,
+            zone=zone,
+            selected_range=selected_range,
+            stream=stream,
+        )
+        return InsightTurn(
+            session=session,
+            question=question,
+            question_id=question_id,
+            created_at=created_at,
+            completion_model=model,
+            answer=answer,
+            target_name=target.name,
+            space_id=space.id,
+        )
+
+    async def list_conversations(
+        self,
+        *,
+        assistant_id: UUID | None,
+        group_chat_id: UUID | None,
+        limit: int,
+        cursor: datetime | None,
+    ) -> tuple[list[SessionMetadataPublic], int, datetime | None]:
+        """The operator's own conversations about the target, newest first."""
+        if (assistant_id is None) == (group_chat_id is None):
+            raise BadRequestException(
+                "Provide exactly one of assistant_id or group_chat_id"
+            )
+        await self.analysis_service.assert_insight_access(
+            assistant_id=assistant_id, group_chat_id=group_chat_id
+        )
+        return await self.insight_conversation_repo.list_for_actor(
+            tenant_id=self.user.tenant_id,
+            actor_user_id=self.user.id,
+            assistant_id=assistant_id,
+            group_chat_id=group_chat_id,
+            limit=limit,
+            cursor=cursor,
+        )
+
+    async def get_conversation(self, session_id: UUID) -> SessionInDB:
+        link = await self._own_conversation(session_id)
+        await self.analysis_service.assert_insight_access(
+            assistant_id=link.assistant_id, group_chat_id=link.group_chat_id
+        )
+        session = await self.session_repo.get_for_insight_conversation(
+            session_id, self.user.tenant_id
+        )
+        if session is None:
+            raise NotFoundException("Insights conversation not found.")
+        return session
+
+    async def delete_conversation(self, session_id: UUID) -> InsightConversation:
+        """Delete one of the operator's own conversations; the link row
+        cascades with the session. Returns the link for the audit entry."""
+        link = await self._own_conversation(session_id)
+        deleted = await self.session_repo.delete(session_id)
+        if deleted is None:
+            raise NotFoundException("Insights conversation not found.")
+        return link
+
+    async def _own_conversation(self, session_id: UUID) -> InsightConversation:
+        """The link row, provided the caller is the operator who started it."""
+        link = await self.insight_conversation_repo.get_by_session_id(
+            session_id, self.user.tenant_id
+        )
+        if link is None:
+            raise NotFoundException("Insights conversation not found.")
+        if link.actor_user_id != self.user.id:
+            raise UnauthorizedException(
+                "You do not have access to this insights conversation.",
+                code="forbidden_action",
+            )
+        return link
 
     async def _run_turn(
         self,

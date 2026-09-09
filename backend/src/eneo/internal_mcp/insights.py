@@ -30,8 +30,13 @@ from mcp.server.fastmcp import Context, FastMCP
 from eneo.analysis.insight_scope import InsightScope, InsightTargetKind, InsightWindow
 from eneo.analysis.insights_repo import (
     Granularity,
+    NoKnowledgeRow,
     QuestionRow,
+    RephrasingRow,
+    SearchHit,
     TopQuestionRow,
+    Transcript,
+    UnansweredRow,
     UsageSummary,
 )
 from eneo.internal_mcp.constants import INSIGHTS_SERVER_NAME
@@ -55,6 +60,16 @@ MAX_WINDOW_DAYS = 400
 MAX_BUCKETS = 120
 LIST_LIMIT_CEILING = 200
 TOP_N_CEILING = 50
+# Rows fetched per gap-signal page before the character cap trims further.
+GAP_PAGE_ROWS = 50
+# Returned whenever a session id names nothing in the target's conversations.
+# Missing, hidden and out-of-scope are indistinguishable on purpose, so this
+# is a constant, never interpolated with what was asked for.
+CONVERSATION_NOT_FOUND_MESSAGE = (
+    "No conversation with that session id among this target's conversations. "
+    "Use the session ids that list_questions, top_questions or "
+    "search_questions return."
+)
 # Question text shown per line; long messages are cut so one page still
 # lists many questions. read_conversation (phase 2) shows full text.
 QUESTION_PREVIEW_CHARS = 300
@@ -79,6 +94,9 @@ class InsightToolContext(NamedTuple):
     user: Any
     scope: InsightScope
     target_label: str
+    # Whether the target can cite knowledge at all (any member assistant for
+    # a group chat); the no-knowledge gap signal is meaningless otherwise.
+    has_knowledge: bool = False
 
 
 def insight_target_from_token(token: str) -> tuple[InsightTargetKind, UUID]:
@@ -122,7 +140,18 @@ async def insight_tool_context(ctx: Context):
             user=user,
             scope=scope,
             target_label=target_label(kind, target.name),
+            has_knowledge=_target_has_knowledge(target),
         )
+
+
+def _target_has_knowledge(target: Any) -> bool:
+    if hasattr(target, "has_knowledge"):
+        return bool(target.has_knowledge())
+    members = getattr(target, "assistants", None) or []
+    return any(
+        getattr(getattr(member, "assistant", None), "has_knowledge", lambda: False)()
+        for member in members
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -471,6 +500,379 @@ async def top_questions(
         label=label,
         page_cap=default_page_cap(),
     )
+
+
+# --------------------------------------------------------------------------- #
+# Phase 2 formatting
+# --------------------------------------------------------------------------- #
+def _paged(
+    lines: list[str],
+    *,
+    header: str,
+    offset: int,
+    total: int,
+    tool_name: str,
+    page_cap: int,
+    footer: str = "",
+) -> str:
+    kept = fit_lines(lines, page_cap)
+    shown_to = offset + len(kept)
+    body = "\n".join(kept)
+    if shown_to < total:
+        body += (
+            f"\n\nShowing {offset + 1}-{shown_to} of {total}. Call {tool_name} "
+            f"again with offset={shown_to} for the next part before summarising."
+        )
+    if footer:
+        body += f"\n\n{footer}"
+    return f"{header}\n{body}"
+
+
+def _search_text(
+    hits: list[SearchHit],
+    *,
+    query: str,
+    total: int,
+    offset: int,
+    include_answers: bool,
+    window: InsightWindow,
+    label: str,
+    page_cap: int,
+) -> str:
+    if total == 0:
+        return (
+            f"No questions matching {query!r} for {label} in "
+            f"{_format_window(window)}. Try a shorter or differently spelled "
+            "phrase; matching is by substring and trigram similarity."
+        )
+    if not hits:
+        return f"Offset {offset} is past the end ({total} matches)."
+    lines = []
+    for hit in hits:
+        kind = "exact" if hit.exact else "similar"
+        line = (
+            f"{_local(hit.created_at, window.timezone).strftime('%Y-%m-%d %H:%M')} | "
+            f"session_id={hit.session_id} | {kind} | Q: {_preview(hit.question)}"
+        )
+        if include_answers:
+            line += f" | A: {_preview(hit.answer)}"
+        lines.append(line)
+    return _paged(
+        lines,
+        header=(
+            f"Questions {offset + 1}-{offset + len(hits)} of {total} matching "
+            f"{query!r} for {label}, substring matches first (local time "
+            f"{window.timezone}):"
+        ),
+        offset=offset,
+        total=total,
+        tool_name="search_questions",
+        page_cap=page_cap,
+    )
+
+
+def _transcript_text(
+    transcript: Transcript, *, offset: int, timezone: str, page_cap: int
+) -> str:
+    """One page of the full conversation, sliced by characters like a document."""
+    parts = [
+        f"Conversation session_id={transcript.session_id}, started "
+        f"{_local(transcript.started_at, timezone).strftime('%Y-%m-%d %H:%M')} "
+        f"({timezone}), {len(transcript.turns)} turns."
+    ]
+    for number, turn in enumerate(transcript.turns, start=1):
+        details = [f"cited passages: {turn.cited_passages}"]
+        if turn.best_score is not None:
+            details.append(f"best score: {turn.best_score:.2f}")
+        if turn.tool_names:
+            details.append("tools: " + ", ".join(turn.tool_names))
+        parts.append(
+            f"\n### Turn {number} "
+            f"({_local(turn.created_at, timezone).strftime('%H:%M')})\n"
+            f"User: {' '.join(turn.question.split())}\n"
+            f"Assistant: {' '.join(turn.answer.split()) or '(no answer)'}\n"
+            f"[{'; '.join(details)}]"
+        )
+    text = "\n".join(parts)
+    total = len(text)
+    page = text[offset : offset + page_cap]
+    if not page:
+        return (
+            f"Offset {offset} is past the end of the conversation ({total} characters)."
+        )
+    end = offset + len(page)
+    if end < total:
+        page += (
+            f"\n\nConversation truncated at character {end} of {total}. Call "
+            f"read_conversation again with offset={end} for the next part."
+        )
+    return page
+
+
+def _unanswered_lines(rows: list[UnansweredRow], timezone: str) -> list[str]:
+    return [
+        f"{_local(row.created_at, timezone).strftime('%Y-%m-%d %H:%M')} | "
+        f"session_id={row.session_id} | Q: {_preview(row.question)} | "
+        f'admits: "{" ".join(row.evidence.split())}"'
+        for row in rows
+    ]
+
+
+def _no_knowledge_lines(rows: list[NoKnowledgeRow], timezone: str) -> list[str]:
+    lines = []
+    for row in rows:
+        score = (
+            f", best score {row.best_score:.2f}" if row.best_score is not None else ""
+        )
+        lines.append(
+            f"{_local(row.created_at, timezone).strftime('%Y-%m-%d %H:%M')} | "
+            f"session_id={row.session_id} | Q: {_preview(row.question)} | "
+            f"{row.reason}{score}"
+        )
+    return lines
+
+
+def _rephrasing_lines(rows: list[RephrasingRow], timezone: str) -> list[str]:
+    lines = []
+    for row in rows:
+        sequence = " -> ".join(f'"{_preview(q)[:120]}"' for q in row.questions)
+        lines.append(
+            f"{_local(row.started_at, timezone).strftime('%Y-%m-%d %H:%M')} | "
+            f"session_id={row.session_id} | {len(row.questions)} questions, "
+            f"{row.similar_pairs} similar consecutive pairs | {sequence}"
+        )
+    return lines
+
+
+# --------------------------------------------------------------------------- #
+# Phase 2 tools
+# --------------------------------------------------------------------------- #
+@mcp.tool(title="Search questions")
+async def search_questions(
+    ctx: Context,
+    query: str,
+    start: str,
+    end: str,
+    include_answers: bool = False,
+    offset: int = 0,
+    limit: int = 50,
+    timezone: str = "UTC",
+) -> str:
+    """Find questions about a topic by text, in a window.
+
+    Use this when the operator names a subject ("questions about parking",
+    "did anyone ask about opening hours") or when you need examples of one
+    topic. Matching is a case-insensitive substring match first, then
+    trigram similarity for misspellings and inflections; results list
+    substring matches first, newest first within each group. Keep the query
+    to one or two key words in the language of the questions; a whole
+    sentence rarely matches.
+
+    start and end are ISO-8601 datetimes with a UTC offset (end exclusive);
+    timezone is the IANA zone for the displayed times. include_answers=true
+    appends the start of each answer, useful to judge whether the assistant
+    handled the topic well. Output is one page; when a continuation notice
+    appears, call again with the given offset. Cite examples as
+    (session <uuid>).
+    """
+    query = query.strip()
+    if not query:
+        return "query must not be empty."
+    try:
+        window = _parse_window(start, end, timezone)
+    except ValueError as exc:
+        return str(exc)
+    offset = max(0, offset)
+    limit = max(1, min(limit, LIST_LIMIT_CEILING))
+    async with insight_tool_context(ctx) as tool:
+        hits, total = await tool.container.insights_repo().search_questions(
+            tool.scope, window, query=query, offset=offset, limit=limit
+        )
+        label = tool.target_label
+    logger.debug(
+        "[Insights] search_questions target=%s query=%r offset=%d hits=%d total=%d",
+        label,
+        query[:80],
+        offset,
+        len(hits),
+        total,
+    )
+    return _search_text(
+        hits,
+        query=query,
+        total=total,
+        offset=offset,
+        include_answers=include_answers,
+        window=window,
+        label=label,
+        page_cap=default_page_cap(),
+    )
+
+
+@mcp.tool(title="Read conversation")
+async def read_conversation(
+    ctx: Context,
+    session_id: str,
+    offset: int = 0,
+    timezone: str = "UTC",
+) -> str:
+    """The full transcript of one conversation, turn by turn.
+
+    Use this to verify a signal before reporting it: what exactly was asked,
+    how the assistant answered, and whether the answer cited knowledge
+    (each turn ends with its cited passage count, best citation score and
+    the tools it called). Pass a session id from another tool's output.
+
+    Long conversations come in parts; when a truncation notice appears, call
+    again with the given offset. timezone is the IANA zone for the displayed
+    times.
+    """
+    try:
+        wanted = UUID(session_id.strip())
+    except (ValueError, AttributeError):
+        return CONVERSATION_NOT_FOUND_MESSAGE
+    try:
+        _parse_timezone(timezone)
+    except ValueError as exc:
+        return str(exc)
+    offset = max(0, offset)
+    async with insight_tool_context(ctx) as tool:
+        transcript = await tool.container.insights_repo().get_transcript(
+            tool.scope, wanted
+        )
+        label = tool.target_label
+    if transcript is None:
+        logger.debug("[Insights] read_conversation target=%s miss", label)
+        return CONVERSATION_NOT_FOUND_MESSAGE
+    logger.debug(
+        "[Insights] read_conversation target=%s session=%s turns=%d offset=%d",
+        label,
+        wanted,
+        len(transcript.turns),
+        offset,
+    )
+    return _transcript_text(
+        transcript, offset=offset, timezone=timezone, page_cap=default_page_cap()
+    )
+
+
+@mcp.tool(title="Find gaps")
+async def find_gaps(
+    ctx: Context,
+    start: str,
+    end: str,
+    signal: Literal["unanswered", "no_knowledge", "rephrasing", "all"] = "all",
+    offset: int = 0,
+    timezone: str = "UTC",
+) -> str:
+    """Conversations where the assistant probably fell short, by signal.
+
+    Use this for "what could the assistant not answer", "where is knowledge
+    missing", "what should we add", "were users frustrated". Each signal is
+    a heuristic that yields candidates; verify the important ones with
+    read_conversation before drawing conclusions, and say that the counts
+    are indicative.
+
+    Signals:
+    - unanswered: the answer contains a phrase admitting it could not answer
+      (in Swedish or English); the matched phrase is shown as evidence.
+    - no_knowledge: the assistant has knowledge sources but this answer used
+      none well: the knowledge search returned nothing, the answer cited no
+      knowledge, or its best citation score is in the window's weakest
+      quartile or below 0.2. Skipped when the target has no knowledge.
+    - rephrasing: the user asked textually similar questions in a row, or
+      kept asking within one conversation; the question sequence is shown
+      for you to judge.
+    - all: a short page of each signal in turn.
+
+    start and end are ISO-8601 datetimes with a UTC offset (end exclusive);
+    timezone is the IANA zone for the displayed times. Page one signal at a
+    time with offset when its continuation notice appears. Cite conversations
+    as (session <uuid>).
+    """
+    try:
+        window = _parse_window(start, end, timezone)
+    except ValueError as exc:
+        return str(exc)
+    offset = max(0, offset)
+    page_cap = default_page_cap()
+    async with insight_tool_context(ctx) as tool:
+        repo = tool.container.insights_repo()
+        label = tool.target_label
+        sections: list[str] = []
+        signals = (
+            ["unanswered", "no_knowledge", "rephrasing"]
+            if signal == "all"
+            else [signal]
+        )
+        # In "all" mode each signal gets a third of the page and its own
+        # first page; page a single signal for the rest.
+        per_signal_cap = page_cap // len(signals)
+        limit = GAP_PAGE_ROWS if signal != "all" else 10
+        for name in signals:
+            if name == "unanswered":
+                rows, total = await repo.find_unanswered(
+                    tool.scope, window, offset=offset, limit=limit
+                )
+                header = (
+                    f"Unanswered ({total} turns admit not knowing) for {label}, "
+                    f"{_format_window(window)}:"
+                )
+                lines = _unanswered_lines(rows, window.timezone)
+            elif name == "no_knowledge":
+                if not tool.has_knowledge:
+                    sections.append(
+                        f"No-knowledge signal skipped: {label} has no knowledge sources."
+                    )
+                    continue
+                rows, total, median = await repo.find_no_knowledge(
+                    tool.scope, window, offset=offset, limit=limit
+                )
+                median_note = (
+                    f"window median best score {median:.2f}"
+                    if median is not None
+                    else "no citation scores in the window"
+                )
+                header = (
+                    f"No knowledge used ({total} turns; {median_note}) for {label}, "
+                    f"{_format_window(window)}:"
+                )
+                lines = _no_knowledge_lines(rows, window.timezone)
+            else:
+                rows, total = await repo.find_rephrasing(
+                    tool.scope, window, offset=offset, limit=limit
+                )
+                header = (
+                    f"Rephrasing ({total} conversations) for {label}, "
+                    f"{_format_window(window)}:"
+                )
+                lines = _rephrasing_lines(rows, window.timezone)
+            if total == 0:
+                sections.append(header + "\n(none)")
+                continue
+            if not rows:
+                sections.append(
+                    header + f"\nOffset {offset} is past the end ({total})."
+                )
+                continue
+            sections.append(
+                _paged(
+                    lines,
+                    header=header,
+                    offset=offset,
+                    total=total,
+                    tool_name=f'find_gaps with signal="{name}"',
+                    page_cap=per_signal_cap,
+                )
+            )
+    logger.debug(
+        "[Insights] find_gaps target=%s signal=%s offset=%d", label, signal, offset
+    )
+    footer = (
+        "These are heuristic candidates: verify important ones with "
+        "read_conversation and present counts as indicative."
+    )
+    return "\n\n".join(sections) + f"\n\n{footer}"
 
 
 # --------------------------------------------------------------------------- #

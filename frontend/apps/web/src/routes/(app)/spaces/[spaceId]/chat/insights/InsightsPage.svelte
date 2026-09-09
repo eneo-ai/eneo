@@ -26,7 +26,7 @@
   );
 </script>
 
-<div class="h-full overflow-y-auto pt-4">
+<div class="h-full overflow-y-auto">
   <div
     class="bg-primary border-default sticky top-0 z-[11] mx-auto mb-4 w-full max-w-[74rem] rounded-xl rounded-t-none border border-t-0 py-2 pr-2.5 pl-4 shadow-lg"
   >
