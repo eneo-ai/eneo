@@ -222,6 +222,7 @@ async def test_active_overview_tracks_attempt_start_and_completion(
     )
 
     run_ids = []
+    website_urls = []
     attempts = []
     async with db_session() as session:
         repo = CrawlRunRepository(session)
@@ -232,6 +233,13 @@ async def test_active_overview_tracks_attempt_start_and_completion(
                 user_id=admin_user.id,
                 label=f"Overview {index}",
             )
+            website_urls.append(website.url)
+            if index == 2:
+                await session.execute(
+                    sa.update(Websites)
+                    .where(Websites.id == website.id)
+                    .values(name=None)
+                )
             run = await _admit(session, website=website, user=admin_user)
             await session.execute(
                 sa.update(CrawlRuns)
@@ -265,6 +273,9 @@ async def test_active_overview_tracks_attempt_start_and_completion(
     data = response.json()
     assert data["summary"] == {"ongoing": 3, "queued": 2, "issues": 0}
     assert [item["run"]["id"] for item in data["items"]] == run_ids
+    assert data["items"][0]["website_name"] == "Overview 0"
+    assert data["items"][2]["website_name"] is None
+    assert data["items"][2]["website_url"] == website_urls[2]
     assert [item["run"]["phase"] for item in data["items"]] == [
         "pending_dispatch",
         "queued",
@@ -274,6 +285,11 @@ async def test_active_overview_tracks_attempt_start_and_completion(
     ]
     assert all(item["started_at"] is None for item in data["items"][:2])
     assert all(item["started_at"] is not None for item in data["items"][2:])
+    by_url = await client.get(
+        "/api/v1/admin/crawler/", params={"search": website_urls[2]}, headers=headers
+    )
+    assert by_url.status_code == 200, by_url.text
+    assert [item["run"]["id"] for item in by_url.json()["items"]] == [run_ids[2]]
     queued = await client.get("/api/v1/admin/crawler/?status=queued", headers=headers)
     assert len(queued.json()["items"]) == 2
     assert queued.json()["summary"]["ongoing"] == 3
@@ -287,6 +303,9 @@ async def test_active_overview_tracks_attempt_start_and_completion(
     refreshed = await client.get("/api/v1/admin/crawler/", headers=headers)
     assert refreshed.json()["summary"]["ongoing"] == 2
     recent = await client.get("/api/v1/admin/crawler/?view=recent", headers=headers)
+    assert recent.status_code == 200, recent.text
+    assert recent.json()["items"][0]["website_name"] is None
+    assert recent.json()["items"][0]["website_url"] == website_urls[2]
     assert recent.json()["items"][0]["run"]["pages_crawled"] == 7
 
 

@@ -78,27 +78,30 @@ function show() {
   return result;
 }
 
-it("shows tenant crawl metadata and opens failures through the admin endpoint", async () => {
-  api.adminCrawler.failures.mockResolvedValue({
-    run: overview.items[0].run,
-    items: [],
-    total_count: 0,
-    next_cursor: null,
-    details_available: true
-  });
-  show();
-  await expect
-    .element(page.getByRole("button", { name: "Municipal website", exact: true }))
-    .toBeVisible();
-  await expect.element(page.getByText("Communications", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Municipal website", exact: true }).click();
-  await expect.poll(() => api.adminCrawler.failures.mock.calls.length).toBe(1);
-  expect(api.websites.crawlRuns.failures).not.toHaveBeenCalled();
-  await userEvent.keyboard("{Escape}");
-  await expect
-    .element(page.getByRole("button", { name: "Municipal website", exact: true }))
-    .toHaveFocus();
-});
+it.each(["Municipal website", null])(
+  "shows tenant metadata and opens admin failures with website name %s",
+  async (websiteName) => {
+    const sample = structuredClone(overview);
+    sample.items[0].website_name = websiteName;
+    api.adminCrawler.overview.mockResolvedValue(sample);
+    const label = websiteName ?? sample.items[0].website_url;
+    api.adminCrawler.failures.mockResolvedValue({
+      run: overview.items[0].run,
+      items: [],
+      total_count: 0,
+      next_cursor: null,
+      details_available: true
+    });
+    show();
+    await expect.element(page.getByRole("button", { name: label, exact: true })).toBeVisible();
+    await expect.element(page.getByText("Communications", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: label, exact: true }).click();
+    await expect.poll(() => api.adminCrawler.failures.mock.calls.length).toBe(1);
+    expect(api.websites.crawlRuns.failures).not.toHaveBeenCalled();
+    await userEvent.keyboard("{Escape}");
+    await expect.element(page.getByRole("button", { name: label, exact: true })).toHaveFocus();
+  }
+);
 
 it("keeps rows and filters when a refresh fails, then retries the same query", async () => {
   const intervals = vi.spyOn(globalThis, "setInterval");

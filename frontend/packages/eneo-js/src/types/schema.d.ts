@@ -8734,7 +8734,7 @@ export interface components {
        */
       website_id: string;
       /** Website Name */
-      website_name: string;
+      website_name: string | null;
       /** Website Url */
       website_url: string;
       /** Space Name */

@@ -285,13 +285,17 @@
                           <Table.Cell class="max-w-72 whitespace-normal">
                             <button
                               type="button"
-                              class="text-accent-default text-left font-medium underline-offset-4 hover:underline focus-visible:underline"
+                              class="text-accent-default text-left font-medium break-all underline-offset-4 hover:underline focus-visible:underline"
                               onclick={() => {
                                 selectedRun = item.run;
                                 detailsOpen = true;
-                              }}>{item.website_name}</button
+                              }}>{item.website_name || item.website_url}</button
                             >
-                            <p class="text-secondary mt-1 text-xs break-all">{item.website_url}</p>
+                            {#if item.website_name}
+                              <p class="text-secondary mt-1 text-xs break-all">
+                                {item.website_url}
+                              </p>
+                            {/if}
                           </Table.Cell>
                           <Table.Cell class="max-w-44 whitespace-normal"
                             >{item.space_name ?? "—"}</Table.Cell

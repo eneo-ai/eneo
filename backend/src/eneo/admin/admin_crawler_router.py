@@ -29,7 +29,7 @@ class AdminCrawlerSummary(BaseModel):
 class AdminCrawlerItem(BaseModel):
     run: CrawlRunPublic
     website_id: UUID
-    website_name: str
+    website_name: str | None
     website_url: str
     space_name: str | None
     started_at: datetime | None
