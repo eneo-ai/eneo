@@ -12,6 +12,7 @@ from eneo.image_models.domain.image_model import (
     IMAGE_QUALITIES,
     IMAGE_SIZES,
     ImageModel,
+    ImageModelUsage,
 )
 from eneo.image_models.presentation.image_model_models import (
     ImageModelPublic,
@@ -97,3 +98,17 @@ class TestCreateFromDb:
         assert public.cost_per_image == Decimal("0.04")
         assert public.name == "gpt-image-1"
         assert public.nickname == "GPT Image"
+        assert public.used_by_mcp_servers == []
+
+    def test_public_dto_lists_the_providers_running_on_the_model(self):
+        model = ImageModel.create_from_db(_db_row(), _user())
+        provider_id = uuid4()
+        model.used_by_mcp_servers.append(
+            ImageModelUsage(id=provider_id, name="Images", purpose="image_generation")
+        )
+
+        public = ImageModelPublic.from_domain(model)
+
+        assert [(u.id, u.name, u.purpose) for u in public.used_by_mcp_servers] == [
+            (provider_id, "Images", "image_generation")
+        ]

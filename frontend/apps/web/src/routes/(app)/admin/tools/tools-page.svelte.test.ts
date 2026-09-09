@@ -158,16 +158,20 @@ describe("Tools capability configuration", () => {
         ]
       })
     ]);
-    expect(page.getByText("Generate image", { exact: true }).elements()).toHaveLength(0);
+    // A built-in provider's tool is Eneo's own, so the listing shows its
+    // localized title and description rather than the synced English strings.
+    const title = m.tool_generate_image_title();
+    expect(page.getByText(title, { exact: true }).elements()).toHaveLength(0);
     const expand = page.getByRole("button", {
       name: `${m.governance_mcp_show_tools()}: Image Studio`
     });
     await expect.element(expand).toHaveAttribute("aria-expanded", "false");
     await expand.click();
-    await expect.element(page.getByText("Generate image", { exact: true })).toBeVisible();
+    await expect.element(page.getByText(title, { exact: true })).toBeVisible();
     await expect
-      .element(page.getByText("Generate an image from a text description.", { exact: true }))
+      .element(page.getByText(m.tool_generate_image_description(), { exact: true }))
       .toBeVisible();
+    expect(page.getByText("Generate image", { exact: true }).elements()).toHaveLength(0);
     expect(page.getByRole("button", { name: m.sync_tools(), exact: true }).elements()).toHaveLength(
       0
     );
@@ -176,7 +180,7 @@ describe("Tools capability configuration", () => {
     });
     await expect.element(collapse).toHaveAttribute("aria-expanded", "true");
     await collapse.click();
-    expect(page.getByText("Generate image", { exact: true }).elements()).toHaveLength(0);
+    expect(page.getByText(title, { exact: true }).elements()).toHaveLength(0);
   });
 
   it("configures a model and submits save-and-activate together", async () => {

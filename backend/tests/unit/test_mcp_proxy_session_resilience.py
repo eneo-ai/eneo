@@ -101,6 +101,89 @@ class _FakeMCPClient:
         return {"content": [{"type": "text", "text": name}], "is_error": False}
 
 
+class _RecordingMCPClient(_FakeMCPClient):
+    """Fake client that keeps the constructor options the proxy passed."""
+
+    options_by_server: dict[UUID, dict[str, object]] = {}
+
+    def __init__(
+        self,
+        mcp_server: MCPServer,
+        auth_credentials: dict[str, str] | None = None,
+        *,
+        identity_headers: dict[str, str] | None = None,
+        **options: object,
+    ) -> None:
+        super().__init__(
+            mcp_server, auth_credentials, identity_headers=identity_headers
+        )
+        type(self).options_by_server[mcp_server.id] = options
+
+
+async def test_builtin_image_provider_gets_its_own_tool_call_budget(monkeypatch):
+    """Image generation outlasts a general tool call; only the built-in
+    provider carries the longer budget, other servers keep the default."""
+    general = _make_server("general")
+    image_provider = MCPServer(
+        id=uuid4(),
+        tenant_id=general.tenant_id,
+        name="Images",
+        http_url="http://localhost/internal-mcp/image_generation/mcp",
+        http_auth_type="internal",
+        purpose="image_generation",
+        image_model_id=uuid4(),
+    )
+    monkeypatch.setattr(proxy_module, "MCPClient", _RecordingMCPClient)
+    _RecordingMCPClient.options_by_server = {}
+    proxy = MCPProxySession([general, image_provider])
+
+    await proxy._get_or_create_client(general)  # pyright: ignore[reportPrivateUsage]
+    await proxy._get_or_create_client(image_provider)  # pyright: ignore[reportPrivateUsage]
+
+    options = _RecordingMCPClient.options_by_server
+    assert options[general.id]["tool_call_timeout"] is None
+    assert (
+        options[image_provider.id]["tool_call_timeout"]
+        == proxy_module._settings.image_generation_timeout_seconds  # pyright: ignore[reportPrivateUsage]
+    )
+
+
+def test_builtin_provider_tool_calls_are_reported_under_the_loopback_server():
+    """A built-in provider's tools are Eneo's own: the trace names the
+    loopback server (its purpose), not the admin-named row, so clients can
+    localize them like the other internal servers. External servers keep
+    their own name."""
+    general = _make_server("general")
+    provider_id = uuid4()
+    image_provider = MCPServer(
+        id=provider_id,
+        tenant_id=general.tenant_id,
+        name="Image Studio",
+        http_url="http://localhost/internal-mcp/image_generation/mcp",
+        http_auth_type="internal",
+        purpose="image_generation",
+        image_model_id=uuid4(),
+        tools=[
+            MCPServerTool(
+                mcp_server_id=provider_id,
+                name="generate_image",
+                title="Generate image",
+                description="Generate an image from a text description.",
+                input_schema={"type": "object", "properties": {}},
+                is_enabled_by_default=True,
+            )
+        ],
+    )
+    proxy = MCPProxySession([general, image_provider])
+
+    assert proxy.get_tool_info("image_studio__generate_image") == (
+        "image_generation",
+        "generate_image",
+        "Generate image",
+    )
+    assert proxy.get_tool_info("general__tool") == ("general", "tool", None)
+
+
 class _InMemoryToolRepo:
     def __init__(self, tools: list[MCPServerTool]) -> None:
         self.tools = {tool.id: tool for tool in tools}
@@ -807,7 +890,9 @@ class TestReferenceFallbackHint:
         texts = [block["text"] for block in result["content"]]
         assert not any("files__read_file" in text for text in texts)
 
-    async def test_no_hint_when_read_file_is_not_registered(self):
+    async def test_reference_stays_valid_when_read_file_is_not_registered(self):
+        # Image references register no reader; the notice keeps the model from
+        # asking for a re-upload when a remote tool could not fetch the url.
         external = _make_server(name="tabular")
         proxy = MCPProxySession([external])
         proxy._clients[external.id] = self._failing_client()
@@ -816,6 +901,7 @@ class TestReferenceFallbackHint:
 
         texts = [block["text"] for block in result["content"]]
         assert not any("read_file" in text for text in texts)
+        assert any("do not ask the user to re-upload" in text for text in texts)
 
     async def test_unavailable_server_result_carries_the_hint(self):
         external = _make_server(name="tabular")

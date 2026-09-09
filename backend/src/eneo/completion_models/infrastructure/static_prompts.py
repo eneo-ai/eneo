@@ -45,7 +45,10 @@ ATTACHED_FILE_REFERENCES_INSTRUCTION = (
     "tool suited to the file and the task; when no more specific tool fits or "
     'a chosen tool fails, the read_file ("Read attached file") tool, when '
     "available, accepts every reference url. Use it rather than telling the "
-    "user a file cannot be read."
+    'user a file cannot be read. Entries with "kind": "image" are images '
+    "(attached by the user or generated earlier in this conversation): pass "
+    "their url to an image tool to edit them or make variations, never to "
+    "read_file."
 )
 
 SHOW_REFERENCES_PROMPT = """Use the provided sources delimited by triple quotes to answer questions.

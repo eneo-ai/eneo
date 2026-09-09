@@ -1,12 +1,19 @@
-"""File persistence keeps its read-back inside the write transaction."""
+"""File persistence keeps its read-back inside the write transaction, and the
+original-download selection serves what ``original_available`` promises."""
 
 from contextlib import asynccontextmanager
+from hashlib import sha256
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
+import pytest
+
 from eneo.files import file_service as module
-from eneo.files.file_service import FileService
+from eneo.files.file_models import FileContentVariant, FileType
+from eneo.files.file_repo import FileContentReferenceRecord
+from eneo.files.file_service import FileOriginalNotFoundError, FileService
+from eneo.object_content.content import ContentAccessClass
 
 
 def _service_with_explicit_transactions() -> tuple[FileService, dict[str, bool]]:
@@ -53,3 +60,41 @@ async def test_generated_image_is_read_back_inside_the_write_transaction(monkeyp
     assert seen == [True]
     assert saved.id == file_id and saved.blob == b"img"
     assert state["in_transaction"] is False
+
+
+def _reference(variant):
+    return FileContentReferenceRecord(
+        file_id=uuid4(),
+        content_id=uuid4(),
+        variant=FileContentVariant(variant),
+        ordinal=0,
+        page_number=None,
+        width=None,
+        height=None,
+        duration_ms=None,
+        sha256=sha256(b"x").digest(),
+        size_bytes=1,
+        media_type="image/png",
+        access_class=ContentAccessClass.PRIVATE_RESOURCE,
+    )
+
+
+class TestOriginalContent:
+    """The original-download route serves what ``original_available`` promises."""
+
+    def test_generated_artifact_is_an_image_original(self):
+        artifact = _reference("generated_artifact")
+        assert FileService._original_content([artifact], [], FileType.IMAGE) is artifact
+
+    def test_stored_original_wins_over_the_artifact(self):
+        original, artifact = _reference("original"), _reference("generated_artifact")
+        assert (
+            FileService._original_content([artifact, original], [], FileType.IMAGE)
+            is original
+        )
+
+    def test_text_file_without_original_is_not_served(self):
+        with pytest.raises(FileOriginalNotFoundError):
+            FileService._original_content(
+                [_reference("extracted_text")], [], FileType.TEXT
+            )

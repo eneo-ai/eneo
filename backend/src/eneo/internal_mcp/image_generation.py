@@ -28,23 +28,27 @@ from __future__ import annotations
 
 import base64
 import logging
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 import httpx
+from litellm.exceptions import BadRequestError
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import CallToolResult, ImageContent, TextContent
 
+from eneo.files.file_models import FileType
 from eneo.image_models.domain.image_model import (
     AUTO_IMAGE_OPTION,
     IMAGE_QUALITIES,
     IMAGE_SIZES,
 )
 from eneo.internal_mcp.constants import IMAGE_GENERATION_SERVER_NAME
+from eneo.internal_mcp.file_references import resolve_reference_file
 from eneo.internal_mcp.foundation import (
     bearer_from_ctx,
     internal_tool_context,
     mcp_server_id_from_token,
 )
+from eneo.main.config import get_settings
 from eneo.mcp_servers.domain.entities.mcp_server import is_builtin_provider
 from eneo.model_providers.domain.model_route import resolve_model_route
 from eneo.model_providers.infrastructure import litellm_transport
@@ -69,6 +73,25 @@ NOT_CONFIGURED_MESSAGE = (
     "administrator to check the built-in provider's image model."
 )
 NO_IMAGE_MESSAGE = "The image model returned no image."
+NOT_AN_IMAGE_MESSAGE = (
+    "'{name}' is not an image. reference_images accepts only the url of "
+    'entries with "kind": "image".'
+)
+TOO_MANY_REFERENCES_MESSAGE = "At most {limit} reference images per call."
+REFERENCE_TOO_LARGE_MESSAGE = (
+    "'{name}' is too large to use as a reference image ({limit} bytes max)."
+)
+EDIT_UNSUPPORTED_MESSAGE = (
+    "The configured image model cannot use reference images. Call "
+    "generate_image again without reference_images to create a new image "
+    "from the description, or tell the user this image cannot be edited "
+    "with the organisation's image model."
+)
+EDIT_REJECTED_MESSAGE = (
+    "The image model rejected the reference image request. Call "
+    "generate_image again without reference_images to create a new image "
+    "from the description, or tell the user this image could not be edited."
+)
 DEFAULT_MIME_TYPE = "image/png"
 
 # OpenTelemetry GenAI semantic-convention values for ``gen_ai.provider.name``
@@ -95,11 +118,14 @@ def resolve_request_params(
     return params
 
 
-async def image_bytes_from_response(response: Any) -> tuple[bytes, str | None]:
+async def image_bytes_from_response(
+    response: Any, *, timeout: float = 60
+) -> tuple[bytes, str | None]:
     """The first generated image as bytes plus its revised prompt, if any.
 
     Providers return base64 (``b64_json``) or a short-lived URL; both are
-    accepted so the tool works across LiteLLM image backends.
+    accepted so the tool works across LiteLLM image backends. ``timeout``
+    bounds the URL fetch.
     """
     data = list(getattr(response, "data", None) or [])
     if not data:
@@ -111,7 +137,7 @@ async def image_bytes_from_response(response: Any) -> tuple[bytes, str | None]:
         return base64.b64decode(encoded), revised
     url = getattr(first, "url", None)
     if url:
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             fetched = await client.get(url)
             fetched.raise_for_status()
             return fetched.content, revised
@@ -148,18 +174,20 @@ def usage_meta_from_response(
 DROPPABLE_PARAMS = frozenset({"response_format", "size", "quality", "n"})
 
 
-async def _generate_dropping_unsupported_params(call_kwargs: dict[str, Any]) -> Any:
+async def _call_dropping_unsupported_params(
+    call: Callable[..., Awaitable[Any]], call_kwargs: dict[str, Any]
+) -> Any:
     """Call the image model, dropping parameters it rejects as unsupported.
 
     Models differ in what they accept: gpt-image-1 rejects ``response_format``
-    because it always returns base64, dall-e-2 rejects ``quality``. LiteLLM
-    names one rejected parameter per error, so drop it and retry; the
-    caller's remaining choices survive and ``image_bytes_from_response``
-    handles both base64 and URL payloads.
+    because it always returns base64, dall-e-2 rejects ``quality``. Each error
+    names a rejected parameter, so drop it and retry; the caller's remaining
+    choices survive and ``image_bytes_from_response`` handles both base64 and
+    URL payloads.
     """
     for _ in range(len(DROPPABLE_PARAMS)):
         try:
-            return await litellm_transport.aimage_generation(**call_kwargs)
+            return await call(**call_kwargs)
         except Exception as exc:
             param = litellm_transport.unsupported_param(exc)
             if param not in DROPPABLE_PARAMS or param not in call_kwargs:
@@ -170,7 +198,12 @@ async def _generate_dropping_unsupported_params(call_kwargs: dict[str, Any]) -> 
                 param,
             )
             call_kwargs.pop(param)
-    return await litellm_transport.aimage_generation(**call_kwargs)
+    return await call(**call_kwargs)
+
+
+def _edit_unsupported(exc: BaseException) -> bool:
+    """LiteLLM has no image-edit transformation for the route's provider."""
+    return isinstance(exc, ValueError) and "image edit is not supported" in str(exc)
 
 
 async def generate_with_litellm(
@@ -181,34 +214,64 @@ async def generate_with_litellm(
     params: dict[str, str],
     provider_type: str,
     model: str | None = None,
+    reference_images: list[bytes] | None = None,
 ) -> CallToolResult:
     """Call the image model and shape its answer as an MCP tool result.
 
-    ``model`` is the configured model name for the usage metadata; it defaults
-    to the route with its provider prefix removed.
+    With ``reference_images`` the call is an edit (OpenAI ``images.edit``
+    contract: the prompt describes the change, the images are the input);
+    without them it is a generation. ``model`` is the configured model name
+    for the usage metadata; it defaults to the route with its provider prefix
+    removed.
     """
+    timeout = get_settings().image_generation_timeout_seconds
     call_kwargs: dict[str, Any] = {
         "model": route,
         "prompt": prompt,
         "n": 1,
-        "response_format": "b64_json",
+        "timeout": timeout,
         **params,
         **provider_kwargs,
     }
+    if reference_images:
+        # Raw bytes, not (name, bytes) tuples: LiteLLM wraps each image into
+        # the multipart field itself and sniffs the content type. gpt-image-1
+        # rejects ``response_format`` on edits; every edit model returns
+        # base64 or a URL by default, both of which are accepted below.
+        call_kwargs["image"] = list(reference_images)
+        call = litellm_transport.aimage_edit
+    else:
+        call_kwargs["response_format"] = "b64_json"
+        call = litellm_transport.aimage_generation
     try:
-        response = await _generate_dropping_unsupported_params(call_kwargs)
-        image, revised = await image_bytes_from_response(response)
-    except ValueError:
+        response = await _call_dropping_unsupported_params(call, call_kwargs)
+        image, revised = await image_bytes_from_response(response, timeout=timeout)
+    except ValueError as exc:
+        if reference_images and _edit_unsupported(exc):
+            logger.info("[ImageGeneration] %s: image edit unsupported", route)
+            raise ValueError(EDIT_UNSUPPORTED_MESSAGE) from exc
         raise
     except Exception as exc:
         logger.exception("[ImageGeneration] %s: provider call failed", route)
+        if reference_images and isinstance(exc, BadRequestError):
+            # The request itself is what the model refused (edits not offered
+            # for this model, image format or size): tell the model so it can
+            # recover, rather than a generic provider error.
+            raise ValueError(EDIT_REJECTED_MESSAGE) from exc
         litellm_transport.raise_public_litellm_error(
             exc,
             provider_type=provider_type,
             is_unavailable=litellm_transport.is_provider_unavailable_error,
             raise_unavailable=litellm_transport.raise_provider_unavailable,
         )
-    text = "Image generated and shown to the user."
+    if reference_images:
+        count = len(reference_images)
+        plural = "s" if count != 1 else ""
+        text = (
+            f"Image edited from {count} reference image{plural} and shown to the user."
+        )
+    else:
+        text = "Image generated and shown to the user."
     if revised:
         text += f" The model interpreted the prompt as: {revised}"
     return CallToolResult(
@@ -228,20 +291,61 @@ async def generate_with_litellm(
     )
 
 
+async def load_reference_images(urls: list[str], tool_ctx: Any) -> list[bytes]:
+    """The bytes behind each reference url, verified and capped.
+
+    Each url is resolved like ``read_file`` resolves an attachment (token and
+    tenant checks, bytes from the content store). Uploads yield their
+    provider-safe model input (downscaled PNG/JPEG/WEBP) and generated images
+    their artifact. The count and size caps are the same ones that bound
+    images arriving from tool results, so one call cannot move more image
+    data than the platform admits in the other direction.
+    """
+    settings = get_settings()
+    if len(urls) > settings.mcp_tool_image_max_count:
+        raise ValueError(
+            TOO_MANY_REFERENCES_MESSAGE.format(limit=settings.mcp_tool_image_max_count)
+        )
+    images: list[bytes] = []
+    for url in urls:
+        file = await resolve_reference_file(
+            url, tool_ctx, log_tag="[ImageGeneration] reference"
+        )
+        if file.file_type != FileType.IMAGE or file.blob is None:
+            raise ValueError(NOT_AN_IMAGE_MESSAGE.format(name=file.name))
+        if len(file.blob) > settings.mcp_tool_image_max_bytes:
+            raise ValueError(
+                REFERENCE_TOO_LARGE_MESSAGE.format(
+                    name=file.name, limit=settings.mcp_tool_image_max_bytes
+                )
+            )
+        images.append(file.blob)
+    return images
+
+
 @mcp.tool(title="Generate image")
 async def generate_image(
     prompt: str,
     ctx: Context,
     size: str | None = None,
     quality: str | None = None,
+    reference_images: list[str] | None = None,
 ) -> CallToolResult:
-    """Generate an image from a text description.
+    """Generate an image from a text description, or edit existing images.
 
     The image is shown to the user directly. Describe the subject, style and
     composition in the prompt. ``size`` is one of "1024x1024", "1536x1024"
     (landscape) or "1024x1536" (portrait); ``quality`` is "low", "medium" or
     "high". Leave both out to use the organisation's defaults. For diagrams
     or vector graphics, write code instead of calling this tool.
+
+    To edit an image or make a variation of it, pass ``reference_images``:
+    the exact "url" values of image entries in the conversation's file
+    references (images the user attached, or images generated earlier in the
+    conversation). Then the prompt describes the change or the variation
+    wanted, and the result is based on those images. Never construct or
+    modify the urls, and leave ``reference_images`` out entirely when the
+    conversation lists no image reference entry.
     """
     server_id = mcp_server_id_from_token(bearer_from_ctx(ctx))
     async with internal_tool_context(ctx) as tool_ctx:
@@ -250,6 +354,7 @@ async def generate_image(
         if (
             server.tenant_id != tool_ctx.user.tenant_id
             or not is_builtin_provider(server.http_auth_type)
+            or not server.is_enabled
             or server.image_model_id is None
         ):
             raise ValueError(NOT_CONFIGURED_MESSAGE)
@@ -274,6 +379,11 @@ async def generate_image(
             size=size,
             quality=quality,
         )
+        references = (
+            await load_reference_images(reference_images, tool_ctx)
+            if reference_images
+            else []
+        )
     # The provider call runs outside the request-scoped DB transaction.
     return await generate_with_litellm(
         route=route,
@@ -281,6 +391,7 @@ async def generate_image(
         prompt=prompt,
         params=params,
         provider_type=provider.provider_type,
+        reference_images=references,
     )
 
 

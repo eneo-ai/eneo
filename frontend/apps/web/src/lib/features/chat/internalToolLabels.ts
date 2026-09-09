@@ -8,6 +8,8 @@ import { m } from "$lib/paraglide/messages";
 
 type ToolArgs = Record<string, unknown> | undefined;
 
+type CatalogLabels = { title: () => string; description: () => string };
+
 /**
  * Localized display labels for Eneo's own built-in tools (the loopback
  * internal-MCP servers). External MCP servers provide their own titles and
@@ -24,6 +26,12 @@ const INTERNAL_SERVERS: Record<
       string,
       { running: (args?: ToolArgs) => string; done: (args?: ToolArgs) => string }
     >;
+    /**
+     * Admin-facing title and description per tool, for servers that admins
+     * see as catalog rows (built-in providers). Other internal servers are
+     * never listed in admin surfaces and carry none.
+     */
+    catalog?: Record<string, CatalogLabels>;
   }
 > = {
   knowledge: {
@@ -67,8 +75,47 @@ const INTERNAL_SERVERS: Record<
         done: () => m.tool_read_file_done()
       }
     }
+  },
+  // The built-in image generation provider is an admin-named server row over
+  // Eneo's loopback server; the backend reports its tool calls under the
+  // loopback server's name so the tool follows the UI language too. An
+  // external image provider keeps its own name and titles.
+  image_generation: {
+    label: () => m.image_generation(),
+    tools: {
+      // One tool covers both: a call carrying reference images is an edit or
+      // variation of those images, which reads differently to the user.
+      generate_image: {
+        running: (args) =>
+          hasReferenceImages(args) ? m.tool_edit_image() : m.tool_generate_image(),
+        done: (args) =>
+          hasReferenceImages(args) ? m.tool_edit_image_done() : m.tool_generate_image_done()
+      }
+    },
+    catalog: {
+      generate_image: {
+        title: () => m.tool_generate_image_title(),
+        description: () => m.tool_generate_image_description()
+      }
+    }
   }
 };
+
+/**
+ * Localized admin-facing title and description of a tool on one of Eneo's
+ * built-in providers, or null for external servers and unknown tools. A
+ * built-in provider is an admin-named server row over the loopback server
+ * of its purpose; admin surfaces show synced protocol strings for external
+ * servers, while Eneo's own tools follow the UI language.
+ */
+export function builtinToolCatalogLabels(
+  server: { purpose?: string | null; http_auth_type?: string | null },
+  toolName: string
+): { title: string; description: string } | null {
+  if (server.http_auth_type !== "internal" || !server.purpose) return null;
+  const labels = INTERNAL_SERVERS[server.purpose]?.catalog?.[toolName];
+  return labels ? { title: labels.title(), description: labels.description() } : null;
+}
 
 /** Whether a server name refers to one of Eneo's built-in loopback servers. */
 export function isInternalServer(serverName: string): boolean {
@@ -109,8 +156,8 @@ export function serverDisplayName(serverName: string): string {
   return INTERNAL_SERVERS[serverName]?.label() ?? serverName;
 }
 
-/** Path of a signed attachment download URL, mirroring the backend's parser. */
-const FILE_DOWNLOAD_PATH = /\/api\/v1\/files\/([0-9a-fA-F-]{36})\/download\/?$/;
+/** Path of a signed file reference URL, mirroring the backend's parser. */
+const FILE_DOWNLOAD_PATH = /\/api\/v1\/files\/([0-9a-fA-F-]{36})\/original\/download\/?$/;
 
 /**
  * File id referenced by a read_file call on Eneo's internal files server, or
@@ -130,6 +177,12 @@ export function internalReadFileId(
   } catch {
     return null;
   }
+}
+
+/** Whether a generate_image call edits reference images rather than starting from text. */
+function hasReferenceImages(args?: ToolArgs): boolean {
+  const references = args?.reference_images;
+  return Array.isArray(references) && references.length > 0;
 }
 
 /** Longest query shown inline in a tool label before being cut with an ellipsis. */

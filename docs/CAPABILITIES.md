@@ -100,11 +100,26 @@ An MCP `image` content block returned by any tool becomes a generated file shown
 | `MCP_TOOL_IMAGE_MAX_COUNT` | 4 | Images admitted per tool result; the rest are dropped with one notice. |
 | `MCP_TOOL_OUTPUT_MAX_CHARS` | 32768 | Text budget per tool result. Images do not count against it. |
 
-Only `image/png`, `image/jpeg`, `image/webp` and `image/gif` are accepted. The model sees a short placeholder instead of the bytes. Only the latest turn's generated images are replayed to the model on follow-ups; older ones are described by the placeholder in their tool result. Generated files are deleted with their conversation.
+Only `image/png`, `image/jpeg`, `image/webp` and `image/gif` are accepted. The model sees a short placeholder instead of the bytes. Only the latest turn's generated images are replayed to the model as vision input on follow-ups; older ones are described by the placeholder in their tool result plus a reference URL (below). Generated files are deleted with their conversation.
+
+### Reference images (variations and follow-up edits)
+
+A user can attach an image and ask for a variation or edit, and a follow-up turn can pass an image the assistant generated earlier back to the image tool. Both the built-in provider and external `purpose=image_generation` servers use the same mechanism: signed file reference URLs.
+
+- Attached images and generated images get signed reference URLs in the prompt, tagged `"kind": "image"` next to the document entries. Images are never URL-only; the entry is an extra handle beside the vision input. The system prompt directs image entries to image tools, never to `read_file`.
+- The built-in `generate_image` tool takes an optional `reference_images` list of those URLs. With references it calls the image edit API (`litellm.aimage_edit`) with the file bytes; the URL is verified locally like `read_file` does, never fetched. Count and size caps reuse `MCP_TOOL_IMAGE_MAX_COUNT` and `MCP_TOOL_IMAGE_MAX_BYTES`.
+- A model without edit support, or a provider that rejects the edit request, returns a tool error the model can recover from (generate from the description, or tell the user the image cannot be edited). Never a silent plain generation.
+- `ToolCallInfo.generated_file_ids` records which files a call produced. Replayed tool results get a fresh `Reference url for Image N` line per image; URLs are never persisted.
+- External image servers fetch the bytes through the signed download endpoint, so `FILE_REFERENCE_BASE_URL` must be reachable from the external server. A failed call carrying a reference URL tells the model the URL is valid, so it reports that the tool cannot reach the file rather than asking for a re-upload.
+- Image attachments are offered in the chat whenever image generation is available, even without a vision model.
+
+Known limitation: an image generated earlier in the same turn cannot be edited in that turn, because the file is persisted after the tool result reaches the model. Follow-ups work from the next turn on.
 
 ## 5. Extending the capability set
 
 Adding a capability requires updating the backend `CapabilityPurpose` type and `CAPABILITY_PURPOSES` list, adding the matching permission and frontend `capabilities.ts` descriptor with its messages, and migrating the association-table purpose constraints and existing role permissions. All admin, space, assistant and chat surfaces render from those lists.
+
+Whether a capability should be served by a built-in loopback server at all, and which attachment pattern it should use, is covered in the docs site page **Built-in Tool Servers** (`frontend/apps/docs-site/src/content/docs/builtin-tool-servers.mdx`). The rule in short: a loopback tool is a pure function of the request, the tenant database and at most one outbound provider call, finishing inside a tool-call timeout; anything with a runtime footprint (engine, process, storage, heavy dependency) is an external MCP server that receives the signed reference URL.
 
 
 ## 6. Deployment and client changes

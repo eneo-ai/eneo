@@ -1056,7 +1056,10 @@ class TenantImageModelService:
         provider_refs = await self.session.scalar(
             sa.select(sa.func.count())
             .select_from(MCPServers)
-            .where(MCPServers.image_model_id == model_id)
+            .where(
+                MCPServers.tenant_id == self.user.tenant_id,
+                MCPServers.image_model_id == model_id,
+            )
         )
         if provider_refs:
             raise ModelInUseException()

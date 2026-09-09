@@ -186,7 +186,8 @@ class TestImageModelSoftDelete:
         async with db_container() as container:
             session = container.session()
             model = await image_model_factory(session, "in-use")
-            await _builtin_provider(session, admin_user.tenant_id, model.id)
+            unused = await image_model_factory(session, "unused")
+            provider = await _builtin_provider(session, admin_user.tenant_id, model.id)
 
             service = TenantImageModelService(session=session, user=admin_user)
             with pytest.raises(ModelInUseException):
@@ -198,6 +199,18 @@ class TestImageModelSoftDelete:
                 )
             ).scalar_one()
             assert row.deleted_at is None
+
+            # The listing names the provider so the admin sees the block
+            # before trying to delete.
+            repo = ImageModelRepository(session, admin_user)
+            usage = {m.id: m.used_by_mcp_servers for m in await repo.all()}
+            assert [(u.id, u.name, u.purpose) for u in usage[model.id]] == [
+                (provider.id, provider.name, "image_generation")
+            ]
+            assert usage[unused.id] == []
+            assert [u.id for u in (await repo.one(model.id)).used_by_mcp_servers] == [
+                provider.id
+            ]
 
 
 class TestImageModelCleanupWorker:

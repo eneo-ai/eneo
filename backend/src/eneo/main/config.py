@@ -269,6 +269,9 @@ class Settings(BaseSettings):
     mcp_client_connect_timeout_seconds: int = 30
     mcp_client_list_tools_timeout_seconds: int = 30
     mcp_client_call_timeout_seconds: int = 60
+    # Tool-call budget for the built-in image generation provider. Image
+    # models routinely take longer than a general MCP tool call.
+    image_generation_timeout_seconds: int = 240
     mcp_tool_output_max_chars: int = 32768
     # Decoded size cap for a single MCP image content block; larger images
     # are dropped before they can be persisted as generated files.
@@ -770,6 +773,14 @@ class Settings(BaseSettings):
             logging.error(
                 "MCP_CLIENT_CALL_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
                 self.mcp_client_call_timeout_seconds,
+            )
+            sys.exit(1)
+
+        if self.image_generation_timeout_seconds <= 0:
+            logging.error(
+                "IMAGE_GENERATION_TIMEOUT_SECONDS must be greater than zero. "
+                "Current value: %s",
+                self.image_generation_timeout_seconds,
             )
             sys.exit(1)
 

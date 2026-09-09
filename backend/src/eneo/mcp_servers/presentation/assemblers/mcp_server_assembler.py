@@ -95,6 +95,10 @@ class MCPServerAssembler:
             "http_url": mcp_server.http_url,
             "http_auth_type": mcp_server.http_auth_type,
             "purpose": mcp_server.purpose,
+            # Org-level availability: a deactivated server stays attached to
+            # assistants but is never called, so clients show it as unavailable.
+            "is_enabled": mcp_server.is_enabled,
+            "readiness_reason": mcp_server.readiness_reason,
             "tags": mcp_server.tags,
             "icon_url": mcp_server.icon_url,
             "security_classification": sc_dict,

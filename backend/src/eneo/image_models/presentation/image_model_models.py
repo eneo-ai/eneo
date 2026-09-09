@@ -15,6 +15,14 @@ ImageSize = Literal["auto", "1024x1024", "1536x1024", "1024x1536"]
 ImageQuality = Literal["auto", "low", "medium", "high"]
 
 
+class ImageModelUsedByPublic(BaseModel):
+    """A capability provider that runs on the model."""
+
+    id: UUID
+    name: str
+    purpose: str
+
+
 class ImageModelPublic(BaseModel):
     id: UUID
     name: str
@@ -42,6 +50,8 @@ class ImageModelPublic(BaseModel):
     provider_name: Optional[str] = None
     provider_type: Optional[str] = None
     deprecation_date: Optional[str] = None
+    # Capability providers that run on this model; non-empty blocks deletion.
+    used_by_mcp_servers: list[ImageModelUsedByPublic] = []
 
     @classmethod
     def from_domain(cls, model: ImageModel):
@@ -75,6 +85,10 @@ class ImageModelPublic(BaseModel):
             provider_name=model.provider_name,
             provider_type=model.provider_type,
             deprecation_date=model.litellm_deprecation_date,
+            used_by_mcp_servers=[
+                ImageModelUsedByPublic(id=u.id, name=u.name, purpose=u.purpose)
+                for u in model.used_by_mcp_servers
+            ],
         )
 
 

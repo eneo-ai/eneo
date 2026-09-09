@@ -16,6 +16,7 @@ from eneo.files.file_repo import (
     LegacyFileInfoRecord,
     binary_file_variants,
     legacy_primary_file_variant,
+    original_download_variants,
     primary_file_variants,
     project_file_media_type,
     select_binary_file_reference,
@@ -203,12 +204,10 @@ class FileContentLoader:
                 text_reference=text_reference,
                 blob_reference=blob_reference,
                 transcription_reference=transcription_reference,
-                original_available=self._first_content(
-                    file_references,
-                    [],
-                    FileContentVariant.ORIGINAL,
+                original_available=any(
+                    self._first_content(file_references, [], variant) is not None
+                    for variant in original_download_variants(file.file_type)
                 )
-                is not None
                 or self._legacy_original_available(legacy_info_by_file.get(file.id)),
             )
             selections[file.id] = selection

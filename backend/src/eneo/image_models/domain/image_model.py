@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING, Optional
 
@@ -27,6 +28,18 @@ IMAGE_SIZES: tuple[str, ...] = (
 IMAGE_QUALITIES: tuple[str, ...] = (AUTO_IMAGE_OPTION, "low", "medium", "high")
 
 
+@dataclass(frozen=True)
+class ImageModelUsage:
+    """A capability provider (``mcp_servers`` row) that runs on the model.
+
+    While any such provider exists the model cannot be deleted.
+    """
+
+    id: "UUID"
+    name: str
+    purpose: str
+
+
 class ImageModel(AIModel):
     def __init__(
         self,
@@ -54,6 +67,7 @@ class ImageModel(AIModel):
         provider_id: Optional["UUID"] = None,
         provider_name: Optional[str] = None,
         provider_type: Optional[str] = None,
+        used_by_mcp_servers: Optional[list[ImageModelUsage]] = None,
     ):
         super().__init__(
             user=user,
@@ -79,6 +93,9 @@ class ImageModel(AIModel):
         self.cost_per_image = cost_per_image
         self.security_classification = security_classification
         self.tenant_id = tenant_id
+        self.used_by_mcp_servers: list[ImageModelUsage] = list(
+            used_by_mcp_servers or []
+        )
         self.provider_id = provider_id
         self.provider_name = provider_name
         self.provider_type = provider_type

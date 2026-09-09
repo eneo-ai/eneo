@@ -17,10 +17,17 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from eneo.authentication.signed_urls import looks_like_reference_url
-from eneo.internal_mcp.constants import FILES_SERVER_NAME
+from eneo.internal_mcp.constants import (
+    FILES_SERVER_NAME,
+    IMAGE_GENERATION_SERVER_NAME,
+)
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
-from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
+from eneo.mcp_servers.domain.entities.mcp_server import (
+    MCPServer,
+    MCPServerTool,
+    is_builtin_provider,
+)
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
     MCPClient,
     MCPClientError,
@@ -41,12 +48,52 @@ _settings = get_settings()
 MCP_IMAGE_MIME_TYPES: frozenset[str] = frozenset(
     {"image/png", "image/jpeg", "image/webp", "image/gif"}
 )
+# Appended to a failed tool call that carried a reference url when no built-in
+# reader is registered (image references). The url is the file, so a re-upload
+# or a "public link" changes nothing; the honest outcome is that the tool's host
+# cannot reach this deployment.
+REFERENCE_URL_VALID_NOTICE = (
+    "The url passed is a valid signed reference to the file; uploading the "
+    "file again would yield the same kind of url, so do not ask the user to "
+    "re-upload it or to provide another link. If the tool could not fetch the "
+    "url, the tool runs somewhere that cannot reach this deployment's file "
+    "references: tell the user that the tool cannot access the file from where "
+    "it runs."
+)
 MCP_IDENTITY_CATALOG_PREPARATION_TIMEOUT_SECONDS = float(
     _settings.mcp_client_connect_timeout_seconds
     + _settings.mcp_client_list_tools_timeout_seconds
 )
 _CIRCUIT_BREAKER_STATE: dict[UUID, dict[str, float | int]] = {}
 _CIRCUIT_BREAKER_LOCK = asyncio.Lock()
+
+
+def _trace_server_name(server: MCPServer) -> str:
+    """Server name a tool call is reported under to clients.
+
+    A built-in provider is an admin-named row whose endpoint is one of Eneo's
+    loopback servers, mounted under its purpose (see
+    ``MCPServerService.builtin_provider_url``). Its tools are Eneo's own, so
+    they are reported under the loopback server's name like the knowledge and
+    files servers are; that lets the chat label them in the UI language
+    instead of showing the server-side English title under the row's name.
+    """
+    if is_builtin_provider(server.http_auth_type) and server.purpose:
+        return server.purpose
+    return server.name
+
+
+def _tool_call_timeout_for(server: MCPServer) -> int | None:
+    """Per-server tool-call budget; ``None`` keeps the client default.
+
+    The built-in image generation provider runs an image model whose calls
+    routinely outlast a general MCP tool call, so it gets its own budget.
+    """
+    if is_builtin_provider(server.http_auth_type) and (
+        server.purpose == IMAGE_GENERATION_SERVER_NAME
+    ):
+        return _settings.image_generation_timeout_seconds
+    return None
 
 
 class MCPProxySession:
@@ -723,7 +770,7 @@ class MCPProxySession:
         if prefixed_tool_name not in self._tool_registry:
             return None
         server, original_tool_name, title = self._tool_registry[prefixed_tool_name]
-        return (server.name, original_tool_name, title)
+        return (_trace_server_name(server), original_tool_name, title)
 
     def _capture_owner_task(self) -> None:
         """Bind this proxy session to the current asyncio.Task on first connect.
@@ -789,6 +836,7 @@ class MCPProxySession:
                     sid
                 ),
                 identity_headers=self.identity_headers,
+                tool_call_timeout=_tool_call_timeout_for(server),
             )
 
             logger.debug(f"[MCPProxy] Connecting to '{server.name}'...")
@@ -817,13 +865,15 @@ class MCPProxySession:
     def _reference_fallback_hint(
         self, failing_tool_name: str, arguments: dict[str, Any]
     ) -> str:
-        """Pointer to the built-in reader for a failed reference-URL call.
+        """Guidance appended to a failed tool call that carried a reference URL.
 
         Keys on the argument shape (a signed attachment reference URL), not on
-        which server failed: any tool call that carried a reference url can be
-        retried against the loopback read_file, which registers exactly when
-        reference entries render in the prompt. Empty when no argument is a
-        reference, read_file is not registered, or read_file itself failed.
+        which server failed. Points at the loopback read_file when it is
+        registered (it registers exactly when text references render in the
+        prompt); otherwise, e.g. for image references, states that the url is
+        valid so the model neither asks for a re-upload nor blames the file
+        when a remote tool could not fetch it. Empty when no argument is a
+        reference or read_file itself failed.
         """
         if not any(
             isinstance(value, str) and looks_like_reference_url(value)
@@ -832,7 +882,7 @@ class MCPProxySession:
             return ""
         entry = self._files_read_file_entry()
         if entry is None:
-            return ""
+            return REFERENCE_URL_VALID_NOTICE
         prefixed_name, title = entry
         if prefixed_name == failing_tool_name:
             return ""

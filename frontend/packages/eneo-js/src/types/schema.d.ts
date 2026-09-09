@@ -13453,6 +13453,11 @@ export interface components {
       provider_type?: string | null;
       /** Deprecation Date */
       deprecation_date?: string | null;
+      /**
+       * Used By Mcp Servers
+       * @default []
+       */
+      used_by_mcp_servers?: components["schemas"]["ImageModelUsedByPublic"][];
     };
     /** ImageModelSecurityStatus */
     ImageModelSecurityStatus: {
@@ -13528,6 +13533,11 @@ export interface components {
       provider_type?: string | null;
       /** Deprecation Date */
       deprecation_date?: string | null;
+      /**
+       * Used By Mcp Servers
+       * @default []
+       */
+      used_by_mcp_servers?: components["schemas"]["ImageModelUsedByPublic"][];
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
     };
@@ -13539,6 +13549,21 @@ export interface components {
       is_org_default?: boolean | null;
       /** Security Classification */
       security_classification?: components["schemas"]["ModelId"] | null;
+    };
+    /**
+     * ImageModelUsedByPublic
+     * @description A capability provider that runs on the model.
+     */
+    ImageModelUsedByPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Purpose */
+      purpose: string;
     };
     /** InfoBlobAddPublic */
     InfoBlobAddPublic: {
@@ -14156,6 +14181,10 @@ export interface components {
       http_auth_type: string | null;
       /** Purpose */
       purpose: string;
+      /** Is Enabled */
+      is_enabled: boolean;
+      /** Readiness Reason */
+      readiness_reason: string | null;
       /** Tags */
       tags: string[] | null;
       /** Icon Url */
@@ -20217,6 +20246,8 @@ export interface components {
       meta?: {
         [key: string]: unknown;
       } | null;
+      /** Generated File Ids */
+      generated_file_ids?: string[] | null;
     };
     /**
      * ToolCallResultPublic
@@ -27836,6 +27867,8 @@ export interface operations {
                     meta?: {
                       [key: string]: unknown;
                     } | null;
+                    /** Generated File Ids */
+                    generated_file_ids?: string[] | null;
                   };
                 };
               }
@@ -27891,6 +27924,8 @@ export interface operations {
                     meta?: {
                       [key: string]: unknown;
                     } | null;
+                    /** Generated File Ids */
+                    generated_file_ids?: string[] | null;
                   };
                 };
               }
@@ -27946,6 +27981,8 @@ export interface operations {
                     meta?: {
                       [key: string]: unknown;
                     } | null;
+                    /** Generated File Ids */
+                    generated_file_ids?: string[] | null;
                   };
                 };
               }

@@ -28,7 +28,8 @@
   import { SvelteSet } from "svelte/reactivity";
   import { AlertTriangle, X } from "lucide-svelte";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
-  import { canUseCapability, isCapabilityPurpose } from "$lib/features/mcp/capabilities";
+  import { isCapabilityPurpose } from "$lib/features/mcp/capabilities";
+  import { chatCapabilities } from "../../chatCapabilities";
   import { getContextErrorInfo, isConversationSubmitDisabled } from "./conversationInputState";
 
   type McpServerSummary = {
@@ -38,6 +39,9 @@
     icon_url?: string | null;
     /** "general" for ordinary MCP servers, otherwise a capability purpose (web search, image generation). */
     purpose?: string | null;
+    /** Org-level availability: a deactivated server stays attached but is never called. */
+    is_enabled?: boolean;
+    readiness_reason?: string | null;
   };
 
   const chat = getChatService();
@@ -280,35 +284,15 @@
   // each its own popover entry. A capability the user's role may not use is
   // hidden; the backend never attaches its tools for that user anyway.
   const generalMcpServers = $derived(
-    mcpServers.filter((server) => !isCapabilityPurpose(server.purpose))
+    mcpServers
+      .filter((server) => !isCapabilityPurpose(server.purpose))
+      .map((server) => ({
+        ...server,
+        available: server.is_enabled !== false,
+        reason: server.is_enabled === false ? "server_disabled" : null
+      }))
   );
-  const capabilityServers = $derived.by(() => {
-    const partner = chat.partner;
-    if (!partner) return [];
-    const effective = "effective_config" in partner ? partner.effective_config : undefined;
-    const purposes = effective?.mcp_enforced
-      ? effective.enabled_capabilities
-      : "enabled_capabilities" in partner
-        ? partner.enabled_capabilities
-        : [];
-    const availability = effective?.mcp_enforced
-      ? effective.available_capabilities
-      : "available_capabilities" in partner
-        ? partner.available_capabilities
-        : [];
-    return (purposes ?? [])
-      .filter((p) => canUseCapability(user, p))
-      .map((purpose) => {
-        const state = availability?.find((c) => c.purpose === purpose);
-        return {
-          id: "capability:" + purpose,
-          purpose,
-          name: purpose,
-          available: state?.available ?? false,
-          reason: state?.reason ?? "no_active_provider"
-        };
-      });
-  });
+  const capabilityServers = $derived(chatCapabilities(chat.partner, user));
   const toolPreferenceIds = $derived([...generalMcpServers, ...capabilityServers].map((s) => s.id));
 
   $effect(() => {
