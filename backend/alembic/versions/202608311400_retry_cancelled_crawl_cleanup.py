@@ -46,6 +46,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.execute("LOCK TABLE crawl_attempts IN SHARE ROW EXCLUSIVE MODE")
     op.execute(
         """
         DO $$
@@ -54,15 +55,24 @@ def downgrade() -> None:
                 SELECT 1
                 FROM crawl_attempts
                 WHERE failure_code = 'cancelled'
+                  AND transport_cleaned_at IS NULL
             ) THEN
                 RAISE EXCEPTION USING
                     MESSAGE = 'cannot downgrade cancelled crawl cleanup',
-                    HINT = 'Resolve or retain cancelled cleanup obligations before downgrading.';
+                    HINT = 'Let the crawler maintenance worker finish cancelled transport cleanup before retrying.';
             END IF;
         END $$;
         """
     )
     op.drop_constraint(_CONSTRAINT, "crawl_attempts", type_="check")
+    # The older constraint has no representation for cancelled cleanup receipts.
+    # Keep the cancellation outcome; only completed receipts may be removed.
+    # Fire the lifecycle trigger now so pending events do not block the DDL.
+    op.execute("SET CONSTRAINTS crawl_attempts_preserve_current_attempt IMMEDIATE")
+    op.execute(
+        "UPDATE crawl_attempts SET transport_cleaned_at = NULL "
+        "WHERE failure_code = 'cancelled' AND transport_cleaned_at IS NOT NULL"
+    )
     op.create_check_constraint(
         _CONSTRAINT,
         "crawl_attempts",

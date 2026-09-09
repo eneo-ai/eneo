@@ -544,15 +544,49 @@ def downgrade() -> None:
             END IF;
             IF EXISTS (
                 SELECT 1
-                FROM crawl_runs
-                WHERE phase = 'terminal'
-                  AND job_id IS NULL
+                FROM crawl_attempts
+                WHERE failure_code = 'lease_expired'
+                  AND transport_cleaned_at IS NULL
             ) THEN
                 RAISE EXCEPTION USING
-                    MESSAGE = 'crawler lifecycle downgrade cannot project runs without jobs',
-                    HINT = 'Restore a compatible job projection or retain this migration.';
+                    MESSAGE = 'crawler lifecycle downgrade requires completed transport cleanup',
+                    HINT = 'Let the crawler maintenance worker finish transport cleanup before retrying.';
             END IF;
         END $$;
+        """
+    )
+    op.execute("DROP TRIGGER crawl_attempts_preserve_current_attempt ON crawl_attempts")
+    op.execute("DROP TRIGGER crawl_runs_require_current_attempt ON crawl_runs")
+    op.execute("DROP FUNCTION enforce_crawl_run_current_attempt()")
+
+    # A run cancelled before dispatch has no transport job. Restore a terminal
+    # legacy projection from its observed state without enqueueing work or
+    # inventing a completion timestamp for historical rows.
+    op.execute(
+        """
+        WITH missing_jobs AS MATERIALIZED (
+            SELECT cr.id AS run_id, gen_random_uuid() AS job_id,
+                   w.user_id, w.name, cr.created_at, cr.updated_at,
+                   cr.finished_at, cr.outcome
+            FROM crawl_runs AS cr
+            JOIN websites AS w ON w.id = cr.website_id
+            WHERE cr.job_id IS NULL
+        ), inserted_jobs AS (
+            INSERT INTO jobs (
+                id, user_id, task, status, name, created_at, updated_at, finished_at
+            )
+            SELECT job_id, user_id, 'crawl',
+                   CASE WHEN outcome IN ('succeeded', 'unchanged', 'empty', 'partial')
+                        THEN 'complete' ELSE 'failed' END,
+                   'Crawl history: ' || name, created_at, updated_at, finished_at
+            FROM missing_jobs
+            RETURNING id
+        )
+        UPDATE crawl_runs AS cr
+        SET job_id = missing_jobs.job_id
+        FROM missing_jobs
+        JOIN inserted_jobs ON inserted_jobs.id = missing_jobs.job_id
+        WHERE cr.id = missing_jobs.run_id
         """
     )
     op.execute(
@@ -575,10 +609,6 @@ def downgrade() -> None:
           AND cr.phase = 'terminal'
         """
     )
-    op.execute("DROP TRIGGER crawl_attempts_preserve_current_attempt ON crawl_attempts")
-    op.execute("DROP TRIGGER crawl_runs_require_current_attempt ON crawl_runs")
-    op.execute("DROP FUNCTION enforce_crawl_run_current_attempt()")
-
     # Restore the total-attempted representation expected by legacy workers
     # and UI consumers. This runs after removing the deferred lifecycle triggers
     # so their pending events do not block the schema teardown below.

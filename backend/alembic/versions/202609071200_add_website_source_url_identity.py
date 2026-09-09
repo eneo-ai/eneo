@@ -134,6 +134,31 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Concurrent DDL commits this revision before lower revisions can refuse a
+    # rollback. Check drain requirements before removing any publisher schema.
+    # API and workers must remain stopped throughout the downgrade.
+    op.execute("LOCK TABLE crawl_runs, crawl_attempts IN SHARE ROW EXCLUSIVE MODE")
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (SELECT 1 FROM crawl_runs WHERE phase <> 'terminal') THEN
+                RAISE EXCEPTION USING
+                    MESSAGE = 'crawler downgrade requires drained crawl runs',
+                    HINT = 'Finish or cancel active crawls before stopping the workers and retrying.';
+            END IF;
+            IF EXISTS (
+                SELECT 1 FROM crawl_attempts
+                WHERE failure_code IN ('lease_expired', 'cancelled')
+                  AND transport_cleaned_at IS NULL
+            ) THEN
+                RAISE EXCEPTION USING
+                    MESSAGE = 'crawler downgrade requires completed transport cleanup',
+                    HINT = 'Let the crawler maintenance worker finish transport cleanup before stopping it and retrying.';
+            END IF;
+        END $$;
+        """
+    )
     with op.get_context().autocommit_block():
         op.drop_index(
             _INDEX,

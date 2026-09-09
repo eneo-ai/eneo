@@ -648,6 +648,62 @@ then restart all publishers on the same version. Old publishers identify website
 documents by title; the new version uses their source URL. The migration preserves
 metadata and citation IDs and reports ambiguous legacy URLs for review.
 
+#### Returning from the Python crawler branch to develop
+
+Run the database downgrade **before switching application code**, while the Python
+crawler branch's migration files are still available. The procedure below returns
+to develop revision `202609071000` (develop commit `3becec01`). If the target release
+has different migrations, verify its revision graph first.
+
+1. Record the current website schedules and set them to **Never** for the
+   maintenance window. Block new manual crawl requests. Let active crawls finish
+   or stop them through the website controls; keep both workers running until
+   cancellation and expired-lease cleanup have completed.
+2. Stop the API, general worker, and crawler worker. Back up the database and
+   retain the matching document storage. Run this query against the database;
+   both counts must be zero:
+
+   ```sql
+   SELECT
+       (SELECT count(*) FROM crawl_runs WHERE phase <> 'terminal') AS active_runs,
+       (SELECT count(*) FROM crawl_attempts
+        WHERE failure_code IN ('lease_expired', 'cancelled')
+          AND transport_cleaned_at IS NULL) AS pending_transport_cleanup;
+   ```
+
+   If either count is nonzero, resume the crawler version's workers with new
+   admissions still disabled, finish the work, then stop the services and check
+   again. Do not clear these records or mark cleanup complete manually.
+3. From the crawler version's backend environment, run:
+
+   ```bash
+   uv run alembic downgrade '202608311430@202608121500'
+   uv run alembic current
+   ```
+
+   The branch qualifier removes only the crawler migrations across both merge
+   revisions. The database must report **only `202609071000`** afterward. A plain
+   downgrade to `202609071000` leaves crawler migrations applied; a plain downgrade
+   to the common ancestor `202608121500` also removes unrelated develop features.
+   Do not use `alembic stamp` to bypass migration work.
+4. Deploy the matching develop backend, frontend, and worker configuration. Keep
+   the crawler branch's separate worker stopped. Confirm that website history and
+   indexed documents load, run a small crawl, then restore the recorded schedules.
+
+The downgrade preserves indexed content, document versions, citation IDs, website
+settings, and crawl totals. Completed crawl outcomes are projected into develop's
+job-based history; runs without a job receive a terminal history record without
+enqueueing a crawl. Detailed attempt history, cancellation cleanup receipts, HTTP
+validators, sitemap state, and the derived source-URL column are removed because
+develop does not use them. Keep the backup if those details are needed. Re-upgrading
+rebuilds source URLs from retained public URLs and rediscovers incremental crawl
+state; it does not reconstruct removed attempt history.
+
+The migrations refuse live runs and pending transport cleanup before removing the
+publisher schema. If a later database error interrupts the downgrade, keep all
+services stopped and inspect `alembic current` before retrying or restoring the
+backup.
+
 ### Apps (Voice/Audio Features)
 
 <Callout type="info">

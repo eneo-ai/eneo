@@ -575,7 +575,7 @@ def test_crawl_lifecycle_migration_preserves_and_terminalizes_legacy_history(
     _assert_active_run_with_current_attempt_commits(database_url)
 
 
-def test_crawl_lifecycle_downgrade_refuses_lossy_state_then_round_trips(
+def test_crawl_lifecycle_downgrade_drains_runs_and_restores_job_projections(
     migration_database: tuple[str, Config],
 ) -> None:
     database_url, config = migration_database
@@ -611,13 +611,6 @@ def test_crawl_lifecycle_downgrade_refuses_lossy_state_then_round_trips(
     ):
         cursor.execute("DELETE FROM crawl_runs WHERE id = %s", (str(active_run_id),))
 
-    with pytest.raises(
-        InternalError,
-        match="crawler lifecycle downgrade cannot project runs without jobs",
-    ):
-        command.downgrade(config, _PREVIOUS_REVISION)
-    assert _current_revision(database_url) == _LIFECYCLE_REVISION
-
     with (
         psycopg2.connect(_sync_url(database_url)) as connection,
         connection.cursor() as cursor,
@@ -646,10 +639,33 @@ def test_crawl_lifecycle_downgrade_refuses_lossy_state_then_round_trips(
             """,
             (str(failed_run_id),),
         )
-        cursor.execute("DELETE FROM crawl_runs WHERE job_id IS NULL")
+        cursor.execute(
+            "SELECT cr.id, w.user_id, cr.created_at, cr.finished_at "
+            "FROM crawl_runs cr JOIN websites w ON w.id = cr.website_id "
+            "WHERE cr.job_id IS NULL"
+        )
+        jobless_runs = cursor.fetchall()
+        assert jobless_runs
 
     command.downgrade(config, _PREVIOUS_REVISION)
     assert _current_revision(database_url) == _PREVIOUS_REVISION
+    with (
+        psycopg2.connect(_sync_url(database_url)) as connection,
+        connection.cursor() as cursor,
+    ):
+        for run_id, user_id, created_at, finished_at in jobless_runs:
+            cursor.execute(
+                "SELECT j.user_id, j.created_at, j.finished_at, j.task, j.status "
+                "FROM crawl_runs cr JOIN jobs j ON j.id = cr.job_id WHERE cr.id = %s",
+                (str(run_id),),
+            )
+            assert cursor.fetchone() == (
+                str(user_id),
+                created_at,
+                finished_at,
+                "crawl",
+                "failed",
+            )
     assert _crawl_counters_for_job(database_url, "Legacy partial crawl") == (
         5,
         4,
@@ -679,7 +695,7 @@ def test_crawl_lifecycle_downgrade_refuses_lossy_state_then_round_trips(
         engine.dispose()
 
 
-def test_cancelled_cleanup_migration_refuses_to_lose_pending_or_acknowledged_work(
+def test_cancelled_cleanup_downgrade_requires_cleanup_and_preserves_cancellation(
     migration_database: tuple[str, Config],
 ) -> None:
     database_url, config = migration_database
@@ -744,28 +760,17 @@ def test_cancelled_cleanup_migration_refuses_to_lose_pending_or_acknowledged_wor
             (str(attempt_id),),
         )
 
-    with pytest.raises(
-        InternalError,
-        match="cannot downgrade cancelled crawl cleanup",
-    ):
-        command.downgrade(config, _LIFECYCLE_REVISION)
-    assert _current_revision(database_url) == _CANCELLED_CLEANUP_REVISION
-
+    command.downgrade(config, _LIFECYCLE_REVISION)
+    assert _current_revision(database_url) == _LIFECYCLE_REVISION
     with (
         psycopg2.connect(_sync_url(database_url)) as connection,
         connection.cursor() as cursor,
     ):
         cursor.execute(
-            """
-            UPDATE crawl_attempts
-            SET failure_code = 'lease_expired'
-            WHERE id = %s
-            """,
+            "SELECT failure_code, transport_cleaned_at FROM crawl_attempts WHERE id = %s",
             (str(attempt_id),),
         )
-
-    command.downgrade(config, _LIFECYCLE_REVISION)
-    assert _current_revision(database_url) == _LIFECYCLE_REVISION
+        assert cursor.fetchone() == ("cancelled", None)
     command.upgrade(config, _CANCELLED_CLEANUP_REVISION)
 
 
