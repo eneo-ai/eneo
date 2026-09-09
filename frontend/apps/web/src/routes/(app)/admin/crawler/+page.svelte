@@ -4,18 +4,19 @@
   import type { AdminCrawlerOverview, AdminCrawlerQuery } from "@eneo/eneo-js";
   import { ArrowRight, RefreshCw } from "lucide-svelte";
   import { Page } from "$lib/components/layout";
-  import * as Alert from "$lib/components/ui/alert/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import * as Table from "$lib/components/ui/table/index.js";
   import * as Tabs from "$lib/components/ui/tabs/index.js";
-  import { Badge } from "$lib/components/ui/badge/index.js";
+  import CrawlRunCounts from "$lib/features/knowledge/CrawlRunCounts.svelte";
+  import CrawlRunStatus from "$lib/features/knowledge/CrawlRunStatus.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
   import { getEneo } from "$lib/core/Eneo";
   import AdminCrawlDetails from "./AdminCrawlDetails.svelte";
+  import CrawlLoadError from "$lib/features/knowledge/CrawlLoadError.svelte";
   import {
     crawlRunState,
     crawlRunStateLabel,
@@ -73,10 +74,12 @@
     const request = query();
     const requestKey = JSON.stringify(request);
     loading = true;
-    loadFailed = false;
     try {
       const result = await eneo.adminCrawler.overview(request);
-      if (mounted && requestKey === JSON.stringify(query())) overview = result;
+      if (mounted && requestKey === JSON.stringify(query())) {
+        overview = result;
+        loadFailed = false;
+      }
     } catch {
       if (mounted && requestKey === JSON.stringify(query())) loadFailed = true;
     } finally {
@@ -104,6 +107,13 @@
   function showIssues() {
     view = "recent";
     status = "issues";
+    search = "";
+    searchInput = "";
+    filterChanged();
+  }
+
+  function clearFilters() {
+    status = "all";
     search = "";
     searchInput = "";
     filterChanged();
@@ -151,30 +161,40 @@
     <div class="flex min-w-0 flex-col gap-6 py-6 pr-6">
       <p class="text-secondary max-w-3xl text-sm">{m.admin_crawler_description()}</p>
       <div class="grid gap-3 sm:grid-cols-3">
-        <Card.Root>
-          <Card.Header>
+        <Card.Root
+          class="flex-row items-center gap-2 py-3 sm:flex-col sm:items-stretch sm:gap-4 sm:py-4"
+        >
+          <Card.Header class="min-w-0 flex-1">
             <Card.Title>{m.admin_crawler_ongoing()}</Card.Title>
             <Card.Description>{m.admin_crawler_now()}</Card.Description>
           </Card.Header>
           <Card.Content>
             {#if overview}<p class="text-3xl font-semibold tabular-nums">
                 {overview.summary.ongoing}
-              </p>{:else}<Skeleton class="h-9 w-16" />{/if}
+              </p>{:else if loadFailed}<p class="text-secondary text-3xl">—</p>{:else}<Skeleton
+                class="h-9 w-16"
+              />{/if}
           </Card.Content>
         </Card.Root>
-        <Card.Root>
-          <Card.Header>
+        <Card.Root
+          class="flex-row items-center gap-2 py-3 sm:flex-col sm:items-stretch sm:gap-4 sm:py-4"
+        >
+          <Card.Header class="min-w-0 flex-1">
             <Card.Title>{m.admin_crawler_queued()}</Card.Title>
             <Card.Description>{m.admin_crawler_now()}</Card.Description>
           </Card.Header>
           <Card.Content>
             {#if overview}<p class="text-3xl font-semibold tabular-nums">
                 {overview.summary.queued}
-              </p>{:else}<Skeleton class="h-9 w-16" />{/if}
+              </p>{:else if loadFailed}<p class="text-secondary text-3xl">—</p>{:else}<Skeleton
+                class="h-9 w-16"
+              />{/if}
           </Card.Content>
         </Card.Root>
-        <Card.Root>
-          <Card.Header>
+        <Card.Root
+          class="flex-row items-center gap-2 py-3 sm:flex-col sm:items-stretch sm:gap-4 sm:py-4"
+        >
+          <Card.Header class="min-w-0 flex-1">
             <Card.Title>{m.admin_crawler_issues()}</Card.Title>
             <Card.Description>{m.admin_crawler_last_day()}</Card.Description>
             <Card.Action
@@ -190,7 +210,9 @@
           <Card.Content>
             {#if overview}<p class="text-3xl font-semibold tabular-nums">
                 {overview.summary.issues}
-              </p>{:else}<Skeleton class="h-9 w-16" />{/if}
+              </p>{:else if loadFailed}<p class="text-secondary text-3xl">—</p>{:else}<Skeleton
+                class="h-9 w-16"
+              />{/if}
           </Card.Content>
         </Card.Root>
       </div>
@@ -243,17 +265,19 @@
                   </Select.Root>
                 </Field.Field>
                 <Button type="submit" variant="outline">{m.search()}</Button>
+                {#if search || searchInput || status !== "all"}
+                  <Button type="button" variant="ghost" onclick={clearFilters}
+                    >{m.admin_crawler_clear_filters()}</Button
+                  >
+                {/if}
               </form>
 
               {#if loadFailed}
-                <Alert.Root variant="destructive">
-                  <Alert.Description>{m.admin_crawler_error()}</Alert.Description>
-                  <Alert.Action
-                    ><Button variant="outline" size="sm" onclick={() => refresh()}
-                      >{m.retry()}</Button
-                    ></Alert.Action
-                  >
-                </Alert.Root>
+                <CrawlLoadError
+                  message={overview ? m.admin_crawler_refresh_error() : m.admin_crawler_error()}
+                  {loading}
+                  onretry={() => refresh()}
+                />
               {/if}
 
               <div aria-busy={loading}>
@@ -283,13 +307,13 @@
                         {@const state = crawlRunState(item.run)}
                         <Table.Row>
                           <Table.Cell class="max-w-72 whitespace-normal">
-                            <button
-                              type="button"
-                              class="text-accent-default text-left font-medium break-all underline-offset-4 hover:underline focus-visible:underline"
+                            <Button
+                              variant="link"
+                              class="h-auto min-h-8 max-w-full justify-start px-0 text-left break-all whitespace-normal"
                               onclick={() => {
                                 selectedRunId = item.run.id;
                                 detailsOpen = true;
-                              }}>{item.website_name || item.website_url}</button
+                              }}>{item.website_name || item.website_url}</Button
                             >
                             {#if item.website_name}
                               <p class="text-secondary mt-1 text-xs break-all">
@@ -300,31 +324,8 @@
                           <Table.Cell class="max-w-44 whitespace-normal"
                             >{item.space_name ?? "—"}</Table.Cell
                           >
-                          <Table.Cell
-                            ><Badge
-                              variant={state === "failed" || state === "interrupted"
-                                ? "destructive"
-                                : "secondary"}>{crawlRunStateLabel(state)}</Badge
-                            ></Table.Cell
-                          >
-                          <Table.Cell
-                            ><div class="flex flex-col gap-1 text-xs">
-                              <span
-                                >{m.pages_succeeded({ count: item.run.pages_crawled ?? "—" })}</span
-                              >
-                              <span
-                                >{m.files_succeeded({
-                                  count: item.run.files_downloaded ?? "—"
-                                })}</span
-                              >
-                              {#if item.run.pages_failed}<span
-                                  >{m.pages_failed({ count: item.run.pages_failed })}</span
-                                >{/if}
-                              {#if item.run.files_failed}<span
-                                  >{m.files_failed({ count: item.run.files_failed })}</span
-                                >{/if}
-                            </div></Table.Cell
-                          >
+                          <Table.Cell><CrawlRunStatus run={item.run} /></Table.Cell>
+                          <Table.Cell><CrawlRunCounts run={item.run} /></Table.Cell>
                           <Table.Cell class="text-xs">
                             {#if state === "queued" && item.run.created_at}
                               {m.admin_crawler_wait({

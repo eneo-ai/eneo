@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
+  import { RefreshCw } from "lucide-svelte";
   import dayjs from "dayjs";
   import type {
     AdminCrawlerDetails,
@@ -9,21 +10,18 @@
   } from "@eneo/eneo-js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
-  import * as Alert from "$lib/components/ui/alert/index.js";
+  import CrawlLoadError from "$lib/features/knowledge/CrawlLoadError.svelte";
   import * as Tabs from "$lib/components/ui/tabs/index.js";
   import * as Table from "$lib/components/ui/table/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
-  import { Badge } from "$lib/components/ui/badge/index.js";
+  import CrawlRunCounts from "$lib/features/knowledge/CrawlRunCounts.svelte";
+  import CrawlRunStatus from "$lib/features/knowledge/CrawlRunStatus.svelte";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
   import { getEneo } from "$lib/core/Eneo";
   import { getErrorMessage } from "$lib/core/errors";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import CrawlRunDetailsContent from "$lib/features/knowledge/CrawlRunDetailsContent.svelte";
-  import {
-    crawlRunState,
-    crawlRunStateLabel,
-    isActiveCrawlRun
-  } from "$lib/features/knowledge/crawlRunState";
+  import { isActiveCrawlRun } from "$lib/features/knowledge/crawlRunState";
   import { m } from "$lib/paraglide/messages";
 
   let {
@@ -78,10 +76,12 @@
     const context = generation;
     const request = ++detailRequest;
     loading = true;
-    loadFailed = false;
     try {
       const result = await eneo.adminCrawler.details({ id });
-      if (open && context === generation && request === detailRequest) details = result;
+      if (open && context === generation && request === detailRequest) {
+        details = result;
+        loadFailed = false;
+      }
     } catch {
       if (open && context === generation && request === detailRequest) {
         loadFailed = true;
@@ -97,6 +97,7 @@
       untrack(() => {
         generation += 1;
         details = null;
+        loadFailed = false;
         history = null;
         matches = null;
         historyCursors = [null];
@@ -120,14 +121,16 @@
     if (!details || historyLoading) return;
     const context = generation;
     historyLoading = true;
-    historyFailed = false;
     try {
       const result = await eneo.adminCrawler.history({
         id: details.website_id,
         limit: 10,
         cursor: historyCursors.at(-1)
       });
-      if (open && context === generation) history = result;
+      if (open && context === generation) {
+        history = result;
+        historyFailed = false;
+      }
     } catch {
       if (open && context === generation) historyFailed = true;
     } finally {
@@ -139,14 +142,16 @@
     if (!details || matchesLoading) return;
     const context = generation;
     matchesLoading = true;
-    matchesFailed = false;
     try {
       const result = await eneo.adminCrawler.matches({
         id: details.website_id,
         limit: 10,
         cursor: matchCursors.at(-1)
       });
-      if (open && context === generation) matches = result;
+      if (open && context === generation) {
+        matches = result;
+        matchesFailed = false;
+      }
     } catch {
       if (open && context === generation) matchesFailed = true;
     } finally {
@@ -198,14 +203,11 @@
     </Dialog.Header>
 
     {#if loadFailed}
-      <Alert.Root variant="destructive">
-        <Alert.Description>{m.admin_crawler_details_error()}</Alert.Description>
-        <Alert.Action
-          ><Button variant="outline" disabled={loading || busy} onclick={() => loadDetails()}
-            >{m.retry()}</Button
-          ></Alert.Action
-        >
-      </Alert.Root>
+      <CrawlLoadError
+        message={m.admin_crawler_details_error()}
+        loading={loading || busy}
+        onretry={() => loadDetails()}
+      />
     {/if}
     {#if !details && !loadFailed}
       <div class="flex flex-col gap-3" role="status" aria-label={m.loading()}>
@@ -213,14 +215,58 @@
       </div>
     {:else if details}
       <Tabs.Root value={view} onValueChange={changeView} class="flex min-h-0 flex-col gap-3">
-        <Tabs.List aria-label={m.crawl_details_description()}>
+        <Tabs.List class="w-full sm:w-fit" aria-label={m.crawl_details_description()}>
           <Tabs.Trigger value="details">{m.details()}</Tabs.Trigger>
+          <Tabs.Trigger value="source">{m.admin_crawler_source()}</Tabs.Trigger>
           <Tabs.Trigger value="history">{m.history()}</Tabs.Trigger>
           <Tabs.Trigger value="matches">{m.admin_crawler_same_address()}</Tabs.Trigger>
         </Tabs.List>
         <Tabs.Content value="details" class="min-h-0 overflow-auto">
           <div class="flex flex-col gap-4 pr-1" aria-busy={loading}>
-            <dl class="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+            <div>
+              <h3 class="font-medium">
+                {m.crawl_details_title({ date: date(details.run.created_at) })}
+              </h3>
+              {#if details.started_at}<p class="text-secondary mt-1 text-xs">
+                  {m.admin_crawler_started({ time: date(details.started_at) })}
+                </p>{/if}
+            </div>
+            <p class="text-secondary text-sm">
+              {m.admin_crawler_initiated_by()}: {details.run.origin === "scheduled"
+                ? m.crawl_origin_scheduled()
+                : details.initiated_by?.username ||
+                  details.initiated_by?.email ||
+                  m.admin_crawler_not_recorded()}
+            </p>
+            <CrawlRunDetailsContent
+              run={details.run}
+              {open}
+              fetchFailures={eneo.adminCrawler.failures}
+              onrefresh={() => loadDetails()}
+              onrunupdate={(run) => {
+                // Use the displayed snapshot until the next metadata refresh so actions agree.
+                if (open && details && run.id === id) details = { ...details, run };
+              }}
+            />
+          </div>
+        </Tabs.Content>
+        <Tabs.Content value="source" class="min-h-0 overflow-auto">
+          <div class="flex flex-col gap-4 pr-1" aria-busy={loading}>
+            <div class="flex items-start justify-between gap-3">
+              <p class="text-secondary max-w-prose text-sm">
+                {m.admin_crawler_source_description()}
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={loading || busy}
+                aria-label={m.admin_crawler_refresh_source()}
+                onclick={() => loadDetails()}
+              >
+                <RefreshCw data-icon="inline-start" />{m.refresh()}
+              </Button>
+            </div>
+            <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
               <div class="min-w-0">
                 <dt class="text-secondary">{m.admin_crawler_owning_space()}</dt>
                 <dd class="mt-1 break-words">
@@ -232,16 +278,6 @@
                 <dd class="mt-1 break-words">{details.owner.username || details.owner.email}</dd>
                 <dd class="text-secondary break-all text-xs">
                   {details.owner.username ? details.owner.email : ""}
-                </dd>
-              </div>
-              <div class="min-w-0">
-                <dt class="text-secondary">{m.admin_crawler_initiated_by()}</dt>
-                <dd class="mt-1 break-words">
-                  {details.run.origin === "scheduled"
-                    ? m.crawl_origin_scheduled()
-                    : details.initiated_by?.username ||
-                      details.initiated_by?.email ||
-                      m.admin_crawler_not_recorded()}
                 </dd>
               </div>
               <div>
@@ -281,32 +317,28 @@
                 >{m.admin_crawler_view_latest()}</Button
               >
             {/if}
-            <div class="border-default border-t pt-4">
-              <h3 class="font-medium">
-                {m.crawl_details_title({ date: date(details.run.created_at) })}
-              </h3>
-              {#if details.started_at}<p class="text-secondary mt-1 text-xs">
-                  {m.admin_crawler_started({ time: date(details.started_at) })}
-                </p>{/if}
-            </div>
-            <CrawlRunDetailsContent
-              run={details.run}
-              {open}
-              fetchFailures={eneo.adminCrawler.failures}
-              onrefresh={() => loadDetails()}
-            />
           </div>
         </Tabs.Content>
         <Tabs.Content value="history" class="min-h-0 overflow-auto">
           <div class="flex flex-col gap-3" aria-busy={historyLoading}>
-            {#if historyFailed}
-              <Alert.Root variant="destructive"
-                ><Alert.Description>{m.admin_crawler_history_error()}</Alert.Description
-                ><Alert.Action
-                  ><Button variant="outline" onclick={loadHistory}>{m.retry()}</Button
-                  ></Alert.Action
-                ></Alert.Root
+            <div class="flex items-center justify-between gap-3">
+              <h3 class="font-medium">{m.history()}</h3>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={historyLoading || busy}
+                aria-label={m.admin_crawler_refresh_history()}
+                onclick={loadHistory}
               >
+                <RefreshCw data-icon="inline-start" />{m.refresh()}
+              </Button>
+            </div>
+            {#if historyFailed}
+              <CrawlLoadError
+                message={m.admin_crawler_history_error()}
+                loading={historyLoading}
+                onretry={loadHistory}
+              />
             {/if}
             {#if !history && historyLoading}<Skeleton class="h-40 w-full" />{:else if history}
               <Table.Root>
@@ -332,60 +364,70 @@
                           }}>{date(entry.created_at)}</Button
                         ></Table.Cell
                       >
-                      <Table.Cell
-                        ><Badge variant="secondary"
-                          >{crawlRunStateLabel(crawlRunState(entry))}</Badge
-                        ></Table.Cell
-                      >
-                      <Table.Cell class="whitespace-normal text-xs"
-                        >{m.pages_succeeded({ count: entry.pages_crawled ?? "—" })}<br
-                        />{m.files_succeeded({ count: entry.files_downloaded ?? "—" })}</Table.Cell
-                      >
+                      <Table.Cell><CrawlRunStatus run={entry} /></Table.Cell>
+                      <Table.Cell><CrawlRunCounts run={entry} /></Table.Cell>
                     </Table.Row>
-                  {/each}</Table.Body
+                  {:else}<Table.Row
+                      ><Table.Cell colspan={3} class="py-8 text-center"
+                        >{m.admin_crawler_history_empty()}</Table.Cell
+                      ></Table.Row
+                    >{/each}</Table.Body
                 >
               </Table.Root>
-              <div class="flex justify-end gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={historyCursors.length === 1 || historyLoading}
-                  onclick={() => {
-                    historyCursors = historyCursors.slice(0, -1);
-                    history = null;
-                    void loadHistory();
-                  }}>{m.admin_crawler_previous()}</Button
-                >
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={!history.next_cursor || historyLoading}
-                  onclick={() => {
-                    if (history?.next_cursor) {
-                      historyCursors = [...historyCursors, history.next_cursor];
+              {#if historyCursors.length > 1 || history.next_cursor}
+                <div class="flex justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={historyCursors.length === 1 || historyLoading}
+                    onclick={() => {
+                      historyCursors = historyCursors.slice(0, -1);
                       history = null;
                       void loadHistory();
-                    }
-                  }}>{m.admin_crawler_next()}</Button
-                >
-              </div>
+                    }}>{m.admin_crawler_previous()}</Button
+                  >
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!history.next_cursor || historyLoading}
+                    onclick={() => {
+                      if (history?.next_cursor) {
+                        historyCursors = [...historyCursors, history.next_cursor];
+                        history = null;
+                        void loadHistory();
+                      }
+                    }}>{m.admin_crawler_next()}</Button
+                  >
+                </div>
+              {/if}
             {/if}
           </div>
         </Tabs.Content>
         <Tabs.Content value="matches" class="min-h-0 overflow-auto">
           <div class="flex flex-col gap-3" aria-busy={matchesLoading}>
-            <p class="text-secondary text-sm">{m.admin_crawler_same_address_description()}</p>
-            {#if matchesFailed}<Alert.Root variant="destructive"
-                ><Alert.Description>{m.admin_crawler_matches_error()}</Alert.Description
-                ><Alert.Action
-                  ><Button variant="outline" onclick={loadMatches}>{m.retry()}</Button
-                  ></Alert.Action
-                ></Alert.Root
-              >{/if}
+            <div class="flex items-start justify-between gap-3">
+              <p class="text-secondary max-w-prose text-sm">
+                {m.admin_crawler_same_address_description()}
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={matchesLoading || busy}
+                aria-label={m.admin_crawler_refresh_matches()}
+                onclick={loadMatches}
+              >
+                <RefreshCw data-icon="inline-start" />{m.refresh()}
+              </Button>
+            </div>
+            {#if matchesFailed}<CrawlLoadError
+                message={m.admin_crawler_matches_error()}
+                loading={matchesLoading}
+                onretry={loadMatches}
+              />{/if}
             {#if !matches && matchesLoading}<Skeleton class="h-32 w-full" />{:else if matches}
               {#each matches.items as source (source.website_id)}
                 <div
-                  class="border-default flex min-w-0 flex-wrap items-start justify-between gap-3 border-b pb-3"
+                  class="border-default flex min-w-0 flex-wrap items-start justify-between gap-3 border-b pb-3 last:border-0"
                 >
                   <div class="min-w-0 flex-1">
                     {#if source.latest_run_id}<Button
@@ -447,36 +489,44 @@
         {#if actionError && !confirmation}<p role="alert" class="text-negative-default text-sm">
             {actionError}
           </p>{/if}
-        {#if otherActive}
-          <div class="flex flex-wrap items-center justify-between gap-2">
-            <p class="text-secondary text-sm">{m.admin_crawler_newer_active()}</p>
-            <Button
-              variant="outline"
-              disabled={busy}
-              onclick={() => otherActive && onselect(otherActive.id)}
-              >{m.admin_crawler_view_active()}</Button
-            >
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="flex min-w-0 flex-col items-start gap-1">
+            <p class="text-secondary text-xs">
+              {m.admin_crawler_selected_run({ date: date(details.run.created_at) })}
+            </p>
+            <CrawlRunStatus run={details.run} />
           </div>
-        {:else if isActiveCrawlRun(details.run)}
-          <Button
-            class="self-end"
-            variant="destructive"
-            disabled={busy || loading || details.run.phase === "stopping"}
-            onclick={() => {
-              actionError = null;
-              confirmation = "cancel";
-            }}>{details.run.phase === "stopping" ? m.stopping_crawl() : m.stop_crawl()}</Button
-          >
-        {:else}
-          <Button
-            class="self-end"
-            disabled={busy || loading}
-            onclick={() => {
-              actionError = null;
-              confirmation = "start";
-            }}>{busy ? m.starting() : startLabel}</Button
-          >
-        {/if}
+          {#if otherActive}
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <p class="text-secondary text-sm">{m.admin_crawler_newer_active()}</p>
+              <Button
+                variant="outline"
+                disabled={busy}
+                onclick={() => otherActive && onselect(otherActive.id)}
+                >{m.admin_crawler_view_active()}</Button
+              >
+            </div>
+          {:else if isActiveCrawlRun(details.run)}
+            <Button
+              class="self-end"
+              variant="destructive"
+              disabled={busy || loading || details.run.phase === "stopping"}
+              onclick={() => {
+                actionError = null;
+                confirmation = "cancel";
+              }}>{details.run.phase === "stopping" ? m.stopping_crawl() : m.stop_crawl()}</Button
+            >
+          {:else}
+            <Button
+              class="self-end"
+              disabled={busy || loading}
+              onclick={() => {
+                actionError = null;
+                confirmation = "start";
+              }}>{busy ? m.starting() : startLabel}</Button
+            >
+          {/if}
+        </div>
       </div>
     {/if}
   </Dialog.Content>

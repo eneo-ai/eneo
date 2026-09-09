@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { AdminCrawlerDetails, AdminCrawlerOverview, CrawlRun } from "@eneo/eneo-js";
 import "../../../../app.css";
 import { m } from "$lib/paraglide/messages";
+import dayjs from "dayjs";
 
 const api = vi.hoisted(() => ({
   adminCrawler: {
@@ -120,9 +121,162 @@ function failurePage(run: CrawlRun) {
 
 async function openDetails() {
   await page.getByRole("button", { name: "Municipal website", exact: true }).click();
-  await expect.element(page.getByText("Alex Sourceowner", { exact: true })).toBeVisible();
+  await expect
+    .element(page.getByRole("tab", { name: m.admin_crawler_source(), exact: true }))
+    .toBeVisible();
   return page.getByRole("dialog");
 }
+
+it("shows failed and unknown resource counts in history without an unusable pager", async () => {
+  const previous: CrawlRun = {
+    ...details.run,
+    phase: "terminal",
+    outcome: "partial",
+    status: "complete",
+    pages_crawled: 12,
+    pages_failed: 3,
+    files_downloaded: 0,
+    files_failed: null
+  };
+  api.adminCrawler.details.mockResolvedValue({
+    ...details,
+    run: previous,
+    active_run: null,
+    latest_run: previous
+  });
+  api.adminCrawler.failures.mockResolvedValue(failurePage(previous));
+  api.adminCrawler.history.mockResolvedValue({
+    items: [previous],
+    total_count: 1,
+    next_cursor: null
+  });
+  show();
+  const dialog = await openDetails();
+  await dialog.getByRole("tab", { name: m.history(), exact: true }).click();
+  const counts = dialog.getByRole("table", { name: m.crawl_counts_caption(), exact: true });
+  await expect
+    .element(counts.getByRole("row", { name: `${m.crawl_counts_pages()} 12 3`, exact: true }))
+    .toBeVisible();
+  await expect
+    .element(
+      counts.getByRole("row", {
+        name: `${m.crawl_counts_files()} 0 ${m.crawl_counts_unknown()}`,
+        exact: true
+      })
+    )
+    .toBeVisible();
+  await expect
+    .element(dialog.getByRole("button", { name: m.admin_crawler_next() }))
+    .not.toBeInTheDocument();
+  await expect
+    .element(dialog.getByRole("button", { name: m.admin_crawler_previous() }))
+    .not.toBeInTheDocument();
+});
+
+it("separates the selected crawl from current source data and keeps action context across tabs", async () => {
+  show();
+  await page.getByRole("button", { name: "Municipal website", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await expect
+    .element(dialog.getByRole("tab", { name: m.details(), exact: true }))
+    .toHaveAttribute("aria-selected", "true");
+  await expect.element(dialog.getByText("Alex Sourceowner", { exact: true })).not.toBeVisible();
+  await expect.element(dialog.getByRole("table", { name: m.crawl_counts_caption() })).toBeVisible();
+  await dialog.getByRole("tab", { name: m.admin_crawler_source(), exact: true }).click();
+  await expect.element(dialog.getByText("Alex Sourceowner", { exact: true })).toBeVisible();
+  await expect.element(dialog.getByText("2.0 MB", { exact: true })).toBeVisible();
+  await expect.element(dialog.getByText(m.admin_crawler_source_description())).toBeVisible();
+  expect(api.adminCrawler.details).toHaveBeenCalledTimes(1);
+  await dialog.getByRole("tab", { name: m.history(), exact: true }).click();
+  await expect
+    .element(
+      dialog.getByText(
+        m.admin_crawler_selected_run({
+          date: dayjs(details.run.created_at).format("YYYY-MM-DD HH:mm")
+        }),
+        { exact: true }
+      )
+    )
+    .toBeVisible();
+  await expect
+    .element(dialog.getByRole("button", { name: m.stop_crawl(), exact: true }))
+    .toBeVisible();
+});
+
+it("updates the available action when failure details contain a newer terminal run", async () => {
+  const finished: CrawlRun = {
+    ...details.run,
+    phase: "terminal",
+    outcome: "succeeded",
+    status: "complete",
+    finished_at: "2026-09-09T12:00:00Z",
+    pages_crawled: 12,
+    pages_failed: 0,
+    files_downloaded: 0,
+    files_failed: 0
+  };
+  api.adminCrawler.failures.mockResolvedValue(failurePage(finished));
+  show();
+  const dialog = await openDetails();
+  await expect
+    .element(dialog.getByRole("button", { name: m.run_crawl_again(), exact: true }))
+    .toBeVisible();
+  await expect
+    .element(dialog.getByRole("button", { name: m.stop_crawl(), exact: true }))
+    .not.toBeInTheDocument();
+  expect(api.adminCrawler.failures).toHaveBeenCalledTimes(1);
+  expect(api.adminCrawler.details).toHaveBeenCalledTimes(1);
+});
+
+it("keeps failed addresses visible during a details refresh and recovers from a failed replacement", async () => {
+  const original = {
+    id: "failure-1",
+    kind: "page",
+    reason: "http_404",
+    url: "https://example.test/missing"
+  };
+  api.adminCrawler.failures.mockResolvedValueOnce({
+    ...failurePage(details.run),
+    items: [original],
+    total_count: 1
+  });
+  show();
+  const dialog = await openDetails();
+  await expect.element(dialog.getByRole("link", { name: original.url, exact: true })).toBeVisible();
+  let fail: (error: Error) => void = () => {};
+  api.adminCrawler.failures.mockReturnValueOnce(
+    new Promise((_resolve, reject) => {
+      fail = reject;
+    })
+  );
+  await dialog.getByRole("button", { name: m.refresh(), exact: true }).click();
+  await expect.poll(() => api.adminCrawler.failures.mock.calls.length).toBe(2);
+  await expect.element(dialog.getByRole("link", { name: original.url, exact: true })).toBeVisible();
+  await expect
+    .element(dialog.getByRole("button", { name: m.refresh(), exact: true }))
+    .toBeDisabled();
+  fail(new Error("Unavailable"));
+  await expect.element(dialog.getByRole("alert")).toHaveTextContent(m.crawl_failures_load_failed());
+  await expect.element(dialog.getByRole("link", { name: original.url, exact: true })).toBeVisible();
+  const replacement = { ...original, id: "failure-2", url: "https://example.test/revised" };
+  api.adminCrawler.failures.mockResolvedValueOnce({
+    ...failurePage(details.run),
+    items: [replacement],
+    total_count: 1
+  });
+  await dialog.getByRole("button", { name: m.retry(), exact: true }).click();
+  await expect
+    .element(dialog.getByRole("link", { name: replacement.url, exact: true }))
+    .toBeVisible();
+  await expect
+    .element(dialog.getByRole("link", { name: original.url, exact: true }))
+    .not.toBeInTheDocument();
+  expect(api.adminCrawler.failures).toHaveBeenLastCalledWith({
+    id: "run-1",
+    limit: 100,
+    cursor: null
+  });
+});
 
 it("keeps cancellation from history retryable and returns to the updated details", async () => {
   const stopping: CrawlRun = {
@@ -168,7 +322,7 @@ it("keeps cancellation from history retryable and returns to the updated details
   await expect
     .element(dialog.getByRole("tab", { name: m.details(), exact: true }))
     .toHaveAttribute("aria-selected", "true");
-  await expect.element(dialog.getByText("Alex Sourceowner", { exact: true })).toBeVisible();
+  await expect.element(dialog.getByRole("table", { name: m.crawl_counts_caption() })).toBeVisible();
 });
 
 it.each(["failed", "succeeded"] as const)(
@@ -259,6 +413,20 @@ it("loads history on demand, retries its page, and opens the selected older run"
     limit: 10,
     cursor: "history-next"
   });
+  api.adminCrawler.history.mockResolvedValueOnce({
+    items: [old],
+    next_cursor: null,
+    total_count: 2
+  });
+  await dialog
+    .getByRole("button", { name: m.admin_crawler_refresh_history(), exact: true })
+    .click();
+  expect(api.adminCrawler.history).toHaveBeenLastCalledWith({
+    id: "website-1",
+    limit: 10,
+    cursor: "history-next"
+  });
+  expect(api.adminCrawler.details).toHaveBeenCalledTimes(1);
   api.adminCrawler.details.mockResolvedValue({ ...details, run: old, active_run: details.run });
   api.adminCrawler.failures.mockResolvedValue(failurePage(old));
   await dialog.getByRole("button", { name: /2026-09-08/ }).click();
@@ -337,6 +505,7 @@ it("ignores an old details response after closing and reopening another crawl", 
   api.adminCrawler.details.mockResolvedValue(next);
   api.adminCrawler.failures.mockResolvedValue(failurePage(next.run));
   await page.getByRole("button", { name: "Second source", exact: true }).click();
+  await page.getByRole("tab", { name: m.admin_crawler_source(), exact: true }).click();
   await expect.element(page.getByText("New owner", { exact: true })).toBeVisible();
   finish(details);
   await expect.element(page.getByText("Alex Sourceowner", { exact: true })).not.toBeInTheDocument();
@@ -362,8 +531,9 @@ it.each(["Municipal website", null])(
     await expect.element(page.getByRole("button", { name: label, exact: true })).toBeVisible();
     await expect.element(page.getByText("Communications", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: label, exact: true }).click();
+    await expect.element(page.getByText("Sam Operator", { exact: false })).toBeVisible();
+    await page.getByRole("tab", { name: m.admin_crawler_source(), exact: true }).click();
     await expect.element(page.getByText("Alex Sourceowner", { exact: true })).toBeVisible();
-    await expect.element(page.getByText("Sam Operator", { exact: true })).toBeVisible();
     await expect.element(page.getByText("2.0 MB", { exact: true })).toBeVisible();
     await expect.poll(() => api.adminCrawler.failures.mock.calls.length).toBe(1);
     expect(api.websites.crawlRuns.failures).not.toHaveBeenCalled();
@@ -387,7 +557,7 @@ it("keeps rows and filters when a refresh fails, then retries the same query", a
   if (typeof poll !== "function") throw new Error("Missing crawler polling callback");
   api.adminCrawler.overview.mockRejectedValueOnce(new Error("Network unavailable"));
   poll();
-  await expect.element(page.getByRole("alert")).toHaveTextContent(m.admin_crawler_error());
+  await expect.element(page.getByRole("alert")).toHaveTextContent(m.admin_crawler_refresh_error());
   await expect
     .element(page.getByRole("button", { name: "Municipal website", exact: true }))
     .toBeVisible();
@@ -399,10 +569,28 @@ it("keeps rows and filters when a refresh fails, then retries the same query", a
     .toHaveTextContent(m.in_progress());
   const updated = structuredClone(overview);
   updated.items[0].run.pages_crawled = 8;
-  api.adminCrawler.overview.mockResolvedValueOnce(updated);
-  await page.getByRole("button", { name: m.retry(), exact: true }).click();
+  let finish: (value: AdminCrawlerOverview) => void = () => {};
+  api.adminCrawler.overview.mockReturnValueOnce(
+    new Promise<AdminCrawlerOverview>((resolve) => {
+      finish = resolve;
+    })
+  );
+  const retryButton = page.getByRole("button", { name: m.retry(), exact: true });
+  await retryButton.click();
+  await expect.element(retryButton).toBeDisabled();
+  await expect.element(retryButton).toHaveAttribute("aria-busy", "true");
+  await expect.element(page.getByRole("alert")).toHaveTextContent(m.admin_crawler_refresh_error());
   await expect
-    .element(page.getByText(m.pages_succeeded({ count: 8 }), { exact: true }))
+    .element(page.getByRole("button", { name: "Municipal website", exact: true }))
+    .toBeVisible();
+  finish(updated);
+  await expect
+    .element(
+      page.getByRole("row", {
+        name: `${m.crawl_counts_pages()} 8 ${m.crawl_counts_unknown()}`,
+        exact: true
+      })
+    )
     .toBeVisible();
   expect(api.adminCrawler.overview).toHaveBeenLastCalledWith(
     expect.objectContaining({ search: "Municipal", status: "running", view: "active" })
@@ -442,6 +630,29 @@ it("serializes refreshes and ignores an old response after filters change", asyn
   await rendered.unmount();
   poll();
   expect(api.adminCrawler.overview).toHaveBeenCalledTimes(2);
+});
+
+it("clears a filtered empty result and restores the unfiltered query", async () => {
+  show();
+  await expect
+    .element(page.getByRole("button", { name: "Municipal website", exact: true }))
+    .toBeVisible();
+  await page.getByRole("textbox", { name: m.admin_crawler_search() }).fill("No match");
+  api.adminCrawler.overview.mockResolvedValueOnce({ ...overview, items: [] });
+  await page.getByRole("button", { name: m.search(), exact: true }).click();
+  await expect
+    .element(page.getByText(m.admin_crawler_empty_filtered(), { exact: true }))
+    .toBeVisible();
+  await page.getByRole("button", { name: m.admin_crawler_clear_filters(), exact: true }).click();
+  await expect
+    .element(page.getByRole("textbox", { name: m.admin_crawler_search() }))
+    .toHaveValue("");
+  await expect
+    .element(page.getByRole("button", { name: "Municipal website", exact: true }))
+    .toBeVisible();
+  expect(api.adminCrawler.overview).toHaveBeenLastCalledWith(
+    expect.objectContaining({ search: "", status: undefined, cursor: null, view: "active" })
+  );
 });
 
 it("pauses polling while hidden and the issue summary opens all tenant warnings", async () => {

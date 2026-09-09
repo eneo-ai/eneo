@@ -1,7 +1,8 @@
 # Crawleröversikt i adminpanelen
 
 Genomförd 9 september 2026. Översikten följs i Beads `crawl-f35` och
-detaljer och åtgärder i `crawl-5x5`, båda i `crawler-review`. Sidan blir tillgänglig när backend, databas och frontend har
+detaljer och åtgärder i `crawl-5x5` samt gränssnittets förfining i `crawl-8ue`,
+alla i `crawler-review`. Sidan blir tillgänglig när backend, databas och frontend har
 uppdaterats tillsammans.
 
 Administratören kan se vad som körs i hela tenanten, vad som väntar och
@@ -33,7 +34,7 @@ Tabellen har en rad per körning:
 | Webbplats | Namn och adress. Om namn saknas används adressen som etikett. Knappen öppnar körningsdetaljer. |
 | Yta | Ytans namn så att samma webbplats i olika ytor går att skilja åt. |
 | Status | Befintliga översatta statusetiketter. Köad, pågår, slutförs och stoppas går att skilja åt. |
-| Resultat | Antal indexerade sidor och filer samt misslyckade resurser när sådana finns. Okända räknare visas som okända. |
+| Resultat | Sidor och filer visas på varsin rad med lyckade och misslyckade antal i separata kolumner. Noll skiljs från saknad uppgift. |
 | Tid | Väntetid för köade körningar; start och varaktighet för körningar som har startat. |
 | Senast indexerad | Webbplatsens befintliga tidsstämpel, som bevaras vid ett senare fel. |
 
@@ -43,9 +44,9 @@ för alla crawls, så sidan visar räknare utan uppskattad procent eller sluttid
 En lång körning får inte automatiskt etiketten ”fastnad”.
 
 Ett klick öppnar körningens detaljer med resultat, översatt felorsak och sidvis
-hämtade feladresser. Äldre körningar kan sakna adressdetaljer. Där visas också
-källans ägande yta, källägare, schema, senaste indexering och senaste begärda
-körning. För manuella körningar visas den som begärde körningen när personen
+hämtade feladresser. Äldre körningar kan sakna adressdetaljer. Fliken **Källa**
+visar källans aktuella ägande yta, källägare, schema, senaste indexering och
+senaste begärda körning. För manuella körningar visas den som begärde körningen när personen
 kan identifieras från första försöket. Schemalagda körningar anges som
 schemalagda; källägaren tillskrivs inte en manuell åtgärd.
 
@@ -70,7 +71,9 @@ Administratören kan stoppa den valda körningen eller begära en ny körning.
 innehåll hanteras av crawlerns befintliga regler. Båda åtgärderna bekräftas med
 källans namn. Köad körning avbryts direkt; pågående arbete kan först gå till
 **Stoppas**. Finns en annan aktiv körning visas en knapp för att öppna den.
-Servern återanvänder en befintlig aktiv körning vid upprepad start, och ett stopp
+Dialogens åtgärdsrad visar den valda körningens tid och status även när en
+annan flik är öppen. Åtgärderna följer också en nyare status som hämtas med
+körningens feladresser. Servern återanvänder en befintlig aktiv körning vid upprepad start, och ett stopp
 av en äldre körning påverkar inte en senare körning.
 
 ## Shadcn och uppdatering
@@ -82,7 +85,10 @@ semantiska färger. `Card` visar de tre sammanfattningarna, `Tabs` vyerna,
 Sidan uppdateras var tionde sekund medan sidan är synlig, med högst en pågående
 uppdatering. Filter och befintliga rader behålls under uppdateringen. Sidan visar
 ”Senast hämtat” och en manuell uppdateringsknapp. Vid fel behålls senaste
-resultatet med ett tydligt felbesked och möjlighet att försöka igen. Noll
+resultatet med ett tydligt felbesked och möjlighet att försöka igen.
+Felbeskedet och knappen ligger kvar medan försöket pågår; knappen visar att
+den arbetar och hindrar dubbla klick. Aktiva sök- och statusfilter kan rensas
+med en gemensam knapp. Noll
 aktiva körningar ska vara ett begripligt normaltillstånd. Skeleton används vid
 första laddningen. Tangentbord, fokus, svenska/engelska och smala skärmar ska
 fungera med de befintliga komponenterna.
@@ -92,7 +98,11 @@ Detaljer hämtas när dialogen öppnas, vid manuell uppdatering och efter en
 rader åt gången. Dessa frågor ingår inte i översiktens uppdatering var tionde sekund.
 Dialogen behåller bara aktuell resultatsida. Sena svar för en tidigare vald
 källa kan inte ersätta den nya källans detaljer. Vid fel finns möjlighet att
-försöka igen.
+försöka igen. Varje flik har en uppdateringsknapp för sitt innehåll. Historik
+och samma adress uppdateras på den valda resultatsidan. Uppdatering av **Källa**
+hämtar även den valda körningens status och feladresser. En uppdatering av
+körningsdetaljer ersätter adresslistan från första sidan när hämtningen lyckas;
+befintliga adresser ligger kvar medan hämtningen pågår eller om den misslyckas.
 
 Massåtgärder, ändringar av källinställningar, grafer, kostnadsberäkningar och
 aviseringar ingår inte.

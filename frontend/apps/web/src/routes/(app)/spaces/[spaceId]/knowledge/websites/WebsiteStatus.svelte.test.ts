@@ -48,4 +48,24 @@ it("updates website status when refreshed knowledge replaces its latest crawl", 
     }
   });
   await expect.element(page.getByText(m.failed(), { exact: true })).toBeVisible();
+
+  await rendered.rerender({
+    website: {
+      ...website,
+      latest_crawl: {
+        ...run,
+        phase: "terminal",
+        status: "complete",
+        outcome: "partial",
+        finished_at: "2026-09-09T12:00:00Z",
+        pages_crawled: 12,
+        pages_failed: 2,
+        failure_code: "processing_failed"
+      }
+    }
+  });
+  await page.getByText(m.crawl_completed_with_warnings(), { exact: true }).hover();
+  const tooltip = page.getByRole("tooltip");
+  await expect.element(tooltip).toHaveTextContent(m.pages_failed({ count: "2" }));
+  await expect.element(tooltip).toHaveTextContent(m.crawl_failure_partial());
 });

@@ -98,6 +98,13 @@ export function crawlFailureMessage(failureCode: string | null | undefined): str
 }
 
 export function crawlRunFailureMessage(crawl: CrawlRun): string {
+  if (
+    crawl.outcome === "partial" &&
+    crawl.failure_code !== "tenant_quota_exceeded" &&
+    crawl.failure_code !== "user_quota_exceeded"
+  ) {
+    return m.crawl_failure_partial();
+  }
   return crawlFailureMessage(crawl.failure_code);
 }
 

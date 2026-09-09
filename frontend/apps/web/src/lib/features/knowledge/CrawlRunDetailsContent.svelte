@@ -1,14 +1,18 @@
 <script lang="ts">
   import type { CrawlRun, CrawlResourceFailure, Eneo } from "@eneo/eneo-js";
   import { untrack } from "svelte";
+  import { RefreshCw } from "lucide-svelte";
+  import { cn } from "$lib/utils";
+  import * as Table from "$lib/components/ui/table/index.js";
+  import CrawlLoadError from "./CrawlLoadError.svelte";
+  import CrawlRunCounts from "./CrawlRunCounts.svelte";
+  import CrawlRunStatus from "./CrawlRunStatus.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import {
     crawlFailureReasonLabel,
     crawlRunFailureMessage,
-    crawlRunState,
-    crawlRunStateLabel,
     isActiveCrawlRun
   } from "$lib/features/knowledge/crawlRunState";
 
@@ -17,11 +21,13 @@
     run,
     open = false,
     onrefresh,
+    onrunupdate,
     fetchFailures = eneo.websites.crawlRuns.failures
   }: {
     run: CrawlRun;
     open?: boolean;
     onrefresh?: () => void | Promise<void>;
+    onrunupdate?: (run: CrawlRun) => void;
     fetchFailures?: Eneo["websites"]["crawlRuns"]["failures"];
   } = $props();
   const runId = $derived(run.id);
@@ -35,18 +41,20 @@
   let refreshing = $state(false);
   let loadFailed = $state(false);
   let generation = 0;
+  let viewedRunId: string | null = null;
   const displayedRun = $derived(loadedRun ?? run);
   const summary = $derived(Object.entries(displayedRun.failure_summary ?? {}));
 
   async function loadFailures(cursor: string | null = null) {
     const request = ++generation;
     loading = true;
-    loadFailed = false;
     retryCursor = cursor;
     try {
       const result = await fetchFailures({ id: runId, limit: 100, cursor });
       if (request !== generation) return;
+      loadFailed = false;
       loadedRun = result.run;
+      onrunupdate?.(loadedRun);
       detailsAvailable = result.details_available;
       if (cursor === null) {
         failures = result.items;
@@ -67,13 +75,22 @@
     const currentRun = run;
     if (open && currentRun.id) {
       untrack(() => {
+        // onrunupdate passes this exact proxy back through run. Keep its identity:
+        // cloning it would turn snapshot adoption into another fetch/adopt cycle.
+        if (currentRun === loadedRun) return;
         loadedRun = null;
-        failures = [];
-        total = 0;
-        nextCursor = null;
-        detailsAvailable = true;
+        if (viewedRunId !== currentRun.id) {
+          failures = [];
+          total = 0;
+          nextCursor = null;
+          detailsAvailable = true;
+          loadFailed = false;
+        }
+        viewedRunId = currentRun.id;
         void loadFailures();
       });
+    } else {
+      viewedRunId = null;
     }
     return () => {
       generation += 1;
@@ -101,14 +118,23 @@
   }
 </script>
 
-<div class="flex flex-col gap-2 pr-6">
-  <p class="font-medium">{crawlRunStateLabel(crawlRunState(displayedRun))}</p>
-  <div class="text-secondary flex flex-wrap gap-x-4 gap-y-1 text-sm">
-    <span>{m.pages_succeeded({ count: displayedRun.pages_crawled ?? "—" })}</span>
-    <span>{m.files_succeeded({ count: displayedRun.files_downloaded ?? "—" })}</span>
-    <span>{m.pages_failed({ count: displayedRun.pages_failed ?? "—" })}</span>
-    <span>{m.files_failed({ count: displayedRun.files_failed ?? "—" })}</span>
+<div class="flex flex-col gap-3">
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <CrawlRunStatus run={displayedRun} />
+    <Button
+      variant="outline"
+      size="sm"
+      disabled={loading || refreshing}
+      aria-busy={loading || refreshing}
+      onclick={refresh}
+    >
+      <RefreshCw
+        data-icon="inline-start"
+        class={cn((loading || refreshing) && "motion-safe:animate-spin")}
+      />{m.refresh()}
+    </Button>
   </div>
+  <div class="max-w-sm"><CrawlRunCounts run={displayedRun} /></div>
   <p class="text-secondary text-sm">
     {displayedRun.origin === "manual"
       ? m.crawl_origin_manual()
@@ -116,6 +142,9 @@
         ? m.crawl_origin_scheduled()
         : m.crawl_origin_legacy()}
   </p>
+  {#if isActiveCrawlRun(displayedRun)}
+    <p class="text-secondary text-xs">{m.crawl_details_running()}</p>
+  {/if}
   {#if displayedRun.failure_code}
     <p class="text-secondary text-sm">{crawlRunFailureMessage(displayedRun)}</p>
   {/if}
@@ -130,22 +159,22 @@
 
 <div class="min-h-0 overflow-auto" aria-busy={loading}>
   {#if failures.length > 0}
-    <table class="w-full table-fixed text-left text-sm">
-      <thead class="border-default border-b">
-        <tr>
-          <th class="w-20 py-2 pr-3 font-medium">{m.crawl_failure_resource_type()}</th>
-          <th class="py-2 pr-3 font-medium">{m.crawl_failure_address()}</th>
-          <th class="w-1/3 py-2 font-medium">{m.crawl_failure_reason()}</th>
-        </tr>
-      </thead>
-      <tbody>
+    <Table.Root class="w-full table-fixed text-left text-sm">
+      <Table.Header>
+        <Table.Row>
+          <Table.Head class="w-16 whitespace-normal">{m.crawl_failure_resource_type()}</Table.Head>
+          <Table.Head>{m.crawl_failure_address()}</Table.Head>
+          <Table.Head class="w-1/3 whitespace-normal">{m.crawl_failure_reason()}</Table.Head>
+        </Table.Row>
+      </Table.Header>
+      <Table.Body>
         {#each failures as failure (failure.id)}
           {@const href = resourceLink(failure.url)}
-          <tr class="border-default border-b last:border-0">
-            <td class="py-3 pr-3 align-top"
-              >{failure.kind === "page" ? m.page() : m.crawl_failure_file()}</td
+          <Table.Row>
+            <Table.Cell class="py-3 align-top whitespace-normal"
+              >{failure.kind === "page" ? m.page() : m.crawl_failure_file()}</Table.Cell
             >
-            <td class="py-3 pr-3 align-top break-all">
+            <Table.Cell class="py-3 align-top break-all whitespace-normal">
               {#if href}
                 <!-- eslint-disable svelte/no-navigation-without-resolve -- validated external HTTP(S) address -->
                 <a
@@ -158,12 +187,14 @@
               {:else}
                 {failure.url}
               {/if}
-            </td>
-            <td class="py-3 align-top break-words">{crawlFailureReasonLabel(failure.reason)}</td>
-          </tr>
+            </Table.Cell>
+            <Table.Cell class="py-3 align-top break-words whitespace-normal"
+              >{crawlFailureReasonLabel(failure.reason)}</Table.Cell
+            >
+          </Table.Row>
         {/each}
-      </tbody>
-    </table>
+      </Table.Body>
+    </Table.Root>
   {:else if !loading && !loadFailed}
     <p class="text-secondary py-4 text-sm">
       {detailsAvailable ? m.crawl_failures_empty() : m.crawl_failures_unavailable()}
@@ -172,25 +203,21 @@
 </div>
 
 {#if loading}
-  <p role="status" class="text-secondary text-sm">{m.loading_more()}</p>
+  <p role="status" class="text-secondary text-sm">
+    {failures.length ? m.loading_more() : m.loading()}
+  </p>
 {/if}
 {#if loadFailed}
-  <div role="alert" class="flex items-center justify-between gap-3">
-    <p class="text-negative-default text-sm">{m.crawl_failures_load_failed()}</p>
-    <Button variant="outline" onclick={() => loadFailures(retryCursor)}>{m.retry()}</Button>
-  </div>
+  <CrawlLoadError
+    message={m.crawl_failures_load_failed()}
+    {loading}
+    onretry={() => loadFailures(retryCursor)}
+  />
 {/if}
-<div class="flex flex-wrap items-center justify-between gap-3">
-  <div>
-    {#if nextCursor && !loadFailed}
-      <Button variant="outline" disabled={loading} onclick={() => loadFailures(nextCursor)}>
-        {m.crawl_failures_load_more({ current: failures.length, total })}
-      </Button>
-    {/if}
+{#if nextCursor && !loadFailed}
+  <div class="flex justify-start">
+    <Button variant="outline" disabled={loading} onclick={() => loadFailures(nextCursor)}>
+      {m.crawl_failures_load_more({ current: failures.length, total })}
+    </Button>
   </div>
-  <Button variant="outline" disabled={loading || refreshing} onclick={refresh}>{m.refresh()}</Button
-  >
-</div>
-{#if isActiveCrawlRun(displayedRun)}
-  <p class="text-secondary text-xs">{m.crawl_details_running()}</p>
 {/if}

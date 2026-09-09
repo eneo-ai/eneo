@@ -105,4 +105,27 @@ describe("crawlRunState", () => {
       )
     ).toBe(m.crawl_failure_lease_expired());
   });
+
+  it("explains partial results without describing a complete failure and preserves quota guidance", () => {
+    for (const failure_code of [
+      "processing_failed",
+      "remote_blocked",
+      "remote_unreachable",
+      "timed_out"
+    ] as const) {
+      expect(
+        crawlRunFailureMessage(run({ phase: "terminal", outcome: "partial", failure_code }))
+      ).toBe(m.crawl_failure_partial());
+    }
+    expect(
+      crawlRunFailureMessage(
+        run({ phase: "terminal", outcome: "partial", failure_code: "user_quota_exceeded" })
+      )
+    ).toBe(m.crawl_failure_user_quota_exceeded());
+    expect(
+      crawlRunFailureMessage(
+        run({ phase: "terminal", outcome: "partial", failure_code: "tenant_quota_exceeded" })
+      )
+    ).toBe(m.crawl_failure_tenant_quota_exceeded());
+  });
 });
