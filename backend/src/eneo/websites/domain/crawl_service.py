@@ -16,7 +16,7 @@ from eneo.websites.domain.crawl_run import (
 if TYPE_CHECKING:
     from eneo.jobs.job_service import JobService
     from eneo.websites.domain.crawl_run_repo import CrawlRunRepository
-    from eneo.websites.domain.website import Website
+    from eneo.websites.domain.website import Website, WebsiteSparse
 
 logger = get_logger(__name__)
 _RECONCILIATION_CALLBACK_KEY = "crawler_reconciliation_after_commit"
@@ -35,7 +35,7 @@ class CrawlService:
 
     async def crawl(
         self,
-        website: "Website",
+        website: "Website | WebsiteSparse",
         origin: CrawlOrigin = CrawlOrigin.MANUAL,
         *,
         reconcile_after_commit: bool = True,

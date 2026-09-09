@@ -7,9 +7,12 @@ from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.orm import aliased
 
+from eneo.database.tables.info_blobs_table import InfoBlobs, active_info_blob_version
 from eneo.database.tables.job_table import Jobs
 from eneo.database.tables.spaces_table import Spaces
+from eneo.database.tables.users_table import Users
 from eneo.database.tables.websites_table import CrawlAttempts, CrawlRunFailures
 from eneo.database.tables.websites_table import CrawlRuns as CrawlRunsTable
 from eneo.database.tables.websites_table import Websites as WebsitesTable
@@ -19,6 +22,7 @@ from eneo.main.models import Status
 from eneo.websites.crawl_dependencies.crawl_models import CrawlTask
 from eneo.websites.domain.crawl_run import (
     CrawlFailureCode,
+    CrawlOrigin,
     CrawlOutcome,
     CrawlPhase,
     CrawlResourceFailure,
@@ -109,6 +113,28 @@ class CrawlOverview:
     issues: int
     items: list[CrawlOverviewItem]
     next_cursor: UUID | None
+
+
+@dataclass(frozen=True, slots=True)
+class CrawlUserMetadata:
+    id: UUID
+    username: str | None
+    email: str
+
+
+@dataclass(frozen=True, slots=True)
+class CrawlDetails:
+    item: CrawlOverviewItem
+    space_id: UUID | None
+    owner: CrawlUserMetadata
+    initiated_by: CrawlUserMetadata | None
+    indexed_size: int
+    stored_resources: int
+    update_interval: str
+    next_retry_at: datetime | None
+    consecutive_failures: int
+    active_run: CrawlRun | None
+    latest_run: CrawlRun | None
 
 
 class CrawlDeletionBlocker(StrEnum):
@@ -296,6 +322,119 @@ class CrawlRunRepository:
             issues=counts[2],
             items=items,
             next_cursor=items[-1].run.id if len(rows) > limit else None,
+        )
+
+    async def tenant_details(self, id: UUID, tenant_id: UUID) -> CrawlDetails:
+        initial_attempt = aliased(CrawlAttempts)
+        row = (
+            await self.session.execute(
+                sa.select(
+                    CrawlRunsTable,
+                    WebsitesTable.name,
+                    WebsitesTable.url,
+                    Spaces.name.label("space_name"),
+                    CrawlAttempts.started_at,
+                    WebsitesTable.last_indexed_at,
+                    WebsitesTable.space_id,
+                    WebsitesTable.size,
+                    WebsitesTable.update_interval,
+                    WebsitesTable.next_retry_at,
+                    WebsitesTable.consecutive_failures,
+                    Users.id.label("owner_id"),
+                    Users.username,
+                    Users.email,
+                    initial_attempt.dispatch_payload["user_id"].astext.label(
+                        "initiator_id"
+                    ),
+                )
+                .join(
+                    WebsitesTable,
+                    sa.and_(
+                        WebsitesTable.id == CrawlRunsTable.website_id,
+                        WebsitesTable.tenant_id == tenant_id,
+                    ),
+                )
+                .join(
+                    Users,
+                    sa.and_(
+                        Users.id == WebsitesTable.user_id, Users.tenant_id == tenant_id
+                    ),
+                )
+                .outerjoin(
+                    Spaces,
+                    sa.and_(
+                        Spaces.id == WebsitesTable.space_id,
+                        Spaces.tenant_id == tenant_id,
+                    ),
+                )
+                .outerjoin(
+                    CrawlAttempts,
+                    sa.and_(
+                        CrawlAttempts.crawl_run_id == CrawlRunsTable.id,
+                        CrawlAttempts.attempt_number == CrawlRunsTable.attempt_count,
+                    ),
+                )
+                .outerjoin(
+                    initial_attempt,
+                    sa.and_(
+                        initial_attempt.crawl_run_id == CrawlRunsTable.id,
+                        initial_attempt.attempt_number == 1,
+                    ),
+                )
+                .where(CrawlRunsTable.id == id, CrawlRunsTable.tenant_id == tenant_id)
+            )
+        ).one_or_none()
+        if row is None:
+            raise NotFoundException()
+        run = CrawlRun.to_domain(row[0])
+        initiated_by = None
+        # Scheduled payloads identify the execution account, not a human request.
+        if run.origin == CrawlOrigin.MANUAL and row.initiator_id:
+            try:
+                initiator_id = UUID(row.initiator_id)
+            except ValueError:
+                initiator_id = None
+            if initiator_id is not None:
+                initiator = (
+                    await self.session.execute(
+                        sa.select(Users.id, Users.username, Users.email).where(
+                            Users.id == initiator_id,
+                            Users.tenant_id == tenant_id,
+                        )
+                    )
+                ).one_or_none()
+                if initiator is not None:
+                    initiated_by = CrawlUserMetadata(*initiator)
+
+        stored_resources = await self.session.scalar(
+            sa.select(sa.func.count())
+            .select_from(InfoBlobs)
+            .where(
+                InfoBlobs.website_id == run.website_id,
+                InfoBlobs.tenant_id == tenant_id,
+                active_info_blob_version(),
+            )
+        )
+        return CrawlDetails(
+            item=CrawlOverviewItem(
+                run=run,
+                website_id=run.website_id,
+                website_name=row.name,
+                website_url=row.url,
+                space_name=row.space_name,
+                started_at=row.started_at,
+                last_indexed_at=row.last_indexed_at,
+            ),
+            space_id=row.space_id,
+            owner=CrawlUserMetadata(row.owner_id, row.username, row.email),
+            initiated_by=initiated_by,
+            indexed_size=row.size,
+            stored_resources=stored_resources or 0,
+            update_interval=row.update_interval,
+            next_retry_at=row.next_retry_at,
+            consecutive_failures=row.consecutive_failures,
+            active_run=await self.get_active_for_website(run.website_id),
+            latest_run=await self.get_latest_for_website(run.website_id),
         )
 
     async def get_failures(

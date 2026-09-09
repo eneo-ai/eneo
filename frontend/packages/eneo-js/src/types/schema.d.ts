@@ -2009,6 +2009,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/crawler/runs/{id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Crawler Details
+     * @description Read a crawl's owning space, source owner, recorded manual initiator, indexed storage and current source state. Requires tenant admin permission; does not grant access to indexed content.
+     */
+    get: operations["get_crawler_details_api_v1_admin_crawler_runs__id___get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/crawler/runs/{id}/failures/": {
     parameters: {
       query?: never;
@@ -2023,6 +2043,86 @@ export interface paths {
     get: operations["get_crawler_failures_api_v1_admin_crawler_runs__id__failures__get"];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/crawler/websites/{id}/runs/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Admin Website Runs
+     * @description Read paginated crawl history for one website in the administrator's tenant, including runs older than 24 hours. Does not grant private content access.
+     */
+    get: operations["get_admin_website_runs_api_v1_admin_crawler_websites__id__runs__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/crawler/websites/{id}/matches/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Admin Website Matches
+     * @description Read a bounded page of other source registrations with this exact website address in the administrator's tenant. Matching addresses do not imply identical indexed content.
+     */
+    get: operations["get_admin_website_matches_api_v1_admin_crawler_websites__id__matches__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/crawler/websites/{id}/run/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Request Admin Crawl
+     * @description Request a crawl with the website's current settings. Tenant admin permission permits this operation in private spaces without granting content access. Returns the existing active run when present. Requires a user identity; retry starts a new full crawl. A new run executes as the requesting administrator, whose storage quota covers newly published content versions.
+     */
+    post: operations["request_admin_crawl_api_v1_admin_crawler_websites__id__run__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/crawler/runs/{id}/cancel/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Cancel Admin Crawl
+     * @description Request cancellation of this exact run. Tenant admin permission permits this operation in private spaces without granting content access. Queued work cancels immediately; running work enters stopping. An already finished run is returned unchanged.
+     */
+    post: operations["cancel_admin_crawl_api_v1_admin_crawler_runs__id__cancel__post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -8607,6 +8707,8 @@ export interface components {
       | "website_updated"
       | "website_deleted"
       | "website_crawled"
+      | "website_crawl_requested"
+      | "website_crawl_stop_requested"
       | "website_crawl_probed"
       | "website_transferred"
       | "group_chat_created"
@@ -8725,6 +8827,40 @@ export interface components {
         [key: string]: string;
       }[];
     };
+    /** AdminCrawlerDetails */
+    AdminCrawlerDetails: {
+      run: components["schemas"]["CrawlRunPublic"];
+      /**
+       * Website Id
+       * Format: uuid
+       */
+      website_id: string;
+      /** Website Name */
+      website_name: string | null;
+      /** Website Url */
+      website_url: string;
+      /** Space Name */
+      space_name: string | null;
+      /** Started At */
+      started_at: string | null;
+      /** Last Indexed At */
+      last_indexed_at: string | null;
+      /** Space Id */
+      space_id: string | null;
+      owner: components["schemas"]["AdminCrawlerUser"];
+      initiated_by: components["schemas"]["AdminCrawlerUser"] | null;
+      /** Indexed Size */
+      indexed_size: number;
+      /** Stored Resources */
+      stored_resources: number;
+      update_interval: components["schemas"]["UpdateInterval"];
+      /** Next Retry At */
+      next_retry_at: string | null;
+      /** Consecutive Failures */
+      consecutive_failures: number;
+      active_run: components["schemas"]["CrawlRunPublic"] | null;
+      latest_run: components["schemas"]["CrawlRunPublic"] | null;
+    };
     /** AdminCrawlerItem */
     AdminCrawlerItem: {
       run: components["schemas"]["CrawlRunPublic"];
@@ -8757,6 +8893,35 @@ export interface components {
       /** Next Cursor */
       next_cursor: string | null;
     };
+    /** AdminCrawlerRelatedPage */
+    AdminCrawlerRelatedPage: {
+      /** Items */
+      items: components["schemas"]["AdminCrawlerRelatedWebsite"][];
+      /** Next Cursor */
+      next_cursor: string | null;
+    };
+    /** AdminCrawlerRelatedWebsite */
+    AdminCrawlerRelatedWebsite: {
+      /**
+       * Website Id
+       * Format: uuid
+       */
+      website_id: string;
+      /** Website Name */
+      website_name: string | null;
+      /** Website Url */
+      website_url: string;
+      /** Space Id */
+      space_id: string | null;
+      /** Space Name */
+      space_name: string | null;
+      /** Indexed Size */
+      indexed_size: number;
+      /** Last Indexed At */
+      last_indexed_at: string | null;
+      /** Latest Run Id */
+      latest_run_id: string | null;
+    };
     /** AdminCrawlerSummary */
     AdminCrawlerSummary: {
       /** Ongoing */
@@ -8765,6 +8930,18 @@ export interface components {
       queued: number;
       /** Issues */
       issues: number;
+    };
+    /** AdminCrawlerUser */
+    AdminCrawlerUser: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Username */
+      username: string | null;
+      /** Email */
+      email: string;
     };
     /** AllowedOriginCreate */
     AllowedOriginCreate: {
@@ -30314,6 +30491,55 @@ export interface operations {
       };
     };
   };
+  get_crawler_details_api_v1_admin_crawler_runs__id___get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminCrawlerDetails"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   get_crawler_failures_api_v1_admin_crawler_runs__id__failures__get: {
     parameters: {
       query?: {
@@ -30344,6 +30570,217 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_admin_website_runs_api_v1_admin_crawler_websites__id__runs__get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        cursor?: string | null;
+      };
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CursorPaginatedResponse_CrawlRunPublic_"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_admin_website_matches_api_v1_admin_crawler_websites__id__matches__get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        cursor?: string | null;
+      };
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminCrawlerRelatedPage"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  request_admin_crawl_api_v1_admin_crawler_websites__id__run__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlRunPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  cancel_admin_crawl_api_v1_admin_crawler_runs__id__cancel__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlRunPublic"];
         };
       };
       /** @description Forbidden */

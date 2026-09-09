@@ -338,10 +338,8 @@ async def queue_website_crawls(container: Container):
                     tenant=providers.Object(user.tenant),
                 )
 
-                from eneo.websites.domain.website import Website
-
                 await website_container.crawl_service().crawl(
-                    cast(Website, website),
+                    website,
                     origin=CrawlOrigin.SCHEDULED,
                     reconcile_after_commit=False,
                 )

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import dayjs from "dayjs";
-  import type { AdminCrawlerOverview, AdminCrawlerQuery, CrawlRun } from "@eneo/eneo-js";
+  import type { AdminCrawlerOverview, AdminCrawlerQuery } from "@eneo/eneo-js";
   import { ArrowRight, RefreshCw } from "lucide-svelte";
   import { Page } from "$lib/components/layout";
   import * as Alert from "$lib/components/ui/alert/index.js";
@@ -15,7 +15,7 @@
   import { Input } from "$lib/components/ui/input/index.js";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
   import { getEneo } from "$lib/core/Eneo";
-  import CrawlRunDetails from "$lib/features/knowledge/CrawlRunDetails.svelte";
+  import AdminCrawlDetails from "./AdminCrawlDetails.svelte";
   import {
     crawlRunState,
     crawlRunStateLabel,
@@ -33,7 +33,7 @@
   let overview = $state<AdminCrawlerOverview | null>(null);
   let loading = $state(false);
   let loadFailed = $state(false);
-  let selectedRun = $state<CrawlRun | null>(null);
+  let selectedRunId = $state<string | null>(null);
   let detailsOpen = $state(false);
   let mounted = false;
   let refreshPending = false;
@@ -287,7 +287,7 @@
                               type="button"
                               class="text-accent-default text-left font-medium break-all underline-offset-4 hover:underline focus-visible:underline"
                               onclick={() => {
-                                selectedRun = item.run;
+                                selectedRunId = item.run.id;
                                 detailsOpen = true;
                               }}>{item.website_name || item.website_url}</button
                             >
@@ -395,10 +395,15 @@
   </Page.Main>
 </Page.Root>
 
-{#if selectedRun}
-  <CrawlRunDetails
-    run={selectedRun}
+{#if selectedRunId}
+  <AdminCrawlDetails
+    id={selectedRunId}
     bind:open={detailsOpen}
-    fetchFailures={eneo.adminCrawler.failures}
+    onselect={(id) => {
+      selectedRunId = id;
+    }}
+    onchange={() => {
+      void refresh(true);
+    }}
   />
 {/if}

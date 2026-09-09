@@ -11,6 +11,41 @@ export function initAdminCrawler(client) {
         params: { query }
       }),
 
+    /** @param {{id: string}} run */
+    details: async ({ id }) =>
+      client.fetch("/api/v1/admin/crawler/runs/{id}/", {
+        method: "get",
+        params: { path: { id } }
+      }),
+
+    /** @param {{id: string, limit?: number, cursor?: string | null}} options */
+    history: async ({ id, limit = 10, cursor }) =>
+      client.fetch("/api/v1/admin/crawler/websites/{id}/runs/", {
+        method: "get",
+        params: { path: { id }, query: { limit, cursor } }
+      }),
+
+    /** @param {{id: string, limit?: number, cursor?: string | null}} options */
+    matches: async ({ id, limit = 10, cursor }) =>
+      client.fetch("/api/v1/admin/crawler/websites/{id}/matches/", {
+        method: "get",
+        params: { path: { id }, query: { limit, cursor } }
+      }),
+
+    /** @param {{id: string}} website */
+    start: async ({ id }) =>
+      client.fetch("/api/v1/admin/crawler/websites/{id}/run/", {
+        method: "post",
+        params: { path: { id } }
+      }),
+
+    /** @param {{id: string}} run */
+    cancel: async ({ id }) =>
+      client.fetch("/api/v1/admin/crawler/runs/{id}/cancel/", {
+        method: "post",
+        params: { path: { id } }
+      }),
+
     /** @param {{id: string, limit?: number, cursor?: string | null}} options */
     failures: async ({ id, limit = 100, cursor }) =>
       client.fetch("/api/v1/admin/crawler/runs/{id}/failures/", {

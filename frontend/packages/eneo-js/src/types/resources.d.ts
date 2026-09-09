@@ -111,6 +111,8 @@ export type Permission = components["schemas"]["Permission"];
 export type ResourcePermission = components["schemas"]["ResourcePermission"];
 export type CrawlRun = components["schemas"]["CrawlRunPublic"];
 export type AdminCrawlerOverview = components["schemas"]["AdminCrawlerOverview"];
+export type AdminCrawlerDetails = components["schemas"]["AdminCrawlerDetails"];
+export type AdminCrawlerRelatedPage = components["schemas"]["AdminCrawlerRelatedPage"];
 export type AdminCrawlerQuery = NonNullable<
   import("./schema").paths["/api/v1/admin/crawler/"]["get"]["parameters"]["query"]
 >;

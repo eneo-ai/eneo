@@ -357,7 +357,7 @@ class WebsiteSparse(Entity):
         tenant_id: "UUID",
         embedding_model_id: "UUID",
         space_id: "UUID",
-        name: str,
+        name: str | None,
         url: str,
         download_files: bool,
         crawl_type: CrawlType,
@@ -418,9 +418,7 @@ class WebsiteSparse(Entity):
             space_id=cast(
                 "UUID", record.space_id
             ),  # DB invariant: space_id is non-null for persisted websites
-            name=cast(
-                str, record.name
-            ),  # DB invariant: name is non-null for sparse website records
+            name=record.name,
             url=record.url,
             download_files=record.download_files,
             crawl_type=record.crawl_type,

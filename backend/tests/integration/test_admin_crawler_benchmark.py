@@ -237,3 +237,138 @@ async def test_admin_crawler_scaling(
                     {"requests": 10, "batch_ms": (time.perf_counter() - start) * 1000}
                 )
             )
+
+
+async def test_admin_crawler_details_scaling(
+    client, db_container, admin_user, website_id, headers
+):
+    """Measure on-demand detail reads with a large source and tenant."""
+    async with db_container(user=admin_user) as container:
+        session = container.session()
+        await session.execute(
+            sa.text("""
+            INSERT INTO websites (name, url, download_files, crawl_type, update_interval,
+                                  size, tenant_id, user_id, embedding_model_id, space_id)
+            SELECT NULL, CASE WHEN n <= 11 THEN w.url ELSE 'https://details-' || n || '.example.test' END,
+                   false, w.crawl_type, 'never', 0, w.tenant_id, w.user_id, w.embedding_model_id, w.space_id
+            FROM generate_series(1, 100000) n CROSS JOIN websites w WHERE w.id = :website
+        """),
+            {"website": website_id},
+        )
+        await session.execute(
+            sa.text("""
+            INSERT INTO info_blobs (text, size, source_id, version_state, user_id,
+                                    tenant_id, website_id, embedding_model_id)
+            SELECT 'Synthetic indexed document', 128, gen_random_uuid(), 'active',
+                   w.user_id, w.tenant_id, w.id, w.embedding_model_id
+            FROM generate_series(1, 100000) n CROSS JOIN websites w WHERE w.id = :website
+        """),
+            {"website": website_id},
+        )
+        await session.execute(
+            sa.text("UPDATE websites SET size = 12800000 WHERE id = :website"),
+            {"website": website_id},
+        )
+        await session.execute(
+            sa.text("""
+            INSERT INTO crawl_runs (website_id, tenant_id, phase, outcome, origin, finished_at)
+            SELECT :website, :tenant, 'terminal', 'succeeded', 'legacy', now() - interval '2 days'
+            FROM generate_series(1, 100000)
+        """),
+            {"website": website_id, "tenant": admin_user.tenant_id},
+        )
+        run_id = await session.scalar(
+            sa.text(
+                "SELECT id FROM crawl_runs WHERE website_id = :website ORDER BY created_at DESC, id DESC LIMIT 1"
+            ),
+            {"website": website_id},
+        )
+        unmatched_website = await session.scalar(
+            sa.text(
+                "SELECT id FROM websites WHERE url = 'https://details-100000.example.test'"
+            )
+        )
+        for table in ("websites", "info_blobs", "crawl_runs", "crawl_attempts"):
+            await session.execute(sa.text(f"ANALYZE {table}"))
+
+    captured = []
+
+    def record_query(connection, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().startswith("SELECT"):
+            captured.append((statement, parameters))
+
+    sa.event.listen(Engine, "before_cursor_execute", record_query)
+    try:
+        for label, url, expected_count in (
+            ("details", f"/api/v1/admin/crawler/runs/{run_id}/", None),
+            ("history", f"/api/v1/admin/crawler/websites/{website_id}/runs/", 10),
+            ("matches", f"/api/v1/admin/crawler/websites/{website_id}/matches/", 10),
+            (
+                "no_matches",
+                f"/api/v1/admin/crawler/websites/{unmatched_website}/matches/",
+                0,
+            ),
+        ):
+            for _ in range(2):
+                assert (await client.get(url, headers=headers)).status_code == 200
+            wall = []
+            for _ in range(7):
+                captured.clear()
+                start = time.perf_counter_ns()
+                response = await client.get(url, headers=headers)
+                wall.append((time.perf_counter_ns() - start) / 1e6)
+                assert response.status_code == 200, response.text
+                data = response.json()
+                if expected_count is None:
+                    assert data["stored_resources"] == 100000
+                    assert data["indexed_size"] == 12800000
+                else:
+                    assert len(data["items"]) == expected_count
+            domain_queries = [
+                (statement, params)
+                for statement, params in captured
+                if any(
+                    table in statement
+                    for table in ("websites", "crawl_runs", "info_blobs")
+                )
+            ]
+            print(
+                "CRAWLER_DETAIL_SAMPLE "
+                + json.dumps(
+                    {
+                        "view": label,
+                        "websites": 100001,
+                        "source_documents": 100000,
+                        "source_runs": 100000,
+                        "wall_ms": wall,
+                        "median_ms": statistics.median(wall),
+                        "select_queries_including_auth": len(captured),
+                        "domain_queries": len(domain_queries),
+                        "response_bytes": len(response.content),
+                    }
+                )
+            )
+            async with db_container(user=admin_user) as container:
+                connection = await container.session().connection()
+                for statement, parameters in domain_queries:
+                    plan = (
+                        await connection.exec_driver_sql(
+                            "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + statement,
+                            parameters,
+                        )
+                    ).scalar_one()
+                    print(
+                        "CRAWLER_DETAIL_PLAN "
+                        + json.dumps({"view": label, "plan": plan})
+                    )
+            tracemalloc.start()
+            response = await client.get(url, headers=headers)
+            _, peak = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+            assert response.status_code == 200
+            print(
+                "CRAWLER_DETAIL_MEMORY "
+                + json.dumps({"view": label, "python_peak_bytes": peak})
+            )
+    finally:
+        sa.event.remove(Engine, "before_cursor_execute", record_query)

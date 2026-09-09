@@ -1,7 +1,7 @@
 # Crawleröversikt i adminpanelen
 
-Genomförd första version, 9 september 2026. Arbetet följs i Beads `crawl-f35` i
-`crawler-review`. Sidan blir tillgänglig när backend, databas och frontend har
+Genomförd 9 september 2026. Översikten följs i Beads `crawl-f35` och
+detaljer och åtgärder i `crawl-5x5`, båda i `crawler-review`. Sidan blir tillgänglig när backend, databas och frontend har
 uppdaterats tillsammans.
 
 Administratören kan se vad som körs i hela tenanten, vad som väntar och
@@ -42,10 +42,36 @@ syns. Skapandetid och verklig starttid hålls isär. Det finns inget känt total
 för alla crawls, så sidan visar räknare utan uppskattad procent eller sluttid.
 En lång körning får inte automatiskt etiketten ”fastnad”.
 
-Ett klick öppnar den befintliga detaljvyn för körningen: resultat, översatt
-felorsak och sidvis hämtade feladresser. Där hör också manuell/schemalagd start
-hemma. Äldre körningar kan sakna adressdetaljer. Översikten länkar inte vidare till webbplatsens kunskapssida, eftersom
-adminbehörighet i sig inte ger åtkomst till den ytan.
+Ett klick öppnar körningens detaljer med resultat, översatt felorsak och sidvis
+hämtade feladresser. Äldre körningar kan sakna adressdetaljer. Där visas också
+källans ägande yta, källägare, schema, senaste indexering och senaste begärda
+körning. För manuella körningar visas den som begärde körningen när personen
+kan identifieras från första försöket. Schemalagda körningar anges som
+schemalagda; källägaren tillskrivs inte en manuell åtgärd.
+
+**Lagrade dokument** räknar källans nuvarande aktiva dokument. Sidor och filer
+räknas tillsammans eftersom de sparade dokumenten saknar en beständig typ som
+skiljer dem åt. Körningens egna sid- och filräknare visas separat.
+**Indexerad lagring** använder källans befintliga storleksredovisning, som
+omfattar indexerat innehåll och vektorer. Den mäter inte databasens fysiska
+utrymme eller säkerhetskopior. Båda värdena gäller källans aktuella innehåll,
+även när en äldre körning är vald.
+
+Fliken **Historik** visar även körningar äldre än ett dygn. **Samma adress**
+visar andra källor i tenanten med exakt samma registrerade adress, deras ägande
+yta, lagring och senaste indexering. Adresser normaliseras inte, och en träff
+innebär inte att innehåll eller inställningar är identiska. En källa med tidigare
+körningar kan öppnas direkt därifrån. En källa utan körning anges som sådan.
+Översikten länkar inte till webbplatsens kunskapssida; adminbehörighet ger inte
+i sig åtkomst till den ytan.
+
+Administratören kan stoppa den valda körningen eller begära en ny körning.
+**Försök igen** startar hela källan med dess aktuella inställningar. Redan sparat
+innehåll hanteras av crawlerns befintliga regler. Båda åtgärderna bekräftas med
+källans namn. Köad körning avbryts direkt; pågående arbete kan först gå till
+**Stoppas**. Finns en annan aktiv körning visas en knapp för att öppna den.
+Servern återanvänder en befintlig aktiv körning vid upprepad start, och ett stopp
+av en äldre körning påverkar inte en senare körning.
 
 ## Shadcn och uppdatering
 
@@ -61,8 +87,15 @@ aktiva körningar ska vara ett begripligt normaltillstånd. Skeleton används vi
 första laddningen. Tangentbord, fokus, svenska/engelska och smala skärmar ska
 fungera med de befintliga komponenterna.
 
-Första versionen är en läsvy. Start/stopp för hela tenanten, crawlerinställningar,
-grafer, kostnadsberäkningar och aviseringar ingår inte.
+Detaljer hämtas när dialogen öppnas, vid manuell uppdatering och efter en
+åtgärd. Historik och samma adress hämtas först när respektive flik öppnas, tio
+rader åt gången. Dessa frågor ingår inte i översiktens uppdatering var tionde sekund.
+Dialogen behåller bara aktuell resultatsida. Sena svar för en tidigare vald
+källa kan inte ersätta den nya källans detaljer. Vid fel finns möjlighet att
+försöka igen.
+
+Massåtgärder, ändringar av källinställningar, grafer, kostnadsberäkningar och
+aviseringar ingår inte.
 
 ## Behörighet och data
 
@@ -73,16 +106,47 @@ tenant-id i klienten. Befintliga krav på API-nycklars adminomfattning gäller �
 här. Inga nya behörigheter eller rollnamnsjämförelser behövs.
 
 Owner har inte automatiskt läsrätt till alla privata ytor. Tenantöversikten
-behöver därför en uttrycklig adminläsning av körningsmetadata och feladresser,
-även för dessa ytor. Den läsningen ger inte nya rättigheter till indexerat
-innehåll, privata dokument eller ändringar av webbplatsen. Behörigheten till den
+har därför uttrycklig adminåtkomst till körningsmetadata, feladresser och
+start/stopp även för dessa ytor. Varje vald körning och källa slås upp inom den
+autentiserade tenanten före åtgärden. Det ger inte rätt att läsa indexerat
+innehåll, ändra källinställningar eller radera källor. Behörigheten till den
 vanliga kunskapssidan fortsätter att prövas som tidigare.
 
-API-ytan består av en adminendpoint för sammanfattning och en begränsad sida
-med körningar, samt en adminendpoint för vald körnings feladresser. Båda ligger
-under `/api/v1/admin/crawler/`. Befintliga svarstyper för körningar och fel används
-inne i projektionen; klienttyper genereras från OpenAPI. Detaljvyn återanvänds
-med rätt hämtfunktion för respektive behörighetskontext.
+Start kräver en riktig användaridentitet; en fristående service-API-nyckel kan
+inte skapa en körning, men en service-API-nyckel med tenantens adminomfattning
+kan läsa metadata och stoppa en körning.
+
+En ny adminbegärd körning använder den begärande administratörens konto. Nya
+innehållsversioner får den användaren som upphov och räknas mot användarens
+lagringskvot. Även en adminbegärd körning kan därför nå användarens kvotgräns.
+Källans ägare ändras inte; befintliga innehållsversioner behåller sin tidigare
+användare. Om en redan aktiv körning återanvänds behåller den sin ursprungliga
+körningsidentitet. Bekräftelsen för en ny körning förklarar kvotkonsekvensen.
+
+Adminbegäran om start och stopp skrivs som separata
+händelsetyper i befintlig revisionslogg, med aktör, källa, körnings-id och
+returnerad status. När loggning är aktiverad sparas åtgärd och revisionspost i
+samma transaktion. Om loggningen misslyckas rullas åtgärden tillbaka. Befintlig
+avstängning av loggning eller dess integrationskategori respekteras.
+
+API-ytan ligger under `/api/v1/admin/crawler/`:
+
+| Metod och sökväg | Innehåll eller åtgärd |
+| --- | --- |
+| `GET /` | Sammanfattning och en begränsad sida med körningar. |
+| `GET /runs/{id}/` | Vald körning och källans aktuella metadata. |
+| `GET /runs/{id}/failures/` | Körningens sparade feladresser. |
+| `GET /websites/{id}/runs/` | Källans körningshistorik. |
+| `GET /websites/{id}/matches/` | Andra källor med exakt samma adress. |
+| `POST /websites/{id}/run/` | Begär en ny körning eller returnera befintlig aktiv körning. |
+| `POST /runs/{id}/cancel/` | Begär stopp av den valda körningen. |
+
+Befintliga svarstyper för körningar och fel används inne i projektionen;
+klienttyper genereras från OpenAPI. Resultat och feladresser har en gemensam
+UI-komponent som används med rätt hämtfunktion för respektive behörighetskontext.
+Adminsidans ägarskapsinformation och åtgärder ligger i dess egen dialog.
+Läsningar återanvänder `CrawlRunRepository` och `WebsiteSparseRepository`;
+åtgärder återanvänder `CrawlService` utan ett nytt status- eller kölager.
 
 Läsningen ägs av befintlig `CrawlRunRepository` och använder adminpanelens
 behörighetskontroll. Läs enbart nödvändiga fält från körningar, aktuellt försök,
@@ -195,6 +259,44 @@ ENEO_RUN_CRAWLER_OVERVIEW_BENCHMARK=1 uv run pytest -s -m integration \
   tests/integration/test_admin_crawler_benchmark.py
 ```
 
+## Skalning för detaljer och åtgärder
+
+Utökningen ändrar inte översiktens återkommande SQL-frågor. Ett separat prov
+mätte de nya läsningarna med 100 001 källor, 100 000 aktiva dokument och
+100 000 äldre körningar för den valda källan. Elva andra källor hade samma
+adress. Miljö, uppvärmning och sju HTTP-mätningar per fall följde provet ovan.
+
+| Läsning | Median (min–max) | Crawlerfrågor per hämtning | Svarsstorlek |
+| --- | --- | --- | --- |
+| Detaljer | 21,75 ms (21,32–22,23) | 4 | 1 510 byte |
+| Historik, tio rader | 15,32 ms (14,89–15,87) | 3 | 4 860 byte |
+| Samma adress, tio rader | 17,58 ms (16,10–19,78) | 2 | 2 934 byte |
+| Samma adress, inga träffar | 16,03 ms (15,21–17,15) | 2 | 31 byte |
+
+Autentisering tillkommer med fem läsfrågor i den testade miljön. En registrerad
+manuell initiator kräver ytterligare en begränsad användarfråga; provet använde
+äldre körningar utan den uppgiften. Spårade Python-allokeringar låg runt
+0,49–0,54 MiB per hämtning. Inga dokumenttexter eller vektorer lästes in.
+
+Historiksidan hämtar elva rader via befintligt index och returnerar tio.
+Totalantalet historiska körningar och aktiva dokument måste fortfarande räknas.
+Adressmatchningen läste 100 001 källor i detta prov och tog cirka 6,4–6,7 ms i
+SQL. Kostnaden växer med antalet källor; detta är ingen konstanttidsfråga.
+Dokumenträkningen tog cirka 11,3 ms när samtliga 100 000 dokument tillhörde den
+valda källan. Begränsade svar och hämtning vid behov håller detta arbete utanför
+översiktens återkommande uppdatering. Provet motiverar inget ytterligare index i
+den här ändringen och säger inget om produktionens p95/p99 under samtidig
+crawling. Utökningen kräver ingen ny migration.
+
+Detaljer och åtgärder verifierades med 102 PostgreSQL-integrationstester,
+176 berörda enhetstester, 46 frontendtester och 42 SDK-tester. Kontrollerna
+omfattar bland annat andra tenanter, privata källor, namnlösa källor,
+användarattribution efter att kompatibilitetsjobbet tagits bort, upprepad start,
+stopp av en äldre körning, rollback vid revisionsfel, paginering och återhämtning
+efter misslyckade hämtningar eller åtgärder. Genererat API-kontrakt, strikta
+typer, lint, språknycklar och dialogens breda, mellanbreda och smala layouter i
+ljust och mörkt tema kontrollerades också.
+
 ## Kontrollerat källunderlag
 
 - [Adminmeny](../../frontend/apps/web/src/routes/(app)/admin/AdminMenu.svelte),
@@ -205,7 +307,8 @@ ENEO_RUN_CRAWLER_OVERVIEW_BENCHMARK=1 uv run pytest -s -m integration \
   [åtkomst till ytor](../../backend/src/eneo/actors/actors/space_actor.py).
 - [CrawlRunRepository](../../backend/src/eneo/websites/domain/crawl_run_repo.py),
   [sparad crawlmodell](../../backend/src/eneo/database/tables/websites_table.py)
-  och [befintlig detaljvy](../../frontend/apps/web/src/lib/features/knowledge/CrawlRunDetails.svelte).
+  och [gemensamt detaljinnehåll](../../frontend/apps/web/src/lib/features/knowledge/CrawlRunDetailsContent.svelte).
 
 - [Adminendpoint](../../backend/src/eneo/admin/admin_crawler_router.py) och
-  [adminsidan](../../frontend/apps/web/src/routes/(app)/admin/crawler/+page.svelte).
+  [adminsidan](../../frontend/apps/web/src/routes/(app)/admin/crawler/+page.svelte) och
+  [admindialogen](../../frontend/apps/web/src/routes/(app)/admin/crawler/AdminCrawlDetails.svelte).
