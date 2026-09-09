@@ -1,6 +1,8 @@
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum, StrEnum
 from typing import TYPE_CHECKING, Optional, Union, cast, overload
+from uuid import UUID, uuid4
 
 from typing_extensions import override
 
@@ -8,8 +10,6 @@ from eneo.base.base_entity import Entity
 from eneo.main.models import Status
 
 if TYPE_CHECKING:
-    from uuid import UUID
-
     from eneo.database.tables.websites_table import CrawlRuns as CrawlRunsTable
     from eneo.websites.domain.website import Website, WebsiteSparse
 
@@ -56,6 +56,19 @@ class CrawlFailureCode(StrEnum):
     TENANT_QUOTA_EXCEEDED = "tenant_quota_exceeded"
     USER_QUOTA_EXCEEDED = "user_quota_exceeded"
     CANCELLED = "cancelled"
+
+
+class CrawlResourceKind(StrEnum):
+    PAGE = "page"
+    FILE = "file"
+
+
+@dataclass(frozen=True, slots=True)
+class CrawlResourceFailure:
+    url: str
+    reason: str
+    kind: CrawlResourceKind
+    id: UUID = field(default_factory=uuid4)
 
 
 _SUCCESSFUL_OUTCOMES = {
@@ -109,6 +122,7 @@ class CrawlRun(Entity):
         failure_detail: Optional[str] = None,
         cancel_requested_at: Optional[datetime] = None,
         failure_summary: Optional[dict[str, int]] = None,
+        failure_details_available: bool = False,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.website_id = website_id
@@ -128,6 +142,7 @@ class CrawlRun(Entity):
         self.failure_detail = failure_detail
         self.cancel_requested_at = cancel_requested_at
         self.failure_summary = failure_summary
+        self.failure_details_available = failure_details_available
 
     @property
     def status(self) -> Status:
@@ -227,4 +242,5 @@ class CrawlRun(Entity):
             failure_detail=record.failure_detail,
             cancel_requested_at=record.cancel_requested_at,
             failure_summary=record.failure_summary,
+            failure_details_available=record.failure_details_available,
         )

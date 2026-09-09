@@ -3,6 +3,7 @@
   import { Label } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import {
+    crawlFailureReasonLabel,
     crawlRunFailureMessage,
     crawlRunState,
     crawlRunStateLabel,
@@ -21,56 +22,27 @@
   $: filesFailed = crawl.files_failed ?? 0;
   $: state = crawlRunState(crawl);
 
-  function getFailureReasonLabel(reason: string): string {
-    const normalizedReason = reason
-      .replace(/^_/, "")
-      .replace(/([a-z])([A-Z])/g, "$1_$2")
-      .toLowerCase();
-    const labels: Record<string, () => string> = {
-      empty_content: () => m.failure_reason_EMPTY_CONTENT(),
-      no_chunks: () => m.failure_reason_NO_CHUNKS(),
-      embedding_timeout: () => m.failure_reason_EMBEDDING_TIMEOUT(),
-      embedding_error: () => m.failure_reason_EMBEDDING_ERROR(),
-      db_error: () => m.failure_reason_DB_ERROR(),
-      tenant_quota_exceeded: () => m.failure_reason_TENANT_QUOTA_EXCEEDED(),
-      user_quota_exceeded: () => m.failure_reason_USER_QUOTA_EXCEEDED(),
-      no_embedding_model: () => m.failure_reason_NO_EMBEDDING_MODEL(),
-      missing_provider: () => m.failure_reason_MISSING_PROVIDER(),
-      redirect_rejected: () => m.failure_reason_redirect_rejected(),
-      unsafe_target: () => m.failure_reason_unsafe_target(),
-      request_timeout: () => m.failure_reason_timeout(),
-      connection_error: () => m.failure_reason_connection(),
-      response_decode_error: () => m.failure_reason_invalid_response(),
-      request_failed: () => m.failure_reason_other(),
-      invalid_sitemap: () => m.failure_reason_invalid_sitemap(),
-      sitemap_too_large: () => m.failure_reason_too_large(),
-      response_too_large: () => m.failure_reason_too_large(),
-      file_too_large: () => m.failure_reason_too_large(),
-      unsupported_content_type: () => m.failure_reason_unsupported_content(),
-      robots_disallowed: () => m.failure_reason_robots_disallowed(),
-      file_out_of_scope: () => m.failure_reason_file_out_of_scope()
-    };
-    if (/^http_\d{3}$/.test(normalizedReason)) {
-      return m.failure_reason_http({ status: normalizedReason.slice(5) });
-    }
-    return labels[normalizedReason]?.() ?? m.failure_reason_other();
-  }
-
-  function getFailureTooltip(): string | undefined {
-    const summary = crawl.failure_summary;
+  function getFailureTooltip(currentCrawl: CrawlRun): string | undefined {
+    const summary = currentCrawl.failure_summary;
     if (!summary || Object.keys(summary).length === 0) {
       return undefined;
     }
 
     const lines = Object.entries(summary)
-      .map(([reason, count]) => `${getFailureReasonLabel(reason)}: ${count}`)
+      .map(([reason, count]) => `${crawlFailureReasonLabel(reason)}: ${count}`)
       .join("\n");
 
     return `${m.failure_reasons_tooltip()}:\n${lines}`;
   }
 
-  function failedLabel(): { label: string; color: Label.LabelColor; tooltip?: string } {
-    const tooltip = getFailureTooltip();
+  function failedLabel(currentCrawl: CrawlRun): {
+    label: string;
+    color: Label.LabelColor;
+    tooltip?: string;
+  } {
+    const tooltip = getFailureTooltip(currentCrawl);
+    const pagesFailed = currentCrawl.pages_failed ?? 0;
+    const filesFailed = currentCrawl.files_failed ?? 0;
 
     if (pagesFailed && filesFailed) {
       return {
@@ -93,7 +65,9 @@
     }
   }
 
-  function successLabel(): { label: string; color: Label.LabelColor } {
+  function successLabel(currentCrawl: CrawlRun): { label: string; color: Label.LabelColor } {
+    const pagesCrawled = currentCrawl.pages_crawled ?? 0;
+    const filesDownloaded = currentCrawl.files_downloaded ?? 0;
     if (pagesCrawled && filesDownloaded) {
       return {
         color: "green",
@@ -112,7 +86,10 @@
     }
   }
 
-  function crawlStatus(currentState: CrawlRunState): {
+  function crawlStatus(
+    currentState: CrawlRunState,
+    currentCrawl: CrawlRun
+  ): {
     label: string;
     color: Label.LabelColor;
     tooltip?: string;
@@ -131,7 +108,7 @@
       label: crawlRunStateLabel(currentState),
       tooltip:
         currentState === "failed" || currentState === "interrupted" || currentState === "cancelled"
-          ? crawlRunFailureMessage(crawl)
+          ? crawlRunFailureMessage(currentCrawl)
           : undefined
     };
   }
@@ -140,15 +117,15 @@
 <div class="flex w-full items-center gap-2 {cls}" style="justify-content: flex-{align}">
   {#if state === "succeeded" || state === "partial" || state === "running" || state === "finalizing" || state === "stopping"}
     {#if pagesCrawled || filesDownloaded}
-      <Label.Single capitalize={false} item={successLabel()}></Label.Single>
+      <Label.Single capitalize={false} item={successLabel(crawl)}></Label.Single>
     {/if}
     {#if pagesFailed || filesFailed}
-      <Label.Single capitalize={false} item={failedLabel()}></Label.Single>
+      <Label.Single capitalize={false} item={failedLabel(crawl)}></Label.Single>
     {/if}
     {#if !pagesCrawled && !filesDownloaded && !pagesFailed && !filesFailed}
-      <Label.Single capitalize={false} item={crawlStatus(state)}></Label.Single>
+      <Label.Single capitalize={false} item={crawlStatus(state, crawl)}></Label.Single>
     {/if}
   {:else}
-    <Label.Single capitalize={false} item={crawlStatus(state)}></Label.Single>
+    <Label.Single capitalize={false} item={crawlStatus(state, crawl)}></Label.Single>
   {/if}
 </div>

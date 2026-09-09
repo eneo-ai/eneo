@@ -11,6 +11,7 @@ from eneo.embedding_models.presentation.embedding_model_models import (
 from eneo.main.models import (
     NOT_PROVIDED,
     BaseResponse,
+    CursorPaginatedResponse,
     IdAndName,
     InDB,
     ModelId,
@@ -25,6 +26,7 @@ from eneo.websites.domain.crawl_run import (
     CrawlOrigin,
     CrawlOutcome,
     CrawlPhase,
+    CrawlResourceKind,
     CrawlRun,
     CrawlType,
 )
@@ -109,9 +111,27 @@ class CrawlRunPublic(InDB):
         )
 
 
+class CrawlResourceFailurePublic(BaseModel):
+    id: UUID
+    url: str
+    reason: str = Field(description="Failure reason code, localized by the client.")
+    kind: CrawlResourceKind
+
+
+class CrawlFailurePagePublic(CursorPaginatedResponse[CrawlResourceFailurePublic]):
+    run: CrawlRunPublic
+    details_available: bool = Field(
+        description="False when this run predates collection of failed resource addresses."
+    )
+
+
 class WebsiteSparse(ResourcePermissionsMixin, WebsiteBase, InDB):
     url: str
     latest_crawl: Optional[CrawlRunPublic] = None
+    last_indexed_at: datetime | None = Field(
+        default=None,
+        description="Completion time of the latest successful, unchanged, empty, or partial indexing run.",
+    )
     user_id: UUID
     embedding_model: IdAndName
     metadata: WebsiteMetadata
@@ -125,6 +145,9 @@ class WebsitePublic(ResourcePermissionsMixin, BaseResponse):
     crawl_type: CrawlType
     update_interval: UpdateInterval
     latest_crawl: Optional[CrawlRunPublic]
+    last_indexed_at: datetime | None = Field(
+        description="Completion time of the latest successful, unchanged, empty, or partial indexing run. A later active or failed run does not replace it."
+    )
     embedding_model: EmbeddingModelPublic
     metadata: WebsiteMetadata
     requires_http_auth: bool = Field(
@@ -164,6 +187,7 @@ class WebsitePublic(ResourcePermissionsMixin, BaseResponse):
             crawl_type=website.crawl_type,
             update_interval=website.update_interval,
             latest_crawl=latest_crawl,
+            last_indexed_at=website.last_indexed_at,
             embedding_model=EmbeddingModelPublic.from_domain(website.embedding_model),
             metadata=WebsiteMetadata(size=website.size),
             permissions=website.permissions,

@@ -538,7 +538,10 @@ def test_crawl_lifecycle_migration_preserves_and_terminalizes_legacy_history(
         )
 
     assert _inspected_names(database_url, CrawlRuns.__tablename__, "columns") == {
-        column.name for column in CrawlRuns.__table__.columns
+        column.name
+        for column in CrawlRuns.__table__.columns
+        # Added after the lifecycle revision exercised by this test.
+        if column.name != "failure_details_available"
     }
     assert _inspected_names(database_url, CrawlAttempts.__tablename__, "columns") == {
         column.name for column in CrawlAttempts.__table__.columns

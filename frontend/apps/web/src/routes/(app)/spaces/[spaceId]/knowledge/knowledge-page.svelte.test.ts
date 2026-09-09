@@ -51,6 +51,7 @@ const space = {
       name,
       url: `https://${index}.example.test`,
       update_interval: "never",
+      last_indexed_at: index === 0 ? "2026-09-08T10:30:00Z" : null,
       latest_crawl: null,
       permissions: [],
       embedding_model: { id: "model-1", name: "Embedding model" }
@@ -85,6 +86,7 @@ test("syncing the selected websites refreshes jobs and reports the full selectio
       availableIntegrations: []
     }
   });
+  await expect.element(page.getByText(/2026-09-08/)).toBeVisible();
   await page.getByRole("checkbox").first().click();
   await page.getByRole("button", { name: m.sync_selected({ count: 3 }), exact: true }).click();
   expect(bulkRun).toHaveBeenCalledWith({ website_ids: ["website-0", "website-1", "website-2"] });

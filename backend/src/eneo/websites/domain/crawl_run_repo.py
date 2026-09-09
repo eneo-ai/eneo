@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
@@ -8,7 +9,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from eneo.database.tables.job_table import Jobs
-from eneo.database.tables.websites_table import CrawlAttempts
+from eneo.database.tables.websites_table import CrawlAttempts, CrawlRunFailures
 from eneo.database.tables.websites_table import CrawlRuns as CrawlRunsTable
 from eneo.database.tables.websites_table import Websites as WebsitesTable
 from eneo.jobs.job_models import Task
@@ -19,6 +20,8 @@ from eneo.websites.domain.crawl_run import (
     CrawlFailureCode,
     CrawlOutcome,
     CrawlPhase,
+    CrawlResourceFailure,
+    CrawlResourceKind,
     CrawlRun,
 )
 
@@ -80,6 +83,13 @@ class CrawlRunPage:
     next_cursor: UUID | None
 
 
+@dataclass(frozen=True, slots=True)
+class CrawlFailurePage:
+    items: list[CrawlResourceFailure]
+    total_count: int
+    next_cursor: UUID | None
+
+
 class CrawlDeletionBlocker(StrEnum):
     ACTIVE_CRAWL = "active_crawl"
     TRANSPORT_CLEANUP = "transport_cleanup_pending"
@@ -135,6 +145,74 @@ class CrawlRunRepository:
             .execution_options(populate_existing=True)
         )
         return CrawlRun.to_domain(record=record) if record is not None else None
+
+    async def get_failures(
+        self, run_id: UUID, *, limit: int = 100, cursor: UUID | None = None
+    ) -> CrawlFailurePage:
+        if not 1 <= limit <= 100:
+            raise BadRequestException("Failure page size must be between 1 and 100")
+        query = (
+            sa.select(CrawlRunFailures)
+            .where(CrawlRunFailures.crawl_run_id == run_id)
+            .order_by(CrawlRunFailures.created_at, CrawlRunFailures.id)
+            .limit(limit + 1)
+        )
+        if cursor is not None:
+            cursor_created_at = await self.session.scalar(
+                sa.select(CrawlRunFailures.created_at).where(
+                    CrawlRunFailures.crawl_run_id == run_id,
+                    CrawlRunFailures.id == cursor,
+                )
+            )
+            if cursor_created_at is None:
+                raise BadRequestException(
+                    "Failure cursor does not belong to this crawl"
+                )
+            query = query.where(
+                sa.tuple_(CrawlRunFailures.created_at, CrawlRunFailures.id)
+                > sa.tuple_(sa.literal(cursor_created_at), sa.literal(cursor))
+            )
+        records = list(await self.session.scalars(query))
+        items = [
+            CrawlResourceFailure(
+                id=row.id,
+                url=row.url,
+                reason=row.reason,
+                kind=CrawlResourceKind(row.kind),
+            )
+            for row in records[:limit]
+        ]
+        total_count = await self.session.scalar(
+            sa.select(sa.func.count())
+            .select_from(CrawlRunFailures)
+            .where(CrawlRunFailures.crawl_run_id == run_id)
+        )
+        return CrawlFailurePage(
+            items=items,
+            total_count=total_count or 0,
+            next_cursor=items[-1].id if len(records) > limit else None,
+        )
+
+    async def _record_failures(
+        self, run_id: UUID, failures: Sequence[CrawlResourceFailure]
+    ) -> None:
+        if failures:
+            await self.session.execute(
+                pg_insert(CrawlRunFailures)
+                .values(
+                    [
+                        {
+                            "id": failure.id,
+                            "crawl_run_id": run_id,
+                            "url": failure.url,
+                            "reason": failure.reason,
+                            "kind": failure.kind.value,
+                        }
+                        for failure in failures
+                    ]
+                )
+                .on_conflict_do_nothing(index_elements=[CrawlRunFailures.id])
+            )
 
     async def health_snapshot(self) -> CrawlLifecycleSnapshot:
         """Return aggregate state using the same current-attempt invariants as repair."""
@@ -789,6 +867,7 @@ class CrawlRunRepository:
         attempt.lease_expires_at = now + lease_duration
         attempt.started_at = now
         run.phase = CrawlPhase.RUNNING.value
+        run.failure_details_available = True
         await self.session.execute(
             sa.update(Jobs)
             .where(Jobs.id == dispatch_id)
@@ -807,6 +886,7 @@ class CrawlRunRepository:
         files_downloaded: int | None = None,
         pages_failed: int | None = None,
         files_failed: int | None = None,
+        failures: Sequence[CrawlResourceFailure] = (),
     ) -> bool:
         if lease_duration <= timedelta(0):
             raise ValueError("A crawl lease duration must be positive")
@@ -850,6 +930,7 @@ class CrawlRunRepository:
         if renewed is None:
             return False
         dispatch_id, crawl_run_id = renewed
+        await self._record_failures(crawl_run_id, failures)
         progress_values = {
             name: value for name, value in progress.items() if value is not None
         }
@@ -929,6 +1010,7 @@ class CrawlRunRepository:
         pages_failed: int | None = None,
         files_failed: int | None = None,
         failure_summary: dict[str, int] | None = None,
+        failures: Sequence[CrawlResourceFailure] = (),
     ) -> bool:
         code = self._validate_terminal_facts(
             outcome,
@@ -986,6 +1068,16 @@ class CrawlRunRepository:
             run.files_failed = files_failed
         if failure_summary is not None:
             run.failure_summary = failure_summary
+        await self._record_failures(run.id, failures)
+        if outcome in _SUCCESSFUL_OUTCOMES:
+            await self.session.execute(
+                sa.update(WebsitesTable)
+                .where(
+                    WebsitesTable.id == run.website_id,
+                    WebsitesTable.tenant_id == run.tenant_id,
+                )
+                .values(last_indexed_at=now)
+            )
         await self._project_job_terminal(
             attempt.dispatch_id,
             outcome=outcome,

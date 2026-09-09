@@ -73,7 +73,7 @@ describe("CrawlResultCell", () => {
   });
 
   it("shows persisted counters while a crawl is running", async () => {
-    render(CrawlResultCell, {
+    const rendered = render(CrawlResultCell, {
       crawl: crawlRun({
         phase: "running",
         status: "in progress",
@@ -91,6 +91,25 @@ describe("CrawlResultCell", () => {
       .toBeVisible();
     await expect
       .element(page.getByText(m.pages_failed({ count: 1 }), { exact: true }))
+      .toBeVisible();
+
+    await rendered.rerender({
+      crawl: crawlRun({
+        phase: "running",
+        status: "in progress",
+        pages_crawled: 24,
+        files_downloaded: 3,
+        pages_failed: 4,
+        files_failed: 0
+      })
+    });
+    await expect
+      .element(
+        page.getByText(m.pages_and_files_succeeded({ pages: 24, files: 3 }), { exact: true })
+      )
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.pages_failed({ count: 4 }), { exact: true }))
       .toBeVisible();
   });
 

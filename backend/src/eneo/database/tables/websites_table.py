@@ -5,6 +5,7 @@ from uuid import UUID
 from sqlalchemy import (
     TIMESTAMP,
     BigInteger,
+    Boolean,
     CheckConstraint,
     ForeignKey,
     Index,
@@ -125,6 +126,9 @@ class CrawlRuns(BasePublic):
         JSONB,
         nullable=True,
         comment="JSONB dict mapping failure reason codes to counts",
+    )
+    failure_details_available: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
     )
     phase: Mapped[str] = mapped_column(
         String(32), nullable=False, server_default="pending_dispatch"
@@ -289,6 +293,20 @@ class CrawlAttempts(BasePublic):
     )
 
 
+class CrawlRunFailures(BasePublic):
+    __table_args__ = (
+        CheckConstraint("kind IN ('page', 'file')", name="ck_crawl_run_failures_kind"),
+        Index("ix_crawl_run_failures_run_created", "crawl_run_id", "created_at", "id"),
+    )
+
+    crawl_run_id: Mapped[UUID] = mapped_column(
+        ForeignKey(CrawlRuns.id, ondelete="CASCADE"), nullable=False
+    )
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str] = mapped_column(String(64), nullable=False)
+    kind: Mapped[str] = mapped_column(String(8), nullable=False)
+
+
 class Websites(BasePublic):
     name: Mapped[Optional[str]] = mapped_column()
     url: Mapped[str] = mapped_column()
@@ -297,6 +315,9 @@ class Websites(BasePublic):
     update_interval: Mapped[str] = mapped_column()
     size: Mapped[int] = mapped_column(BigInteger, nullable=False)
     last_crawled_at: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+    last_indexed_at: Mapped[Optional[datetime]] = mapped_column(
         TIMESTAMP(timezone=True), nullable=True
     )
 

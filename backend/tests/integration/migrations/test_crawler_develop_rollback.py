@@ -20,7 +20,7 @@ from tests.integration.migrations.test_crawl_lifecycle_round_trip import (
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 _DEVELOP_HEAD = "202609071000"
-_CRAWLER_HEAD = "202609091230"
+_CRAWLER_HEAD = "202609091300"
 # The qualifier keeps the other side of both merge revisions at develop's head.
 _CRAWLER_ROLLBACK = "202608311430@202608121500"
 
@@ -194,6 +194,70 @@ def test_quota_failures_remain_readable_after_downgrade(
             )
             assert detail == "Storage quota is full"
             assert summary in ({"TENANT_QUOTA_EXCEEDED": 2}, {"USER_QUOTA_EXCEEDED": 2})
+    command.upgrade(database.config, _CRAWLER_HEAD)
+    assert database.revisions() == {_CRAWLER_HEAD}
+
+
+def test_indexing_timestamps_use_recorded_history_and_failure_details_block_lossy_downgrade(
+    rollback_database: RollbackDatabase,
+) -> None:
+    database = rollback_database
+    command.upgrade(database.config, "202609091230")
+    run_id = uuid4()
+    with psycopg2.connect(database.url) as connection, connection.cursor() as cursor:
+        tenant_id, _, website_id = _insert_crawl_owner(
+            cursor, label="Indexing timestamp"
+        )
+        _, _, unknown_website_id = _insert_crawl_owner(
+            cursor, label="Unknown timestamp"
+        )
+        for outcome, finished_at in (
+            ("partial", "2026-09-08 10:00 UTC"),
+            ("failed", "2026-09-09 10:00 UTC"),
+        ):
+            cursor.execute(
+                "INSERT INTO crawl_runs (id, website_id, tenant_id, phase, outcome, "
+                "origin, finished_at, failure_code) VALUES (%s, %s, %s, 'terminal', %s, "
+                "'manual', %s, 'processing_failed')",
+                (
+                    str(run_id if outcome == "partial" else uuid4()),
+                    str(website_id),
+                    str(tenant_id),
+                    outcome,
+                    finished_at,
+                ),
+            )
+    command.upgrade(database.config, _CRAWLER_HEAD)
+    with psycopg2.connect(database.url) as connection, connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT last_indexed_at = '2026-09-08 10:00 UTC'::timestamptz FROM websites WHERE id = %s",
+            (str(website_id),),
+        )
+        assert cursor.fetchone() == (True,)
+        cursor.execute(
+            "SELECT last_indexed_at FROM websites WHERE id = %s",
+            (str(unknown_website_id),),
+        )
+        assert cursor.fetchone() == (None,)
+        cursor.execute(
+            "SELECT failure_details_available FROM crawl_runs WHERE id = %s",
+            (str(run_id),),
+        )
+        assert cursor.fetchone() == (False,)
+        cursor.execute(
+            "INSERT INTO crawl_run_failures (crawl_run_id, url, reason, kind) VALUES (%s, 'https://example.test/missing', 'http_404', 'page')",
+            (str(run_id),),
+        )
+    schema = database.schema()
+    with pytest.raises(InternalError, match="recorded crawl failure addresses exist"):
+        command.downgrade(database.config, "202609091230")
+    assert database.revisions() == {_CRAWLER_HEAD}
+    assert database.schema() == schema
+    with psycopg2.connect(database.url) as connection, connection.cursor() as cursor:
+        cursor.execute("SELECT count(*) FROM crawl_run_failures")
+        assert cursor.fetchone() == (1,)
+        cursor.execute("DELETE FROM crawl_run_failures")
+    command.downgrade(database.config, "202609091230")
     command.upgrade(database.config, _CRAWLER_HEAD)
     assert database.revisions() == {_CRAWLER_HEAD}
 

@@ -11,6 +11,7 @@
   import "dayjs/locale/sv";
   import "dayjs/locale/en";
   import CrawlResultCell from "./CrawlResultCell.svelte";
+  import CrawlRunDetails from "./CrawlRunDetails.svelte";
   import { crawlRunState, crawlRunStateLabel } from "$lib/features/knowledge/crawlRunState";
   dayjs.extend(relativeTime);
   dayjs.extend(utc);
@@ -20,17 +21,27 @@
   $: dayjs.locale(getLocale());
 
   export let runs: CrawlRun[];
+  let selectedRun: CrawlRun | null = null;
+  let detailsOpen = false;
   const table = Table.createWithResource(runs);
 
   const viewModel = table.createViewModel([
     table.column({
-      accessor: "created_at",
+      accessor: (run) => run,
+      id: "created_at",
       header: m.started(),
       cell: (item) => {
-        return createRender(Table.FormattedCell, {
-          value: dayjs(item.value).format("YYYY-MM-DD HH:mm"),
-          monospaced: true
+        return createRender(Table.ButtonCell, {
+          label: dayjs(item.value.created_at).format("YYYY-MM-DD HH:mm"),
+          onclick: () => {
+            selectedRun = item.value;
+            detailsOpen = true;
+          }
         });
+      },
+      plugins: {
+        sort: { getSortValue: (run) => run.created_at ?? "" },
+        tableFilter: { getFilterValue: (run) => dayjs(run.created_at).format("YYYY-MM-DD HH:mm") }
       }
     }),
 
@@ -99,3 +110,7 @@
   emptyMessage={m.this_website_not_crawled_before()}
   resourceName="crawl"
 ></Table.Root>
+
+{#if selectedRun}
+  <CrawlRunDetails run={selectedRun} bind:open={detailsOpen} />
+{/if}

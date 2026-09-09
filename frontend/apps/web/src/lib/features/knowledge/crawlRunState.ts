@@ -100,3 +100,39 @@ export function crawlFailureMessage(failureCode: string | null | undefined): str
 export function crawlRunFailureMessage(crawl: CrawlRun): string {
   return crawlFailureMessage(crawl.failure_code);
 }
+
+export function crawlFailureReasonLabel(reason: string): string {
+  const normalizedReason = reason
+    .replace(/^_/, "")
+    .replace(/([a-z])([A-Z])/g, "$1_$2")
+    .toLowerCase();
+  const labels: Record<string, () => string> = {
+    processing_failed: () => m.failure_reason_PROCESSING_FAILED(),
+    empty_content: () => m.failure_reason_EMPTY_CONTENT(),
+    no_chunks: () => m.failure_reason_NO_CHUNKS(),
+    embedding_timeout: () => m.failure_reason_EMBEDDING_TIMEOUT(),
+    embedding_error: () => m.failure_reason_EMBEDDING_ERROR(),
+    db_error: () => m.failure_reason_DB_ERROR(),
+    tenant_quota_exceeded: () => m.failure_reason_TENANT_QUOTA_EXCEEDED(),
+    user_quota_exceeded: () => m.failure_reason_USER_QUOTA_EXCEEDED(),
+    no_embedding_model: () => m.failure_reason_NO_EMBEDDING_MODEL(),
+    missing_provider: () => m.failure_reason_MISSING_PROVIDER(),
+    redirect_rejected: () => m.failure_reason_redirect_rejected(),
+    unsafe_target: () => m.failure_reason_unsafe_target(),
+    request_timeout: () => m.failure_reason_timeout(),
+    connection_error: () => m.failure_reason_connection(),
+    response_decode_error: () => m.failure_reason_invalid_response(),
+    request_failed: () => m.failure_reason_other(),
+    invalid_sitemap: () => m.failure_reason_invalid_sitemap(),
+    sitemap_too_large: () => m.failure_reason_too_large(),
+    response_too_large: () => m.failure_reason_too_large(),
+    file_too_large: () => m.failure_reason_too_large(),
+    unsupported_content_type: () => m.failure_reason_unsupported_content(),
+    robots_disallowed: () => m.failure_reason_robots_disallowed(),
+    file_out_of_scope: () => m.failure_reason_file_out_of_scope()
+  };
+  if (/^http_\d{3}$/.test(normalizedReason)) {
+    return m.failure_reason_http({ status: normalizedReason.slice(5) });
+  }
+  return labels[normalizedReason]?.() ?? m.failure_reason_other();
+}

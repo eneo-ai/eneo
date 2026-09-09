@@ -21,6 +21,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/crawl-runs/{id}/failures/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List failed crawl addresses
+     * @description Read a bounded page of recorded page and file failures, oldest first. Older runs retain aggregate counts but may have no recorded addresses.
+     */
+    get: operations["get_crawl_failures_api_v1_crawl_runs__id__failures__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/crawl-runs/{id}/cancel/": {
     parameters: {
       query?: never;
@@ -11370,6 +11390,33 @@ export interface components {
       | "tenant_quota_exceeded"
       | "user_quota_exceeded"
       | "cancelled";
+    /** CrawlFailurePagePublic */
+    CrawlFailurePagePublic: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["CrawlResourceFailurePublic"][];
+      /** Limit */
+      limit?: number | null;
+      /** Next Cursor */
+      next_cursor?: string | null;
+      /** Previous Cursor */
+      previous_cursor?: string | null;
+      /** Total Count */
+      total_count: number;
+      run: components["schemas"]["CrawlRunPublic"];
+      /**
+       * Details Available
+       * @description False when this run predates collection of failed resource addresses.
+       */
+      details_available: boolean;
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
     /**
      * CrawlLifecycleHealth
      * @description Authoritative active crawl state from PostgreSQL.
@@ -11415,6 +11462,27 @@ export interface components {
      * @enum {string}
      */
     CrawlPhase: "pending_dispatch" | "queued" | "running" | "finalizing" | "stopping" | "terminal";
+    /** CrawlResourceFailurePublic */
+    CrawlResourceFailurePublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Url */
+      url: string;
+      /**
+       * Reason
+       * @description Failure reason code, localized by the client.
+       */
+      reason: string;
+      kind: components["schemas"]["CrawlResourceKind"];
+    };
+    /**
+     * CrawlResourceKind
+     * @enum {string}
+     */
+    CrawlResourceKind: "page" | "file";
     /** CrawlRunPublic */
     CrawlRunPublic: {
       /** Created At */
@@ -21489,6 +21557,11 @@ export interface components {
       crawl_type: components["schemas"]["CrawlType"];
       update_interval: components["schemas"]["UpdateInterval"];
       latest_crawl: components["schemas"]["CrawlRunPublic"] | null;
+      /**
+       * Last Indexed At
+       * @description Completion time of the latest successful, unchanged, empty, or partial indexing run. A later active or failed run does not replace it.
+       */
+      last_indexed_at: string | null;
       embedding_model: components["schemas"]["EmbeddingModelPublic"];
       metadata: components["schemas"]["WebsiteMetadata"];
       /**
@@ -22029,6 +22102,68 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["CrawlRunPublic"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_crawl_failures_api_v1_crawl_runs__id__failures__get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        cursor?: string | null;
+      };
+      header?: never;
+      path: {
+        /** @description Unique identifier of the crawl run */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlFailurePagePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */

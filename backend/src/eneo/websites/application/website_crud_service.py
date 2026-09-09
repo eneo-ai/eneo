@@ -22,7 +22,11 @@ if TYPE_CHECKING:
     from eneo.spaces.space_service import SpaceService
     from eneo.users.user import UserInDB
     from eneo.websites.domain.crawl_run import CrawlRun, CrawlType
-    from eneo.websites.domain.crawl_run_repo import CrawlRunPage, CrawlRunRepository
+    from eneo.websites.domain.crawl_run_repo import (
+        CrawlFailurePage,
+        CrawlRunPage,
+        CrawlRunRepository,
+    )
     from eneo.websites.domain.crawl_service import CrawlService
 
 
@@ -261,13 +265,20 @@ class WebsiteCRUDService:
 
     async def get_crawl_run(self, id: UUID) -> "CrawlRun":
         crawl_run = await self.crawl_run_repo.one(id)
-        space = await self.space_service.get_space_by_website(crawl_run.website_id)
-        actor = self.actor_manager.get_space_actor_from_space(space=space)
+        access = await self.space_repo.get_website_access_facts(crawl_run.website_id)
+        actor = self.actor_manager.get_space_actor(access)
 
-        if not actor.can_read_websites():
+        if not actor.can_read_space() or not actor.can_read_websites():
             raise UnauthorizedException()
 
         return crawl_run
+
+    async def get_crawl_failures(
+        self, id: UUID, *, limit: int = 100, cursor: UUID | None = None
+    ) -> tuple["CrawlRun", "CrawlFailurePage"]:
+        run = await self.get_crawl_run(id)
+        page = await self.crawl_run_repo.get_failures(id, limit=limit, cursor=cursor)
+        return run, page
 
     async def cancel_crawl_run(self, id: UUID) -> "CrawlRun":
         crawl_run = await self.crawl_run_repo.one(id)

@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from eneo.database.tables.ai_models_table import EmbeddingModels
 from eneo.database.tables.info_blobs_table import InfoBlobs, InfoBlobVersionState
 from eneo.database.tables.job_table import Jobs
-from eneo.database.tables.websites_table import CrawlAttempts
+from eneo.database.tables.websites_table import CrawlAttempts, CrawlRunFailures
 from eneo.database.tables.websites_table import CrawlRuns as CrawlRunsTable
 from eneo.database.tables.websites_table import Websites as WebsitesTable
 from eneo.jobs.job_models import Task
@@ -21,6 +21,8 @@ from eneo.websites.domain.crawl_run import (
     CrawlOrigin,
     CrawlOutcome,
     CrawlPhase,
+    CrawlResourceFailure,
+    CrawlResourceKind,
     CrawlRun,
     CrawlType,
 )
@@ -586,6 +588,25 @@ async def test_cancel_leased_attempt_stops_renewal_and_terminalizes_cancelled(
                 lease_owner="stopping-worker",
             )
 
+        failure = CrawlResourceFailure(
+            url="https://example.com/missing",
+            reason="http_404",
+            kind=CrawlResourceKind.PAGE,
+        )
+        for _ in range(2):
+            assert await repo.renew_attempt_lease(
+                attempt_id,
+                lease_owner="stopping-worker",
+                lease_duration=timedelta(minutes=5),
+                failures=[failure],
+            )
+        assert (
+            await session.scalar(
+                sa.select(sa.func.count()).select_from(CrawlRunFailures)
+            )
+            == 1
+        )
+
         stopping = (await repo.request_cancel(run.id)).run
 
         assert stopping.phase == CrawlPhase.STOPPING
@@ -596,6 +617,13 @@ async def test_cancel_leased_attempt_stops_renewal_and_terminalizes_cancelled(
                 attempt_id,
                 lease_owner="stopping-worker",
                 lease_duration=timedelta(minutes=5),
+                failures=[
+                    CrawlResourceFailure(
+                        url="https://example.com/stale",
+                        reason="http_404",
+                        kind=CrawlResourceKind.PAGE,
+                    )
+                ],
             )
             is False
         )
@@ -614,6 +642,12 @@ async def test_cancel_leased_attempt_stops_renewal_and_terminalizes_cancelled(
         assert finished.outcome == CrawlOutcome.CANCELLED
         assert finished.pages_crawled == 12
         assert finished.pages_failed == 1
+        assert (
+            await session.scalar(
+                sa.select(sa.func.count()).select_from(CrawlRunFailures)
+            )
+            == 1
+        )
 
 
 async def test_stopping_attempt_with_dead_worker_is_reaped(

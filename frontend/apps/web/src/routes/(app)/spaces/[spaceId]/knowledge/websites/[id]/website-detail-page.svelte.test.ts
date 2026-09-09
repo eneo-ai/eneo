@@ -9,6 +9,7 @@ const latestRun = vi.hoisted(() => vi.fn());
 const listRuns = vi.hoisted(() => vi.fn());
 const listBlobs = vi.hoisted(() => vi.fn());
 const cancelRun = vi.hoisted(() => vi.fn());
+const listFailures = vi.hoisted(() => vi.fn());
 const showError = vi.hoisted(() => vi.fn());
 vi.mock("$lib/core/errors", () => ({ toastError: showError }));
 const route = vi.hoisted(() => ({
@@ -18,7 +19,12 @@ const route = vi.hoisted(() => ({
 vi.mock("$lib/core/Eneo", () => ({
   getEneo: () => ({
     websites: {
-      crawlRuns: { latest: latestRun, listPage: listRuns, cancel: cancelRun },
+      crawlRuns: {
+        latest: latestRun,
+        listPage: listRuns,
+        cancel: cancelRun,
+        failures: listFailures
+      },
       indexedBlobs: { listPage: listBlobs }
     }
   })
@@ -97,9 +103,76 @@ beforeEach(() => {
   listRuns.mockReset().mockResolvedValue({ ...emptyPage, items: [running], total_count: 1 });
   listBlobs.mockReset().mockResolvedValue(emptyPage);
   cancelRun.mockReset().mockResolvedValue({});
+  listFailures.mockReset();
   showError.mockReset();
 });
 afterEach(() => vi.useRealTimers());
+
+test("opens a crawl's failed addresses and retries the next page without losing results", async () => {
+  const run = {
+    ...terminal,
+    outcome: "partial",
+    pages_failed: 2,
+    failure_code: "remote_unreachable"
+  };
+  const first = {
+    id: "failure-1",
+    url: "https://example.test/guide.pdf",
+    reason: "http_404",
+    kind: "file"
+  };
+  listFailures.mockResolvedValueOnce({
+    ...emptyPage,
+    run,
+    details_available: true,
+    items: [first],
+    total_count: 2,
+    next_cursor: "failure-1"
+  });
+  render(WebsiteDetailPage, { data: { ...data, crawlRuns: [run] } as never });
+  await page.getByRole("button", { name: /2026-09-04/ }).click();
+  const dialog = page.getByRole("dialog");
+  await expect.element(dialog.getByRole("link", { name: first.url })).toBeVisible();
+  expect(listFailures).toHaveBeenCalledWith({ id: run.id, limit: 100, cursor: null });
+  listFailures.mockRejectedValueOnce(new Error("Temporary failure"));
+  await dialog.getByRole("button", { name: /1.*2/ }).click();
+  await expect.element(dialog.getByRole("button", { name: m.retry(), exact: true })).toBeVisible();
+  await expect.element(dialog.getByRole("link", { name: first.url })).toBeVisible();
+  listFailures.mockResolvedValueOnce({
+    ...emptyPage,
+    run,
+    details_available: true,
+    items: [{ ...first, id: "failure-2", url: "https://example.test/missing", kind: "page" }],
+    total_count: 2
+  });
+  await dialog.getByRole("button", { name: m.retry(), exact: true }).click();
+  await expect
+    .element(dialog.getByRole("link", { name: "https://example.test/missing" }))
+    .toBeVisible();
+  expect(listFailures).toHaveBeenLastCalledWith({ id: run.id, limit: 100, cursor: "failure-1" });
+});
+
+test.each([false, true])(
+  "failure details distinguish unavailable history from no failures (%s)",
+  async (available) => {
+    listFailures.mockRejectedValueOnce(new Error("Temporary failure"));
+    render(WebsiteDetailPage, { data: { ...data, crawlRuns: [terminal] } as never });
+    await page.getByRole("button", { name: /2026-09-04/ }).click();
+    const dialog = page.getByRole("dialog");
+    await expect.element(dialog.getByRole("alert")).toBeVisible();
+    listFailures.mockResolvedValueOnce({
+      ...emptyPage,
+      run: terminal,
+      details_available: available
+    });
+    await dialog.getByRole("button", { name: m.retry(), exact: true }).click();
+    await expect
+      .element(
+        dialog.getByText(available ? m.crawl_failures_empty() : m.crawl_failures_unavailable())
+      )
+      .toBeVisible();
+  }
+);
 
 test("older history has a loading state and retries without losing the current run", async () => {
   let rejectPage: (error: Error) => void = () => {};

@@ -18,7 +18,7 @@ from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.spaces_table import SpacesUserGroups, SpacesUsers
 from eneo.database.tables.user_groups_table import UserGroups
 from eneo.database.tables.users_table import Users
-from eneo.database.tables.websites_table import CrawlRuns, Websites
+from eneo.database.tables.websites_table import CrawlRunFailures, CrawlRuns, Websites
 from eneo.main.exceptions import UnauthorizedException
 from eneo.users.user import UserGroupInDBRead
 from eneo.websites.domain.crawl_run import CrawlType
@@ -161,6 +161,111 @@ async def test_latest_crawl_returns_null_then_one_deterministic_run_without_spac
     assert response.json()["id"] == str(run_ids[-1])
     assert response.json()["pages_crawled"] == 999
     assert response.json()["phase"] == "terminal"
+
+
+async def test_older_crawls_report_that_failure_addresses_were_not_recorded(
+    client, db_container, admin_user, website_id, headers
+) -> None:
+    async with db_container(user=admin_user) as container:
+        run = CrawlRuns(
+            website_id=website_id,
+            tenant_id=admin_user.tenant_id,
+            phase="terminal",
+            outcome="failed",
+            origin="legacy",
+            failure_code="processing_failed",
+            pages_failed=2,
+            failure_summary={"http_404": 2},
+        )
+        container.session().add(run)
+        await container.session().flush()
+        run_id = run.id
+    response = await client.get(
+        f"/api/v1/crawl-runs/{run_id}/failures/", headers=headers
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["details_available"] is False
+    assert response.json()["items"] == []
+    assert response.json()["total_count"] == 0
+
+
+async def test_failed_addresses_are_paginated_and_require_website_access(
+    client, db_container, admin_user, website_id, headers, monkeypatch
+) -> None:
+    from eneo.main.exceptions import NotFoundException
+    from eneo.spaces.space_repo import SpaceRepository
+
+    async def forbid_aggregate(*args, **kwargs):
+        pytest.fail("Failure details must not hydrate the whole space")
+
+    monkeypatch.setattr(SpaceRepository, "_get_from_query", forbid_aggregate)
+    async with db_container(user=admin_user) as container:
+        session = container.session()
+        run = CrawlRuns(
+            website_id=website_id,
+            tenant_id=admin_user.tenant_id,
+            phase="terminal",
+            outcome="failed",
+            origin="manual",
+            failure_code="remote_unreachable",
+            pages_failed=104,
+            files_failed=1,
+            finished_at=datetime.now(timezone.utc),
+            failure_details_available=True,
+        )
+        session.add(run)
+        await session.flush()
+        run_id = run.id
+        ids = sorted(uuid4() for _ in range(105))
+        await session.execute(
+            sa.insert(CrawlRunFailures),
+            [
+                {
+                    "id": id,
+                    "crawl_run_id": run_id,
+                    "kind": "file" if index == 0 else "page",
+                    "url": f"https://example.test/{index}",
+                    "reason": "http_404",
+                }
+                for index, id in enumerate(ids)
+            ],
+        )
+    url = f"/api/v1/crawl-runs/{run_id}/failures/"
+    response = await client.get(url, headers=headers)
+    assert response.status_code == 200, response.text
+    first = response.json()
+    assert first["details_available"] is True
+    assert first["run"]["id"] == str(run_id)
+    assert first["total_count"] == 105
+    assert [item["id"] for item in first["items"]] == list(map(str, ids[:100]))
+    assert first["items"][0]["kind"] == "file"
+    response = await client.get(
+        url, headers=headers, params={"cursor": first["next_cursor"]}
+    )
+    assert response.status_code == 200, response.text
+    assert [item["id"] for item in response.json()["items"]] == list(
+        map(str, ids[100:])
+    )
+    assert response.json()["next_cursor"] is None
+    assert (
+        await client.get(url, headers=headers, params={"cursor": str(uuid4())})
+    ).status_code == 400
+    assert (
+        await client.get(url, headers=headers, params={"limit": 101})
+    ).status_code == 422
+
+    foreign_user = admin_user.model_copy(update={"tenant_id": uuid4()})
+    async with db_container(user=foreign_user) as container:
+        with pytest.raises(NotFoundException):
+            await container.website_crud_service().get_crawl_failures(run_id)
+    async with db_container(user=admin_user) as container:
+        space_id = await container.session().scalar(
+            sa.select(Websites.space_id).where(Websites.id == website_id)
+        )
+        await container.session().execute(
+            sa.delete(SpacesUsers).where(SpacesUsers.space_id == space_id)
+        )
+    assert (await client.get(url, headers=headers)).status_code == 403
 
 
 async def test_latest_crawl_loads_only_the_callers_access_facts_in_a_large_space(

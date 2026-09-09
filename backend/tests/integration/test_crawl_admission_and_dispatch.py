@@ -39,7 +39,7 @@ from eneo.database.tables.job_table import Jobs
 from eneo.database.tables.model_providers_table import ModelProviders
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
-from eneo.database.tables.websites_table import CrawlAttempts
+from eneo.database.tables.websites_table import CrawlAttempts, CrawlRunFailures
 from eneo.database.tables.websites_table import CrawlRuns as CrawlRunsTable
 from eneo.database.tables.websites_table import Websites as WebsitesTable
 from eneo.jobs.job_models import Task
@@ -1903,6 +1903,67 @@ async def test_persistence_failure_is_not_counted_as_a_successful_page(
         assert finished.pages_failed == 1
 
 
+async def test_worker_saves_failure_addresses_during_crawl_and_flushes_the_final_page(
+    db_session,
+    admin_user,
+) -> None:
+    async with db_session() as session:
+        website = await _persist_website(
+            session,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            label="Live failure details",
+        )
+        run = await _admit(session, website=website, user=admin_user)
+        attempt = await session.scalar(
+            sa.select(CrawlAttempts).where(CrawlAttempts.crawl_run_id == run.id)
+        )
+        assert attempt is not None
+        task = CrawlTask.model_validate(attempt.dispatch_payload)
+        dispatch_id = attempt.dispatch_id
+        run_id = cast(UUID, run.id)
+
+    class CrawlEngine:
+        async def crawl(self, request: CrawlRequest) -> AsyncIterator[CrawlEvent]:
+            for index in range(105):
+                yield PageFailed(url=f"{request.url}/{index}", reason="http_404")
+                if index == 99:
+                    async with asyncio.timeout(10):
+                        while True:
+                            async with db_session() as session:
+                                repository = CrawlRunRepository(session)
+                                details = await repository.get_failures(run_id)
+                                if details.total_count == 100:
+                                    current = await repository.one(run_id)
+                                    assert current.phase == CrawlPhase.RUNNING
+                                    assert current.failure_details_available
+                                    assert current.pages_failed == 100
+                                    break
+                            await asyncio.sleep(0.01)
+            yield CrawlFinished(status="completed", pages_crawled=0, pages_failed=105)
+
+    container = Container(session=providers.Object(SessionProxy()))
+    container.crawler.override(providers.Object(CrawlEngine()))
+    await crawl_task(job_id=dispatch_id, params=task, container=container)
+
+    async with db_session() as session:
+        repository = CrawlRunRepository(session)
+        finished = await repository.one(run_id)
+        assert finished.phase == CrawlPhase.TERMINAL
+        assert finished.outcome == CrawlOutcome.FAILED
+        assert finished.pages_failed == 105
+        first_page = await repository.get_failures(run_id)
+        assert first_page.total_count == 105
+        assert len(first_page.items) == 100
+        assert first_page.next_cursor is not None
+        last_page = await repository.get_failures(run_id, cursor=first_page.next_cursor)
+        assert len(last_page.items) == 5
+        assert last_page.next_cursor is None
+        assert {failure.url for failure in first_page.items + last_page.items} == {
+            f"{task.url}/{index}" for index in range(105)
+        }
+
+
 @pytest.mark.parametrize(
     ("reason", "published_prefix", "expected_outcome", "quota_on_file"),
     [
@@ -1922,6 +1983,7 @@ async def test_quota_exhaustion_stops_crawl_and_finishes_the_job(
     quota_on_file: bool,
 ) -> None:
     monkeypatch.setattr(get_settings(), "crawl_page_batch_size", 10)
+    previous_indexed_at = datetime(2026, 9, 8, tzinfo=timezone.utc)
     async with db_session() as session:
         website = await _persist_website(
             session,
@@ -1937,6 +1999,11 @@ async def test_quota_exhaustion_stops_crawl_and_finishes_the_job(
         task = CrawlTask.model_validate(attempt.dispatch_payload)
         dispatch_id = attempt.dispatch_id
         run_id = cast(UUID, run.id)
+        await session.execute(
+            sa.update(WebsitesTable)
+            .where(WebsitesTable.id == website.id)
+            .values(last_indexed_at=previous_indexed_at)
+        )
 
     file_path = tmp_path / "quota.pdf"
 
@@ -2000,6 +2067,22 @@ async def test_quota_exhaustion_stops_crawl_and_finishes_the_job(
         assert finished.pages_failed == (5 if quota_on_file else 10)
         assert finished.files_failed == (1 if quota_on_file else 0)
         assert finished.failure_summary == {reason: 6 if quota_on_file else 10}
+        persisted_website = await session.get(WebsitesTable, website.id)
+        assert persisted_website is not None
+        if expected_outcome == CrawlOutcome.FAILED:
+            assert persisted_website.last_indexed_at == previous_indexed_at
+        else:
+            assert persisted_website.last_indexed_at == finished.finished_at
+        failures = list(
+            await session.scalars(
+                sa.select(CrawlRunFailures).where(
+                    CrawlRunFailures.crawl_run_id == run_id
+                )
+            )
+        )
+        assert len(failures) == (6 if quota_on_file else 10)
+        assert {failure.reason for failure in failures} == {reason}
+        assert sum(failure.kind == "file" for failure in failures) == int(quota_on_file)
         job = await session.get(Jobs, dispatch_id)
         assert job is not None
         assert job.status == (
@@ -2068,6 +2151,7 @@ async def test_partial_crawl_updates_persisted_failure_backoff_by_cause(
         assert persisted.consecutive_failures == expected_failures
         assert (persisted.next_retry_at is not None) is expects_backoff
         assert (persisted.last_crawled_at is not None) is (not expects_backoff)
+        assert persisted.last_indexed_at is not None
 
 
 async def test_published_files_are_not_reduced_by_unrelated_download_failures(

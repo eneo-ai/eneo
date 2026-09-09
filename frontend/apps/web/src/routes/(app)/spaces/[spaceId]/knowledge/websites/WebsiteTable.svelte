@@ -12,6 +12,7 @@
   import { IconWeb } from "@eneo/icons/web";
   import { formatWebsiteName } from "$lib/core/formatting/formatWebsiteName";
   import { m } from "$lib/paraglide/messages";
+  import dayjs from "dayjs";
   import {
     toggleVisibleWebsiteSelection,
     visibleWebsiteIdsFromTableRows
@@ -169,6 +170,17 @@
           }
         }
       }
+    }),
+
+    table.column({
+      accessor: "last_indexed_at",
+      header: m.website_last_indexed(),
+      cell: (item) =>
+        createRender(Table.FormattedCell, {
+          value: item.value ? dayjs(item.value).format("YYYY-MM-DD HH:mm") : "—",
+          monospaced: true,
+          class: "whitespace-nowrap"
+        })
     }),
 
     table.columnActions({

@@ -43,6 +43,8 @@ from eneo.websites.domain.crawl_run import (
     CrawlOrigin,
     CrawlOutcome,
     CrawlPhase,
+    CrawlResourceFailure,
+    CrawlResourceKind,
     CrawlType,
 )
 from eneo.worker.crawl import (
@@ -389,6 +391,8 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
     terminalized = False
     heartbeat_stop: asyncio.Event | None = None
     heartbeat_task: asyncio.Task[None] | None = None
+    pending_failures: list[CrawlResourceFailure] = []
+    failure_flush_lock = asyncio.Lock()
 
     async def _stop_heartbeat(*, propagate_failure: bool = False) -> None:
         if heartbeat_stop is not None:
@@ -455,20 +459,28 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
         nonlocal terminalized
         if terminalized:
             return True
-        async with sessionmanager.session() as finish_session, finish_session.begin():
-            finished = await CrawlRunRepository(finish_session).finish_attempt(
-                attempt_id,
-                lease_owner=lease_owner,
-                outcome=outcome,
-                failure_code=failure_code,
-                failure_detail=failure_detail,
-                result_location=result_location,
-                pages_crawled=pages_crawled,
-                files_downloaded=files_downloaded,
-                pages_failed=pages_failed,
-                files_failed=files_failed,
-                failure_summary=failure_summary,
-            )
+        async with failure_flush_lock:
+            failures = list(pending_failures)
+            async with (
+                sessionmanager.session() as finish_session,
+                finish_session.begin(),
+            ):
+                finished = await CrawlRunRepository(finish_session).finish_attempt(
+                    attempt_id,
+                    lease_owner=lease_owner,
+                    outcome=outcome,
+                    failure_code=failure_code,
+                    failure_detail=failure_detail,
+                    result_location=result_location,
+                    pages_crawled=pages_crawled,
+                    files_downloaded=files_downloaded,
+                    pages_failed=pages_failed,
+                    files_failed=files_failed,
+                    failure_summary=failure_summary,
+                    failures=failures,
+                )
+            if finished:
+                del pending_failures[: len(failures)]
         terminalized = finished
         return finished
 
@@ -779,24 +791,37 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
             crawled_urls: set[str] = set()
             failed_urls: set[str] = set()  # Failed URLs excluded from stale deletion
 
+            def _record_failure(url: str, reason: str, kind: CrawlResourceKind) -> None:
+                failed_urls.add(url)
+                failure_counts[reason] += 1
+                pending_failures.append(
+                    CrawlResourceFailure(url=url, reason=reason, kind=kind)
+                )
+
             current_tenant = container.tenant()
 
             async def _renew_lease() -> bool:
-                async with (
-                    sessionmanager.session() as heartbeat_session,
-                    heartbeat_session.begin(),
-                ):
-                    return await CrawlRunRepository(
-                        heartbeat_session
-                    ).renew_attempt_lease(
-                        attempt_id,
-                        lease_owner=lease_owner,
-                        lease_duration=lease_duration,
-                        pages_crawled=num_published_pages,
-                        files_downloaded=num_published_files,
-                        pages_failed=num_failed_pages,
-                        files_failed=num_failed_files,
-                    )
+                async with failure_flush_lock:
+                    failures = list(pending_failures)
+                    async with (
+                        sessionmanager.session() as heartbeat_session,
+                        heartbeat_session.begin(),
+                    ):
+                        renewed = await CrawlRunRepository(
+                            heartbeat_session
+                        ).renew_attempt_lease(
+                            attempt_id,
+                            lease_owner=lease_owner,
+                            lease_duration=lease_duration,
+                            pages_crawled=num_published_pages,
+                            files_downloaded=num_published_files,
+                            pages_failed=num_failed_pages,
+                            files_failed=num_failed_files,
+                            failures=failures,
+                        )
+                    if renewed:
+                        del pending_failures[: len(failures)]
+                    return renewed
 
             heartbeat_monitor = HeartbeatMonitor(
                 renew_lease=_renew_lease,
@@ -886,9 +911,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 processing_page_seconds += time.time() - flush_started
                 num_published_pages += success_count
                 crawled_urls.update(successful_urls)
-                for reason, titles in batch_failures_by_reason.items():
-                    failure_counts[reason] += len(titles)
-                    failed_urls.update(titles)
+                for reason, urls in batch_failures_by_reason.items():
+                    for url in urls:
+                        _record_failure(url, reason, CrawlResourceKind.PAGE)
                 num_failed_pages += failed_count
                 quota_exceeded = not QUOTA_FAILURE_REASONS.isdisjoint(
                     batch_failures_by_reason
@@ -957,14 +982,16 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                         crawled_urls.update(successful_urls)
                     if failed_count:
                         num_failed_files += failed_count
-                        for reason, titles in file_failures.items():
-                            failure_counts[reason] += len(titles)
-                            failed_urls.update(titles)
+                        for reason, urls in file_failures.items():
+                            for url in urls:
+                                _record_failure(url, reason, CrawlResourceKind.FILE)
                     quota_exceeded = not QUOTA_FAILURE_REASONS.isdisjoint(file_failures)
                 except CrawlLeaseLostError:
                     raise
                 except Exception:
-                    failed_urls.add(event.url)
+                    _record_failure(
+                        event.url, "processing_failed", CrawlResourceKind.FILE
+                    )
                     num_failed_files += 1
                     logger.exception(
                         "Exception while uploading crawled file",
@@ -1062,13 +1089,16 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                             crawled_urls.add(event.url)
                         elif isinstance(event, PageFailed):
                             num_failed_pages += 1
-                            failed_urls.add(event.url)
-                            failure_counts[event.reason] += 1
+                            _record_failure(
+                                event.url, event.reason, CrawlResourceKind.PAGE
+                            )
                         elif isinstance(event, FileDownloaded):
                             await _process_file(event)
                         elif isinstance(event, FileFailed):
                             num_failed_files += 1
-                            failure_counts[event.reason] += 1
+                            _record_failure(
+                                event.url, event.reason, CrawlResourceKind.FILE
+                            )
                         elif isinstance(event, CrawlFinished):
                             crawl_is_partial = event.status == "partial"
                             crawl_termination_reason = event.reason or event.status
@@ -1083,6 +1113,10 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     finally:
                         if acknowledgement is not None:
                             acknowledgement.set()
+                    if len(pending_failures) >= 100 and not await _renew_lease():
+                        raise CrawlLeaseLostError(
+                            "Crawl lease was lost while saving failed addresses"
+                        )
                     if quota_exceeded:
                         break
 
@@ -1103,9 +1137,9 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                     reason = next(
                         iter(QUOTA_FAILURE_REASONS.intersection(failure_counts))
                     )
-                    failure_counts[reason] += len(page_buffer)
                     num_failed_pages += len(page_buffer)
-                    failed_urls.update(page["url"] for page in page_buffer)
+                    for page in page_buffer:
+                        _record_failure(page["url"], reason, CrawlResourceKind.PAGE)
                     page_buffer.clear()
 
             total_crawl_seconds = time.time() - crawl_started
