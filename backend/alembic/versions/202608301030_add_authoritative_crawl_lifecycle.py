@@ -79,7 +79,8 @@ def _preflight() -> None:
                 SELECT 1
                 FROM crawl_runs
                 WHERE failure_summary IS NOT NULL
-                  AND jsonb_typeof(failure_summary) <> 'object'
+                  -- SQLAlchemy JSONB stores an absent Python summary as JSON null.
+                  AND jsonb_typeof(failure_summary) NOT IN ('object', 'null')
             ) THEN
                 RAISE EXCEPTION 'crawl_runs contains a malformed failure_summary';
             END IF;

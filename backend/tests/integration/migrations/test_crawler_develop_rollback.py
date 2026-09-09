@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 
 import psycopg2
 import pytest
+from sqlalchemy import MetaData, Table, create_engine, null
 from sqlalchemy.exc import InternalError
 from testcontainers.postgres import PostgresContainer
 
@@ -86,6 +87,98 @@ def rollback_database() -> Generator[RollbackDatabase, None, None]:
     ) as postgres:
         url = _sync_url(postgres.get_connection_url())
         yield RollbackDatabase(url, _alembic_config(url), postgres)
+
+
+def test_legacy_failure_summaries_survive_upgrade_and_rollback(
+    rollback_database: RollbackDatabase,
+) -> None:
+    database = rollback_database
+    command.upgrade(database.config, _DEVELOP_HEAD)
+    with psycopg2.connect(database.url) as connection, connection.cursor() as cursor:
+        tenant_id, _, website_id = _insert_crawl_owner(cursor, label="Legacy summaries")
+
+    engine = create_engine(database.url)
+    try:
+        legacy_runs = Table("crawl_runs", MetaData(), autoload_with=engine)
+        with engine.begin() as connection:
+            # JSONB's default binding stores Python None as JSON null.
+            for summary in (None, null(), {"processing_failed": 2}):
+                connection.execute(
+                    legacy_runs.insert().values(
+                        id=uuid4(),
+                        tenant_id=tenant_id,
+                        website_id=website_id,
+                        failure_summary=summary,
+                    )
+                )
+    finally:
+        engine.dispose()
+
+    def summaries() -> list[tuple[str, str | None, bool]]:
+        with (
+            psycopg2.connect(database.url) as connection,
+            connection.cursor() as cursor,
+        ):
+            cursor.execute(
+                "SELECT id::text, failure_summary::text, failure_summary IS NULL "
+                "FROM crawl_runs ORDER BY id"
+            )
+            return cursor.fetchall()
+
+    original = summaries()
+    assert {(summary, is_null) for _, summary, is_null in original} == {
+        ("null", False),
+        (None, True),
+        ('{"processing_failed": 2}', False),
+    }
+    command.upgrade(database.config, _CRAWLER_HEAD)
+    assert summaries() == original
+    command.downgrade(database.config, _CRAWLER_ROLLBACK)
+    assert summaries() == original
+    command.upgrade(database.config, _CRAWLER_HEAD)
+    assert summaries() == original
+
+
+def test_malformed_failure_summaries_block_upgrade_without_changing_legacy_data(
+    rollback_database: RollbackDatabase,
+) -> None:
+    database = rollback_database
+    command.upgrade(database.config, _DEVELOP_HEAD)
+    run_id = uuid4()
+    with psycopg2.connect(database.url) as connection, connection.cursor() as cursor:
+        tenant_id, _, website_id = _insert_crawl_owner(
+            cursor, label="Malformed summary"
+        )
+        cursor.execute(
+            "INSERT INTO crawl_runs (id, tenant_id, website_id) VALUES (%s, %s, %s)",
+            (str(run_id), str(tenant_id), str(website_id)),
+        )
+    schema = database.schema()
+
+    for malformed in ("[]", '"failure"', "true", "2"):
+        with (
+            psycopg2.connect(database.url) as connection,
+            connection.cursor() as cursor,
+        ):
+            cursor.execute(
+                "UPDATE crawl_runs SET failure_summary = %s::jsonb WHERE id = %s",
+                (malformed, str(run_id)),
+            )
+
+        with pytest.raises(InternalError, match="malformed failure_summary"):
+            command.upgrade(database.config, _CRAWLER_HEAD)
+
+        assert database.revisions() == {_DEVELOP_HEAD}
+        assert database.schema() == schema
+        with (
+            psycopg2.connect(database.url) as connection,
+            connection.cursor() as cursor,
+        ):
+            cursor.execute(
+                "SELECT failure_summary::text FROM crawl_runs WHERE id = %s",
+                (str(run_id),),
+            )
+            assert cursor.fetchone() == (malformed,)
 
 
 @pytest.mark.parametrize("blocker", ["active_run", "transport_cleanup"])
