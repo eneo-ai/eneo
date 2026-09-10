@@ -277,7 +277,9 @@
         <CrawlLimitations></CrawlLimitations>
       {/if}
       {#if latestCompletedRun && hasCrawlIssues(latestCompletedRun)}
-        <div class="mb-4 flex flex-wrap items-start justify-between gap-3 rounded-lg border p-4">
+        <div
+          class="border-default mb-4 flex flex-wrap items-start justify-between gap-3 rounded-lg border p-4"
+        >
           <div class="flex min-w-0 items-start gap-3">
             <TriangleAlert
               class="text-negative-stronger mt-0.5 size-4 shrink-0"

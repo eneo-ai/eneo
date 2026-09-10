@@ -52,8 +52,8 @@
             {:else if column === 1 && count > 0 && onshowFailures}
               <Button
                 variant="link"
-                size="xs"
-                class="text-accent-stronger h-auto p-0 underline"
+                size="sm"
+                class="text-accent-stronger min-w-7 px-1 text-xs underline"
                 onclick={() => onshowFailures?.(row.kind)}
                 aria-label={row.kind === "page"
                   ? m.crawl_view_failed_pages({ count })

@@ -45,7 +45,7 @@
   let generation = 0;
   let viewedRunId: string | null = null;
   let viewedInitialKind: CrawlResourceFailure["kind"] | null = null;
-  let kind = $state<CrawlResourceFailure["kind"] | null>(null);
+  let kind = $state<CrawlResourceFailure["kind"] | null>(untrack(() => initialKind));
   const filters = $derived([
     { kind: null, label: m.crawl_failures_filter_all() },
     { kind: "page" as const, label: m.crawl_counts_pages() },
@@ -145,130 +145,128 @@
   }
 </script>
 
-<div class="min-h-0 overflow-y-auto">
+<div class="flex flex-col gap-3">
   <div class="flex flex-col gap-3">
-    <div class="flex flex-col gap-3">
-      <div class="flex flex-wrap items-center justify-between gap-3">
-        <CrawlRunStatus run={displayedRun} />
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <CrawlRunStatus run={displayedRun} />
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={loading || refreshing}
+        aria-busy={loading || refreshing}
+        onclick={refresh}
+      >
+        <RefreshCw
+          data-icon="inline-start"
+          class={cn((loading || refreshing) && "motion-safe:animate-spin")}
+        />{m.refresh()}
+      </Button>
+    </div>
+    <div class="max-w-sm"><CrawlRunCounts run={displayedRun} onshowFailures={selectKind} /></div>
+    <p class="text-secondary text-sm">
+      {displayedRun.origin === "manual"
+        ? m.crawl_origin_manual()
+        : displayedRun.origin === "scheduled"
+          ? m.crawl_origin_scheduled()
+          : m.crawl_origin_legacy()}
+    </p>
+    {#if isActiveCrawlRun(displayedRun)}
+      <p class="text-secondary text-xs">{m.crawl_details_running()}</p>
+    {/if}
+    {#if displayedRun.failure_code}
+      <p class="text-secondary text-sm">{crawlRunFailureMessage(displayedRun)}</p>
+    {/if}
+  </div>
+
+  <div class="flex flex-wrap items-center justify-between gap-2 border-default border-t pt-3">
+    <h3 class="text-sm font-semibold">{m.crawl_failed_addresses()}</h3>
+    <div class="flex gap-1" role="group" aria-label={m.crawl_failure_resource_type()}>
+      {#each filters as filter (filter.label)}
         <Button
-          variant="outline"
+          variant="ghost"
+          class="aria-pressed:border-accent-stronger aria-pressed:bg-accent-dimmer aria-pressed:text-accent-stronger aria-pressed:hover:bg-accent-dimmer aria-pressed:hover:text-accent-stronger"
           size="sm"
-          disabled={loading || refreshing}
-          aria-busy={loading || refreshing}
-          onclick={refresh}
+          aria-pressed={kind === filter.kind}
+          onclick={() => selectKind(filter.kind)}>{filter.label}</Button
         >
-          <RefreshCw
-            data-icon="inline-start"
-            class={cn((loading || refreshing) && "motion-safe:animate-spin")}
-          />{m.refresh()}
-        </Button>
-      </div>
-      <div class="max-w-sm"><CrawlRunCounts run={displayedRun} onshowFailures={selectKind} /></div>
-      <p class="text-secondary text-sm">
-        {displayedRun.origin === "manual"
-          ? m.crawl_origin_manual()
-          : displayedRun.origin === "scheduled"
-            ? m.crawl_origin_scheduled()
-            : m.crawl_origin_legacy()}
-      </p>
-      {#if isActiveCrawlRun(displayedRun)}
-        <p class="text-secondary text-xs">{m.crawl_details_running()}</p>
-      {/if}
-      {#if displayedRun.failure_code}
-        <p class="text-secondary text-sm">{crawlRunFailureMessage(displayedRun)}</p>
-      {/if}
+      {/each}
     </div>
+  </div>
 
-    <div class="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
-      <h3 class="text-sm font-semibold">{m.crawl_failed_addresses()}</h3>
-      <div class="flex gap-1" role="group" aria-label={m.crawl_failure_resource_type()}>
-        {#each filters as filter (filter.label)}
-          <Button
-            variant={kind === filter.kind ? "secondary" : "ghost"}
-            size="sm"
-            aria-pressed={kind === filter.kind}
-            onclick={() => selectKind(filter.kind)}>{filter.label}</Button
-          >
-        {/each}
-      </div>
-    </div>
-
-    <div class="min-h-0 overflow-auto" aria-busy={loading}>
-      {#if summary.length > 0}
-        <details class="mb-3 text-sm">
-          <summary
-            class="cursor-pointer rounded-sm py-1 font-medium focus-visible:outline-2 focus-visible:outline-offset-2"
-            >{m.crawl_failure_help_title()}</summary
-          >
-          <ul class="mt-2 space-y-3">
-            {#each summary as [reason, count] (reason)}
-              {@const help = crawlFailureReasonHelp(reason)}
-              <li>
-                <p class="font-medium">{crawlFailureReasonLabel(reason)} · {count}</p>
-                {#if help}<p class="text-secondary mt-0.5 max-w-prose">{help}</p>{/if}
-              </li>
-            {/each}
-          </ul>
-        </details>
-      {/if}
-      {#if failures.length > 0}
-        <ul aria-label={m.crawl_failed_addresses()} class="divide-y text-sm">
-          {#each failures as failure (failure.id)}
-            {@const href = resourceLink(failure.url)}
-            <li class="grid gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_12rem] sm:gap-5">
-              <div class="min-w-0">
-                <p class="text-secondary mb-1 text-xs">
-                  {failure.kind === "page" ? m.page() : m.crawl_failure_file()}
-                </p>
-                {#if href}
-                  <!-- eslint-disable svelte/no-navigation-without-resolve -- validated external HTTP(S) address -->
-                  <a
-                    {href}
-                    target="_blank"
-                    rel="noreferrer"
-                    class="text-accent-stronger break-all underline underline-offset-2"
-                    >{failure.url}</a
-                  >
-                  <!-- eslint-enable svelte/no-navigation-without-resolve -->
-                {:else}
-                  <span class="break-all">{failure.url}</span>
-                {/if}
-              </div>
-              <p class="text-negative-stronger break-words sm:pt-5">
-                {crawlFailureReasonLabel(failure.reason)}
-              </p>
+  <div aria-busy={loading}>
+    {#if summary.length > 0}
+      <details class="mb-3 text-sm">
+        <summary
+          class="cursor-pointer rounded-sm py-1 font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-stronger"
+          >{m.crawl_failure_help_title()}</summary
+        >
+        <ul class="mt-2 space-y-3">
+          {#each summary as [reason, count] (reason)}
+            {@const help = crawlFailureReasonHelp(reason)}
+            <li>
+              <p class="font-medium">{crawlFailureReasonLabel(reason)} · {count}</p>
+              {#if help}<p class="text-secondary mt-0.5 max-w-prose">{help}</p>{/if}
             </li>
           {/each}
         </ul>
-      {:else if !loading && !loadFailed}
-        <p class="text-secondary py-4 text-sm">
-          {detailsAvailable
-            ? kind
-              ? m.crawl_failures_filter_empty()
-              : m.crawl_failures_empty()
-            : m.crawl_failures_unavailable()}
-        </p>
-      {/if}
-    </div>
-
-    {#if loading}
-      <p role="status" class="text-secondary text-sm">
-        {failures.length ? m.loading_more() : m.loading()}
+      </details>
+    {/if}
+    {#if failures.length > 0}
+      <ul aria-label={m.crawl_failed_addresses()} class="divide-border divide-y text-sm">
+        {#each failures as failure (failure.id)}
+          {@const href = resourceLink(failure.url)}
+          <li class="space-y-1.5 py-3">
+            <p class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              <span class="text-secondary text-xs">
+                {failure.kind === "page" ? m.page() : m.crawl_failure_file()}
+              </span>
+              <span class="text-negative-stronger break-words">
+                {crawlFailureReasonLabel(failure.reason)}
+              </span>
+            </p>
+            {#if href}
+              <!-- eslint-disable svelte/no-navigation-without-resolve -- validated external HTTP(S) address -->
+              <a
+                {href}
+                target="_blank"
+                rel="noreferrer"
+                class="text-accent-stronger break-all underline underline-offset-2">{failure.url}</a
+              >
+              <!-- eslint-enable svelte/no-navigation-without-resolve -->
+            {:else}
+              <span class="break-all">{failure.url}</span>
+            {/if}
+          </li>
+        {/each}
+      </ul>
+    {:else if !loading && !loadFailed}
+      <p class="text-secondary py-4 text-sm">
+        {detailsAvailable
+          ? kind
+            ? m.crawl_failures_filter_empty()
+            : m.crawl_failures_empty()
+          : m.crawl_failures_unavailable()}
       </p>
     {/if}
-    {#if loadFailed}
-      <CrawlLoadError
-        message={m.crawl_failures_load_failed()}
-        {loading}
-        onretry={() => loadFailures(retryCursor)}
-      />
-    {/if}
-    {#if nextCursor && !loadFailed}
-      <div class="flex justify-start">
-        <Button variant="outline" disabled={loading} onclick={() => loadFailures(nextCursor)}>
-          {m.crawl_failures_load_more({ current: failures.length, total })}
-        </Button>
-      </div>
-    {/if}
   </div>
+
+  {#if loading}
+    <p role="status" class="text-secondary text-sm">
+      {failures.length ? m.loading_more() : m.loading()}
+    </p>
+  {/if}
+  {#if loadFailed}
+    <CrawlLoadError
+      message={m.crawl_failures_load_failed()}
+      {loading}
+      onretry={() => loadFailures(retryCursor)}
+    />
+  {/if}
+  {#if nextCursor && !loadFailed}
+    <div class="flex justify-start">
+      <Button variant="outline" disabled={loading} onclick={() => loadFailures(nextCursor)}>
+        {m.crawl_failures_load_more({ current: failures.length, total })}
+      </Button>
+    </div>
+  {/if}
 </div>
