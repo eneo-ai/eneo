@@ -389,7 +389,7 @@ def _install_required_slot_refs(
 ) -> frozenset[str]:
     return frozenset(
         requirement.slot_ref.ref
-        for requirement in envelope.requirements.requirements
+        for requirement in envelope.active_requirements()
         if requirement.required
     )
 

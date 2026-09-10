@@ -49,6 +49,8 @@ from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     InputSource,
     InputType,
+    OutputMode,
+    OutputType,
     StepSpec,
 )
 from eneo.flows.flow_resource_bindings import (
@@ -449,6 +451,49 @@ def test_planner_exposes_audio_target_state_and_blocks_missing_default_model() -
     assert ready.target_state.audio_transcription_required is True
     assert ready.target_state.default_transcription_model_id == model_id
     assert ready.can_install_as_draft is True
+
+
+def test_planner_omits_model_slot_that_no_step_reads() -> None:
+    # The spec loader strips model_ref from a rendering step, so a package that
+    # declared a model only for such steps carries a slot nothing reads. The
+    # plan neither shows it nor requires a binding for it.
+    envelope = _envelope(
+        requirements=[
+            FlowPackageModelRequirement(
+                slot_ref=_slot_ref(ResourceSlotKind.MODEL, "structured"),
+            ),
+            FlowPackageModelRequirement(
+                slot_ref=_slot_ref(ResourceSlotKind.MODEL, "render"),
+                used_by_steps=["render"],
+            ),
+        ],
+        extra_steps=[
+            StepSpec(
+                plan_step_ref="render",
+                name="Render",
+                assistant_spec=AssistantSpec(
+                    instructions="Render the text.",
+                    model_ref="model.render",
+                ),
+                input_source=InputSource.PREVIOUS_STEP,
+                output_mode=OutputMode.RENDER_VERBATIM,
+                output_type=OutputType.PDF,
+            )
+        ],
+    )
+
+    plan = build_flow_package_import_plan(
+        envelope,
+        candidates=FlowPackageImportPlannerCandidates(),
+    )
+
+    assert [entry.slot_ref.ref for entry in plan.dependency_resolutions] == [
+        "model.structured"
+    ]
+    assert plan.package_summary.requirements_count == 1
+    assert plan.package_summary.requirements_by_kind == {
+        FlowPackageRequirementKind.MODEL: 1,
+    }
 
 
 def test_planner_summary_counts_requirements_by_kind() -> None:

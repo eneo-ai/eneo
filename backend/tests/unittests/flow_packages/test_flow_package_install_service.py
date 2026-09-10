@@ -52,6 +52,8 @@ from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
+    OutputMode,
+    OutputType,
     StepSpec,
 )
 from eneo.flows.flow_resource_bindings import (
@@ -120,6 +122,57 @@ async def test_install_rejects_missing_required_model_before_creating_flow() -> 
     )
     assert exc_info.value.context["slot_ref"] == "model.structured"
     service.create_flow.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_install_does_not_require_binding_for_model_slot_no_step_reads() -> None:
+    # A package exported before rendering steps stopped carrying a model
+    # declares a required slot that the stripped draft never references.
+    flow_id = uuid4()
+    assistant_id = uuid4()
+    model_id = uuid4()
+    envelope = _envelope(
+        requirements=[
+            FlowPackageModelRequirement(
+                slot_ref=_slot_ref(ResourceSlotKind.MODEL, "structured"),
+            ),
+            FlowPackageModelRequirement(
+                slot_ref=_slot_ref(ResourceSlotKind.MODEL, "render"),
+                used_by_steps=["render"],
+            ),
+        ],
+        extra_steps=[
+            StepSpec(
+                plan_step_ref="render",
+                name="Render",
+                assistant_spec=AssistantSpec(
+                    instructions="Render the text.",
+                    model_ref="model.render",
+                ),
+                input_source=InputSource.PREVIOUS_STEP,
+                output_mode=OutputMode.RENDER_VERBATIM,
+                output_type=OutputType.PDF,
+            )
+        ],
+    )
+    binding = _binding(
+        slot_ref=_slot_ref(ResourceSlotKind.MODEL, "structured"),
+        local_kind=LocalResourceKind.COMPLETION_MODEL,
+        local_id=model_id,
+    )
+    service = _flow_service(flow_id=flow_id, assistant_id=assistant_id)
+
+    result = await _install_as_draft(
+        envelope=envelope,
+        flow_service=service,
+        space_id=uuid4(),
+        selected_bindings=(binding,),
+        candidates=_candidates(models=[_model_candidate(model_id)]),
+    )
+
+    service.create_flow.assert_awaited_once()
+    assert result.steps_created == 2
+    assert result.resource_bindings_count == 1
 
 
 @pytest.mark.asyncio
@@ -761,6 +814,7 @@ def _envelope(
     *,
     requirements: list[FlowPackageRequirementEntry] | None = None,
     assistant: AssistantSpec | None = None,
+    extra_steps: list[StepSpec] | None = None,
 ) -> FlowPackageEnvelope:
     spec = FlowDraftSpecCore(
         flow_name="Imported Flow",
@@ -774,7 +828,8 @@ def _envelope(
                     model_ref="model.structured",
                 ),
                 input_source=InputSource.FLOW_INPUT,
-            )
+            ),
+            *(extra_steps or []),
         ],
     )
     return FlowPackageEnvelope.build_for_export(
