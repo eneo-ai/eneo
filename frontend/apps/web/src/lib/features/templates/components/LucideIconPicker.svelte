@@ -1,6 +1,11 @@
 <script lang="ts">
-  import * as LucideIcons from "lucide-svelte";
   import { Dialog, Button } from "@eneo/ui";
+  import {
+    loadLucideIcons,
+    toKebabCase,
+    toPascalCase,
+    type LucideIconRegistry
+  } from "../lucideIcons";
   import { Search, X, Sparkles, Check } from "lucide-svelte";
   import { writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
@@ -44,22 +49,27 @@
     "Database"
   ];
 
-  // Get all available Lucide icon names
-  const allIcons = Object.keys(LucideIcons)
-    .filter((name) => name !== "Icon" && name !== "icons" && !name.startsWith("Lucide"))
-    .sort();
-
-  // Convert PascalCase to kebab-case for storage
-  function toKebabCase(str: string): string {
-    return str.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
-  }
-
-  // Convert kebab-case back to PascalCase for icon lookup
-  function toPascalCase(str: string): string {
-    return (
-      str.charAt(0).toUpperCase() + str.slice(1).replace(/-([a-z])/g, (g) => g[1].toUpperCase())
+  // The full registry is large, so it is fetched only when the picker opens
+  // or a chosen icon has to be shown (see lucideIcons.ts).
+  let icons = $state<LucideIconRegistry | null>(null);
+  $effect(() => {
+    if (icons || (!value && !$dialogOpen)) return;
+    void loadLucideIcons().then(
+      (registry) => (icons = registry),
+      () => {
+        // Leave the picker empty; the registry retries on the next open.
+      }
     );
-  }
+  });
+
+  // All available Lucide icon names
+  const allIcons = $derived(
+    icons
+      ? Object.keys(icons)
+          .filter((name) => name !== "Icon" && name !== "icons" && !name.startsWith("Lucide"))
+          .sort()
+      : []
+  );
 
   // Filter icons based on search query
   const filteredIcons = $derived(
@@ -68,9 +78,8 @@
       : []
   );
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic icon lookup from lucide-svelte module exports
-  function getIconComponent(name: string): any {
-    return (LucideIcons as Record<string, unknown>)[name] || null;
+  function getIconComponent(name: string) {
+    return icons?.[name] ?? null;
   }
 
   const selectedIconComponent = $derived.by(() => {
@@ -103,7 +112,8 @@
     aria-label={value ? m.change_icon_current({ iconName: value }) : m.choose_template_icon()}
   >
     {#if selectedIconComponent}
-      {@render selectedIconComponent({ class: "h-5 w-5 text-text" })}
+      {@const SelectedIcon = selectedIconComponent}
+      <SelectedIcon class="h-5 w-5 text-text" />
     {:else}
       <Sparkles class="text-text-dimmer h-5 w-5" />
     {/if}
@@ -120,7 +130,8 @@
         class="border-strong bg-component hover:bg-hover-subtle flex h-10 min-w-10 items-center gap-2 rounded-lg border px-3 transition-colors"
       >
         {#if selectedIconComponent}
-          {@render selectedIconComponent({ class: "h-5 w-5 text-text" })}
+          {@const SelectedIcon = selectedIconComponent}
+          <SelectedIcon class="h-5 w-5 text-text" />
           <span class="text-text text-sm">{value}</span>
         {:else}
           <Sparkles class="text-text-dimmer h-5 w-5" />
@@ -179,9 +190,7 @@
                   aria-label={m.select_icon({ iconName: kebabName })}
                 >
                   {#if IconComp}
-                    {@render IconComp({
-                      class: `h-5 w-5 ${isSelected ? "text-accent-stronger" : "text-text"}`
-                    })}
+                    <IconComp class="h-5 w-5 {isSelected ? 'text-accent-stronger' : 'text-text'}" />
                   {/if}
                   {#if isSelected}
                     <div
@@ -217,9 +226,7 @@
                   aria-label={m.select_icon({ iconName: kebabName })}
                 >
                   {#if IconComp}
-                    {@render IconComp({
-                      class: `h-5 w-5 ${isSelected ? "text-accent-stronger" : "text-text"}`
-                    })}
+                    <IconComp class="h-5 w-5 {isSelected ? 'text-accent-stronger' : 'text-text'}" />
                   {/if}
                   {#if isSelected}
                     <div

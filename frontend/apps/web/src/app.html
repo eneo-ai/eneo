@@ -11,6 +11,20 @@
       media="(prefers-color-scheme: light)"
     />
     <meta name="theme-color" content="oklch(16.84% 0 89.88)" media="(prefers-color-scheme: dark)" />
+    <link
+      rel="preload"
+      href="%sveltekit.assets%/fonts/Inter-Regular.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link
+      rel="preload"
+      href="%sveltekit.assets%/fonts/Inter-Medium.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
     %sveltekit.head%
     <script nonce="%sveltekit.nonce%">
       const theme = localStorage.getItem("theme");
@@ -19,7 +33,7 @@
       }
     </script>
   </head>
-  <body data-sveltekit-preload-data="tap" data-sveltekit-preload-code="eager">
+  <body data-sveltekit-preload-data="hover" data-sveltekit-preload-code="eager">
     <div style="display: contents">%sveltekit.body%</div>
   </body>
 </html>
