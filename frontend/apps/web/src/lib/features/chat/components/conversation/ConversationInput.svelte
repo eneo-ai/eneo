@@ -57,7 +57,9 @@
   const {
     states: { mentions, question },
     resetMentionInput,
-    setQuestionText,
+    snapshotMentionInput,
+    restoreMentionInput,
+    isMentionInputEmpty,
     focusMentionInput
   } = initMentionInput({
     triggerCharacter: "@",
@@ -171,12 +173,18 @@
     const toolApprovalEnabled = !autoAcceptTools && hasMcpTools;
     // The question is echoed in the conversation as soon as the backend
     // confirms it, so clear the composer now instead of showing it dimmed
-    // behind a spinner until the answer finishes. Restored on error below.
-    const questionText = $question;
+    // behind a spinner until the answer finishes. The full draft (mention
+    // chips included) is restored on error below.
+    const draft = snapshotMentionInput();
+    const questionText = draft.question;
     resetMentionInput();
     scrollToBottom();
 
     try {
+      // A model or reasoning switch is applied optimistically; the backend
+      // resolves the model from the stored assistant, so let that write land
+      // before the question is sent under it.
+      await spacesManager?.awaitDefaultAssistantUpdates();
       await chat.askQuestion(
         questionText,
         files,
@@ -187,7 +195,9 @@
       );
       clearUploads();
     } catch (error: unknown) {
-      setQuestionText(questionText);
+      // Put the draft back unless the user has already started a new one
+      // while the request was pending; that newer input wins.
+      if (isMentionInputEmpty()) restoreMentionInput(draft);
       const contextError = getContextErrorInfo(error);
       if (contextError) {
         if (contextError.used !== undefined && contextError.limit !== undefined) {

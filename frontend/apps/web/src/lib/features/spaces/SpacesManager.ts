@@ -146,7 +146,27 @@ function SpacesManager(data: SpacesManagerParams) {
     }
   }
 
-  async function updateDefaultAssistant({
+  // Model and reasoning changes are applied optimistically, so a message sent
+  // right after a switch must not race the update: sends wait for this chain
+  // (see awaitDefaultAssistantUpdates) and updates run one at a time so a
+  // quick A → B → C never lets an older response win.
+  let pendingDefaultAssistantUpdate: Promise<void> = Promise.resolve();
+
+  function updateDefaultAssistant(update: {
+    completionModel?: { id: string };
+    modelKwargs?: ModelKwargs;
+  }): Promise<void> {
+    const run = () => applyDefaultAssistantUpdate(update);
+    pendingDefaultAssistantUpdate = pendingDefaultAssistantUpdate.then(run, run);
+    return pendingDefaultAssistantUpdate;
+  }
+
+  /** Resolves once every queued default-assistant update has settled. */
+  function awaitDefaultAssistantUpdates(): Promise<void> {
+    return pendingDefaultAssistantUpdate;
+  }
+
+  async function applyDefaultAssistantUpdate({
     completionModel,
     modelKwargs
   }: {
@@ -207,7 +227,8 @@ function SpacesManager(data: SpacesManagerParams) {
     updateSpace,
     deleteSpace,
     watchPageData,
-    updateDefaultAssistant
+    updateDefaultAssistant,
+    awaitDefaultAssistantUpdates
   });
 }
 
@@ -215,7 +236,8 @@ function isOrganizationSpace(space: SpaceSparse) {
   return space.organization === true;
 }
 
-export { initSpacesManager, getSpacesManager };
+// SpacesManager is exported for unit tests; components use initSpacesManager.
+export { initSpacesManager, getSpacesManager, SpacesManager };
 
 function derivedCurrentSpace(space: Readable<Space>) {
   return derived(space, ($space) => {
