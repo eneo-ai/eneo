@@ -47,6 +47,7 @@ class Tenants(BasePublic):
             "jsonb_build_object("
             "'max_delegation_depth', 3, "
             "'revocation_cascade_enabled', false, "
+            "'require_tenant_allowed_origin', true, "
             "'require_expiration', false, "
             "'max_expiration_days', NULL, "
             "'auto_expire_unused_days', NULL, "

@@ -393,6 +393,21 @@ async def test_admin_api_key_policy_update(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_admin_can_relax_tenant_origin_requirement(
+    client,
+    default_user_token,
+):
+    response = await client.patch(
+        "/api/v1/admin/api-key-policy",
+        json={"require_tenant_allowed_origin": False},
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["require_tenant_allowed_origin"] is False
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_creation_constraints_reflect_tenant_policy(
     client,
     default_user_token,

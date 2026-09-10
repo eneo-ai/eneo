@@ -437,7 +437,7 @@ def get_application():
                 response.headers["Access-Control-Allow-Origin"] = origin
                 response.headers.add_vary_header("Origin")
             elif not cors.allow_all_origins and await cors.is_allowed_origin(
-                origin=origin
+                origin=origin, request_headers=request.headers
             ):
                 response.headers["Access-Control-Allow-Origin"] = origin
                 response.headers.add_vary_header("Origin")
@@ -510,7 +510,7 @@ def get_application():
                 response.headers["Access-Control-Allow-Origin"] = origin
                 response.headers.add_vary_header("Origin")
             elif not cors.allow_all_origins and await cors.is_allowed_origin(
-                origin=origin
+                origin=origin, request_headers=request.headers
             ):
                 response.headers["Access-Control-Allow-Origin"] = origin
                 response.headers.add_vary_header("Origin")

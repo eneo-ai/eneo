@@ -32,7 +32,7 @@ class CORSMiddleware:
         expose_headers: Sequence[str] = (),
         max_age: int = 600,
         callback: typing.Optional[
-            typing.Callable[[str], typing.Awaitable[bool]]
+            typing.Callable[[str, Headers], typing.Awaitable[bool]]
         ] = None,
     ) -> None:
         super().__init__()
@@ -107,7 +107,9 @@ class CORSMiddleware:
 
         await self.simple_response(scope, receive, send, request_headers=headers)
 
-    async def is_allowed_origin(self, origin: str) -> bool:
+    async def is_allowed_origin(
+        self, origin: str, request_headers: Headers | None = None
+    ) -> bool:
         if self.allow_all_origins:
             return True
 
@@ -120,7 +122,7 @@ class CORSMiddleware:
             return True
 
         if self.callback is not None:
-            return await self.callback(origin)
+            return await self.callback(origin, request_headers or Headers())
 
         return False
 
@@ -135,7 +137,9 @@ class CORSMiddleware:
         headers = dict(self.preflight_headers)
         failures: list[str] = []
 
-        if await self.is_allowed_origin(origin=requested_origin):
+        if await self.is_allowed_origin(
+            origin=requested_origin, request_headers=request_headers
+        ):
             if self.preflight_explicit_allow_origin:
                 # The "else" case is already accounted for in self.preflight_headers
                 # and the value would be "*".
@@ -196,7 +200,9 @@ class CORSMiddleware:
 
         # If we only allow specific origins, then we have to mirror back
         # the Origin header in the response.
-        elif not self.allow_all_origins and await self.is_allowed_origin(origin=origin):
+        elif not self.allow_all_origins and await self.is_allowed_origin(
+            origin=origin, request_headers=request_headers
+        ):
             self.allow_explicit_origin(headers, origin)
 
         await send(message)

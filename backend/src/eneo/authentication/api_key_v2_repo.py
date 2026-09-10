@@ -19,6 +19,7 @@ from eneo.authentication.auth_models import (
     ApiKeyV2InDB,
 )
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
+from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
 
 
@@ -74,6 +75,52 @@ class ApiKeysV2Repository:
             return None
 
         return ApiKeyV2InDB.model_validate(record)
+
+    async def tenant_requires_allowed_origin(self, tenant_id: UUID) -> bool:
+        policy = await self.session.scalar(
+            sa.select(Tenants.api_key_policy).where(Tenants.id == tenant_id)
+        )
+        if not isinstance(policy, dict):
+            return True
+        return policy.get("require_tenant_allowed_origin", True) is not False
+
+    async def list_relaxed_tenant_public_key_origin_patterns(self) -> list[str]:
+        """Return active public-key CORS patterns for tenants that opted in."""
+        query = (
+            sa.select(self.table.allowed_origins, Tenants.api_key_policy)
+            .join(Tenants, Tenants.id == self.table.tenant_id)
+            .where(self.table.key_type == ApiKeyType.PK.value)
+            .where(self.table.revoked_at.is_(None))
+            .where(self.table.suspended_at.is_(None))
+            .where(
+                sa.or_(
+                    self.table.expires_at.is_(None),
+                    self.table.expires_at >= sa.func.now(),
+                )
+            )
+            .where(
+                sa.or_(
+                    self.table.rotation_grace_until.is_(None),
+                    self.table.rotation_grace_until > sa.func.now(),
+                )
+            )
+            .where(self.table.allowed_origins.is_not(None))
+        )
+        records = (await self.session.execute(query)).all()
+        origin_patterns: list[str] = []
+        for raw_patterns, raw_policy in records:
+            if not isinstance(raw_policy, dict):
+                continue
+            policy = cast(dict[str, object], raw_policy)
+            if policy.get("require_tenant_allowed_origin", True) is not False:
+                continue
+            if not isinstance(raw_patterns, list):
+                continue
+            patterns = cast(list[object], raw_patterns)
+            origin_patterns.extend(
+                pattern for pattern in patterns if isinstance(pattern, str)
+            )
+        return origin_patterns
 
     async def list_by_scope(
         self,

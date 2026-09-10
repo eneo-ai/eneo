@@ -8944,6 +8944,8 @@ export interface components {
       max_delegation_depth?: number | null;
       /** Revocation Cascade Enabled */
       revocation_cascade_enabled?: boolean | null;
+      /** Require Tenant Allowed Origin */
+      require_tenant_allowed_origin?: boolean;
       /** Require Expiration */
       require_expiration?: boolean | null;
       /** Max Expiration Days */
@@ -8961,6 +8963,8 @@ export interface components {
       max_delegation_depth?: number | null;
       /** Revocation Cascade Enabled */
       revocation_cascade_enabled?: boolean | null;
+      /** Require Tenant Allowed Origin */
+      require_tenant_allowed_origin?: boolean;
       /** Require Expiration */
       require_expiration?: boolean | null;
       /** Max Expiration Days */

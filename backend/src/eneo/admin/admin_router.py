@@ -1101,6 +1101,7 @@ async def _enrich_api_keys_with_user_snapshots(
                         "auto_expire_unused_days": 180,
                         "max_delegation_depth": 3,
                         "revocation_cascade_enabled": True,
+                        "require_tenant_allowed_origin": True,
                         "max_rate_limit_override": 10000,
                     }
                 }
@@ -1136,6 +1137,7 @@ async def get_api_key_policy(
                 "application/json": {
                     "example": {
                         "require_expiration": True,
+                        "require_tenant_allowed_origin": True,
                         "max_expiration_days": 90,
                         "auto_expire_unused_days": 180,
                     }
@@ -1153,6 +1155,7 @@ async def update_api_key_policy(
             examples=[
                 {
                     "require_expiration": True,
+                    "require_tenant_allowed_origin": True,
                     "max_expiration_days": 90,
                     "max_delegation_depth": 3,
                     "revocation_cascade_enabled": True,
