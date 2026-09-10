@@ -621,6 +621,8 @@ def _make_model() -> MagicMock:
     model.id = uuid4()
     model.name = "test-model"
     model.provider_id = uuid4()
+    model.max_input_tokens = 32_000
+    model.max_output_tokens = 4_000
     return model
 
 
@@ -1072,7 +1074,7 @@ class TestPlannerContextPreparation:
         space = MagicMock()
         space.completion_models = [model]
         space.collections = []
-        space.get_default_completion_model.return_value = model
+        space.select_default_completion_model.return_value = model
 
         session = _make_session(
             tenant_id=user.tenant_id,
@@ -1163,7 +1165,7 @@ class TestPlannerContextPreparation:
         space = MagicMock()
         space.completion_models = [model]
         space.collections = []
-        space.get_default_completion_model.return_value = model
+        space.select_default_completion_model.return_value = model
         completion_service = AsyncMock()
         completion_service.resolve_model_route.return_value = _route(
             supported=SupportedModelKwargs(
@@ -1206,7 +1208,7 @@ class TestPlannerContextPreparation:
         space = MagicMock()
         space.completion_models = [model]
         space.collections = []
-        space.get_default_completion_model.return_value = model
+        space.select_default_completion_model.return_value = model
         completion_service = AsyncMock()
         completion_service.resolve_model_route.return_value = _route(
             supported=SupportedModelKwargs(
@@ -1247,7 +1249,7 @@ class TestPlannerContextPreparation:
         space = MagicMock()
         space.completion_models = [model]
         space.collections = []
-        space.get_default_completion_model.return_value = model
+        space.select_default_completion_model.return_value = model
         session = _make_session(tenant_id=user.tenant_id)
         persisted_files = [
             _make_file(tenant_id=user.tenant_id, owner_user_id=user.id)
@@ -1299,7 +1301,7 @@ class TestPlannerContextPreparation:
         space = MagicMock()
         space.completion_models = [model]
         space.collections = []
-        space.get_default_completion_model.return_value = model
+        space.select_default_completion_model.return_value = model
         session = _make_session(tenant_id=user.tenant_id)
         repo.list_session_file_ids.return_value = [
             uuid4() for _ in range(AI_BUILDER_MAX_ATTACHMENTS - 1)
@@ -1349,7 +1351,7 @@ class TestPlannerContextPreparation:
         space = MagicMock()
         space.completion_models = [model]
         space.collections = []
-        space.get_default_completion_model.return_value = model
+        space.select_default_completion_model.return_value = model
         service = AIBuilderService(
             user=user,
             repo=repo,
@@ -1411,7 +1413,7 @@ class TestPlannerContextPreparation:
         space.id = uuid4()
         space.completion_models = [model]
         space.collections = []
-        space.get_default_completion_model.return_value = model
+        space.select_default_completion_model.return_value = model
 
         session = _make_session(
             tenant_id=user.tenant_id,
@@ -2920,7 +2922,7 @@ async def test_prepare_message_context_stages_new_files_and_builds_attachment_co
     model.max_input_tokens = 8192
     model.max_output_tokens = 2048
     model.litellm_model_name = "openai/gpt-5.4"
-    space.get_default_completion_model.return_value = model
+    space.select_default_completion_model.return_value = model
     space.completion_models = [model]
     space.collections = []
 
@@ -2974,7 +2976,7 @@ async def test_prepare_message_context_does_not_persist_new_files_before_message
     model.max_input_tokens = 8192
     model.max_output_tokens = 2048
     model.litellm_model_name = "openai/gpt-5.4"
-    space.get_default_completion_model.return_value = model
+    space.select_default_completion_model.return_value = model
     space.completion_models = [model]
     space.collections = []
 
@@ -3035,7 +3037,7 @@ async def test_prepare_message_context_rejects_missing_or_unavailable_file_ids()
     model.max_input_tokens = 8192
     model.max_output_tokens = 2048
     model.litellm_model_name = "openai/gpt-5.4"
-    space.get_default_completion_model.return_value = model
+    space.select_default_completion_model.return_value = model
     space.completion_models = [model]
     space.collections = []
     completion_service.resolve_model_route.return_value = _route(model="openai/gpt-5.4")

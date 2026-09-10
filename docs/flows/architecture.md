@@ -110,6 +110,13 @@ when its protection preconditions are not met.
 
 ### AI Builder failure telemetry
 
+Builder provider failures log the estimated request input tokens, selected
+model's context and output limits, reserved answer space, configured deadline,
+and elapsed provider-call time. Recognized rejection codes and parameter names
+are included when available. These are request measurements; a failed call's
+token usage remains unknown unless the provider reports it. Prompts, attachment
+text, credentials, and raw provider messages are excluded.
+
 The AI Builder failure summary reads `builder_sessions`, `flow_runs`, and
 `builder_client_errors`. Each section returns at most 20 failure families and
 five sample identifiers per family, with `truncated` and `total_families`
@@ -123,6 +130,54 @@ Client error reports persist the stable `code`, `category`, and `phase`, plus
 `request_id` when available, but never display text. They are deleted when their
 session or tenant is deleted, and the daily data-retention worker removes rows
 older than 90 days.
+
+### AI Builder request budgets
+
+The selected model's declared context window and output ceiling determine how
+much each request can carry. Classification, proposals, and review reserve the
+model's full output ceiling before fitting input: available input is the context
+window minus that ceiling and the configured safety buffer. The request sends
+that same output ceiling through LiteLLM; there is no fixed answer-token cap.
+Required instructions, schemas, and the current turn must fit or the request is
+refused before calling the provider. Attachment excerpts and older messages share
+the remaining space, with truncated evidence marked. Larger models can retain
+more text; the original uploaded files remain available. A tenant review-evidence cap limits the complete
+input for review suggestions and review-backed proposals; it does not consume
+any of the model's output allowance.
+
+Configured model limits take precedence. Missing limits may come from Eneo's
+shared provider-aware LiteLLM metadata resolver; unknown output capacity is never
+inferred from the input window. Existing configured values are preserved. Admission
+uses the shared conservative token reserve, including response schemas and tool
+definitions, so an unavailable tokenizer cannot silently reduce the estimate.
+A classifier response marked as length-limited is recorded as incomplete and is
+neither accepted nor cached.
+
+Some provider metadata declares an output ceiling equal to the context window.
+If the full output allowance and safety buffer leave no input capacity, model
+admission returns `planner_model_incompatible_token_limits`. Shortening the
+request cannot resolve that configuration. Choose a model with enough remaining
+input capacity, or correct inaccurate configured limits; AI Builder does not
+lower a model's declared output ceiling automatically.
+
+Upload byte limits protect storage and file processing. Message, collection,
+schema, and archive inspection bounds protect their respective API, persistence,
+and parsing boundaries. Those limits remain independent of model context size.
+
+`AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS` sets the default provider-call deadline for
+classification, proposals, and review (180 seconds). An explicitly configured
+`AI_BUILDER_CLASSIFICATION_TIMEOUT_SECONDS` overrides it for classification;
+leaving it unset restores inheritance. Deployments that previously used the
+implicit 60-second classification deadline now inherit the proposal deadline.
+Model context capacity does not establish
+provider processing speed, so deadlines are deployment policy.
+
+Each call has a local deadline as well as the SDK timeout, with automatic SDK
+retries disabled. Expiry stops the local wait; remote work may continue. The
+turn retains its unknown-outcome state and requires acknowledgement before
+another provider call. HTTP 400 rejections should be investigated using the
+rejection fields and request budget; increasing the deadline does not resolve
+an invalid request.
 
 ## Retention and deletion
 

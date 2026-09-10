@@ -42,6 +42,7 @@ SlotClassificationAttemptOutcome = Literal[
     "resolved",
     "no_content",
     "parse_failed",
+    "output_limit_exceeded",
     "skipped_context_budget",
     "skipped_no_resolvable_slots",
 ]

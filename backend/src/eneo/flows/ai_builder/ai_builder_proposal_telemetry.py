@@ -211,10 +211,10 @@ def _call_record_metadata(record: ProposalCallRecord) -> PlannerCallRecordMetada
             budget.model_output_ceiling_tokens if budget is not None else None
         ),
         output_reserve_tokens=(
-            budget.output_reserve_tokens if budget is not None else None
+            budget.model_output_ceiling_tokens if budget is not None else None
         ),
         provider_output_cap_tokens=(
-            budget.provider_output_cap_tokens if budget is not None else None
+            budget.model_output_ceiling_tokens if budget is not None else None
         ),
         fixed_input_tokens=(budget.fixed_input_tokens if budget is not None else None),
         safety_buffer_tokens=(

@@ -310,9 +310,7 @@ def fit_proposal_request_budget(
     )
     assert fitted is not None, "resolved protected proposal context must fit"
     fitted_groups, fitted_tokens = fitted
-    # The cap the provider is told belongs to the request that is sent, not
-    # to its protected core: whatever room the fitted input leaves is the
-    # model's, up to its ceiling.
+    # Record the fitted request's input measurement for provider accounting.
     sent = budget.resolve(input_tokens=tool_tokens + fitted_tokens)
     assert sent is not None, "a fitted proposal request keeps its reserved room"
     return fitted_groups, sent

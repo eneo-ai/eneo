@@ -318,3 +318,17 @@ def test_an_evidence_floor_narrows_the_candidates_and_refuses_a_lower_named_mode
         ).name
         == "high"
     )
+
+
+@pytest.mark.parametrize("output_tokens", [128_000, 126_000])
+def test_model_limits_leaving_no_input_have_a_distinct_admission_error(
+    output_tokens: int,
+) -> None:
+    provider_id = uuid4()
+    model = _model(provider_id=provider_id)
+    model.max_input_tokens = 128_000
+    model.max_output_tokens = output_tokens
+    with pytest.raises(AIBuilderBadRequestException) as error:
+        build_planner_context(_space([model]), active_provider_ids={provider_id})
+    assert error.value.code.value == "planner_model_incompatible_token_limits"
+    assert "output" in str(error.value).lower()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -76,6 +77,7 @@ from eneo.model_providers.infrastructure.litellm_provider import (
     ResolvedLiteLLMProvider,
 )
 from eneo.tenants.tenant import TenantInDB
+from eneo.tokens.token_utils import TokenCount, TokenCountSource
 
 
 def _resolved_slots(
@@ -762,6 +764,49 @@ async def test_non_string_response_records_parse_failure_with_usage_telemetry() 
     assert attempt.outcome == "parse_failed"
     assert usage_tracker.llm_calls_made == 1
     assert usage_tracker.token_usages[0].source == "litellm_estimate"
+
+
+@pytest.mark.asyncio
+async def test_truncated_classification_is_not_accepted_or_cached() -> None:
+    response = _make_response(json.dumps(_VALID_CLASSIFICATION_RESPONSE))
+    response.choices[0].finish_reason = "length"
+    client = AsyncMock()
+    client.acompletion.return_value = response
+    kwargs = dict(
+        litellm_client=client,
+        completion_model_route=_route(),
+        classification_input=_classification_input("Return a summary."),
+        allowed_slot_values={},
+        tenant_id=uuid4(),
+    )
+
+    attempt = await classify_slots(**kwargs)
+    assert attempt.outcome == "output_limit_exceeded"
+    assert attempt.result is None
+    assert client.acompletion.await_count == 1
+
+    response.choices[0].finish_reason = "stop"
+    assert (await classify_slots(**kwargs)).outcome == "resolved"
+    assert client.acompletion.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_classifier_admission_uses_safe_reserve_when_tokenizer_is_unavailable() -> (
+    None
+):
+    client = AsyncMock()
+    with patch("litellm.token_counter", side_effect=LookupError("unknown tokenizer")):
+        with pytest.raises(AIBuilderKnownProviderRejectionException):
+            await classify_slots(
+                litellm_client=client,
+                completion_model_route=_route(model="openai/gpt-4o"),
+                classification_input=_classification_input("漢字" * 10_000),
+                allowed_slot_values={},
+                tenant_id=uuid4(),
+                max_input_tokens=40_000,
+                max_output_tokens=16_000,
+            )
+    client.acompletion.assert_not_awaited()
 
 
 def test_parser_normalizes_only_cited_user_named_output_field_phrases() -> None:
@@ -2546,12 +2591,13 @@ def test_parser_rejects_schema_direction_outside_complete_candidate_set() -> Non
 def _route(
     *,
     model: str = "gpt-test",
+    provider_type: str = "openai",
     kwargs: dict[str, object] | None = None,
     supported: SupportedModelKwargs | None = None,
 ) -> ResolvedCompletionModelRoute:
     return ResolvedCompletionModelRoute(
         litellm_model=model,
-        provider_type="openai",
+        provider_type=provider_type,
         litellm_kwargs=kwargs or {},
         supported_model_kwargs=supported
         or SupportedModelKwargs(temperature=ModelKwargCapability(supported=True)),
@@ -2560,9 +2606,11 @@ def _route(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("retry_overrides", [{}, {"num_retries": 2, "max_retries": 2}])
+@pytest.mark.parametrize("provider_type", ["openai", "azure"])
 async def test_classifier_timeout_does_not_repeat_provider_work(
     monkeypatch: pytest.MonkeyPatch,
     retry_overrides: dict[str, int],
+    provider_type: str,
 ) -> None:
     requests: list[httpx.Request] = []
 
@@ -2583,22 +2631,76 @@ async def test_classifier_timeout_does_not_repeat_provider_work(
         await classify_slots(
             litellm_client=litellm,
             completion_model_route=_route(
-                model="openai/gpt-5.6-sol",
+                model=f"{provider_type}/gpt-5.6-sol",
+                provider_type=provider_type,
                 kwargs={
                     "api_key": "test-key",
                     "api_base": "https://timeout.invalid/v1",
+                    **(
+                        {"api_version": "2025-04-01-preview"}
+                        if provider_type == "azure"
+                        else {}
+                    ),
                     **retry_overrides,
                 },
             ),
             classification_input=_classification_input(f"Create a flow {uuid4()}"),
             allowed_slot_values={"primary_runtime_input": {"audio", "documents"}},
             tenant_id=uuid4(),
+            max_input_tokens=1_000_000,
+            max_output_tokens=128_000,
         )
 
     assert len(requests) == 1
+    payload = json.loads(requests[0].content)
+    assert payload["max_completion_tokens"] == 128_000
+    assert "max_tokens" not in payload
     assert (
         exc_info.value.public_error.details["retry_scope"] == "acknowledged_same_turn"
     )
+
+
+@pytest.mark.asyncio
+async def test_classifier_enforces_the_deadline_when_the_client_keeps_waiting() -> None:
+    cancelled = asyncio.Event()
+
+    async def wait_for_provider(**_kwargs: object) -> None:
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    client = MagicMock(acompletion=AsyncMock(side_effect=wait_for_provider))
+    tracker = ProposalTurnTelemetry(
+        request_id="req-classifier-deadline",
+        model="private-model",
+        target_kind=TargetKind.CREATE,
+    )
+    with pytest.raises(AIBuilderProviderOutcomeUnknownException) as exc_info:
+        async with asyncio.timeout(1):
+            await classify_slots(
+                litellm_client=client,
+                completion_model_route=_route(),
+                classification_input=_classification_input(f"Create a flow {uuid4()}"),
+                allowed_slot_values={"primary_runtime_input": {"audio", "documents"}},
+                tenant_id=uuid4(),
+                usage_tracker=tracker,
+                budget_policy=AIBuilderBudgetPolicy(
+                    conversation_safety_buffer_tokens=0,
+                    minimum_conversation_budget_tokens=0,
+                    classification_timeout_seconds=0.01,
+                ),
+            )
+
+    assert cancelled.is_set()
+    client.acompletion.assert_awaited_once()
+    assert exc_info.value.public_error.details["provider_exception_class"] == "timeout"
+    assert (
+        exc_info.value.public_error.details["retry_scope"] == "acknowledged_same_turn"
+    )
+    record = tracker.build_planner_telemetry()["call_records"][0]
+    assert record["provider_failure_kind"] == "timeout"
+    assert record["provider_turn_state"] == "provider_outcome_unknown"
 
 
 @pytest.mark.parametrize(
@@ -2725,8 +2827,14 @@ async def test_slot_classification_provider_failure_uses_typed_disposition(
     event_log.assert_called_once()
     payload = event_log.call_args.kwargs["extra"]
     assert payload["operation"] == "slot_classification"
+    assert payload["request_id"] == "req-slot-failure"
     assert payload["failure_kind"] == expected_kind
     assert payload["tenant_id"] == str(tenant_id)
+    assert payload["safe_detail"]["context_window_tokens"] == 100_000
+    assert payload["safe_detail"]["fixed_input_tokens"] > 0
+    assert payload["safe_detail"]["model_output_ceiling_tokens"] == 4_096
+    assert payload["safe_detail"]["timeout_seconds"] == 180.0
+    assert payload["safe_detail"]["provider_elapsed_ms"] >= 0
     encoded = str(payload)
     assert "sensitive-provider-material" not in encoded
     assert "private-user-content" not in encoded
@@ -3620,7 +3728,7 @@ def test_near_limit_admission_uses_the_selected_response_format_size(
         "ui_language": "en",
         "bias": None,
         "litellm_model": "openai/gpt-test",
-        "max_input_tokens": 1_000,
+        "max_input_tokens": 5_000,
         "max_output_tokens": 4_096,
         "budget_policy": AIBuilderBudgetPolicy(
             conversation_safety_buffer_tokens=0,
@@ -3629,11 +3737,13 @@ def test_near_limit_admission_uses_the_selected_response_format_size(
         "structured_output_mode": mode,
     }
     with (
-        patch.object(classifier, "count_message_tokens", return_value=100),
         patch.object(
             classifier,
-            "count_tokens",
-            side_effect=lambda value, _model: len(value),
+            "measure_provider_input_reserve",
+            side_effect=lambda messages, _tools, _model: TokenCount(
+                tokens=len(messages[0]["content"]) if len(messages) == 1 else 100,
+                source=TokenCountSource.LITELLM,
+            ),
         ),
     ):
         if not fits:
@@ -4395,17 +4505,23 @@ async def test_classify_slots_rejects_request_that_cannot_fit_selected_model() -
 
 
 @pytest.mark.asyncio
-async def test_classify_slots_clamps_output_to_available_headroom() -> None:
+async def test_classify_slots_rejects_insufficient_headroom_for_full_model_output() -> (
+    None
+):
     litellm_client = AsyncMock()
     litellm_client.acompletion.return_value = _make_response(
         json.dumps(_VALID_CLASSIFICATION_RESPONSE)
     )
 
     with (
-        patch.object(classifier, "count_message_tokens", return_value=100),
-        patch.object(classifier, "count_tokens", return_value=20),
+        patch.object(
+            classifier,
+            "measure_provider_input_reserve",
+            return_value=TokenCount(tokens=60, source=TokenCountSource.LITELLM),
+        ),
+        pytest.raises(AIBuilderKnownProviderRejectionException),
     ):
-        attempt = await classify_slots(
+        await classify_slots(
             litellm_client=litellm_client,
             completion_model_route=_route(),
             classification_input=_classification_input("Return JSON with case_id."),
@@ -4419,22 +4535,22 @@ async def test_classify_slots_clamps_output_to_available_headroom() -> None:
             ),
         )
 
-    assert attempt.outcome == "resolved"
-    call_kwargs = litellm_client.acompletion.await_args.kwargs
-    assert call_kwargs["max_tokens"] == 780
-    assert call_kwargs["timeout"] == 60.0
+    litellm_client.acompletion.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_classify_slots_sends_the_models_ceiling_not_the_reserve() -> None:
+async def test_classify_slots_sends_the_models_full_output_ceiling() -> None:
     litellm_client = AsyncMock()
     litellm_client.acompletion.return_value = _make_response(
         json.dumps(_VALID_CLASSIFICATION_RESPONSE)
     )
 
     with (
-        patch.object(classifier, "count_message_tokens", return_value=100),
-        patch.object(classifier, "count_tokens", return_value=20),
+        patch.object(
+            classifier,
+            "measure_provider_input_reserve",
+            return_value=TokenCount(tokens=60, source=TokenCountSource.LITELLM),
+        ),
     ):
         attempt = await classify_slots(
             litellm_client=litellm_client,

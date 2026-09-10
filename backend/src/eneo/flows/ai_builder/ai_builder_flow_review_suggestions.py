@@ -13,6 +13,7 @@ silence, while the verified ones beside it stand.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
@@ -615,18 +616,10 @@ async def generate_review_suggestions(
             + response_format_tokens
         )
 
-    # The answer keeps its reserve (or the model's ceiling when that is
-    # lower): the evidence may fill the window only up to where it would
-    # start eroding the answer, and a scaffold that already does is refused.
-    answer_tokens = min(
-        request_budget.output_reserve_tokens, request_budget.model_output_ceiling_tokens
-    )
-
     def fits(candidate: FlowReviewSample) -> bool:
-        resolved = request_budget.resolve(input_tokens=request_tokens_for(candidate))
         return (
-            resolved is not None
-            and resolved.provider_output_cap_tokens >= answer_tokens
+            request_budget.resolve(input_tokens=request_tokens_for(candidate))
+            is not None
         )
 
     fit_started = time.monotonic()
@@ -635,14 +628,10 @@ async def generate_review_suggestions(
     messages = build_review_suggestions_messages(sample, ui_language=ui_language)
     request_tokens = request_tokens_for(sample)
     resolved_budget = request_budget.resolve(input_tokens=request_tokens)
-    if (
-        resolved_budget is None
-        or resolved_budget.provider_output_cap_tokens < answer_tokens
-    ):
+    if resolved_budget is None:
         raise AIBuilderKnownProviderRejectionException(
             build_ai_builder_request_budget_exhausted_error(request_id=None)
         )
-    request_budget_resolved = resolved_budget
     completion_kwargs = completion_model_route.prepare_provider_kwargs(
         ModelKwargs(temperature=0.0)
     )
@@ -651,20 +640,25 @@ async def generate_review_suggestions(
     completion_kwargs.pop("timeout", None)
     # A failed review must not silently repeat work through SDK retries.
     completion_kwargs.update(num_retries=0, max_retries=0)
-    completion_kwargs["max_tokens"] = request_budget_resolved.provider_output_cap_tokens
+    completion_kwargs["max_tokens"] = resolved_budget.model_output_ceiling_tokens
     started = time.monotonic()
     try:
-        response = await litellm_client.acompletion(
-            model=litellm_model,
-            messages=messages,
-            stream=False,
-            drop_params=True,
-            timeout=request_budget_resolved.timeout_seconds,
-            **completion_kwargs,
-        )
+        async with asyncio.timeout(resolved_budget.timeout_seconds):
+            response = await litellm_client.acompletion(
+                model=litellm_model,
+                messages=messages,
+                stream=False,
+                drop_params=True,
+                timeout=resolved_budget.timeout_seconds,
+                **completion_kwargs,
+            )
     except Exception as error:
         failure = record_ai_builder_provider_failure(
-            error, stage="review_suggestions", tenant_id=tenant_id
+            error,
+            stage="review_suggestions",
+            tenant_id=tenant_id,
+            request_budget=resolved_budget,
+            provider_elapsed_ms=int((time.monotonic() - started) * 1000),
         )
         raise failure.as_exception() from error
 
@@ -699,7 +693,8 @@ async def generate_review_suggestions(
             "kinds": sorted({item.kind for item in parsed.suggestions}),
             "request_tokens": request_tokens,
             "context_window_tokens": request_budget.context_window_tokens,
-            "max_output_tokens": request_budget_resolved.provider_output_cap_tokens,
+            "input_cap_tokens": request_budget.input_cap_tokens,
+            "max_output_tokens": resolved_budget.model_output_ceiling_tokens,
             "excerpts_included": summary.excerpts_included,
             "excerpts_truncated": summary.excerpts_truncated,
             "excerpts_omitted_by_budget": summary.excerpts_omitted_by_budget,

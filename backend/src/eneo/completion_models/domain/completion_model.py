@@ -86,7 +86,9 @@ class CompletionModel(AIModel):
             security_classification=security_classification,
         )
 
-        defaults = lookup_model_defaults(litellm_model_name, name)
+        defaults = lookup_model_defaults(
+            litellm_model_name, name, provider_type=provider_type
+        )
         resolved_max_input_tokens = (
             max_input_tokens
             if max_input_tokens is not None
@@ -104,8 +106,10 @@ class CompletionModel(AIModel):
             if max_output_tokens is not None
             else defaults.max_output_tokens
             if defaults and defaults.max_output_tokens is not None
-            else resolved_max_input_tokens
+            else None
         )
+        if resolved_max_output_tokens is None:
+            raise ValueError("Completion model is missing max_output_tokens")
 
         self.base_url = base_url
         self.litellm_model_name = litellm_model_name
@@ -191,17 +195,6 @@ class CompletionModel(AIModel):
             max_input_tokens = token_limit
 
         max_output_tokens = getattr(completion_model_db, "max_output_tokens", None)
-        if max_output_tokens is None:
-            defaults = lookup_model_defaults(
-                completion_model_db.litellm_model_name,
-                completion_model_db.name,
-            )
-            max_output_tokens = (
-                defaults.max_output_tokens
-                if defaults and defaults.max_output_tokens is not None
-                else max_input_tokens
-            )
-
         # Settings are now directly on the model table
         return cls(
             tenant=tenant,

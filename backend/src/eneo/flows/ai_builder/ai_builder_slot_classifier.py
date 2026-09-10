@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -59,7 +60,7 @@ from eneo.flows.ai_builder.ai_builder_token_usage import (
 )
 from eneo.flows.ai_builder.planning_state import CheckpointProducerKind
 from eneo.main.logging import get_logger
-from eneo.tokens.token_utils import count_message_tokens, count_tokens
+from eneo.tokens.token_utils import measure_provider_input_reserve
 
 logger = get_logger(__name__)
 
@@ -221,7 +222,7 @@ async def classify_slots(
         raise AIBuilderKnownProviderRejectionException(
             build_ai_builder_request_budget_exhausted_error(request_id=None)
         )
-    completion_kwargs["max_tokens"] = request_budget.provider_output_cap_tokens
+    completion_kwargs["max_tokens"] = request_budget.model_output_ceiling_tokens
     if before_provider_call is not None:
         await before_provider_call()
     call = (
@@ -232,20 +233,25 @@ async def classify_slots(
         if usage_tracker is not None
         else None
     )
+    provider_started_at = time.perf_counter()
     try:
-        response = await litellm_client.acompletion(
-            model=litellm_model,
-            messages=messages,
-            stream=False,
-            drop_params=True,
-            timeout=request_budget.timeout_seconds,
-            **completion_kwargs,
-        )
+        async with asyncio.timeout(request_budget.timeout_seconds):
+            response = await litellm_client.acompletion(
+                model=litellm_model,
+                messages=messages,
+                stream=False,
+                drop_params=True,
+                timeout=request_budget.timeout_seconds,
+                **completion_kwargs,
+            )
     except Exception as error:
         failure = record_ai_builder_provider_failure(
             error,
             stage="slot_classification",
             tenant_id=tenant_id,
+            request_id=usage_tracker.request_id if usage_tracker is not None else None,
+            request_budget=request_budget,
+            provider_elapsed_ms=int((time.perf_counter() - provider_started_at) * 1000),
         )
         if call is not None and usage_tracker is not None:
             usage_tracker.fail_call(call=call, failure=failure)
@@ -262,6 +268,9 @@ async def classify_slots(
                 completion_text=content if isinstance(content, str) else None,
             ),
         )
+
+    if response.choices and response.choices[0].finish_reason == "length":
+        return SlotClassificationAttempt(outcome="output_limit_exceeded")
 
     if content is None or (isinstance(content, str) and not content.strip()):
         return SlotClassificationAttempt(outcome="no_content")
@@ -307,28 +316,6 @@ async def classify_slots(
     return SlotClassificationAttempt(outcome="resolved", result=result)
 
 
-def slot_classification_request_fits_model(
-    *,
-    messages: list[dict[str, Any]],
-    response_format: dict[str, object],
-    litellm_model: str,
-    max_input_tokens: int,
-    max_output_tokens: int,
-    budget_policy: AIBuilderBudgetPolicy,
-) -> bool:
-    return (
-        _resolve_slot_classification_request_budget(
-            messages=messages,
-            response_format=response_format,
-            litellm_model=litellm_model,
-            max_input_tokens=max_input_tokens,
-            max_output_tokens=max_output_tokens,
-            budget_policy=budget_policy,
-        )
-        is not None
-    )
-
-
 def _resolve_slot_classification_request_budget(
     *,
     messages: list[dict[str, Any]],
@@ -338,10 +325,20 @@ def _resolve_slot_classification_request_budget(
     max_output_tokens: int,
     budget_policy: AIBuilderBudgetPolicy,
 ) -> AIBuilderResolvedRequestBudget | None:
-    request_tokens = count_message_tokens(messages, litellm_model) + count_tokens(
-        json.dumps(response_format, ensure_ascii=False, separators=(",", ":")),
-        litellm_model,
-    )
+    request_tokens = measure_provider_input_reserve(messages, [], litellm_model).tokens
+    if response_format:
+        request_tokens += measure_provider_input_reserve(
+            [
+                {
+                    "role": "system",
+                    "content": json.dumps(
+                        response_format, ensure_ascii=False, separators=(",", ":")
+                    ),
+                }
+            ],
+            [],
+            litellm_model,
+        ).tokens
     return budget_policy.classification_request_budget(
         context_window_tokens=max_input_tokens,
         model_output_ceiling_tokens=max_output_tokens,
@@ -372,12 +369,10 @@ def admit_slot_classification_input(
         mode=structured_output_mode,
     )
 
-    def fits(
+    def request_budget_for(
         candidate: SlotClassificationInput,
-        *,
-        input_token_limit: int = max_input_tokens,
-    ) -> bool:
-        return slot_classification_request_fits_model(
+    ) -> AIBuilderResolvedRequestBudget | None:
+        return _resolve_slot_classification_request_budget(
             messages=_build_slot_classification_prompt(
                 classification_input=candidate,
                 allowed_slot_values=normalized_values,
@@ -388,7 +383,7 @@ def admit_slot_classification_input(
             ),
             response_format=response_format,
             litellm_model=litellm_model,
-            max_input_tokens=input_token_limit,
+            max_input_tokens=max_input_tokens,
             max_output_tokens=max_output_tokens,
             budget_policy=budget_policy,
         )
@@ -415,6 +410,13 @@ def admit_slot_classification_input(
             if source.source_id in protected_source_ids
         ),
     )
+    if request_budget_for(protected_input) is None:
+        raise AIBuilderKnownProviderRejectionException(
+            build_ai_builder_request_budget_exhausted_error(request_id=None)
+        )
+
+    def fits(candidate: SlotClassificationInput) -> bool:
+        return request_budget_for(candidate) is not None
 
     if attachment_context is not None:
 

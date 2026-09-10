@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -11,6 +13,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
     AIBuilderKnownProviderRejectionException,
+    AIBuilderProviderOutcomeUnknownException,
 )
 from eneo.flows.ai_builder.ai_builder_flow_review import (
     FlowReviewCohort,
@@ -26,7 +29,10 @@ from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
 from eneo.flows.ai_builder.ai_builder_flow_review_suggestions import (
     generate_review_suggestions,
 )
-from eneo.flows.ai_builder.ai_builder_settings import resolve_ai_builder_budget_policy
+from eneo.flows.ai_builder.ai_builder_settings import (
+    AIBuilderBudgetPolicy,
+    resolve_ai_builder_budget_policy,
+)
 
 
 def _sample() -> FlowReviewSample:
@@ -108,6 +114,7 @@ async def _generate(
     max_input_tokens: int = 100_000,
     max_output_tokens: int = 4000,
     sample=None,
+    budget_policy: AIBuilderBudgetPolicy | None = None,
 ):
     return await generate_review_suggestions(
         sample=sample or _sample(),
@@ -117,7 +124,7 @@ async def _generate(
         model_name="gpt-test",
         max_input_tokens=max_input_tokens,
         max_output_tokens=max_output_tokens,
-        budget_policy=resolve_ai_builder_budget_policy(None),
+        budget_policy=budget_policy or resolve_ai_builder_budget_policy(None),
         tenant_id=uuid4(),
         ui_language="sv",
     )
@@ -222,6 +229,28 @@ async def test_a_provider_error_is_recorded_as_a_provider_failure():
 
 
 @pytest.mark.asyncio
+async def test_review_enforces_its_deadline_without_repeating_provider_work():
+    async def wait_for_provider(**_kwargs: object) -> None:
+        await asyncio.Event().wait()
+
+    client = SimpleNamespace(acompletion=AsyncMock(side_effect=wait_for_provider))
+    with pytest.raises(AIBuilderProviderOutcomeUnknownException) as exc_info:
+        async with asyncio.timeout(1):
+            await _generate(
+                client,
+                budget_policy=AIBuilderBudgetPolicy(
+                    conversation_safety_buffer_tokens=0,
+                    minimum_conversation_budget_tokens=0,
+                    proposal_timeout_seconds=0.01,
+                ),
+            )
+
+    client.acompletion.assert_awaited_once()
+    assert exc_info.value.public_error.details["provider_exception_class"] == "timeout"
+    assert exc_info.value.public_error.details["another_call_permitted"] is False
+
+
+@pytest.mark.asyncio
 async def test_rejected_model_text_never_reaches_the_error_or_the_log(caplog):
     # A malformed field may carry copied evidence; only reason codes may leave.
     sentinel = "PERSONNUMMER-19900101-1234"
@@ -275,7 +304,7 @@ async def test_the_evidence_is_fitted_to_the_models_window_and_marked():
 
 
 @pytest.mark.asyncio
-async def test_the_answer_is_sent_with_the_models_ceiling_not_the_reserve():
+async def test_the_answer_is_sent_with_the_models_full_output_ceiling():
     client = _Client(content=json.dumps({"suggestions": []}))
     await _generate(client, max_input_tokens=100_000, max_output_tokens=16_000)
     (call,) = client.calls
@@ -297,7 +326,7 @@ async def test_a_tenant_cap_bounds_the_evidence_below_the_models_window():
         {"ai_builder": {"review_evidence_max_input_tokens": 12_000}}
     )
     result = await generate_review_suggestions(
-        sample=_long_sample(40_000),
+        sample=_long_sample(80_000),
         litellm_client=client,
         completion_model_route=_route(),
         model_id=uuid4(),
@@ -313,9 +342,25 @@ async def test_a_tenant_cap_bounds_the_evidence_below_the_models_window():
 
 @pytest.mark.asyncio
 async def test_a_scaffold_that_leaves_less_than_the_answer_is_refused_before_the_call():
-    """The window resolves (more than the minimum output stays) but the target
-    answer would be eroded by the scaffold alone: refused, no provider call."""
+    """The required prompt and full output must fit before any provider call."""
     client = _Client(content=json.dumps({"suggestions": []}))
     with pytest.raises(AIBuilderKnownProviderRejectionException):
         await _generate(client, max_input_tokens=6_000)
     assert client.calls == []
+
+
+@pytest.mark.asyncio
+async def test_review_input_cap_can_equal_the_full_model_output_ceiling():
+    client = _Client(content=json.dumps({"suggestions": []}))
+    result = await _generate(
+        client,
+        max_input_tokens=1_000_000,
+        max_output_tokens=128_000,
+        sample=_long_sample(600_000),
+        budget_policy=resolve_ai_builder_budget_policy(
+            {"ai_builder": {"review_evidence_max_input_tokens": 128_000}}
+        ),
+    )
+    (call,) = client.calls
+    assert call["max_tokens"] == 128_000
+    assert result.sample.excerpts_truncated == 1

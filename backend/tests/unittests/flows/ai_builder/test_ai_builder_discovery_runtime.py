@@ -17,7 +17,6 @@ from eneo.completion_models.infrastructure.completion_service import (
 )
 from eneo.files.file_models import File, FileType
 from eneo.flows.ai_builder import ai_builder_discovery_runtime as runtime
-from eneo.flows.ai_builder import ai_builder_slot_classifier as classifier
 from eneo.flows.ai_builder.ai_builder_architecture_commit import (
     finalize_architecture_commit,
 )
@@ -2227,15 +2226,6 @@ async def test_runtime_refits_saturated_attachment_before_admitting_transcript()
         attachment_context=attachment_context,
     )
 
-    provider_request = litellm_client.acompletion.await_args.kwargs
-    assert classifier.slot_classification_request_fits_model(
-        messages=provider_request["messages"],
-        response_format=provider_request["response_format"],
-        litellm_model="gpt-test",
-        max_input_tokens=16_000,
-        max_output_tokens=1_000,
-        budget_policy=_budget_policy(safety_buffer_tokens=1_000),
-    )
     assert context.slot_classification_metadata is not None
     assert [
         source.kind for source in context.slot_classification_metadata.source_inventory

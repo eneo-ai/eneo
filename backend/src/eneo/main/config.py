@@ -370,7 +370,9 @@ class Settings(BaseSettings):
     flow_mapped_step_max_provider_calls_default: int | None = 100
     ai_builder_conversation_safety_buffer_tokens: int = 2_000
     ai_builder_minimum_conversation_budget_tokens: int = 4_000
-    ai_builder_classification_timeout_seconds: float = 60.0
+    # Unset classification follows the proposal deadline: both may read the
+    # selected model's full context. A value preserves an explicit override.
+    ai_builder_classification_timeout_seconds: float | None = None
     ai_builder_proposal_timeout_seconds: float = 180.0
     ai_builder_send_lock_lease_seconds: int = 900
 
@@ -758,7 +760,10 @@ class Settings(BaseSettings):
             )
             sys.exit(1)
 
-        if self.ai_builder_classification_timeout_seconds <= 0:
+        if (
+            self.ai_builder_classification_timeout_seconds is not None
+            and self.ai_builder_classification_timeout_seconds <= 0
+        ):
             logging.error(
                 "AI_BUILDER_CLASSIFICATION_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
                 self.ai_builder_classification_timeout_seconds,

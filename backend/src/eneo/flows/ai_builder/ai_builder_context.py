@@ -198,6 +198,7 @@ def build_planner_context(
     defaults = lookup_model_defaults(
         getattr(model, "litellm_model_name", None),
         getattr(model, "name", None),
+        provider_type=getattr(model, "provider_type", None),
     )
     budget_policy = resolve_ai_builder_budget_policy(tenant_flow_settings)
     attachment_context_policy = AIBuilderAttachmentContextPolicy(
@@ -223,6 +224,20 @@ def build_planner_context(
         raise AIBuilderBadRequestException(
             "Planner model is missing max_output_tokens. Configure the model before using AI Builder.",
             code=AIBuilderErrorCode.PLANNER_MODEL_MISSING_OUTPUT_TOKENS,
+        )
+
+    if (
+        budget_policy.classification_request_budget(
+            context_window_tokens=max_input_tokens,
+            model_output_ceiling_tokens=max_output_tokens,
+        ).available_input_tokens
+        == 0
+    ):
+        raise AIBuilderBadRequestException(
+            "This model's configured output allowance and safety buffer leave no room "
+            "for AI Builder input. Choose a model with input capacity remaining after "
+            "its full output allowance, or ask an administrator to correct inaccurate model limits.",
+            code=AIBuilderErrorCode.PLANNER_MODEL_INCOMPATIBLE_TOKEN_LIMITS,
         )
 
     available_models = serialize_space_models(space)

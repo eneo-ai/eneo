@@ -181,8 +181,6 @@ def test_turn_call_records_are_the_usage_and_call_count_owner() -> None:
     request_budget = AIBuilderRequestBudget(
         context_window_tokens=32_000,
         model_output_ceiling_tokens=16_000,
-        output_reserve_tokens=8_000,
-        minimum_output_tokens=1_024,
         safety_buffer_tokens=2_000,
         timeout_seconds=180.0,
     ).resolve(input_tokens=6_000)
@@ -218,7 +216,7 @@ def test_turn_call_records_are_the_usage_and_call_count_owner() -> None:
         "token_usage_estimated": False,
         "context_window_tokens": 32_000,
         "model_output_ceiling_tokens": 16_000,
-        "output_reserve_tokens": 8_000,
+        "output_reserve_tokens": 16_000,
         "provider_output_cap_tokens": 16_000,
         "fixed_input_tokens": 6_000,
         "safety_buffer_tokens": 2_000,
@@ -490,6 +488,14 @@ def test_proposal_attempt_telemetry_is_bounded_and_content_free() -> None:
             "provider_outcome_unknown",
         ),
         (
+            TimeoutError(),
+            "timeout",
+            None,
+            None,
+            "timeout",
+            "provider_outcome_unknown",
+        ),
+        (
             APIConnectionError(
                 "sensitive-provider-material",
                 model="private-model",
@@ -742,6 +748,95 @@ def test_provider_incident_evidence_drops_untrusted_failure_facts() -> None:
         "private-request-id",
     ):
         assert forbidden not in encoded
+
+
+@pytest.mark.parametrize("source", ["body", "nested_body", "response"])
+def test_classifier_failure_logs_provider_rejection_fields(source: str) -> None:
+    provider_error = {
+        "code": "unsupported_value",
+        "param": "temperature",
+        "message": "private prompt and provider credentials",
+    }
+    response = httpx.Response(
+        400,
+        request=httpx.Request("POST", "https://private-endpoint.example/chat"),
+        json={"error": provider_error},
+    )
+    error = BadRequestError(
+        "private prompt and provider credentials",
+        model="private-model",
+        llm_provider="azure",
+        body=(
+            provider_error
+            if source == "body"
+            else {"error": provider_error}
+            if source == "nested_body"
+            else None
+        ),
+        response=response,
+    )
+    event_logger = MagicMock()
+
+    failure = record_ai_builder_provider_failure(
+        error, stage="slot_classification", event_logger=event_logger
+    )
+
+    payload = event_logger.info.call_args.kwargs["extra"]
+    assert payload["safe_detail"] == {
+        "provider_status_code": 400,
+        "provider_status_class": "4xx",
+        "provider_error_code": "unsupported_value",
+        "provider_parameter": "temperature",
+    }
+    assert failure.parameter == "temperature"
+    assert "private" not in json.dumps(payload)
+
+
+def test_provider_failure_drops_unrecognized_error_fields() -> None:
+    event_logger = MagicMock()
+    record_ai_builder_provider_failure(
+        BadRequestError(
+            "private-message",
+            model="private-model",
+            llm_provider="azure",
+            body={"error": {"code": "private-code", "param": "private-param"}},
+        ),
+        stage="slot_classification",
+        event_logger=event_logger,
+    )
+
+    payload = event_logger.info.call_args.kwargs["extra"]
+    assert payload["safe_detail"] == {
+        "provider_status_code": 400,
+        "provider_status_class": "4xx",
+    }
+    assert "private" not in json.dumps(payload)
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(400, text="not JSON"),
+        httpx.Response(400, stream=httpx.ByteStream(b"unread")),
+        httpx.Response(400, json=["unexpected shape"]),
+        httpx.Response(400, json={"error": {"param": "x" * 65_536}}),
+    ],
+)
+def test_unusable_provider_body_preserves_original_failure(
+    response: httpx.Response,
+) -> None:
+    response.request = httpx.Request("POST", "https://provider.example/chat")
+    error = BadRequestError(
+        "rejected", model="test", llm_provider="azure", response=response
+    )
+
+    failure = record_ai_builder_provider_failure(
+        error, stage="slot_classification", event_logger=MagicMock()
+    )
+
+    assert failure.kind == "rejected"
+    assert failure.parameter is None
+    assert failure.another_call_permitted is False
 
 
 def test_proposal_turn_telemetry_first_attempt_is_first_write_wins() -> None:

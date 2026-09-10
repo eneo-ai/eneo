@@ -1,12 +1,21 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from typing import get_args
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
 
 from eneo.authentication.principal_types import PrincipalType
+from eneo.completion_models.domain.model_kwargs_capabilities import SupportedModelKwargs
+from eneo.completion_models.infrastructure.completion_service import (
+    ResolvedCompletionModelRoute,
+)
+from eneo.completion_models.infrastructure.tenant_model_capabilities import (
+    StructuredOutputMode,
+)
 from eneo.files.file_models import File, FileType
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     _FILE_ROLE_PRIORITY,
@@ -28,6 +37,17 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
     SCHEMA_MAX_DEPTH,
     SCHEMA_MAX_JSON_BYTES,
+)
+from eneo.flows.ai_builder.ai_builder_settings import (
+    AIBuilderBudgetPolicy,
+)
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
+    SlotClassificationInput,
+    SlotClassificationSource,
+)
+from eneo.flows.ai_builder.ai_builder_slot_classifier import (
+    admit_slot_classification_input,
+    classify_slots,
 )
 from eneo.flows.ai_builder.planning_state import (
     PLANNING_STATE_PAYLOAD_CAP_BYTES,
@@ -133,6 +153,86 @@ def test_attachment_text_admission_scales_with_selected_model_context() -> None:
         abs(len(large.evidence[0].excerpt or "") - len(large.evidence[1].excerpt or ""))
         <= 1
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("window", "output_ceiling", "coverage"),
+    [
+        (128_000, 16_384, "excerpt_truncated"),
+        (128_000, 2_048, "excerpt_truncated"),
+        (1_000_000, 128_000, "fully_seen"),
+    ],
+)
+async def test_classifier_attachments_preserve_answer_room_and_model_capacity(
+    window: int,
+    output_ceiling: int,
+    coverage: str,
+) -> None:
+    late_heading = "Required heading at the end of the attachment"
+    text = "Detailed reference evidence.\n" * 50_000 + late_heading
+    context = build_ai_builder_attachment_context(
+        [_make_file(name=f"reference-{index}.txt", text=text) for index in range(2)],
+        fits_context=lambda _: False,
+    )
+    source = SlotClassificationSource(
+        source_id="user_message:user-1",
+        kind="user_message",
+        message_id="user-1",
+        text="Create a flow using the attached headings.",
+    )
+    policy = AIBuilderBudgetPolicy(
+        conversation_safety_buffer_tokens=2_000,
+        minimum_conversation_budget_tokens=4_000,
+    )
+    route = ResolvedCompletionModelRoute(
+        litellm_model="openai/gpt-4o",
+        provider_type="openai",
+        litellm_kwargs={},
+        supported_model_kwargs=SupportedModelKwargs(),
+    )
+    mode = StructuredOutputMode.STRICT_JSON_SCHEMA
+    admitted = admit_slot_classification_input(
+        classification_input=SlotClassificationInput(
+            sources=(source,), current_user_message_id="user-1"
+        ),
+        attachment_context=context,
+        allowed_slot_values={},
+        schema_candidates=(),
+        active_checkpoint_producers=(),
+        ui_language="en",
+        bias=None,
+        structured_output_mode=mode,
+        litellm_model=route.litellm_model,
+        max_input_tokens=window,
+        max_output_tokens=output_ceiling,
+        budget_policy=policy,
+    )
+    client = SimpleNamespace(
+        acompletion=AsyncMock(return_value=SimpleNamespace(choices=[]))
+    )
+
+    await classify_slots(
+        litellm_client=client,
+        completion_model_route=route,
+        classification_input=admitted,
+        allowed_slot_values={},
+        tenant_id=uuid4(),
+        structured_output_mode=mode,
+        ui_language="en",
+        max_input_tokens=window,
+        max_output_tokens=output_ceiling,
+        budget_policy=policy,
+    )
+
+    sent = client.acompletion.await_args.kwargs
+    assert sent["max_tokens"] == output_ceiling
+    uploaded = [item for item in admitted.sources if item.kind == "uploaded_file"]
+    assert len(uploaded) == 2
+    assert all(item.coverage == coverage for item in uploaded)
+    if coverage == "fully_seen":
+        assert all(late_heading in item.text for item in uploaded)
+    assert source in admitted.sources
 
 
 def test_file_role_priority_covers_all_declared_file_roles() -> None:

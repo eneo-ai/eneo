@@ -255,6 +255,20 @@ describe("AI Builder stream protocol", () => {
     });
   });
 
+  it("preserves the model token-limit compatibility error", () => {
+    const error: AIBuilderPublicErrorPayload = {
+      ...validPublicError,
+      code: "planner_model_incompatible_token_limits",
+      category: "bad_request",
+      phase: "planner",
+      message: "This model's output allowance leaves no room for AI Builder input."
+    };
+    expect(parseAIBuilderStreamEvent({ event: "error", data: JSON.stringify(error) })).toEqual({
+      event: "error",
+      data: error
+    });
+  });
+
   // The backend model refuses a disclosure whose input or output is blank or
   // whitespace-only. A parser that accepted them would render a contract row
   // with nothing in it.

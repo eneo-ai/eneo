@@ -9,6 +9,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal, TypeAlias, TypeGuard, cast
 from uuid import UUID, uuid4
 
+import httpx
 from litellm.exceptions import (
     APIConnectionError,
     APIError,
@@ -45,6 +46,7 @@ if TYPE_CHECKING:
     from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
         ProposalTurnTelemetry,
     )
+    from eneo.flows.ai_builder.ai_builder_settings import AIBuilderResolvedRequestBudget
 
 JsonScalar: TypeAlias = str | int | float | bool | None
 AIBuilderProviderFailureKind = Literal[
@@ -93,6 +95,44 @@ _MAX_MESSAGE_LENGTH = 4096
 _MAX_REQUEST_ID_LENGTH = 128
 _DIAGNOSTIC_CONTEXT_STRING_LENGTH = 256
 _MAX_PROVIDER_FACT_LENGTH = 64
+_MAX_PROVIDER_ERROR_BODY_BYTES = 65_536
+# Provider messages can echo prompts, schemas, and credentials. Only protocol
+# identifiers from these closed sets may enter the shared failure event.
+_PROVIDER_ERROR_CODES = frozenset(
+    {
+        "invalid_request_error",
+        "invalid_json_schema",
+        "unsupported_parameter",
+        "unsupported_value",
+        "context_length_exceeded",
+        "content_filter",
+        "content_policy_violation",
+        "DeploymentNotFound",
+        "model_not_found",
+        "InvalidApiVersionParameter",
+        "OperationNotSupported",
+    }
+)
+_PROVIDER_ERROR_PARAMETERS = frozenset(
+    {
+        "model",
+        "messages",
+        "tools",
+        "tool_choice",
+        "parallel_tool_calls",
+        "response_format",
+        "temperature",
+        "top_p",
+        "reasoning_effort",
+        "max_tokens",
+        "max_completion_tokens",
+        "verbosity",
+        "stream",
+        "presence_penalty",
+        "frequency_penalty",
+        "api_version",
+    }
+)
 AI_BUILDER_PROVIDER_INCIDENT_EVIDENCE_LOG_KEY = "ai_builder_provider_incident_evidence"
 AI_BUILDER_PROVIDER_INCIDENT_EVIDENCE_SCHEMA_VERSION = (
     "ai-builder-provider-incident-evidence.v1"
@@ -157,6 +197,7 @@ class AIBuilderErrorCode(StrEnum):
     PLANNER_BUDGET_MISSING = "planner_budget_missing"
     PLANNER_MODEL_MISSING_CONTEXT_WINDOW = "planner_model_missing_context_window"
     PLANNER_MODEL_MISSING_OUTPUT_TOKENS = "planner_model_missing_output_tokens"
+    PLANNER_MODEL_INCOMPATIBLE_TOKEN_LIMITS = "planner_model_incompatible_token_limits"
     PLANNER_CONTEXT_LIMIT_EXCEEDED = "planner_context_limit_exceeded"
     PLANNER_INVALID_REPAIR_RESPONSE = "planner_invalid_repair_response"
     PLANNER_OUTPUT_TOO_LONG = "planner_output_too_long"
@@ -336,7 +377,7 @@ def classify_ai_builder_provider_failure(
     stage: AIBuilderProviderFailureStage,
     request_id: str | None = None,
 ) -> AIBuilderProviderFailure:
-    """Classify only adapter types whose semantics are part of our dependency."""
+    """Classify known adapter failures and expiry of our provider-call deadline."""
 
     status_code: int | None = None
     exception_class = _provider_exception_class(error)
@@ -346,6 +387,10 @@ def classify_ai_builder_provider_failure(
     elif isinstance(error, Timeout):
         kind = "timeout"
         status_code = _bounded_provider_status(error.status_code)
+    elif isinstance(error, TimeoutError):
+        # asyncio.timeout bounds the whole call independently of SDK socket
+        # timeouts. Local expiry provides no HTTP status or provider outcome.
+        kind = "timeout"
     elif isinstance(error, APIConnectionError):
         kind = "transport_ambiguous"
     elif isinstance(error, _KNOWN_PROVIDER_REJECTION_ERRORS):
@@ -406,6 +451,8 @@ def record_ai_builder_provider_failure(
     request_id: str | None = None,
     tenant_id: UUID | str | None = None,
     incident_evidence: AIBuilderProviderRequestEvidence | None = None,
+    request_budget: AIBuilderResolvedRequestBudget | None = None,
+    provider_elapsed_ms: int | None = None,
     event_logger: logging.Logger = logger,
 ) -> AIBuilderProviderFailure:
     """Record one safe event while preserving coarse persisted turn telemetry."""
@@ -417,12 +464,29 @@ def record_ai_builder_provider_failure(
     )
     if usage_tracker is not None:
         usage_tracker.record_attempt_failure(failure_kind="provider_error")
-    safe_detail: dict[str, object] | None = None
+    safe_detail: dict[str, object] = {}
     if failure.status_code is not None and failure.status_class is not None:
         safe_detail = {
             "provider_status_code": failure.status_code,
             "provider_status_class": failure.status_class,
         }
+        error_code = _provider_error_fields(error).get("code")
+        if isinstance(error_code, str) and error_code in _PROVIDER_ERROR_CODES:
+            safe_detail["provider_error_code"] = error_code
+        if failure.parameter in _PROVIDER_ERROR_PARAMETERS:
+            safe_detail["provider_parameter"] = failure.parameter
+    if request_budget is not None:
+        safe_detail.update(
+            context_window_tokens=request_budget.context_window_tokens,
+            fixed_input_tokens=request_budget.fixed_input_tokens,
+            model_output_ceiling_tokens=request_budget.model_output_ceiling_tokens,
+            safety_buffer_tokens=request_budget.safety_buffer_tokens,
+            timeout_seconds=request_budget.timeout_seconds,
+        )
+        if request_budget.input_cap_tokens is not None:
+            safe_detail["input_cap_tokens"] = request_budget.input_cap_tokens
+    if provider_elapsed_ms is not None:
+        safe_detail["provider_elapsed_ms"] = provider_elapsed_ms
     log_failure_event(
         event_logger,
         event="ai_builder.provider.failure",
@@ -433,7 +497,7 @@ def record_ai_builder_provider_failure(
         failure_fingerprint=failure.fingerprint,
         request_id=request_id,
         tenant_id=None if tenant_id is None else str(tenant_id),
-        safe_detail=safe_detail,
+        safe_detail=safe_detail or None,
     )
     if incident_evidence is not None:
         event_logger.info(
@@ -452,7 +516,7 @@ def _provider_exception_class(
 ) -> AIBuilderProviderExceptionClass:
     if isinstance(error, RateLimitError):
         return "rate_limit"
-    if isinstance(error, Timeout):
+    if isinstance(error, (Timeout, TimeoutError)):
         return "timeout"
     if isinstance(error, APIConnectionError):
         return "api_connection"
@@ -487,11 +551,41 @@ def _provider_parameter(error: Exception) -> str | None:
     ):
         return None
     value = getattr(error, "param", None)
+    if value is None:
+        value = _provider_error_fields(error).get("param")
     if not isinstance(value, str) or not 1 <= len(value) <= _MAX_PROVIDER_FACT_LENGTH:
         return None
     if not all(character.isalnum() or character in "._:-" for character in value):
         return None
     return value
+
+
+def _provider_error_fields(error: Exception) -> Mapping[str, object]:
+    if not isinstance(
+        error, (*_KNOWN_PROVIDER_REJECTION_ERRORS, *_AMBIGUOUS_PROVIDER_ERRORS)
+    ):
+        return {}
+    body = getattr(error, "body", None)
+    if not isinstance(body, Mapping):
+        # Some LiteLLM adapters retain only the HTTP response. Inspect already
+        # buffered content; never read a stream or perform I/O during recovery.
+        response = getattr(error, "response", None)
+        if not isinstance(response, httpx.Response) or not response.is_stream_consumed:
+            return {}
+        try:
+            if len(response.content) > _MAX_PROVIDER_ERROR_BODY_BYTES:
+                return {}
+            body = response.json()
+        except (ValueError, httpx.ResponseNotRead):
+            return {}
+    if not isinstance(body, Mapping):
+        return {}
+    body_fields = cast(Mapping[object, object], body)
+    fields = body_fields.get("error", body_fields)
+    if not isinstance(fields, Mapping):
+        return {}
+    error_fields = cast(Mapping[object, object], fields)
+    return {"code": error_fields.get("code"), "param": error_fields.get("param")}
 
 
 def _bounded_provider_status(value: object) -> int | None:
@@ -564,8 +658,8 @@ def build_ai_builder_request_budget_exhausted_error(
 ) -> AIBuilderPublicError:
     return build_ai_builder_error(
         message=(
-            "The AI planner request is too large to preserve the current turn and "
-            "repair context. Start a new turn with a shorter request or choose a "
+            "The required AI planner input and the model's full output allowance "
+            "do not fit together. Start a new turn with a shorter request or choose a "
             "model with a larger context window."
         ),
         code=AIBuilderErrorCode.PLANNER_CONTEXT_LIMIT_EXCEEDED,
@@ -833,6 +927,12 @@ AI_BUILDER_ERROR_REGISTRY: _AIBuilderErrorRegistry = MappingProxyType(
             default_phase=AIBuilderErrorPhase.PLANNER,
         ),
         AIBuilderErrorCode.PLANNER_MODEL_MISSING_OUTPUT_TOKENS: _entry(
+            category=AIBuilderErrorCategory.BAD_REQUEST,
+            http_status=400,
+            eneo_error_code=ErrorCodes.BAD_REQUEST,
+            default_phase=AIBuilderErrorPhase.PLANNER,
+        ),
+        AIBuilderErrorCode.PLANNER_MODEL_INCOMPATIBLE_TOKEN_LIMITS: _entry(
             category=AIBuilderErrorCategory.BAD_REQUEST,
             http_status=400,
             eneo_error_code=ErrorCodes.BAD_REQUEST,

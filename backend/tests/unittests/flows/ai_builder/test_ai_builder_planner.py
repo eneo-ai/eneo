@@ -2456,7 +2456,7 @@ def test_real_proposal_boundary_fits_attachments_and_protects_current_turn() -> 
     final_request_tokens = (
         count_message_tokens(fitted_messages, model_name)
         + count_tool_tokens([prepared_tool_schema_for_budget], model_name)
-        + resolved_budget.provider_output_cap_tokens
+        + resolved_budget.model_output_ceiling_tokens
         + resolved_budget.safety_buffer_tokens
     )
     assert final_request_tokens <= tight_context_window
@@ -4038,7 +4038,8 @@ async def test_resumed_stale_classification_is_rejected_and_rearms_discovery() -
     response = MagicMock()
     response.choices = [
         SimpleNamespace(
-            message=SimpleNamespace(content=json.dumps(classification_payload))
+            message=SimpleNamespace(content=json.dumps(classification_payload)),
+            finish_reason="stop",
         )
     ]
     planner.litellm_client.acompletion.return_value = response
@@ -5466,6 +5467,7 @@ def _build_review_backed_proposal(
     *,
     review_evidence_max_input_tokens: int | None,
     window: int = 60_000,
+    output_ceiling: int = 1024,
     review_investigation_evidence_max_tokens: int = 16_000,
     excerpt_chars: int = 200_000,
 ) -> ProposalPrepared:
@@ -5496,7 +5498,7 @@ def _build_review_backed_proposal(
         prior_plan_for_revision=None,
         litellm_model="openai/gpt-5.4",
         max_input_tokens=window,
-        max_output_tokens=1024,
+        max_output_tokens=output_ceiling,
         budget_policy=policy,
         attachment_file_count=0,
         current_turn_start=0,
@@ -5507,7 +5509,8 @@ def test_a_review_backed_proposal_is_bounded_by_the_tenant_cap_at_the_request() 
     # The cap shrinks the budget every later step and the provider boundary
     # use, and the excerpt that cannot fit is marked, not silently dropped.
     prepared = _build_review_backed_proposal(review_evidence_max_input_tokens=12_000)
-    assert prepared.request_budget.context_window_tokens == 12_000
+    assert prepared.request_budget.context_window_tokens == 60_000
+    assert prepared.request_budget.available_input_tokens == 12_000
     system = prepared.message_groups[0].messages[0]["content"]
     assert "avklippt efter" in system
     uncapped = _build_review_backed_proposal(review_evidence_max_input_tokens=None)
@@ -5533,7 +5536,8 @@ def test_a_review_backed_proposal_reports_its_evidence_fit_in_the_prompt_metrics
         for call in logger_mock.info.call_args_list
         if call.args and call.args[0] == "AI Builder plan proposal prompt metrics"
     )
-    assert metrics["context_window_tokens"] == 12_000
+    assert metrics["context_window_tokens"] == 60_000
+    assert metrics["input_cap_tokens"] == 12_000
     assert isinstance(metrics["review_evidence_fit_ms"], int)
     assert metrics["review_excerpts_truncated"] == 1
     assert metrics["review_excerpts_included"] == 0
@@ -5558,3 +5562,13 @@ def test_the_investigation_evidence_share_is_bounded_by_the_system_bound() -> No
         review_evidence_max_input_tokens=None, window=1_000_000, excerpt_chars=2_000
     )
     assert "avklippt efter" not in short.message_groups[0].messages[0]["content"]
+
+
+def test_review_backed_proposal_preserves_output_outside_its_input_cap() -> None:
+    prepared = _build_review_backed_proposal(
+        review_evidence_max_input_tokens=128_000,
+        window=1_000_000,
+        output_ceiling=128_000,
+    )
+    assert prepared.request_budget.available_input_tokens == 128_000
+    assert prepared.request_budget.model_output_ceiling_tokens == 128_000

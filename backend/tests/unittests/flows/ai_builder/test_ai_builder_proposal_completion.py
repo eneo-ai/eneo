@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -131,8 +132,6 @@ def _completion_request(
         AIBuilderRequestBudget(
             context_window_tokens=100_000,
             model_output_ceiling_tokens=max_output_tokens,
-            output_reserve_tokens=max_output_tokens,
-            minimum_output_tokens=1,
             safety_buffer_tokens=0,
             timeout_seconds=180.0,
         ),
@@ -155,7 +154,6 @@ def _request_budget(
     *,
     context_window_tokens: int,
     output_tokens: int,
-    minimum_output_tokens: int = 1,
     safety_buffer_tokens: int = 0,
     timeout_seconds: float = 180.0,
     request_id: str | None = None,
@@ -163,8 +161,6 @@ def _request_budget(
     return AIBuilderRequestBudget(
         context_window_tokens=context_window_tokens,
         model_output_ceiling_tokens=output_tokens,
-        output_reserve_tokens=output_tokens,
-        minimum_output_tokens=minimum_output_tokens,
         safety_buffer_tokens=safety_buffer_tokens,
         timeout_seconds=timeout_seconds,
         request_id=request_id,
@@ -930,6 +926,33 @@ async def test_proposal_provider_failure_uses_typed_disposition(
 
 
 @pytest.mark.asyncio
+async def test_proposal_enforces_its_deadline_without_repeating_provider_work() -> None:
+    async def wait_for_provider(**_kwargs: object) -> None:
+        await asyncio.Event().wait()
+
+    client = SimpleNamespace(acompletion=AsyncMock(side_effect=wait_for_provider))
+    request = _completion_request(
+        messages=[{"role": "user", "content": "Create a flow"}],
+        tool_schemas=[{"function": {"name": PROPOSE_FLOW_TOOL_NAME}}],
+        route=_route(),
+        max_output_tokens=4096,
+        temperature=0.2,
+        request_budget=_request_budget(
+            context_window_tokens=128_000,
+            output_tokens=4096,
+            timeout_seconds=0.01,
+        ),
+    )
+    with pytest.raises(AIBuilderProviderOutcomeUnknownException) as exc_info:
+        async with asyncio.timeout(1):
+            await call_proposal_completion(litellm_client=client, request=request)
+
+    client.acompletion.assert_awaited_once()
+    assert exc_info.value.public_error.details["provider_exception_class"] == "timeout"
+    assert exc_info.value.public_error.details["another_call_permitted"] is False
+
+
+@pytest.mark.asyncio
 async def test_proposal_failure_emits_one_allowlisted_incident_evidence() -> None:
     route = await _resolved_route(
         {
@@ -1237,7 +1260,7 @@ async def test_usage_tracked_completion_counts_repair_usage() -> None:
 
 
 @pytest.mark.asyncio
-async def test_the_proposal_is_sent_with_the_models_ceiling_not_the_reserve() -> None:
+async def test_the_proposal_is_sent_with_the_selected_models_output_ceiling() -> None:
     response = _make_response_with_text("ok")
     litellm_client = SimpleNamespace(acompletion=AsyncMock(return_value=response))
 
@@ -1252,8 +1275,6 @@ async def test_the_proposal_is_sent_with_the_models_ceiling_not_the_reserve() ->
             request_budget=AIBuilderRequestBudget(
                 context_window_tokens=100_000,
                 model_output_ceiling_tokens=16_000,
-                output_reserve_tokens=6_144,
-                minimum_output_tokens=1_024,
                 safety_buffer_tokens=0,
                 timeout_seconds=180.0,
             ),
@@ -1264,30 +1285,27 @@ async def test_the_proposal_is_sent_with_the_models_ceiling_not_the_reserve() ->
 
 
 @pytest.mark.asyncio
-async def test_request_budget_treats_model_output_as_a_ceiling() -> None:
+async def test_request_budget_refuses_when_full_model_output_cannot_fit() -> None:
     response = _make_response_with_text("ok")
     litellm_client = SimpleNamespace(acompletion=AsyncMock(return_value=response))
 
-    await call_proposal_completion(
-        litellm_client=litellm_client,
-        request=_completion_request(
-            messages=[{"role": "user", "content": "Keep this current turn"}],
-            tool_schemas=[],
-            route=_route(),
-            max_output_tokens=100,
-            temperature=0.2,
-            request_budget=_request_budget(
-                context_window_tokens=100,
-                output_tokens=100,
+    with pytest.raises(AIBuilderKnownProviderRejectionException):
+        await call_proposal_completion(
+            litellm_client=litellm_client,
+            request=_completion_request(
+                messages=[{"role": "user", "content": "Keep this current turn"}],
+                tool_schemas=[],
+                route=_route(),
+                max_output_tokens=100,
+                temperature=0.2,
+                request_budget=_request_budget(
+                    context_window_tokens=100,
+                    output_tokens=100,
+                ),
             ),
-        ),
-    )
+        )
 
-    call_kwargs = litellm_client.acompletion.await_args.kwargs
-    assert 0 < call_kwargs["max_tokens"] < 100
-    assert call_kwargs["messages"] == [
-        {"role": "user", "content": "Keep this current turn"}
-    ]
+    litellm_client.acompletion.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1300,7 +1318,6 @@ async def test_protected_only_overflow_rejects_before_provider_work_or_call_slot
     request_budget = _request_budget(
         context_window_tokens=20,
         output_tokens=10,
-        minimum_output_tokens=10,
         request_id="req-budget-overflow",
     )
     monkeypatch.setattr(
@@ -1383,7 +1400,6 @@ async def test_final_strict_tool_payload_is_admitted_before_provider_work(
         proposal_request_budget=_request_budget(
             context_window_tokens=20,
             output_tokens=10,
-            minimum_output_tokens=10,
             request_id="req-strict-payload-overflow",
         ),
         proposal_call_budget=call_budget,
@@ -1482,10 +1498,10 @@ def test_request_budget_evicts_oldest_optional_groups_and_preserves_repair_conte
         failed_call,
         tool_feedback,
     ]
-    assert resolved.provider_output_cap_tokens == 1
+    assert resolved.model_output_ceiling_tokens == 1
 
 
-def test_the_provider_cap_follows_the_request_that_is_sent(
+def test_optional_history_yields_to_the_models_full_output_capacity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system_message = {"role": "system", "content": "system"}
@@ -1521,28 +1537,25 @@ def test_the_provider_cap_follows_the_request_that_is_sent(
         return AIBuilderRequestBudget(
             context_window_tokens=context_window_tokens,
             model_output_ceiling_tokens=60,
-            output_reserve_tokens=10,
-            minimum_output_tokens=1,
             safety_buffer_tokens=0,
             timeout_seconds=180.0,
         )
 
-    # The history fits beside the reserve; the model may then write into the
-    # room the whole request leaves, up to its ceiling.
+    # A larger window carries the history beside the complete output allowance.
     fitted, resolved = fit_proposal_request_budget(
         budget=budget(100), message_groups=groups, tool_schemas=[], model_name="test"
     )
     assert len(flatten_proposal_message_groups(fitted)) == 3
     assert resolved.fixed_input_tokens == 30
-    assert resolved.provider_output_cap_tokens == 60
+    assert resolved.model_output_ceiling_tokens == 60
 
-    # A tighter window leaves less, never less than the reserve the input was
-    # planned against.
+    # A smaller window drops optional history and preserves output capacity.
     fitted, resolved = fit_proposal_request_budget(
-        budget=budget(50), message_groups=groups, tool_schemas=[], model_name="test"
+        budget=budget(80), message_groups=groups, tool_schemas=[], model_name="test"
     )
-    assert len(flatten_proposal_message_groups(fitted)) == 3
-    assert resolved.provider_output_cap_tokens == 20
+    assert len(flatten_proposal_message_groups(fitted)) == 2
+    assert resolved.fixed_input_tokens == 20
+    assert resolved.model_output_ceiling_tokens == 60
 
 
 def test_an_all_protected_request_is_measured_once(
@@ -1645,7 +1658,6 @@ async def test_repair_time_overflow_uses_same_completion_boundary_rejection(
         proposal_request_budget=_request_budget(
             context_window_tokens=70,
             output_tokens=20,
-            minimum_output_tokens=20,
             request_id="req-repair-overflow",
         ),
         proposal_call_budget=call_budget,

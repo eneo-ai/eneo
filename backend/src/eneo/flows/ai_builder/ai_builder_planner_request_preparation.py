@@ -147,7 +147,6 @@ from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
 from eneo.main.logging import get_logger
 from eneo.observability.failure_events import stable_hash
 from eneo.tokens.token_utils import (
-    count_message_tokens,
     count_tool_tokens,
     measure_provider_input_reserve,
 )
@@ -271,13 +270,7 @@ async def prepare_planner_request(
             policy=request.attachment_context_policy,
             model_name=request.completion_model_route.litellm_model,
             max_input_tokens=request.max_input_tokens,
-            max_output_tokens=request.budget_policy.reserved_proposal_output_tokens(
-                context_window_tokens=request.max_input_tokens,
-                model_output_ceiling_tokens=request.max_output_tokens,
-                fixed_input_tokens=(
-                    request.budget_policy.minimum_conversation_budget_tokens
-                ),
-            ),
+            max_output_tokens=request.max_output_tokens,
             safety_buffer_tokens=request.budget_policy.conversation_safety_buffer_tokens,
             minimum_conversation_tokens=(
                 request.budget_policy.minimum_conversation_budget_tokens
@@ -717,7 +710,7 @@ def build_proposal_prepared(
         review_evidence: FlowReviewEvidence | None = None,
     ) -> bool:
         return (
-            count_message_tokens(
+            measure_provider_input_reserve(
                 [
                     {
                         "role": "system",
@@ -726,8 +719,9 @@ def build_proposal_prepared(
                         ),
                     }
                 ],
+                [],
                 litellm_model,
-            )
+            ).tokens
             <= system_prompt_token_limit
         )
 
@@ -818,6 +812,7 @@ def build_proposal_prepared(
                 else 0
             ),
             "context_window_tokens": proposal_request_budget.context_window_tokens,
+            "input_cap_tokens": proposal_request_budget.input_cap_tokens,
             "review_evidence_fit_ms": review_evidence_fit_ms,
             **_review_excerpt_counts(fitted_review_evidence),
         },
@@ -909,14 +904,9 @@ def _proposal_system_prompt_token_limit(
     """What the model can actually carry as a system prompt this turn."""
 
     tool_tokens = count_tool_tokens(turn_tool_schemas, litellm_model)
-    output_tokens = request_budget.output_reserve_for(
-        input_tokens=(tool_tokens + budget_policy.minimum_conversation_budget_tokens)
-    )
     return max(
         0,
-        request_budget.context_window_tokens
-        - output_tokens
-        - request_budget.safety_buffer_tokens
+        request_budget.available_input_tokens
         - budget_policy.minimum_conversation_budget_tokens
         - tool_tokens,
     )
@@ -1071,18 +1061,14 @@ def _prepare_prompt_messages(
     budget_policy: AIBuilderBudgetPolicy,
     current_turn_start: int,
 ) -> PreparedPromptMessages:
-    prompt_tokens = count_message_tokens(
+    prompt_tokens = measure_provider_input_reserve(
         [{"role": "system", "content": system_prompt}],
+        [],
         litellm_model,
-    )
-    output_tokens = request_budget.output_reserve_for(
-        input_tokens=(prompt_tokens + budget_policy.minimum_conversation_budget_tokens)
-    )
+    ).tokens
     conversation_budget = compute_conversation_token_budget(
-        model_max_input_tokens=request_budget.context_window_tokens,
+        request_budget=request_budget,
         system_prompt_tokens=prompt_tokens,
-        max_output_tokens=output_tokens,
-        safety_buffer_tokens=request_budget.safety_buffer_tokens,
     )
     raw_messages = [
         conversation_message_to_llm_message(message) for message in conversation
@@ -1116,18 +1102,10 @@ def _prepare_prompt_messages(
 
 def compute_conversation_token_budget(
     *,
-    model_max_input_tokens: int,
+    request_budget: AIBuilderRequestBudget,
     system_prompt_tokens: int,
-    max_output_tokens: int,
-    safety_buffer_tokens: int,
 ) -> int:
-    budget = (
-        model_max_input_tokens
-        - system_prompt_tokens
-        - max_output_tokens
-        - safety_buffer_tokens
-    )
-    return max(budget, 0)
+    return max(request_budget.available_input_tokens - system_prompt_tokens, 0)
 
 
 def trim_conversation_for_context(

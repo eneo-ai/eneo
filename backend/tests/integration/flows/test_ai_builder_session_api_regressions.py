@@ -2963,6 +2963,7 @@ async def test_ai_builder_known_provider_rejection_commits_and_replays_without_r
 @pytest.mark.parametrize(
     ("provider_error", "expected_failure_kind"),
     [
+        pytest.param(TimeoutError(), "timeout", id="local_deadline"),
         (
             Timeout(
                 "sensitive-provider-material",

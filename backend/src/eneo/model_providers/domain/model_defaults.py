@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import cast
 
+from eneo.model_providers.domain.model_defaults_lookup import resolve_model_defaults
+
 ModelCost = dict[str, dict[str, object]]
 
 
@@ -40,39 +42,8 @@ def _get_model_cost() -> ModelCost:
     return cast(ModelCost, raw_model_cost)
 
 
-def _lookup_exact(model_cost: ModelCost, model_name: str) -> ModelDefaults | None:
-    info = model_cost.get(model_name)
-    if info is None:
-        return None
-    return _build_defaults(info)
-
-
-def _lookup_prefixed(model_cost: ModelCost, model_name: str) -> ModelDefaults | None:
-    prefixes = {key.split("/", 1)[0] for key in model_cost if "/" in key}
-    for prefix in sorted(prefixes):
-        defaults = _lookup_exact(model_cost, f"{prefix}/{model_name}")
-        if defaults is not None:
-            return defaults
-    return None
-
-
-def lookup_model_defaults(*model_names: str | None) -> ModelDefaults | None:
-    try:
-        model_cost = _get_model_cost()
-    except TypeError:
-        model_cost = cast(ModelCost, _get_model_cost)
-    for model_name in model_names:
-        if not model_name:
-            continue
-        defaults = _lookup_exact(model_cost, model_name)
-        if defaults is not None:
-            return defaults
-
-    for model_name in model_names:
-        if not model_name or "/" in model_name:
-            continue
-        defaults = _lookup_prefixed(model_cost, model_name)
-        if defaults is not None:
-            return defaults
-
-    return None
+def lookup_model_defaults(
+    *model_names: str | None, provider_type: str | None = None
+) -> ModelDefaults | None:
+    info = resolve_model_defaults(_get_model_cost(), list(model_names), provider_type)
+    return _build_defaults(info) if info is not None else None

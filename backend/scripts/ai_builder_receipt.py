@@ -166,6 +166,7 @@ _CREDENTIAL_ROUTE_ERROR_CODES = frozenset(
         "planner_budget_missing",
         "planner_model_missing_context_window",
         "planner_model_missing_output_tokens",
+        "planner_model_incompatible_token_limits",
         "transcription_model_required",
     }
 )

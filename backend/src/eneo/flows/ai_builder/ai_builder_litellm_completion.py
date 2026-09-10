@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, cast
@@ -107,7 +109,7 @@ async def call_proposal_completion(
         logger.debug("ai_builder_proposal_completion_dropped_response_format")
     incident_evidence = _proposal_request_evidence(
         request=request,
-        max_tokens=request_budget.provider_output_cap_tokens,
+        max_tokens=request_budget.model_output_ceiling_tokens,
         timeout_seconds=request_budget.timeout_seconds,
         messages=messages,
         tool_schemas=tool_schemas,
@@ -121,19 +123,21 @@ async def call_proposal_completion(
             call_kind=call_kind,
             request_budget=request_budget,
         )
+    provider_started_at = time.perf_counter()
     try:
-        raw_response = await litellm_client.acompletion(
-            model=request.route.litellm_model,
-            messages=messages,
-            tools=tool_schemas,
-            tool_choice=request.tool_choice,
-            parallel_tool_calls=False,
-            stream=False,
-            drop_params=True,
-            max_tokens=request_budget.provider_output_cap_tokens,
-            timeout=request_budget.timeout_seconds,
-            **provider_kwargs,
-        )
+        async with asyncio.timeout(request_budget.timeout_seconds):
+            raw_response = await litellm_client.acompletion(
+                model=request.route.litellm_model,
+                messages=messages,
+                tools=tool_schemas,
+                tool_choice=request.tool_choice,
+                parallel_tool_calls=False,
+                stream=False,
+                drop_params=True,
+                max_tokens=request_budget.model_output_ceiling_tokens,
+                timeout=request_budget.timeout_seconds,
+                **provider_kwargs,
+            )
     except Exception as error:
         failure = record_ai_builder_provider_failure(
             error,
@@ -141,6 +145,8 @@ async def call_proposal_completion(
             usage_tracker=usage_tracker,
             request_id=usage_tracker.request_id if usage_tracker is not None else None,
             incident_evidence=incident_evidence,
+            request_budget=request_budget,
+            provider_elapsed_ms=int((time.perf_counter() - provider_started_at) * 1000),
         )
         raise failure.as_exception() from error
     response = normalize_litellm_completion_response(raw_response)
