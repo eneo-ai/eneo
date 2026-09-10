@@ -41,6 +41,8 @@ test("a created assistant can be edited and used in chat", async ({ page, reques
 
   await askChatQuestion(page, question);
 
-  await expect(page.getByText(question, { exact: true })).toBeVisible();
-  await expect(page.getByText(MOCK_REPLY)).toBeVisible({ timeout: 20_000 });
+  // Scope to the conversation: the reloaded history table also holds the question text.
+  const conversation = page.locator("#session-message-container");
+  await expect(conversation.getByText(question, { exact: true })).toBeVisible();
+  await expect(conversation.getByText(MOCK_REPLY)).toBeVisible({ timeout: 20_000 });
 });

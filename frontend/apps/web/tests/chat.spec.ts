@@ -12,8 +12,13 @@ test("a streamed answer is saved and can be reopened from history", async ({ pag
   const question = uniqueName("e2e persistence ping");
   await askChatQuestion(page, question);
 
-  await expect(page.getByText(question, { exact: true })).toBeVisible();
-  await expect(page.getByText("E2E mock completion: pong")).toBeVisible({ timeout: 20_000 });
+  // Scope to the conversation: once the session exists the service reloads the
+  // history list, whose (hidden) table also contains the question text.
+  const conversation = page.locator("#session-message-container");
+  await expect(conversation.getByText(question, { exact: true })).toBeVisible();
+  await expect(conversation.getByText("E2E mock completion: pong")).toBeVisible({
+    timeout: 20_000
+  });
 
   await page.getByRole("tablist").getByRole("tab").nth(1).click();
 
@@ -21,7 +26,6 @@ test("a streamed answer is saved and can be reopened from history", async ({ pag
   await expect(savedConversation).toBeVisible({ timeout: 15_000 });
   await savedConversation.click();
 
-  const conversation = page.locator("#session-message-container");
   await expect(conversation.getByText(question, { exact: true })).toBeVisible();
   await expect(conversation.getByText("E2E mock completion: pong")).toBeVisible();
 
