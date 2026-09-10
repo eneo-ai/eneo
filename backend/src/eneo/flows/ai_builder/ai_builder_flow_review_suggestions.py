@@ -649,6 +649,8 @@ async def generate_review_suggestions(
     if response_format:
         completion_kwargs["response_format"] = response_format
     completion_kwargs.pop("timeout", None)
+    # A failed review must not silently repeat work through SDK retries.
+    completion_kwargs.update(num_retries=0, max_retries=0)
     completion_kwargs["max_tokens"] = request_budget_resolved.provider_output_cap_tokens
     started = time.monotonic()
     try:

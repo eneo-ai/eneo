@@ -7,7 +7,10 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
+import httpx
+import litellm
 import pytest
+from litellm.caching.llm_caching_handler import LLMClientCache
 from litellm.exceptions import (
     APIConnectionError,
     APIError,
@@ -15,6 +18,7 @@ from litellm.exceptions import (
     RateLimitError,
     Timeout,
 )
+from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
 
 from eneo.ai_models.completion_models.completion_model import CompletionModel
 from eneo.completion_models.domain.model_kwargs_capabilities import (
@@ -2551,6 +2555,49 @@ def _route(
         litellm_kwargs=kwargs or {},
         supported_model_kwargs=supported
         or SupportedModelKwargs(temperature=ModelKwargCapability(supported=True)),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("retry_overrides", [{}, {"num_retries": 2, "max_retries": 2}])
+async def test_classifier_timeout_does_not_repeat_provider_work(
+    monkeypatch: pytest.MonkeyPatch,
+    retry_overrides: dict[str, int],
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def timeout(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        raise httpx.ReadTimeout("Provider response timed out", request=request)
+
+    monkeypatch.setattr(
+        AsyncHTTPHandler,
+        "_create_async_transport",
+        staticmethod(lambda **_kwargs: httpx.MockTransport(timeout)),
+    )
+    monkeypatch.setattr(litellm, "in_memory_llm_clients_cache", LLMClientCache())
+    monkeypatch.setattr(litellm, "disable_aiohttp_transport", True)
+    monkeypatch.setattr(litellm, "num_retries", 0)
+
+    with pytest.raises(AIBuilderProviderOutcomeUnknownException) as exc_info:
+        await classify_slots(
+            litellm_client=litellm,
+            completion_model_route=_route(
+                model="openai/gpt-5.6-sol",
+                kwargs={
+                    "api_key": "test-key",
+                    "api_base": "https://timeout.invalid/v1",
+                    **retry_overrides,
+                },
+            ),
+            classification_input=_classification_input(f"Create a flow {uuid4()}"),
+            allowed_slot_values={"primary_runtime_input": {"audio", "documents"}},
+            tenant_id=uuid4(),
+        )
+
+    assert len(requests) == 1
+    assert (
+        exc_info.value.public_error.details["retry_scope"] == "acknowledged_same_turn"
     )
 
 

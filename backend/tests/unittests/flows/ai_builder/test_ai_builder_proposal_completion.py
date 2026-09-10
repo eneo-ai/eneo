@@ -438,6 +438,8 @@ async def test_outbound_proposal_tools_follow_the_route_capability(
     assert "strict" not in tool_schema["function"]
     assert call_kwargs["tool_choice"] == tool_choice
     assert call_kwargs["parallel_tool_calls"] is False
+    assert call_kwargs["num_retries"] == 0
+    assert call_kwargs["max_retries"] == 0
     assert "response_format" not in call_kwargs
 
 

@@ -206,6 +206,9 @@ async def classify_slots(
     if response_format:
         completion_kwargs["response_format"] = response_format
     completion_kwargs.pop("timeout", None)
+    # The turn owns retries. LiteLLM's OpenAI SDK retries are independent of
+    # its process-wide num_retries setting and otherwise repeat timed-out work.
+    completion_kwargs.update(num_retries=0, max_retries=0)
     request_budget = _resolve_slot_classification_request_budget(
         messages=messages,
         response_format=response_format,

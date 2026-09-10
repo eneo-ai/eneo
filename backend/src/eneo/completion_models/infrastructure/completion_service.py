@@ -290,7 +290,7 @@ def completion_evidence_field_domain(
         return "endpoint"
     if name in {"api_version", "api_type", "organization", "response_format"}:
         return "provider_configuration"
-    if name == "drop_params":
+    if name in {"drop_params", "num_retries", "max_retries"}:
         return "transport_control"
     return None
 

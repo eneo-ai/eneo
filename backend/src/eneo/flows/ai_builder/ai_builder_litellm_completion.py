@@ -100,6 +100,8 @@ async def call_proposal_completion(
     )
     provider_kwargs.pop("drop_params", None)
     provider_kwargs.pop("timeout", None)
+    # Keep both LiteLLM and provider SDK retries inside the turn's call budget.
+    provider_kwargs.update(num_retries=0, max_retries=0)
     dropped_response_format = provider_kwargs.pop("response_format", None)
     if dropped_response_format is not None:
         logger.debug("ai_builder_proposal_completion_dropped_response_format")
