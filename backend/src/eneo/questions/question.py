@@ -95,6 +95,11 @@ class ToolCallInfo(BaseModel):
     # currently-registered tools. `tool_name` above is the unprefixed/display
     # form used by the UI.
     mcp_tool_name: Optional[str] = None
+    # Capability the call serves ("web_search", "image_generation") when the
+    # server is a capability provider, whichever server backs it; None for
+    # general MCP servers and Eneo's own loopback servers. Clients render
+    # capability calls by purpose, not by the provider's name.
+    purpose: Optional[str] = None
     # The tool result's MCP `_meta`, as sent by the server (size-capped by the
     # client). Model-backed tools report their own usage here under the
     # OpenTelemetry GenAI attribute names, e.g. `gen_ai.usage.input_tokens`,

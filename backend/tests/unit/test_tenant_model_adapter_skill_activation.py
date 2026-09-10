@@ -58,6 +58,10 @@ class _FakeMCPProxy:
             return ("server", "lookup", "Lookup")
         return None
 
+    def get_tool_purpose(self, name: str) -> str | None:
+        del name
+        return None
+
     async def refresh_tools(self, *, touched_tool_names: list[str]) -> bool:
         del touched_tool_names
         return False

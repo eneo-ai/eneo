@@ -4684,5 +4684,9 @@
   "functions_policy_description": "Your organization’s policy determines which functions are available and which start switched on in chat.",
   "functions_policy_none": "Your organization’s policy does not provide any functions.",
   "functions_default_on": "Starts on in chat",
-  "functions_default_off": "Starts off in chat"
+  "functions_default_off": "Starts off in chat",
+  "tool_web_search": "Searching the web",
+  "tool_web_search_query": "Searching the web for “{query}”",
+  "tool_web_search_done": "Searched the web",
+  "tool_web_search_query_done": "Searched the web for “{query}”"
 }

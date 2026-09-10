@@ -119,6 +119,10 @@ class _FakeMCPProxy:
     def get_tool_info(self, prefixed_tool_name: str):
         return ("Server", "tool", "Tool title")
 
+    def get_tool_purpose(self, prefixed_tool_name: str) -> str | None:
+        del prefixed_tool_name
+        return None
+
     async def call_tools_parallel(self, proxy_calls):
         self.calls.append(proxy_calls)
         return [

@@ -20122,6 +20122,8 @@ export interface components {
       result?: string | null;
       /** Mcp Tool Name */
       mcp_tool_name?: string | null;
+      /** Purpose */
+      purpose?: string | null;
       /** Meta */
       meta?: {
         [key: string]: unknown;
@@ -27769,6 +27771,8 @@ export interface operations {
                     result?: string | null;
                     /** Mcp Tool Name */
                     mcp_tool_name?: string | null;
+                    /** Purpose */
+                    purpose?: string | null;
                     /** Meta */
                     meta?: {
                       [key: string]: unknown;
@@ -27826,6 +27830,8 @@ export interface operations {
                     result?: string | null;
                     /** Mcp Tool Name */
                     mcp_tool_name?: string | null;
+                    /** Purpose */
+                    purpose?: string | null;
                     /** Meta */
                     meta?: {
                       [key: string]: unknown;
@@ -27883,6 +27889,8 @@ export interface operations {
                     result?: string | null;
                     /** Mcp Tool Name */
                     mcp_tool_name?: string | null;
+                    /** Purpose */
+                    purpose?: string | null;
                     /** Meta */
                     meta?: {
                       [key: string]: unknown;
