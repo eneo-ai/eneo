@@ -184,6 +184,42 @@ def test_builtin_provider_tool_calls_are_reported_under_the_loopback_server():
     assert proxy.get_tool_info("general__tool") == ("general", "tool", None)
 
 
+def test_tool_purpose_names_the_capability_whichever_server_backs_it():
+    """A capability provider's calls carry the purpose so clients render
+    them as one function ("web search") rather than by the provider's name;
+    general servers carry none, and unknown tools resolve to none."""
+    general = _make_server("general")
+    provider_id = uuid4()
+    search_provider = MCPServer(
+        id=provider_id,
+        tenant_id=general.tenant_id,
+        name="GDM Safe Search",
+        http_url="https://search.example/mcp",
+        http_auth_type="bearer",
+        purpose="web_search",
+        tools=[
+            MCPServerTool(
+                mcp_server_id=provider_id,
+                name="search",
+                title="Search",
+                description="Search the web.",
+                input_schema={"type": "object", "properties": {}},
+                is_enabled_by_default=True,
+            )
+        ],
+    )
+    proxy = MCPProxySession([general, search_provider])
+
+    assert proxy.get_tool_purpose("gdm_safe_search__search") == "web_search"
+    assert proxy.get_tool_info("gdm_safe_search__search") == (
+        "GDM Safe Search",
+        "search",
+        "Search",
+    )
+    assert proxy.get_tool_purpose("general__tool") is None
+    assert proxy.get_tool_purpose("nope__tool") is None
+
+
 class _InMemoryToolRepo:
     def __init__(self, tools: list[MCPServerTool]) -> None:
         self.tools = {tool.id: tool for tool in tools}

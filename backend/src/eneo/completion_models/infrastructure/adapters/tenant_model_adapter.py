@@ -1393,6 +1393,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 result_status=result_status,
                                 result=display_text,
                                 mcp_tool_name=call.name,
+                                purpose=mcp_proxy.get_tool_purpose(call.name),
                                 meta=result.get("meta") or None,
                             )
                         )
@@ -1598,6 +1599,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                     return server_name, tool_name, None
                 return "", name, None
 
+            def _tool_purpose(name: str) -> str | None:
+                return mcp_proxy.get_tool_purpose(name) if mcp_proxy else None
+
             # Shared state for tool call accumulation and usage across stream draining
             class _StreamResult:
                 def __init__(self) -> None:
@@ -1748,6 +1752,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                             tool_call_id=call_id,
                                             result_status="pending",
                                             mcp_tool_name=name,
+                                            purpose=_tool_purpose(name),
                                         )
                                     ],
                                 )
@@ -1926,6 +1931,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                         title=title,
                                         tool_call_id=call.call_id,
                                         result_status="deferred",
+                                        purpose=_tool_purpose(call.name),
                                         result=json.dumps(
                                             {
                                                 "deferred": True,
@@ -1999,6 +2005,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 arguments=args,
                                 tool_call_id=tc["id"],
                                 mcp_tool_name=name,
+                                purpose=mcp_proxy.get_tool_purpose(name),
                             )
                         )
                     tool_args_by_call_id: dict[str, dict[str, Any] | None] = {}
@@ -2081,6 +2088,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                         approved=False,
                                         result_status="timeout_denied",
                                         mcp_tool_name=tm.mcp_tool_name,
+                                        purpose=tm.purpose,
                                     )
                                     for tm in approval_metadata
                                 ],
@@ -2108,6 +2116,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                         )
                                     ),
                                     mcp_tool_name=tm.mcp_tool_name,
+                                    purpose=tm.purpose,
                                 )
                                 for tm in tool_metadata
                             ],
@@ -2136,6 +2145,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     approved=tm.approved,
                                     result_status="approved",
                                     mcp_tool_name=tm.mcp_tool_name,
+                                    purpose=tm.purpose,
                                 )
                                 for tm in tool_metadata
                             ],
@@ -2240,6 +2250,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     result_status=result_status,
                                     result=display_text,
                                     mcp_tool_name=tc["function"]["name"],
+                                    purpose=mcp_proxy.get_tool_purpose(
+                                        tc["function"]["name"]
+                                    ),
                                     meta=result_data.get("meta") or None,
                                 )
                             )
@@ -2296,6 +2309,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 ),
                                 result=json.dumps(denial_payload),
                                 mcp_tool_name=tc["function"]["name"],
+                                purpose=mcp_proxy.get_tool_purpose(
+                                    tc["function"]["name"]
+                                ),
                             )
                         )
 
@@ -2392,6 +2408,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     result_status="failed",
                                     result=refusal_payload,
                                     mcp_tool_name=name,
+                                    purpose=_tool_purpose(name),
                                 )
                             )
                         yield Completion(

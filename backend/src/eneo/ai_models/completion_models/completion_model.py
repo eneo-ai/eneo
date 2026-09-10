@@ -107,6 +107,11 @@ class ToolCallMetadata:
     # forms used by the UI; this field preserves the exact identifier needed
     # to replay the tool_use so it matches the currently-registered tools.
     mcp_tool_name: Optional[str] = None
+    # Capability the call serves ("web_search", "image_generation") when the
+    # server is a capability provider, whichever server backs it; None for
+    # general MCP servers and Eneo's own loopback servers. Clients render
+    # capability calls by purpose, not by the provider's name.
+    purpose: Optional[str] = None
     # The tool result's MCP `_meta` (capped by the client). Servers use it for
     # out-of-band facts about the call, e.g. OpenTelemetry GenAI usage
     # attributes (`gen_ai.usage.input_tokens`) from a model-backed tool.

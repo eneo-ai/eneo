@@ -2300,6 +2300,8 @@ class AssistantService:
                                             existing.result = tc.result
                                         if tc.meta is not None:
                                             existing.meta = tc.meta
+                                        if tc.purpose is not None:
+                                            existing.purpose = tc.purpose
                                     else:
                                         # Add new tool call
                                         tool_calls.append(
@@ -2316,6 +2318,7 @@ class AssistantService:
                                                 result_status=tc.result_status,
                                                 result=tc.result,
                                                 mcp_tool_name=tc.mcp_tool_name,
+                                                purpose=tc.purpose,
                                                 meta=tc.meta,
                                             )
                                         )
@@ -2359,6 +2362,7 @@ class AssistantService:
                                                 approved=None,
                                                 result_status=tc.result_status,
                                                 mcp_tool_name=tc.mcp_tool_name,
+                                                purpose=tc.purpose,
                                             )
                                         )
                             yield chunk
@@ -2395,6 +2399,7 @@ class AssistantService:
                                                 result_status=tc.result_status
                                                 or "timeout_denied",
                                                 mcp_tool_name=tc.mcp_tool_name,
+                                                purpose=tc.purpose,
                                             )
                                         )
                             yield chunk
@@ -2596,6 +2601,7 @@ class AssistantService:
                             result_status=tc.result_status,
                             result=tc.result,
                             mcp_tool_name=tc.mcp_tool_name,
+                            purpose=tc.purpose,
                             meta=tc.meta,
                         )
                         for tc in non_streaming_tool_metadata

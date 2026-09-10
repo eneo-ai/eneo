@@ -4684,5 +4684,9 @@
   "functions_policy_description": "Organisationens policy styr vilka funktioner som är tillgängliga och vilka som är påslagna från början i chatten.",
   "functions_policy_none": "Organisationens policy tillhandahåller inga funktioner.",
   "functions_default_on": "På från början i chatten",
-  "functions_default_off": "Av från början i chatten"
+  "functions_default_off": "Av från början i chatten",
+  "tool_web_search": "Söker på webben",
+  "tool_web_search_query": "Söker på webben efter ”{query}”",
+  "tool_web_search_done": "Sökte på webben",
+  "tool_web_search_query_done": "Sökte på webben efter ”{query}”"
 }
