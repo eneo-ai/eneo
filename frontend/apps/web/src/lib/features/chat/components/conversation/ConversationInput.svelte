@@ -155,8 +155,14 @@
     else chat.newConversation();
   };
 
+  // Set synchronously on send and held until the conversation request has
+  // settled, so Enter or Send during the wait for a queued model switch (or
+  // the draft restore after a failure) cannot start an overlapping request.
+  let sendPending = $state(false);
+
   async function ask() {
     if (isAskingDisabled) return;
+    sendPending = true;
     inputError = null;
     const files = $attachments.map((file) => file?.fileRef).filter((file) => file !== undefined);
     abortController = new AbortController();
@@ -225,6 +231,8 @@
           .join(",")
       };
       focusMentionInput();
+    } finally {
+      sendPending = false;
     }
   }
 
@@ -451,6 +459,7 @@
   const isAskingDisabled = $derived(
     isConversationSubmitDisabled({
       isLoading: chat.askQuestion.isLoading,
+      sendPending,
       isUploading: $isUploading,
       hasContent: $question !== "" || $attachments.length > 0,
       hasCompletionModel: chat.hasCompletionModel,
@@ -460,7 +469,7 @@
 </script>
 
 <PromptInput.Root
-  status={chat.askQuestion.isLoading ? "streaming" : "ready"}
+  status={chat.askQuestion.isLoading || sendPending ? "streaming" : "ready"}
   onSubmit={ask}
   onStop={() => abortController?.abort("User cancelled")}
   class="max-w-[74ch] md:w-full"
