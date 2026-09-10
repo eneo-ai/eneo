@@ -7,7 +7,7 @@
   import SkillForm from "$lib/features/skills/SkillForm.svelte";
   import type { SkillFormValue } from "$lib/features/skills/skillBindings";
   import { m } from "$lib/paraglide/messages";
-  import { CheckCircle2, Info } from "lucide-svelte";
+  import { ArrowRight, CheckCircle2, Info } from "lucide-svelte";
 
   let { data } = $props();
 
@@ -17,15 +17,17 @@
 
   async function createSkill(value: SkillFormValue) {
     const skill = await data.eneo.skills.organization.create(value);
-    const skillHref = resolve(`/spaces/organization/skills/${skill.id}`);
+    const skillHref = resolve("/(app)/spaces/organization/skills/[skillId]", { skillId: skill.id });
     createdSkillHref = skillHref;
     formDirty = false;
     allowNavigation = true;
     try {
       await goto(skillHref);
     } catch {
-      // Creation is already committed. Keep a non-repeatable success state with
-      // a direct link instead of reporting the mutation as failed.
+      // `goto` only rejects when a `beforeNavigate` cancels or a newer
+      // navigation supersedes it. The creation is already committed, so keep
+      // a non-repeatable success state with a direct link instead of
+      // reporting the mutation as failed.
     } finally {
       allowNavigation = false;
     }
@@ -53,15 +55,10 @@
     ></Page.Title>
   </Page.Header>
   <Page.Main>
-    <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6 sm:px-6 sm:py-8">
-      <div class="max-w-[65ch]">
-        <h2 class="text-foreground text-base font-semibold">
-          {m.organization_skills_new_heading()}
-        </h2>
-        <p class="text-muted-foreground mt-1 text-sm leading-6">
-          {m.organization_skills_new_intro()}
-        </p>
-      </div>
+    <div class="mx-auto flex w-full max-w-[44rem] flex-col gap-6 px-4 py-6 sm:px-6 sm:py-8">
+      <p class="text-muted-foreground max-w-[65ch] text-sm leading-6">
+        {m.organization_skills_new_intro()}
+      </p>
       {#if createdSkillHref}
         <Alert.Root>
           <CheckCircle2 aria-hidden="true" />
@@ -69,9 +66,12 @@
           <Alert.Description>
             {m.organization_skills_created_navigation_failed_description()}
           </Alert.Description>
-          <Button class="mt-3" href={createdSkillHref} variant="outline">
-            {m.organization_skills_open_created_action()}
-          </Button>
+          <div class="col-start-2 mt-2">
+            <Button href={createdSkillHref} size="sm">
+              {m.organization_skills_open_created_action()}
+              <ArrowRight data-icon="inline-end" aria-hidden="true" />
+            </Button>
+          </div>
         </Alert.Root>
       {:else}
         <Alert.Root role="note">
@@ -80,6 +80,7 @@
           <Alert.Description>{m.organization_skills_draft_notice_description()}</Alert.Description>
         </Alert.Root>
         <SkillForm
+          class="max-w-none"
           onSubmit={createSkill}
           showDiscardAction
           onDirtyChange={(dirty) => (formDirty = dirty)}

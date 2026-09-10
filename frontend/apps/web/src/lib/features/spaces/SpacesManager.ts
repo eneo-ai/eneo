@@ -156,6 +156,20 @@ function SpacesManager(data: SpacesManagerParams) {
     const defaultAssistant = get(currentSpace).default_assistant;
     if (!defaultAssistant) return;
     const id = defaultAssistant.id;
+    // Optimistic: the picker label and chat partner follow the store, so
+    // reflect the choice immediately and let the server response confirm it.
+    const optimisticModel = completionModel
+      ? get(currentSpace).completion_models.find((model) => model.id === completionModel.id)
+      : undefined;
+    if (optimisticModel) {
+      currentSpace.update(($currentSpace) => {
+        $currentSpace.default_assistant = {
+          ...defaultAssistant,
+          completion_model: optimisticModel
+        };
+        return $currentSpace;
+      });
+    }
     try {
       const updatedAssistant = await eneo.assistants.update({
         assistant: { id },
@@ -169,6 +183,12 @@ function SpacesManager(data: SpacesManagerParams) {
         return $currentSpace;
       });
     } catch (e) {
+      if (optimisticModel) {
+        currentSpace.update(($currentSpace) => {
+          $currentSpace.default_assistant = defaultAssistant;
+          return $currentSpace;
+        });
+      }
       toastError(e);
       console.error(e);
     }

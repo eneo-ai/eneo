@@ -57,7 +57,7 @@
   const {
     states: { mentions, question },
     resetMentionInput,
-    setQuestionText: _setQuestionText,
+    setQuestionText,
     focusMentionInput
   } = initMentionInput({
     triggerCharacter: "@",
@@ -169,20 +169,25 @@
     // Approval controls external MCP servers only. Eneo's read-only internal
     // knowledge/files tools are core capabilities and always auto-execute.
     const toolApprovalEnabled = !autoAcceptTools && hasMcpTools;
+    // The question is echoed in the conversation as soon as the backend
+    // confirms it, so clear the composer now instead of showing it dimmed
+    // behind a spinner until the answer finishes. Restored on error below.
+    const questionText = $question;
+    resetMentionInput();
     scrollToBottom();
 
     try {
       await chat.askQuestion(
-        $question,
+        questionText,
         files,
         tools,
         toolApprovalEnabled,
         abortController,
         disabledMcpServerIds.size > 0 ? Array.from(disabledMcpServerIds) : undefined
       );
-      resetMentionInput();
       clearUploads();
     } catch (error: unknown) {
+      setQuestionText(questionText);
       const contextError = getContextErrorInfo(error);
       if (contextError) {
         if (contextError.used !== undefined && contextError.limit !== undefined) {
@@ -463,24 +468,6 @@
 
   <PromptInput.Body>
     <MentionInput onpaste={queueUploadsFromClipboard}></MentionInput>
-    {#if chat.askQuestion.isLoading}
-      <div
-        class="bg-card/60 absolute inset-0 flex items-center justify-center rounded-lg backdrop-blur-[1px]"
-      >
-        <div class="text-muted-foreground flex items-center gap-2 text-sm">
-          <svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"
-            ></circle>
-            <path
-              class="opacity-75"
-              fill="currentColor"
-              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-            ></path>
-          </svg>
-          {m.generating_answer()}
-        </div>
-      </div>
-    {/if}
   </PromptInput.Body>
 
   {#if $uploadError}

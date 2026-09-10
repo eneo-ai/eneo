@@ -1,8 +1,9 @@
 <script lang="ts">
   import * as Alert from "$lib/components/ui/alert/index.js";
-  import { Button } from "$lib/components/ui/button/index.js";
+  import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
@@ -71,18 +72,18 @@
   {liveTurnStatus}
 </p>
 
-<div class="border-border flex flex-col gap-2 border-b px-5 py-4">
+<div class="border-border flex flex-col gap-2 border-b px-5 py-4 @container">
   <label for="{idPrefix}-turn-select" class="text-xs font-medium">
     {m.chat_debug_select_turn()}
   </label>
-  <div class="flex min-w-0 items-center gap-2">
+  <div class="flex min-w-0 flex-col gap-2 @[24rem]:flex-row @[24rem]:items-center">
     <Select.Root
       type="single"
       value={panel.selectedMessageId}
       disabled={panel.turns.length === 0}
       onValueChange={(messageId) => panel.selectTurn(messageId)}
     >
-      <Select.Trigger id="{idPrefix}-turn-select" class="min-w-0 flex-1">
+      <Select.Trigger id="{idPrefix}-turn-select" class="w-full min-w-0 @[24rem]:flex-1">
         <span data-slot="select-value" class="min-w-0 truncate">
           {panel.selectedTurn
             ? turnLabel(panel.selectedTurn)
@@ -100,38 +101,45 @@
         </Select.Group>
       </Select.Content>
     </Select.Root>
-    <div class="flex items-center gap-1">
-      <Button
-        variant="outline"
-        size="icon"
-        disabled={panel.selectedTurnIndex <= 0}
-        aria-label={m.chat_debug_previous_turn()}
-        onclick={() => panel.stepTurn(-1)}
-      >
-        <ChevronUp aria-hidden="true" />
-      </Button>
-      <Button
-        variant="outline"
-        size="icon"
-        disabled={panel.selectedTurnIndex < 0 || panel.selectedTurnIndex >= panel.turns.length - 1}
-        aria-label={m.chat_debug_next_turn()}
-        onclick={() => panel.stepTurn(1)}
-      >
-        <ChevronDown aria-hidden="true" />
-      </Button>
-      {#if panel.diagnostics}
-        <Button
-          variant="outline"
-          size="icon"
-          disabled={panel.refreshing}
-          aria-label={m.chat_debug_refresh()}
-          onclick={() => panel.retryLoad(true)}
+    <div class="flex shrink-0 items-center gap-1">
+      <Tooltip.Root>
+        <Tooltip.Trigger
+          class={buttonVariants({ variant: "outline", size: "icon" })}
+          disabled={panel.selectedTurnIndex <= 0}
+          aria-label={m.chat_debug_previous_turn()}
+          onclick={() => panel.stepTurn(-1)}
         >
-          <RotateCcw
-            class={panel.refreshing ? "animate-spin motion-reduce:animate-none" : undefined}
-            aria-hidden="true"
-          />
-        </Button>
+          <ChevronUp aria-hidden="true" />
+        </Tooltip.Trigger>
+        <Tooltip.Content>{m.chat_debug_previous_turn()}</Tooltip.Content>
+      </Tooltip.Root>
+      <Tooltip.Root>
+        <Tooltip.Trigger
+          class={buttonVariants({ variant: "outline", size: "icon" })}
+          disabled={panel.selectedTurnIndex < 0 ||
+            panel.selectedTurnIndex >= panel.turns.length - 1}
+          aria-label={m.chat_debug_next_turn()}
+          onclick={() => panel.stepTurn(1)}
+        >
+          <ChevronDown aria-hidden="true" />
+        </Tooltip.Trigger>
+        <Tooltip.Content>{m.chat_debug_next_turn()}</Tooltip.Content>
+      </Tooltip.Root>
+      {#if panel.diagnostics}
+        <Tooltip.Root>
+          <Tooltip.Trigger
+            class={buttonVariants({ variant: "outline", size: "icon" })}
+            disabled={panel.refreshing}
+            aria-label={m.chat_debug_refresh()}
+            onclick={() => panel.retryLoad(true)}
+          >
+            <RotateCcw
+              class={panel.refreshing ? "animate-spin motion-reduce:animate-none" : undefined}
+              aria-hidden="true"
+            />
+          </Tooltip.Trigger>
+          <Tooltip.Content>{m.chat_debug_refresh()}</Tooltip.Content>
+        </Tooltip.Root>
       {/if}
     </div>
   </div>

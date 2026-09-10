@@ -645,6 +645,69 @@ class TenantModelAdapter(CompletionModelAdapter):
                 code="invalid_tool_call",
             ) from error
 
+    @staticmethod
+    def _skill_activation_metadata(
+        activation: SkillToolCallApplication | None,
+    ) -> list[ToolCallMetadata]:
+        """Surface Skill activations to the chat as steps on the built-in
+        ``skills`` server, so the UI can show them the way it shows other
+        internal tool calls and persist them with the turn."""
+        if activation is None:
+            return []
+        metadata: list[ToolCallMetadata] = []
+        for outcome in activation.outcomes:
+            rejected = outcome.status == "rejected"
+            arguments: dict[str, object] = {
+                "skill_key": outcome.activation_key,
+                "mode": "on_demand",
+            }
+            if rejected and outcome.reason is not None:
+                arguments["reason"] = outcome.reason.value
+            metadata.append(
+                ToolCallMetadata(
+                    server_name="skills",
+                    tool_name=outcome.activation_key or "unknown",
+                    title=outcome.display_name,
+                    arguments=arguments,
+                    tool_call_id=outcome.call_id,
+                    approved=True,
+                    result_status="failed" if rejected else "completed",
+                    result=json.dumps(
+                        {
+                            "activated": not rejected,
+                            "already_active": outcome.status == "already_active",
+                            "reason": outcome.reason.value if outcome.reason else None,
+                        }
+                    ),
+                    mcp_tool_name=SKILL_ACTIVATION_TOOL_NAME,
+                )
+            )
+        return metadata
+
+    @staticmethod
+    def _always_active_skill_metadata(
+        runtime: SkillActivationRuntime | None,
+    ) -> list[ToolCallMetadata]:
+        """Skills in context from turn start ("Alltid") never go through the
+        activation tool, so surface them as steps up front: the chat shows
+        which Skills shaped the reply either way."""
+        if runtime is None:
+            return []
+        return [
+            ToolCallMetadata(
+                server_name="skills",
+                tool_name=key,
+                title=display_name,
+                arguments={"skill_key": key, "mode": "always"},
+                tool_call_id=f"skill-always-{key}",
+                approved=True,
+                result_status="completed",
+                result=json.dumps({"activated": True, "mode": "always"}),
+                mcp_tool_name=SKILL_ACTIVATION_TOOL_NAME,
+            )
+            for key, display_name in runtime.initially_active_skills()
+        ]
+
     def _extract_usage(self, response: _LiteLLMHasUsage) -> TokenUsage | None:
         """Extract token usage from a LiteLLM response."""
         usage = getattr(response, "usage", None)
@@ -1174,7 +1237,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                 seen_prefixes: set[str] = set()
                 captured_refs: list[McpToolReference] = []
                 captured_images: list[GeneratedImage] = []
-                collected_tool_metadata: list[ToolCallMetadata] = []
+                collected_tool_metadata: list[ToolCallMetadata] = (
+                    self._always_active_skill_metadata(skill_runtime)
+                )
                 result_budget = _ToolResultBudget(
                     token_limit=self.model.token_limit,
                     litellm_model=self.litellm_model,
@@ -1285,6 +1350,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                             litellm_kwargs.get("tools") or [],
                         ),
                         assistant_content=msg.content,
+                    )
+                    collected_tool_metadata.extend(
+                        self._skill_activation_metadata(activation)
                     )
                     external_calls = (
                         activation.external_calls
@@ -1583,6 +1651,12 @@ class TenantModelAdapter(CompletionModelAdapter):
             activation_available = (
                 skill_runtime is not None and skill_runtime.tool_definition is not None
             )
+            always_active_metadata = self._always_active_skill_metadata(skill_runtime)
+            if always_active_metadata:
+                yield Completion(
+                    response_type=ResponseType.TOOL_CALL,
+                    tool_calls_metadata=always_active_metadata,
+                )
             mcp_tools_active = bool(mcp_proxy and prepared and prepared.has_tools)
             pending_allowed_tools: set[str] = (
                 mcp_proxy.get_allowed_tool_names()
@@ -1914,6 +1988,12 @@ class TenantModelAdapter(CompletionModelAdapter):
                         for tool_call in tool_calls
                         if tool_call["id"] in external_call_ids
                     ]
+                    activation_metadata = self._skill_activation_metadata(activation)
+                    if activation_metadata:
+                        yield Completion(
+                            response_type=ResponseType.TOOL_CALL,
+                            tool_calls_metadata=activation_metadata,
+                        )
                     if tool_calls and mcp_proxy is None:
                         break
 

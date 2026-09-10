@@ -52,7 +52,10 @@
         <Bug aria-hidden="true" class="size-4" />
         {m.chat_debug_title()}
       </h2>
-      <p class="text-muted-foreground max-w-[54ch] text-sm leading-5">
+      <p
+        class="text-muted-foreground truncate text-sm leading-5"
+        title={m.chat_debug_description()}
+      >
         {m.chat_debug_description()}
       </p>
     </div>

@@ -12,7 +12,16 @@
   import { getErrorMessage } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
-  import { Info, LoaderCircle, Plus, RefreshCw, Search, Trash2, X } from "lucide-svelte";
+  import {
+    Info,
+    LoaderCircle,
+    Plus,
+    RefreshCw,
+    Search,
+    Trash2,
+    X,
+    BookOpenCheck
+  } from "lucide-svelte";
   import { untrack } from "svelte";
 
   let { data } = $props();
@@ -153,14 +162,9 @@
           </Alert.Action>
         </Alert.Root>
       {/if}
-      <div class="max-w-3xl">
-        <h2 class="text-foreground text-lg font-semibold">
-          {m.organization_skills_manage_heading()}
-        </h2>
-        <p class="text-muted-foreground mt-1 max-w-[65ch] text-sm leading-6">
-          {m.organization_skills_manage_intro()}
-        </p>
-      </div>
+      <p class="text-muted-foreground max-w-[65ch] text-sm leading-6">
+        {m.organization_skills_manage_intro()}
+      </p>
 
       {#if items.length > 0 || data.search}
         <form
@@ -199,17 +203,32 @@
       {/if}
 
       {#if items.length === 0}
-        <div class="border-border flex max-w-3xl flex-col items-center border-y px-6 py-10">
-          <h2 class="text-foreground text-base font-medium">
-            {data.search
-              ? m.skills_library_no_results()
-              : m.organization_skills_empty_manage_title()}
-          </h2>
+        <div
+          class="border-border flex max-w-3xl flex-col items-center gap-4 px-6 py-12 text-center {data.search
+            ? 'border-y'
+            : 'rounded-xl border border-dashed'}"
+        >
           {#if !data.search}
-            <p class="text-muted-foreground mt-2 max-w-lg text-center text-sm leading-6">
-              {m.organization_skills_empty_manage_description()}
-            </p>
-            <Button class="mt-5" href={resolve("/spaces/organization/skills/new")}>
+            <div
+              class="bg-muted text-muted-foreground flex size-11 items-center justify-center rounded-full"
+            >
+              <BookOpenCheck class="size-5" aria-hidden="true" />
+            </div>
+          {/if}
+          <div class="max-w-md">
+            <h2 class="text-foreground text-base font-medium">
+              {data.search
+                ? m.skills_library_no_results()
+                : m.organization_skills_empty_manage_title()}
+            </h2>
+            {#if !data.search}
+              <p class="text-muted-foreground mt-1.5 text-sm leading-6">
+                {m.organization_skills_empty_manage_description()}
+              </p>
+            {/if}
+          </div>
+          {#if !data.search}
+            <Button href={resolve("/spaces/organization/skills/new")}>
               <Plus data-icon="inline-start" aria-hidden="true" />
               {m.skills_library_create_first()}
             </Button>
@@ -268,7 +287,7 @@
                       </div>
                       <div class="flex gap-1 @4xl:hidden">
                         <dt>{m.skills_library_updated_column()}:</dt>
-                        <dd>{formatDate(skill.updated_at)}</dd>
+                        <dd class="tabular-nums">{formatDate(skill.updated_at)}</dd>
                       </div>
                     </dl>
                   </Table.Cell>
@@ -285,7 +304,9 @@
                       version: String(skill.current_revision_number)
                     })}
                   </Table.Cell>
-                  <Table.Cell class="text-muted-foreground hidden text-sm @4xl:table-cell">
+                  <Table.Cell
+                    class="text-muted-foreground hidden text-sm tabular-nums @4xl:table-cell"
+                  >
                     {formatDate(skill.updated_at)}
                   </Table.Cell>
                   <Table.Cell class="text-right">

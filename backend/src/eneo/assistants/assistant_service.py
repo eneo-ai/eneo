@@ -2895,8 +2895,6 @@ class AssistantService:
                 },
             )
 
-        space.can_ask_assistant(assistant=active_assistant)
-
         if tool_assistant_id is not None:
             tool_assistant = space.get_assistant(assistant_id=tool_assistant_id)
             if tool_assistant_id not in [
@@ -2971,6 +2969,16 @@ class AssistantService:
                         )
                     )
 
+        # Space checks run after policy resolution so a personal default
+        # assistant with no stored model is judged on the model it will use.
+        space.can_ask_assistant(
+            assistant=active_assistant,
+            completion_model=(
+                completion_model_override
+                if assistant_to_ask is active_assistant
+                else None
+            ),
+        )
         effective_completion_model = (
             completion_model_override or assistant_to_ask.completion_model
         )
