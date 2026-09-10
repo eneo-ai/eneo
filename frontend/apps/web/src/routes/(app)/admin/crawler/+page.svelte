@@ -254,12 +254,17 @@
                         status: statusLabel(outcome.status),
                         day: periodLabel(day)
                       })}
+                      aria-describedby={overview
+                        ? `crawler-${day}-${outcome.status}-count`
+                        : undefined}
                       aria-pressed={view === "recent" &&
                         period === day &&
                         status === outcome.status}
                       onclick={() => showDay(day, outcome.status)}
                     >
-                      {#if overview}<span class="text-xl font-semibold tabular-nums sm:text-2xl"
+                      {#if overview}<span
+                          id={`crawler-${day}-${outcome.status}-count`}
+                          class="text-xl font-semibold tabular-nums sm:text-2xl"
                           >{overview.calendar[day][outcome.count].toLocaleString(getLocale())}</span
                         >
                       {:else if loadFailed}<span class="text-2xl">—</span>
@@ -279,13 +284,16 @@
                     status: statusLabel("cancelled"),
                     day: periodLabel(day)
                   })}
+                  aria-describedby={`crawler-${day}-cancelled-count`}
                   aria-pressed={view === "recent" && period === day && status === "cancelled"}
                   onclick={() => showDay(day, "cancelled")}
-                  >{m.admin_crawler_cancelled_count({
-                    count: overview
-                      ? overview.calendar[day].cancelled.toLocaleString(getLocale())
-                      : "—"
-                  })}</Button
+                  ><span id={`crawler-${day}-cancelled-count`}
+                    >{m.admin_crawler_cancelled_count({
+                      count: overview
+                        ? overview.calendar[day].cancelled.toLocaleString(getLocale())
+                        : "—"
+                    })}</span
+                  ></Button
                 >
               </Card.Content>
             </Card.Root>

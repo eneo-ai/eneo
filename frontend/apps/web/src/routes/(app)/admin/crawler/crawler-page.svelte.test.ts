@@ -753,6 +753,7 @@ it("opens each daily outcome and preserves statistics while loading a new filter
   await todayClean.click();
   await expect.element(todayClean).toBeVisible();
   await expect.element(todayClean).toHaveTextContent("124");
+  await expect.element(todayClean).toHaveAccessibleDescription("124");
   await expect
     .element(page.getByRole("button", { name: "Municipal website", exact: true }))
     .not.toBeInTheDocument();
@@ -792,6 +793,19 @@ it("opens each daily outcome and preserves statistics while loading a new filter
           cursor: null
         })
       );
+    if (status === "cancelled") {
+      await expect
+        .element(
+          page.getByRole("button", {
+            name: m.admin_crawler_show_day_status({
+              status: label,
+              day: m.admin_crawler_yesterday()
+            }),
+            exact: true
+          })
+        )
+        .toHaveAccessibleDescription(m.admin_crawler_cancelled_count({ count: "0" }));
+    }
   }
 });
 
