@@ -26,9 +26,7 @@
     <div class="h-16"></div>
 
     <div class="flex w-full justify-between">
-      <Button href={localizeHref("/logout")} variant="outlined" data-sveltekit-preload-data="false"
-        >{m.logout()}</Button
-      >
+      <Button href={localizeHref("/logout")} variant="outlined">{m.logout()}</Button>
       <Button href={localizeHref("/")} variant="primary">{m.retry()}</Button>
     </div>
   </div>

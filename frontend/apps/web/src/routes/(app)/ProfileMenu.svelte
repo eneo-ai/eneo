@@ -106,7 +106,7 @@
     <DropdownMenu.Item variant="destructive">
       {#snippet child({ props })}
         <!-- The logout load clears the session cookies, so hover preloading
-             must not run it (see data-sveltekit-preload-data on <body>). -->
+             must not run it (hover is enabled on the (app) layout wrapper). -->
         <a {...props} href={localizeHref("/logout")} data-sveltekit-preload-data="false">
           <LogOut />
           {m.logout()}

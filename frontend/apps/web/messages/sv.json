@@ -1537,6 +1537,7 @@
   "no_icons_found": "Inga ikoner hittades för \"{query}\"",
   "select_icon": "Välj ikon: {iconName}",
   "showing_first_icons": "Visar första 200 av {total} resultat. Förfina din sökning för fler.",
+  "icon_picker_load_error": "Ikonerna kunde inte läsas in.",
   "icon_picker_title": "Välj ikon",
   "icon_picker_empty": "Inga ikoner tillgängliga. Ladda upp en för att komma igång.",
   "select": "Välj",

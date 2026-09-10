@@ -52,14 +52,25 @@
   // The full registry is large, so it is fetched only when the picker opens
   // or a chosen icon has to be shown (see lucideIcons.ts).
   let icons = $state<LucideIconRegistry | null>(null);
-  $effect(() => {
-    if (icons || (!value && !$dialogOpen)) return;
+  let loadFailed = $state(false);
+  let loadAttempt = $state(0);
+
+  function loadIcons() {
+    loadFailed = false;
     void loadLucideIcons().then(
       (registry) => (icons = registry),
-      () => {
-        // Leave the picker empty; the registry retries on the next open.
-      }
+      () => (loadFailed = true)
     );
+  }
+
+  $effect(() => {
+    // Read both triggers before deciding, so opening the dialog re-runs this
+    // even when a selected value already asked for the registry once.
+    const open = $dialogOpen;
+    const wanted = Boolean(value) || open;
+    void loadAttempt;
+    if (icons || !wanted) return;
+    loadIcons();
   });
 
   // All available Lucide icon names
@@ -157,6 +168,15 @@
 
     <Dialog.Section>
       <div class="flex flex-col gap-4 p-6">
+        {#if loadFailed}
+          <div
+            class="border-default bg-secondary flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-sm"
+            role="alert"
+          >
+            <span>{m.icon_picker_load_error()}</span>
+            <Button variant="outlined" onclick={() => loadAttempt++}>{m.retry()}</Button>
+          </div>
+        {/if}
         <!-- Search input -->
         <div class="relative">
           <input
