@@ -561,13 +561,20 @@ class Space:
 
         return True
 
-    def can_ask_assistant(self, assistant: "Assistant"):
-        if assistant.completion_model is None:
+    def can_ask_assistant(
+        self,
+        assistant: "Assistant",
+        completion_model: "CompletionModel | None" = None,
+    ):
+        # `completion_model` is the policy-resolved model for a personal default
+        # assistant, which may have no stored model of its own.
+        completion_model = completion_model or assistant.completion_model
+        if completion_model is None:
             raise NoModelSelectedException(
                 "No AI model is configured for this assistant. "
                 "Please select a model in the assistant settings."
             )
-        if not self.is_completion_model_available(assistant.completion_model.id):
+        if not self.is_completion_model_available(completion_model.id):
             raise ModelNotAvailableException(
                 "The selected AI model is not available in this space. "
                 "Please choose a different model or contact your administrator."
@@ -583,7 +590,7 @@ class Space:
             )
         if self.security_classification is not None:
             if self.security_classification.is_greater_than(
-                assistant.completion_model.security_classification
+                completion_model.security_classification
             ):
                 raise SecurityClassificationMismatchException(
                     "The assistant's model does not meet this space's "

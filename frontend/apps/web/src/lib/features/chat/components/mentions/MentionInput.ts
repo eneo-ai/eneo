@@ -29,6 +29,12 @@ function initMentionInput(data: MentionInputParams) {
 
 export { initMentionInput, getMentionInput };
 
+export type MentionInputSnapshot = {
+  html: string;
+  mentions: AssistantSuggestion[];
+  question: string;
+};
+
 export function createMentionInput(params: MentionInputParams) {
   const { triggerCharacter, tools } = params;
   const showSuggestions = writable(false);
@@ -86,6 +92,35 @@ export function createMentionInput(params: MentionInputParams) {
     if (inputNode) {
       inputNode.textContent = text;
     }
+  }
+
+  /**
+   * The complete editor state: markup (mention chips included), the mention
+   * list the send path builds tools from, and the serialized question. Taken
+   * before the composer is cleared on send so a failed send can put the exact
+   * draft back.
+   */
+  function snapshotMentionInput(): MentionInputSnapshot {
+    return {
+      html: inputNode?.innerHTML ?? "",
+      mentions: get(mentions),
+      question: get(question)
+    };
+  }
+
+  /** True when nothing has been typed or mentioned since the last reset. */
+  function isMentionInputEmpty(): boolean {
+    return get(question) === "" && get(mentions).length === 0;
+  }
+
+  function restoreMentionInput(snapshot: MentionInputSnapshot) {
+    if (!inputNode) {
+      throw new Error("Can't restore MentionInput: inputNode node defined");
+    }
+    inputNode.innerHTML = snapshot.html;
+    mentions.set(snapshot.mentions);
+    question.set(snapshot.question);
+    selectedIndex.set(0);
   }
 
   function handleInputSuggestions(event: Event) {
@@ -570,6 +605,9 @@ export function createMentionInput(params: MentionInputParams) {
     showMentionPicker,
     resetMentionInput,
     setQuestionText,
+    snapshotMentionInput,
+    restoreMentionInput,
+    isMentionInputEmpty,
     focusMentionInput: () => {
       inputNode?.focus();
     }

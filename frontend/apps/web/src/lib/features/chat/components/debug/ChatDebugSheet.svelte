@@ -22,7 +22,7 @@
         <Bug aria-hidden="true" class="size-4" />
         {m.chat_debug_title()}
       </Sheet.Title>
-      <Sheet.Description class="max-w-[54ch] leading-5">
+      <Sheet.Description class="truncate leading-5" title={m.chat_debug_description()}>
         {m.chat_debug_description()}
       </Sheet.Description>
       <Sheet.Close>

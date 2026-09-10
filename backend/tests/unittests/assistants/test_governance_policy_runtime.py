@@ -1216,3 +1216,118 @@ async def test_governance_prompt_rechecks_persistent_baseline_on_plain_turn():
         ]
         is True
     )
+
+
+async def test_ask_checks_space_with_policy_default_when_assistant_has_no_model():
+    """A personal default assistant with no stored model must not be rejected
+    before the policy default is resolved (the frontend already shows that
+    model as selected)."""
+    assistant_id = uuid4()
+    now = datetime.now(UTC)
+    effective_model = DomainCompletionModel(
+        user=TEST_USER,
+        id=TEST_MODEL_GPT4.id,
+        created_at=now,
+        updated_at=now,
+        nickname=TEST_MODEL_GPT4.nickname,
+        name=TEST_MODEL_GPT4.name,
+        max_input_tokens=TEST_MODEL_GPT4.max_input_tokens,
+        max_output_tokens=TEST_MODEL_GPT4.max_output_tokens,
+        vision=False,
+        family="openai",
+        hosting="usa",
+        org="OpenAI",
+        stability="stable",
+        open_source=False,
+        description=None,
+        nr_billion_parameters=None,
+        hf_link=None,
+        is_deprecated=False,
+        deployment_name=None,
+        is_org_enabled=True,
+        is_org_default=False,
+        reasoning=False,
+        tenant_id=TEST_USER.tenant_id,
+        provider_type="openai",
+    )
+    session = SessionInDB(id=uuid4(), name="hello", user_id=TEST_USER.id, questions=[])
+    assistant = MagicMock()
+    assistant.id = assistant_id
+    assistant.name = "Personal assistant"
+    assistant.description = None
+    assistant.is_default = True
+    assistant.completion_model = None
+    assistant.completion_model_kwargs = ModelKwargs()
+    assistant.tool_assistants = []
+    assistant.ask = AsyncMock(
+        return_value=(
+            MagicMock(),
+            DatastoreResult(chunks=[], no_duplicate_chunks=[], info_blobs=[]),
+        )
+    )
+
+    space = MagicMock()
+    space.get_assistant.return_value = assistant
+    space.can_ask_assistant.return_value = None
+    space.is_personal.return_value = True
+    space.default_assistant = assistant
+    space.security_classification = None
+
+    actor = MagicMock()
+    actor.can_read_default_assistant.return_value = True
+
+    effective_config_service = AsyncMock()
+    effective_config_service.resolve_for.return_value = EffectiveConfig(
+        models_enforced=True,
+        available_models=[effective_model],
+        locked_model=None,
+        policy_default_model=effective_model,
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+        reasoning_policy_configured=False,
+        default_reasoning_effort=None,
+        reasoning_effort_user_configurable=False,
+        governance_skill_resolution=SkillRuntimeResolution(eligible=(), blocked=()),
+    )
+    session_service = AsyncMock(
+        create_session=AsyncMock(return_value=session),
+        create_question_placeholder=AsyncMock(return_value=(uuid4(), None)),
+        create_session_with_question_placeholder=AsyncMock(
+            return_value=(session, uuid4(), None)
+        ),
+    )
+    service = AssistantService(
+        repo=AsyncMock(),
+        space_repo=AsyncMock(get_space_by_assistant=AsyncMock(return_value=space)),
+        user=TEST_USER,
+        auth_service=MagicMock(),
+        service_repo=AsyncMock(),
+        step_repo=AsyncMock(),
+        completion_model_crud_service=AsyncMock(),
+        space_service=AsyncMock(),
+        factory=MagicMock(),
+        prompt_service=AsyncMock(),
+        file_service=AsyncMock(get_files_by_ids=AsyncMock(return_value=[])),
+        assistant_template_service=AsyncMock(),
+        session_service=session_service,
+        actor_manager=MagicMock(
+            get_space_actor_from_space=MagicMock(return_value=actor)
+        ),
+        integration_knowledge_repo=AsyncMock(),
+        completion_service=AsyncMock(),
+        references_service=AsyncMock(),
+        icon_repo=AsyncMock(),
+        org_space_assistant_role_repo=_not_helper_role_repo(),
+        help_assistant_assignment_history_repo=_not_helper_history_repo(),
+        skill_service=_empty_skill_service(),
+        effective_config_service=effective_config_service,
+    )
+    service._handle_response = AsyncMock(return_value="answer")  # type: ignore[method-assign]
+
+    await service.ask(question="hello", assistant_id=assistant_id)
+
+    space.can_ask_assistant.assert_called_once_with(
+        assistant=assistant, completion_model=effective_model
+    )

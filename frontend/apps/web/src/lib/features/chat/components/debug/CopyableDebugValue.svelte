@@ -21,8 +21,10 @@
 
 <div class="min-w-0">
   <dt class="text-muted-foreground text-xs">{label}</dt>
-  <dd class="mt-0.5 flex min-w-0 items-start gap-1">
-    <code class="min-w-0 flex-1 text-sm leading-5 font-medium break-all">{value}</code>
+  <dd class="mt-0.5 flex min-w-0 items-center gap-1">
+    <code class="min-w-0 flex-1 truncate font-mono text-sm leading-5 font-medium" title={value}>
+      {value}
+    </code>
     <Button
       variant="ghost"
       size="icon-sm"

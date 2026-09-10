@@ -57,7 +57,9 @@
   const {
     states: { mentions, question },
     resetMentionInput,
-    setQuestionText: _setQuestionText,
+    snapshotMentionInput,
+    restoreMentionInput,
+    isMentionInputEmpty,
     focusMentionInput
   } = initMentionInput({
     triggerCharacter: "@",
@@ -153,8 +155,14 @@
     else chat.newConversation();
   };
 
+  // Set synchronously on send and held until the conversation request has
+  // settled, so Enter or Send during the wait for a queued model switch (or
+  // the draft restore after a failure) cannot start an overlapping request.
+  let sendPending = $state(false);
+
   async function ask() {
     if (isAskingDisabled) return;
+    sendPending = true;
     inputError = null;
     const files = $attachments.map((file) => file?.fileRef).filter((file) => file !== undefined);
     abortController = new AbortController();
@@ -169,20 +177,33 @@
     // Approval controls external MCP servers only. Eneo's read-only internal
     // knowledge/files tools are core capabilities and always auto-execute.
     const toolApprovalEnabled = !autoAcceptTools && hasMcpTools;
+    // The question is echoed in the conversation as soon as the backend
+    // confirms it, so clear the composer now instead of showing it dimmed
+    // behind a spinner until the answer finishes. The full draft (mention
+    // chips included) is restored on error below.
+    const draft = snapshotMentionInput();
+    const questionText = draft.question;
+    resetMentionInput();
     scrollToBottom();
 
     try {
+      // A model or reasoning switch is applied optimistically; the backend
+      // resolves the model from the stored assistant, so let that write land
+      // before the question is sent under it.
+      await spacesManager?.awaitDefaultAssistantUpdates();
       await chat.askQuestion(
-        $question,
+        questionText,
         files,
         tools,
         toolApprovalEnabled,
         abortController,
         disabledMcpServerIds.size > 0 ? Array.from(disabledMcpServerIds) : undefined
       );
-      resetMentionInput();
       clearUploads();
     } catch (error: unknown) {
+      // Put the draft back unless the user has already started a new one
+      // while the request was pending; that newer input wins.
+      if (isMentionInputEmpty()) restoreMentionInput(draft);
       const contextError = getContextErrorInfo(error);
       if (contextError) {
         if (contextError.used !== undefined && contextError.limit !== undefined) {
@@ -210,6 +231,8 @@
           .join(",")
       };
       focusMentionInput();
+    } finally {
+      sendPending = false;
     }
   }
 
@@ -436,6 +459,7 @@
   const isAskingDisabled = $derived(
     isConversationSubmitDisabled({
       isLoading: chat.askQuestion.isLoading,
+      sendPending,
       isUploading: $isUploading,
       hasContent: $question !== "" || $attachments.length > 0,
       hasCompletionModel: chat.hasCompletionModel,
@@ -445,7 +469,7 @@
 </script>
 
 <PromptInput.Root
-  status={chat.askQuestion.isLoading ? "streaming" : "ready"}
+  status={chat.askQuestion.isLoading || sendPending ? "streaming" : "ready"}
   onSubmit={ask}
   onStop={() => abortController?.abort("User cancelled")}
   class="max-w-[74ch] md:w-full"
@@ -463,24 +487,6 @@
 
   <PromptInput.Body>
     <MentionInput onpaste={queueUploadsFromClipboard}></MentionInput>
-    {#if chat.askQuestion.isLoading}
-      <div
-        class="bg-card/60 absolute inset-0 flex items-center justify-center rounded-lg backdrop-blur-[1px]"
-      >
-        <div class="text-muted-foreground flex items-center gap-2 text-sm">
-          <svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"
-            ></circle>
-            <path
-              class="opacity-75"
-              fill="currentColor"
-              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-            ></path>
-          </svg>
-          {m.generating_answer()}
-        </div>
-      </div>
-    {/if}
   </PromptInput.Body>
 
   {#if $uploadError}

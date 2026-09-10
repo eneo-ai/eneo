@@ -110,13 +110,14 @@
       <ModelSelector.Name>{selectedLabel}</ModelSelector.Name>
     </ModelSelector.Trigger>
     <ModelSelector.Content
-      class="w-auto max-w-[calc(100vw-1rem)] border-0 bg-transparent p-0 shadow-none ring-0"
+      class="w-auto max-w-[calc(100vw-1rem)] gap-0 overflow-hidden rounded-xl p-0 shadow-lg"
       commandClass="size-auto overflow-visible rounded-none! bg-transparent p-0"
     >
-      <div class="flex items-start gap-2">
-        <div
-          class="bg-popover/95 ring-foreground/10 w-72 shrink-0 overflow-hidden rounded-xl shadow-lg ring-1 backdrop-blur-xl"
-        >
+      <div class="flex items-stretch">
+        {#if previewedModel}
+          <ChatModelDetails model={previewedModel} class="border-border border-r" />
+        {/if}
+        <div class="w-72 shrink-0">
           <ModelSelector.Input placeholder={m.search_models()} />
           <ModelSelector.List class="max-h-[20rem] p-1 pt-0">
             <ModelSelector.Empty>{m.no_models_found()}</ModelSelector.Empty>
@@ -138,9 +139,6 @@
             {/each}
           </ModelSelector.List>
         </div>
-        {#if previewedModel}
-          <ChatModelDetails model={previewedModel} />
-        {/if}
       </div>
     </ModelSelector.Content>
   </ModelSelector.Root>

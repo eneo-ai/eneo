@@ -17,7 +17,7 @@
 </script>
 
 <div class="relative flex-grow">
-  <div class="relative max-h-[440px] overflow-y-auto rounded-lg px-2.5 py-2 text-lg">
+  <div class="relative max-h-[min(440px,40dvh)] overflow-y-auto rounded-lg px-2.5 py-2 text-lg">
     <div
       contenteditable="true"
       use:input

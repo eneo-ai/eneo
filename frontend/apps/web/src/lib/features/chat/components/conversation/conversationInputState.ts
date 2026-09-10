@@ -8,7 +8,15 @@ type ContextErrorInfo = {
 };
 
 export function isConversationSubmitDisabled(state: {
+  /** A conversation request is streaming. */
   isLoading: boolean;
+  /**
+   * A send has started but the conversation request has not been issued yet
+   * (for example while a queued model switch settles). Without this, a second
+   * Enter in that window would start an overlapping request that hides the
+   * first one's message.
+   */
+  sendPending: boolean;
   isUploading: boolean;
   hasContent: boolean;
   hasCompletionModel: boolean;
@@ -16,7 +24,13 @@ export function isConversationSubmitDisabled(state: {
 }): boolean {
   // The estimate is advisory. Only the provider can authoritatively reject
   // the final payload after all model-specific tokenization has been applied.
-  return state.isLoading || state.isUploading || !state.hasContent || !state.hasCompletionModel;
+  return (
+    state.isLoading ||
+    state.sendPending ||
+    state.isUploading ||
+    !state.hasContent ||
+    !state.hasCompletionModel
+  );
 }
 
 export function getContextErrorInfo(error: unknown): ContextErrorInfo | null {

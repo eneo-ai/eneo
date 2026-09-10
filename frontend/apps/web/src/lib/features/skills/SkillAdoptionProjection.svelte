@@ -329,27 +329,83 @@
 
 {#snippet rolloutReceipt()}
   {#if run !== null}
-    <Alert.Root
-      role="region"
+    <section
       aria-labelledby="organization-skill-rollout-heading"
-      variant={run.status === "failed" ? "destructive" : "default"}
+      class="border-border flex flex-col gap-3 border-y py-4 text-sm"
     >
-      <Alert.Title>
-        <div class="flex flex-wrap items-center gap-2">
-          <span id="organization-skill-rollout-heading">
-            {m.organization_skills_rollout_title()}
-          </span>
-          <Badge variant={rolloutStatusVariant(run.status)}>
-            {rolloutStatusLabel(run.status)}
-          </Badge>
+      <div class="flex flex-wrap items-center gap-2">
+        <h3
+          id="organization-skill-rollout-heading"
+          class={["font-medium", run.status === "failed" && "text-destructive"]}
+        >
+          {m.organization_skills_rollout_title()}
+        </h3>
+        <Badge variant={rolloutStatusVariant(run.status)}>
+          {rolloutStatusLabel(run.status)}
+        </Badge>
+      </div>
+      {#if run.assistantsIncluded}
+        <p role="status" aria-live="polite" aria-atomic="true" class="font-medium tabular-nums">
+          {m.organization_skills_rollout_progress({
+            updated: String(run.advanced),
+            total: String(rolloutTotal)
+          })}
+        </p>
+        <div class="border-border border-y">
+          <Table.Root>
+            <Table.Header>
+              <Table.Row>
+                <Table.Head>{m.organization_skills_rollout_outcome_column()}</Table.Head>
+                <Table.Head class="w-20 text-right">
+                  {m.organization_skills_rollout_count_column()}
+                </Table.Head>
+              </Table.Row>
+            </Table.Header>
+            <Table.Body>
+              <Table.Row>
+                <Table.Cell>{m.organization_skills_rollout_updated()}</Table.Cell>
+                <Table.Cell class="text-right tabular-nums">{run.advanced}</Table.Cell>
+              </Table.Row>
+              <Table.Row>
+                <Table.Cell>{m.organization_skills_rollout_concurrent_change()}</Table.Cell>
+                <Table.Cell class="text-right tabular-nums">{run.concurrentChange}</Table.Cell>
+              </Table.Row>
+              <Table.Row>
+                <Table.Cell>{m.organization_skills_rollout_activation_unavailable()}</Table.Cell>
+                <Table.Cell class="text-right tabular-nums">{run.activationUnavailable}</Table.Cell>
+              </Table.Row>
+              <Table.Row>
+                <Table.Cell>{m.organization_skills_rollout_context_window()}</Table.Cell>
+                <Table.Cell class="text-right tabular-nums">{run.contextWindow}</Table.Cell>
+              </Table.Row>
+            </Table.Body>
+          </Table.Root>
         </div>
-      </Alert.Title>
-      <Alert.Description class="mt-2 flex flex-col gap-3 text-balance">
-        {#if run.assistantsIncluded}
+        <div class="text-muted-foreground flex flex-col gap-1 leading-6">
+          <p>{m.organization_skills_rollout_exclusions()}</p>
+          <p>{personalChatResultLabel(run.personalChat)}</p>
+          {#if run.status === "failed" && run.apps?.status !== "failed"}
+            <p class="text-destructive">{m.organization_skills_rollout_failure()}</p>
+          {/if}
+        </div>
+      {/if}
+      {#if run.apps !== null}
+        <section
+          class="border-border flex flex-col gap-3 border-t pt-4"
+          aria-labelledby="organization-skill-app-rollout-heading"
+        >
+          <div class="flex flex-wrap items-center gap-2">
+            <h4 id="organization-skill-app-rollout-heading" class="text-foreground font-medium">
+              {m.organization_skills_rollout_apps_title()}
+            </h4>
+            <Badge variant={appRolloutStatusVariant(run.apps.status)}>
+              {appRolloutStatusLabel(run.apps.status)}
+            </Badge>
+          </div>
           <p role="status" aria-live="polite" aria-atomic="true" class="font-medium tabular-nums">
-            {m.organization_skills_rollout_progress({
-              updated: String(run.advanced),
-              total: String(rolloutTotal)
+            {m.organization_skills_rollout_apps_progress({
+              updated: String(run.apps.advanced),
+              total: String(appRolloutTotal)
             })}
           </p>
           <div class="border-border border-y">
@@ -365,114 +421,51 @@
               <Table.Body>
                 <Table.Row>
                   <Table.Cell>{m.organization_skills_rollout_updated()}</Table.Cell>
-                  <Table.Cell class="text-right tabular-nums">{run.advanced}</Table.Cell>
+                  <Table.Cell class="text-right tabular-nums">{run.apps.advanced}</Table.Cell>
                 </Table.Row>
                 <Table.Row>
                   <Table.Cell>{m.organization_skills_rollout_concurrent_change()}</Table.Cell>
-                  <Table.Cell class="text-right tabular-nums">{run.concurrentChange}</Table.Cell>
-                </Table.Row>
-                <Table.Row>
-                  <Table.Cell>{m.organization_skills_rollout_activation_unavailable()}</Table.Cell>
-                  <Table.Cell class="text-right tabular-nums"
-                    >{run.activationUnavailable}</Table.Cell
-                  >
+                  <Table.Cell class="text-right tabular-nums">
+                    {run.apps.concurrentChange}
+                  </Table.Cell>
                 </Table.Row>
                 <Table.Row>
                   <Table.Cell>{m.organization_skills_rollout_context_window()}</Table.Cell>
-                  <Table.Cell class="text-right tabular-nums">{run.contextWindow}</Table.Cell>
+                  <Table.Cell class="text-right tabular-nums">
+                    {run.apps.contextWindow}
+                  </Table.Cell>
                 </Table.Row>
               </Table.Body>
             </Table.Root>
           </div>
-          <p>{m.organization_skills_rollout_exclusions()}</p>
-          <p>{personalChatResultLabel(run.personalChat)}</p>
-          {#if run.status === "failed" && run.apps?.status !== "failed"}
-            <p>{m.organization_skills_rollout_failure()}</p>
-          {/if}
-        {/if}
-        {#if run.apps !== null}
-          <section
-            class="border-border bg-muted/30 rounded-md border p-3"
-            aria-labelledby="organization-skill-app-rollout-heading"
+          <div class="text-muted-foreground flex flex-col gap-1 leading-6">
+            <p>{m.organization_skills_rollout_apps_exclusions()}</p>
+            <p>{m.organization_skills_rollout_apps_queued_runs_unchanged()}</p>
+            {#if run.apps.status === "failed"}
+              <p class="text-destructive">{m.organization_skills_rollout_apps_failure()}</p>
+            {/if}
+          </div>
+        </section>
+      {/if}
+      {#if run.status === "running" && onStop !== undefined}
+        <div>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={run.stopRequested === true}
+            onclick={onStop}
           >
-            <div class="flex flex-wrap items-center justify-between gap-2">
-              <h3 id="organization-skill-app-rollout-heading" class="text-foreground font-medium">
-                {m.organization_skills_rollout_apps_title()}
-              </h3>
-              <Badge variant={appRolloutStatusVariant(run.apps.status)}>
-                {appRolloutStatusLabel(run.apps.status)}
-              </Badge>
-            </div>
-            <p
-              role="status"
-              aria-live="polite"
-              aria-atomic="true"
-              class="mt-3 font-medium tabular-nums"
-            >
-              {m.organization_skills_rollout_apps_progress({
-                updated: String(run.apps.advanced),
-                total: String(appRolloutTotal)
-              })}
-            </p>
-            <div class="border-border mt-3 border-y">
-              <Table.Root>
-                <Table.Header>
-                  <Table.Row>
-                    <Table.Head>{m.organization_skills_rollout_outcome_column()}</Table.Head>
-                    <Table.Head class="w-20 text-right">
-                      {m.organization_skills_rollout_count_column()}
-                    </Table.Head>
-                  </Table.Row>
-                </Table.Header>
-                <Table.Body>
-                  <Table.Row>
-                    <Table.Cell>{m.organization_skills_rollout_updated()}</Table.Cell>
-                    <Table.Cell class="text-right tabular-nums">{run.apps.advanced}</Table.Cell>
-                  </Table.Row>
-                  <Table.Row>
-                    <Table.Cell>{m.organization_skills_rollout_concurrent_change()}</Table.Cell>
-                    <Table.Cell class="text-right tabular-nums">
-                      {run.apps.concurrentChange}
-                    </Table.Cell>
-                  </Table.Row>
-                  <Table.Row>
-                    <Table.Cell>{m.organization_skills_rollout_context_window()}</Table.Cell>
-                    <Table.Cell class="text-right tabular-nums">
-                      {run.apps.contextWindow}
-                    </Table.Cell>
-                  </Table.Row>
-                </Table.Body>
-              </Table.Root>
-            </div>
-            <div class="text-muted-foreground mt-3 space-y-2 text-sm leading-5">
-              <p>{m.organization_skills_rollout_apps_exclusions()}</p>
-              <p>{m.organization_skills_rollout_apps_queued_runs_unchanged()}</p>
-              {#if run.apps.status === "failed"}
-                <p>{m.organization_skills_rollout_apps_failure()}</p>
-              {/if}
-            </div>
-          </section>
-        {/if}
-        {#if run.status === "running" && onStop !== undefined}
-          <div>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={run.stopRequested === true}
-              onclick={onStop}
-            >
-              {m.organization_skills_rollout_stop()}
-            </Button>
-          </div>
-        {:else if (run.status === "stopped" || run.status === "failed") && run.personalChat !== "pending" && onRestart !== undefined && !recoveryActionAvailable}
-          <div>
-            <Button variant="outline" size="sm" onclick={onRestart}>
-              {m.organization_skills_rollout_restart()}
-            </Button>
-          </div>
-        {/if}
-      </Alert.Description>
-    </Alert.Root>
+            {m.organization_skills_rollout_stop()}
+          </Button>
+        </div>
+      {:else if (run.status === "stopped" || run.status === "failed") && run.personalChat !== "pending" && onRestart !== undefined && !recoveryActionAvailable}
+        <div>
+          <Button variant="outline" size="sm" onclick={onRestart}>
+            {m.organization_skills_rollout_restart()}
+          </Button>
+        </div>
+      {/if}
+    </section>
   {/if}
 {/snippet}
 
@@ -498,7 +491,7 @@
       aria-label={m.organization_skills_adoption_loading()}
     >
       <span class="sr-only">{m.organization_skills_adoption_loading()}</span>
-      <div class="grid grid-cols-2 gap-4 border-y py-4 sm:grid-cols-4">
+      <div class="border-border grid grid-cols-2 gap-4 border-y py-4 sm:grid-cols-4">
         {#each Array(4) as _, index (index)}
           <div class="flex flex-col gap-2">
             <Skeleton class="h-3 w-20" />
@@ -520,7 +513,7 @@
     </Alert.Root>
     {@render rolloutReceipt()}
   {:else if summary !== null}
-    <dl class="grid grid-cols-2 gap-x-6 gap-y-5 border-y py-5 sm:grid-cols-4">
+    <dl class="border-border grid grid-cols-2 gap-x-6 gap-y-5 border-y py-5 sm:grid-cols-4">
       <div>
         <dt class="text-muted-foreground text-sm">
           {m.organization_skills_adoption_assistants_label()}
@@ -593,7 +586,7 @@
             {m.organization_skills_adoption_personal_chat_heading()}
           </h3>
           <div
-            class="mt-3 flex min-h-12 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-y py-3"
+            class="border-border mt-3 flex min-h-12 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-y py-3"
           >
             {#if summary.personal_chat}
               {@const personalChat = summary.personal_chat}
@@ -700,7 +693,7 @@
         </p>
 
         {#if items.length === 0}
-          <p class="text-muted-foreground border-y py-5 text-sm">
+          <p class="text-muted-foreground border-border mt-4 border-y py-5 text-sm">
             {m.organization_skills_adoption_resources_empty()}
           </p>
         {:else}

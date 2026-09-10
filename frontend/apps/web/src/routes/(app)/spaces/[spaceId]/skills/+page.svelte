@@ -12,7 +12,7 @@
   import { SkillCatalogQuery } from "$lib/features/skills/skillCatalogQuery.svelte";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
-  import { LoaderCircle, Plus, Search, Trash2 } from "lucide-svelte";
+  import { LoaderCircle, Plus, Search, Trash2, BookOpenCheck } from "lucide-svelte";
   import { onDestroy, untrack } from "svelte";
 
   const CREATE_SKILL_PERMISSION: ResourcePermission = "create";
@@ -95,26 +95,30 @@
       </p>
 
       {#if skillCatalog.items.length === 0 && !skillCatalog.query && !skillCatalog.loading && !skillCatalog.error}
-        <div class="border-border max-w-3xl border-y py-8">
-          <div class="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
-            <div class="max-w-lg">
-              <h2 class="text-foreground text-base font-medium">
-                {m.skills_library_empty_title()}
-              </h2>
-              <p class="text-muted-foreground mt-1.5 text-sm leading-6">
-                {m.skills_library_empty_description()}
-              </p>
-            </div>
-            {#if canCreate}
-              <Button
-                class="shrink-0 sm:mt-0.5"
-                href={resolve(`/spaces/${spaceRouteId}/skills/new`)}
-              >
-                <Plus data-icon="inline-start" aria-hidden="true" />
-                {m.skills_library_create_first()}
-              </Button>
-            {/if}
+        <!-- Empty state as one centred block: what is missing, why it matters,
+             and the single action, in reading order. -->
+        <div
+          class="border-border flex max-w-3xl flex-col items-center gap-4 rounded-xl border border-dashed px-6 py-12 text-center"
+        >
+          <div
+            class="bg-muted text-muted-foreground flex size-11 items-center justify-center rounded-full"
+          >
+            <BookOpenCheck class="size-5" aria-hidden="true" />
           </div>
+          <div class="max-w-md">
+            <h2 class="text-foreground text-base font-medium">
+              {m.skills_library_empty_title()}
+            </h2>
+            <p class="text-muted-foreground mt-1.5 text-sm leading-6">
+              {m.skills_library_empty_description()}
+            </p>
+          </div>
+          {#if canCreate}
+            <Button href={resolve(`/spaces/${spaceRouteId}/skills/new`)}>
+              <Plus data-icon="inline-start" aria-hidden="true" />
+              {m.skills_library_create_first()}
+            </Button>
+          {/if}
         </div>
       {:else}
         <InputGroup.Root class="mb-3 max-w-sm">
@@ -216,7 +220,7 @@
                         </div>
                         <div class="flex gap-1 @4xl:hidden">
                           <dt>{m.skills_library_updated_column()}:</dt>
-                          <dd>{formatUpdatedAt(skill.updated_at)}</dd>
+                          <dd class="tabular-nums">{formatUpdatedAt(skill.updated_at)}</dd>
                         </div>
                       </dl>
                     </Table.Cell>
@@ -237,7 +241,9 @@
                         revision: String(skill.current_revision_number)
                       })}
                     </Table.Cell>
-                    <Table.Cell class="text-muted-foreground hidden text-sm @4xl:table-cell">
+                    <Table.Cell
+                      class="text-muted-foreground hidden text-sm tabular-nums @4xl:table-cell"
+                    >
                       {formatUpdatedAt(skill.updated_at)}
                     </Table.Cell>
                     {#if canDelete}

@@ -14,6 +14,9 @@ from eneo.ai_models.completion_models.completion_model import (
     MessageToolCall,
     function_definition_to_tool,
 )
+from eneo.completion_models.domain.skill_activation import (
+    SKILL_ACTIVATION_TOOL_NAME,
+)
 from eneo.completion_models.infrastructure.message_payload import (
     build_turn_messages,
     countable_messages,
@@ -66,6 +69,10 @@ def _replayable_tool_calls(
         if tc.tool_call_id is None or tc.tool_call_id == "":
             continue
         if tc.result is None:
+            continue
+        # Skill activations are rebuilt from the turn's own Skill runtime; the
+        # activation tool may not even be registered on a later turn.
+        if tc.mcp_tool_name == SKILL_ACTIVATION_TOOL_NAME:
             continue
         replayable.append(
             MessageToolCall(

@@ -33,6 +33,12 @@
     const policyDefault = effectiveConfig?.default_reasoning_effort;
     return policyDefault && options.includes(policyDefault) ? policyDefault : null;
   });
+  const policyDefaultLabel = $derived.by(() => {
+    const policyDefault = effectiveConfig?.default_reasoning_effort;
+    return policyDefault && options.includes(policyDefault)
+      ? getModelKwargOptionLabel(policyDefault)
+      : null;
+  });
   const selectedValue = $derived(
     storedEffort && options.includes(storedEffort)
       ? `${VALUE_PREFIX}${storedEffort}`
@@ -67,6 +73,9 @@
         <Select.GroupHeading>{m.reasoning_effort()}</Select.GroupHeading>
         <Select.Item value={DEFAULT_VALUE} label={m.governance_reasoning_organization_default()}>
           {m.governance_reasoning_organization_default()}
+          {#if policyDefaultLabel}
+            <span class="text-muted-foreground">· {policyDefaultLabel}</span>
+          {/if}
         </Select.Item>
         {#each options as option (option)}
           <Select.Item value={`${VALUE_PREFIX}${option}`} label={getModelKwargOptionLabel(option)}>
