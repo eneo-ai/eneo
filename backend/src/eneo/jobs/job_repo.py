@@ -94,8 +94,8 @@ class JobRepository:
     async def touch_job(self, id: UUID) -> bool:
         """Update an in-progress job's timestamp to signal 'still alive'.
 
-        Used as a heartbeat during long-running tasks like crawls to prevent
-        safe preemption from marking the job as stale.
+        Upload processing uses this as a heartbeat and stops if the job has
+        already become terminal.
 
         Args:
             id: Job UUID to touch
@@ -114,10 +114,8 @@ class JobRepository:
     async def mark_job_started(self, id: UUID) -> bool:
         """Atomically transition job from QUEUED to IN_PROGRESS.
 
-        Uses Compare-and-Swap (CAS) pattern to prevent race conditions where:
-        1. Safe Watchdog marks expired QUEUED job as FAILED
-        2. Worker dequeues same job from ARQ (doesn't know DB changed)
-        3. Worker would blindly set status to IN_PROGRESS, "resurrecting" the job
+        Uses Compare-and-Swap (CAS) to prevent a worker from resurrecting a job
+        after another recovery path has already made it terminal.
 
         This atomic check-and-update ensures the worker only starts the job if
         it's still in QUEUED state, preventing zombie job resurrection.
@@ -127,7 +125,7 @@ class JobRepository:
 
         Returns:
             True if job was successfully transitioned to IN_PROGRESS
-            False if job status had already changed (e.g., to FAILED by watchdog)
+            False if job status had already changed
         """
         from eneo.main.models import Status
 
@@ -159,40 +157,6 @@ class JobRepository:
         )
         result = await self.delegate.session.execute(stmt)
         return affected_row_count(result) > 0
-
-    async def mark_job_failed_if_running(
-        self,
-        id: UUID,
-        error_message: str | None,
-    ) -> int:
-        """Atomically mark a job as FAILED only if it's currently IN_PROGRESS or QUEUED.
-
-        Uses Compare-and-Swap pattern to prevent race conditions when multiple
-        users try to preempt the same job simultaneously.
-
-        Args:
-            id: Job UUID to fail
-            error_message: Error message to store
-
-        Returns:
-            Number of rows affected (1 if successful, 0 if job was already
-            completed/failed or doesn't exist)
-        """
-        from eneo.main.models import Status
-
-        stmt = (
-            sa.update(Jobs)
-            .where(Jobs.id == id)
-            .where(Jobs.status.in_([Status.IN_PROGRESS, Status.QUEUED]))
-            .values(
-                status=Status.FAILED,
-                result_location=error_message,
-                finished_at=sa.func.now(),
-                updated_at=sa.func.now(),
-            )
-        )
-        result = await self.delegate.session.execute(stmt)
-        return affected_row_count(result)
 
     async def mark_knowledge_job_failed_if_running(
         self,

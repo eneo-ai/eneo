@@ -544,6 +544,15 @@ class TenantEmbeddingModelService:
             )
         _ensure_tenant_owned(model)
 
+        from eneo.embedding_models.domain.embedding_model_repo import (
+            guard_embedding_model_update,
+        )
+
+        changes = payload.model_dump(exclude_unset=True)
+        if payload.family is None:
+            changes.pop("family", None)
+        await guard_embedding_model_update(self.session, model_id, changes)
+
         provided = payload.model_fields_set
         if payload.display_name is not None:
             await _validate_unique_display_name(

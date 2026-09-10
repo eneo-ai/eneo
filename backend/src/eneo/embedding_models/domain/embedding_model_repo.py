@@ -1,19 +1,96 @@
+from collections.abc import Collection, Mapping
 from typing import TYPE_CHECKING, Optional
 
 import sqlalchemy as sa
 from sqlalchemy.orm import selectinload
 
 from eneo.database.tables.ai_models_table import EmbeddingModels
+from eneo.database.tables.collections_table import CollectionsTable
+from eneo.database.tables.info_blobs_table import InfoBlobs
+from eneo.database.tables.integration_table import IntegrationKnowledge
 from eneo.database.tables.model_providers_table import ModelProviders
 from eneo.database.tables.security_classifications_table import SecurityClassification
+from eneo.database.tables.websites_table import Websites
 from eneo.embedding_models.domain.embedding_model import EmbeddingModel
-from eneo.main.exceptions import NotFoundException
+from eneo.main.exceptions import ModelInUseException, NotFoundException
 
 if TYPE_CHECKING:
     from uuid import UUID
 
     from eneo.database.database import AsyncSession
     from eneo.users.user import UserInDB
+
+
+_EMBEDDING_SEMANTIC_FIELDS = frozenset(
+    {
+        "name",
+        "litellm_model_name",
+        "family",
+        "dimensions",
+        "max_input",
+        "provider_id",
+    }
+)
+
+
+async def require_unused_embedding_models(
+    session: "AsyncSession", model_ids: Collection["UUID"]
+) -> None:
+    """Check configuration and retained vectors while model rows are locked."""
+    if not model_ids:
+        return
+    referenced = await session.scalar(
+        sa.select(
+            sa.or_(
+                sa.exists().where(CollectionsTable.embedding_model_id.in_(model_ids)),
+                sa.exists().where(Websites.embedding_model_id.in_(model_ids)),
+                sa.exists().where(
+                    IntegrationKnowledge.embedding_model_id.in_(model_ids)
+                ),
+                sa.exists().where(InfoBlobs.embedding_model_id.in_(model_ids)),
+            )
+        )
+    )
+    if referenced:
+        raise ModelInUseException(
+            "This embedding configuration is used by knowledge or retained versions. "
+            "Create a new embedding model and reindex the knowledge to change it."
+        )
+
+
+async def guard_embedding_model_update(
+    session: "AsyncSession", model_id: "UUID", changes: Mapping[str, object]
+) -> None:
+    fields = _EMBEDDING_SEMANTIC_FIELDS.intersection(changes)
+    if not fields:
+        return
+    model = await session.scalar(
+        sa.select(EmbeddingModels)
+        .where(EmbeddingModels.id == model_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    # FOR UPDATE conflicts with the FK key-share lock of a new assignment.
+    # Read usage after obtaining it, so a racing first assignment is visible.
+    if model is not None and any(
+        getattr(model, field) != changes[field] for field in fields
+    ):
+        await require_unused_embedding_models(session, [model_id])
+
+
+async def guard_embedding_provider_update(
+    session: "AsyncSession", provider_id: "UUID"
+) -> None:
+    """Freeze the route of every used embedding model on a locked provider."""
+    model_ids = list(
+        await session.scalars(
+            sa.select(EmbeddingModels.id)
+            .where(EmbeddingModels.provider_id == provider_id)
+            .order_by(EmbeddingModels.id)
+            .with_for_update()
+        )
+    )
+    await require_unused_embedding_models(session, model_ids)
 
 
 class EmbeddingModelRepository:

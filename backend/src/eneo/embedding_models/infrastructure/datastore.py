@@ -7,6 +7,9 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pydantic_settings import BaseSettings
 
 from eneo.completion_models.infrastructure.context_builder import count_tokens
+from eneo.embedding_models.infrastructure.adapters.base import (
+    PartialEmbeddingBatchError,
+)
 from eneo.files.chunk_embedding_list import ChunkEmbeddingList
 from eneo.info_blobs.info_blob import (
     InfoBlobChunk,
@@ -138,9 +141,13 @@ class Datastore:
             )
 
         logger.debug(f"Embedding {len(info_blob_chunks)} info-blob chunks.")
-        chunk_embedding_list = await self.create_embeddings_service.get_embeddings(
-            model=embedding_model, chunks=info_blob_chunks
-        )
+        try:
+            chunk_embedding_list = await self.create_embeddings_service.get_embeddings(
+                model=embedding_model, chunks=info_blob_chunks
+            )
+        except PartialEmbeddingBatchError as error:
+            error.completed.close()
+            raise error.cause from None
 
         logger.debug(f"Adding {len(info_blob_chunks)} info-blob chunks to datastore.")
         await self._add(chunk_embedding_list)

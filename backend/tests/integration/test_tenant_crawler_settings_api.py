@@ -7,7 +7,9 @@ Requires super_admin_token for authentication (system admin only).
 from uuid import uuid4
 
 import pytest
+import sqlalchemy as sa
 
+from eneo.database.tables.tenant_table import Tenants
 from eneo.tenants.crawler_settings_helper import CRAWLER_SETTING_SPECS
 
 
@@ -158,6 +160,31 @@ class TestUpdateCrawlerSettings:
         assert data["settings"]["download_max_size"] == 52428800
         assert "download_max_size" in data["overrides"]
 
+    async def test_rejects_retired_and_unknown_settings_without_writing(
+        self, client, test_tenant, super_admin_token
+    ):
+        await client.delete(
+            f"/api/v1/sysadmin/tenants/{test_tenant.id}/crawler-settings",
+            headers={"X-API-Key": super_admin_token},
+        )
+
+        for payload in (
+            {"crawl_feeder_enabled": True},
+            {"crawl_heartbeet_seconds": 30},
+        ):
+            response = await client.put(
+                f"/api/v1/sysadmin/tenants/{test_tenant.id}/crawler-settings",
+                json=payload,
+                headers={"X-API-Key": super_admin_token},
+            )
+            assert response.status_code == 422
+
+        current = await client.get(
+            f"/api/v1/sysadmin/tenants/{test_tenant.id}/crawler-settings",
+            headers={"X-API-Key": super_admin_token},
+        )
+        assert current.json()["overrides"] == []
+
     async def test_download_max_size_validation_below_min(
         self, client, test_tenant, super_admin_token
     ):
@@ -289,6 +316,72 @@ class TestDeleteCrawlerSettings:
         )
         assert response.status_code == 200
         assert response.json()["deleted_keys"] == []
+
+    async def test_reset_preserves_rollback_only_settings(
+        self,
+        client,
+        db_session,
+        test_tenant,
+        super_admin_token,
+    ) -> None:
+        async with db_session() as session:
+            await session.execute(
+                sa.update(Tenants)
+                .where(Tenants.id == test_tenant.id)
+                .values(
+                    crawler_settings={
+                        "crawl_feeder_enabled": True,
+                        "download_timeout": 120,
+                    }
+                )
+            )
+            await session.commit()
+
+        response = await client.delete(
+            f"/api/v1/sysadmin/tenants/{test_tenant.id}/crawler-settings",
+            headers={"X-API-Key": super_admin_token},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["deleted_keys"] == ["download_timeout"]
+        async with db_session() as session:
+            stored = await session.scalar(
+                sa.select(Tenants.crawler_settings).where(Tenants.id == test_tenant.id)
+            )
+        assert stored == {"crawl_feeder_enabled": True}
+
+    async def test_tenant_list_hides_rollback_only_settings(
+        self,
+        client,
+        db_session,
+        test_tenant,
+        super_admin_token,
+    ) -> None:
+        async with db_session() as session:
+            await session.execute(
+                sa.update(Tenants)
+                .where(Tenants.id == test_tenant.id)
+                .values(
+                    crawler_settings={
+                        "crawl_feeder_enabled": True,
+                        "download_timeout": 120,
+                    }
+                )
+            )
+            await session.commit()
+
+        response = await client.get(
+            "/api/v1/sysadmin/tenants/",
+            headers={"X-API-Key": super_admin_token},
+        )
+
+        assert response.status_code == 200
+        tenant = next(
+            item
+            for item in response.json()["items"]
+            if item["id"] == str(test_tenant.id)
+        )
+        assert tenant["crawler_settings"] == {"download_timeout": 120}
 
     async def test_nonexistent_tenant_returns_404(self, client, super_admin_token):
         """Returns 404 for non-existent tenant."""

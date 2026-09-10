@@ -76,6 +76,44 @@ docker exec -i eneo_devcontainer-db-1 psql -U postgres -d eneo_<branch> \
   -c "select version_num from alembic_version;"
 ```
 
+## Crawl history
+
+Migration `202609091300` adds failed page and file addresses to crawl history and
+`websites.last_indexed_at`. The timestamp records the latest completed indexing
+run with outcome `succeeded`, `unchanged`, `empty`, or `partial`; a later failed,
+cancelled, or active run preserves it. Existing timestamps are filled from recorded
+completion times. Unknown dates remain empty.
+
+Address details are collected by workers after the upgrade and read through
+`GET /api/v1/crawl-runs/{id}/failures/`, with the website's existing read permissions
+and at most 100 records per page. Older runs retain their aggregate counts and
+report that address details are unavailable. Workers save details with progress
+and completion updates; a process killed before its next save can lose buffered
+addresses. Details follow the lifetime of their crawl run.
+
+Apply the migration before starting the updated backend and workers. Downgrade
+refuses to drop recorded failure addresses. Before reverting this migration, stop
+those services and preserve the database in a backup. Keep the upgraded schema,
+or export the details and explicitly approve their removal before downgrading.
+
+## Tenant crawler overview
+
+Administrators can read current and recent tenant-wide crawl activity at
+`/admin/crawler`. The API requires the existing `admin` permission and tenant-admin
+API-key scope. It includes operational metadata and failed addresses from private
+spaces without granting access to their indexed content.
+
+Apply migrations through `202609101130` before starting the updated backend and
+workers. The history and active-run indexes are built concurrently; a retry
+replaces an invalid index left by an interrupted build. The latest migration
+allows `resources_missing` diagnostics for normally completed crawls whose only
+failures are HTTP 404/410 and whose useful results outnumber failures. They show
+as completed in the UI while retaining the `partial` outcome, failure details and
+existing cleanup rules. Old summaries are not reclassified. Downgrade maps the
+new code to `processing_failed` and retains its explanation; stop updated workers
+before downgrading. See the [overview contract and verification](../docs/plans/admin-crawler-overview.md)
+for view semantics, query bounds and rollback behavior.
+
 ## Environment variables
 
 | Variable                         | Required | Explanation                                              |

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
@@ -20,6 +21,27 @@ from eneo.tenants.provider_field_config import get_field_definitions
 if TYPE_CHECKING:
     from eneo.database.database import AsyncSession
     from eneo.settings.encryption_service import EncryptionService
+
+_OPTIONAL_PROVIDER_FIELDS = ("api_type", "organization")
+
+
+def embedding_provider_configuration(
+    provider_type: str,
+    credentials: Mapping[str, object],
+    config: Mapping[str, object],
+) -> dict[str, object]:
+    """Effective embedding route options; API-key rotation preserves vectors."""
+    fields = {field["name"] for field in get_field_definitions(provider_type)}
+    fields.update(_OPTIONAL_PROVIDER_FIELDS)
+    fields.difference_update({"api_key", "deployment_name"})
+    values: dict[str, object] = {}
+    for field in fields:
+        value = credentials.get(field)
+        if value is None:
+            value = config.get(field)
+        if value:
+            values[field] = value
+    return values
 
 
 @dataclass(frozen=True)
@@ -82,7 +104,7 @@ def _build_litellm_provider_kwargs(
 
     # Existing provider records may contain these optional LiteLLM settings
     # even though they are not rendered as setup fields.
-    for field in ("api_type", "organization"):
+    for field in _OPTIONAL_PROVIDER_FIELDS:
         value = credential_resolver.get_credential_field(field=field)
         if value:
             kwargs[field] = value

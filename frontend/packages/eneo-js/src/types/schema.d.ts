@@ -21,6 +21,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/crawl-runs/{id}/failures/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List failed crawl addresses
+     * @description Read a bounded page of recorded page and file failures, oldest first. Older runs retain aggregate counts but may have no recorded addresses.
+     */
+    get: operations["get_crawl_failures_api_v1_crawl_runs__id__failures__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/crawl-runs/{id}/cancel/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Stop a crawl run
+     * @description Persist an idempotent cancellation request. Queued work stops immediately; running work transitions through the stopping phase.
+     */
+    post: operations["cancel_crawl_run_api_v1_crawl_runs__id__cancel__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/apps/{id}/": {
     parameters: {
       query?: never;
@@ -1943,6 +1983,146 @@ export interface paths {
     get: operations["get_conversation_insight_session_api_v1_analysis_conversation_insights_sessions__session_id___get"];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/crawler/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Crawler Overview
+     * @description Read tenant-wide crawl metadata and totals. Requires admin permission; includes private-space operational metadata without granting content access.
+     */
+    get: operations["get_crawler_overview_api_v1_admin_crawler__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/crawler/runs/{id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Crawler Details
+     * @description Read a crawl's owning space, source owner, recorded manual initiator, indexed storage and current source state. Requires tenant admin permission; does not grant access to indexed content.
+     */
+    get: operations["get_crawler_details_api_v1_admin_crawler_runs__id___get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/crawler/runs/{id}/failures/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Crawler Failures
+     * @description Read recorded failure addresses for a crawl in the administrator's tenant.
+     */
+    get: operations["get_crawler_failures_api_v1_admin_crawler_runs__id__failures__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/crawler/websites/{id}/runs/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Admin Website Runs
+     * @description Read paginated crawl history for one website in the administrator's tenant, including runs older than 24 hours. Does not grant private content access.
+     */
+    get: operations["get_admin_website_runs_api_v1_admin_crawler_websites__id__runs__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/crawler/websites/{id}/matches/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Admin Website Matches
+     * @description Read a bounded page of other source registrations with this exact website address in the administrator's tenant. Matching addresses do not imply identical indexed content.
+     */
+    get: operations["get_admin_website_matches_api_v1_admin_crawler_websites__id__matches__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/crawler/websites/{id}/run/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Request Admin Crawl
+     * @description Request a crawl with the website's current settings. Tenant admin permission permits this operation in private spaces without granting content access. Returns the existing active run when present. Requires a user identity; retry starts a new full crawl. A new run executes as the requesting administrator, whose storage quota covers newly published content versions.
+     */
+    post: operations["request_admin_crawl_api_v1_admin_crawler_websites__id__run__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/crawler/runs/{id}/cancel/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Cancel Admin Crawl
+     * @description Request cancellation of this exact run. Tenant admin permission permits this operation in private spaces without granting content access. Queued work cancels immediately; running work enters stopping. An already finished run is returned unchanged.
+     */
+    post: operations["cancel_admin_crawl_api_v1_admin_crawler_runs__id__cancel__post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -4740,6 +4920,7 @@ export interface paths {
      *         **Features:**
      *         - Maximum 50 websites per request (safety limit)
      *         - Individual failures don't stop the batch
+     *         - A website with an active crawl returns that existing run
      *         - Returns detailed status for each website
      *
      *         **Example Request:**
@@ -4756,19 +4937,54 @@ export interface paths {
      *         ```json
      *         {
      *           "total": 2,
-     *           "queued": 1,
-     *           "failed": 1,
+     *           "queued": 2,
+     *           "failed": 0,
      *           "crawl_runs": [...],
-     *           "errors": [
-     *             {
-     *               "website_id": "123e4567-e89b-12d3-a456-426614174001",
-     *               "error": "Crawl already in progress for this website"
-     *             }
-     *           ]
+     *           "errors": []
      *         }
      *         ```
      */
     post: operations["bulk_run_crawl_api_v1_websites_bulk_run__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/websites/bulk/stop/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Stop active crawls for selected websites
+     * @description Stops the active crawl, if any, for up to 50 websites. Websites without an active crawl are reported separately and do not fail the batch.
+     */
+    post: operations["bulk_stop_crawl_api_v1_websites_bulk_stop__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/websites/bulk/delete/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Delete selected website sources
+     * @description Permanently deletes up to 50 website sources, their indexed content, and their crawl history. Sources with active crawls remain in place while their crawl is stopped and must be submitted again after cleanup completes.
+     */
+    post: operations["bulk_delete_websites_api_v1_websites_bulk_delete__post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -4792,7 +5008,7 @@ export interface paths {
     post: operations["update_website_api_v1_websites__id___post"];
     /**
      * Delete Website
-     * @description Delete a website by id.
+     * @description Delete a website by id. Returns a conflict while its crawl is active or durable crawler cleanup is still pending.
      */
     delete: operations["delete_website_api_v1_websites__id___delete"];
     options?: never;
@@ -4811,20 +5027,15 @@ export interface paths {
     put?: never;
     /**
      * Trigger a crawl
-     * @description Manually trigger a crawl for a specific website. This can be used to:
-     *         - Recrawl a website to update its content
-     *         - Force a crawl outside the automatic update schedule
-     *         - Retry a failed crawl
+     * @description Manually trigger or retry a crawl for a specific website. If the website
+     *         already has an active crawl, the existing durable run is returned instead
+     *         of creating duplicate work.
      *
      *         The crawl will use the website's configured settings (crawler engine, crawl type, etc.).
      *
-     *         **Status Flow:**
-     *         1. `queued` - Crawl is waiting to start
-     *         2. `in progress` - Crawl is actively running
-     *         3. `complete` - Crawl finished successfully
-     *         4. `failed` - Crawl encountered an error
-     *
-     *         Returns the new crawl run with status information.
+     *         `phase` describes the lifecycle (`pending_dispatch`, `queued`, `running`,
+     *         `finalizing`, `stopping`, or `terminal`). A terminal run's `outcome`
+     *         describes whether it completed, failed, or was cancelled.
      */
     post: operations["run_crawl_api_v1_websites__id__run__post"];
     delete?: never;
@@ -4842,9 +5053,29 @@ export interface paths {
     };
     /**
      * Get Crawl Runs
-     * @description List crawl runs for a website by id.
+     * @description List newest crawl runs first. A cursor continues into older history; new runs appear on refresh.
      */
     get: operations["get_crawl_runs_api_v1_websites__id__runs__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/websites/{id}/runs/latest/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Latest Crawl Run
+     * @description Read the latest crawl run without loading the full website or run history.
+     */
+    get: operations["get_latest_crawl_run_api_v1_websites__id__runs_latest__get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -4882,6 +5113,23 @@ export interface paths {
     };
     /** Get Info Blobs */
     get: operations["get_info_blobs_api_v1_websites__id__info_blobs__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/websites/{id}/info-blobs/page/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Info Blob Page */
+    get: operations["get_info_blob_page_api_v1_websites__id__info_blobs_page__get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -8255,41 +8503,6 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
-    /**
-     * ARQHealth
-     * @description Parsed ARQ health metrics (clean view).
-     */
-    ARQHealth: {
-      /** Heartbeat Ttl Seconds */
-      heartbeat_ttl_seconds?: number | null;
-      /** Age Seconds */
-      age_seconds?: number | null;
-      /**
-       * J Complete
-       * @default 0
-       */
-      j_complete?: number;
-      /**
-       * J Failed
-       * @default 0
-       */
-      j_failed?: number;
-      /**
-       * J Retried
-       * @default 0
-       */
-      j_retried?: number;
-      /**
-       * J Ongoing
-       * @default 0
-       */
-      j_ongoing?: number;
-      /**
-       * Queued
-       * @default 0
-       */
-      queued?: number;
-    };
     /** AcceptedFileType */
     AcceptedFileType: {
       /** Mimetype */
@@ -8494,6 +8707,9 @@ export interface components {
       | "website_updated"
       | "website_deleted"
       | "website_crawled"
+      | "website_crawl_requested"
+      | "website_crawl_stop_requested"
+      | "website_crawl_probed"
       | "website_transferred"
       | "group_chat_created"
       | "collection_created"
@@ -8610,6 +8826,152 @@ export interface components {
       value: {
         [key: string]: string;
       }[];
+    };
+    /** AdminCrawlerCalendar */
+    AdminCrawlerCalendar: {
+      /** Time Zone */
+      time_zone: string;
+      today: components["schemas"]["AdminCrawlerDaySummary"];
+      yesterday: components["schemas"]["AdminCrawlerDaySummary"];
+    };
+    /** AdminCrawlerDaySummary */
+    AdminCrawlerDaySummary: {
+      /**
+       * Date
+       * Format: date
+       */
+      date: string;
+      /**
+       * Completed
+       * @description Completed runs, including runs with only missing resources.
+       */
+      completed: number;
+      /**
+       * Partial
+       * @description Incomplete runs needing attention; excludes completed runs with only missing resources.
+       */
+      partial: number;
+      /** Failed */
+      failed: number;
+      /** Cancelled */
+      cancelled: number;
+    };
+    /** AdminCrawlerDetails */
+    AdminCrawlerDetails: {
+      run: components["schemas"]["CrawlRunPublic"];
+      /**
+       * Website Id
+       * Format: uuid
+       */
+      website_id: string;
+      /** Website Name */
+      website_name: string | null;
+      /** Website Url */
+      website_url: string;
+      /** Space Name */
+      space_name: string | null;
+      /** Started At */
+      started_at: string | null;
+      /** Last Indexed At */
+      last_indexed_at: string | null;
+      /** Space Id */
+      space_id: string | null;
+      owner: components["schemas"]["AdminCrawlerUser"];
+      initiated_by: components["schemas"]["AdminCrawlerUser"] | null;
+      /** Indexed Size */
+      indexed_size: number;
+      /** Stored Resources */
+      stored_resources: number;
+      update_interval: components["schemas"]["UpdateInterval"];
+      /** Next Retry At */
+      next_retry_at: string | null;
+      /** Consecutive Failures */
+      consecutive_failures: number;
+      active_run: components["schemas"]["CrawlRunPublic"] | null;
+      latest_run: components["schemas"]["CrawlRunPublic"] | null;
+    };
+    /** AdminCrawlerItem */
+    AdminCrawlerItem: {
+      run: components["schemas"]["CrawlRunPublic"];
+      /**
+       * Website Id
+       * Format: uuid
+       */
+      website_id: string;
+      /** Website Name */
+      website_name: string | null;
+      /** Website Url */
+      website_url: string;
+      /** Space Name */
+      space_name: string | null;
+      /** Started At */
+      started_at: string | null;
+      /** Last Indexed At */
+      last_indexed_at: string | null;
+    };
+    /** AdminCrawlerOverview */
+    AdminCrawlerOverview: {
+      /**
+       * As Of
+       * Format: date-time
+       */
+      as_of: string;
+      summary: components["schemas"]["AdminCrawlerSummary"];
+      calendar: components["schemas"]["AdminCrawlerCalendar"];
+      /** Items */
+      items: components["schemas"]["AdminCrawlerItem"][];
+      /** Next Cursor */
+      next_cursor: string | null;
+    };
+    /** AdminCrawlerRelatedPage */
+    AdminCrawlerRelatedPage: {
+      /** Items */
+      items: components["schemas"]["AdminCrawlerRelatedWebsite"][];
+      /** Next Cursor */
+      next_cursor: string | null;
+    };
+    /** AdminCrawlerRelatedWebsite */
+    AdminCrawlerRelatedWebsite: {
+      /**
+       * Website Id
+       * Format: uuid
+       */
+      website_id: string;
+      /** Website Name */
+      website_name: string | null;
+      /** Website Url */
+      website_url: string;
+      /** Space Id */
+      space_id: string | null;
+      /** Space Name */
+      space_name: string | null;
+      /** Indexed Size */
+      indexed_size: number;
+      /** Last Indexed At */
+      last_indexed_at: string | null;
+      /** Latest Run Id */
+      latest_run_id: string | null;
+    };
+    /** AdminCrawlerSummary */
+    AdminCrawlerSummary: {
+      /** Ongoing */
+      ongoing: number;
+      /** Queued */
+      queued: number;
+      /** Issues */
+      issues: number;
+    };
+    /** AdminCrawlerUser */
+    AdminCrawlerUser: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Username */
+      username: string | null;
+      /** Email */
+      email: string;
     };
     /** AllowedOriginCreate */
     AllowedOriginCreate: {
@@ -10543,11 +10905,43 @@ export interface components {
       /** Failed */
       failed: number;
       /** Crawl Runs */
-      crawl_runs: components["schemas"]["eneo__websites__presentation__website_models__CrawlRunPublic"][];
+      crawl_runs: components["schemas"]["CrawlRunPublic"][];
       /** Errors */
-      errors: {
-        [key: string]: string;
-      }[];
+      errors: components["schemas"]["WebsiteBulkActionError"][];
+    };
+    /**
+     * BulkCrawlStopResponse
+     * @description Result of stopping active crawls for a bounded website selection.
+     */
+    BulkCrawlStopResponse: {
+      /** Total */
+      total: number;
+      /** Stopped */
+      stopped: number;
+      /** Not Running */
+      not_running: number;
+      /** Failed */
+      failed: number;
+      /** Crawl Runs */
+      crawl_runs: components["schemas"]["CrawlRunPublic"][];
+      /** Errors */
+      errors: components["schemas"]["WebsiteBulkActionError"][];
+    };
+    /**
+     * BulkWebsiteDeleteResponse
+     * @description Result of permanently deleting a bounded website selection.
+     */
+    BulkWebsiteDeleteResponse: {
+      /** Total */
+      total: number;
+      /** Deleted */
+      deleted: number;
+      /** Not Found */
+      not_found: number;
+      /** Failed */
+      failed: number;
+      /** Errors */
+      errors: components["schemas"]["WebsiteBulkActionError"][];
     };
     /**
      * CallbackRequest
@@ -11269,37 +11663,194 @@ export interface components {
       questions: number;
     };
     /**
+     * CrawlFailureCode
+     * @enum {string}
+     */
+    CrawlFailureCode:
+      | "dispatch_failed"
+      | "invalid_dispatch"
+      | "worker_interrupted"
+      | "lease_expired"
+      | "remote_unreachable"
+      | "remote_blocked"
+      | "timed_out"
+      | "processing_failed"
+      | "resources_missing"
+      | "tenant_quota_exceeded"
+      | "user_quota_exceeded"
+      | "cancelled";
+    /** CrawlFailurePagePublic */
+    CrawlFailurePagePublic: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["CrawlResourceFailurePublic"][];
+      /** Limit */
+      limit?: number | null;
+      /** Next Cursor */
+      next_cursor?: string | null;
+      /** Previous Cursor */
+      previous_cursor?: string | null;
+      /** Total Count */
+      total_count: number;
+      run: components["schemas"]["CrawlRunPublic"];
+      /**
+       * Details Available
+       * @description False when this run predates collection of failed resource addresses.
+       */
+      details_available: boolean;
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
+    /**
+     * CrawlHistoryPeriod
+     * @enum {string}
+     */
+    CrawlHistoryPeriod: "last_24_hours" | "today" | "yesterday";
+    /**
+     * CrawlLifecycleHealth
+     * @description Authoritative active crawl state from PostgreSQL.
+     */
+    CrawlLifecycleHealth: {
+      /**
+       * Database Ok
+       * @default true
+       */
+      database_ok?: boolean;
+      /** Pending Dispatch */
+      pending_dispatch?: number | null;
+      /** Queued */
+      queued?: number | null;
+      /** Running */
+      running?: number | null;
+      /** Finalizing */
+      finalizing?: number | null;
+      /** Stopping */
+      stopping?: number | null;
+      /** Active Total */
+      active_total?: number | null;
+      /** Expired Leases */
+      expired_leases?: number | null;
+      /** Pending Transport Cleanup */
+      pending_transport_cleanup?: number | null;
+      /** Oldest Active Age Seconds */
+      oldest_active_age_seconds?: number | null;
+    };
+    /**
+     * CrawlOrigin
+     * @enum {string}
+     */
+    CrawlOrigin: "manual" | "scheduled" | "legacy";
+    /**
+     * CrawlOutcome
+     * @enum {string}
+     */
+    CrawlOutcome:
+      "succeeded" | "unchanged" | "empty" | "partial" | "failed" | "cancelled" | "interrupted";
+    /**
+     * CrawlPhase
+     * @enum {string}
+     */
+    CrawlPhase: "pending_dispatch" | "queued" | "running" | "finalizing" | "stopping" | "terminal";
+    /** CrawlResourceFailurePublic */
+    CrawlResourceFailurePublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Url */
+      url: string;
+      /**
+       * Reason
+       * @description Failure reason code, localized by the client.
+       */
+      reason: string;
+      kind: components["schemas"]["CrawlResourceKind"];
+    };
+    /**
+     * CrawlResourceKind
+     * @enum {string}
+     */
+    CrawlResourceKind: "page" | "file";
+    /** CrawlRunPublic */
+    CrawlRunPublic: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Pages Crawled */
+      pages_crawled: number | null;
+      /** Files Downloaded */
+      files_downloaded: number | null;
+      /** Pages Failed */
+      pages_failed: number | null;
+      /** Files Failed */
+      files_failed: number | null;
+      /** Failure Summary */
+      failure_summary?: {
+        [key: string]: number;
+      } | null;
+      status: components["schemas"]["Status"];
+      phase: components["schemas"]["CrawlPhase"];
+      outcome: components["schemas"]["CrawlOutcome"] | null;
+      origin: components["schemas"]["CrawlOrigin"];
+      /** Result Location */
+      result_location: string | null;
+      /** Finished At */
+      finished_at: string | null;
+      failure_code: components["schemas"]["CrawlFailureCode"] | null;
+      /** Failure Detail */
+      failure_detail: string | null;
+      /** Cancel Requested At */
+      cancel_requested_at: string | null;
+      /** Attempt Count */
+      attempt_count: number;
+    };
+    /**
      * CrawlType
      * @enum {string}
      */
     CrawlType: "crawl" | "sitemap";
     /**
-     * CrawlerActivity
-     * @description Real-time crawler activity from multiple sources.
+     * CrawlerCapacityHealth
+     * @description Configured cluster-wide crawl admission capacity.
      */
-    CrawlerActivity: {
-      /** Db In Progress */
-      db_in_progress?: number | null;
-      /**
-       * Db Query Ok
-       * @default true
-       */
-      db_query_ok?: boolean;
-      /**
-       * Arq Ongoing
-       * @default 0
-       */
-      arq_ongoing?: number;
-      /** Delta */
-      delta?: number | null;
+    CrawlerCapacityHealth: {
+      /** Max Concurrent Crawl Jobs */
+      max_concurrent_crawl_jobs: number;
+    };
+    /**
+     * CrawlerHealthDebugInfo
+     * @description Queue names and Redis database used by the health snapshot.
+     */
+    CrawlerHealthDebugInfo: {
+      /** Redis Db */
+      redis_db?: number | null;
+      /** Dispatcher Queue Name */
+      dispatcher_queue_name: string;
+      /** Executor Queue Name */
+      executor_queue_name: string;
     };
     /**
      * CrawlerHealthResponse
      * @description Crawler health status with operator-friendly signals.
      */
     CrawlerHealthResponse: {
-      /** Status */
-      status: string;
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "HEALTHY" | "DEGRADED" | "UNHEALTHY" | "UNKNOWN";
       /** Status Flags */
       status_flags?: string[];
       /**
@@ -11309,13 +11860,10 @@ export interface components {
       status_reason?: string;
       /** Response Timestamp Utc */
       response_timestamp_utc: string;
-      crawler_activity?: components["schemas"]["CrawlerActivity"];
-      arq?: components["schemas"]["ARQHealth"];
-      watchdog?: components["schemas"]["WatchdogMetrics"];
-      feeder?: components["schemas"]["FeederLeader"];
-      pending?: components["schemas"]["PendingQueueSummary"];
-      thresholds: components["schemas"]["HealthThresholds"];
-      debug?: components["schemas"]["DebugInfo"];
+      lifecycle?: components["schemas"]["CrawlLifecycleHealth"];
+      transport?: components["schemas"]["CrawlerTransportHealth"];
+      capacity: components["schemas"]["CrawlerCapacityHealth"];
+      debug: components["schemas"]["CrawlerHealthDebugInfo"];
     };
     /**
      * CrawlerSettingsResponse
@@ -11336,13 +11884,8 @@ export interface components {
      *                 "closespider_itemcount": 20000,
      *                 "obey_robots": true,
      *                 "autothrottle_enabled": true,
-     *                 "tenant_worker_concurrency_limit": 4,
-     *                 "crawl_stale_threshold_minutes": 30,
      *                 "crawl_heartbeat_interval_seconds": 300,
-     *                 "crawl_feeder_enabled": false,
-     *                 "crawl_feeder_interval_seconds": 10,
-     *                 "crawl_feeder_batch_size": 10,
-     *                 "crawl_job_max_age_seconds": 1800
+     *                 "crawl_page_batch_size": 100
      *             },
      *             "overrides": ["download_timeout", "dns_timeout"],
      *             "updated_at": "2025-10-22T10:00:00+00:00"
@@ -11361,19 +11904,14 @@ export interface components {
        * @example {
        *       "autothrottle_enabled": true,
        *       "closespider_itemcount": 20000,
-       *       "crawl_feeder_batch_size": 10,
-       *       "crawl_feeder_enabled": false,
-       *       "crawl_feeder_interval_seconds": 10,
        *       "crawl_heartbeat_interval_seconds": 300,
-       *       "crawl_job_max_age_seconds": 1800,
        *       "crawl_max_length": 14400,
-       *       "crawl_stale_threshold_minutes": 30,
+       *       "crawl_page_batch_size": 100,
        *       "dns_timeout": 30,
        *       "download_max_size": 10485760,
        *       "download_timeout": 90,
        *       "obey_robots": true,
-       *       "retry_times": 2,
-       *       "tenant_worker_concurrency_limit": 4
+       *       "retry_times": 2
        *     }
        */
       settings: {
@@ -11413,13 +11951,8 @@ export interface components {
      *             "closespider_itemcount": 20000,
      *             "obey_robots": true,
      *             "autothrottle_enabled": true,
-     *             "tenant_worker_concurrency_limit": 4,
-     *             "crawl_stale_threshold_minutes": 30,
      *             "crawl_heartbeat_interval_seconds": 300,
-     *             "crawl_feeder_enabled": false,
-     *             "crawl_feeder_interval_seconds": 10,
-     *             "crawl_feeder_batch_size": 10,
-     *             "crawl_job_max_age_seconds": 1800
+     *             "crawl_page_batch_size": 100
      *         }
      *
      *     Example - Partial update (adjust timeouts only):
@@ -11461,7 +11994,7 @@ export interface components {
       retry_times?: number | null;
       /**
        * Closespider Itemcount
-       * @description Maximum pages to crawl before stopping (100 to 100k)
+       * @description Maximum pages and linked files to process per crawl (100 to 100k)
        * @example 20000
        */
       closespider_itemcount?: number | null;
@@ -11473,22 +12006,10 @@ export interface components {
       obey_robots?: boolean | null;
       /**
        * Autothrottle Enabled
-       * @description Enable automatic request throttling based on server response times
+       * @description Enable conservative pacing between bounded request batches
        * @example true
        */
       autothrottle_enabled?: boolean | null;
-      /**
-       * Tenant Worker Concurrency Limit
-       * @description Maximum concurrent crawl jobs per tenant (0 = unlimited, 1 to 50)
-       * @example 4
-       */
-      tenant_worker_concurrency_limit?: number | null;
-      /**
-       * Crawl Stale Threshold Minutes
-       * @description Minutes without activity before IN_PROGRESS job is considered stale (5 min to 24 hours)
-       * @example 30
-       */
-      crawl_stale_threshold_minutes?: number | null;
       /**
        * Crawl Heartbeat Interval Seconds
        * @description Heartbeat interval to signal job is alive (30s to 1 hour)
@@ -11496,29 +12017,23 @@ export interface components {
        */
       crawl_heartbeat_interval_seconds?: number | null;
       /**
-       * Crawl Feeder Enabled
-       * @description Enable crawl feeder service for rate-limited job enqueueing
-       * @example false
+       * Crawl Page Batch Size
+       * @description Commit after every N pages during crawl (10 to 1000)
+       * @example 100
        */
-      crawl_feeder_enabled?: boolean | null;
-      /**
-       * Crawl Feeder Interval Seconds
-       * @description Feeder check interval in seconds (5s to 5 min)
-       * @example 10
-       */
-      crawl_feeder_interval_seconds?: number | null;
-      /**
-       * Crawl Feeder Batch Size
-       * @description Maximum jobs to enqueue per feeder cycle per tenant (1 to 100)
-       * @example 10
-       */
-      crawl_feeder_batch_size?: number | null;
-      /**
-       * Crawl Job Max Age Seconds
-       * @description Maximum job retry age before permanent failure (5 min to 2 hours)
-       * @example 1800
-       */
-      crawl_job_max_age_seconds?: number | null;
+      crawl_page_batch_size?: number | null;
+    };
+    /**
+     * CrawlerTransportHealth
+     * @description Dedicated queue depth and liveness of both crawler worker roles.
+     */
+    CrawlerTransportHealth: {
+      /** Reconciliation Heartbeat Ttl Seconds */
+      reconciliation_heartbeat_ttl_seconds?: number | null;
+      /** Executor Heartbeat Ttl Seconds */
+      executor_heartbeat_ttl_seconds?: number | null;
+      /** Queued */
+      queued?: number | null;
     };
     /** CreateGroupRequest */
     CreateGroupRequest: {
@@ -11710,6 +12225,48 @@ export interface components {
        */
       readonly count: number;
     };
+    /** CursorPaginatedResponse[CrawlRunPublic] */
+    CursorPaginatedResponse_CrawlRunPublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["CrawlRunPublic"][];
+      /** Limit */
+      limit?: number | null;
+      /** Next Cursor */
+      next_cursor?: string | null;
+      /** Previous Cursor */
+      previous_cursor?: string | null;
+      /** Total Count */
+      total_count: number;
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
+    /** CursorPaginatedResponse[InfoBlobPublicNoText] */
+    CursorPaginatedResponse_InfoBlobPublicNoText_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["InfoBlobPublicNoText"][];
+      /** Limit */
+      limit?: number | null;
+      /** Next Cursor */
+      next_cursor?: string | null;
+      /** Previous Cursor */
+      previous_cursor?: string | null;
+      /** Total Count */
+      total_count: number;
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
     /** CursorPaginatedResponse[SessionMetadataPublic] */
     CursorPaginatedResponse_SessionMetadataPublic_: {
       /**
@@ -11797,28 +12354,6 @@ export interface components {
     /** Dashboard */
     Dashboard: {
       spaces: components["schemas"]["PaginatedResponse_SpaceDashboard_"];
-    };
-    /**
-     * DebugInfo
-     * @description Raw data for debugging - noisy, not for quick reads.
-     */
-    DebugInfo: {
-      /**
-       * Arq Raw
-       * @default
-       */
-      arq_raw?: string;
-      /** Arq Timestamp */
-      arq_timestamp?: string | null;
-      /** Watchdog Timestamp */
-      watchdog_timestamp?: string | null;
-      /** Redis Db */
-      redis_db?: number | null;
-      /**
-       * Queue Name
-       * @default arq:queue
-       */
-      queue_name?: string;
     };
     /** DefaultAssistant */
     DefaultAssistant: {
@@ -12512,7 +13047,9 @@ export interface components {
       | 9054
       | 9055
       | 9056
-      | 9057;
+      | 9057
+      | 9058
+      | 9059;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -12750,21 +13287,6 @@ export interface components {
       has_global_oidc_config: boolean;
       /** Tenant Count */
       tenant_count: number;
-    };
-    /**
-     * FeederLeader
-     * @description Feeder leader election status.
-     */
-    FeederLeader: {
-      /** Leader Id */
-      leader_id?: string | null;
-      /** Leader Ttl Seconds */
-      leader_ttl_seconds?: number | null;
-      /**
-       * Status
-       * @default UNKNOWN
-       */
-      status?: string;
     };
     /** FileDeletionPreview */
     FileDeletionPreview: {
@@ -13130,18 +13652,6 @@ export interface components {
     HTTPValidationError: {
       /** Detail */
       detail?: components["schemas"]["ValidationError"][];
-    };
-    /**
-     * HealthThresholds
-     * @description Thresholds used for status decisions - helps explain status.
-     */
-    HealthThresholds: {
-      /** Feeder Interval Seconds */
-      feeder_interval_seconds: number;
-      /** Watchdog Stale Threshold Seconds */
-      watchdog_stale_threshold_seconds: number;
-      /** Heartbeat Ttl Expected Seconds */
-      heartbeat_ttl_expected_seconds: number;
     };
     /**
      * HelperKind
@@ -13741,10 +14251,19 @@ export interface components {
       | "processing_interrupted"
       | "invalid_job_payload"
       | "quota_exceeded"
+      | "tenant_quota_exceeded"
+      | "user_quota_exceeded"
       | "storage_limit_exceeded"
       | "storage_unavailable"
       | "storage_verification_failed"
-      | "knowledge_source_conflict";
+      | "knowledge_source_conflict"
+      | "dispatch_failed"
+      | "invalid_dispatch"
+      | "worker_interrupted"
+      | "lease_expired"
+      | "remote_unreachable"
+      | "remote_blocked"
+      | "timed_out";
     /** JobPublic */
     JobPublic: {
       /** Created At */
@@ -15725,19 +16244,6 @@ export interface components {
        */
       readonly count: number;
     };
-    /** PaginatedResponse[CrawlRunPublic] */
-    PaginatedResponse_CrawlRunPublic_: {
-      /**
-       * Items
-       * @description List of items returned in the response
-       */
-      items: components["schemas"]["eneo__websites__presentation__website_models__CrawlRunPublic"][];
-      /**
-       * Count
-       * @description Number of items returned in the response
-       */
-      readonly count: number;
-    };
     /** PaginatedResponse[EmbeddingModelLegacy] */
     PaginatedResponse_EmbeddingModelLegacy_: {
       /**
@@ -16526,26 +17032,6 @@ export interface components {
        * Format: date-time
        */
       updated_at: string;
-    };
-    /**
-     * PendingQueueSummary
-     * @description Pending crawl queue summary.
-     */
-    PendingQueueSummary: {
-      /**
-       * Total
-       * @default 0
-       */
-      total?: number;
-      /**
-       * Tenant Count
-       * @default 0
-       */
-      tenant_count?: number;
-      /** Top Tenants */
-      top_tenants?: {
-        [key: string]: number;
-      };
     };
     /**
      * Permission
@@ -21224,43 +21710,28 @@ export interface components {
       user_confirmed?: boolean;
     };
     /**
-     * WatchdogMetrics
-     * @description Watchdog activity metrics.
+     * WebsiteBulkActionError
+     * @description One website-level failure in a bounded bulk action.
      */
-    WatchdogMetrics: {
-      /** Age Seconds */
-      age_seconds?: number | null;
+    WebsiteBulkActionError: {
       /**
-       * Zombies Reconciled
-       * @default 0
+       * Website Id
+       * Format: uuid
        */
-      zombies_reconciled?: number;
-      /**
-       * Expired Killed
-       * @default 0
-       */
-      expired_killed?: number;
-      /**
-       * Rescued
-       * @default 0
-       */
-      rescued?: number;
-      /**
-       * Early Zombies Failed
-       * @default 0
-       */
-      early_zombies_failed?: number;
-      /**
-       * Long Running Failed
-       * @default 0
-       */
-      long_running_failed?: number;
-      /**
-       * Slots Released
-       * @default 0
-       */
-      slots_released?: number;
+      website_id: string;
+      /** @description Stable machine-readable website action error code */
+      error: components["schemas"]["WebsiteBulkErrorCode"];
     };
+    /**
+     * WebsiteBulkErrorCode
+     * @enum {string}
+     */
+    WebsiteBulkErrorCode:
+      | "not_authorized"
+      | "not_found"
+      | "crawl_stop_requested"
+      | "crawl_active"
+      | "crawl_cleanup_pending";
     /** WebsiteCreate */
     WebsiteCreate: {
       /** Name */
@@ -21379,9 +21850,12 @@ export interface components {
       download_files: boolean;
       crawl_type: components["schemas"]["CrawlType"];
       update_interval: components["schemas"]["UpdateInterval"];
-      latest_crawl:
-        | components["schemas"]["eneo__websites__presentation__website_models__CrawlRunPublic"]
-        | null;
+      latest_crawl: components["schemas"]["CrawlRunPublic"] | null;
+      /**
+       * Last Indexed At
+       * @description Completion time of the latest successful, unchanged, empty, or partial indexing run. A later active or failed run does not replace it.
+       */
+      last_indexed_at: string | null;
       embedding_model: components["schemas"]["EmbeddingModelPublic"];
       metadata: components["schemas"]["WebsiteMetadata"];
       /**
@@ -21689,65 +22163,6 @@ export interface components {
        */
       set_at: string;
     };
-    /** CrawlRunPublic */
-    eneo__websites__crawl_dependencies__crawl_models__CrawlRunPublic: {
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      /** Pages Crawled */
-      pages_crawled?: number | null;
-      /** Files Downloaded */
-      files_downloaded?: number | null;
-      /** Pages Failed */
-      pages_failed?: number | null;
-      /** Files Failed */
-      files_failed?: number | null;
-      /** Failure Summary */
-      failure_summary?: {
-        [key: string]: number;
-      } | null;
-      /** @default queued */
-      status?: components["schemas"]["Status"] | null;
-      /** Result Location */
-      result_location?: string | null;
-      /** Finished At */
-      finished_at?: string | null;
-    };
-    /** CrawlRunPublic */
-    eneo__websites__presentation__website_models__CrawlRunPublic: {
-      /** Created At */
-      created_at?: string | null;
-      /** Updated At */
-      updated_at?: string | null;
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      /** Pages Crawled */
-      pages_crawled: number | null;
-      /** Files Downloaded */
-      files_downloaded: number | null;
-      /** Pages Failed */
-      pages_failed: number | null;
-      /** Files Failed */
-      files_failed: number | null;
-      /** Failure Summary */
-      failure_summary?: {
-        [key: string]: number;
-      } | null;
-      status: components["schemas"]["Status"];
-      /** Result Location */
-      result_location: string | null;
-      /** Finished At */
-      finished_at: string | null;
-    };
     /** @enum {string} */
     EneoEventType:
       | "generating_image"
@@ -21980,7 +22395,120 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["eneo__websites__crawl_dependencies__crawl_models__CrawlRunPublic"];
+          "application/json": components["schemas"]["CrawlRunPublic"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_crawl_failures_api_v1_crawl_runs__id__failures__get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        cursor?: string | null;
+        kind?: components["schemas"]["CrawlResourceKind"] | null;
+      };
+      header?: never;
+      path: {
+        /** @description Unique identifier of the crawl run */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlFailurePagePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  cancel_crawl_run_api_v1_crawl_runs__id__cancel__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Unique identifier of the crawl run to stop */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlRunPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -29943,6 +30471,388 @@ export interface operations {
       };
     };
   };
+  get_crawler_overview_api_v1_admin_crawler__get: {
+    parameters: {
+      query?: {
+        view?: "active" | "recent" | "all";
+        status?:
+          | components["schemas"]["CrawlPhase"]
+          | components["schemas"]["CrawlOutcome"]
+          | ("issues" | "completed" | "warnings" | "unsuccessful")
+          | null;
+        period?: components["schemas"]["CrawlHistoryPeriod"];
+        /** @description IANA time zone used for today and yesterday. */
+        time_zone?: string;
+        search?: string;
+        limit?: number;
+        cursor?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminCrawlerOverview"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_crawler_details_api_v1_admin_crawler_runs__id___get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminCrawlerDetails"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_crawler_failures_api_v1_admin_crawler_runs__id__failures__get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        cursor?: string | null;
+        kind?: components["schemas"]["CrawlResourceKind"] | null;
+      };
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlFailurePagePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_admin_website_runs_api_v1_admin_crawler_websites__id__runs__get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        cursor?: string | null;
+      };
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CursorPaginatedResponse_CrawlRunPublic_"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_admin_website_matches_api_v1_admin_crawler_websites__id__matches__get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        cursor?: string | null;
+      };
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminCrawlerRelatedPage"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  request_admin_crawl_api_v1_admin_crawler_websites__id__run__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlRunPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  cancel_admin_crawl_api_v1_admin_crawler_runs__id__cancel__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlRunPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   get_users_api_v1_admin_users__get: {
     parameters: {
       query?: {
@@ -35151,6 +36061,15 @@ export interface operations {
           "application/json": components["schemas"]["ModelProviderPublic"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Forbidden */
       403: {
         headers: {
@@ -38697,6 +39616,108 @@ export interface operations {
       };
     };
   };
+  bulk_stop_crawl_api_v1_websites_bulk_stop__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["BulkCrawlRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BulkCrawlStopResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  bulk_delete_websites_api_v1_websites_bulk_delete__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["BulkCrawlRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BulkWebsiteDeleteResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   get_website_api_v1_websites__id___get: {
     parameters: {
       query?: never;
@@ -38822,8 +39843,26 @@ export interface operations {
           "application/json": unknown;
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -38860,7 +39899,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["eneo__websites__presentation__website_models__CrawlRunPublic"];
+          "application/json": components["schemas"]["CrawlRunPublic"];
         };
       };
       /** @description Forbidden */
@@ -38903,6 +39942,68 @@ export interface operations {
   };
   get_crawl_runs_api_v1_websites__id__runs__get: {
     parameters: {
+      query?: {
+        limit?: number;
+        cursor?: string | null;
+      };
+      header?: never;
+      path: {
+        /** @description Unique identifier of the website */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CursorPaginatedResponse_CrawlRunPublic_"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_latest_crawl_run_api_v1_websites__id__runs_latest__get: {
+    parameters: {
       query?: never;
       header?: never;
       path: {
@@ -38919,7 +40020,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["PaginatedResponse_CrawlRunPublic_"];
+          "application/json": components["schemas"]["CrawlRunPublic"] | null;
         };
       };
       /** @description Forbidden */
@@ -39022,6 +40123,68 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["PaginatedResponse_InfoBlobPublicNoText_"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_info_blob_page_api_v1_websites__id__info_blobs_page__get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        cursor?: string | null;
+      };
+      header?: never;
+      path: {
+        /** @description Unique identifier of the website */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CursorPaginatedResponse_InfoBlobPublicNoText_"];
         };
       };
       /** @description Bad Request */
@@ -47668,6 +48831,15 @@ export interface operations {
           "application/json": components["schemas"]["EmbeddingModelSparse"];
         };
       };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Unauthorized */
       401: {
         headers: {
@@ -49568,9 +50740,7 @@ export interface operations {
   };
   crawler_health_api_healthz_crawler_get: {
     parameters: {
-      query?: {
-        include_all?: boolean;
-      };
+      query?: never;
       header?: never;
       path?: never;
       cookie?: never;
@@ -49584,15 +50754,6 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["CrawlerHealthResponse"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };

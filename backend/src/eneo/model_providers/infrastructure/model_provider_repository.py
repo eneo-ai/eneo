@@ -38,11 +38,15 @@ class ModelProviderRepository:
             ModelProvider.create_from_db(provider_db) for provider_db in providers_db
         ]
 
-    async def get_by_id(self, provider_id: UUID) -> ModelProvider:
+    async def get_by_id(
+        self, provider_id: UUID, *, for_update: bool = False
+    ) -> ModelProvider:
         """Get a provider by ID."""
         stmt = sa.select(ModelProviders).where(
             ModelProviders.id == provider_id, ModelProviders.tenant_id == self.tenant_id
         )
+        if for_update:
+            stmt = stmt.with_for_update().execution_options(populate_existing=True)
 
         result = await self.session.execute(stmt)
         provider_db = result.scalar_one_or_none()

@@ -15,6 +15,7 @@ from httpx import AsyncClient
 from eneo.authentication.auth_service import AuthService
 from eneo.database.database import sessionmanager
 from eneo.database.tables.tenant_table import Tenants
+from eneo.main.config import get_settings, set_settings
 from eneo.tenants.tenant_repo import TenantRepository
 
 
@@ -865,7 +866,6 @@ async def test_federation_callback_rejects_redirect_mismatch_without_grace(
     jwks_mock,
     monkeypatch,
     mock_transcription_models,
-    test_settings,
     async_session,
 ):
     slug = f"federation-redirect-{uuid4().hex[:6]}"
@@ -909,12 +909,18 @@ async def test_federation_callback_rejects_redirect_mismatch_without_grace(
         lambda *_, **__: {"email": allowed_email},
     )
 
-    original_grace = test_settings.oidc_redirect_grace_period_seconds
-    original_strict = test_settings.strict_oidc_redirect_validation
+    # Other tests may have replaced the singleton with a settings copy.
+    # Override the instance used by requests, not the original fixture object.
+    original_settings = get_settings()
+    set_settings(
+        original_settings.model_copy(
+            update={
+                "oidc_redirect_grace_period_seconds": 0,
+                "strict_oidc_redirect_validation": True,
+            }
+        )
+    )
     try:
-        test_settings.oidc_redirect_grace_period_seconds = 0
-        test_settings.strict_oidc_redirect_validation = True
-
         await _configure_federation(
             client,
             super_admin_token,
@@ -988,8 +994,7 @@ async def test_federation_callback_rejects_redirect_mismatch_without_grace(
         assert response.status_code == 400
         assert "redirect" in response.json()["detail"].lower()
     finally:
-        test_settings.oidc_redirect_grace_period_seconds = original_grace
-        test_settings.strict_oidc_redirect_validation = original_strict
+        set_settings(original_settings)
 
 
 @pytest.mark.integration

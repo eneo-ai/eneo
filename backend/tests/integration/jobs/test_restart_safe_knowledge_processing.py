@@ -41,7 +41,7 @@ pytestmark = pytest.mark.integration
 
 
 class StubExtractor:
-    def extract(
+    async def extract_bounded(
         self, filepath: Path, mimetype: str, filename: str | None = None
     ) -> str:
         return "replacement knowledge"
@@ -399,11 +399,11 @@ async def test_heartbeat_advances_updated_at_during_each_compute_phase(
         assert release.wait(timeout=2)
 
     class PhaseExtractor:
-        def extract(
+        async def extract_bounded(
             self, filepath: Path, mimetype: str, filename: str | None = None
         ) -> str:
             if stalled_phase == "extraction":
-                stall_sync_phase()
+                await asyncio.to_thread(stall_sync_phase)
             return "replacement knowledge"
 
     original_chunk_text = Datastore._chunk_text

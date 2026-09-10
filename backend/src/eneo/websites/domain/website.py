@@ -57,6 +57,7 @@ class Website(Entity):
         http_auth: Optional[HttpAuthCredentials] = None,
         consecutive_failures: int = 0,
         next_retry_at: Optional["datetime"] = None,
+        last_indexed_at: Optional["datetime"] = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.space_id = space_id
@@ -74,6 +75,7 @@ class Website(Entity):
         self.http_auth = http_auth
         self.consecutive_failures = consecutive_failures
         self.next_retry_at = next_retry_at
+        self.last_indexed_at = last_indexed_at
 
     @property
     def requires_auth(self) -> bool:
@@ -284,6 +286,7 @@ class Website(Entity):
             if latest_crawl
             else None,
             last_crawled_at=record.last_crawled_at,
+            last_indexed_at=record.last_indexed_at,
             http_auth=http_auth,
             consecutive_failures=record.consecutive_failures,
             next_retry_at=record.next_retry_at,
@@ -354,7 +357,7 @@ class WebsiteSparse(Entity):
         tenant_id: "UUID",
         embedding_model_id: "UUID",
         space_id: "UUID",
-        name: str,
+        name: str | None,
         url: str,
         download_files: bool,
         crawl_type: CrawlType,
@@ -415,9 +418,7 @@ class WebsiteSparse(Entity):
             space_id=cast(
                 "UUID", record.space_id
             ),  # DB invariant: space_id is non-null for persisted websites
-            name=cast(
-                str, record.name
-            ),  # DB invariant: name is non-null for sparse website records
+            name=record.name,
             url=record.url,
             download_files=record.download_files,
             crawl_type=record.crawl_type,

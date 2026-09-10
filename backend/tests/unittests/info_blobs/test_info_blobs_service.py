@@ -1,10 +1,11 @@
 from dataclasses import dataclass
 from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import pytest
 
 from eneo.groups_legacy.group_service import GroupService
-from eneo.info_blobs.info_blob_repo import InfoBlobRepository
+from eneo.info_blobs.info_blob_repo import InfoBlobRepository, WebsiteInfoBlobPage
 from eneo.info_blobs.info_blob_service import InfoBlobService
 from eneo.main.exceptions import NameCollisionException, NotFoundException
 
@@ -85,6 +86,40 @@ async def test_get_by_user_projects_original_availability_after_filtering(setup:
 
     assert result == [included]
     setup.repo.hydrate_original_availability.assert_awaited_once_with([included])
+
+
+async def test_get_by_website_page_projects_original_availability(setup: Setup):
+    website_id = uuid4()
+    cursor = uuid4()
+    next_cursor = uuid4()
+    stored = MagicMock(original_available=False)
+    projected = MagicMock(original_available=True)
+    setup.service._authorize_website_info_blobs = AsyncMock()
+    setup.repo.get_by_website_page.return_value = WebsiteInfoBlobPage(
+        items=[stored],
+        total_count=7,
+        next_cursor=next_cursor,
+    )
+    setup.repo.hydrate_original_availability.return_value = [projected]
+
+    result = await setup.service.get_by_website_page(
+        website_id,
+        limit=3,
+        cursor=cursor,
+    )
+
+    assert result == WebsiteInfoBlobPage(
+        items=[projected],
+        total_count=7,
+        next_cursor=next_cursor,
+    )
+    setup.service._authorize_website_info_blobs.assert_awaited_once_with(website_id)
+    setup.repo.get_by_website_page.assert_awaited_once_with(
+        website_id=website_id,
+        limit=3,
+        cursor=cursor,
+    )
+    setup.repo.hydrate_original_availability.assert_awaited_once_with([stored])
 
 
 async def test_update_fails_if_info_blob_with_same_name_exists(setup: Setup):

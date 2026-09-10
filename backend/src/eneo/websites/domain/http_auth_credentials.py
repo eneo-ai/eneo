@@ -19,12 +19,12 @@ class HttpAuthCredentials:
     - This object holds PLAINTEXT credentials temporarily during domain operations
     - Never persisted in plaintext - encryption happens at infrastructure boundary
     - Short-lived - exists only during request/crawl lifecycle
-    - Domain-locked to prevent credential leakage (Scrapy security requirement)
+    - Domain-locked to prevent credential leakage across crawl origins
     """
 
     username: str
     password: str
-    auth_domain: str  # Required by Scrapy's HttpAuthMiddleware for security
+    auth_domain: str
 
     def __post_init__(self):
         """Validate credentials meet business rules."""
@@ -43,8 +43,8 @@ class HttpAuthCredentials:
     ) -> "HttpAuthCredentials":
         """Factory method to create credentials with auto-extracted domain.
 
-        Why: Scrapy's HttpAuthMiddleware requires exact domain match for security.
-        Extracting domain from website URL ensures credentials only apply to intended site.
+        Extracting the domain from the website URL ensures credentials only apply
+        to the intended crawl origin.
 
         Args:
             username: HTTP Basic Auth username
@@ -66,21 +66,3 @@ class HttpAuthCredentials:
         return cls(
             username=username.strip(), password=password, auth_domain=auth_domain
         )
-
-    def to_scrapy_kwargs(self) -> dict[str, str]:
-        """Convert to Scrapy spider initialization parameters.
-
-        Why: Encapsulates knowledge of how Scrapy expects auth credentials.
-
-        Note: We only pass http_user and http_pass. The spider computes
-        http_auth_domain internally from the URL to avoid kwargs conflicts
-        with Scrapy's initialization mechanism (the working pattern).
-
-        Returns:
-            Dict with keys: http_user, http_pass
-        """
-        return {
-            "http_user": self.username,
-            "http_pass": self.password,
-            # http_auth_domain intentionally NOT passed - spider computes it
-        }

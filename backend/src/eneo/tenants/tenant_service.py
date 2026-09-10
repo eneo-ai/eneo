@@ -6,7 +6,10 @@ from pydantic import HttpUrl
 
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.modules.module import ModuleTenantAssignment
-from eneo.tenants.crawler_settings_helper import get_all_crawler_settings
+from eneo.tenants.crawler_settings_helper import (
+    get_active_crawler_settings,
+    get_all_crawler_settings,
+)
 from eneo.tenants.masking import mask_api_key
 from eneo.tenants.provider_field_config import validate_provider_credentials
 from eneo.tenants.tenant import (
@@ -498,7 +501,9 @@ class TenantService:
         return {
             "tenant_id": tenant_id,
             "settings": effective_settings,
-            "overrides": list(updated_tenant.crawler_settings.keys()),
+            "overrides": list(
+                get_active_crawler_settings(updated_tenant.crawler_settings)
+            ),
             "updated_at": updated_tenant.updated_at,
         }
 
@@ -538,7 +543,7 @@ class TenantService:
         return {
             "tenant_id": tenant_id,
             "settings": effective_settings,
-            "overrides": list(overrides.keys()),
+            "overrides": list(get_active_crawler_settings(overrides)),
             "updated_at": tenant.updated_at if overrides else None,
         }
 
@@ -565,8 +570,8 @@ class TenantService:
         self._validate(tenant, tenant_id)
         assert tenant is not None
 
-        # Get keys before deletion
-        deleted_keys = list((tenant.crawler_settings or {}).keys())
+        # Rollback-only keys stay persisted but are never active or public.
+        deleted_keys = list(get_active_crawler_settings(tenant.crawler_settings or {}))
 
         # Clear settings using dedicated method
         await self.repo.clear_crawler_settings(tenant_id=tenant_id)

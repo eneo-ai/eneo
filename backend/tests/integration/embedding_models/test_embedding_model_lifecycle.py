@@ -9,17 +9,20 @@ re-embedding, not repointing), so the lifecycle is soft-delete only:
   are the blocker that keeps a tombstone alive until the knowledge is gone
 """
 
+import asyncio
 from datetime import datetime, timezone
 from hashlib import sha256
 from uuid import uuid4
 
 import pytest
+from cryptography.fernet import Fernet
 from sqlalchemy import select
 
 from eneo.database.tables.ai_models_table import EmbeddingModels
 from eneo.database.tables.info_blobs_table import InfoBlobs, InfoBlobVersionState
 from eneo.database.tables.model_providers_table import ModelProviders
 from eneo.database.tables.spaces_table import SpacesEmbeddingModels
+from eneo.database.tables.websites_table import Websites
 from eneo.embedding_models.domain.embedding_model_repo import (
     EmbeddingModelRepository,
 )
@@ -29,7 +32,12 @@ from eneo.embedding_models.infrastructure.embedding_model_cleanup_worker import 
 from eneo.embedding_models.presentation.tenant_embedding_models_router import (
     TenantEmbeddingModelUpdate,
 )
-from eneo.main.exceptions import NotFoundException
+from eneo.main.exceptions import ModelInUseException, NotFoundException
+from eneo.model_providers.domain.model_provider_service import ModelProviderService
+from eneo.model_providers.infrastructure.model_provider_repository import (
+    ModelProviderRepository,
+)
+from eneo.settings.encryption_service import EncryptionService
 from eneo.tenant_models.application.tenant_model_service import (
     TenantEmbeddingModelService,
 )
@@ -71,6 +79,150 @@ async def _make_embedding_model(session, admin_user, name, *, deleted=False):
         model.deleted_at = datetime.now(timezone.utc)
         await session.flush()
     return model
+
+
+@pytest.mark.parametrize(
+    "change", [{"family": "e5"}, {"dimensions": 768}, {"max_input": 8192}]
+)
+async def test_retained_vectors_prevent_semantic_model_edits(
+    db_container, admin_user, change
+):
+    async with db_container() as container:
+        session = container.session()
+        model = await _make_embedding_model(session, admin_user, "retained-embedding")
+        session.add(
+            InfoBlobs(
+                text="Retained knowledge",
+                size=18,
+                content_hash=sha256(b"Retained knowledge").digest(),
+                source_id=uuid4(),
+                version_state=InfoBlobVersionState.SUPERSEDED.value,
+                user_id=admin_user.id,
+                tenant_id=admin_user.tenant_id,
+                embedding_model_id=model.id,
+            )
+        )
+        await session.flush()
+        service = TenantEmbeddingModelService(session=session, user=admin_user)
+        with pytest.raises(ModelInUseException):
+            await service.update(model.id, TenantEmbeddingModelUpdate(**change))
+        updated = await service.update(
+            model.id, TenantEmbeddingModelUpdate(display_name="New display name")
+        )
+        assert updated.nickname == "New display name"
+
+
+async def test_first_website_assignment_wins_race_with_model_edit(
+    db_container, db_session, admin_user
+):
+    async with db_container() as setup:
+        model = await _make_embedding_model(
+            setup.session(), admin_user, "first-assignment"
+        )
+        model_id = model.id
+
+    async def edit_model():
+        async with db_container() as container:
+            service = TenantEmbeddingModelService(
+                session=container.session(), user=admin_user
+            )
+            await service.update(model_id, TenantEmbeddingModelUpdate(dimensions=768))
+
+    async with db_session() as session:
+        session.add(
+            Websites(
+                name="New website",
+                url="https://example.com",
+                size=0,
+                download_files=False,
+                crawl_type="crawl",
+                update_interval="never",
+                user_id=admin_user.id,
+                tenant_id=admin_user.tenant_id,
+                embedding_model_id=model_id,
+            )
+        )
+        await session.flush()
+        editing = asyncio.create_task(edit_model())
+        completed, _ = await asyncio.wait({editing}, timeout=0.1)
+    with pytest.raises(ModelInUseException):
+        await asyncio.wait_for(editing, timeout=5)
+    assert not completed
+
+
+async def test_provider_route_is_frozen_while_key_rotation_remains_available(
+    db_container, admin_user
+):
+    async with db_container() as container:
+        session = container.session()
+        model = await _make_embedding_model(session, admin_user, "provider-in-use")
+        provider = await session.get(ModelProviders, model.provider_id)
+        provider.config = {"endpoint": "https://old-provider.example/v1"}
+        session.add(
+            InfoBlobs(
+                text="Historical knowledge",
+                size=20,
+                content_hash=sha256(b"Historical knowledge").digest(),
+                source_id=uuid4(),
+                version_state=InfoBlobVersionState.SUPERSEDED.value,
+                user_id=admin_user.id,
+                tenant_id=admin_user.tenant_id,
+                embedding_model_id=model.id,
+            )
+        )
+        await session.flush()
+        encryption = EncryptionService(Fernet.generate_key().decode())
+        service = ModelProviderService(
+            repository=ModelProviderRepository(session, admin_user.tenant_id),
+            encryption=encryption,
+        )
+        for change in (
+            {"config": {"endpoint": "https://different-provider.example/v1"}},
+            {
+                "credentials": {
+                    "endpoint": "https://different-provider.example/v1",
+                    "api_key": "new-key",
+                }
+            },
+        ):
+            with pytest.raises(ModelInUseException):
+                await service.update(provider.id, **change)
+        updated = await service.update(
+            provider.id, name="Renamed provider", credentials={"api_key": "new-key"}
+        )
+        assert updated.config["endpoint"] == "https://old-provider.example/v1"
+        assert encryption.decrypt(updated.credentials["api_key"]) == "new-key"
+
+
+async def test_sysadmin_cannot_change_model_route_with_retained_vectors(
+    client, super_admin_token, db_container, admin_user
+):
+    async with db_container() as setup:
+        session = setup.session()
+        model = await _make_embedding_model(
+            session, admin_user, "global-retained-model"
+        )
+        model.tenant_id = None
+        model.provider_id = None
+        model_id = model.id
+        session.add(
+            InfoBlobs(
+                text="Historical knowledge",
+                size=20,
+                content_hash=sha256(b"Historical knowledge").digest(),
+                source_id=uuid4(),
+                version_state=InfoBlobVersionState.SUPERSEDED.value,
+                user_id=admin_user.id,
+                tenant_id=admin_user.tenant_id,
+                embedding_model_id=model_id,
+            )
+        )
+    response = await client.put(
+        f"/api/v1/sysadmin/embedding-models/{model_id}/metadata",
+        headers={"X-API-Key": super_admin_token},
+        json={"name": "different-global-route"},
+    )
+    assert response.status_code == 400, response.text
 
 
 @pytest.mark.integration

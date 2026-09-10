@@ -1,162 +1,88 @@
 <script lang="ts">
-  import type { CrawlRun } from "@eneo/eneo-js";
+  import type { CrawlResourceFailure, CrawlRun } from "@eneo/eneo-js";
   import { Label } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
+  import {
+    crawlRunFailureMessage,
+    crawlRunState,
+    crawlRunStateLabel,
+    type CrawlRunState
+  } from "$lib/features/knowledge/crawlRunState";
+
+  import CrawlFailureActions from "$lib/features/knowledge/CrawlFailureActions.svelte";
 
   export let crawl: CrawlRun;
+  export let onshowFailures: (kind: CrawlResourceFailure["kind"] | null) => void;
   export let align: "start" | "end" | "center" = "start";
 
   let cls = "";
   export { cls as class };
 
-  const successPages = (crawl.pages_crawled ?? 0) - (crawl.pages_failed ?? 0);
-  const successFiles = (crawl.files_downloaded ?? 0) - (crawl.files_failed ?? 0);
-  const SKIPPED_PREFIX = "skipped duplicate crawl";
+  $: pagesCrawled = crawl.pages_crawled ?? 0;
+  $: filesDownloaded = crawl.files_downloaded ?? 0;
+  $: pagesFailed = crawl.pages_failed ?? 0;
+  $: filesFailed = crawl.files_failed ?? 0;
+  $: state = crawlRunState(crawl);
 
-  // Map failure reason codes to i18n labels
-  function getFailureReasonLabel(reason: string): string {
-    const labels: Record<string, () => string> = {
-      EMPTY_CONTENT: () => m.failure_reason_EMPTY_CONTENT(),
-      NO_CHUNKS: () => m.failure_reason_NO_CHUNKS(),
-      EMBEDDING_TIMEOUT: () => m.failure_reason_EMBEDDING_TIMEOUT(),
-      EMBEDDING_ERROR: () => m.failure_reason_EMBEDDING_ERROR(),
-      DB_ERROR: () => m.failure_reason_DB_ERROR(),
-      NO_EMBEDDING_MODEL: () => m.failure_reason_NO_EMBEDDING_MODEL(),
-      MISSING_PROVIDER: () => m.failure_reason_MISSING_PROVIDER()
-    };
-    return labels[reason]?.() ?? reason;
-  }
-
-  // Build tooltip content from failure_summary
-  function getFailureTooltip(): string | undefined {
-    const summary = (crawl as CrawlRun & { failure_summary?: Record<string, number> })
-      .failure_summary;
-    if (!summary || Object.keys(summary).length === 0) {
-      return undefined;
-    }
-
-    const lines = Object.entries(summary)
-      .map(([reason, count]) => `${getFailureReasonLabel(reason)}: ${count}`)
-      .join("\n");
-
-    return `${m.failure_reasons_tooltip()}:\n${lines}`;
-  }
-
-  function totalLabel(): { label: string; color: Label.LabelColor } {
-    if ((crawl.files_downloaded ?? 0) > 0) {
-      return {
-        color: "blue",
-        label: m.crawled_pages_and_files({
-          pages: crawl.pages_crawled,
-          files: crawl.files_downloaded
-        })
-      };
-    } else {
-      return {
-        color: "blue",
-        label: m.crawled_pages({ count: crawl.pages_crawled })
-      };
-    }
-  }
-
-  function failedLabel(): { label: string; color: Label.LabelColor; tooltip?: string } {
-    const tooltip = getFailureTooltip();
-
-    if (crawl.pages_failed && crawl.files_failed) {
-      return {
-        color: "orange",
-        label: m.pages_and_files_failed({ pages: crawl.pages_failed, files: crawl.files_failed }),
-        tooltip
-      };
-    } else if (crawl.pages_failed) {
-      return {
-        color: "orange",
-        label: m.pages_failed({ count: crawl.pages_failed }),
-        tooltip
-      };
-    } else {
-      return {
-        color: "orange",
-        label: m.files_failed({ count: crawl.files_failed }),
-        tooltip
-      };
-    }
-  }
-
-  function successLabel(): { label: string; color: Label.LabelColor } {
-    if (successPages && successFiles) {
+  function successLabel(currentCrawl: CrawlRun): { label: string; color: Label.LabelColor } {
+    const pagesCrawled = currentCrawl.pages_crawled ?? 0;
+    const filesDownloaded = currentCrawl.files_downloaded ?? 0;
+    if (pagesCrawled && filesDownloaded) {
       return {
         color: "green",
-        label: m.pages_and_files_succeeded({ pages: successPages, files: successFiles })
+        label: m.pages_and_files_succeeded({ pages: pagesCrawled, files: filesDownloaded })
       };
-    } else if (successPages > 0) {
+    } else if (pagesCrawled > 0) {
       return {
         color: "green",
-        label: m.pages_succeeded({ count: successPages })
+        label: m.pages_succeeded({ count: pagesCrawled })
       };
     } else {
       return {
         color: "green",
-        label: m.files_succeeded({ count: successFiles })
+        label: m.files_succeeded({ count: filesDownloaded })
       };
     }
   }
 
-  function crawlStatus(): { label: string; color: Label.LabelColor; tooltip?: string } {
-    const reason = crawl.result_location ?? undefined;
-    const skipTooltip = crawl.result_location?.toLowerCase().startsWith(SKIPPED_PREFIX)
-      ? m.crawl_skipped_duplicate()
-      : reason;
-    if (
-      crawl.status === "failed" &&
-      crawl.result_location?.toLowerCase().startsWith(SKIPPED_PREFIX)
-    ) {
-      return {
-        color: "gray",
-        label: m.crawl_skipped(),
-        tooltip: skipTooltip
-      };
-    }
-
-    if (crawl.status === "failed" || crawl.status === "not found") {
-      return {
-        color: "orange",
-        label: m.crawl_failed(),
-        tooltip: reason
-      };
-    }
-
-    if (crawl.status === "queued") {
-      return {
-        color: "blue",
-        label: m.queued()
-      };
-    }
-
-    if (crawl.status === "in progress") {
-      return {
-        color: "yellow",
-        label: m.in_progress()
-      };
-    }
-
+  function crawlStatus(
+    currentState: CrawlRunState,
+    currentCrawl: CrawlRun
+  ): {
+    label: string;
+    color: Label.LabelColor;
+    tooltip?: string;
+  } {
     return {
-      color: "blue",
-      label: m.crawl_still_running()
+      color:
+        currentState === "queued"
+          ? "blue"
+          : currentState === "cancelled" || currentState === "unchanged"
+            ? "gray"
+            : currentState === "failed" ||
+                currentState === "interrupted" ||
+                currentState === "unknown"
+              ? "orange"
+              : "yellow",
+      label: crawlRunStateLabel(currentState),
+      tooltip:
+        currentState === "failed" || currentState === "interrupted" || currentState === "cancelled"
+          ? crawlRunFailureMessage(currentCrawl)
+          : undefined
     };
   }
 </script>
 
-<div class="flex w-full items-center gap-2 {cls}" style="justify-content: flex-{align}">
-  {#if crawl.status === "complete"}
-    <Label.Single capitalize={false} item={totalLabel()}></Label.Single>
-    {#if successPages || successFiles}
-      <Label.Single capitalize={false} item={successLabel()}></Label.Single>
+<div class="flex w-full flex-wrap items-center gap-2 {cls}" style="justify-content: flex-{align}">
+  {#if state === "succeeded" || state === "partial" || state === "running" || state === "finalizing" || state === "stopping"}
+    {#if pagesCrawled || filesDownloaded}
+      <Label.Single capitalize={false} item={successLabel(crawl)}></Label.Single>
     {/if}
-    {#if crawl.pages_failed || crawl.files_failed}
-      <Label.Single capitalize={false} item={failedLabel()}></Label.Single>
+    {#if !pagesCrawled && !filesDownloaded && !pagesFailed && !filesFailed}
+      <Label.Single capitalize={false} item={crawlStatus(state, crawl)}></Label.Single>
     {/if}
   {:else}
-    <Label.Single capitalize={false} item={crawlStatus()}></Label.Single>
+    <Label.Single capitalize={false} item={crawlStatus(state, crawl)}></Label.Single>
   {/if}
+  <CrawlFailureActions run={crawl} onselect={onshowFailures} />
 </div>

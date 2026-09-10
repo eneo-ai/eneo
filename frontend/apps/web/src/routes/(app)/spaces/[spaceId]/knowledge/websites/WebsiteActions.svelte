@@ -11,6 +11,8 @@
   import { derived } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
+  import { toast } from "$lib/components/toast";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
 
   export let website: WebsiteSparse;
 
@@ -25,14 +27,27 @@
   async function deleteWebsite() {
     isProcessing = true;
     try {
-      await eneo.websites.delete({ id: website.id });
-      refreshCurrentSpace();
-      $showDeleteDialog = false;
+      const result = await eneo.websites.bulkDelete({ website_ids: [website.id] });
+      showDeleteDialog = false;
+
+      if (result.deleted === 1) {
+        toast.success(m.websites_removed({ count: 1 }));
+      } else if (result.errors.some((error) => error.error === "crawl_stop_requested")) {
+        toast.info(m.website_remove_stopping());
+      } else if (result.errors.some((error) => error.error === "crawl_cleanup_pending")) {
+        toast.info(m.website_remove_cleanup_pending());
+      } else if (result.not_found === 1) {
+        toast.info(m.websites_already_removed());
+      } else {
+        toast.error(m.bulk_website_remove_failed());
+      }
+      await refreshCurrentSpace("knowledge");
     } catch (e) {
-      toastError(e, m.could_not_delete_crawl());
+      toastError(e, m.bulk_website_remove_failed());
       console.error(e);
+    } finally {
+      isProcessing = false;
     }
-    isProcessing = false;
   }
 
   async function moveCollection() {
@@ -63,14 +78,14 @@
   let moveDestination: { id: string } | undefined = undefined;
 
   let isProcessing = false;
-  let showEditDialog: Dialog.OpenState;
-  let showDeleteDialog: Dialog.OpenState;
+  let showEditDialog = false;
+  let showDeleteDialog = false;
   let showMoveDialog: Dialog.OpenState;
 </script>
 
 <Dropdown.Root>
   <Dropdown.Trigger let:trigger asFragment>
-    <Button is={trigger} padding="icon">
+    <Button is={trigger} padding="icon" aria-label={m.actions()}>
       <IconEllipsis />
     </Button>
   </Dropdown.Trigger>
@@ -78,7 +93,7 @@
     <Button
       is={item}
       on:click={() => {
-        $showEditDialog = true;
+        showEditDialog = true;
       }}
       padding="icon-leading"
     >
@@ -101,7 +116,7 @@
         is={item}
         variant="destructive"
         on:click={() => {
-          $showDeleteDialog = true;
+          showDeleteDialog = true;
         }}
         padding="icon-leading"
       >
@@ -111,23 +126,25 @@
   </Dropdown.Menu>
 </Dropdown.Root>
 
-<Dialog.Root alert bind:isOpen={showDeleteDialog}>
-  <Dialog.Content width="small">
-    <Dialog.Title>{m.delete_crawl()}</Dialog.Title>
-    <Dialog.Description>
-      {m.confirm_delete_crawl_start()}
-      <span class="italic">
+<AlertDialog.Root bind:open={showDeleteDialog}>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>{m.remove_website_title()}</AlertDialog.Title>
+      <AlertDialog.Description>
+        {m.remove_website_description()}
+      </AlertDialog.Description>
+      <p class="text-foreground text-sm font-medium break-all">
         {website.name ? `${website.name} (${website.url})` : website.url}
-      </span>{m.confirm_delete_crawl_end()}
-    </Dialog.Description>
-    <Dialog.Controls let:close>
-      <Button is={close}>{m.cancel()}</Button>
-      <Button variant="destructive" on:click={deleteWebsite}
-        >{isProcessing ? m.deleting() : m.delete()}</Button
-      >
-    </Dialog.Controls>
-  </Dialog.Content>
-</Dialog.Root>
+      </p>
+    </AlertDialog.Header>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel disabled={isProcessing}>{m.cancel()}</AlertDialog.Cancel>
+      <AlertDialog.Action variant="destructive" disabled={isProcessing} onclick={deleteWebsite}>
+        {isProcessing ? m.deleting() : m.remove_website_confirm()}
+      </AlertDialog.Action>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>
 
 <WebsiteEditor mode="update" {website} bind:showDialog={showEditDialog}></WebsiteEditor>
 

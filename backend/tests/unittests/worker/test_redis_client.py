@@ -1,9 +1,21 @@
 """Unit tests for worker redis client utilities."""
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
-from eneo.worker.redis.client import parse_arq_health_string
+from eneo.jobs.job_manager import CRAWLER_QUEUE_NAME
+from eneo.worker.redis.client import get_worker_health, parse_arq_health_string
+
+
+async def test_worker_health_can_target_the_crawler_queue(monkeypatch) -> None:
+    redis = AsyncMock()
+    redis.get.return_value = b"Aug-30 10:00:00 j_complete=2 queued=0"
+    monkeypatch.setattr("eneo.worker.redis.client.r", redis)
+
+    health = await get_worker_health(CRAWLER_QUEUE_NAME)
+
+    redis.get.assert_awaited_once_with(f"{CRAWLER_QUEUE_NAME}:health-check")
+    assert health.status == "HEALTHY"
 
 
 class TestParseArqHealthString:

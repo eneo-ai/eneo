@@ -17,6 +17,7 @@ from eneo.database.tables.info_blobs_table import (
     InfoBlobs,
     InfoBlobVersionState,
     active_info_blob_version,
+    website_source_url_equals,
 )
 from eneo.database.tables.integration_table import IntegrationKnowledge
 from eneo.database.tables.object_content_table import (
@@ -37,6 +38,7 @@ from eneo.main.exceptions import (
     NotFoundException,
 )
 from eneo.object_content.content import ContentAccessClass, ContentState
+from eneo.websites.domain.source_url import normalize_url
 
 _InfoBlobNoTextT = TypeVar("_InfoBlobNoTextT", bound=InfoBlobInDBNoText)
 
@@ -77,6 +79,13 @@ class InfoBlobListing:
     @property
     def label(self) -> str:
         return self.title or self.url or "Untitled source"
+
+
+@dataclass(frozen=True, slots=True)
+class WebsiteInfoBlobPage:
+    items: list[InfoBlobInDBNoText]
+    total_count: int
+    next_cursor: UUID | None
 
 
 class InfoBlobRepository:
@@ -188,12 +197,21 @@ class InfoBlobRepository:
             )
 
     @staticmethod
+    def website_publication_identity(website_id: UUID, url: str | None) -> str:
+        source_url = normalize_url(url) if url else None
+        if source_url is None:
+            raise ValueError("Website publications require an HTTP source URL")
+        return f"website:{website_id}:url:{source_url}"
+
+    @staticmethod
     def _publication_identity(info_blob: InfoBlobAdd) -> str | None:
         title = info_blob.title if info_blob.title and info_blob.title.strip() else None
         if info_blob.group_id is not None:
             return f"group:{info_blob.group_id}:title:{title}" if title else None
         if info_blob.website_id is not None:
-            return f"website:{info_blob.website_id}:title:{title}" if title else None
+            return InfoBlobRepository.website_publication_identity(
+                info_blob.website_id, info_blob.url
+            )
         if info_blob.integration_knowledge_id is not None:
             item_id = (
                 info_blob.sharepoint_item_id
@@ -256,10 +274,12 @@ class InfoBlobRepository:
         else:
             source_conditions: list[ColumnElement[bool]] = []
             if info_blob.website_id is not None:
+                source_url = normalize_url(info_blob.url) if info_blob.url else None
+                assert source_url is not None
                 source_conditions.extend(
                     [
                         InfoBlobs.website_id == info_blob.website_id,
-                        InfoBlobs.title == info_blob.title,
+                        website_source_url_equals(source_url),
                     ]
                 )
             elif info_blob.integration_knowledge_id is not None:
@@ -488,7 +508,15 @@ class InfoBlobRepository:
         updated_id = await self.session.scalar(
             sa.update(InfoBlobs)
             .where(InfoBlobs.id == info_blob_id, active_info_blob_version())
-            .values(title=info_blob.title, url=info_blob.url)
+            .values(
+                title=info_blob.title,
+                url=info_blob.url,
+                website_source_url=(
+                    normalize_url(info_blob.url)
+                    if info_blob.website_id is not None and info_blob.url
+                    else None
+                ),
+            )
             .returning(InfoBlobs.id)
         )
         if updated_id is None:
@@ -782,14 +810,61 @@ class InfoBlobRepository:
         records = await self.delegate.get_models_from_query(query)
         return [InfoBlobInDB.model_validate(record) for record in records]
 
-    async def get_by_website(self, website_id: UUID) -> list[InfoBlobInDB]:
+    async def get_by_website(
+        self,
+        website_id: UUID,
+    ) -> list[InfoBlobInDBNoText]:
         records = await self.session.scalars(
-            sa.select(InfoBlobs).where(
+            sa.select(InfoBlobs)
+            .where(
                 InfoBlobs.website_id == website_id,
                 active_info_blob_version(),
             )
+            .order_by(InfoBlobs.id.asc())
+            .options(
+                defer(InfoBlobs.text),
+                selectinload(InfoBlobs.website),
+            )
         )
-        return [InfoBlobInDB.model_validate(record) for record in records]
+        return [InfoBlobInDBNoText.model_validate(record) for record in records]
+
+    async def get_by_website_page(
+        self,
+        website_id: UUID,
+        *,
+        limit: int,
+        cursor: UUID | None = None,
+    ) -> WebsiteInfoBlobPage:
+        conditions = (
+            InfoBlobs.website_id == website_id,
+            active_info_blob_version(),
+        )
+        total_count = await self.session.scalar(
+            sa.select(sa.func.count()).select_from(InfoBlobs).where(*conditions)
+        )
+        query = (
+            sa.select(InfoBlobs)
+            .where(*conditions)
+            .order_by(InfoBlobs.id.asc())
+            .options(
+                defer(InfoBlobs.text),
+                selectinload(InfoBlobs.website),
+            )
+            .limit(limit + 1)
+        )
+        if cursor is not None:
+            query = query.where(InfoBlobs.id > cursor)
+
+        records = list(await self.session.scalars(query))
+        has_more = len(records) > limit
+        items = [
+            InfoBlobInDBNoText.model_validate(record) for record in records[:limit]
+        ]
+        return WebsiteInfoBlobPage(
+            items=items,
+            total_count=total_count or 0,
+            next_cursor=items[-1].id if has_more else None,
+        )
 
     @staticmethod
     def _source_filter(
@@ -930,8 +1005,20 @@ class InfoBlobRepository:
             .where(active_info_blob_version())
         )
 
-    def _retained_sum_stmt(self):
-        return sa.select(sa.func.sum(InfoBlobs.size)).select_from(InfoBlobs)
+    @staticmethod
+    def retained_size_of_user_stmt(user_id: UUID):
+        return sa.select(sa.func.sum(InfoBlobs.size)).where(
+            InfoBlobs.user_id == user_id
+        )
+
+    @staticmethod
+    def retained_size_of_tenant_stmt(tenant_id: UUID):
+        return (
+            sa.select(sa.func.sum(InfoBlobs.size))
+            .select_from(InfoBlobs)
+            .join(Users)
+            .where(Users.tenant_id == tenant_id)
+        )
 
     async def get_total_size_of_group(self, group_id: UUID):
         stmt = self._sum_stmt().where(InfoBlobs.group_id == group_id)
@@ -964,9 +1051,7 @@ class InfoBlobRepository:
         return size
 
     async def get_retained_size_of_user(self, user_id: UUID) -> int:
-        size = await self.session.scalar(
-            self._retained_sum_stmt().where(InfoBlobs.user_id == user_id)
-        )
+        size = await self.session.scalar(self.retained_size_of_user_stmt(user_id))
         return size or 0
 
     async def get_total_size_of_tenant(self, tenant_id: UUID):
@@ -980,9 +1065,7 @@ class InfoBlobRepository:
         return size
 
     async def get_retained_size_of_tenant(self, tenant_id: UUID) -> int:
-        size = await self.session.scalar(
-            self._retained_sum_stmt().join(Users).where(Users.tenant_id == tenant_id)
-        )
+        size = await self.session.scalar(self.retained_size_of_tenant_stmt(tenant_id))
         return size or 0
 
     async def get_ids(self):
@@ -992,30 +1075,11 @@ class InfoBlobRepository:
 
         return set(ids)
 
-    async def get_titles_of_website(self, website_id: UUID) -> list[str]:
-        stmt = sa.select(InfoBlobs.title).where(
-            InfoBlobs.website_id == website_id,
-            active_info_blob_version(),
-        )
-        result = await self.session.scalars(stmt)
-        return [title for title in result if title is not None]
-
-    async def batch_delete_by_titles_and_website(
-        self, titles: list[str], website_id: UUID
+    async def batch_delete_by_source_urls_and_website(
+        self, urls: list[str], website_id: UUID
     ) -> int:
-        """Delete multiple info blobs by titles in a single query.
-
-        Why: Reduces N queries to 1 query for better performance during re-crawls.
-        Uses SQLAlchemy's .in_() method for efficient batch deletion.
-
-        Args:
-            titles: List of blob titles to delete
-            website_id: Website UUID for tenant isolation
-
-        Returns:
-            Number of blobs deleted
-        """
-        if not titles:
+        """Remove observed absent sources without touching namesakes or unknown URLs."""
+        if not urls:
             return 0
 
         active_count = await self.session.scalar(
@@ -1023,33 +1087,12 @@ class InfoBlobRepository:
             .select_from(InfoBlobs)
             .where(
                 InfoBlobs.website_id == website_id,
-                InfoBlobs.title.in_(titles),
+                InfoBlobs.website_source_url.in_(urls),
                 active_info_blob_version(),
             )
         )
         stmt = sa.delete(InfoBlobs).where(
-            InfoBlobs.website_id == website_id, InfoBlobs.title.in_(titles)
+            InfoBlobs.website_id == website_id, InfoBlobs.website_source_url.in_(urls)
         )
         await self.session.execute(stmt)
         return active_count or 0
-
-    async def get_content_hash(self, website_id: UUID, title: str) -> bytes | None:
-        """Get content hash for a specific page.
-
-        Why: Enables content-based change detection to skip re-processing unchanged pages.
-        Uses composite index (website_id, title) for efficient lookup.
-
-        Args:
-            website_id: Website UUID
-            title: Page title/URL
-
-        Returns:
-            32-byte SHA-256 hash or None if page doesn't exist or hash not computed
-        """
-        stmt = sa.select(InfoBlobs.content_hash).where(
-            InfoBlobs.website_id == website_id,
-            InfoBlobs.title == title,
-            active_info_blob_version(),
-        )
-        result = await self.session.scalar(stmt)
-        return result

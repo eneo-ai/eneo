@@ -516,8 +516,7 @@ async def upload_info_blob_task(
                 embedding_model_id=embedding_model.id,
                 original=captured_original,
             )
-            text = await asyncio.to_thread(
-                container.text_extractor().extract,
+            text = await container.text_extractor().extract_bounded(
                 filepath,
                 params.mimetype,
                 params.filename,

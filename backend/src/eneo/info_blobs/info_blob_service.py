@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Optional, TypeVar
 from uuid import UUID
 
 from eneo.actors import SpaceAction
-from eneo.admin.quota_service import QuotaService
+from eneo.admin.quota_service import QuotaService, enforce_quota_on_commit
 from eneo.groups_legacy.group_service import GroupService
 from eneo.info_blobs.info_blob import (
     CapturedKnowledgeOriginal,
@@ -21,6 +21,7 @@ from eneo.info_blobs.info_blob import (
 from eneo.info_blobs.info_blob_repo import (
     InfoBlobPublication,
     InfoBlobRepository,
+    WebsiteInfoBlobPage,
 )
 from eneo.main.exceptions import (
     BadRequestException,
@@ -436,7 +437,13 @@ class InfoBlobService:
                 )
             updated = await self.update_info_blob_size(published.id)
             await self.quota_service.ensure_capacity(0)
-            return updated
+
+        enforce_quota_on_commit(
+            self.repo.session,
+            tenant_id=info_blob.tenant_id,
+            user_id=info_blob.user_id,
+        )
+        return updated
 
     async def add_info_blobs(
         self,
@@ -549,15 +556,36 @@ class InfoBlobService:
             await self.repo.get_by_group(group.id)
         )
 
-    async def get_by_website(self, id: UUID) -> list[InfoBlobInDB]:
+    async def _authorize_website_info_blobs(self, id: UUID) -> None:
         space = await self.space_service.get_space_by_website(website_id=id)
         actor = self.actor_manager.get_space_actor_from_space(space)
 
         if not actor.can_read_info_blobs():
             raise UnauthorizedException()
 
+    async def get_by_website(self, id: UUID) -> list[InfoBlobInDBNoText]:
+        await self._authorize_website_info_blobs(id)
         return await self._project_original_availability(
             await self.repo.get_by_website(website_id=id)
+        )
+
+    async def get_by_website_page(
+        self,
+        id: UUID,
+        *,
+        limit: int,
+        cursor: UUID | None = None,
+    ) -> WebsiteInfoBlobPage:
+        await self._authorize_website_info_blobs(id)
+        page = await self.repo.get_by_website_page(
+            website_id=id,
+            limit=limit,
+            cursor=cursor,
+        )
+        return WebsiteInfoBlobPage(
+            items=await self._project_original_availability(page.items),
+            total_count=page.total_count,
+            next_cursor=page.next_cursor,
         )
 
     async def delete(self, id: UUID):

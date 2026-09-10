@@ -1,22 +1,105 @@
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 import sqlalchemy as sa
 
-from eneo.database.tables.job_table import Jobs
+from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.websites_table import CrawlRuns as CrawlRunsTable
 from eneo.database.tables.websites_table import Websites as WebsitesTable
-from eneo.main.models import Status
+from eneo.main.exceptions import BadRequestException, NotFoundException
+from eneo.websites.domain.crawl_run import CrawlPhase
 from eneo.websites.domain.website import UpdateInterval, WebsiteSparse
 
 if TYPE_CHECKING:
     from eneo.database.database import AsyncSession
 
 
+@dataclass(frozen=True, slots=True)
+class RelatedWebsite:
+    website_id: UUID
+    website_name: str | None
+    website_url: str
+    space_id: UUID | None
+    space_name: str | None
+    indexed_size: int
+    last_indexed_at: datetime | None
+    latest_run_id: UUID | None
+
+
+@dataclass(frozen=True, slots=True)
+class RelatedWebsitePage:
+    items: list[RelatedWebsite]
+    next_cursor: UUID | None
+
+
 class WebsiteSparseRepository:
     def __init__(self, session: "AsyncSession"):
         super().__init__()
         self.session = session
+
+    async def one_for_tenant(self, id: UUID, tenant_id: UUID) -> WebsiteSparse:
+        record = await self.session.scalar(
+            sa.select(WebsitesTable).where(
+                WebsitesTable.id == id, WebsitesTable.tenant_id == tenant_id
+            )
+        )
+        if record is None:
+            raise NotFoundException()
+        return WebsiteSparse.to_domain(record)
+
+    async def same_address(
+        self, website: WebsiteSparse, *, limit: int = 10, cursor: UUID | None = None
+    ) -> RelatedWebsitePage:
+        if not 1 <= limit <= 100:
+            raise BadRequestException("Page size must be between 1 and 100")
+        latest_run = (
+            sa.select(CrawlRunsTable.id)
+            .where(
+                CrawlRunsTable.website_id == WebsitesTable.id,
+                CrawlRunsTable.tenant_id == website.tenant_id,
+            )
+            .order_by(CrawlRunsTable.created_at.desc(), CrawlRunsTable.id.desc())
+            .limit(1)
+            .correlate(WebsitesTable)
+            .scalar_subquery()
+        )
+        # Match registration addresses exactly, as the existing organization
+        # lookup does. This is not a claim that their indexed content is equal.
+        query = (
+            sa.select(
+                WebsitesTable.id,
+                WebsitesTable.name,
+                WebsitesTable.url,
+                WebsitesTable.space_id,
+                Spaces.name.label("space_name"),
+                WebsitesTable.size,
+                WebsitesTable.last_indexed_at,
+                latest_run,
+            )
+            .outerjoin(
+                Spaces,
+                sa.and_(
+                    Spaces.id == WebsitesTable.space_id,
+                    Spaces.tenant_id == website.tenant_id,
+                ),
+            )
+            .where(
+                WebsitesTable.tenant_id == website.tenant_id,
+                WebsitesTable.url == website.url,
+                WebsitesTable.id != website.id,
+            )
+            .order_by(WebsitesTable.id)
+            .limit(limit + 1)
+        )
+        if cursor is not None:
+            query = query.where(WebsitesTable.id > cursor)
+        rows = (await self.session.execute(query)).all()
+        items = [RelatedWebsite(*row) for row in rows[:limit]]
+        return RelatedWebsitePage(
+            items=items, next_cursor=items[-1].website_id if len(rows) > limit else None
+        )
 
     async def get_weekly_websites(self) -> list[WebsiteSparse]:
         """Get websites with weekly update intervals.
@@ -109,26 +192,23 @@ class WebsiteSparseRepository:
             WebsitesTable.next_retry_at <= now_utc,
         )
 
-        # Active job condition: Skip websites that already have queued/in-progress crawls
-        # Why: Prevent duplicate scheduled crawls while a crawl is running or queued
-        active_job_statuses = [Status.QUEUED.value, Status.IN_PROGRESS.value]
-        active_job_exists = (
+        # CrawlRuns is authoritative even when the compatibility Job is missing.
+        active_crawl_exists = (
             sa.select(sa.literal(1))
             .select_from(CrawlRunsTable)
-            .join(Jobs, Jobs.id == CrawlRunsTable.job_id)
             .where(
                 CrawlRunsTable.website_id == WebsitesTable.id,
-                Jobs.status.in_(active_job_statuses),
+                CrawlRunsTable.phase != CrawlPhase.TERMINAL.value,
             )
         )
-        cond_no_active_jobs = ~sa.exists(active_job_exists)
+        cond_no_active_crawl = ~sa.exists(active_crawl_exists)
 
         # Combine all conditions with circuit breaker
         stmt = sa.select(WebsitesTable).where(
             sa.and_(
                 sa.or_(cond_daily, cond_every_other_day, cond_weekly),
                 cond_circuit_breaker,
-                cond_no_active_jobs,
+                cond_no_active_crawl,
             )
         )
 

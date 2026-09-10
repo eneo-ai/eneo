@@ -5,15 +5,19 @@ from datetime import datetime, timezone
 from typing import Any, NamedTuple, cast
 
 import redis.asyncio as aioredis
+from eneo.jobs.job_manager import DEFAULT_QUEUE_NAME
 from eneo.main.config import get_settings
 from eneo.redis.connection import build_redis_pool_kwargs
+
+CRAWL_RECONCILIATION_HEALTH_KEY = "crawler:reconciliation:health"
+CRAWL_RECONCILIATION_HEALTH_TTL_SECONDS = 180
 
 
 def _get_redis_connection() -> aioredis.Redis:
     """Lazy initialization of Redis connection using current settings.
 
     Honors settings.redis_db to ensure health endpoint reads from the same
-    Redis database as the worker/feeder.
+    Redis database as the background workers.
     """
     settings = get_settings()
     redis_url = f"redis://{settings.redis_host}:{settings.redis_port}"
@@ -33,6 +37,15 @@ def get_redis() -> aioredis.Redis:
     if _redis_client is None:
         _redis_client = _get_redis_connection()
     return _redis_client
+
+
+async def mark_crawl_reconciliation_healthy() -> None:
+    """Record that the durable crawl reconciliation cycle completed."""
+    await get_redis().set(
+        CRAWL_RECONCILIATION_HEALTH_KEY,
+        "ok",
+        ex=CRAWL_RECONCILIATION_HEALTH_TTL_SECONDS,
+    )
 
 
 def reset_redis_client() -> aioredis.Redis:
@@ -64,15 +77,14 @@ class WorkerHealth(NamedTuple):
     details: str | None
 
 
-async def get_worker_health() -> WorkerHealth:
+async def get_worker_health(queue_name: str = DEFAULT_QUEUE_NAME) -> WorkerHealth:
     """Check the health status of the arq worker via Redis health check key.
 
     Returns:
         WorkerHealth: Contains status, last_heartbeat timestamp, and details
     """
     try:
-        # Default queue name in arq is "arq:queue", health check key is "{queue_name}:health-check"
-        health_key = "arq:queue:health-check"
+        health_key = f"{queue_name}:health-check"
         worker_health_data = await r.get(health_key)
 
         if worker_health_data:

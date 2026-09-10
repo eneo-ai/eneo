@@ -44,3 +44,14 @@ def test_fails_when_the_lengths_dont_match():
             chunk_embedding_list.add([1, 2], [[1]])
     finally:
         chunk_embedding_list._file.close()
+
+
+def test_closes_temporary_file_when_iteration_is_abandoned():
+    chunk_embedding_list = ChunkEmbeddingList()
+    chunk_embedding_list.add(["first", "second"], [[1.0], [2.0]])
+    iterator = iter(chunk_embedding_list)
+
+    next(iterator)
+    iterator.close()
+
+    assert chunk_embedding_list._file.closed
