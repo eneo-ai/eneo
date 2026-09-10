@@ -16483,10 +16483,19 @@ export interface components {
     FlowAuthoringInputType: "text" | "json" | "audio" | "document" | "file" | "any";
     /**
      * FlowAuthoringOutputMode
+     * @description Output modes an authoring spec can carry.
+     *
+     *     Builder plans, manual edits and flow packages all travel as specs. HTTP
+     *     delivery stays out: its config holds credentials that no spec may carry.
      * @enum {string}
      */
     FlowAuthoringOutputMode:
-      "pass_through" | "compose_text" | "transcribe_only" | "template_fill" | "render_verbatim";
+      | "pass_through"
+      | "compose_text"
+      | "transcribe_only"
+      | "template_fill"
+      | "render_verbatim"
+      | "speaker_mapping";
     /** FlowBuilderEditApproval */
     FlowBuilderEditApproval: {
       /** Advisories */

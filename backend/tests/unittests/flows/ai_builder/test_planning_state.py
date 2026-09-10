@@ -46,7 +46,11 @@ from eneo.flows.ai_builder.planning_state import (
     UnplacedNamedResultPlacement,
     enforce_planning_state_payload_cap,
 )
-from eneo.flows.enums import FlowAuthoringInputType, FlowAuthoringOutputMode
+from eneo.flows.enums import (
+    FLOW_BUILDER_PROPOSABLE_OUTPUT_MODES,
+    FlowAuthoringInputType,
+    FlowAuthoringOutputMode,
+)
 
 _VALID_ARCH_HASH = "a" * ARCHITECTURE_HASH_HEX_LENGTH
 
@@ -932,7 +936,8 @@ class TestStepTripleValidation:
         )
 
     @pytest.mark.parametrize(
-        "output_mode", [item.value for item in FlowAuthoringOutputMode]
+        "output_mode",
+        sorted(item.value for item in FLOW_BUILDER_PROPOSABLE_OUTPUT_MODES),
     )
     def test_canonical_output_modes_load_and_serialize_as_wire_values(
         self,
@@ -949,13 +954,16 @@ class TestStepTripleValidation:
         assert triple.output_mode is FlowAuthoringOutputMode(output_mode)
         assert triple.model_dump(mode="json")["output_mode"] == output_mode
 
-    def test_server_injected_http_post_output_mode_is_rejected(self) -> None:
+    @pytest.mark.parametrize("output_mode", ["http_post", "speaker_mapping"])
+    def test_output_modes_the_builder_cannot_propose_are_rejected(
+        self, output_mode: str
+    ) -> None:
         with pytest.raises(ValidationError):
             StepTriple.model_validate(
                 {
                     "input_type": "text",
                     "output_type": "text",
-                    "output_mode": "http_post",
+                    "output_mode": output_mode,
                 }
             )
 

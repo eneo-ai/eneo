@@ -22,6 +22,7 @@ import pytest
 
 from eneo.flows.ai_builder.pattern_registry import PATTERN_REGISTRY
 from eneo.flows.enums import (
+    FLOW_BUILDER_PROPOSABLE_OUTPUT_MODES,
     FlowAuthoringInputSource,
     FlowAuthoringOutputMode,
     FlowOutputType,
@@ -116,7 +117,7 @@ def test_http_gap_is_not_silently_authorable() -> None:
     # express them. If HTTP authoring is ever added, this fails and forces the
     # gap rows to be promoted to buildable with real goldens.
     builder_sources = {source.value for source in FlowAuthoringInputSource}
-    builder_modes = {mode.value for mode in FlowAuthoringOutputMode}
+    builder_modes = {mode.value for mode in FLOW_BUILDER_PROPOSABLE_OUTPUT_MODES}
     assert "http_get" not in builder_sources
     assert "http_post" not in builder_sources
     assert "http_post" not in builder_modes
@@ -130,7 +131,7 @@ def test_known_gaps_runtime_support_is_real_but_not_authorable(
     # every claimed member must be absent from the AI Builder authoring enums.
     assert gap.runtime_input_sources or gap.runtime_output_modes
     builder_sources = {source.value for source in FlowAuthoringInputSource}
-    builder_modes = {mode.value for mode in FlowAuthoringOutputMode}
+    builder_modes = {mode.value for mode in FLOW_BUILDER_PROPOSABLE_OUTPUT_MODES}
     for source in gap.runtime_input_sources:
         assert source.value not in builder_sources
     for mode in gap.runtime_output_modes:

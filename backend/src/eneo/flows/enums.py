@@ -54,7 +54,8 @@ class FlowOutputMode(str, Enum):
     TEMPLATE_FILL = "template_fill"
     RENDER_VERBATIM = "render_verbatim"
     # An LLM proposes which person each diarized speaker label is; the run then
-    # pauses for a reviewer to confirm. Manual authoring only for now.
+    # pauses for a reviewer to confirm. Authored by hand and carried by specs
+    # and packages; the AI Builder does not propose it.
     SPEAKER_MAPPING = "speaker_mapping"
 
 
@@ -124,11 +125,28 @@ def final_step_output_type(output_types: Sequence[str]) -> FlowOutputType | None
 
 
 class FlowAuthoringOutputMode(str, Enum):
+    """Output modes an authoring spec can carry.
+
+    Builder plans, manual edits and flow packages all travel as specs. HTTP
+    delivery stays out: its config holds credentials that no spec may carry.
+    """
+
     PASS_THROUGH = FlowOutputMode.PASS_THROUGH.value
     COMPOSE_TEXT = FlowOutputMode.COMPOSE_TEXT.value
     TRANSCRIBE_ONLY = FlowOutputMode.TRANSCRIBE_ONLY.value
     TEMPLATE_FILL = FlowOutputMode.TEMPLATE_FILL.value
     RENDER_VERBATIM = FlowOutputMode.RENDER_VERBATIM.value
+    SPEAKER_MAPPING = FlowOutputMode.SPEAKER_MAPPING.value
+
+
+# The subset the AI Builder may propose. A speaker-mapping step is authored by
+# hand; a spec carries it through edits and packages, but the model never
+# emits it.
+FLOW_BUILDER_PROPOSABLE_OUTPUT_MODES: frozenset[FlowAuthoringOutputMode] = frozenset(
+    mode
+    for mode in FlowAuthoringOutputMode
+    if mode is not FlowAuthoringOutputMode.SPEAKER_MAPPING
+)
 
 
 FLOW_INPUT_SOURCE_VALUES = tuple(item.value for item in FlowInputSource)

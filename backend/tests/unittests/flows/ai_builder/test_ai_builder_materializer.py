@@ -34,6 +34,7 @@ from eneo.flows.application.flow_draft_materialization_executor import (
     FlowDraftMaterializer,
 )
 from eneo.flows.domain.flow import Flow, FlowStep
+from eneo.flows.enums import FlowOutputMode
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -971,6 +972,53 @@ class TestDescriptionRewriteInputs:
         changeset = compile_flow_draft_changeset(spec, current_flow=flow)
 
         assert changeset.flow_description == flow.description
+
+    def test_edit_mode_carries_an_existing_speaker_mapping_step(self) -> None:
+        mapping_config = {
+            "speaker_mapping": {"participants_field": "deltagare", "infer_names": True}
+        }
+        flow = _make_flow(
+            steps=[
+                _make_flow_step(
+                    step_order=1,
+                    input_type="audio",
+                    output_mode="transcribe_only",
+                ),
+                _make_flow_step(
+                    step_order=2,
+                    input_source="previous_step",
+                    output_mode="speaker_mapping",
+                    output_type="json",
+                    output_config=mapping_config,
+                ),
+            ],
+        )
+        spec = _make_spec(
+            steps=[
+                _make_step_spec(
+                    plan_step_ref="step_a",
+                    existing_step_ref="existing_step_1",
+                    input_type=InputType.AUDIO,
+                    output_mode=OutputMode.TRANSCRIBE_ONLY,
+                ),
+                _make_step_spec(
+                    plan_step_ref="step_b",
+                    existing_step_ref="existing_step_2",
+                    input_source=InputSource.PREVIOUS_STEP,
+                    output_mode=OutputMode.SPEAKER_MAPPING,
+                    output_type=OutputType.JSON,
+                    output_config=mapping_config,
+                ),
+            ],
+        )
+
+        changeset = compile_flow_draft_changeset(spec, current_flow=flow)
+
+        mapping_step = changeset.compiled_steps[1]
+        assert (
+            FlowOutputMode(mapping_step.output_mode) is FlowOutputMode.SPEAKER_MAPPING
+        )
+        assert mapping_step.output_config == mapping_config
 
 
 # ---------------------------------------------------------------------------

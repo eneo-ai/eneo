@@ -417,15 +417,25 @@ def _portable_output_config(step: FlowStep) -> FlowPersistedJsonObject | None:
             config_field="output_config",
         ) from exc
 
-    if parsed.citation_mode != CITATION_MODE_INLINE_INREF_SIDECAR:
-        return None
-    if not is_citation_capable_step(
-        output_type=step.output_type,
-        output_mode=step.output_mode,
-        output_config={"citation_mode": parsed.citation_mode},
+    portable: FlowPersistedJsonObject = {}
+    if (
+        parsed.speaker_mapping is not None
+        and step.output_mode is FlowOutputMode.SPEAKER_MAPPING
     ):
-        return None
-    return {"citation_mode": parsed.citation_mode}
+        portable["speaker_mapping"] = parsed.speaker_mapping.model_dump(
+            mode="json",
+            exclude_unset=True,
+        )
+    if (
+        parsed.citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR
+        and is_citation_capable_step(
+            output_type=step.output_type,
+            output_mode=step.output_mode,
+            output_config={"citation_mode": parsed.citation_mode},
+        )
+    ):
+        portable["citation_mode"] = parsed.citation_mode
+    return portable or None
 
 
 def _reject_known_nonportable_config(

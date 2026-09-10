@@ -57,6 +57,7 @@ from eneo.flows.ai_builder.ai_builder_slot_vocabulary import (
     LLM_RESOLVABLE_SLOT_NAMES,
 )
 from eneo.flows.enums import (
+    FLOW_BUILDER_PROPOSABLE_OUTPUT_MODES,
     FlowAuthoringInputType,
     FlowAuthoringOutputMode,
     FlowOutputType,
@@ -350,6 +351,17 @@ class StepTriple(_PlanningModel):
     input_type: FlowAuthoringInputType
     output_type: FlowOutputType
     output_mode: FlowAuthoringOutputMode
+
+    @field_validator("output_mode")
+    @classmethod
+    def _reject_modes_the_builder_cannot_propose(
+        cls, value: FlowAuthoringOutputMode
+    ) -> FlowAuthoringOutputMode:
+        if value not in FLOW_BUILDER_PROPOSABLE_OUTPUT_MODES:
+            raise ValueError(
+                f"The AI Builder cannot propose output mode {value.value!r}."
+            )
+        return value
 
 
 class ArchitectureCommitDraft(_PlanningModel):

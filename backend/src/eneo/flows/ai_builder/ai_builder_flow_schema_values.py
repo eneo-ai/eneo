@@ -48,11 +48,18 @@ def builder_output_type_values() -> list[str]:
 
 
 def builder_output_mode_values() -> list[str]:
-    """Output modes AI Builder can author without raw backend config."""
+    """Output modes the AI Builder may propose, in canonical order."""
 
-    from eneo.flows.enums import FlowAuthoringOutputMode
+    from eneo.flows.enums import (
+        FLOW_BUILDER_PROPOSABLE_OUTPUT_MODES,
+        FlowAuthoringOutputMode,
+    )
 
-    return [item.value for item in FlowAuthoringOutputMode]
+    return [
+        item.value
+        for item in FlowAuthoringOutputMode
+        if item in FLOW_BUILDER_PROPOSABLE_OUTPUT_MODES
+    ]
 
 
 def builder_form_field_type_values() -> list[str]:

@@ -284,7 +284,7 @@ def test_export_preserves_only_strict_mode_relevant_portable_config() -> None:
                     input_source="previous_step",
                     input_type="json",
                     output_type="json",
-                    input_config={"item_map": {"enabled": True}},
+                    input_config={"item_map": {"enabled": True, "max_items": 12}},
                 ),
             ]
         ),
@@ -309,12 +309,120 @@ def test_export_preserves_only_strict_mode_relevant_portable_config() -> None:
         }
     }
     assert document_step.output_config == {"citation_mode": "inline_inref_sidecar"}
-    assert item_step.input_config == {"item_map": {"enabled": True}}
+    assert item_step.input_config == {"item_map": {"enabled": True, "max_items": 12}}
     assert item_step.output_config is None
 
     reparsed = read_flow_package(write_flow_package(envelope))
     assert reparsed == envelope
     assert reparsed.content_checksum == envelope.content_checksum
+
+
+@pytest.mark.parametrize("max_items", [0, -1, True, "12"])
+def test_export_rejects_item_map_without_positive_ceiling(max_items: object) -> None:
+    assistant_id = uuid4()
+
+    with pytest.raises(FlowPackageExportError) as exc_info:
+        _build_envelope(
+            flow=_flow(
+                steps=[
+                    _step(
+                        1,
+                        assistant_id=assistant_id,
+                        input_source="previous_step",
+                        input_type="json",
+                        output_type="json",
+                        input_config={
+                            "item_map": {"enabled": True, "max_items": max_items}
+                        },
+                    )
+                ]
+            ),
+            assistant_snapshots={assistant_id: _snapshot(model_ref=None)},
+            resource_bindings=tuple(),
+        )
+
+    assert exc_info.value.code is FlowPackageExportErrorCode.STEP_CONFIG_NOT_PORTABLE
+    assert exc_info.value.context == {"step_order": 1, "config_field": "input_config"}
+
+
+def test_export_carries_speaker_mapping_config_through_the_package() -> None:
+    transcript_assistant_id = uuid4()
+    mapping_assistant_id = uuid4()
+    envelope = _build_envelope(
+        flow=_flow(
+            metadata_json={
+                "form_schema": {
+                    "fields": [
+                        {
+                            "name": "deltagare",
+                            "type": "text",
+                            "label": "Deltagare",
+                            "required": False,
+                        }
+                    ]
+                }
+            },
+            steps=[
+                _step(
+                    1,
+                    assistant_id=transcript_assistant_id,
+                    input_type="audio",
+                    output_mode="transcribe_only",
+                ),
+                _step(
+                    2,
+                    assistant_id=mapping_assistant_id,
+                    input_source="previous_step",
+                    output_mode="speaker_mapping",
+                    output_type="json",
+                    output_config={
+                        "speaker_mapping": {
+                            "participants_field": "deltagare",
+                            "speaker_count_field": None,
+                            "infer_names": True,
+                        }
+                    },
+                ),
+            ],
+        ),
+        assistant_snapshots={
+            transcript_assistant_id: _snapshot(model_ref=None),
+            mapping_assistant_id: _snapshot(model_ref=None),
+        },
+        resource_bindings=tuple(),
+    )
+
+    _, mapping_step = envelope.draft.spec.steps
+    assert mapping_step.output_mode.value == "speaker_mapping"
+    assert mapping_step.output_config == {
+        "speaker_mapping": {
+            "participants_field": "deltagare",
+            "speaker_count_field": None,
+            "infer_names": True,
+        }
+    }
+
+    reparsed = read_flow_package(write_flow_package(envelope))
+    assert reparsed == envelope
+
+
+def test_export_drops_a_speaker_mapping_block_on_a_step_that_does_not_map() -> None:
+    assistant_id = uuid4()
+    envelope = _build_envelope(
+        flow=_flow(
+            steps=[
+                _step(
+                    1,
+                    assistant_id=assistant_id,
+                    output_config={"speaker_mapping": {"infer_names": True}},
+                )
+            ]
+        ),
+        assistant_snapshots={assistant_id: _snapshot(model_ref=None)},
+        resource_bindings=tuple(),
+    )
+
+    assert envelope.draft.spec.steps[0].output_config is None
 
 
 def test_export_omits_recognized_portable_config_when_mode_irrelevant() -> None:

@@ -11,6 +11,7 @@ from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
     document_delivery_mode_values,
 )
 from eneo.flows.enums import (
+    FLOW_BUILDER_PROPOSABLE_OUTPUT_MODES,
     FlowAuthoringInputSource,
     FlowAuthoringInputType,
     FlowAuthoringOutputMode,
@@ -44,8 +45,11 @@ def test_builder_schema_values_follow_builder_exposed_flow_capabilities() -> Non
     assert set(builder_input_type_values()) == exposed_input_types
     assert builder_output_type_values() == [item.value for item in FlowOutputType]
     assert builder_output_mode_values() == [
-        item.value for item in FlowAuthoringOutputMode
+        item.value
+        for item in FlowAuthoringOutputMode
+        if item in FLOW_BUILDER_PROPOSABLE_OUTPUT_MODES
     ]
+    assert "speaker_mapping" not in builder_output_mode_values()
 
 
 def test_flow_input_field_provenance_vocabulary_is_complete_and_ordered() -> None:

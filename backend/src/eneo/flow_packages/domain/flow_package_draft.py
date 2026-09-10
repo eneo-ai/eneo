@@ -1,8 +1,16 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, StrictBool, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictInt,
+    StrictStr,
+    field_validator,
+)
 
 from eneo.flows.domain.flow import FlowRuntimeInputConfig
 from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
@@ -16,6 +24,9 @@ class FlowPackageItemMapConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     enabled: StrictBool = True
+    # An enabled item map must carry its fan-out ceiling: flow validation
+    # rejects one without it, on export and again on import.
+    max_items: Annotated[StrictInt, Field(gt=0)] | None = None
 
 
 class FlowPackageStepInputConfig(BaseModel):
@@ -25,10 +36,25 @@ class FlowPackageStepInputConfig(BaseModel):
     item_map: FlowPackageItemMapConfig | None = None
 
 
+class FlowPackageSpeakerMappingConfig(BaseModel):
+    """The speaker-mapping block: form field names and a name-inference flag.
+
+    Every value describes the flow's own form, so the block travels as-is;
+    the importing flow's validation checks the fields exist there.
+    """
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    participants_field: Annotated[StrictStr, Field(min_length=1)] | None = None
+    speaker_count_field: Annotated[StrictStr, Field(min_length=1)] | None = None
+    infer_names: StrictBool | None = None
+
+
 class FlowPackageStepOutputConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     citation_mode: Literal["off", "inline_inref_sidecar"] | None = None
+    speaker_mapping: FlowPackageSpeakerMappingConfig | None = None
 
 
 class FlowPackageFlowDraft(BaseModel):
