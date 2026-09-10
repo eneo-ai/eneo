@@ -45,6 +45,7 @@ from eneo.flows.enums import (
     FlowInputType,
     FlowOutputMode,
     FlowOutputType,
+    flow_output_mode_uses_completion_model,
 )
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -334,6 +335,7 @@ def _step_spec(
         slot_allocator=slot_allocator,
         requirement_drafts=requirement_drafts,
         usage=usage,
+        uses_completion_model=flow_output_mode_uses_completion_model(step.output_mode),
     )
     return StepSpec(
         plan_step_ref=usage.step_ref,
@@ -458,9 +460,13 @@ def _assistant_spec(
     slot_allocator: ResourceSlotAllocator,
     requirement_drafts: dict[str, _RequirementDraft],
     usage: _StepUsage,
+    uses_completion_model: bool,
 ) -> AssistantSpec:
+    # A deterministic step never runs its assistant's model, and the spec
+    # loader strips the model_ref on import. Recording a model requirement
+    # for it would ask the importer to bind a slot no step reads.
     model_ref = None
-    if snapshot.model is not None:
+    if uses_completion_model and snapshot.model is not None:
         model_binding = _binding_for_ref(
             snapshot.model,
             slot_kind=ResourceSlotKind.MODEL,

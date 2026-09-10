@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from eneo.flows.enums import FlowOutputMode, flow_output_mode_uses_completion_model
 from eneo.main.exceptions import BadRequestException
 
 
@@ -67,11 +68,19 @@ def evaluate_step_security_classification(
     *,
     step_order: int,
     input_source: str,
+    output_mode: FlowOutputMode | str,
     output_classification_override: int | None,
     prior_output_levels_by_order: dict[int, int | None],
     assistant: Any,
     space: Any,
 ) -> FlowStepClassificationEvaluation:
+    """Check one step's classification and return its effective output level.
+
+    The model requirement applies only to output modes that run a completion
+    model. A deterministic step (rendering, template fill, compose) has no
+    model to clear the floor with, yet its output still carries the
+    classification of what flowed into it.
+    """
     baseline_level = _classification_level(
         getattr(space, "security_classification", None)
     )
@@ -90,7 +99,12 @@ def evaluate_step_security_classification(
         )
     )
 
-    required_model_level = _max_level(input_floor_level, knowledge_level)
+    uses_completion_model = flow_output_mode_uses_completion_model(output_mode)
+    required_model_level = (
+        _max_level(input_floor_level, knowledge_level)
+        if uses_completion_model
+        else None
+    )
     if required_model_level is not None and (
         model_level is None or model_level < required_model_level
     ):

@@ -132,7 +132,7 @@ def build_flow_package_import_plan(
     )
     dependency_resolutions = [
         _resolve_requirement(requirement, candidates)
-        for requirement in envelope.requirements.requirements
+        for requirement in envelope.active_requirements()
     ]
     return FlowPackageImportPlan(
         package_id=envelope.manifest.package_id,
@@ -212,15 +212,14 @@ def _invalid_flow_draft(
 
 
 def _package_summary(envelope: FlowPackageEnvelope) -> FlowPackageImportPlanSummary:
-    requirement_counts = Counter(
-        requirement.kind for requirement in envelope.requirements.requirements
-    )
+    requirements = envelope.active_requirements()
+    requirement_counts = Counter(requirement.kind for requirement in requirements)
     return FlowPackageImportPlanSummary(
         name=envelope.manifest.name,
         description=envelope.manifest.description,
         spec_hash=envelope.spec_hash,
         steps_count=len(envelope.spec.steps),
-        requirements_count=len(envelope.requirements.requirements),
+        requirements_count=len(requirements),
         requirements_by_kind=dict(requirement_counts),
     )
 

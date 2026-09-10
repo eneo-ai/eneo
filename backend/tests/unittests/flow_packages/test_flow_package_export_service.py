@@ -651,6 +651,89 @@ def test_export_sorts_used_by_steps_by_step_order_not_lexicographic_ref() -> Non
     assert requirement.used_by_steps == ["step_2", "step_10"]
 
 
+def test_export_records_no_model_for_a_step_that_runs_none() -> None:
+    # The importer's spec loader strips model_ref from a rendering step, so a
+    # model requirement recorded for it would be a slot nobody reads.
+    assistant_id = uuid4()
+    model_id = uuid4()
+    envelope = _build_envelope(
+        flow=_flow(
+            steps=[
+                _step(
+                    1,
+                    assistant_id=assistant_id,
+                    output_mode="render_verbatim",
+                    output_type="pdf",
+                )
+            ]
+        ),
+        assistant_snapshots={
+            assistant_id: _snapshot(
+                model_ref=AssistantAuthoringResourceRef(
+                    local_ref=str(model_id),
+                    local_kind=LocalResourceKind.COMPLETION_MODEL,
+                )
+            )
+        },
+        resource_bindings=(
+            _binding(
+                slot_kind=ResourceSlotKind.MODEL,
+                slot="render-model",
+                label="Render model",
+                local_kind=LocalResourceKind.COMPLETION_MODEL,
+                local_id=model_id,
+            ),
+        ),
+    )
+
+    assert envelope.draft.spec.steps[0].assistant_spec.model_ref is None
+    assert envelope.requirements.requirements == []
+
+
+def test_export_lists_only_completion_steps_as_users_of_a_shared_model() -> None:
+    writer_id = uuid4()
+    renderer_id = uuid4()
+    model_id = uuid4()
+    model_ref = AssistantAuthoringResourceRef(
+        local_ref=str(model_id),
+        local_kind=LocalResourceKind.COMPLETION_MODEL,
+    )
+    envelope = _build_envelope(
+        flow=_flow(
+            steps=[
+                _step(1, assistant_id=writer_id),
+                _step(
+                    2,
+                    assistant_id=renderer_id,
+                    input_source="previous_step",
+                    output_mode="render_verbatim",
+                    output_type="pdf",
+                ),
+            ]
+        ),
+        assistant_snapshots={
+            writer_id: _snapshot(model_ref=model_ref),
+            renderer_id: _snapshot(model_ref=model_ref),
+        },
+        resource_bindings=(
+            _binding(
+                slot_kind=ResourceSlotKind.MODEL,
+                slot="shared-model",
+                label="Shared model",
+                local_kind=LocalResourceKind.COMPLETION_MODEL,
+                local_id=model_id,
+            ),
+        ),
+    )
+
+    writer, renderer = envelope.draft.spec.steps
+    assert writer.assistant_spec.model_ref == "model.shared-model"
+    assert renderer.assistant_spec.model_ref is None
+    requirement = envelope.requirements.requirements[0]
+    assert isinstance(requirement, FlowPackageModelRequirement)
+    assert requirement.used_by_steps == ["step_1"]
+
+
 def test_export_rejects_missing_assistant_snapshot() -> None:
     assistant_id = uuid4()
 

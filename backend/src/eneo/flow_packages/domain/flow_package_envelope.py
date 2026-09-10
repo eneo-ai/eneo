@@ -24,6 +24,7 @@ from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageKnowledgeRequirement,
     FlowPackageModelKind,
     FlowPackageModelRequirement,
+    FlowPackageRequirementEntry,
     FlowPackageRequirementSet,
 )
 from eneo.flows.flow_authoring_spec import AssistantSpec, FlowDraftSpecCore, OutputMode
@@ -69,6 +70,22 @@ class FlowPackageEnvelope(BaseModel):
     @property
     def spec(self) -> FlowDraftSpecCore:
         return self.draft.spec
+
+    def active_requirements(self) -> list[FlowPackageRequirementEntry]:
+        """Declared requirements that the installed flow will actually read.
+
+        A completion-model slot no step references is inert. The spec loader
+        strips ``model_ref`` from steps that run no model, so a package
+        exported before that rule can declare a model only such steps carried.
+        Binding it changes nothing in the installed flow, so the importer is
+        not asked to.
+        """
+        inert_slot_refs = self.validated_resource_contract().inert_slot_refs
+        return [
+            requirement
+            for requirement in self.requirements.requirements
+            if requirement.slot_ref.ref not in inert_slot_refs
+        ]
 
     def validated_resource_contract(
         self,
@@ -128,9 +145,17 @@ class FlowPackageEnvelope(BaseModel):
                         slot_ref=knowledge_ref,
                         reason="assistant_knowledge_ref_kind_mismatch",
                     )
+        inert_slot_refs = frozenset(
+            ref
+            for ref, requirement in declared_requirements.items()
+            if isinstance(requirement, FlowPackageModelRequirement)
+            and requirement.model_kind is FlowPackageModelKind.COMPLETION_MODEL
+            and ref not in referenced_slot_refs
+        )
         return ValidatedFlowPackageResourceContract(
             declared_slot_refs=declared_slot_refs,
             referenced_slot_refs=referenced_slot_refs,
+            inert_slot_refs=inert_slot_refs,
         )
 
     @classmethod
@@ -259,6 +284,8 @@ def require_flow_package_manifest(manifest: FlowPackageManifestMetadata) -> None
 class ValidatedFlowPackageResourceContract:
     declared_slot_refs: dict[str, ResourceSlotRef]
     referenced_slot_refs: frozenset[str]
+    # Declared completion-model slots that no step in the draft reads.
+    inert_slot_refs: frozenset[str] = frozenset()
 
 
 def _assistant_slot_refs(assistant: AssistantSpec) -> tuple[str, ...]:
