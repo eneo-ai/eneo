@@ -131,6 +131,9 @@ class AssistantAssembler:
                 )
                 for server in effective_config.available_mcp_servers
             ],
+            enabled_capabilities=effective_config.enabled_capabilities,
+            available_capabilities=effective_config.available_capabilities,
+            default_disabled_capabilities=effective_config.default_disabled_capabilities,
             default_disabled_mcp_server_ids=list(
                 effective_config.default_disabled_mcp_server_ids
             ),
@@ -224,6 +227,8 @@ class AssistantAssembler:
             ],
             integration_knowledge_list=integration_knowledge_list,
             mcp_servers=mcp_servers,
+            enabled_capabilities=assistant.enabled_capabilities,
+            available_capabilities=assistant.available_capabilities,
             mcp_tools=[],  # Initialize as empty - frontend will track changes from current state
             completion_model=completion_model,
             completion_model_kwargs=assistant.completion_model_kwargs,

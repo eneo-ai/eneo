@@ -31,6 +31,7 @@ function initAssistantEditor(data: {
       // On-demand knowledge is opt-in. Missing values must preserve the
       // legacy retrieve-and-inject behavior for existing assistants.
       knowledge_mode: "inject" as Assistant["knowledge_mode"],
+      enabled_capabilities: [],
       mcp_tools: []
     },
     updateResource: async (resource, changes) => {
@@ -54,6 +55,7 @@ function initAssistantEditor(data: {
       websites: ["id"],
       groups: ["id"],
       integration_knowledge_list: ["id"],
+      enabled_capabilities: true,
       mcp_servers: ["id"],
       mcp_tools: ["tool_id", "is_enabled"] as unknown as true,
       skill_bindings: ["skill_id", "skill_revision_id", "activation_mode"],

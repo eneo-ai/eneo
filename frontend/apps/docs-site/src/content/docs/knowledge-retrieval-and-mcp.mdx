@@ -260,7 +260,14 @@ Eneo registers built-in FastMCP applications under these backend routes:
 ```text
 /internal-mcp/knowledge/mcp
 /internal-mcp/files/mcp
+/internal-mcp/image_generation/mcp
 ```
+
+The knowledge and files servers are attached ephemerally per completion, as
+described below. The image generation server is instead attached through an
+admin-registered provider row; [Built-in Tool
+Servers](/docs/builtin-tool-servers) contrasts the two patterns and states
+which features should be built-in at all.
 
 During a completion, `INTERNAL_MCP_BASE_URL` is combined with one of those
 paths. The backend then connects through its ordinary Streamable HTTP MCP

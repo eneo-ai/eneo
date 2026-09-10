@@ -746,6 +746,8 @@ class SpaceAssembler:
             completion_models=completion_models,
             transcription_models=transcription_models,
             mcp_servers=mcp_servers,
+            enabled_capabilities=space.enabled_capabilities,
+            available_capabilities=space.available_capabilities,
             default_assistant=default_assistant,
             applications=applications,
             knowledge=knowledge,
@@ -863,6 +865,7 @@ class SpaceAssembler:
             )
 
         return UpdateSpaceDryRunResponse(
+            capabilities=result.affected_capabilities,
             assistants=applications.assistants.items,
             group_chats=applications.group_chats.items,
             apps=applications.apps.items,

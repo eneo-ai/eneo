@@ -6,6 +6,7 @@
     - completion   → token budgets + capability checkboxes
     - embedding    → family + dimensions + max input
     - transcription → name + display name + hosting + classification
+    - image        → cost per image + default size/quality
 -->
 
 <script lang="ts">
@@ -25,6 +26,12 @@
   import SelectSecurityClassification from "$lib/features/security-classifications/components/SelectSecurityClassification.svelte";
 
   import HelpTooltip from "../../components/HelpTooltip.svelte";
+  import {
+    IMAGE_QUALITIES,
+    IMAGE_SIZES,
+    imageQualityLabel,
+    imageSizeLabel
+  } from "$lib/features/ai-models/imageModelOptions";
   import {
     MAX_COST_INPUT,
     perMillionFromTokenCost,
@@ -97,6 +104,7 @@
         input_cost_per_token?: number | null;
         output_cost_per_token?: number | null;
         cost_per_minute?: number | null;
+        cost_per_image?: number | null;
       };
       if (!result.found) {
         toast.info(m.reset_to_defaults_not_found({ model: draft.name.trim() }));
@@ -116,6 +124,10 @@
       if (modelType === "transcription") {
         if (result.cost_per_minute != null) {
           draft.costPerMinuteStr = String(result.cost_per_minute);
+        }
+      } else if (modelType === "image") {
+        if (result.cost_per_image != null) {
+          draft.costPerImageStr = String(result.cost_per_image);
         }
       } else {
         // Backend returns USD/token (LiteLLM's native unit); we display
@@ -154,7 +166,9 @@
         ? m.model_identifier_placeholder_completion()
         : modelType === "embedding"
           ? m.model_identifier_placeholder_embedding()
-          : m.model_identifier_placeholder_transcription()}
+          : modelType === "image"
+            ? m.model_identifier_placeholder_image()
+            : m.model_identifier_placeholder_transcription()}
     />
     {#if draft.name.trim() && !isSelfHosted}
       <button
@@ -176,7 +190,9 @@
     <Input
       id="display-name"
       bind:value={draft.displayName}
-      placeholder={m.display_name_placeholder_completion()}
+      placeholder={modelType === "image"
+        ? m.display_name_placeholder_image()
+        : m.display_name_placeholder_completion()}
     />
   </Field.Field>
 </div>
@@ -286,7 +302,7 @@
 <!--
   Cost. Stored in USD; left empty when LiteLLM has no data and the admin
   doesn't want to track it. Token-based for completion+embedding, per-minute
-  of audio for transcription.
+  of audio for transcription, per generated image for image models.
 -->
 {#if modelType === "transcription"}
   <Field.Field>
@@ -305,6 +321,62 @@
     />
     <Field.Description>{m.cost_currency_hint()}</Field.Description>
   </Field.Field>
+{:else if modelType === "image"}
+  <Field.Field>
+    <Field.Label for="cost-per-image" class="flex items-center gap-1.5">
+      {m.cost_per_image()}
+      <HelpTooltip text={m.cost_per_image_help()} />
+    </Field.Label>
+    <Input
+      id="cost-per-image"
+      type="number"
+      step="0.0001"
+      min="0"
+      max={MAX_COST_INPUT}
+      bind:value={draft.costPerImageStr}
+      placeholder={m.cost_input_placeholder()}
+    />
+    <Field.Description>{m.cost_currency_hint()}</Field.Description>
+  </Field.Field>
+
+  <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+    <Field.Field>
+      <Field.Label for="default-size" class="flex items-center gap-1.5">
+        {m.image_default_size()}
+        <HelpTooltip text={m.image_default_size_help()} />
+      </Field.Label>
+      <Select.Root type="single" bind:value={draft.defaultSize}>
+        <Select.Trigger id="default-size" class="w-full">
+          <span data-slot="select-value">{imageSizeLabel(draft.defaultSize)}</span>
+        </Select.Trigger>
+        <Select.Content>
+          {#each IMAGE_SIZES as size (size)}
+            <Select.Item value={size} label={imageSizeLabel(size)}
+              >{imageSizeLabel(size)}</Select.Item
+            >
+          {/each}
+        </Select.Content>
+      </Select.Root>
+    </Field.Field>
+    <Field.Field>
+      <Field.Label for="default-quality" class="flex items-center gap-1.5">
+        {m.image_default_quality()}
+        <HelpTooltip text={m.image_default_quality_help()} />
+      </Field.Label>
+      <Select.Root type="single" bind:value={draft.defaultQuality}>
+        <Select.Trigger id="default-quality" class="w-full">
+          <span data-slot="select-value">{imageQualityLabel(draft.defaultQuality)}</span>
+        </Select.Trigger>
+        <Select.Content>
+          {#each IMAGE_QUALITIES as quality (quality)}
+            <Select.Item value={quality} label={imageQualityLabel(quality)}
+              >{imageQualityLabel(quality)}</Select.Item
+            >
+          {/each}
+        </Select.Content>
+      </Select.Root>
+    </Field.Field>
+  </div>
 {:else}
   <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
     <Field.Field>

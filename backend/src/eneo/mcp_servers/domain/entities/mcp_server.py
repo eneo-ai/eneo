@@ -1,8 +1,12 @@
+from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
 from eneo.base.base_entity import Entity
+from eneo.mcp_servers.domain.capabilities import CapabilityPurpose
+from eneo.roles.permissions import Permission
 
 if TYPE_CHECKING:
     from eneo.security_classifications.domain.entities.security_classification import (
@@ -19,6 +23,103 @@ MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES = 16 * 1024 * 1024
 MCP_TOOL_CATALOG_HARD_MAX_BYTES = 64 * 1024 * 1024
 MCP_TOOL_DEFINITION_DEFAULT_MAX_BYTES = 64 * 1024
 MCP_TOOL_DEFINITION_HARD_MAX_BYTES = 1024 * 1024
+
+# An MCP server's purpose is either "general" (ordinary assistant tooling) or
+# a capability purpose. A capability server is a tenant-wide provider for one
+# capability (web search, image generation): at most one is active per tenant,
+# spaces and assistants attach it as a capability marker rather than a
+# provider pin, and the ask path substitutes the active provider. The tuple
+# order is the order resolved providers are prepended in at ask time.
+GENERAL_PURPOSE = "general"
+CAPABILITY_PURPOSES: tuple[CapabilityPurpose, ...] = ("web_search", "image_generation")
+
+# Who a capability provider serves. "everyone" is the tenant's default provider
+# for its purpose (at most one active per tenant and purpose); "groups" targets
+# the members of the provider's user groups and may coexist with the default
+# and with other group-targeted providers. A user matching several
+# group-targeted providers gets the one with the lowest audience_priority.
+AUDIENCE_EVERYONE = "everyone"
+AUDIENCE_GROUPS = "groups"
+AUDIENCES: tuple[str, ...] = (AUDIENCE_EVERYONE, AUDIENCE_GROUPS)
+DEFAULT_AUDIENCE_PRIORITY = 100
+
+# A built-in provider is an ordinary row whose endpoint is one of Eneo's own
+# loopback MCP servers. It differs from an external server only by this auth
+# type: the ask path mints a scoped token for it instead of sending stored
+# credentials, and ``image_model_id`` names the catalog image model the
+# loopback tool calls (credentials come from that model's provider, defaults
+# and security classification from the model). Today only image generation
+# has one.
+INTERNAL_AUTH_TYPE = "internal"
+BUILTIN_PROVIDER_PURPOSES: tuple[str, ...] = ("image_generation",)
+
+
+def is_builtin_provider(http_auth_type: str | None) -> bool:
+    return http_auth_type == INTERNAL_AUTH_TYPE
+
+
+@dataclass(frozen=True)
+class MCPServerBackingModel:
+    """Read-only projection of the catalog model a built-in provider runs on."""
+
+    id: UUID
+    name: str
+    nickname: str
+    provider_name: str | None
+    is_enabled: bool
+    is_deleted: bool
+    security_classification: "SecurityClassification | None"
+    is_deprecated: bool = False
+    provider_is_active: bool = True
+
+
+def is_capability_purpose(purpose: str | None) -> bool:
+    return bool(purpose) and purpose != GENERAL_PURPOSE
+
+
+def duplicate_capability_purposes(purposes: Iterable[str | None]) -> list[str]:
+    """Capability purposes that occur more than once, in first-seen order.
+
+    A space or assistant attaches at most one marker per capability: the
+    marker only requests the capability, so a second one for the same purpose
+    adds nothing and would let a stale marker keep the capability requested
+    after the user switches the other one off.
+    """
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for purpose in purposes:
+        if not is_capability_purpose(purpose):
+            continue
+        assert purpose is not None
+        if purpose in seen and purpose not in duplicates:
+            duplicates.append(purpose)
+        seen.add(purpose)
+    return duplicates
+
+
+def capability_permission(purpose: str) -> Permission:
+    """The role permission that lets a user use this capability purpose.
+
+    Permission values equal purpose strings, so no per-purpose table exists.
+    """
+    return Permission(purpose)
+
+
+def allowed_capability_purposes(permissions: "set[Permission]") -> set[str]:
+    """Capability purposes the given permission set may use."""
+    return {
+        purpose
+        for purpose in CAPABILITY_PURPOSES
+        if capability_permission(purpose) in permissions
+    }
+
+
+@dataclass(frozen=True)
+class MCPServerAudienceGroup:
+    """A user group in a group-targeted provider's audience."""
+
+    id: UUID
+    name: str
 
 
 class MCPToolCatalogLimitExceeded(ValueError):
@@ -37,6 +138,7 @@ class MCPServerTool(Entity):
         mcp_server_id: UUID,
         name: str,
         title: Optional[str] = None,
+        display_name: Optional[str] = None,
         description: Optional[str] = None,
         input_schema: Optional[dict[str, Any]] = None,
         is_enabled_by_default: bool = True,
@@ -52,6 +154,7 @@ class MCPServerTool(Entity):
         self.mcp_server_id = mcp_server_id
         self.name = name
         self.title = title
+        self.display_name = display_name
         self.description = description
         self.input_schema = input_schema
         self.is_enabled_by_default = is_enabled_by_default
@@ -104,7 +207,13 @@ class MCPServer(Entity):
         description: Optional[str] = None,
         http_auth_type: str = "none",
         http_auth_config_schema: Optional[dict[str, Any]] = None,
+        purpose: str = GENERAL_PURPOSE,
         is_enabled: bool = True,
+        audience: str = AUDIENCE_EVERYONE,
+        audience_priority: int = DEFAULT_AUDIENCE_PRIORITY,
+        user_groups: Optional[list[MCPServerAudienceGroup]] = None,
+        image_model_id: Optional[UUID] = None,
+        image_model: Optional[MCPServerBackingModel] = None,
         forward_identity: bool = False,
         tool_catalog_max_count: int = MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT,
         tool_catalog_max_bytes: int = MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES,
@@ -126,7 +235,13 @@ class MCPServer(Entity):
         self.http_url = http_url
         self.http_auth_type = http_auth_type
         self.http_auth_config_schema = http_auth_config_schema
+        self.purpose = purpose
         self.is_enabled = is_enabled
+        self.audience = audience
+        self.audience_priority = audience_priority
+        self.user_groups = list(user_groups or [])
+        self.image_model_id = image_model_id
+        self.image_model = image_model
         self.forward_identity = forward_identity
         self.tool_catalog_max_count = tool_catalog_max_count
         self.tool_catalog_max_bytes = tool_catalog_max_bytes
@@ -137,6 +252,69 @@ class MCPServer(Entity):
         self.documentation_url = documentation_url
         self.tools = tools or []
         self.security_classification = security_classification
+
+    @property
+    def user_group_ids(self) -> list[UUID]:
+        return [group.id for group in self.user_groups]
+
+    @property
+    def effective_security_classification(self) -> "SecurityClassification | None":
+        """The row's own classification, else that of the model it runs on.
+
+        A built-in provider never stores its own classification, so for it
+        this is always the image model's; an external server has no backing
+        model, so this is always its own.
+        """
+        if self.security_classification is not None:
+            return self.security_classification
+        if self.image_model is not None:
+            return self.image_model.security_classification
+        return None
+
+    @property
+    def is_backing_model_available(self) -> bool:
+        """False when the provider runs on a model that is disabled or deleted."""
+        return self.backing_model_blocker is None
+
+    @property
+    def backing_model_blocker(self) -> str | None:
+        if not is_builtin_provider(self.http_auth_type):
+            return None
+        model = self.image_model
+        if model is None or model.is_deleted:
+            return "model_missing"
+        if not model.is_enabled:
+            return "model_disabled"
+        if model.is_deprecated:
+            return "model_deprecated"
+        if not model.provider_is_active:
+            return "model_provider_inactive"
+        return None
+
+    @property
+    def readiness_reason(self) -> str | None:
+        if self.backing_model_blocker:
+            return self.backing_model_blocker
+        if not any(
+            t.is_enabled_by_default
+            and not t.removed_from_remote
+            and (t.description is not None or t.input_schema is not None)
+            for t in self.tools
+        ):
+            return "no_approved_tools"
+        return None
+
+    def is_default_provider(self) -> bool:
+        """True for a capability provider that serves everyone in the tenant."""
+        return (
+            is_capability_purpose(self.purpose) and self.audience == AUDIENCE_EVERYONE
+        )
+
+    def serves_user_groups(self, user_group_ids: "set[UUID]") -> bool:
+        """True when this group-targeted provider covers any of the groups."""
+        return self.audience == AUDIENCE_GROUPS and any(
+            group_id in user_group_ids for group_id in self.user_group_ids
+        )
 
 
 class MCPServerSettings(Entity):

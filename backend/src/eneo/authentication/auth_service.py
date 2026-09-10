@@ -121,6 +121,7 @@ class AuthService:
         user: UserInDB,
         *,
         assistant_id: UUID,
+        mcp_server_id: UUID | None = None,
         expires_in: int = 15,
     ) -> str:
         """Mint a short-lived access token for a loopback MCP server.
@@ -133,6 +134,10 @@ class AuthService:
         another assistant. Unknown claims ride through ``JWTPayload`` (which
         ignores them on decode) and are read out separately by the loopback
         endpoint.
+
+        ``mcp_server_id`` is set for a built-in provider: the loopback tool
+        reads its configuration from that ``mcp_servers`` row, so the row
+        cannot be chosen by the caller.
         """
         secret_key = str(JWT_SECRET)
 
@@ -155,6 +160,8 @@ class AuthService:
             ).model_dump(),
             "assistant_id": str(assistant_id),
         }
+        if mcp_server_id is not None:
+            payload["mcp_server_id"] = str(mcp_server_id)
         return jwt.encode(payload, secret_key, algorithm=JWT_ALGORITHM)
 
     @staticmethod

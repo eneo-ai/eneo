@@ -97,7 +97,7 @@ describe("password change server adapter", () => {
   test("throws a sanitized stable reason without retaining password payloads", async () => {
     const fetchFn = vi
       .fn<typeof fetch>()
-      .mockResolvedValue(jsonResponse({ eneo_error_code: 9057, message: "wrong" }, 400));
+      .mockResolvedValue(jsonResponse({ eneo_error_code: 9061, message: "wrong" }, 400));
 
     let thrown: unknown;
     try {

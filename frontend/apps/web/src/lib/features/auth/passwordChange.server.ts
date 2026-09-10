@@ -151,7 +151,7 @@ function failureFromEneoResponse(status: number, body: unknown): PasswordChangeF
 
   const code = isRecord(body) ? body.eneo_error_code : undefined;
   switch (Number(code)) {
-    case 9057:
+    case 9061:
       return "current_password_incorrect";
     case 9058:
       return "password_unchanged";

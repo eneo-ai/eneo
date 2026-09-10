@@ -58,13 +58,15 @@ availability requirements justify it. There is no production filesystem
 backend, automatic fallback, dual write, public object URL, provider registry,
 or provider-specific product branch.
 
-File and Icon are the first adopted product owners. Their legacy bytes are
-copied in bounded batches, verified against PostgreSQL-owned SHA-256 and size,
-switched to concrete typed references, and only then removed from the old
-columns. Eligible new File and Icon writes use the target selected in **Admin >
-Storage**. InfoBlob generations and Flow artifacts remain separate follow-up
-work. A target change affects new writes only; moving existing content remains
-a separate migration workflow.
+File and Icon are the first adopted product owners. Existing legacy bytes stay
+readable while a staged, resumable backfill creates and verifies concrete typed
+references. The old columns remain the recovery source until a later contract
+release passes both the campaign-completion and locked live-reference checks
+defined in [Close the recovery window and reclaim
+disk](#close-the-recovery-window-and-reclaim-disk). Eligible new File and Icon
+writes use the target selected in **Admin > Storage**. InfoBlob generations and
+Flow artifacts remain separate follow-up work. A target change affects new
+writes only; moving existing content remains a separate migration workflow.
 
 ## Choose the endpoint
 
@@ -634,6 +636,30 @@ matching PostgreSQL backup.
 
 ## Upgrade and rollback
 
+Start with the concise [File and Icon storage upgrade
+guide](https://docs.eneo.ai/guides/file-icon-storage-upgrade) for its operator
+checklist, disk and duration estimates, pause/rollback decisions, and cleanup.
+This section is the detailed SQL and recovery reference.
+
+The File/Icon upgrade consolidates durable bytes, integrity, storage policy and
+cleanup in the shared object-content module. It is a one-time migration for all
+installations with legacy content, including PostgreSQL-only installations.
+S3-compatible storage is optional and is not the reason the migration is required.
+
+The organizational sequence is:
+
+1. Run read-only preflight with the intended release before downtime. Restore and
+   test representative data, reserve PostgreSQL/WAL headroom from the reported
+   legacy bytes, and keep PostgreSQL inline selected.
+2. Drain old jobs, stop all old backend/worker processes, take the coordinated
+   recovery point, and run `db-init` with the API closed.
+3. Start the new release. Let bounded online adoption run, or acknowledge the
+   reported cumulative capacity above the default 5 GiB threshold.
+4. Monitor status, disk, WAL and request latency. Verify old/new content and a
+   restore of the new release after adoption completes.
+5. Optionally select S3-compatible storage and queue verified moves. Preserve the
+   old columns until the separate contract release; space reclamation is separate.
+
 Before an Eneo or object-store upgrade, take a paired backup and retain the old
 image digests. Upgrade the byte plane without changing endpoint semantics,
 credentials, bucket, or deployment ID. Verify liveness, readiness, single and
@@ -672,16 +698,434 @@ store-generation fence, which pre-upgrade code does not, so never change
 destination while any pre-upgrade process is running. The old columns are
 dropped by a separate migration in a later release.
 
-For the File/Icon normalization upgrade, stop backend and worker producers
-before Alembic starts and do not restart them until the migration succeeds. If
-it stops, retry the migration before accepting new uploads; intervening writes
-make the retry fail closed rather than guess which authority is valid.
+The File/Icon revisions perform schema setup followed by row-metadata inventory.
+The first revision installs a database trigger that freezes legacy payload
+columns and commits that fence. The following revision records one resumable
+ledger item per legacy variant in separately committed, idempotent groups. It
+refuses a non-UTF-8 database before writing the first group because legacy text
+has UTF-8 canonical bytes. Inventory can run without retaining the schema
+revision's exclusive locks on `files` or `icons`.
+Both revisions keep every legacy byte and integrity column. The inventory scans
+the owners and obtains the exact logical byte length of each frozen source
+column without hashing, converting, or copying external payloads. It does not
+contact object storage, hold an `ACCESS EXCLUSIVE` fence during the owner scan,
+or drop the old columns. Normal reads prefer object-content
+references and fall back to the frozen legacy variant only while its reference
+is missing.
 
-The migration copies in row- and byte-bounded batches and hashes copied content
-before its final write fence. While that fence is held, PostgreSQL compares the
-copied payloads with the legacy File/Icon columns once and contracts the old
-schema. Measure this pass on a restored production-size database and reserve a
-maintenance window proportional to total File/Icon bytes.
+PostgreSQL inline remains the complete destination when no S3-compatible store
+is configured. Choosing inline still needs capacity for the second verified
+copy until the later contract and table rewrite reclaim the legacy storage, but
+the work no longer blocks `db-init`. This release has no adapter that adopts
+legacy bytes directly into object storage. Choosing object storage before a
+campaign starts leaves adoption waiting; it does not avoid the inline copy. A
+later remote adapter must change the backup contract from the first
+authoritative remote payload onward.
+
+The worker first finalizes campaign admission in metadata-only batches. It locks
+owners and existing references in a stable order, cancels deleted owners, marks
+still-available references complete, and moves only source-bearing rows to
+`ready`. The inline capacity estimate is frozen only after no `pending` row
+remains, so a reference that fails before admission cannot bypass the capacity
+gate. Owner deletion triggers also cancel unfinished rows while the worker waits,
+allowing both capacity and object-store waits to converge when no owner remains.
+
+The worker then adopts ready inline legacy variants in resumable batches after
+startup. For each leased item, PostgreSQL reads the exact logical size before
+the more expensive SHA-256 and copy. An oversized item is therefore rejected
+without hashing its payload. For an accepted item, the content repository
+verifies the expected size and digest while copying the frozen bytes directly
+into the inline payload table. Python owns the lease, transaction, content
+control, File/Icon reference, and ledger state, but never materializes the
+payload. The guarded copy, reference flip, and completed ledger state commit
+together. Crash recovery can process an item again after its lease expires.
+Owner deletion cancels only that item. An invalid or oversized payload marks
+the item failed; the worker continues other ready or leased items and halts the
+campaign when no actionable item remains. The frozen legacy source stays
+untouched for operator recovery.
+
+Legacy text is canonically encoded as UTF-8. Verify `SHOW server_encoding;`
+returns `UTF8` on an external PostgreSQL deployment before upgrading. The worker
+uses raw text length for the cheap ceiling check and refuses a non-UTF-8 database
+before producing converted bytes.
+
+By default, an inline campaign starts automatically when its stable ready-set
+estimate is at most 5 GiB. Above that size, calculate PostgreSQL payload, WAL,
+backup, replica, and safety headroom first, then set
+`FILE_ICON_BACKFILL_INLINE_CAPACITY_ACK` in `env_backend.env` to at least the
+reported exact logical-byte requirement and recreate the worker. The
+acknowledgement does not reserve disk and the requirement is not peak
+allocation; it records that the operator has accepted the capacity plan. When the current
+Admin storage policy selects object storage, this inline worker does not start
+or silently redirect the campaign. This release adopts legacy bytes into
+PostgreSQL inline. Selecting inline changes the deployment-wide target for eligible new
+writes; keep it selected until the campaign is complete, then reselect object
+storage and queue verified moves if required.
+Set `FILE_ICON_BACKFILL_AUTO_INLINE_MAX_BYTES=0` in `env_backend.env` when every
+non-empty inline campaign must require explicit operator acknowledgement.
+Waiting for capacity is non-fatal: the upgrade is complete, the application
+continues serving frozen legacy File/Icon content, and the worker emits a
+structured warning with the requirement and required acknowledgement on startup
+and every scheduled tick.
+
+### Preflight before downtime
+
+Use the intended new release's image with the existing database configuration.
+Keep old services running during this inspection and use the deployment's normal
+Compose files, profile and maintenance-worker service name:
+
+```bash
+docker compose pull worker
+docker compose run --rm --no-deps -T --entrypoint python worker \
+  -m eneo.object_content.file_icon_migration preflight --timeout-seconds 60 \
+  > file-icon-preflight.json
+```
+
+`run` uses the new image; an old running worker does not contain the command.
+`--entrypoint python` and `--no-deps` keep this invocation to the inspection
+without starting worker jobs or `db-init`. After upgrading, it can also run via
+`docker compose exec worker`.
+
+JSON format version 1 reports `outcome`, `schema_state`, `alembic_revision`,
+`server_encoding`, `inline_maximum_bytes`, storage target, per-variant facts,
+`capacity` and `blockers`. Exit 0 (`ready`) means the metadata checks passed;
+exit 2 (`blocked`) requires resolving a reported issue; exit 3 (`incomplete`)
+means the scan or configuration did not allow a complete result. Check both
+the exit status and JSON before proceeding. No payloads, SQL errors or credentials
+are printed.
+
+The four inventory source groups use logical `octet_length`, preserve empty
+payloads, omit absent payloads/deleted owners and exclude only references whose
+content is `available`. Counts, total bytes, maximum remaining item, oversized
+items and fixed remaining-item size bands are returned in bounded output.
+Remaining logical bytes estimate the future copy; an expanded campaign's
+`campaign_admitted_logical_bytes` is its existing cumulative exposure, including
+possible replacement copies. These are not interchangeable capacity approvals.
+
+Physical database allocation, generated WAL, retained WAL and host free bytes
+remain `null` (unknown). Use the guide's
+[disk planning procedure](https://docs.eneo.ai/guides/file-icon-storage-upgrade#disk-use-the-affected-bytes-not-total-database-size)
+for measurements. Preflight does not reserve capacity, hash/copy bytes, contact
+object storage, or write schema or ledger data. It uses one read-only repeatable
+snapshot, a two-second lock timeout and a total deadline. Increase
+`--timeout-seconds` deliberately for a larger metadata scan; no retry or ongoing
+polling is performed.
+
+Before the write fence, normal traffic can change the estimate. Recheck `status`
+after admission for the worker's actual capacity requirement. Resolve unsupported
+schema/revision/encoding, oversized items, an incompatible target or a halted
+campaign before proceeding. Matching revision IDs and schema cannot distinguish
+earlier unreleased migration implementations with the same shape; the existing
+backup-restore requirement for those revisions still applies.
+
+### Inspect or pause the one-time File/Icon migration
+
+Run these commands inside the maintenance worker, using the deployment's Compose
+files, profiles and service name (`worker` in the reference deployment):
+
+```bash
+docker compose exec worker python -m eneo.object_content.file_icon_migration status
+docker compose exec worker python -m eneo.object_content.file_icon_migration pause
+docker compose exec worker python -m eneo.object_content.file_icon_migration resume
+```
+
+`status` reads a consistent, read-only snapshot of the temporary ledger/campaign
+and the command's environment settings. It never admits work, creates a campaign,
+or reads legacy payload bytes. Before campaign creation it checks for pending
+admission and, once admission has finished, may sum ready ledger metadata for
+`capacity_required_bytes`. This is an on-demand metadata scan, not a polling API.
+After creation, `capacity_required_bytes` is null and `capacity_admitted_bytes`
+reports the accepted cumulative exposure. The configured acknowledgement is not
+a measurement of free disk.
+
+`state` reports `preparing`, `waiting_for_capacity`, `waiting_for_object_store`,
+`active`, `halted` or `complete`; `detail` explains a wait or halt. `paused` is
+separate so a pause does not hide the underlying condition. Preparation and waits
+can exist without a campaign row. Run status in the worker container so its
+`configured_*` fields match the worker's environment; changing the env file alone
+does not update a running container.
+
+Pause updates one flag in `file_icon_backfill_admission_state` and serializes
+with new admission/claims through the existing admission lock. Once it commits,
+all replicas stop claiming migration work. A previously claimed bounded batch
+may finish, so retain headroom for that batch. The flag survives restarts and
+does not affect ordinary moves or other worker jobs. `resume` clears only that
+flag: it never changes the storage target, acknowledges capacity, clears a halt,
+increments the recovery revision, or rewrites ledger state. Use the recovery
+procedure below for a halted campaign. Stop the worker as well if its ongoing
+work must be interrupted.
+
+The command and pause field are temporary upgrade tooling and leave with the
+File/Icon ledger in the later contract release.
+
+### Bound throughput and recover a halted campaign
+
+Large installations can tune bounded throughput without changing application
+or tenant policy:
+
+| Variable                                   | Default | Meaning                                                                                                                                            |
+| ------------------------------------------ | ------: | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `FILE_ICON_BACKFILL_AUTO_INLINE_MAX_BYTES` |   5 GiB | Largest cumulative logical-byte requirement that may start inline without an explicit capacity acknowledgement                                     |
+| `FILE_ICON_BACKFILL_INLINE_CAPACITY_ACK`   |       0 | Accepted cumulative logical-byte exposure, including replacement copies admitted during recovery                                                   |
+| `FILE_ICON_BACKFILL_BATCH_ROWS`            |     200 | Maximum ledger rows leased by one worker run                                                                                                       |
+| `FILE_ICON_BACKFILL_BATCH_BYTES`           | 128 MiB | Maximum summed logical payload bytes per run; one larger first item is still claimed so it cannot be stranded                                      |
+| `FILE_ICON_BACKFILL_LEASE_SECONDS`         |     300 | Crash-recovery lease duration                                                                                                                      |
+| `FILE_ICON_BACKFILL_RESUME_REVISION`       |       0 | Monotonic operator acknowledgement that the cause of a halted campaign was fixed; a strictly higher value starts bounded retries of older failures |
+| `FILE_ICON_BACKFILL_MAX_ATTEMPTS`          |       3 | Processing attempts allowed before a repeatedly crashing item becomes a visible terminal failure                                                   |
+
+The worker reads these values at process startup. After changing
+`env_backend.env`, recreate it with the same Compose files and profile used by
+the deployment:
+
+```bash
+docker compose up -d --force-recreate --no-deps worker
+```
+
+Keep every item within `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES`; the batch byte
+bound does not override that per-content ceiling. An `inline_payload_too_large`
+failure halts the campaign. After confirming capacity, raise the inline ceiling
+and `FILE_ICON_BACKFILL_RESUME_REVISION` together in `env_backend.env`, then
+recreate every backend and worker replica so both use the same safety ceiling.
+
+```bash
+docker compose up -d --force-recreate --no-deps backend worker
+```
+
+The worker logs structured batch counts for every active run, including a
+zero-work run while leases or another worker hold work. It logs the requirement
+and required action while a campaign waits for capacity or is halted.
+Completion runs `ANALYZE` once on the new content, payload, and reference tables
+before the campaign is marked done.
+A PostgreSQL 13 integration benchmark validated the defaults with 10 GiB of
+incompressible legacy payloads across 16,384 items. Active work completed in
+310 seconds at 33.1 MiB/s. Worker peak RSS was about 141 MiB, PostgreSQL stayed
+near 170-217 MiB for that workload, WAL was 11.0 GiB, database allocation grew
+about 10.4 GiB, no PostgreSQL temporary files were written, and a separate
+verification pass found no stored-payload digest mismatch. A concurrent metadata
+query measured p95 6.2 ms and p99 13.0 ms. At the once-per-minute schedule, the
+163 bounded runs project to about
+2 hours 42 minutes. The schedule deliberately limits database load while the
+application remains online; it is not intended to maximize migration
+throughput. Before changing the batch limits, run a canary under representative
+traffic and monitor foreground p95/p99 latency, errors, database CPU and I/O,
+WAL/checkpoints, and batch duration. Restore the defaults if that traffic
+regresses.
+
+A repeatable PostgreSQL 13 check on 2026-09-07 copied about 1 GiB in 1,639 items
+with the default bounds: 36.49 seconds active time, 28.07 MiB/s, 17 runs
+(16.01 minutes at the normal cadence), 140 MiB worker peak RSS, 1.08 GiB
+generated WAL, 1.04 GiB additional database allocation, no temporary files,
+no failed items or digest mismatches, and all legacy rows preserved. The
+concurrent metadata SQL probe recorded p95 4.58 ms and p99 13.33 ms. This was
+a shared local Docker host with six CPUs and about 16 GiB assigned to Docker.
+It is a measurement of this workload, not a claimed speedup or production SLA.
+
+A separate authenticated ASGI test used the production upload, signed-download,
+and original-download routes against PostgreSQL 13 during bounded adoption.
+It passed 19 foreground rounds while adopting 20 legacy text items (983,040
+bytes) in ten copy batches, then verified every old and new payload again. It
+completed the concurrent phase in 4.71 seconds with no request or byte-check
+failure. This is API correctness evidence with a small fixture, not a latency
+benchmark for real users. It does not qualify ingestion, model providers,
+offline expansion, replicas, backup retention, or full restore behavior.
+
+The [raw results and frozen profile](benchmarks/file-icon-migration-pg13-20260907.json)
+record image, PostgreSQL settings, workload and source hashes. Reproduce the
+resource check with `ENEO_RUN_FILE_ICON_BACKFILL_BENCHMARK=1`,
+`ENEO_FILE_ICON_BENCHMARK_TOTAL_MIB=1024`, and
+`ENEO_FILE_ICON_BENCHMARK_FOREGROUND_PROBE=1` when running
+`tests/integration/object_content/test_file_icon_backfill_benchmark.py`.
+The API check is `test_file_icon_migration_traffic.py` in the same directory;
+set `ENEO_TEST_POSTGRES_IMAGE` to the profile's pinned PostgreSQL 13 image when
+running it. This optional test-fixture override leaves deployment images and
+the broader integration fixture's existing default unchanged.
+
+Only one worker replica may run a batch at a time. A PostgreSQL advisory lock
+prevents minute jobs from overlapping and multiplying the configured byte and
+memory bounds. Memory is bounded by one item rather than the campaign or batch
+byte total. A separate five-item benchmark at the 200 MiB inline ceiling kept
+worker RSS near 140 MiB but briefly raised PostgreSQL to about 620 MiB while it
+hashed and copied one large `bytea`. Treat the inline ceiling as a database
+memory-safety bound and measure the exact peak on the deployment's PostgreSQL
+version before raising it.
+After correcting a halted campaign's stated cause, increase
+`FILE_ICON_BACKFILL_RESUME_REVISION` in `env_backend.env` and recreate the worker
+with the deployment's normal Compose files and profile. Do not reuse or lower a
+previous value. The worker records the accepted revision in PostgreSQL, requeues
+older failed items in batches of at most `FILE_ICON_BACKFILL_BATCH_ROWS`, and
+still refuses to resume if the Admin storage target differs from the campaign's
+frozen destination. The durable cursor continues across worker restarts. An
+item that fails again is stamped with the accepted revision and waits for the
+next strictly higher value instead of retrying in a loop.
+Completion is terminal and cached by each worker process; manual campaign
+edits are unsupported and require a worker restart even during diagnosis.
+
+This unreleased expand revision reuses Alembic revision ID `202607231700` and
+replaces the former destructive normalization at that position. The inventory
+revision `202607231745` was also corrected in place before release so capacity
+uses logical source bytes consistently. A test or development environment that
+started or completed either earlier revision must restore its pre-upgrade
+database backup before using the new chain. The inventory commits groups
+independently, and a rerun deliberately keeps existing ledger rows. Alembic also
+cannot detect changed code behind an already-recorded revision ID.
+
+After these revisions, recovery is forward: keep the legacy source frozen,
+retry failed work, and resume from the ledger. A rollback to an older image is a
+coordinated restore of its matching pre-upgrade database backup. Do not Alembic
+stamp past the revision, attempt `alembic downgrade`, drop the trigger, edit
+ledger state manually, or run an old File/Icon writer against the expanded
+schema.
+
+The operator status contract starts with this payload-free preflight query. It
+excludes owners that were deleted and variants that already gained a durable
+reference after the inventory snapshot. During the campaign, use ledger state
+and structured worker logs for completed, failed, cancelled, and remaining
+estimated work:
+
+```sql
+WITH source_bearing AS (
+    SELECT payload_size_estimate
+    FROM file_icon_backfill_items
+    WHERE state = 'ready'
+
+    UNION ALL
+
+    SELECT item.payload_size_estimate
+    FROM file_icon_backfill_items AS item
+    JOIN files AS file
+      ON item.owner_kind = 'file' AND file.id = item.owner_id
+    WHERE item.state = 'pending'
+      AND NOT EXISTS (
+          SELECT 1
+          FROM file_content_references AS reference
+          JOIN object_contents AS content ON content.id = reference.content_id
+          WHERE reference.file_id = item.owner_id
+            AND reference.variant = item.variant
+            AND reference.ordinal = item.ordinal
+            AND content.state = 'available'
+      )
+
+    UNION ALL
+
+    SELECT item.payload_size_estimate
+    FROM file_icon_backfill_items AS item
+    JOIN icons AS icon
+      ON item.owner_kind = 'icon' AND icon.id = item.owner_id
+    WHERE item.state = 'pending'
+      AND NOT EXISTS (
+          SELECT 1
+          FROM icon_content_references AS reference
+          JOIN object_contents AS content ON content.id = reference.content_id
+          WHERE reference.icon_id = item.owner_id
+            AND reference.variant = item.variant
+            AND content.state = 'available'
+      )
+)
+SELECT count(*) AS estimated_source_items,
+       coalesce(sum(payload_size_estimate), 0)::bigint
+           AS estimated_payload_bytes,
+       pg_size_pretty(coalesce(sum(payload_size_estimate), 0)::bigint)
+           AS estimated_payload_size
+FROM source_bearing;
+```
+
+After the campaign starts, this query reports its frozen destination, recovery
+state, and remaining ledger work without reading payloads. It scans the ledger,
+so run it on demand for operator diagnosis rather than polling it from the
+minute worker or a frequent monitor:
+
+```sql
+SELECT campaign.target_kind,
+       campaign.state AS campaign_state,
+       campaign.halt_reason,
+       campaign.resume_revision,
+       campaign.resume_cursor_id,
+       count(*) FILTER (WHERE item.state = 'pending') AS pending_items,
+       count(*) FILTER (WHERE item.state = 'ready') AS ready_items,
+       count(*) FILTER (WHERE item.state = 'leased') AS leased_items,
+       count(*) FILTER (WHERE item.state = 'failed') AS failed_items,
+       count(*) FILTER (WHERE item.state = 'done') AS done_items,
+       count(*) FILTER (WHERE item.state = 'cancelled') AS cancelled_items,
+       coalesce(sum(item.payload_size_estimate) FILTER (
+           WHERE item.state NOT IN ('done', 'cancelled')
+       ), 0)::bigint AS estimated_remaining_bytes,
+       pg_size_pretty(
+           coalesce(sum(item.payload_size_estimate) FILTER (
+               WHERE item.state NOT IN ('done', 'cancelled')
+           ), 0)::bigint
+       ) AS estimated_remaining_size
+FROM file_icon_backfill_campaign AS campaign
+LEFT JOIN file_icon_backfill_items AS item ON true
+GROUP BY campaign.target_kind,
+         campaign.state,
+         campaign.halt_reason,
+         campaign.resume_revision,
+         campaign.resume_cursor_id;
+```
+
+For a halted campaign, inspect at most the first 100 failed items before raising
+the resume revision:
+
+```sql
+SELECT owner_kind,
+       owner_id,
+       variant,
+       ordinal,
+       attempts,
+       failure_revision,
+       last_error_code,
+       last_error_detail
+FROM file_icon_backfill_items
+WHERE state = 'failed'
+ORDER BY id
+LIMIT 100;
+```
+
+### Close the recovery window and reclaim disk
+
+Do not remove frozen legacy bytes when the online campaign first reports
+`complete`. Keep the current release for the deployment's verification period,
+exercise representative old File and Icon downloads, and restore-test a current
+backup. Inline-only deployments need a tested PostgreSQL backup; deployments
+with any object-store authority need a matching PostgreSQL and object-store
+backup pair. Retain the pre-upgrade recovery point until that restore succeeds
+and the deployment's retention rules allow its removal.
+
+Install the later contract release only after the campaign is `complete` and
+the ledger has no `pending`, `ready`, `leased`, or `failed` row. Its migration
+must treat that as a necessary but insufficient precondition. In the same
+transaction that drops legacy columns, it must lock and recheck that every
+surviving ledger key has its matching File or Icon reference and that the
+referenced object content is still `available`. A missing or failed reference
+must abort before any legacy column is dropped. Do not drop the columns
+manually. Installing that release closes direct rollback to the old image;
+recovery remains forward or through the retained coordinated backup.
+
+After the contract release, measure the remaining relations before deciding
+whether filesystem reclamation is worth the operational cost:
+
+```sql
+SELECT pg_size_pretty(pg_total_relation_size('files')) AS files_total,
+       pg_size_pretty(pg_total_relation_size('icons')) AS icons_total;
+```
+
+Use one tested maintenance method:
+
+- Prefer [`pg_repack`](https://github.com/reorg/pg_repack/blob/master/doc/pg_repack.rst)
+  when minimizing blocking matters. It requires the extension and client,
+  temporary free disk of roughly twice the target tables and indexes, and a
+  short final lock. Validate its version and exact command against a restored
+  production-size database first.
+- For the simpler offline option, stop APIs and workers and run
+  `VACUUM (FULL, ANALYZE) files;` followed by
+  `VACUUM (FULL, ANALYZE) icons;`. Each command rewrites and exclusively locks
+  its table and requires temporary space.
+
+Ordinary `VACUUM` generally makes dead space reusable inside PostgreSQL but does
+not return this table storage to the filesystem. Physical reclamation therefore
+stays an explicit operator job, never hidden inside Alembic or application
+startup. See the
+[PostgreSQL VACUUM documentation](https://www.postgresql.org/docs/16/sql-vacuum.html).
 
 The later range-verification revision uses the same maintenance window. It
 backfills at most 10,000 unexpected pre-production object descriptors in one

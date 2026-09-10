@@ -175,9 +175,8 @@ def postgres_container() -> Generator[PostgresContainer, None, None]:
     """
     Start a PostgreSQL container with pgvector extension for the test session.
     """
-    # Use postgres:16 with pgvector pre-installed
     postgres = PostgresContainer(
-        image="pgvector/pgvector:pg16",
+        image=os.environ.get("ENEO_TEST_POSTGRES_IMAGE", "pgvector/pgvector:pg16"),
         username="integration_test_user",
         password="integration_test_password",
         dbname="integration_test_db",
@@ -280,7 +279,6 @@ def test_settings(
         # Feature flags
         using_access_management=False,
         using_iam=False,
-        using_image_generation=False,
         using_crawl=False,
         tenant_credentials_enabled=False,  # Disable for integration tests (tests can override if needed)
         federation_enabled=True,
@@ -588,9 +586,13 @@ async def cleanup_database(
             setup_database.transcription_audio_limit_bytes,
         ),
     )
-    # The migration seeds this singleton once in production. Full test cleanup
+    # Migrations seed these singletons once in production. Full test cleanup
     # truncates every table, so restore the same required control-plane state.
     cursor.execute("INSERT INTO object_content_reconciliation_state (id) VALUES (1)")
+    cursor.execute(
+        "INSERT INTO file_icon_backfill_admission_state "
+        "(singleton, generation) VALUES (true, 0)"
+    )
     # Add API key scope enforcement feature flags.
     conn.commit()
     cursor.close()

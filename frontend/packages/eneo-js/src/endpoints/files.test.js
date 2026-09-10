@@ -3,6 +3,52 @@ import test from "node:test";
 
 import { initFiles } from "./files.js";
 
+test("file deletion waits for the backend outcome", async () => {
+  let resolveRequest;
+  const request = new Promise((resolve) => {
+    resolveRequest = resolve;
+  });
+  const calls = [];
+  const files = initFiles({
+    baseUrl: new URL("https://eneo.example.eu"),
+    fetch: async (endpoint, options) => {
+      calls.push({ endpoint, options });
+      return request;
+    }
+  });
+
+  let settled = false;
+  const deletion = files.delete({ fileId: "file-1" }).finally(() => {
+    settled = true;
+  });
+  await Promise.resolve();
+
+  assert.equal(settled, false);
+  resolveRequest();
+  assert.equal(await deletion, undefined);
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/files/{id}/",
+      options: {
+        method: "delete",
+        params: { path: { id: "file-1" } }
+      }
+    }
+  ]);
+});
+
+test("file deletion propagates backend failures", async () => {
+  const backendError = new Error("deletion rejected");
+  const files = initFiles({
+    baseUrl: new URL("https://eneo.example.eu"),
+    fetch: async () => {
+      throw backendError;
+    }
+  });
+
+  await assert.rejects(files.delete({ fileId: "file-1" }), backendError);
+});
+
 test("processing signed URLs keep the existing route and defaults", async () => {
   const calls = [];
   const files = initFiles({

@@ -61,3 +61,7 @@ export PATH="$HOME/.bun/bin:$PATH"
 cd /workspace/frontend
 rm -rf node_modules packages/*/node_modules apps/*/node_modules
 bun run setup
+
+# Vitest browser mode needs Chromium and its Linux libraries.
+cd /workspace/frontend/apps/web
+bun x playwright install --with-deps chromium chromium-headless-shell

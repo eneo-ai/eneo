@@ -87,15 +87,21 @@ class ReferencesService:
     async def _get_info_blobs_from_chunks(
         self, info_blob_chunks: list["InfoBlobChunkInDBWithScore"]
     ) -> list["InfoBlobInDBWithScore"]:
+        if not info_blob_chunks:
+            return []
+
+        blob_ids = [chunk.info_blob_id for chunk in info_blob_chunks]
+        loaded_blobs = await self.info_blobs_repo.get_by_ids(blob_ids)
+        blobs_by_id = {blob.id: blob for blob in loaded_blobs}
         info_blobs: list[InfoBlobInDBWithScore] = []
         for chunk in info_blob_chunks:
-            info_blob = await self.info_blobs_repo.get(chunk.info_blob_id)
+            info_blob = blobs_by_id.get(chunk.info_blob_id)
             assert info_blob is not None
-            info_blob = InfoBlobInDBWithScore(
-                **info_blob.model_dump(), score=chunk.score
+            info_blobs.append(
+                InfoBlobInDBWithScore(**info_blob.model_dump(), score=chunk.score)
             )
-            info_blobs.append(info_blob)
 
+        await self.info_blobs_repo.hydrate_original_availability(info_blobs)
         return info_blobs
 
     def _get_info_blob_chunks_without_duplicates(

@@ -9,8 +9,10 @@ from eneo.authentication.signed_urls import (
     FILE_ORIGINAL_DOWNLOAD_AUDIENCE,
     SIGNING_KEY,
     generate_file_original_download_token,
+    generate_info_blob_original_download_token,
     generate_signed_token,
     verify_file_original_download_token,
+    verify_info_blob_original_download_token,
     verify_signed_token,
 )
 from eneo.files.file_models import ContentDisposition
@@ -24,7 +26,6 @@ def test_original_download_token_uses_a_purpose_separated_signature():
         expires_at=expires_at,
         content_disposition=ContentDisposition.ATTACHMENT,
     )
-
     assert verify_file_original_download_token(token) == {
         "file_id": str(file_id),
         "expires_at": expires_at,
@@ -82,3 +83,29 @@ def test_tampered_and_expired_tokens_are_rejected():
         )
         is None
     )
+
+
+def test_info_blob_original_token_cannot_be_replayed_as_file_token():
+    info_blob_id = uuid4()
+    tenant_id = uuid4()
+    token = generate_info_blob_original_download_token(
+        info_blob_id=info_blob_id,
+        expires_at=int(time.time()) + 60,
+        content_disposition=ContentDisposition.ATTACHMENT,
+        tenant_id=tenant_id,
+    )
+
+    payload = verify_info_blob_original_download_token(token)
+    assert payload is not None
+    assert payload["info_blob_id"] == str(info_blob_id)
+    assert payload["tenant_id"] == str(tenant_id)
+    assert payload["content_disposition"] == "attachment"
+    assert verify_file_original_download_token(token) is None
+
+    file_token = generate_file_original_download_token(
+        file_id=info_blob_id,
+        expires_at=int(time.time()) + 60,
+        content_disposition=ContentDisposition.ATTACHMENT,
+        tenant_id=tenant_id,
+    )
+    assert verify_info_blob_original_download_token(file_token) is None

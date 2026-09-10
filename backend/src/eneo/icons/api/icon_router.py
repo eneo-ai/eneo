@@ -2,12 +2,12 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Response, UploadFile
-from fastapi.responses import StreamingResponse
 
 from eneo.icons.api.icon_models import IconPublic
 from eneo.main.container.container import Container
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
+from eneo.server.protocol.downloads import ClosingStreamingResponse
 
 router = APIRouter()
 
@@ -45,15 +45,9 @@ async def get_icon(id: UUID, container: _NonTransactionalContainer) -> Response:
     icon_service = container.icon_service()
     download = await icon_service.open_icon(id)
 
-    async def response_chunks():
-        try:
-            async for chunk in download.chunks:
-                yield chunk
-        finally:
-            await download.aclose()
-
-    return StreamingResponse(
-        response_chunks(),
+    return ClosingStreamingResponse(
+        download.chunks,
+        close=download.aclose,
         media_type=download.media_type,
         headers={
             "Cache-Control": "public, max-age=31536000",

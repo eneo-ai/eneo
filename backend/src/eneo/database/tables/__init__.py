@@ -1,6 +1,7 @@
 from importlib import import_module
 
 _TABLE_MODULES = (
+    "eneo.database.tables.capabilities_table",
     "eneo.database.tables.ai_models_table",
     "eneo.database.tables.allowed_origins_table",
     "eneo.database.tables.api_keys_v2_table",
@@ -15,6 +16,7 @@ _TABLE_MODULES = (
     "eneo.database.tables.collections_table",
     "eneo.database.tables.completion_model_migration_history_table",
     "eneo.database.tables.feature_flag_table",
+    "eneo.database.tables.file_icon_backfill_table",
     "eneo.database.tables.files_table",
     "eneo.database.tables.group_chats_table",
     "eneo.database.tables.groups_spaces_table",
@@ -49,7 +51,6 @@ _TABLE_MODULES = (
     "eneo.database.tables.tenant_table",
     "eneo.database.tables.user_groups_table",
     "eneo.database.tables.users_table",
-    "eneo.database.tables.web_search_results_table",
     "eneo.database.tables.websites_spaces_table",
     "eneo.database.tables.websites_table",
     "eneo.database.tables.widget_table",

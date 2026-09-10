@@ -34,7 +34,7 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   9005: () => m.eneo_error_9005(), // AUTHENTICATION_ERROR
   9019: () => m.eneo_error_9019(), // USER_INACTIVE
   9025: () => m.eneo_error_9025(), // TENANT_SUSPENDED
-  9057: () => m.eneo_error_9057(), // CURRENT_PASSWORD_INCORRECT
+  9061: () => m.eneo_error_9061(), // CURRENT_PASSWORD_INCORRECT
   9058: () => m.eneo_error_9058(), // PASSWORD_REUSE
   9059: () => m.eneo_error_9059(), // PASSWORD_POLICY_VIOLATION
   9060: () => m.eneo_error_9060(), // LOCAL_PASSWORD_CHANGE_UNAVAILABLE
@@ -63,6 +63,7 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
 
   // --- File uploads ---
   9056: () => m.eneo_error_9056(), // INVALID_FILENAME
+  9057: () => m.eneo_error_9057(), // INFO_BLOB_ORIGINAL_UNAVAILABLE
 
   // --- Model lifecycle ---
   9039: () => m.eneo_error_9039(), // MODEL_IN_USE

@@ -54,6 +54,10 @@ class SettingsPublic(SettingsBase):
     # assistant inline-file-text toggle). Distinct from object_content_enabled,
     # which only reports that the object-content module started.
     object_store_configured: bool = False
+    # Read-only: whether the guarded SharePoint fixture API is available in
+    # this deployment. Lets the UI expose local test controls without relying
+    # on a manually entered query parameter.
+    sharepoint_fixture_mode_available: bool = False
 
 
 class GetModelsResponse(BaseModel):

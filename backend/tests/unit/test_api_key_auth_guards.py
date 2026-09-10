@@ -20,6 +20,7 @@ from eneo.authentication.auth_dependencies import (
     APPS_READ_OVERRIDES,
     ASSISTANTS_READ_OVERRIDES,
     CONVERSATIONS_READ_OVERRIDES,
+    INFO_BLOBS_READ_OVERRIDES,
     KNOWLEDGE_READ_OVERRIDES,
     _raise_api_key_http_error,
     require_api_key_permission,
@@ -558,10 +559,12 @@ class TestOverrideNameValidation:
             router as conversations_router,
         )
         from eneo.groups_legacy.api.group_router import router as groups_router
+        from eneo.info_blobs.info_blobs_router import router as info_blobs_router
         from eneo.services.service_router import router as services_router
 
         assistant_names = self._collect_endpoint_names(assistants_router)
         group_names = self._collect_endpoint_names(groups_router)
+        info_blob_names = self._collect_endpoint_names(info_blobs_router)
         conversation_names = self._collect_endpoint_names(conversations_router)
         # APPS_READ_OVERRIDES is shared across app_router and services_router
         apps_names = self._collect_endpoint_names(
@@ -576,6 +579,11 @@ class TestOverrideNameValidation:
         for name in KNOWLEDGE_READ_OVERRIDES:
             assert name in group_names, (
                 f"KNOWLEDGE_READ_OVERRIDES contains '{name}' but no route has that endpoint name"
+            )
+
+        for name in INFO_BLOBS_READ_OVERRIDES:
+            assert name in info_blob_names, (
+                f"INFO_BLOBS_READ_OVERRIDES contains '{name}' but no route has that endpoint name"
             )
 
         for name in CONVERSATIONS_READ_OVERRIDES:

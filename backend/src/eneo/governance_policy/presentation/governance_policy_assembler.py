@@ -10,6 +10,7 @@ from eneo.governance_policy.presentation.governance_policy_models import (
     GovernancePolicyPublic,
     McpRestrictionPublic,
     ModelsRestrictionPublic,
+    PolicyCapabilityInput,
     PolicyCompletionModelPublic,
     PolicyMcpServerPublic,
     PromptEnforcementPublic,
@@ -39,6 +40,12 @@ class GovernancePolicyAssembler:
                 provider_ids=list(policy.model_provider_ids),
             ),
             mcp_restriction=McpRestrictionPublic(
+                capabilities=[
+                    PolicyCapabilityInput(
+                        purpose=c.purpose, is_default_enabled=c.is_default_enabled
+                    )
+                    for c in policy.capabilities
+                ],
                 enabled=policy.mcp_restriction_enabled,
                 servers=[
                     PolicyMcpServerPublic(

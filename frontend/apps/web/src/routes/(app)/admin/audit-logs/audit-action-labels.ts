@@ -329,6 +329,10 @@ const ACTION_MESSAGES = {
     name: m.audit_action_file_original_download_link_created,
     description: m.audit_action_file_original_download_link_created_description
   },
+  info_blob_original_download_link_created: {
+    name: m.audit_action_info_blob_original_download_link_created,
+    description: m.audit_action_info_blob_original_download_link_created_description
+  },
   file_signed_url_minted: {
     name: m.audit_action_file_signed_url_minted,
     description: m.audit_action_file_signed_url_minted_description
@@ -440,6 +444,18 @@ const ACTION_MESSAGES = {
   transcription_model_migrated: {
     name: m.audit_action_transcription_model_migrated,
     description: m.audit_action_transcription_model_migrated_description
+  },
+  image_model_created: {
+    name: m.audit_action_image_model_created,
+    description: m.audit_action_image_model_created_description
+  },
+  image_model_updated: {
+    name: m.audit_action_image_model_updated,
+    description: m.audit_action_image_model_updated_description
+  },
+  image_model_deleted: {
+    name: m.audit_action_image_model_deleted,
+    description: m.audit_action_image_model_deleted_description
   },
   template_created: {
     name: m.audit_action_template_created,

@@ -6,14 +6,16 @@ matters.
 
 ## Start here
 
-| If you need to…                   | Start with                                               |
-| --------------------------------- | -------------------------------------------------------- |
-| Deploy or upgrade Eneo            | [Deploy Eneo](/guides/deployment)                        |
-| Choose where durable bytes live   | [Choose Content Storage](/guides/object-content-storage) |
-| Configure login and access        | [Authentication & OIDC](/guides/authentication)          |
-| Connect an AI provider            | [AI Provider Configuration](/guides/ai-providers)        |
-| Add documents to a knowledge base | [Document Processing](/guides/document-processing)       |
-| Connect SharePoint or OneDrive    | [SharePoint Integration](/guides/sharepoint-integration) |
+| If you need to…                   | Start with                                                       |
+| --------------------------------- | ---------------------------------------------------------------- |
+| Deploy Eneo                       | [Deploy Eneo](/guides/deployment)                                |
+| Upgrade legacy File/Icon storage  | [Upgrade File & Icon Storage](/guides/file-icon-storage-upgrade) |
+| Choose where durable bytes live   | [Choose Content Storage](/guides/object-content-storage)         |
+| Configure login and access        | [Authentication & OIDC](/guides/authentication)                  |
+| Connect an AI provider            | [AI Provider Configuration](/guides/ai-providers)                |
+| Enable web search or image generation | [Web Search & Image Generation](/guides/capabilities)        |
+| Add documents to a knowledge base | [Document Processing](/guides/document-processing)               |
+| Connect SharePoint or OneDrive    | [SharePoint Integration](/guides/sharepoint-integration)         |
 
 ## All guides
 
@@ -61,6 +63,15 @@ Connect assistants to external tools while keeping discovery and execution under
 - Forward user identity for user-specific catalogs
 - Preserve stateful MCP sessions across conversation turns
 
+### [Web Search & Image Generation](/guides/capabilities)
+
+Turn on the functions (*Funktioner*) assistants can use, and understand how they run:
+
+- Activate a search engine or an image source under Admin → Tools → Functions
+- Use a catalog image model directly, or an external MCP image server
+- Scope sources by user group, role permission and security classification
+- Edit and vary images with reference images, including follow-up edits
+
 ### [Deploy Eneo](/guides/deployment)
 
 Deploy Eneo in production environments:
@@ -70,6 +81,15 @@ Deploy Eneo in production environments:
 - Reverse proxy configuration (Traefik, Nginx)
 - SSL/TLS certificates with Let's Encrypt
 - Environment configuration best practices
+
+### [Upgrade File & Icon Storage](/guides/file-icon-storage-upgrade)
+
+Run the one-time legacy content adoption safely:
+
+- Follow the offline `db-init` and online worker phases
+- Estimate PostgreSQL disk, WAL headroom, and wall time
+- Pause or restore when capacity runs low
+- Record a release-candidate result and verify completion before cleanup
 
 ### [Choose Content Storage](/guides/object-content-storage)
 

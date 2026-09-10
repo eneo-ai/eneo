@@ -18,6 +18,7 @@ from eneo.authentication.auth_dependencies import (
     ASSISTANTS_READ_OVERRIDES,
     CONVERSATIONS_READ_OVERRIDES,
     FILES_READ_OVERRIDES,
+    INFO_BLOBS_READ_OVERRIDES,
     KNOWLEDGE_READ_OVERRIDES,
 )
 from eneo.main.config import get_settings
@@ -120,6 +121,7 @@ INTENTIONALLY_UNGUARDED = {
     "/completion-models": "Model catalog endpoints are mounted with admin scope + admin key guards",
     "/embedding-models": "Model catalog endpoints are mounted with admin scope + admin key guards",
     "/transcription-models": "Model catalog endpoints are mounted with admin scope + admin key guards",
+    "/image-models": "Model catalog endpoints are mounted with admin scope + admin key guards",
     "/ai-models": "Model listing aggregation",
     "/user-groups": "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
     "/allowed-origins": "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
@@ -320,6 +322,7 @@ class TestReadOverrideValidity:
             | CONVERSATIONS_READ_OVERRIDES
             | APPS_READ_OVERRIDES
             | FILES_READ_OVERRIDES
+            | INFO_BLOBS_READ_OVERRIDES
             | KNOWLEDGE_READ_OVERRIDES
         )
         stale = all_overrides - all_endpoint_names
@@ -429,6 +432,7 @@ class TestTenantAdminApiKeyGuards:
             "/completion-models",
             "/embedding-models",
             "/transcription-models",
+            "/image-models",
             "/audit",
             "/integrations",
             "/storage",
@@ -1069,6 +1073,12 @@ class TestScopeCheckPathParamSafety:
         "via the actor-based space authorization layer; scope=info_blob limits which blobs "
         "a scoped key can resolve.",
         (
+            "POST",
+            "/info-blobs/{id}/original/signed-url/",
+        ): "info_blob_service.ensure_original_available() resolves the blob through "
+        "the actor-based space authorization layer and verifies the retained original "
+        "before a signed URL is minted.",
+        (
             "DELETE",
             "/info-blobs/{id}/",
         ): "info_blob_service.delete() performs space-membership authorization via the "
@@ -1123,6 +1133,7 @@ class TestReadOverrideUniqueness:
             ("CONVERSATIONS_READ_OVERRIDES", CONVERSATIONS_READ_OVERRIDES),
             ("APPS_READ_OVERRIDES", APPS_READ_OVERRIDES),
             ("FILES_READ_OVERRIDES", FILES_READ_OVERRIDES),
+            ("INFO_BLOBS_READ_OVERRIDES", INFO_BLOBS_READ_OVERRIDES),
             ("KNOWLEDGE_READ_OVERRIDES", KNOWLEDGE_READ_OVERRIDES),
         ]
 
@@ -1179,6 +1190,9 @@ class TestReadOverrideSnapshot:
             "generate_original_signed_url",
             "generate_signed_url",
         ],
+        "INFO_BLOBS_READ_OVERRIDES": [
+            "generate_original_signed_url",
+        ],
         "KNOWLEDGE_READ_OVERRIDES": [
             "run_semantic_search",
         ],
@@ -1190,6 +1204,7 @@ class TestReadOverrideSnapshot:
             "CONVERSATIONS_READ_OVERRIDES": sorted(CONVERSATIONS_READ_OVERRIDES),
             "APPS_READ_OVERRIDES": sorted(APPS_READ_OVERRIDES),
             "FILES_READ_OVERRIDES": sorted(FILES_READ_OVERRIDES),
+            "INFO_BLOBS_READ_OVERRIDES": sorted(INFO_BLOBS_READ_OVERRIDES),
             "KNOWLEDGE_READ_OVERRIDES": sorted(KNOWLEDGE_READ_OVERRIDES),
         }
         assert actual == self.EXPECTED_READ_OVERRIDES, (

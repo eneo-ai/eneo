@@ -101,6 +101,125 @@ class _FakeMCPClient:
         return {"content": [{"type": "text", "text": name}], "is_error": False}
 
 
+class _RecordingMCPClient(_FakeMCPClient):
+    """Fake client that keeps the constructor options the proxy passed."""
+
+    options_by_server: dict[UUID, dict[str, object]] = {}
+
+    def __init__(
+        self,
+        mcp_server: MCPServer,
+        auth_credentials: dict[str, str] | None = None,
+        *,
+        identity_headers: dict[str, str] | None = None,
+        **options: object,
+    ) -> None:
+        super().__init__(
+            mcp_server, auth_credentials, identity_headers=identity_headers
+        )
+        type(self).options_by_server[mcp_server.id] = options
+
+
+async def test_builtin_image_provider_gets_its_own_tool_call_budget(monkeypatch):
+    """Image generation outlasts a general tool call; only the built-in
+    provider carries the longer budget, other servers keep the default."""
+    general = _make_server("general")
+    image_provider = MCPServer(
+        id=uuid4(),
+        tenant_id=general.tenant_id,
+        name="Images",
+        http_url="http://localhost/internal-mcp/image_generation/mcp",
+        http_auth_type="internal",
+        purpose="image_generation",
+        image_model_id=uuid4(),
+    )
+    monkeypatch.setattr(proxy_module, "MCPClient", _RecordingMCPClient)
+    _RecordingMCPClient.options_by_server = {}
+    proxy = MCPProxySession([general, image_provider])
+
+    await proxy._get_or_create_client(general)  # pyright: ignore[reportPrivateUsage]
+    await proxy._get_or_create_client(image_provider)  # pyright: ignore[reportPrivateUsage]
+
+    options = _RecordingMCPClient.options_by_server
+    assert options[general.id]["tool_call_timeout"] is None
+    assert (
+        options[image_provider.id]["tool_call_timeout"]
+        == proxy_module._settings.image_generation_timeout_seconds  # pyright: ignore[reportPrivateUsage]
+    )
+
+
+def test_builtin_provider_tool_calls_are_reported_under_the_loopback_server():
+    """A built-in provider's tools are Eneo's own: the trace names the
+    loopback server (its purpose), not the admin-named row, so clients can
+    localize them like the other internal servers. External servers keep
+    their own name."""
+    general = _make_server("general")
+    provider_id = uuid4()
+    image_provider = MCPServer(
+        id=provider_id,
+        tenant_id=general.tenant_id,
+        name="Image Studio",
+        http_url="http://localhost/internal-mcp/image_generation/mcp",
+        http_auth_type="internal",
+        purpose="image_generation",
+        image_model_id=uuid4(),
+        tools=[
+            MCPServerTool(
+                mcp_server_id=provider_id,
+                name="generate_image",
+                title="Generate image",
+                description="Generate an image from a text description.",
+                input_schema={"type": "object", "properties": {}},
+                is_enabled_by_default=True,
+            )
+        ],
+    )
+    proxy = MCPProxySession([general, image_provider])
+
+    assert proxy.get_tool_info("image_studio__generate_image") == (
+        "image_generation",
+        "generate_image",
+        "Generate image",
+    )
+    assert proxy.get_tool_info("general__tool") == ("general", "tool", None)
+
+
+def test_tool_purpose_names_the_capability_whichever_server_backs_it():
+    """A capability provider's calls carry the purpose so clients render
+    them as one function ("web search") rather than by the provider's name;
+    general servers carry none, and unknown tools resolve to none."""
+    general = _make_server("general")
+    provider_id = uuid4()
+    search_provider = MCPServer(
+        id=provider_id,
+        tenant_id=general.tenant_id,
+        name="GDM Safe Search",
+        http_url="https://search.example/mcp",
+        http_auth_type="bearer",
+        purpose="web_search",
+        tools=[
+            MCPServerTool(
+                mcp_server_id=provider_id,
+                name="search",
+                title="Search",
+                description="Search the web.",
+                input_schema={"type": "object", "properties": {}},
+                is_enabled_by_default=True,
+            )
+        ],
+    )
+    proxy = MCPProxySession([general, search_provider])
+
+    assert proxy.get_tool_purpose("gdm_safe_search__search") == "web_search"
+    assert proxy.get_tool_info("gdm_safe_search__search") == (
+        "GDM Safe Search",
+        "search",
+        "Search",
+    )
+    assert proxy.get_tool_purpose("general__tool") is None
+    assert proxy.get_tool_purpose("nope__tool") is None
+
+
 class _InMemoryToolRepo:
     def __init__(self, tools: list[MCPServerTool]) -> None:
         self.tools = {tool.id: tool for tool in tools}
@@ -807,7 +926,9 @@ class TestReferenceFallbackHint:
         texts = [block["text"] for block in result["content"]]
         assert not any("files__read_file" in text for text in texts)
 
-    async def test_no_hint_when_read_file_is_not_registered(self):
+    async def test_reference_stays_valid_when_read_file_is_not_registered(self):
+        # Image references register no reader; the notice keeps the model from
+        # asking for a re-upload when a remote tool could not fetch the url.
         external = _make_server(name="tabular")
         proxy = MCPProxySession([external])
         proxy._clients[external.id] = self._failing_client()
@@ -816,6 +937,7 @@ class TestReferenceFallbackHint:
 
         texts = [block["text"] for block in result["content"]]
         assert not any("read_file" in text for text in texts)
+        assert any("do not ask the user to re-upload" in text for text in texts)
 
     async def test_unavailable_server_result_carries_the_hint(self):
         external = _make_server(name="tabular")
@@ -886,10 +1008,116 @@ class TestTruncateToolResult:
 
         truncated = self._truncate(result)
 
-        first, cut, notice = truncated["content"]
+        # Image blocks never compete for the text budget: they survive the
+        # cut and follow the notice, so they still become generated files.
+        first, cut, notice, image = truncated["content"]
         assert first == {"type": "text", "text": "first block"}
         assert cut["text"].startswith("y") and len(cut["text"]) < max_chars
-        assert "1 content block(s) dropped" in notice["text"]
+        assert "dropped" not in notice["text"]
+        assert image == {"type": "image", "data": "AAAA", "mime_type": "image/png"}
+
+    def test_large_image_within_byte_cap_is_kept_without_truncation(self):
+        from eneo.main.config import get_settings
+
+        max_chars = get_settings().mcp_tool_output_max_chars
+        image = {
+            "type": "image",
+            "data": "A" * (max_chars * 4),
+            "mime_type": "image/png",
+        }
+        result = {
+            "content": [{"type": "text", "text": "done"}, image],
+            "is_error": False,
+        }
+
+        truncated = self._truncate(result)
+
+        assert truncated["content"] == [{"type": "text", "text": "done"}, image]
+
+    def test_image_over_byte_cap_is_dropped_with_notice(self, monkeypatch):
+        from eneo.mcp_servers.infrastructure.proxy import mcp_proxy_session
+
+        monkeypatch.setattr(
+            mcp_proxy_session._settings,  # pyright: ignore[reportPrivateUsage]
+            "mcp_tool_image_max_bytes",
+            64,
+        )
+        result = {
+            "content": [
+                {"type": "text", "text": "done"},
+                {"type": "image", "data": "A" * 400, "mime_type": "image/png"},
+            ],
+            "is_error": False,
+        }
+
+        truncated = self._truncate(result)
+
+        text, notice = truncated["content"]
+        assert text == {"type": "text", "text": "done"}
+        assert notice["type"] == "text"
+        assert "exceeded" in notice["text"] and "dropped" in notice["text"]
+
+    def test_image_with_non_raster_mime_is_dropped_with_notice(self):
+        # Only raster formats become generated files; a server cannot smuggle
+        # HTML or SVG into the file store through an image block.
+        result = {
+            "content": [
+                {"type": "text", "text": "done"},
+                {"type": "image", "data": "AAAA", "mime_type": "text/html"},
+                {"type": "image", "data": "AAAA", "mime_type": "image/svg+xml"},
+            ],
+            "is_error": False,
+        }
+
+        truncated = self._truncate(result)
+
+        text, *notices = truncated["content"]
+        assert text == {"type": "text", "text": "done"}
+        assert [n["type"] for n in notices] == ["text", "text"]
+        assert "'text/html'" in notices[0]["text"]
+        assert "'image/svg+xml'" in notices[1]["text"]
+
+    def test_image_without_mime_is_admitted_as_png(self):
+        # The adapter reads a missing type as PNG; the proxy agrees and
+        # records the normalized type so the two never disagree.
+        result = {
+            "content": [
+                {"type": "image", "data": "AAAA"},
+                {"type": "image", "data": "AAAA", "mime_type": "IMAGE/JPEG; q=1"},
+            ],
+            "is_error": False,
+        }
+
+        truncated = self._truncate(result)
+
+        assert truncated["content"] == [
+            {"type": "image", "data": "AAAA", "mime_type": "image/png"},
+            {"type": "image", "data": "AAAA", "mime_type": "image/jpeg"},
+        ]
+
+    def test_images_beyond_count_cap_are_dropped_with_one_notice(self, monkeypatch):
+        from eneo.mcp_servers.infrastructure.proxy import mcp_proxy_session
+
+        monkeypatch.setattr(
+            mcp_proxy_session._settings,  # pyright: ignore[reportPrivateUsage]
+            "mcp_tool_image_max_count",
+            2,
+        )
+        images = [
+            {"type": "image", "data": f"AAA{i}", "mime_type": "image/png"}
+            for i in range(5)
+        ]
+        result = {
+            "content": [{"type": "text", "text": "done"}, *images],
+            "is_error": False,
+        }
+
+        truncated = self._truncate(result)
+
+        text, notice, *kept = truncated["content"]
+        assert text == {"type": "text", "text": "done"}
+        assert "3 image content block(s)" in notice["text"]
+        assert kept == images[:2]
 
     def test_total_size_respects_budget(self):
         import json

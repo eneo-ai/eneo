@@ -327,6 +327,32 @@ Scope limits where the key can operate:
 
 Tenant-scoped admin user keys require the owner to remain a tenant administrator. Tenant-scoped read/write user keys inherit the owner's live role permissions through endpoint-level guards. Space-, assistant-, and app-scoped user keys require the owner to remain a member of the target space.
 
+### Why does deletion fail even with admin permission?
+
+Check the response's `code` before changing permissions or retrying:
+
+| Response | Meaning | Next step |
+|----------|---------|-----------|
+| `403 insufficient_permission` or `insufficient_resource_permission` | The key does not allow this action or resource type. | Check the key's method and resource permissions. |
+| `403 insufficient_scope` | The requested resource is outside the key's scope, or Eneo cannot establish that it exists within that scope. | Check the environment, actual key, resource ID, and owning space. |
+| `409 file_in_use` | The File still has attachment or input references. | Inspect `details.blockers`; resolve those references before retrying. |
+
+Admin permission does not expand a space-scoped key's boundary. An
+organisation-scoped (`tenant`) key passes that scope check, but user-owned keys
+still depend on their owner's access. Compare the request's environment and
+masked key suffix with the key shown in the admin UI; matching display names
+across test and production do not identify the same credential.
+
+Knowledge documents under `/info-blobs/` use `knowledge` permission. Uploaded
+runtime files under `/files/` use `files` permission. Missing and inaccessible
+resources deliberately share the scope-denial response, so it does not prove
+that a document exists in another space. Use the stable error code and request
+ID for handling and diagnostics, rather than parsing the English message.
+
+For `file_in_use`, see the [file cleanup workflow](/guides/object-content-storage#why-can-i-not-delete-an-uploaded-file).
+Chat attachments currently remain referenced until their conversation is
+deleted; there is no standalone detach endpoint.
+
 ### Can API keys create or manage other API keys?
 
 No. API-key management endpoints require a session login. API-key callers, including tenant-admin service keys, are rejected for API-key mutations.

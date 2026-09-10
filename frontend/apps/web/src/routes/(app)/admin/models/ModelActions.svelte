@@ -5,6 +5,7 @@
     EneoError,
     type CompletionModel,
     type EmbeddingModel,
+    type ImageModel,
     type TranscriptionModel
   } from "@eneo/eneo-js";
   import { getEneo } from "$lib/core/Eneo";
@@ -32,8 +33,8 @@
    *  Mirrors `ErrorCodes.MODEL_IN_USE` in `backend/src/eneo/main/exceptions.py`. */
   const MODEL_IN_USE_CODE = 9039;
 
-  type AnyModel = CompletionModel | EmbeddingModel | TranscriptionModel;
-  type ModelTypeKey = "completionModel" | "embeddingModel" | "transcriptionModel";
+  type AnyModel = CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel;
+  type ModelTypeKey = "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel";
 
   // svelte-headless-table's `createRender` expects a class-based component,
   // so we keep this file on the legacy `export let` API. Shadcn primitives
@@ -66,6 +67,15 @@
   $: modelLabel = "nickname" in model && model.nickname ? model.nickname : model.name;
   $: isMigratedModel =
     supportsMigration && "migrated_to_model_id" in model && !!model.migrated_to_model_id;
+  // An image model that a capability provider runs on cannot be deleted; the
+  // backend refuses with 9039, so the menu says why instead of letting the
+  // admin find out after the fact.
+  $: usedBy =
+    type === "imageModel" && "used_by_mcp_servers" in model
+      ? (model.used_by_mcp_servers ?? [])
+      : [];
+  $: deleteBlocked = usedBy.length > 0;
+  $: deleteBlockedNames = usedBy.map((u) => u.name).join(", ");
 
   function openDelete() {
     deleteError = null;
@@ -83,6 +93,8 @@
         await eneo.tenantModels.deleteCompletion({ id: model.id });
       } else if (type === "embeddingModel") {
         await eneo.tenantModels.deleteEmbedding({ id: model.id });
+      } else if (type === "imageModel") {
+        await eneo.tenantModels.deleteImage({ id: model.id });
       } else {
         await eneo.tenantModels.deleteTranscription({ id: model.id });
       }
@@ -126,9 +138,16 @@
 
     <DropdownMenu.Separator />
 
-    <DropdownMenu.Item variant="destructive" onclick={openDelete}>
+    <DropdownMenu.Item variant="destructive" disabled={deleteBlocked} onclick={openDelete}>
       <Trash2 />
-      {m.delete_model()}
+      <span class="flex flex-col">
+        <span>{m.delete_model()}</span>
+        {#if deleteBlocked}
+          <span class="text-muted-foreground text-xs whitespace-normal">
+            {m.model_delete_blocked_used_by({ names: deleteBlockedNames })}
+          </span>
+        {/if}
+      </span>
     </DropdownMenu.Item>
   </DropdownMenu.Content>
 </DropdownMenu.Root>

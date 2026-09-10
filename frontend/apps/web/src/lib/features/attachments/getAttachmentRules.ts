@@ -3,7 +3,15 @@ import type { Limits, App } from "@eneo/eneo-js";
 import { derived, type Readable } from "svelte/store";
 import type { AttachmentRules } from "./AttachmentManager";
 
-type Resource = { completion_model?: { vision: boolean } | null };
+type Resource = {
+  completion_model?: { vision: boolean } | null;
+  /**
+   * Whether image uploads are accepted regardless of the completion model's
+   * vision support, e.g. because an image tool can take them as input.
+   * Defaults to the model's vision support.
+   */
+  acceptsImageAttachments?: boolean;
+};
 
 /**
  * Get eneo's default attachment limits based on a resource's capabilites,
@@ -29,8 +37,9 @@ export function getAttachmentRules(params: {
 }): AttachmentRules {
   const { limits, resource } = params;
 
+  const acceptsImages = resource.acceptsImageAttachments ?? resource.completion_model?.vision;
   const formats = limits.attachments.formats.filter((format) =>
-    format.vision ? resource.completion_model?.vision : true
+    format.vision ? acceptsImages : true
   );
 
   return {

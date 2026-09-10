@@ -7,9 +7,12 @@ Create Date: 2026-07-31 10:00:00.000000
 The old reference shape never had a production writer. Upgrade therefore
 refuses unexpected rows instead of guessing their meaning. The coordinated
 release must also drain executable legacy knowledge jobs before this contract
-changes.
+changes. Pre-durable queued jobs left after the old worker drains have no
+durable recovery evidence; the migration records those jobs as interrupted
+instead of requiring operators to repair them by hand.
 """
 
+import logging
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -29,10 +32,62 @@ _ACTIVE_KNOWLEDGE_JOB = """
     task IN ('upload_info_blob', 'transcription')
     AND status IN ('queued', 'in progress')
 """
+_PRE_DURABLE_QUEUED_JOB = """
+    task IN ('upload_info_blob', 'transcription')
+    AND status = 'queued'
+    AND dispatch_envelope IS NULL
+"""
+_BLOCKING_KNOWLEDGE_JOB = f"""
+    {_ACTIVE_KNOWLEDGE_JOB}
+    AND NOT (
+        status = 'queued'
+        AND dispatch_envelope IS NULL
+    )
+"""
+_LOCK_NOT_AVAILABLE_SQLSTATE = "55P03"
+
+logger = logging.getLogger("alembic.runtime.migration")
 
 
 def _count(statement: str) -> int:
     return int(op.get_bind().execute(sa.text(statement)).scalar_one())
+
+
+def _retire_pre_durable_queued_jobs() -> int:
+    return _count(
+        f"""
+        WITH retired AS (
+            UPDATE jobs
+            SET status = 'failed',
+                result_location = NULL,
+                failure_code = 'processing_interrupted',
+                finished_at = now(),
+                updated_at = now()
+            WHERE {_PRE_DURABLE_QUEUED_JOB}
+            RETURNING 1
+        )
+        SELECT count(*) FROM retired
+        """
+    )
+
+
+def _lock_jobs_for_classification() -> None:
+    try:
+        op.get_bind().exec_driver_sql(
+            "LOCK TABLE jobs IN SHARE ROW EXCLUSIVE MODE NOWAIT"
+        )
+    except sa.exc.DBAPIError as error:
+        sqlstate = getattr(error.orig, "sqlstate", None) or getattr(
+            error.orig,
+            "pgcode",
+            None,
+        )
+        if sqlstate != _LOCK_NOT_AVAILABLE_SQLSTATE:
+            raise
+        raise RuntimeError(
+            "Knowledge-original migration could not lock jobs; stop all API "
+            "replicas and old workers, then retry db-init"
+        ) from error
 
 
 def _install_reference_identity_fence(*, include_variant: bool) -> None:
@@ -87,15 +142,21 @@ def upgrade() -> None:
             "investigate the drift before upgrading"
         )
 
-    active_job_count = _count(
-        f"SELECT count(*) FROM jobs WHERE {_ACTIVE_KNOWLEDGE_JOB}"
+    # Serialize with writers without blocking ordinary reads or waiting behind
+    # a missed old process indefinitely.
+    _lock_jobs_for_classification()
+
+    blocking_job_count = _count(
+        f"SELECT count(*) FROM jobs WHERE {_BLOCKING_KNOWLEDGE_JOB}"
     )
-    if active_job_count:
+    if blocking_job_count:
         raise RuntimeError(
             "Knowledge-original migration found "
-            f"{active_job_count} active legacy knowledge job(s); "
+            f"{blocking_job_count} active legacy knowledge job(s); "
             "stop API replicas and drain old workers before upgrading"
         )
+
+    retired_job_count = _retire_pre_durable_queued_jobs()
 
     op.drop_constraint(_PRIMARY_KEY, _TABLE, type_="primary")
     op.drop_constraint(_VARIANT_CHECK, _TABLE, type_="check")
@@ -111,6 +172,13 @@ def upgrade() -> None:
     )
     op.create_primary_key(_PRIMARY_KEY, _TABLE, ["info_blob_id"])
     _install_reference_identity_fence(include_variant=False)
+
+    if retired_job_count:
+        logger.info(
+            "Retired %d queued legacy knowledge job(s) without a durable "
+            "dispatch envelope",
+            retired_job_count,
+        )
 
 
 def downgrade() -> None:

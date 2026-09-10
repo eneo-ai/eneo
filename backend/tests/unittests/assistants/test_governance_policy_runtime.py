@@ -154,6 +154,7 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
     space.get_assistant.return_value = assistant
     space.can_ask_assistant.return_value = None
     space.is_personal.return_value = True
+    space.security_classification = None
 
     actor = MagicMock()
     actor.can_read_assistant.return_value = True
@@ -257,6 +258,7 @@ async def test_ask_rejects_empty_model_policy_before_creating_history():
     space.get_assistant.return_value = assistant
     space.can_ask_assistant.return_value = None
     space.is_personal.return_value = True
+    space.security_classification = None
 
     actor = MagicMock()
     actor.can_read_assistant.return_value = True
@@ -327,7 +329,7 @@ async def test_ask_grants_policy_mcp_servers_to_personal_assistant():
     )
     response = MagicMock()
     datastore_result = DatastoreResult(chunks=[], no_duplicate_chunks=[], info_blobs=[])
-    policy_server = SimpleNamespace(id=uuid4(), name="Sundsvall.se")
+    policy_server = SimpleNamespace(id=uuid4(), name="Sundsvall.se", purpose=None)
 
     assistant = MagicMock()
     assistant.id = assistant_id
@@ -343,6 +345,7 @@ async def test_ask_grants_policy_mcp_servers_to_personal_assistant():
     space.get_assistant.return_value = assistant
     space.can_ask_assistant.return_value = None
     space.is_personal.return_value = True
+    space.security_classification = None
 
     actor = MagicMock()
     actor.can_read_assistant.return_value = True
@@ -354,6 +357,7 @@ async def test_ask_grants_policy_mcp_servers_to_personal_assistant():
         policy_default_model=None,
         mcp_enforced=True,
         available_mcp_servers=[policy_server],
+        enabled_capabilities=[],
         prompt_enforced=False,
         enforced_prompt_text=None,
         reasoning_policy_configured=False,
@@ -407,8 +411,8 @@ async def test_ask_respects_disabled_mcp_server_ids():
     session = SessionInDB(id=uuid4(), name="hello", user_id=TEST_USER.id, questions=[])
     response = MagicMock()
     datastore_result = DatastoreResult(chunks=[], no_duplicate_chunks=[], info_blobs=[])
-    server_a = SimpleNamespace(id=uuid4(), name="Sundsvall.se")
-    server_b = SimpleNamespace(id=uuid4(), name="Confluence")
+    server_a = SimpleNamespace(id=uuid4(), name="Sundsvall.se", purpose=None)
+    server_b = SimpleNamespace(id=uuid4(), name="Confluence", purpose=None)
 
     assistant = MagicMock()
     assistant.id = assistant_id
@@ -424,6 +428,7 @@ async def test_ask_respects_disabled_mcp_server_ids():
     space.get_assistant.return_value = assistant
     space.can_ask_assistant.return_value = None
     space.is_personal.return_value = True
+    space.security_classification = None
 
     actor = MagicMock()
     actor.can_read_assistant.return_value = True
@@ -435,6 +440,7 @@ async def test_ask_respects_disabled_mcp_server_ids():
         policy_default_model=None,
         mcp_enforced=True,
         available_mcp_servers=[server_a, server_b],
+        enabled_capabilities=[],
         prompt_enforced=False,
         enforced_prompt_text=None,
         reasoning_policy_configured=False,
