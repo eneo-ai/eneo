@@ -6,6 +6,7 @@ from uuid import UUID
 
 from eneo.actors import SpaceAction
 from eneo.admin.quota_service import QuotaService
+from eneo.authentication.auth_models import ApiKeyScopeType
 from eneo.groups_legacy.group_service import GroupService
 from eneo.info_blobs.info_blob import (
     CapturedKnowledgeOriginal,
@@ -354,8 +355,22 @@ class InfoBlobService:
         actor = await self._get_actor(info_blob=info_blob, group_id=group_id)
         match action:
             case SpaceAction.READ:
-                if not actor.can_read_info_blobs():
-                    raise UnauthorizedException()
+                if actor.can_read_info_blobs():
+                    return
+                # Match UserService._enforce_api_key_scope: scoped blob requests
+                # are bound to the source's owning space.
+                key = self.user.active_api_key
+                if info_blob is not None and (
+                    key is None or key.scope_type == ApiKeyScopeType.TENANT
+                ):
+                    for access in await self.space_repo.get_info_blob_read_access(
+                        info_blob
+                    ):
+                        if self.actor_manager.get_space_actor(
+                            access
+                        ).can_read_info_blobs():
+                            return
+                raise UnauthorizedException()
             case SpaceAction.CREATE:
                 if not actor.can_create_info_blobs():
                     raise UnauthorizedException()
