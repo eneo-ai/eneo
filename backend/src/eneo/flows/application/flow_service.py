@@ -563,6 +563,7 @@ class FlowService:
             evaluation = evaluate_step_security_classification(
                 step_order=step.step_order,
                 input_source=str(step.input_source),
+                output_mode=step.output_mode,
                 output_classification_override=step.output_classification_override,
                 prior_output_levels_by_order=prior_output_levels,
                 assistant=assistant,

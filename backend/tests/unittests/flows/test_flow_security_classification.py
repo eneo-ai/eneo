@@ -55,6 +55,7 @@ def test_rejects_model_below_previous_step_classification() -> None:
         evaluate_step_security_classification(
             step_order=2,
             input_source="previous_step",
+            output_mode="pass_through",
             output_classification_override=None,
             prior_output_levels_by_order={1: 3},
             assistant=_assistant(model_level=2),
@@ -69,6 +70,7 @@ def test_rejects_output_override_write_down() -> None:
         evaluate_step_security_classification(
             step_order=2,
             input_source="previous_step",
+            output_mode="pass_through",
             output_classification_override=1,
             prior_output_levels_by_order={1: 3},
             assistant=_assistant(model_level=3),
@@ -82,6 +84,7 @@ def test_returns_effective_output_level_when_security_is_compatible() -> None:
     evaluation = evaluate_step_security_classification(
         step_order=2,
         input_source="previous_step",
+        output_mode="pass_through",
         output_classification_override=4,
         prior_output_levels_by_order={1: 3},
         assistant=_assistant(model_level=4, knowledge_level=3),
@@ -96,6 +99,7 @@ def test_current_step_output_override_does_not_raise_same_step_input_floor() -> 
     evaluation = evaluate_step_security_classification(
         step_order=1,
         input_source="flow_input",
+        output_mode="pass_through",
         output_classification_override=3,
         prior_output_levels_by_order={},
         assistant=_assistant(model_level=3),
@@ -111,9 +115,57 @@ def test_all_previous_steps_uses_max_prior_effective_output_level() -> None:
         evaluate_step_security_classification(
             step_order=4,
             input_source="all_previous_steps",
+            output_mode="pass_through",
             output_classification_override=None,
             prior_output_levels_by_order={1: 1, 2: 3, 3: 2},
             assistant=_assistant(model_level=2),
+            space=_space(1),
+        )
+
+    assert exc_info.value.code == "flow_step_security_classification_mismatch"
+
+
+def test_deterministic_step_without_model_carries_input_classification() -> None:
+    # A rendering step runs no completion model, so there is no model to hold
+    # to the floor. Its output still inherits the classification of its input.
+    evaluation = evaluate_step_security_classification(
+        step_order=3,
+        input_source="all_previous_steps",
+        output_mode="render_verbatim",
+        output_classification_override=None,
+        prior_output_levels_by_order={1: 1, 2: 3},
+        assistant=_assistant(model_level=None),
+        space=_space(1),
+    )
+
+    assert evaluation.required_model_level is None
+    assert evaluation.effective_output_level == 3
+
+
+def test_deterministic_step_still_rejects_output_override_write_down() -> None:
+    with pytest.raises(BadRequestException) as exc_info:
+        evaluate_step_security_classification(
+            step_order=2,
+            input_source="previous_step",
+            output_mode="render_verbatim",
+            output_classification_override=1,
+            prior_output_levels_by_order={1: 3},
+            assistant=_assistant(model_level=None),
+            space=_space(None),
+        )
+
+    assert exc_info.value.code == "flow_step_output_classification_write_down"
+
+
+def test_completion_step_without_model_is_rejected_when_floor_exists() -> None:
+    with pytest.raises(BadRequestException) as exc_info:
+        evaluate_step_security_classification(
+            step_order=1,
+            input_source="flow_input",
+            output_mode="pass_through",
+            output_classification_override=None,
+            prior_output_levels_by_order={},
+            assistant=_assistant(model_level=None),
             space=_space(1),
         )
 
