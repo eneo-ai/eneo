@@ -1,7 +1,7 @@
 """add user credential version for session invalidation
 
 Revision ID: 202608271000
-Revises: 202608251400
+Revises: 202609071000
 Create Date: 2026-08-27 10:00:00.000000
 
 Existing Eneo JWTs have no credential-version claim and therefore represent
@@ -28,7 +28,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "202608271000"
-down_revision: str = "202608251400"
+down_revision: str = "202609071000"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
