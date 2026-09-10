@@ -2,6 +2,7 @@ import logging
 from typing import Protocol, cast
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 
@@ -292,6 +293,31 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
 
 
 def add_exception_handlers(app: FastAPI):
+    async def request_validation_error_handler(
+        request: Request, exc: Exception
+    ) -> JSONResponse:
+        # Keep the documented HTTPValidationError shape, but never serialize
+        # raw input, validation context or validator-generated messages. Even
+        # SecretStr cannot redact input when a required sibling is missing,
+        # and a custom validator may embed a secret in its error message.
+        validation_exc = cast(RequestValidationError, exc)
+        public_messages = {
+            "missing": "Field required",
+            "string_type": "Input should be a valid string",
+            "json_invalid": "Invalid JSON",
+        }
+        details: list[dict[str, object]] = [
+            {
+                "loc": error["loc"],
+                "type": error["type"],
+                "msg": public_messages.get(error["type"], "Invalid value"),
+            }
+            for error in validation_exc.errors()
+        ]
+        return JSONResponse(status_code=422, content={"detail": details})
+
+    app.add_exception_handler(RequestValidationError, request_validation_error_handler)
+
     exception_handlers = (
         *EXCEPTION_MAP.items(),
         *DOMAIN_EXCEPTION_MAP.items(),
