@@ -114,7 +114,9 @@ class CrawlHistoryPeriod(StrEnum):
 
 
 CrawlOverviewStatus = (
-    CrawlPhase | CrawlOutcome | Literal["issues", "completed", "unsuccessful"]
+    CrawlPhase
+    | CrawlOutcome
+    | Literal["issues", "completed", "warnings", "unsuccessful"]
 )
 
 
@@ -231,7 +233,7 @@ class CrawlRunRepository:
         tenant_id: UUID,
         *,
         as_of: datetime,
-        view: Literal["active", "recent"] = "active",
+        view: Literal["active", "recent", "all"] = "active",
         status: CrawlOverviewStatus | None = None,
         period: CrawlHistoryPeriod = CrawlHistoryPeriod.LAST_24_HOURS,
         time_zone: ZoneInfo = ZoneInfo("UTC"),
@@ -265,8 +267,17 @@ class CrawlRunRepository:
             CrawlHistoryPeriod.YESTERDAY: yesterday,
         }[period]
         queued = run.phase.in_((CrawlPhase.PENDING_DISPATCH, CrawlPhase.QUEUED))
-        completed = run.outcome.in_(_CLEAN_OUTCOMES)
-        partial = run.outcome == CrawlOutcome.PARTIAL
+        completed = sa.or_(
+            run.outcome.in_(_CLEAN_OUTCOMES),
+            sa.and_(
+                run.outcome == CrawlOutcome.PARTIAL,
+                run.failure_code == CrawlFailureCode.RESOURCES_MISSING,
+            ),
+        )
+        partial = sa.and_(
+            run.outcome == CrawlOutcome.PARTIAL,
+            run.failure_code.is_distinct_from(CrawlFailureCode.RESOURCES_MISSING),
+        )
         unsuccessful = run.outcome.in_((CrawlOutcome.FAILED, CrawlOutcome.INTERRUPTED))
         cancelled = run.outcome == CrawlOutcome.CANCELLED
         issues = sa.or_(partial, unsuccessful)
@@ -325,7 +336,11 @@ class CrawlRunRepository:
             )
             .where(
                 run.tenant_id == tenant_id,
-                active if view == "active" else history_window,
+                active
+                if view == "active"
+                else sa.or_(active, history_window)
+                if view == "all"
+                else history_window,
             )
             .limit(limit + 1)
         )
@@ -333,6 +348,8 @@ class CrawlRunRepository:
             query = query.where(issues)
         elif status == "completed":
             query = query.where(completed)
+        elif status == "warnings":
+            query = query.where(partial)
         elif status == "unsuccessful":
             query = query.where(unsuccessful)
         elif status == CrawlPhase.QUEUED:
@@ -348,7 +365,8 @@ class CrawlRunRepository:
                     WebsitesTable.url.icontains(search.strip(), autoescape=True),
                 )
             )
-        timestamp = run.created_at if view == "active" else run.finished_at
+        # The combined view keeps creation order when a run becomes terminal.
+        timestamp = run.finished_at if view == "recent" else run.created_at
         if cursor is not None:
             anchor = (
                 await self.session.execute(

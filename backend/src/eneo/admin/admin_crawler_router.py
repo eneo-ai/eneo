@@ -4,7 +4,7 @@ from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
@@ -50,8 +50,12 @@ class AdminCrawlerItem(BaseModel):
 
 class AdminCrawlerDaySummary(BaseModel):
     date: date
-    completed: int
-    partial: int
+    completed: int = Field(
+        description="Completed runs, including runs with only missing resources."
+    )
+    partial: int = Field(
+        description="Incomplete runs needing attention; excludes completed runs with only missing resources."
+    )
     failed: int
     cancelled: int
 
@@ -113,7 +117,7 @@ class AdminCrawlerRelatedPage(BaseModel):
 )
 async def get_crawler_overview(
     container: AdminContainer,
-    view: Literal["active", "recent"] = "active",
+    view: Literal["active", "recent", "all"] = "active",
     status: CrawlOverviewStatus | None = None,
     period: CrawlHistoryPeriod = CrawlHistoryPeriod.LAST_24_HOURS,
     time_zone: Annotated[

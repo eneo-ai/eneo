@@ -69,8 +69,30 @@ it("updates website status when refreshed knowledge replaces its latest crawl", 
   });
   await page.getByRole("button", { name: m.crawl_view_failed_pages({ count: 2 }) }).click();
   expect(onshowFailures).toHaveBeenLastCalledWith("page");
-  await page.getByText(m.crawl_completed_with_warnings(), { exact: true }).hover();
-  const tooltip = page.getByRole("tooltip");
-  await expect.element(tooltip).toHaveTextContent(m.pages_failed({ count: "2" }));
-  await expect.element(tooltip).toHaveTextContent(m.crawl_failure_partial());
+  await expect
+    .element(page.getByText(m.crawl_completed_with_warnings(), { exact: true }))
+    .toBeVisible();
+  await rendered.rerender({
+    website: {
+      ...website,
+      latest_crawl: {
+        ...run,
+        phase: "terminal",
+        status: "complete",
+        outcome: "partial",
+        pages_crawled: 12,
+        pages_failed: 2,
+        files_failed: 1,
+        failure_code: "resources_missing"
+      }
+    }
+  });
+  await expect.element(page.getByText(m.crawl_status_succeeded(), { exact: true })).toBeVisible();
+  await expect
+    .element(page.getByText(m.crawl_completed_with_warnings(), { exact: true }))
+    .not.toBeInTheDocument();
+  await page.getByRole("button", { name: m.crawl_view_failed_pages({ count: 2 }) }).click();
+  expect(onshowFailures).toHaveBeenLastCalledWith("page");
+  await page.getByRole("button", { name: m.crawl_view_failed_files({ count: 1 }) }).click();
+  expect(onshowFailures).toHaveBeenLastCalledWith("file");
 });

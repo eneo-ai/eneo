@@ -139,6 +139,8 @@ async def test_admin_crawler_scaling(
             for label, params in (
                 ("first", {}),
                 ("search", {"search": f"benchmark-source-{size}."}),
+                ("all-first", {"view": "all"}),
+                ("all-search", {"view": "all", "search": f"benchmark-source-{size}."}),
             ):
                 wall, cpu = [], []
                 for _ in range(7):
@@ -159,7 +161,7 @@ async def test_admin_crawler_scaling(
                         "queued": size // 2,
                         "issues": 0,
                     }
-                    assert len(data["items"]) == (50 if label == "first" else 1)
+                    assert len(data["items"]) == (1 if label.endswith("search") else 50)
                     assert len(captured) == 2
                 print(
                     "CRAWLER_SAMPLE "

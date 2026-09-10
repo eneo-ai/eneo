@@ -12,8 +12,12 @@
   import { formatWebsiteName } from "$lib/core/formatting/formatWebsiteName.js";
   import CrawlCreateRun from "./CrawlCreateRun.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { hasCrawlIssues, isActiveCrawlRun } from "$lib/features/knowledge/crawlRunState";
-  import { LoaderCircle, TriangleAlert } from "lucide-svelte";
+  import {
+    hasCrawlIssues,
+    isCompletedWithMissingResources,
+    isActiveCrawlRun
+  } from "$lib/features/knowledge/crawlRunState";
+  import { Info, LoaderCircle, TriangleAlert } from "lucide-svelte";
   import type { CrawlResourceFailure, CrawlRun, WebsiteInfoBlobPage } from "@eneo/eneo-js";
   import CrawlRunDetails from "$lib/features/knowledge/CrawlRunDetails.svelte";
   import CrawlFailureActions from "$lib/features/knowledge/CrawlFailureActions.svelte";
@@ -281,12 +285,20 @@
           class="border-default mb-4 flex flex-wrap items-start justify-between gap-3 rounded-lg border p-4"
         >
           <div class="flex min-w-0 items-start gap-3">
-            <TriangleAlert
-              class="text-negative-stronger mt-0.5 size-4 shrink-0"
-              aria-hidden="true"
-            />
+            {#if isCompletedWithMissingResources(latestCompletedRun)}
+              <Info class="text-secondary mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            {:else}
+              <TriangleAlert
+                class="text-warning-stronger mt-0.5 size-4 shrink-0"
+                aria-hidden="true"
+              />
+            {/if}
             <div>
-              <h2 class="text-sm font-semibold">{m.crawl_content_has_failures()}</h2>
+              <h2 class="text-sm font-semibold">
+                {isCompletedWithMissingResources(latestCompletedRun)
+                  ? m.crawl_content_has_missing()
+                  : m.crawl_content_has_failures()}
+              </h2>
               <p class="text-secondary mt-1 max-w-prose text-sm">
                 {m.crawl_content_failure_description({
                   date: dayjs(latestCompletedRun.created_at).format("YYYY-MM-DD HH:mm")

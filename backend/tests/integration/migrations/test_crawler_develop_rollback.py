@@ -20,7 +20,7 @@ from tests.integration.migrations.test_crawl_lifecycle_round_trip import (
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 _DEVELOP_HEAD = "202609071000"
-_CRAWLER_HEAD = "202609091830"
+_CRAWLER_HEAD = "202609101130"
 # The qualifier keeps the other side of both merge revisions at develop's head.
 _CRAWLER_ROLLBACK = "202608311430@202608121500"
 
@@ -565,3 +565,70 @@ def test_tenant_crawl_overview_index_round_trip(
         cursor.execute("SELECT outcome FROM crawl_runs WHERE id = %s", (run_id,))
         assert cursor.fetchone() == ("succeeded",)
     command.upgrade(database.config, _CRAWLER_HEAD)
+
+
+def test_missing_resource_history_survives_upgrade_and_downgrade(
+    rollback_database: RollbackDatabase,
+) -> None:
+    database = rollback_database
+    previous_head = "202609091830"
+    command.upgrade(database.config, previous_head)
+    legacy_id, new_id = uuid4(), uuid4()
+    with psycopg2.connect(database.url) as connection, connection.cursor() as cursor:
+        tenant_id, user_id, website_id = _insert_crawl_owner(
+            cursor, label="Missing addresses"
+        )
+        cursor.execute(
+            "INSERT INTO crawl_runs (id, tenant_id, website_id, phase, origin, outcome, "
+            "failure_code, failure_summary, finished_at) VALUES (%s, %s, %s, 'terminal', "
+            "'manual', 'partial', 'processing_failed', '{\"http_404\": 1}'::jsonb, now())",
+            (str(legacy_id), str(tenant_id), str(website_id)),
+        )
+    command.upgrade(database.config, _CRAWLER_HEAD)
+    with psycopg2.connect(database.url) as connection, connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT failure_code FROM crawl_runs WHERE id = %s", (str(legacy_id),)
+        )
+        assert cursor.fetchone() == ("processing_failed",)
+        job_id = uuid4()
+        cursor.execute(
+            "INSERT INTO jobs (id, user_id, task, status, failure_code) "
+            "VALUES (%s, %s, 'crawl', 'complete', 'resources_missing')",
+            (str(job_id), str(user_id)),
+        )
+        cursor.execute(
+            "INSERT INTO crawl_runs (id, tenant_id, website_id, job_id, phase, origin, "
+            "outcome, failure_code, failure_detail, failure_summary, finished_at, attempt_count) "
+            "VALUES (%s, %s, %s, %s, 'terminal', 'manual', 'partial', 'resources_missing', "
+            "'Discovery completed with missing addresses', '{\"http_404\": 1}'::jsonb, now(), 1)",
+            (str(new_id), str(tenant_id), str(website_id), str(job_id)),
+        )
+        cursor.execute(
+            "INSERT INTO crawl_attempts (crawl_run_id, attempt_number, dispatch_id, "
+            "dispatch_payload, finished_at, failure_code) "
+            "VALUES (%s, 1, %s, '{}'::jsonb, now(), 'resources_missing')",
+            (str(new_id), str(job_id)),
+        )
+        cursor.execute(
+            "SELECT convalidated FROM pg_constraint WHERE conname IN "
+            "('ck_crawl_runs_failure_code', 'ck_crawl_attempts_failure_code')"
+        )
+        assert cursor.fetchall() == [(True,), (True,)]
+    command.downgrade(database.config, previous_head)
+    command.upgrade(database.config, _CRAWLER_HEAD)
+    with psycopg2.connect(database.url) as connection, connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT cr.outcome, cr.failure_code, ca.failure_code, j.failure_code, "
+            "cr.failure_detail, cr.failure_summary FROM crawl_runs cr "
+            "JOIN crawl_attempts ca ON ca.crawl_run_id = cr.id "
+            "JOIN jobs j ON j.id = cr.job_id WHERE cr.id = %s",
+            (str(new_id),),
+        )
+        assert cursor.fetchone() == (
+            "partial",
+            "processing_failed",
+            "processing_failed",
+            "processing_failed",
+            "Discovery completed with missing addresses",
+            {"http_404": 1},
+        )

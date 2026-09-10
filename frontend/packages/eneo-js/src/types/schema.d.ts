@@ -8841,9 +8841,15 @@ export interface components {
        * Format: date
        */
       date: string;
-      /** Completed */
+      /**
+       * Completed
+       * @description Completed runs, including runs with only missing resources.
+       */
       completed: number;
-      /** Partial */
+      /**
+       * Partial
+       * @description Incomplete runs needing attention; excludes completed runs with only missing resources.
+       */
       partial: number;
       /** Failed */
       failed: number;
@@ -11669,6 +11675,7 @@ export interface components {
       | "remote_blocked"
       | "timed_out"
       | "processing_failed"
+      | "resources_missing"
       | "tenant_quota_exceeded"
       | "user_quota_exceeded"
       | "cancelled";
@@ -30467,11 +30474,11 @@ export interface operations {
   get_crawler_overview_api_v1_admin_crawler__get: {
     parameters: {
       query?: {
-        view?: "active" | "recent";
+        view?: "active" | "recent" | "all";
         status?:
           | components["schemas"]["CrawlPhase"]
           | components["schemas"]["CrawlOutcome"]
-          | ("issues" | "completed" | "unsuccessful")
+          | ("issues" | "completed" | "warnings" | "unsuccessful")
           | null;
         period?: components["schemas"]["CrawlHistoryPeriod"];
         /** @description IANA time zone used for today and yesterday. */

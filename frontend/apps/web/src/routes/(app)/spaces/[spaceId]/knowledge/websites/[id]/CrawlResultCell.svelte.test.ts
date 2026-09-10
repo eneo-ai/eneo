@@ -49,7 +49,9 @@ describe("CrawlResultCell", () => {
       .element(page.getByText(m.pages_and_files_succeeded({ pages: 5, files: 2 }), { exact: true }))
       .toBeVisible();
     await expect
-      .element(page.getByText(m.crawl_view_failed_pages({ count: 1 }), { exact: true }))
+      .element(
+        page.getByRole("button", { name: m.crawl_view_failed_pages({ count: 1 }), exact: true })
+      )
       .toBeVisible();
   });
 
@@ -92,7 +94,9 @@ describe("CrawlResultCell", () => {
       )
       .toBeVisible();
     await expect
-      .element(page.getByText(m.crawl_view_failed_pages({ count: 1 }), { exact: true }))
+      .element(
+        page.getByRole("button", { name: m.crawl_view_failed_pages({ count: 1 }), exact: true })
+      )
       .toBeVisible();
 
     await rendered.rerender({
@@ -111,7 +115,9 @@ describe("CrawlResultCell", () => {
       )
       .toBeVisible();
     await expect
-      .element(page.getByText(m.crawl_view_failed_pages({ count: 4 }), { exact: true }))
+      .element(
+        page.getByRole("button", { name: m.crawl_view_failed_pages({ count: 4 }), exact: true })
+      )
       .toBeVisible();
   });
 

@@ -207,12 +207,15 @@ class _FailureDominatedPartialCrawlEngine:
 
 
 class _UsefulPartialCrawlEngine:
+    def __init__(self, reason: str = "redirect_rejected") -> None:
+        self.reason = reason
+
     async def crawl(self, request: CrawlRequest) -> AsyncIterator[CrawlEvent]:
         yield PageUnchanged(url=request.url)
         yield PageUnchanged(url=f"{request.url}/useful")
         yield PageFailed(
             url=f"{request.url}/redirected",
-            reason="redirect_rejected",
+            reason=self.reason,
         )
         yield CrawlFinished(
             status="completed",
@@ -1952,6 +1955,7 @@ async def test_worker_saves_failure_addresses_during_crawl_and_flushes_the_final
         finished = await repository.one(run_id)
         assert finished.phase == CrawlPhase.TERMINAL
         assert finished.outcome == CrawlOutcome.FAILED
+        assert finished.failure_code != "resources_missing"
         assert finished.pages_failed == 105
         first_page = await repository.get_failures(run_id)
         assert first_page.total_count == 105
@@ -2094,16 +2098,18 @@ async def test_quota_exhaustion_stops_crawl_and_finishes_the_job(
 
 
 @pytest.mark.parametrize(
-    ("engine", "expected_failures", "expects_backoff"),
+    ("engine", "expected_failures", "expects_backoff", "expected_code"),
     [
-        (_PageLimitedCrawlEngine(), 0, False),
-        (_UsefulPartialCrawlEngine(), 0, False),
-        (_FailureDominatedPartialCrawlEngine(), 4, True),
-        (_FailureDominatedPageLimitedCrawlEngine(), 4, True),
+        (_PageLimitedCrawlEngine(), 0, False, "processing_failed"),
+        (_UsefulPartialCrawlEngine(), 0, False, "processing_failed"),
+        (_UsefulPartialCrawlEngine("http_404"), 0, False, "resources_missing"),
+        (_FailureDominatedPartialCrawlEngine(), 4, True, "processing_failed"),
+        (_FailureDominatedPageLimitedCrawlEngine(), 4, True, "processing_failed"),
     ],
     ids=(
         "local-page-limit",
         "useful-partial",
+        "missing-resources",
         "remote-failures",
         "page-limited-remote-failures",
     ),
@@ -2114,6 +2120,7 @@ async def test_partial_crawl_updates_persisted_failure_backoff_by_cause(
     engine,
     expected_failures: int,
     expects_backoff: bool,
+    expected_code: str,
 ) -> None:
     async with db_session() as session:
         website = await _persist_website(
@@ -2122,6 +2129,23 @@ async def test_partial_crawl_updates_persisted_failure_backoff_by_cause(
             user_id=admin_user.id,
             label=f"Partial backoff {expected_failures}",
         )
+        record = await session.get(WebsitesTable, website.id)
+        assert record is not None
+        unseen_blob = InfoBlobs(
+            text="Previously indexed page",
+            title="Previously indexed page",
+            url=f"{website.url}/not-seen",
+            size=23,
+            source_id=uuid4(),
+            version_state=InfoBlobVersionState.ACTIVE.value,
+            user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            website_id=website.id,
+            embedding_model_id=record.embedding_model_id,
+        )
+        session.add(unseen_blob)
+        await session.flush()
+        unseen_blob_id = unseen_blob.id
         run = await _admit(session, website=website, user=admin_user)
         attempt = await session.scalar(
             sa.select(CrawlAttempts).where(CrawlAttempts.crawl_run_id == run.id)
@@ -2129,6 +2153,8 @@ async def test_partial_crawl_updates_persisted_failure_backoff_by_cause(
         assert attempt is not None
         task = CrawlTask.model_validate(attempt.dispatch_payload)
         dispatch_id = attempt.dispatch_id
+        run_id = cast(UUID, run.id)
+        attempt_id = attempt.id
         await session.execute(
             sa.update(WebsitesTable)
             .where(WebsitesTable.id == website.id)
@@ -2153,6 +2179,20 @@ async def test_partial_crawl_updates_persisted_failure_backoff_by_cause(
         assert (persisted.next_retry_at is not None) is expects_backoff
         assert (persisted.last_crawled_at is not None) is (not expects_backoff)
         assert persisted.last_indexed_at is not None
+
+        assert await session.get(InfoBlobs, unseen_blob_id) is not None
+        finished = await CrawlRunRepository(session).one(run_id)
+        assert finished.outcome == CrawlOutcome.PARTIAL
+        assert finished.failure_code == expected_code
+        attempt = await session.get(CrawlAttempts, attempt_id)
+        job = await session.get(Jobs, dispatch_id)
+        assert attempt is not None and job is not None
+        assert attempt.failure_code == job.failure_code == expected_code
+        if expected_code == "resources_missing":
+            failures = await CrawlRunRepository(session).get_failures(run_id)
+            assert [(failure.url, failure.reason) for failure in failures.items] == [
+                (f"{task.url}/redirected", "http_404")
+            ]
 
 
 async def test_published_files_are_not_reduced_by_unrelated_download_failures(

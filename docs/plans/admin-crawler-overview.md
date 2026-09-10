@@ -2,7 +2,7 @@
 
 Uppdaterad 10 september 2026. Översikten följs i Beads `crawl-f35` och
 detaljer och åtgärder i `crawl-5x5`, gränssnittets förfining i `crawl-8ue`
-och dagsstatistiken i `crawl-xve`,
+och dagsstatistiken i `crawl-xve`. Vyn Alla och förenklad slutstatus följs i `crawl-3tk`,
 alla i `crawler-review`. Sidan blir tillgänglig när backend, databas och frontend har
 uppdaterats tillsammans.
 
@@ -20,7 +20,7 @@ vilken del av tabellen som har laddats eller filtrerats.
 | --- | --- |
 | Pågående | Körningar i `running`, `finalizing` eller `stopping` just nu. |
 | I kö | Körningar i `pending_dispatch` eller `queued` just nu. |
-| Fel och varningar, senaste 24 timmarna | Avslutade körningar med `partial`, `failed` eller `interrupted`. Användaravbrott räknas inte som fel. |
+| Fel och varningar, senaste 24 timmarna | Avslutade körningar med `partial`, `failed` eller `interrupted`, utom färdiga körningar med enbart saknade adresser (`resources_missing`). Användaravbrott räknas inte som fel. |
 
 Dagsstatistiken räknar körningar efter `finished_at` i webbläsarens IANA-tidszon,
 som visas under siffrorna. Idag börjar vid lokal midnatt och slutar vid svarets
@@ -29,16 +29,19 @@ som visas under siffrorna. Idag börjar vid lokal midnatt och slutar vid svarets
 
 | Dagsstatistik | Utfall |
 | --- | --- |
-| Slutförda utan fel | `succeeded`, `unchanged`, `empty`. Även en kontroll utan nytt innehåll är slutförd. |
-| Med varningar | `partial`. Körningen avslutades men delar av resultatet misslyckades. |
+| Klara | `succeeded`, `unchanged`, `empty` och `partial` med `resources_missing`. Även en kontroll utan nytt innehåll är klar. |
+| Behöver ses över | `partial` utan `resources_missing`. Något hindrade en fullständig indexering. |
 | Misslyckade | `failed`, `interrupted`. |
 | Manuellt avbrutna | `cancelled`, separat under de tre huvudtalen. |
 
 Varje antal öppnar motsvarande dag och utfall i listan och rensar sökning och
-sidindelning. Under statistiken finns två flikar: **Aktiva** som standard och
-**Avslutade**. Aktiva innehåller både pågående och köade körningar. Avslutade
-har periodvalen **Idag**, **Igår** och **Senaste dygnet**, med senast avslutad
-först. Det går att filtrera på status och söka efter webbplatsens namn eller
+sidindelning. Under statistiken finns **Alla** som standard, **Pågående** och
+**Avslutade**. Alla visar köade och pågående körningar oavsett ålder tillsammans
+med körningar som avslutats under vald period. Raderna sorteras efter skapandetid,
+nyast först, och behåller sin plats när en körning blir klar. Pågående visar köade
+och pågående körningar. Alla och Avslutade har periodvalen **Idag**, **Igår** och
+**Senaste dygnet**. Perioden gäller bara avslutade körningar. I Avslutade visas
+senast avslutad först. Det går att filtrera på status och söka efter webbplatsens namn eller
 adress. Genvägen för fel och varningar väljer uttryckligen **Senaste dygnet**.
 Historiska fel ligger kvar där även om en senare körning har lyckats.
 
@@ -53,7 +56,7 @@ Tabellen har en rad per körning:
 | Tid | Väntetid för köade körningar; start och varaktighet för körningar som har startat. |
 | Senast indexerad | Webbplatsens befintliga tidsstämpel, som bevaras vid ett senare fel. |
 
-Aktiva körningar sorteras med äldst accepterad först, så att långa väntetider
+I Pågående sorteras körningar med äldst accepterad först, så att långa väntetider
 syns. Skapandetid och verklig starttid hålls isär. Det finns inget känt totalantal
 för alla crawls, så sidan visar räknare utan uppskattad procent eller sluttid.
 En lång körning får inte automatiskt etiketten ”fastnad”.
@@ -91,17 +94,40 @@ annan flik är öppen. Åtgärderna följer också en nyare status som hämtas m
 körningens feladresser. Servern återanvänder en befintlig aktiv körning vid upprepad start, och ett stopp
 av en äldre körning påverkar inte en senare körning.
 
+## Klar trots saknade adresser
+
+En körning visas grönt som **Klar** när crawlern har avslutat upptäckten normalt,
+alla registrerade fel är HTTP 404 eller 410 och det användbara resultatet är
+större än antalet misslyckade resurser. Oförändrade sidor och filer räknas som
+användbara. Klassificeringen följer crawlerns befintliga gräns för att fortsätta
+schemalägga en körning utan felbackoff. Enbart fel, avbruten upptäckt, serverfel,
+tidsgränser och lagringskvoter kan därför inte få grön status på detta sätt.
+
+Backend sparar `resources_missing` som diagnostik på körning, försök och jobb.
+Utfallet förblir `partial`, så reglerna för rensning, återförsök och schemaläggning
+behålls. Feladresser och deras orsaker finns kvar i detaljvyn. API-filtret
+`status=partial` behåller sin exakta betydelse; gränssnittets varningsfilter
+använder `status=warnings`, som utesluter `resources_missing`.
+
+Migreringen `202609101130` måste köras före den nya workerkoden. Den utökar
+befintliga kontrollvillkor och validerar dem efter att DDL-låsen släppts.
+Äldre körningar klassificeras inte om: en gammal 404-sammanställning kan inte
+visa om upptäckten blev färdig. Vid nedgradering återgår den nya koden till
+`processing_failed`, medan förklaring och felsammanställning bevaras. Stoppa
+nya workers före nedgradering så att de inte skriver den borttagna koden.
+
 ## Feladresser från Kunskap
 
-I webbplatslistan och indexeringshistoriken öppnar **Visa misslyckade sidor**
-och **Visa misslyckade filer** rätt adresslista direkt. I körningsdetaljerna
+I webbplatslistan och indexeringshistoriken visas statusen **Klar** eller
+**Delvis klar**. Under statusen finns kompakta länkar med antal sidor och filer
+som inte kunde indexeras. Länkarna öppnar rätt adresslista direkt. I körningsdetaljerna
 går det att växla mellan **Alla**, **Sidor** och **Filer**, även genom att klicka
 på ett positivt felantal. Typfiltret används på servern före sidindelningen,
 så filer går att hitta även när de ligger efter många sidfel. Samma filter
 finns i adminpanelens körningsdetaljer.
 
-Varje adress visar en översatt felorsak. **Vad betyder felen och vad kan jag
-göra?** förklarar vanliga orsaker och nästa steg. Äldre körningar utan sparade
+Varje adress visar en översatt felorsak. **Felorsaker i hela körningen**
+förklarar vanliga orsaker och nästa steg. Äldre körningar utan sparade
 adresser anges uttryckligen; de presenteras inte som felfria.
 
 **Indexerat innehåll** visar en genväg till felen i den senaste avslutade
@@ -147,6 +173,15 @@ befintliga adresser ligger kvar medan hämtningen pågår eller om den misslycka
 
 Massåtgärder, ändringar av källinställningar, grafer, kostnadsberäkningar och
 aviseringar ingår inte.
+
+I den lokala PostgreSQL 16-mätningen den 10 september 2026 tog första sidan i
+Alla cirka 30 ms i median med 100 000 äldre och 10 000 aktiva körningar.
+Sammanfattning och lista använde två domänfrågor. Listfrågan läste aktiva
+körningar och vald avslutsperiod via befintliga index, sorterade i databasen
+och begränsade resultatet till 51 rader före metadatahämtningen. Mätningen
+är ett lokalt test med varm cache, inte en produktionsgaranti. Den går att
+upprepa med `test_admin_crawler_benchmark.py` och
+`ENEO_RUN_CRAWLER_OVERVIEW_BENCHMARK=1`.
 
 ## Behörighet och data
 
@@ -366,8 +401,8 @@ ljust och mörkt tema kontrollerades också.
 
 ## Kontrollerat källunderlag
 
-- [Adminmeny](../../frontend/apps/web/src/routes/(app)/admin/AdminMenu.svelte),
-  [sidans åtkomstkontroll](../../frontend/apps/web/src/routes/(app)/admin/+layout.ts)
+- [Adminmeny](<../../frontend/apps/web/src/routes/(app)/admin/AdminMenu.svelte>),
+  [sidans åtkomstkontroll](<../../frontend/apps/web/src/routes/(app)/admin/+layout.ts>)
   och [shadcn-konfiguration](../../frontend/apps/web/components.json).
 - [Owner och behörigheter](../../backend/src/eneo/server/dependencies/predefined_roles.yml),
   [adminservice](../../backend/src/eneo/admin/admin_service.py) och
@@ -377,5 +412,5 @@ ljust och mörkt tema kontrollerades också.
   och [gemensamt detaljinnehåll](../../frontend/apps/web/src/lib/features/knowledge/CrawlRunDetailsContent.svelte).
 
 - [Adminendpoint](../../backend/src/eneo/admin/admin_crawler_router.py) och
-  [adminsidan](../../frontend/apps/web/src/routes/(app)/admin/crawler/+page.svelte) och
-  [admindialogen](../../frontend/apps/web/src/routes/(app)/admin/crawler/AdminCrawlDetails.svelte).
+  [adminsidan](<../../frontend/apps/web/src/routes/(app)/admin/crawler/+page.svelte>) och
+  [admindialogen](<../../frontend/apps/web/src/routes/(app)/admin/crawler/AdminCrawlDetails.svelte>).

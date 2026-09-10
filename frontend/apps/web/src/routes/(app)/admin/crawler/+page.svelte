@@ -17,28 +17,26 @@
   import { getEneo } from "$lib/core/Eneo";
   import AdminCrawlDetails from "./AdminCrawlDetails.svelte";
   import CrawlLoadError from "$lib/features/knowledge/CrawlLoadError.svelte";
-  import {
-    crawlRunState,
-    crawlRunStateLabel,
-    type CrawlRunState
-  } from "$lib/features/knowledge/crawlRunState";
+  import { crawlRunState, crawlRunStateLabel } from "$lib/features/knowledge/crawlRunState";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
 
   const eneo = getEneo();
-  type Status = "all" | "issues" | "completed" | "unsuccessful" | Exclude<CrawlRunState, "unknown">;
+  type Status =
+    "all" | Exclude<NonNullable<AdminCrawlerQuery["status"]>, "pending_dispatch" | "terminal">;
+  type View = NonNullable<AdminCrawlerQuery["view"]>;
   type Period = NonNullable<AdminCrawlerQuery["period"]>;
   type Day = "today" | "yesterday";
   const days: Day[] = ["today", "yesterday"];
   const outcomes = [
     { count: "completed", status: "completed" },
-    { count: "partial", status: "partial" },
+    { count: "partial", status: "warnings" },
     { count: "failed", status: "unsuccessful" }
   ] as const;
   const periods: Period[] = ["today", "yesterday", "last_24_hours"];
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   let period = $state<Period>("today");
-  let view = $state<"active" | "recent">("active");
+  let view = $state<View>("all");
   let status = $state<Status>("all");
   let searchInput = $state("");
   let search = $state("");
@@ -52,22 +50,13 @@
   let mounted = false;
   let refreshPending = false;
 
-  const statuses = $derived<Status[]>(
-    view === "active"
-      ? ["all", "queued", "running", "finalizing", "stopping"]
-      : [
-          "all",
-          "issues",
-          "completed",
-          "succeeded",
-          "unchanged",
-          "empty",
-          "partial",
-          "unsuccessful",
-          "cancelled",
-          "interrupted"
-        ]
-  );
+  const statuses = $derived<Status[]>([
+    "all",
+    ...(view !== "recent" ? (["queued", "running", "finalizing", "stopping"] as const) : []),
+    ...(view !== "active"
+      ? (["completed", "warnings", "unsuccessful", "cancelled", "issues"] as const)
+      : [])
+  ]);
 
   function query(): AdminCrawlerQuery {
     return {
@@ -94,7 +83,7 @@
       const result = await eneo.adminCrawler.overview(request);
       if (mounted && requestKey === JSON.stringify(query())) {
         const dayChanged = overview && overview.calendar.today.date !== result.calendar.today.date;
-        if (dayChanged && view === "recent" && period !== "last_24_hours" && cursors.length > 1) {
+        if (dayChanged && view !== "active" && period !== "last_24_hours" && cursors.length > 1) {
           cursors = [null];
           rowsStale = true;
           refreshPending = true;
@@ -123,7 +112,7 @@
   }
 
   function changeView(value: string) {
-    if (value !== "active" && value !== "recent") return;
+    if (value !== "active" && value !== "recent" && value !== "all") return;
     view = value;
     status = "all";
     filterChanged();
@@ -172,7 +161,7 @@
     if (value === "all") return m.admin_crawler_all_statuses();
     if (value === "issues") return m.admin_crawler_issues();
     if (value === "completed") return m.admin_crawler_completed_clean();
-    if (value === "partial") return m.admin_crawler_with_warnings();
+    if (value === "warnings") return m.admin_crawler_with_warnings();
     if (value === "unsuccessful") return m.admin_crawler_unsuccessful();
     return crawlRunStateLabel(value);
   }
@@ -306,12 +295,16 @@
 
       <Tabs.Root value={view} onValueChange={changeView}>
         <Tabs.List aria-label={m.admin_crawler_title()}>
+          <Tabs.Trigger value="all">{m.admin_crawler_all_view()}</Tabs.Trigger>
           <Tabs.Trigger value="active">{m.admin_crawler_active()}</Tabs.Trigger>
           <Tabs.Trigger value="recent">{m.admin_crawler_completed_view()}</Tabs.Trigger>
         </Tabs.List>
         {#key view}
           <Tabs.Content value={view}>
             <div class="flex flex-col gap-4 pt-3">
+              {#if view === "all"}<p class="text-secondary text-xs">
+                  {m.admin_crawler_all_help()}
+                </p>{/if}
               <form
                 class="flex flex-wrap items-end gap-3"
                 onsubmit={(event) => {
@@ -329,7 +322,7 @@
                     placeholder={m.admin_crawler_search_hint()}
                   />
                 </Field.Field>
-                {#if view === "recent"}
+                {#if view !== "active"}
                   <Field.Field class="w-full sm:w-44">
                     <Field.Label for="crawler-period">{m.admin_crawler_period()}</Field.Label>
                     <Select.Root
@@ -403,7 +396,9 @@
                     <Table.Caption class="sr-only"
                       >{view === "active"
                         ? m.admin_crawler_active()
-                        : m.admin_crawler_last_day()}</Table.Caption
+                        : view === "all"
+                          ? m.admin_crawler_all_view()
+                          : periodLabel(period)}</Table.Caption
                     >
                     <Table.Header
                       ><Table.Row>
@@ -460,7 +455,9 @@
                               ? m.admin_crawler_empty_filtered()
                               : view === "active"
                                 ? m.admin_crawler_empty_active()
-                                : m.admin_crawler_empty_recent()}
+                                : view === "all"
+                                  ? m.admin_crawler_empty_all()
+                                  : m.admin_crawler_empty_recent()}
                           </Table.Cell></Table.Row
                         >
                       {/each}

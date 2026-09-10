@@ -90,7 +90,7 @@ class CrawlRuns(BasePublic):
             "'dispatch_failed', 'invalid_dispatch', 'worker_interrupted', "
             "'lease_expired', 'remote_unreachable', 'remote_blocked', "
             "'timed_out', 'processing_failed', 'cancelled', "
-            "'tenant_quota_exceeded', 'user_quota_exceeded')",
+            "'tenant_quota_exceeded', 'user_quota_exceeded', 'resources_missing')",
             name="ck_crawl_runs_failure_code",
         ),
         CheckConstraint(
@@ -224,7 +224,7 @@ class CrawlAttempts(BasePublic):
             "'dispatch_failed', 'invalid_dispatch', 'worker_interrupted', "
             "'lease_expired', 'remote_unreachable', 'remote_blocked', "
             "'timed_out', 'processing_failed', 'cancelled', "
-            "'tenant_quota_exceeded', 'user_quota_exceeded')",
+            "'tenant_quota_exceeded', 'user_quota_exceeded', 'resources_missing')",
             name="ck_crawl_attempts_failure_code",
         ),
         CheckConstraint(

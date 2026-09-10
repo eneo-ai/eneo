@@ -103,12 +103,16 @@ Administrators can read current and recent tenant-wide crawl activity at
 API-key scope. It includes operational metadata and failed addresses from private
 spaces without granting access to their indexed content.
 
-Apply migrations through `202609091830` before starting the updated backend. They
-create partial indexes for completed history and active tenant creation order
-concurrently; a retry replaces
-an invalid index left by an interrupted build. See the [overview contract and
-verification](../docs/plans/admin-crawler-overview.md) for query bounds and rollback
-behavior.
+Apply migrations through `202609101130` before starting the updated backend and
+workers. The history and active-run indexes are built concurrently; a retry
+replaces an invalid index left by an interrupted build. The latest migration
+allows `resources_missing` diagnostics for normally completed crawls whose only
+failures are HTTP 404/410 and whose useful results outnumber failures. They show
+as completed in the UI while retaining the `partial` outcome, failure details and
+existing cleanup rules. Old summaries are not reclassified. Downgrade maps the
+new code to `processing_failed` and retains its explanation; stop updated workers
+before downgrading. See the [overview contract and verification](../docs/plans/admin-crawler-overview.md)
+for view semantics, query bounds and rollback behavior.
 
 ## Environment variables
 

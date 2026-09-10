@@ -549,28 +549,51 @@ test("a file count opens the file filter and ignores an old response after switc
     .not.toBeInTheDocument();
 });
 
-test("indexed content links to the latest finished errors and clears them after a clean crawl", async () => {
-  route.url = new URL("http://localhost/?tab=blobs");
-  route.state = { tab: "blobs" };
-  const run: CrawlRun = { ...terminal, outcome: "partial", pages_failed: 6, files_failed: 2 };
-  listFailures.mockResolvedValue({ ...emptyPage, run, details_available: true });
-  const rendered = render(WebsiteDetailPage, {
-    data: { ...data, crawlRuns: [running, run] } as never
-  });
-  await expect.element(page.getByText(m.crawl_content_has_failures())).toBeVisible();
-  await page.getByRole("button", { name: m.crawl_view_failed_files({ count: 2 }) }).click();
-  await expect.element(page.getByRole("dialog")).toBeVisible();
-  expect(listFailures).toHaveBeenCalledWith({ id: run.id, limit: 100, cursor: null, kind: "file" });
-  await page.getByRole("button", { name: m.close(), exact: true }).click();
-  await rendered.rerender({
-    data: {
-      ...data,
-      infoBlobPage: { ...emptyPage, items: [] },
-      crawlRuns: [{ ...terminal, id: "clean-run" }, { ...run }]
-    } as never
-  });
-  await expect.element(page.getByText(m.crawl_content_has_failures())).not.toBeInTheDocument();
-});
+test.each(["processing_failed", "resources_missing"] as const)(
+  "indexed content retains %s details until a clean crawl replaces them",
+  async (failure_code) => {
+    route.url = new URL("http://localhost/?tab=blobs");
+    route.state = { tab: "blobs" };
+    const run: CrawlRun = {
+      ...terminal,
+      outcome: "partial",
+      pages_failed: 6,
+      files_failed: 2,
+      failure_code
+    };
+    const notice =
+      failure_code === "resources_missing"
+        ? m.crawl_content_has_missing()
+        : m.crawl_content_has_failures();
+    listFailures.mockResolvedValue({ ...emptyPage, run, details_available: true });
+    const rendered = render(WebsiteDetailPage, {
+      data: { ...data, crawlRuns: [running, run] } as never
+    });
+    await expect.element(page.getByText(notice)).toBeVisible();
+    await page.getByRole("button", { name: m.crawl_view_failed_files({ count: 2 }) }).click();
+    await expect.element(page.getByRole("dialog")).toBeVisible();
+    if (failure_code === "resources_missing") {
+      await expect
+        .element(page.getByRole("dialog").getByText(m.crawl_status_succeeded(), { exact: true }))
+        .toBeVisible();
+    }
+    expect(listFailures).toHaveBeenCalledWith({
+      id: run.id,
+      limit: 100,
+      cursor: null,
+      kind: "file"
+    });
+    await page.getByRole("button", { name: m.close(), exact: true }).click();
+    await rendered.rerender({
+      data: {
+        ...data,
+        infoBlobPage: { ...emptyPage, items: [] },
+        crawlRuns: [{ ...terminal, id: "clean-run" }, { ...run }]
+      } as never
+    });
+    await expect.element(page.getByText(notice)).not.toBeInTheDocument();
+  }
+);
 
 test("retrying from failure details uses the existing whole-website confirmation", async () => {
   const run: CrawlRun = { ...terminal, outcome: "partial", pages_failed: 1 };

@@ -53,6 +53,7 @@ class CrawlFailureCode(StrEnum):
     REMOTE_BLOCKED = "remote_blocked"
     TIMED_OUT = "timed_out"
     PROCESSING_FAILED = "processing_failed"
+    RESOURCES_MISSING = "resources_missing"
     TENANT_QUOTA_EXCEEDED = "tenant_quota_exceeded"
     USER_QUOTA_EXCEEDED = "user_quota_exceeded"
     CANCELLED = "cancelled"

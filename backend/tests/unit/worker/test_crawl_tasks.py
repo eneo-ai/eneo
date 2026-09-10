@@ -141,6 +141,33 @@ def test_failed_crawls_expose_actionable_failure_codes(
     assert _failure_code_for_crawl(reasons, termination_reason) == expected
 
 
+def test_missing_resources_are_distinct_from_an_incomplete_or_broken_crawl() -> None:
+    assert (
+        _failure_code_for_crawl(
+            {"http_404": 2, "http_410": 1}, "completed", healthy_result=True
+        ).value
+        == "resources_missing"
+    )
+    for reasons, termination in (
+        ({"http_404": 1}, "item_limit"),
+        ({"http_404": 1}, "timeout"),
+        ({"http_404": 1, "invalid_sitemap": 1}, "completed"),
+        ({"http_404": 1, "http_500": 1}, "completed"),
+        ({"http_404": 1, "tenant_quota_exceeded": 1}, "completed"),
+        ({}, "completed"),
+    ):
+        assert (
+            _failure_code_for_crawl(reasons, termination, healthy_result=True).value
+            != "resources_missing"
+        )
+    assert (
+        _failure_code_for_crawl(
+            {"http_404": 20}, "completed", healthy_result=False
+        ).value
+        != "resources_missing"
+    )
+
+
 def test_sitemap_state_requires_a_failure_free_authoritative_outcome() -> None:
     common = {
         "has_new_state": True,

@@ -599,7 +599,7 @@ it("keeps rows and filters when a refresh fails, then retries the same query", a
     )
     .toBeVisible();
   expect(api.adminCrawler.overview).toHaveBeenLastCalledWith(
-    expect.objectContaining({ search: "Municipal", status: "running", view: "active" })
+    expect.objectContaining({ search: "Municipal", status: "running", view: "all" })
   );
   await expect.element(page.getByRole("alert")).not.toBeInTheDocument();
 });
@@ -657,7 +657,7 @@ it("clears a filtered empty result and restores the unfiltered query", async () 
     .element(page.getByRole("button", { name: "Municipal website", exact: true }))
     .toBeVisible();
   expect(api.adminCrawler.overview).toHaveBeenLastCalledWith(
-    expect.objectContaining({ search: "", status: undefined, cursor: null, view: "active" })
+    expect.objectContaining({ search: "", status: undefined, cursor: null, view: "all" })
   );
 });
 
@@ -714,7 +714,7 @@ it("paginates bounded results and returns to the first page", async () => {
   );
 });
 
-it("recovers from an initial load failure and explains an empty active list", async () => {
+it("recovers from an initial load failure and explains an empty All list", async () => {
   api.adminCrawler.overview.mockRejectedValueOnce(new Error("Network unavailable"));
   api.adminCrawler.overview.mockResolvedValue({
     ...overview,
@@ -724,9 +724,7 @@ it("recovers from an initial load failure and explains an empty active list", as
   show();
   await expect.element(page.getByRole("alert")).toHaveTextContent(m.admin_crawler_error());
   await page.getByRole("button", { name: m.retry(), exact: true }).click();
-  await expect
-    .element(page.getByText(m.admin_crawler_empty_active(), { exact: true }))
-    .toBeVisible();
+  await expect.element(page.getByText(m.admin_crawler_empty_all(), { exact: true })).toBeVisible();
   await expect.element(page.getByRole("alert")).not.toBeInTheDocument();
 });
 
@@ -772,7 +770,7 @@ it("opens each daily outcome and preserves statistics while loading a new filter
     .element(page.getByText(m.admin_crawler_empty_filtered(), { exact: true }))
     .toBeVisible();
   for (const [status, label] of [
-    ["partial", m.admin_crawler_with_warnings()],
+    ["warnings", m.admin_crawler_with_warnings()],
     ["unsuccessful", m.admin_crawler_unsuccessful()],
     ["cancelled", crawlRunStateLabel("cancelled")]
   ] as const) {
@@ -840,4 +838,42 @@ it("returns to the first history page when a calendar day changes", async () => 
   await expect
     .element(page.getByRole("button", { name: m.admin_crawler_previous() }))
     .not.toBeInTheDocument();
+});
+
+it("keeps a crawl in the default All view when polling changes it from running to completed", async () => {
+  const intervals = vi.spyOn(globalThis, "setInterval");
+  show();
+  await expect
+    .element(page.getByRole("button", { name: "Municipal website", exact: true }))
+    .toBeVisible();
+  expect(api.adminCrawler.overview).toHaveBeenLastCalledWith(
+    expect.objectContaining({ view: "all" })
+  );
+  const row = page
+    .getByRole("row")
+    .filter({ has: page.getByRole("button", { name: "Municipal website", exact: true }) });
+  await expect.element(row.getByText(m.in_progress(), { exact: true })).toBeVisible();
+  const completed = structuredClone(overview);
+  completed.items[0].run = {
+    ...completed.items[0].run,
+    phase: "terminal",
+    outcome: "succeeded",
+    status: "complete",
+    finished_at: completed.as_of,
+    pages_crawled: 12,
+    pages_failed: 0,
+    files_downloaded: 0,
+    files_failed: 0
+  };
+  api.adminCrawler.overview.mockResolvedValue(completed);
+  const poll = intervals.mock.calls.find(([, delay]) => delay === 10_000)?.[0];
+  if (typeof poll !== "function") throw new Error("Missing crawler polling callback");
+  poll();
+  await expect.element(row.getByText(m.crawl_status_succeeded(), { exact: true })).toBeVisible();
+  await expect
+    .element(page.getByRole("tab", { name: m.admin_crawler_all_view(), exact: true }))
+    .toHaveAttribute("aria-selected", "true");
+  expect(api.adminCrawler.overview).toHaveBeenLastCalledWith(
+    expect.objectContaining({ view: "all", cursor: null })
+  );
 });

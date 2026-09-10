@@ -359,6 +359,7 @@ async def test_calendar_statistics_and_drilldown_use_local_completion_dates(
         ("succeeded", yesterday - timedelta(microseconds=1)),
         ("succeeded", now + timedelta(hours=1)),
     ]
+    records.append(("partial", now))
     ids = [uuid4() for _ in records]
     async with db_container(user=admin_user) as container:
         for id, (outcome, finished_at) in zip(ids, records, strict=True):
@@ -370,7 +371,9 @@ async def test_calendar_statistics_and_drilldown_use_local_completion_dates(
                     phase="terminal",
                     outcome=outcome,
                     origin="legacy",
-                    failure_code="processing_failed"
+                    failure_code="resources_missing"
+                    if id == ids[-1]
+                    else "processing_failed"
                     if outcome in {"partial", "failed", "interrupted"}
                     else "cancelled"
                     if outcome == "cancelled"
@@ -389,7 +392,7 @@ async def test_calendar_statistics_and_drilldown_use_local_completion_dates(
         "time_zone": "Europe/Stockholm",
         "today": {
             "date": "2026-09-10",
-            "completed": 3,
+            "completed": 4,
             "partial": 1,
             "failed": 2,
             "cancelled": 1,
@@ -403,7 +406,7 @@ async def test_calendar_statistics_and_drilldown_use_local_completion_dates(
         },
     }
     assert {item["run"]["id"] for item in response.json()["items"]} == {
-        str(id) for id in ids[:7]
+        str(id) for id in [*ids[:7], ids[-1]]
     }
     first = await client.get(
         "/api/v1/admin/crawler/",
@@ -424,8 +427,24 @@ async def test_calendar_statistics_and_drilldown_use_local_completion_dates(
     )
     assert {
         item["run"]["id"] for item in first.json()["items"] + second.json()["items"]
-    } == {str(id) for id in ids[:3]}
+    } == {str(id) for id in [*ids[:3], ids[-1]]}
     assert second.json()["next_cursor"] is None
+    warnings = await client.get(
+        "/api/v1/admin/crawler/",
+        headers=headers,
+        params={**params, "status": "warnings"},
+    )
+    assert warnings.status_code == 200, warnings.text
+    assert [item["run"]["id"] for item in warnings.json()["items"]] == [str(ids[3])]
+    exact_partial = await client.get(
+        "/api/v1/admin/crawler/",
+        headers=headers,
+        params={**params, "status": "partial"},
+    )
+    assert {item["run"]["id"] for item in exact_partial.json()["items"]} == {
+        str(ids[3]),
+        str(ids[-1]),
+    }
     failed = await client.get(
         "/api/v1/admin/crawler/",
         headers=headers,
@@ -630,7 +649,11 @@ async def test_active_overview_tracks_attempt_start_and_completion(
                 .where(CrawlRuns.id == run.id)
                 .values(
                     created_at=datetime.now(timezone.utc)
-                    - timedelta(minutes=10 - index)
+                    - (
+                        timedelta(days=2)
+                        if index == 0
+                        else timedelta(minutes=10 - index)
+                    )
                 )
             )
             run_ids.append(str(run.id))
@@ -677,6 +700,24 @@ async def test_active_overview_tracks_attempt_start_and_completion(
     queued = await client.get("/api/v1/admin/crawler/?status=queued", headers=headers)
     assert len(queued.json()["items"]) == 2
     assert queued.json()["summary"]["ongoing"] == 3
+    all_before = await client.get(
+        "/api/v1/admin/crawler/",
+        params={"view": "all", "period": "today", "limit": 2},
+        headers=headers,
+    )
+    assert all_before.status_code == 200, all_before.text
+    assert [item["run"]["id"] for item in all_before.json()["items"]] == run_ids[3:][
+        ::-1
+    ]
+    all_cursor = all_before.json()["next_cursor"]
+    next_before = await client.get(
+        "/api/v1/admin/crawler/",
+        params={"view": "all", "period": "today", "limit": 2, "cursor": all_cursor},
+        headers=headers,
+    )
+    assert [item["run"]["id"] for item in next_before.json()["items"]] == run_ids[1:3][
+        ::-1
+    ]
     async with db_session() as session:
         assert await CrawlRunRepository(session).finish_attempt(
             attempts[2],
@@ -691,6 +732,22 @@ async def test_active_overview_tracks_attempt_start_and_completion(
     assert recent.json()["items"][0]["website_name"] is None
     assert recent.json()["items"][0]["website_url"] == website_urls[2]
     assert recent.json()["items"][0]["run"]["pages_crawled"] == 7
+    next_after = await client.get(
+        "/api/v1/admin/crawler/",
+        params={"view": "all", "period": "today", "limit": 2, "cursor": all_cursor},
+        headers=headers,
+    )
+    assert [item["run"]["id"] for item in next_after.json()["items"]] == run_ids[1:3][
+        ::-1
+    ]
+    assert next_after.json()["items"][0]["run"]["phase"] == "terminal"
+    all_after = await client.get(
+        "/api/v1/admin/crawler/",
+        params={"view": "all", "period": "today"},
+        headers=headers,
+    )
+    assert [item["run"]["id"] for item in all_after.json()["items"]] == run_ids[::-1]
+    assert all_after.json()["items"][-1]["run"]["phase"] == "pending_dispatch"
 
 
 @pytest.mark.parametrize(

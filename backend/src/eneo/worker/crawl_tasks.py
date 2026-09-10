@@ -223,8 +223,17 @@ def _crawl_counts_as_scheduled_run(
 def _failure_code_for_crawl(
     failure_counts: dict[str, int],
     termination_reason: str,
+    *,
+    healthy_result: bool = False,
 ) -> CrawlFailureCode:
-    reasons = {reason.lower() for reason in failure_counts}
+    reasons = {reason.lower() for reason, count in failure_counts.items() if count > 0}
+    if (
+        healthy_result
+        and termination_reason == "completed"
+        and reasons
+        and reasons <= {"http_404", "http_410"}
+    ):
+        return CrawlFailureCode.RESOURCES_MISSING
     reasons.add(termination_reason.lower())
     if "tenant_quota_exceeded" in reasons:
         return CrawlFailureCode.TENANT_QUOTA_EXCEEDED
@@ -257,6 +266,8 @@ def _failure_code_for_crawl(
 
 
 def _failure_detail(code: CrawlFailureCode, outcome: CrawlOutcome) -> str:
+    if code == CrawlFailureCode.RESOURCES_MISSING:
+        return "The crawl completed; some pages or files were missing (HTTP 404 or 410)"
     if code == CrawlFailureCode.TENANT_QUOTA_EXCEEDED:
         return "The crawl stopped because the organization's storage quota was exceeded"
     if code == CrawlFailureCode.USER_QUOTA_EXCEEDED:
@@ -1171,7 +1182,11 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
                 failed_items=failed_items,
             )
             crawl_failure_code = (
-                _failure_code_for_crawl(failure_counts, crawl_termination_reason)
+                _failure_code_for_crawl(
+                    failure_counts,
+                    crawl_termination_reason,
+                    healthy_result=crawl_counts_as_scheduled_run,
+                )
                 if crawl_outcome in {CrawlOutcome.FAILED, CrawlOutcome.PARTIAL}
                 else None
             )

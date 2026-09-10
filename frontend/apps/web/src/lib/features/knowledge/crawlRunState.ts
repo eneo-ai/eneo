@@ -39,6 +39,14 @@ export function canRequestCrawlStop(crawl: CrawlRun): boolean {
   return isActiveCrawlRun(crawl) && crawl.phase !== "stopping";
 }
 
+export function isCompletedWithMissingResources(crawl: CrawlRun): boolean {
+  return (
+    crawl.phase === "terminal" &&
+    crawl.outcome === "partial" &&
+    crawl.failure_code === "resources_missing"
+  );
+}
+
 export function hasCrawlIssues(crawl: CrawlRun): boolean {
   return (
     (crawl.pages_failed ?? 0) > 0 ||
@@ -106,6 +114,7 @@ export function crawlFailureMessage(failureCode: string | null | undefined): str
 }
 
 export function crawlRunFailureMessage(crawl: CrawlRun): string {
+  if (isCompletedWithMissingResources(crawl)) return m.crawl_failure_resources_missing();
   if (
     crawl.outcome === "partial" &&
     crawl.failure_code !== "tenant_quota_exceeded" &&

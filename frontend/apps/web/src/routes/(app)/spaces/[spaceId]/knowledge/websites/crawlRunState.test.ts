@@ -6,7 +6,8 @@ import {
   crawlRunState,
   crawlRunStateLabel,
   canRequestCrawlStop,
-  isActiveCrawlRun
+  isActiveCrawlRun,
+  isCompletedWithMissingResources
 } from "$lib/features/knowledge/crawlRunState";
 
 function run(overrides: Partial<CrawlRun>): CrawlRun {
@@ -128,4 +129,20 @@ describe("crawlRunState", () => {
       )
     ).toBe(m.crawl_failure_tenant_quota_exceeded());
   });
+});
+
+it("only treats verified missing resources as a completed crawl", () => {
+  const completed = run({
+    phase: "terminal",
+    outcome: "partial",
+    failure_code: "resources_missing"
+  });
+  expect(isCompletedWithMissingResources(completed)).toBe(true);
+  expect(crawlRunFailureMessage(completed)).toBe(m.crawl_failure_resources_missing());
+  expect(crawlRunState(completed)).toBe("partial");
+  expect(
+    isCompletedWithMissingResources(run({ ...completed, failure_code: "processing_failed" }))
+  ).toBe(false);
+  expect(isCompletedWithMissingResources(run({ ...completed, outcome: "failed" }))).toBe(false);
+  expect(isCompletedWithMissingResources(run({ ...completed, phase: "running" }))).toBe(false);
 });
