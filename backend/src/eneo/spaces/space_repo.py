@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased, selectinload
 from sqlalchemy.sql.dml import ReturningInsert, ReturningUpdate
 
+from eneo.actors.actors.space_actor import SpaceAccessFacts, SpaceRoleFact
 from eneo.database.database import AsyncSession
 from eneo.database.tables.ai_models_table import (
     CompletionModels,
@@ -114,6 +115,7 @@ if TYPE_CHECKING:
         EmbeddingModelRepository,
     )
     from eneo.group_chat.domain.entities.group_chat import GroupChat
+    from eneo.info_blobs.info_blob import InfoBlobInDB
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
     from eneo.transcription_models.domain.transcription_model import (
         TranscriptionModel,
@@ -1886,6 +1888,127 @@ class SpaceRepository:
             raise NotFoundException()
 
         return space
+
+    async def get_info_blob_read_access(
+        self, info_blob: "InfoBlobInDB"
+    ) -> list[SpaceAccessFacts]:
+        """Resolve reader memberships through source ownership and distribution.
+
+        Mirrors the knowledge lists loaded by _get_from_query: child spaces also
+        see sources owned by or distributed to their organization. These facts
+        cover membership-derived reads only; resource-scoped key IDs are omitted.
+        """
+        if info_blob.tenant_id != self.user.tenant_id:
+            return []
+        if info_blob.group_id is not None:
+            source = CollectionsTable
+            source_id = info_blob.group_id
+            distribution_space_id = GroupsSpaces.space_id
+            distribution_source_id = GroupsSpaces.collection_id
+        elif info_blob.website_id is not None:
+            source = WebsitesTable
+            source_id = info_blob.website_id
+            distribution_space_id = WebsitesSpaces.space_id
+            distribution_source_id = WebsitesSpaces.website_id
+        elif info_blob.integration_knowledge_id is not None:
+            source = IntegrationKnowledge
+            source_id = info_blob.integration_knowledge_id
+            distribution_space_id = IntegrationKnowledgesSpaces.space_id
+            distribution_source_id = (
+                IntegrationKnowledgesSpaces.integration_knowledge_id
+            )
+        else:
+            raise ValueError("InfoBlob missing scope reference")
+
+        source_filter = (
+            source.id == source_id,
+            source.tenant_id == self.user.tenant_id,
+        )
+        source_space_ids = (
+            sa.select(source.space_id)
+            .where(*source_filter)
+            .union(
+                sa.select(distribution_space_id)
+                .join(source, distribution_source_id == source.id)
+                .where(*source_filter)
+            )
+        )
+        user_group_ids = sa.select(UserGroups.id).where(
+            UserGroups.id.in_(self.user.user_groups_ids),
+            UserGroups.tenant_id == self.user.tenant_id,
+            sa.or_(
+                UserGroups.state.is_(None),
+                UserGroups.state != UserGroupState.DELETED.value,
+            ),
+        )
+        group_membership = SpacesUserGroups.user_group_id.in_(user_group_ids)
+        query = (
+            sa.select(
+                Spaces.id,
+                Spaces.user_id,
+                Spaces.tenant_space_id,
+                sa.Nullable(SpacesUsers.role),
+            )
+            .outerjoin(
+                SpacesUsers,
+                sa.and_(
+                    SpacesUsers.space_id == Spaces.id,
+                    SpacesUsers.user_id == self.user.id,
+                ),
+            )
+            .where(
+                Spaces.tenant_id == self.user.tenant_id,
+                sa.or_(
+                    Spaces.id.in_(source_space_ids),
+                    Spaces.tenant_space_id.in_(source_space_ids),
+                ),
+                sa.or_(
+                    Spaces.user_id == self.user.id,
+                    SpacesUsers.user_id.is_not(None),
+                    Spaces.group_members.any(group_membership),
+                ),
+            )
+        )
+        spaces = (await self.session.execute(query)).tuples().all()
+        if not spaces:
+            return []
+
+        group_roles: dict[UUID, dict[UUID, SpaceRoleFact]] = {}
+        if self.user.user_groups_ids:
+            rows = await self.session.execute(
+                sa.select(
+                    SpacesUserGroups.space_id,
+                    SpacesUserGroups.user_group_id,
+                    SpacesUserGroups.role,
+                ).where(
+                    SpacesUserGroups.space_id.in_(
+                        [space_id for space_id, _, _, _ in spaces]
+                    ),
+                    group_membership,
+                )
+            )
+            for space_id, group_id, role in rows.tuples():
+                group_roles.setdefault(space_id, {})[group_id] = SpaceRoleFact(
+                    id=group_id, role=role
+                )
+
+        return [
+            SpaceAccessFacts(
+                id=space_id,
+                user_id=user_id,
+                tenant_space_id=tenant_space_id,
+                members=(
+                    {self.user.id: SpaceRoleFact(id=self.user.id, role=role)}
+                    if role is not None
+                    else {}
+                ),
+                group_members=group_roles.get(space_id, {}),
+                default_assistant_id=None,
+                assistant_ids=frozenset(),
+                app_ids=frozenset(),
+            )
+            for space_id, user_id, tenant_space_id, role in spaces
+        ]
 
     async def get_space_by_collection(self, collection_id: UUID) -> Space:
         query = (
