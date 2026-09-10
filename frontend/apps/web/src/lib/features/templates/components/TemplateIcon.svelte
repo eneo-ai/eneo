@@ -11,13 +11,18 @@
   } = $props();
 
   // The icon registry is fetched on demand (see lucideIcons.ts). The box keeps
-  // its size while the icon is on its way, so nothing shifts when it lands.
+  // its size while the icon is on its way, so nothing shifts when it lands;
+  // the initial is shown when there is no icon to wait for, or none arrived.
   let IconComponent = $state<LucideIconComponent | null>(null);
+  let settled = $state(false);
   $effect(() => {
     const name = template.icon_name;
     let stale = false;
+    settled = false;
     void loadLucideIconOrNull(name).then((icon) => {
-      if (!stale) IconComponent = icon;
+      if (stale) return;
+      IconComponent = icon;
+      settled = true;
     });
     return () => {
       stale = true;
@@ -31,7 +36,7 @@
 >
   {#if IconComponent}
     <IconComponent class="text-dynamic-stronger {size === 'large' ? 'h-5 w-5' : 'h-4 w-4'}" />
-  {:else if !template.icon_name}
+  {:else if !template.icon_name || settled}
     <span class="text-dynamic-stronger">{[...template.name][0]}</span>
   {/if}
 </div>
