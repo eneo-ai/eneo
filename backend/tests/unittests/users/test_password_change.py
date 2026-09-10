@@ -414,6 +414,17 @@ def test_present_credential_version_claim_requires_a_strict_integer(invalid_vers
         )
 
 
+def test_existing_short_password_still_verifies_but_cannot_be_set_again():
+    old_password = "OldPass123!"
+    historical_hash = bcrypt.hashpw(
+        old_password.encode("utf-8"), bcrypt.gensalt()
+    ).decode("utf-8")
+
+    assert AuthService.verify_password(old_password, historical_hash)
+    with pytest.raises(PasswordPolicyViolationError):
+        validate_new_local_password(old_password)
+
+
 def test_historical_overlong_bcrypt_passwords_still_verify_but_cannot_be_written():
     historical_hash = bcrypt.hashpw(b"a" * 72, bcrypt.gensalt()).decode("utf-8")
 

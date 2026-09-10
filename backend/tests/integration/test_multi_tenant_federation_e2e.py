@@ -442,7 +442,9 @@ async def test_patch_federation_rejects_null_required_field(
     )
 
     assert response.status_code == 422
-    assert "PATCH does not allow null for: client_id" in response.text
+    assert response.json() == {
+        "detail": [{"loc": ["body"], "type": "value_error", "msg": "Invalid value"}]
+    }
 
 
 @pytest.mark.integration
