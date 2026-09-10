@@ -4805,7 +4805,7 @@
   "admin_crawler_fetched": "Last fetched {time}",
   "admin_crawler_error": "Could not load the crawler overview.",
   "admin_crawler_empty_active": "No active crawls",
-  "admin_crawler_empty_recent": "No crawls completed in the last 24 hours",
+  "admin_crawler_empty_recent": "No finished crawls during the selected period",
   "admin_crawler_empty_filtered": "No crawls match these filters",
   "admin_crawler_wait": "Waiting {duration}",
   "admin_crawler_elapsed": "{minutes} min {seconds} s",
@@ -4861,5 +4861,15 @@
   "admin_crawler_refresh_history": "Refresh history",
   "admin_crawler_refresh_source": "Refresh source details",
   "admin_crawler_refresh_matches": "Refresh sources with this address",
-  "admin_crawler_refresh_error": "Could not refresh the overview. Showing the last fetched data."
+  "admin_crawler_refresh_error": "Could not refresh the overview. Showing the last fetched data.",
+  "admin_crawler_today": "Today",
+  "admin_crawler_yesterday": "Yesterday",
+  "admin_crawler_completed_view": "Finished",
+  "admin_crawler_completed_clean": "Completed without errors",
+  "admin_crawler_with_warnings": "With warnings",
+  "admin_crawler_unsuccessful": "Failed",
+  "admin_crawler_period": "Period",
+  "admin_crawler_calendar_help": "Counted by completion date in {timeZone}. Completed without errors includes unchanged and empty results.",
+  "admin_crawler_show_day_status": "Show {status} · {day}",
+  "admin_crawler_cancelled_count": "Manually cancelled: {count}"
 }

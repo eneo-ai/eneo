@@ -23,9 +23,21 @@
     type CrawlRunState
   } from "$lib/features/knowledge/crawlRunState";
   import { m } from "$lib/paraglide/messages";
+  import { getLocale } from "$lib/paraglide/runtime";
 
   const eneo = getEneo();
-  type Status = "all" | "issues" | Exclude<CrawlRunState, "unknown">;
+  type Status = "all" | "issues" | "completed" | "unsuccessful" | Exclude<CrawlRunState, "unknown">;
+  type Period = NonNullable<AdminCrawlerQuery["period"]>;
+  type Day = "today" | "yesterday";
+  const days: Day[] = ["today", "yesterday"];
+  const outcomes = [
+    { count: "completed", status: "completed" },
+    { count: "partial", status: "partial" },
+    { count: "failed", status: "unsuccessful" }
+  ] as const;
+  const periods: Period[] = ["today", "yesterday", "last_24_hours"];
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  let period = $state<Period>("today");
   let view = $state<"active" | "recent">("active");
   let status = $state<Status>("all");
   let searchInput = $state("");
@@ -33,6 +45,7 @@
   let cursors = $state<(string | null)[]>([null]);
   let overview = $state<AdminCrawlerOverview | null>(null);
   let loading = $state(false);
+  let rowsStale = $state(true);
   let loadFailed = $state(false);
   let selectedRunId = $state<string | null>(null);
   let detailsOpen = $state(false);
@@ -45,11 +58,12 @@
       : [
           "all",
           "issues",
+          "completed",
           "succeeded",
           "unchanged",
           "empty",
           "partial",
-          "failed",
+          "unsuccessful",
           "cancelled",
           "interrupted"
         ]
@@ -58,6 +72,8 @@
   function query(): AdminCrawlerQuery {
     return {
       view,
+      period,
+      time_zone: timeZone,
       status: status === "all" ? undefined : status,
       search,
       limit: 50,
@@ -77,6 +93,14 @@
     try {
       const result = await eneo.adminCrawler.overview(request);
       if (mounted && requestKey === JSON.stringify(query())) {
+        const dayChanged = overview && overview.calendar.today.date !== result.calendar.today.date;
+        if (dayChanged && view === "recent" && period !== "last_24_hours" && cursors.length > 1) {
+          cursors = [null];
+          rowsStale = true;
+          refreshPending = true;
+        } else {
+          rowsStale = false;
+        }
         overview = result;
         loadFailed = false;
       }
@@ -93,7 +117,8 @@
 
   function filterChanged() {
     cursors = [null];
-    overview = null;
+    rowsStale = true;
+    loadFailed = false;
     void refresh(true);
   }
 
@@ -107,9 +132,33 @@
   function showIssues() {
     view = "recent";
     status = "issues";
+    period = "last_24_hours";
     search = "";
     searchInput = "";
     filterChanged();
+  }
+
+  function showDay(day: Day, outcome: Status) {
+    view = "recent";
+    period = day;
+    status = outcome;
+    search = "";
+    searchInput = "";
+    filterChanged();
+  }
+
+  function periodLabel(value: Period) {
+    if (value === "today") return m.admin_crawler_today();
+    if (value === "yesterday") return m.admin_crawler_yesterday();
+    return m.admin_crawler_last_day();
+  }
+
+  function calendarDate(value: string) {
+    return new Intl.DateTimeFormat(getLocale(), {
+      day: "numeric",
+      month: "long",
+      timeZone: "UTC"
+    }).format(new Date(`${value}T00:00:00Z`));
   }
 
   function clearFilters() {
@@ -122,6 +171,9 @@
   function statusLabel(value: Status) {
     if (value === "all") return m.admin_crawler_all_statuses();
     if (value === "issues") return m.admin_crawler_issues();
+    if (value === "completed") return m.admin_crawler_completed_clean();
+    if (value === "partial") return m.admin_crawler_with_warnings();
+    if (value === "unsuccessful") return m.admin_crawler_unsuccessful();
     return crawlRunStateLabel(value);
   }
 
@@ -160,67 +212,94 @@
   <Page.Main>
     <div class="flex min-w-0 flex-col gap-6 py-6 pr-6">
       <p class="text-secondary max-w-3xl text-sm">{m.admin_crawler_description()}</p>
-      <div class="grid gap-3 sm:grid-cols-3">
-        <Card.Root
-          class="flex-row items-center gap-2 py-3 sm:flex-col sm:items-stretch sm:gap-4 sm:py-4"
+      <div class="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+        <p>
+          {m.admin_crawler_ongoing()}
+          <strong class="ml-2 tabular-nums">{overview?.summary.ongoing ?? "—"}</strong>
+        </p>
+        <p>
+          {m.admin_crawler_queued()}
+          <strong class="ml-2 tabular-nums">{overview?.summary.queued ?? "—"}</strong>
+        </p>
+        <Button
+          variant="ghost"
+          size="sm"
+          class="h-auto min-h-9 justify-start whitespace-normal text-left sm:ml-auto"
+          onclick={showIssues}
+          aria-label={m.admin_crawler_show_issues()}
         >
-          <Card.Header class="min-w-0 flex-1">
-            <Card.Title>{m.admin_crawler_ongoing()}</Card.Title>
-            <Card.Description>{m.admin_crawler_now()}</Card.Description>
-          </Card.Header>
-          <Card.Content>
-            {#if overview}<p class="text-3xl font-semibold tabular-nums">
-                {overview.summary.ongoing}
-              </p>{:else if loadFailed}<p class="text-secondary text-3xl">—</p>{:else}<Skeleton
-                class="h-9 w-16"
-              />{/if}
-          </Card.Content>
-        </Card.Root>
-        <Card.Root
-          class="flex-row items-center gap-2 py-3 sm:flex-col sm:items-stretch sm:gap-4 sm:py-4"
-        >
-          <Card.Header class="min-w-0 flex-1">
-            <Card.Title>{m.admin_crawler_queued()}</Card.Title>
-            <Card.Description>{m.admin_crawler_now()}</Card.Description>
-          </Card.Header>
-          <Card.Content>
-            {#if overview}<p class="text-3xl font-semibold tabular-nums">
-                {overview.summary.queued}
-              </p>{:else if loadFailed}<p class="text-secondary text-3xl">—</p>{:else}<Skeleton
-                class="h-9 w-16"
-              />{/if}
-          </Card.Content>
-        </Card.Root>
-        <Card.Root
-          class="flex-row items-center gap-2 py-3 sm:flex-col sm:items-stretch sm:gap-4 sm:py-4"
-        >
-          <Card.Header class="min-w-0 flex-1">
-            <Card.Title>{m.admin_crawler_issues()}</Card.Title>
-            <Card.Description>{m.admin_crawler_last_day()}</Card.Description>
-            <Card.Action
-              ><Button
-                variant="ghost"
-                size="icon-sm"
-                onclick={showIssues}
-                aria-label={m.admin_crawler_show_issues()}
-                title={m.admin_crawler_show_issues()}><ArrowRight /></Button
-              ></Card.Action
-            >
-          </Card.Header>
-          <Card.Content>
-            {#if overview}<p class="text-3xl font-semibold tabular-nums">
-                {overview.summary.issues}
-              </p>{:else if loadFailed}<p class="text-secondary text-3xl">—</p>{:else}<Skeleton
-                class="h-9 w-16"
-              />{/if}
-          </Card.Content>
-        </Card.Root>
+          {m.admin_crawler_issues()} · {m.admin_crawler_last_day()}
+          <span class="tabular-nums">{overview?.summary.issues ?? "—"}</span>
+          <ArrowRight data-icon="inline-end" />
+        </Button>
       </div>
+      <section class="flex flex-col gap-3" aria-label={m.admin_crawler_completed_view()}>
+        <div class="grid gap-4 lg:grid-cols-2">
+          {#each days as day (day)}
+            <Card.Root size="sm" role="group" aria-labelledby={`crawler-${day}`}>
+              <Card.Header class="flex flex-row flex-wrap items-baseline justify-between gap-2">
+                <Card.Title id={`crawler-${day}`}>{periodLabel(day)}</Card.Title>
+                {#if overview}<Card.Description
+                    >{calendarDate(overview.calendar[day].date)}</Card.Description
+                  >{/if}
+              </Card.Header>
+              <Card.Content>
+                <div class="grid grid-cols-3 gap-1 sm:gap-2">
+                  {#each outcomes as outcome (outcome.status)}
+                    <Button
+                      variant="ghost"
+                      class="aria-pressed:bg-muted h-auto min-h-20 min-w-0 flex-col items-start justify-start gap-1 px-1 py-2 text-left whitespace-normal sm:px-2"
+                      disabled={!overview}
+                      aria-label={m.admin_crawler_show_day_status({
+                        status: statusLabel(outcome.status),
+                        day: periodLabel(day)
+                      })}
+                      aria-pressed={view === "recent" &&
+                        period === day &&
+                        status === outcome.status}
+                      onclick={() => showDay(day, outcome.status)}
+                    >
+                      {#if overview}<span class="text-xl font-semibold tabular-nums sm:text-2xl"
+                          >{overview.calendar[day][outcome.count].toLocaleString(getLocale())}</span
+                        >
+                      {:else if loadFailed}<span class="text-2xl">—</span>
+                      {:else}<Skeleton class="h-8 w-12" />{/if}
+                      <span class="text-secondary text-xs leading-5"
+                        >{statusLabel(outcome.status)}</span
+                      >
+                    </Button>
+                  {/each}
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  class="text-secondary aria-pressed:bg-muted mt-2 max-w-full justify-start text-xs whitespace-normal"
+                  disabled={!overview}
+                  aria-label={m.admin_crawler_show_day_status({
+                    status: statusLabel("cancelled"),
+                    day: periodLabel(day)
+                  })}
+                  aria-pressed={view === "recent" && period === day && status === "cancelled"}
+                  onclick={() => showDay(day, "cancelled")}
+                  >{m.admin_crawler_cancelled_count({
+                    count: overview
+                      ? overview.calendar[day].cancelled.toLocaleString(getLocale())
+                      : "—"
+                  })}</Button
+                >
+              </Card.Content>
+            </Card.Root>
+          {/each}
+        </div>
+        <p class="text-secondary max-w-3xl text-xs leading-5">
+          {m.admin_crawler_calendar_help({ timeZone: overview?.calendar.time_zone ?? timeZone })}
+        </p>
+      </section>
 
       <Tabs.Root value={view} onValueChange={changeView}>
         <Tabs.List aria-label={m.admin_crawler_title()}>
           <Tabs.Trigger value="active">{m.admin_crawler_active()}</Tabs.Trigger>
-          <Tabs.Trigger value="recent">{m.admin_crawler_last_day()}</Tabs.Trigger>
+          <Tabs.Trigger value="recent">{m.admin_crawler_completed_view()}</Tabs.Trigger>
         </Tabs.List>
         {#key view}
           <Tabs.Content value={view}>
@@ -242,6 +321,30 @@
                     placeholder={m.admin_crawler_search_hint()}
                   />
                 </Field.Field>
+                {#if view === "recent"}
+                  <Field.Field class="w-full sm:w-44">
+                    <Field.Label for="crawler-period">{m.admin_crawler_period()}</Field.Label>
+                    <Select.Root
+                      type="single"
+                      value={period}
+                      onValueChange={(value) => {
+                        period = periods.find((option) => option === value) ?? "today";
+                        filterChanged();
+                      }}
+                    >
+                      <Select.Trigger id="crawler-period" class="w-full"
+                        >{periodLabel(period)}</Select.Trigger
+                      >
+                      <Select.Content
+                        ><Select.Group>
+                          {#each periods as option (option)}<Select.Item value={option}
+                              >{periodLabel(option)}</Select.Item
+                            >{/each}
+                        </Select.Group></Select.Content
+                      >
+                    </Select.Root>
+                  </Field.Field>
+                {/if}
                 <Field.Field class="w-full sm:w-56">
                   <Field.Label for="crawler-status">{m.status()}</Field.Label>
                   <Select.Root
@@ -274,18 +377,20 @@
 
               {#if loadFailed}
                 <CrawlLoadError
-                  message={overview ? m.admin_crawler_refresh_error() : m.admin_crawler_error()}
+                  message={overview && !rowsStale
+                    ? m.admin_crawler_refresh_error()
+                    : m.admin_crawler_error()}
                   {loading}
                   onretry={() => refresh()}
                 />
               {/if}
 
               <div aria-busy={loading}>
-                {#if !overview && !loadFailed}
+                {#if rowsStale && !loadFailed}
                   <div class="flex flex-col gap-3" role="status" aria-label={m.loading()}>
                     {#each [1, 2, 3] as row (row)}<Skeleton class="h-16 w-full" />{/each}
                   </div>
-                {:else if overview}
+                {:else if overview && !rowsStale}
                   <Table.Root class="min-w-[960px]">
                     <Table.Caption class="sr-only"
                       >{view === "active"
@@ -369,18 +474,20 @@
                       disabled={cursors.length === 1 || loading}
                       onclick={() => {
                         cursors = cursors.slice(0, -1);
-                        overview = null;
+                        rowsStale = true;
+                        loadFailed = false;
                         void refresh();
                       }}>{m.admin_crawler_previous()}</Button
                     >
                     <Button
                       variant="outline"
                       size="sm"
-                      disabled={!overview?.next_cursor || loading}
+                      disabled={rowsStale || !overview?.next_cursor || loading}
                       onclick={() => {
                         if (overview?.next_cursor) {
                           cursors = [...cursors, overview.next_cursor];
-                          overview = null;
+                          rowsStale = true;
+                          loadFailed = false;
                           void refresh();
                         }
                       }}>{m.admin_crawler_next()}</Button

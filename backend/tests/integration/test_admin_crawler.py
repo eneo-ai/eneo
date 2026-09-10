@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -212,6 +212,12 @@ async def test_non_admin_and_other_tenant_cannot_read_crawls(
     assert response.status_code == 200, response.text
     assert response.json()["items"] == []
     assert response.json()["summary"] == {"ongoing": 0, "queued": 0, "issues": 0}
+    for day in ("today", "yesterday"):
+        assert all(
+            count == 0
+            for key, count in response.json()["calendar"][day].items()
+            if key != "date"
+        )
     for url in endpoints[1:]:
         response = await client.get(url, headers=foreign)
         assert response.status_code == 404, response.text
@@ -227,6 +233,221 @@ async def test_non_admin_and_other_tenant_cannot_read_crawls(
             await client.post(url, headers={"Authorization": f"Bearer {token}"})
         ).status_code == 403
         assert (await client.post(url, headers=foreign)).status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("now", "start", "end", "hours"),
+    [
+        (
+            datetime(2026, 3, 30, tzinfo=timezone.utc),
+            datetime(2026, 3, 28, 23, tzinfo=timezone.utc),
+            datetime(2026, 3, 29, 22, tzinfo=timezone.utc),
+            23,
+        ),
+        (
+            datetime(2026, 10, 26, tzinfo=timezone.utc),
+            datetime(2026, 10, 24, 22, tzinfo=timezone.utc),
+            datetime(2026, 10, 25, 23, tzinfo=timezone.utc),
+            25,
+        ),
+    ],
+)
+async def test_calendar_yesterday_follows_daylight_saving_boundaries(
+    client,
+    db_container,
+    admin_user,
+    website_id,
+    headers,
+    monkeypatch,
+    now,
+    start,
+    end,
+    hours,
+):
+    from eneo.admin import admin_crawler_router
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now
+
+    monkeypatch.setattr(admin_crawler_router, "datetime", FrozenDateTime)
+    timestamps = [
+        start - timedelta(microseconds=1),
+        start,
+        end - timedelta(microseconds=1),
+        end,
+    ]
+    ids = [uuid4() for _ in timestamps]
+    assert (end - start) == timedelta(hours=hours)
+    async with db_container(user=admin_user) as container:
+        container.session().add_all(
+            [
+                CrawlRuns(
+                    id=id,
+                    website_id=website_id,
+                    tenant_id=admin_user.tenant_id,
+                    phase="terminal",
+                    outcome="succeeded",
+                    origin="legacy",
+                    finished_at=finished_at,
+                )
+                for id, finished_at in zip(ids, timestamps, strict=True)
+            ]
+        )
+    response = await client.get(
+        "/api/v1/admin/crawler/",
+        headers=headers,
+        params={
+            "view": "recent",
+            "period": "yesterday",
+            "time_zone": "Europe/Stockholm",
+            "status": "completed",
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["calendar"]["yesterday"]["completed"] == 2
+    assert response.json()["calendar"]["today"]["completed"] == 1
+    assert {item["run"]["id"] for item in response.json()["items"]} == {
+        str(id) for id in ids[1:3]
+    }
+
+
+@pytest.mark.parametrize(
+    ("params", "status"),
+    [
+        ({"time_zone": "Not/AZone"}, 400),
+        ({"time_zone": "/UTC"}, 400),
+        ({"period": "week"}, 422),
+    ],
+)
+async def test_calendar_rejects_invalid_filters(client, headers, params, status):
+    response = await client.get(
+        "/api/v1/admin/crawler/", headers=headers, params=params
+    )
+    assert response.status_code == status, response.text
+
+
+async def test_calendar_statistics_and_drilldown_use_local_completion_dates(
+    client, db_container, admin_user, website_id, headers, monkeypatch
+):
+    from eneo.admin import admin_crawler_router
+
+    now = datetime(2026, 9, 10, 6, tzinfo=timezone.utc)
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now
+
+    monkeypatch.setattr(admin_crawler_router, "datetime", FrozenDateTime)
+    today = datetime(2026, 9, 9, 22, tzinfo=timezone.utc)
+    yesterday = datetime(2026, 9, 8, 22, tzinfo=timezone.utc)
+
+    records = [
+        ("succeeded", today),
+        ("unchanged", today + timedelta(hours=1)),
+        ("empty", today + timedelta(hours=2)),
+        ("partial", today + timedelta(hours=3)),
+        ("failed", today + timedelta(hours=4)),
+        ("interrupted", today + timedelta(hours=5)),
+        ("cancelled", today + timedelta(hours=6)),
+        ("succeeded", yesterday),
+        ("succeeded", today - timedelta(microseconds=1)),
+        ("partial", yesterday + timedelta(hours=1)),
+        ("failed", yesterday + timedelta(hours=2)),
+        ("succeeded", yesterday - timedelta(microseconds=1)),
+        ("succeeded", now + timedelta(hours=1)),
+    ]
+    ids = [uuid4() for _ in records]
+    async with db_container(user=admin_user) as container:
+        for id, (outcome, finished_at) in zip(ids, records, strict=True):
+            container.session().add(
+                CrawlRuns(
+                    id=id,
+                    website_id=website_id,
+                    tenant_id=admin_user.tenant_id,
+                    phase="terminal",
+                    outcome=outcome,
+                    origin="legacy",
+                    failure_code="processing_failed"
+                    if outcome in {"partial", "failed", "interrupted"}
+                    else "cancelled"
+                    if outcome == "cancelled"
+                    else None,
+                    created_at=yesterday - timedelta(days=2),
+                    finished_at=finished_at,
+                )
+            )
+    params = {"view": "recent", "period": "today", "time_zone": "Europe/Stockholm"}
+    response = await client.get(
+        "/api/v1/admin/crawler/", headers=headers, params=params
+    )
+    assert response.status_code == 200, response.text
+    calendar = response.json()["calendar"]
+    assert calendar == {
+        "time_zone": "Europe/Stockholm",
+        "today": {
+            "date": "2026-09-10",
+            "completed": 3,
+            "partial": 1,
+            "failed": 2,
+            "cancelled": 1,
+        },
+        "yesterday": {
+            "date": "2026-09-09",
+            "completed": 2,
+            "partial": 1,
+            "failed": 1,
+            "cancelled": 0,
+        },
+    }
+    assert {item["run"]["id"] for item in response.json()["items"]} == {
+        str(id) for id in ids[:7]
+    }
+    first = await client.get(
+        "/api/v1/admin/crawler/",
+        headers=headers,
+        params={**params, "status": "completed", "limit": 2},
+    )
+    assert first.status_code == 200, first.text
+    assert first.json()["calendar"] == calendar
+    second = await client.get(
+        "/api/v1/admin/crawler/",
+        headers=headers,
+        params={
+            **params,
+            "status": "completed",
+            "limit": 2,
+            "cursor": first.json()["next_cursor"],
+        },
+    )
+    assert {
+        item["run"]["id"] for item in first.json()["items"] + second.json()["items"]
+    } == {str(id) for id in ids[:3]}
+    assert second.json()["next_cursor"] is None
+    failed = await client.get(
+        "/api/v1/admin/crawler/",
+        headers=headers,
+        params={**params, "status": "unsuccessful"},
+    )
+    assert {item["run"]["outcome"] for item in failed.json()["items"]} == {
+        "failed",
+        "interrupted",
+    }
+    previous = await client.get(
+        "/api/v1/admin/crawler/",
+        headers=headers,
+        params={**params, "period": "yesterday"},
+    )
+    assert {item["run"]["id"] for item in previous.json()["items"]} == {
+        str(id) for id in ids[7:11]
+    }
+    empty = await client.get(
+        "/api/v1/admin/crawler/", headers=headers, params={**params, "search": "absent"}
+    )
+    assert empty.json()["calendar"] == calendar
+    assert empty.json()["items"] == []
 
 
 async def test_recent_runs_are_bounded_and_summary_ignores_filters(

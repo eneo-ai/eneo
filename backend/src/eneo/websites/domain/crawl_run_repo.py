@@ -1,9 +1,10 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from enum import StrEnum
 from typing import TYPE_CHECKING, Literal, cast
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -106,11 +107,33 @@ class CrawlOverviewItem:
     last_indexed_at: datetime | None
 
 
+class CrawlHistoryPeriod(StrEnum):
+    LAST_24_HOURS = "last_24_hours"
+    TODAY = "today"
+    YESTERDAY = "yesterday"
+
+
+CrawlOverviewStatus = (
+    CrawlPhase | CrawlOutcome | Literal["issues", "completed", "unsuccessful"]
+)
+
+
+@dataclass(frozen=True, slots=True)
+class CrawlDaySummary:
+    date: date
+    completed: int
+    partial: int
+    failed: int
+    cancelled: int
+
+
 @dataclass(frozen=True, slots=True)
 class CrawlOverview:
     ongoing: int
     queued: int
     issues: int
+    today: CrawlDaySummary
+    yesterday: CrawlDaySummary
     items: list[CrawlOverviewItem]
     next_cursor: UUID | None
 
@@ -209,7 +232,9 @@ class CrawlRunRepository:
         *,
         as_of: datetime,
         view: Literal["active", "recent"] = "active",
-        status: CrawlPhase | CrawlOutcome | Literal["issues"] | None = None,
+        status: CrawlOverviewStatus | None = None,
+        period: CrawlHistoryPeriod = CrawlHistoryPeriod.LAST_24_HOURS,
+        time_zone: ZoneInfo = ZoneInfo("UTC"),
         search: str = "",
         limit: int = 50,
         cursor: UUID | None = None,
@@ -218,19 +243,53 @@ class CrawlRunRepository:
             raise BadRequestException("Page size must be between 1 and 100")
         run = CrawlRunsTable
         cutoff = as_of - timedelta(hours=24)
-        active = run.phase != CrawlPhase.TERMINAL
-        recent = sa.and_(run.phase == CrawlPhase.TERMINAL, run.finished_at >= cutoff)
-        queued = run.phase.in_((CrawlPhase.PENDING_DISPATCH, CrawlPhase.QUEUED))
-        issues = run.outcome.in_(
-            (CrawlOutcome.PARTIAL, CrawlOutcome.FAILED, CrawlOutcome.INTERRUPTED)
+        today_date = as_of.astimezone(time_zone).date()
+        yesterday_date = today_date - timedelta(days=1)
+        # Construct each local midnight separately: a calendar day can be 23 or 25 hours.
+        today_start = datetime.combine(today_date, time.min, time_zone).astimezone(
+            timezone.utc
         )
+        yesterday_start = datetime.combine(
+            yesterday_date, time.min, time_zone
+        ).astimezone(timezone.utc)
+        active = run.phase != CrawlPhase.TERMINAL
+        terminal = sa.and_(run.phase == CrawlPhase.TERMINAL, run.finished_at <= as_of)
+        recent = sa.and_(terminal, run.finished_at >= cutoff)
+        today = sa.and_(terminal, run.finished_at >= today_start)
+        yesterday = sa.and_(
+            terminal, run.finished_at >= yesterday_start, run.finished_at < today_start
+        )
+        history_window = {
+            CrawlHistoryPeriod.LAST_24_HOURS: recent,
+            CrawlHistoryPeriod.TODAY: today,
+            CrawlHistoryPeriod.YESTERDAY: yesterday,
+        }[period]
+        queued = run.phase.in_((CrawlPhase.PENDING_DISPATCH, CrawlPhase.QUEUED))
+        completed = run.outcome.in_(_CLEAN_OUTCOMES)
+        partial = run.outcome == CrawlOutcome.PARTIAL
+        unsuccessful = run.outcome.in_((CrawlOutcome.FAILED, CrawlOutcome.INTERRUPTED))
+        cancelled = run.outcome == CrawlOutcome.CANCELLED
+        issues = sa.or_(partial, unsuccessful)
         counts = (
             await self.session.execute(
                 sa.select(
                     sa.func.count().filter(run.phase.in_(_LEASED_PHASES)),
                     sa.func.count().filter(queued),
                     sa.func.count().filter(sa.and_(recent, issues)),
-                ).where(run.tenant_id == tenant_id, sa.or_(active, recent))
+                    *[
+                        sa.func.count().filter(sa.and_(window, outcome))
+                        for window in (today, yesterday)
+                        for outcome in (completed, partial, unsuccessful, cancelled)
+                    ],
+                ).where(
+                    run.tenant_id == tenant_id,
+                    sa.or_(
+                        active,
+                        sa.and_(
+                            terminal, run.finished_at >= min(cutoff, yesterday_start)
+                        ),
+                    ),
+                )
             )
         ).one()
 
@@ -264,11 +323,18 @@ class CrawlRunRepository:
                     CrawlAttempts.attempt_number == run.attempt_count,
                 ),
             )
-            .where(run.tenant_id == tenant_id, active if view == "active" else recent)
+            .where(
+                run.tenant_id == tenant_id,
+                active if view == "active" else history_window,
+            )
             .limit(limit + 1)
         )
         if status == "issues":
             query = query.where(issues)
+        elif status == "completed":
+            query = query.where(completed)
+        elif status == "unsuccessful":
+            query = query.where(unsuccessful)
         elif status == CrawlPhase.QUEUED:
             query = query.where(queued)
         elif isinstance(status, CrawlPhase):
@@ -320,6 +386,12 @@ class CrawlRunRepository:
             ongoing=counts[0],
             queued=counts[1],
             issues=counts[2],
+            today=CrawlDaySummary(
+                today_date, counts[3], counts[4], counts[5], counts[6]
+            ),
+            yesterday=CrawlDaySummary(
+                yesterday_date, counts[7], counts[8], counts[9], counts[10]
+            ),
             items=items,
             next_cursor=items[-1].run.id if len(rows) > limit else None,
         )

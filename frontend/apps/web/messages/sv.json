@@ -4805,7 +4805,7 @@
   "admin_crawler_fetched": "Senast hämtat {time}",
   "admin_crawler_error": "Kunde inte hämta crawleröversikten.",
   "admin_crawler_empty_active": "Inga aktiva körningar",
-  "admin_crawler_empty_recent": "Inga avslutade körningar det senaste dygnet",
+  "admin_crawler_empty_recent": "Inga avslutade körningar under den valda perioden",
   "admin_crawler_empty_filtered": "Inga körningar matchar filtret",
   "admin_crawler_wait": "Väntat {duration}",
   "admin_crawler_elapsed": "{minutes} min {seconds} s",
@@ -4861,5 +4861,15 @@
   "admin_crawler_refresh_history": "Uppdatera historik",
   "admin_crawler_refresh_source": "Uppdatera källuppgifter",
   "admin_crawler_refresh_matches": "Uppdatera källor med denna adress",
-  "admin_crawler_refresh_error": "Kunde inte uppdatera översikten. Senast hämtade uppgifter visas."
+  "admin_crawler_refresh_error": "Kunde inte uppdatera översikten. Senast hämtade uppgifter visas.",
+  "admin_crawler_today": "Idag",
+  "admin_crawler_yesterday": "Igår",
+  "admin_crawler_completed_view": "Avslutade",
+  "admin_crawler_completed_clean": "Slutförda utan fel",
+  "admin_crawler_with_warnings": "Med varningar",
+  "admin_crawler_unsuccessful": "Misslyckade",
+  "admin_crawler_period": "Period",
+  "admin_crawler_calendar_help": "Räknas efter avslutsdatum i {timeZone}. Slutförda utan fel omfattar även oförändrade och tomma resultat.",
+  "admin_crawler_show_day_status": "Visa {status} · {day}",
+  "admin_crawler_cancelled_count": "Manuellt avbrutna: {count}"
 }

@@ -1,7 +1,8 @@
 # Crawleröversikt i adminpanelen
 
-Genomförd 9 september 2026. Översikten följs i Beads `crawl-f35` och
-detaljer och åtgärder i `crawl-5x5` samt gränssnittets förfining i `crawl-8ue`,
+Uppdaterad 10 september 2026. Översikten följs i Beads `crawl-f35` och
+detaljer och åtgärder i `crawl-5x5`, gränssnittets förfining i `crawl-8ue`
+och dagsstatistiken i `crawl-xve`,
 alla i `crawler-review`. Sidan blir tillgänglig när backend, databas och frontend har
 uppdaterats tillsammans.
 
@@ -11,7 +12,8 @@ adminmenyns befintliga grupp för analys och loggar, med namnet **Crawler**.
 
 ## Sidans innehåll
 
-Överst visas tre kompakta sammanfattningar. De omfattar hela tenanten, oavsett
+Överst visas pågående körningar, kö och en genväg till senaste dygnets fel och
+varningar. Därunder visas statistiken för **Idag** och **Igår**. De omfattar hela tenanten, oavsett
 vilken del av tabellen som har laddats eller filtrerats.
 
 | Sammanfattning | Betydelse |
@@ -20,12 +22,25 @@ vilken del av tabellen som har laddats eller filtrerats.
 | I kö | Körningar i `pending_dispatch` eller `queued` just nu. |
 | Fel och varningar, senaste 24 timmarna | Avslutade körningar med `partial`, `failed` eller `interrupted`. Användaravbrott räknas inte som fel. |
 
-Under sammanfattningen finns två flikar: **Aktiva** som standard och **Senaste
-dygnet**. Aktiva innehåller både pågående och köade körningar. Dygnsvyn visar
-avslutade körningar, med senast avslutad först. Det går att filtrera på status
-och söka efter webbplatsens namn eller adress. Sammanfattningen för fel och
-varningar öppnar motsvarande filter i dygnsvyn. Historiska fel ligger kvar där
-även om en senare körning har lyckats.
+Dagsstatistiken räknar körningar efter `finished_at` i webbläsarens IANA-tidszon,
+som visas under siffrorna. Idag börjar vid lokal midnatt och slutar vid svarets
+`as_of`. Igår omfattar hela föregående kalenderdag, även när den är 23 eller
+25 timmar lång. Antalen avser körningar, inte unika webbplatser eller dokument.
+
+| Dagsstatistik | Utfall |
+| --- | --- |
+| Slutförda utan fel | `succeeded`, `unchanged`, `empty`. Även en kontroll utan nytt innehåll är slutförd. |
+| Med varningar | `partial`. Körningen avslutades men delar av resultatet misslyckades. |
+| Misslyckade | `failed`, `interrupted`. |
+| Manuellt avbrutna | `cancelled`, separat under de tre huvudtalen. |
+
+Varje antal öppnar motsvarande dag och utfall i listan och rensar sökning och
+sidindelning. Under statistiken finns två flikar: **Aktiva** som standard och
+**Avslutade**. Aktiva innehåller både pågående och köade körningar. Avslutade
+har periodvalen **Idag**, **Igår** och **Senaste dygnet**, med senast avslutad
+först. Det går att filtrera på status och söka efter webbplatsens namn eller
+adress. Genvägen för fel och varningar väljer uttryckligen **Senaste dygnet**.
+Historiska fel ligger kvar där även om en senare körning har lyckats.
 
 Tabellen har en rad per körning:
 
@@ -79,11 +94,13 @@ av en äldre körning påverkar inte en senare körning.
 ## Shadcn och uppdatering
 
 Sidan använder projektets installerade **shadcn-svelte, Nova**, adminlayout och
-semantiska färger. `Card` visar de tre sammanfattningarna, `Tabs` vyerna,
+semantiska färger. `Card` grupperar de två dagarna, `Tabs` vyerna,
 `Table` körningarna, `Badge` status och `Input`/`Select` filtreringen. Den använder befintlig `Dialog` för körningsdetaljer. Ingen ny komponentfamilj behövs.
 
 Sidan uppdateras var tionde sekund medan sidan är synlig, med högst en pågående
-uppdatering. Filter och befintliga rader behålls under uppdateringen. Sidan visar
+uppdatering. Filter och befintliga rader behålls vid uppdatering av samma lista. Vid
+filterbyte ligger statistiken kvar medan den nya listan laddas. När ett nytt
+kalenderdygn börjar återgår dagens och gårdagens listor till första sidan. Sidan visar
 ”Senast hämtat” och en manuell uppdateringsknapp. Vid fel behålls senaste
 resultatet med ett tydligt felbesked och möjlighet att försöka igen.
 Felbeskedet och knappen ligger kvar medan försöket pågår; knappen visar att
@@ -163,7 +180,15 @@ behörighetskontroll. Läs enbart nödvändiga fält från körningar, aktuellt 
 webbplatser och ytor. Hämta inte alla ytors innehåll eller alla jobb till
 webbläsaren. Begränsa varje sida till högst 100 rader och använd stabil cursor
 med tidsstämpel och id. Dygnsvyn avgränsas av avslutningstid; sammanfattningens
-tidpunkt returneras så att siffrorna går att tolka.
+tidpunkt returneras så att siffrorna går att tolka. `period` väljer
+`today`, `yesterday` eller `last_24_hours`; `time_zone` valideras som en
+IANA-tidszon. Utelämnade parametrar behåller API:ts tidigare rullande dygnsvy
+och använder UTC. `calendar` innehåller tidszon, datum och dagarnas fyra
+antal. Samma tidsgränser och utfallsgrupper används i statistiken och listan.
+Sammanfattningen läser aktiva körningar och det tidsintervall som täcker både
+igår och de senaste 24 timmarna, oberoende av hur mycket äldre historik finns.
+Dagarnas räknare ingår i befintlig aggregatfråga; ingen extra fråga per dag,
+ny tabell eller separat uppdateringsloop behövs.
 
 `CrawlRuns`, `CrawlAttempts`, `CrawlRunFailures` och `Websites.last_indexed_at`
 innehåller underlaget. Jobblistan är användarspecifik och den befintliga
@@ -175,6 +200,14 @@ tenant, skapandetid och id, vilket låter databasen läsa tabellens sorteringsor
 direkt. Inget av dessa index duplicerar webbplatsindexets sorteringsordning.
 
 ## Verifiering och drift
+
+Dagsstatistiken verifierades med 20 admintester mot PostgreSQL och 20 tester i
+riktig webbläsare. De täcker avslutsdatum, lokala dygnsgränser, sommartidsbyte,
+utfallsfilter, tenantgränser, ogiltiga parametrar och återgång till första
+historiesidan vid nytt dygn. Strikta typkontroller och 42 SDK-tester passerar.
+Skalningsprovet med 100 000 äldre körningar och upp till 10 000 aktiva behåller
+två databasfrågor för översikten; aggregatet läser inte igenom äldre historik.
+Det är ett lokalt mätprov, inte ett kapacitetslöfte för produktion.
 
 Den första versionen verifierades med 80 PostgreSQL-integrationstester för adminåtkomst,
 körningshistorik och crawlerns körningsflöde, åtta migrationstester och 37

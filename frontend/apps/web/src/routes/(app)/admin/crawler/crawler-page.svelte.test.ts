@@ -5,6 +5,7 @@ import type { AdminCrawlerDetails, AdminCrawlerOverview, CrawlRun } from "@eneo/
 import "../../../../app.css";
 import { m } from "$lib/paraglide/messages";
 import dayjs from "dayjs";
+import { crawlRunStateLabel } from "$lib/features/knowledge/crawlRunState";
 
 const api = vi.hoisted(() => ({
   adminCrawler: {
@@ -39,6 +40,11 @@ import CrawlerPage from "./+page.svelte";
 const overview: AdminCrawlerOverview = {
   as_of: "2026-09-09T12:00:00Z",
   summary: { ongoing: 1, queued: 0, issues: 2 },
+  calendar: {
+    time_zone: "Europe/Stockholm",
+    today: { date: "2026-09-09", completed: 124, partial: 3, failed: 2, cancelled: 1 },
+    yesterday: { date: "2026-09-08", completed: 256, partial: 4, failed: 1, cancelled: 0 }
+  },
   next_cursor: null,
   items: [
     {
@@ -674,7 +680,7 @@ it("pauses polling while hidden and the issue summary opens all tenant warnings"
   api.adminCrawler.overview.mockResolvedValueOnce({ ...overview, items: [] });
   await page.getByRole("button", { name: m.admin_crawler_show_issues(), exact: true }).click();
   await expect
-    .element(page.getByRole("tab", { name: m.admin_crawler_last_day(), exact: true }))
+    .element(page.getByRole("tab", { name: m.admin_crawler_completed_view(), exact: true }))
     .toHaveAttribute("aria-selected", "true");
   await expect
     .element(page.getByRole("textbox", { name: m.admin_crawler_search() }))
@@ -722,4 +728,102 @@ it("recovers from an initial load failure and explains an empty active list", as
     .element(page.getByText(m.admin_crawler_empty_active(), { exact: true }))
     .toBeVisible();
   await expect.element(page.getByRole("alert")).not.toBeInTheDocument();
+});
+
+it("opens each daily outcome and preserves statistics while loading a new filter", async () => {
+  show();
+  await expect
+    .element(page.getByRole("button", { name: "Municipal website", exact: true }))
+    .toBeVisible();
+  await page.getByRole("textbox", { name: m.admin_crawler_search() }).fill("Municipal");
+  await page.getByRole("button", { name: m.search(), exact: true }).click();
+  let finish: (value: AdminCrawlerOverview) => void = () => {};
+  api.adminCrawler.overview.mockReturnValueOnce(
+    new Promise<AdminCrawlerOverview>((resolve) => {
+      finish = resolve;
+    })
+  );
+  const todayClean = page.getByRole("button", {
+    name: m.admin_crawler_show_day_status({
+      status: m.admin_crawler_completed_clean(),
+      day: m.admin_crawler_today()
+    }),
+    exact: true
+  });
+  await todayClean.click();
+  await expect.element(todayClean).toBeVisible();
+  await expect.element(todayClean).toHaveTextContent("124");
+  await expect
+    .element(page.getByRole("button", { name: "Municipal website", exact: true }))
+    .not.toBeInTheDocument();
+  expect(api.adminCrawler.overview).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      view: "recent",
+      period: "today",
+      status: "completed",
+      search: "",
+      cursor: null,
+      time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone
+    })
+  );
+  finish({ ...overview, items: [] });
+  await expect
+    .element(page.getByText(m.admin_crawler_empty_filtered(), { exact: true }))
+    .toBeVisible();
+  for (const [status, label] of [
+    ["partial", m.admin_crawler_with_warnings()],
+    ["unsuccessful", m.admin_crawler_unsuccessful()],
+    ["cancelled", crawlRunStateLabel("cancelled")]
+  ] as const) {
+    await page
+      .getByRole("button", {
+        name: m.admin_crawler_show_day_status({ status: label, day: m.admin_crawler_yesterday() }),
+        exact: true
+      })
+      .click();
+    await expect
+      .poll(() => api.adminCrawler.overview.mock.lastCall?.[0])
+      .toEqual(
+        expect.objectContaining({
+          view: "recent",
+          period: "yesterday",
+          status,
+          search: "",
+          cursor: null
+        })
+      );
+  }
+});
+
+it("returns to the first history page when a calendar day changes", async () => {
+  const intervals = vi.spyOn(globalThis, "setInterval");
+  show();
+  const dailyButton = page.getByRole("button", {
+    name: m.admin_crawler_show_day_status({
+      status: m.admin_crawler_completed_clean(),
+      day: m.admin_crawler_today()
+    }),
+    exact: true
+  });
+  await expect.element(dailyButton).toBeVisible();
+  api.adminCrawler.overview.mockResolvedValueOnce({ ...overview, next_cursor: "page-2" });
+  await dailyButton.click();
+  await page.getByRole("button", { name: m.admin_crawler_next() }).click();
+  await expect.element(page.getByRole("button", { name: m.refresh(), exact: true })).toBeEnabled();
+  const nextDay = {
+    ...overview,
+    calendar: { ...overview.calendar, today: { ...overview.calendar.today, date: "2026-09-10" } }
+  };
+  api.adminCrawler.overview.mockResolvedValue(nextDay);
+  const poll = intervals.mock.calls.find(([, delay]) => delay === 10_000)?.[0];
+  if (typeof poll !== "function") throw new Error("Missing crawler polling callback");
+  const callsBefore = api.adminCrawler.overview.mock.calls.length;
+  poll();
+  await expect.poll(() => api.adminCrawler.overview.mock.calls.length).toBe(callsBefore + 2);
+  expect(api.adminCrawler.overview).toHaveBeenLastCalledWith(
+    expect.objectContaining({ period: "today", status: "completed", cursor: null })
+  );
+  await expect
+    .element(page.getByRole("button", { name: m.admin_crawler_previous() }))
+    .not.toBeInTheDocument();
 });

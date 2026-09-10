@@ -8827,6 +8827,29 @@ export interface components {
         [key: string]: string;
       }[];
     };
+    /** AdminCrawlerCalendar */
+    AdminCrawlerCalendar: {
+      /** Time Zone */
+      time_zone: string;
+      today: components["schemas"]["AdminCrawlerDaySummary"];
+      yesterday: components["schemas"]["AdminCrawlerDaySummary"];
+    };
+    /** AdminCrawlerDaySummary */
+    AdminCrawlerDaySummary: {
+      /**
+       * Date
+       * Format: date
+       */
+      date: string;
+      /** Completed */
+      completed: number;
+      /** Partial */
+      partial: number;
+      /** Failed */
+      failed: number;
+      /** Cancelled */
+      cancelled: number;
+    };
     /** AdminCrawlerDetails */
     AdminCrawlerDetails: {
       run: components["schemas"]["CrawlRunPublic"];
@@ -8888,6 +8911,7 @@ export interface components {
        */
       as_of: string;
       summary: components["schemas"]["AdminCrawlerSummary"];
+      calendar: components["schemas"]["AdminCrawlerCalendar"];
       /** Items */
       items: components["schemas"]["AdminCrawlerItem"][];
       /** Next Cursor */
@@ -11675,6 +11699,11 @@ export interface components {
        */
       readonly count: number;
     };
+    /**
+     * CrawlHistoryPeriod
+     * @enum {string}
+     */
+    CrawlHistoryPeriod: "last_24_hours" | "today" | "yesterday";
     /**
      * CrawlLifecycleHealth
      * @description Authoritative active crawl state from PostgreSQL.
@@ -30441,8 +30470,11 @@ export interface operations {
         status?:
           | components["schemas"]["CrawlPhase"]
           | components["schemas"]["CrawlOutcome"]
-          | "issues"
+          | ("issues" | "completed" | "unsuccessful")
           | null;
+        period?: components["schemas"]["CrawlHistoryPeriod"];
+        /** @description IANA time zone used for today and yesterday. */
+        time_zone?: string;
         search?: string;
         limit?: number;
         cursor?: string | null;

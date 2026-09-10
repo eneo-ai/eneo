@@ -1,6 +1,7 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Annotated, Literal
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
@@ -10,11 +11,13 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.auth_dependencies import require_user_for_creation
 from eneo.main.container.container import Container
+from eneo.main.exceptions import BadRequestException
 from eneo.main.models import CursorPaginatedResponse
 from eneo.roles.permissions import Permission, validate_permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
-from eneo.websites.domain.crawl_run import CrawlOutcome, CrawlPhase, CrawlRun
+from eneo.websites.domain.crawl_run import CrawlRun
+from eneo.websites.domain.crawl_run_repo import CrawlHistoryPeriod, CrawlOverviewStatus
 from eneo.websites.domain.website import UpdateInterval, WebsiteSparse
 from eneo.websites.presentation.website_models import (
     CrawlFailurePagePublic,
@@ -45,9 +48,24 @@ class AdminCrawlerItem(BaseModel):
     last_indexed_at: datetime | None
 
 
+class AdminCrawlerDaySummary(BaseModel):
+    date: date
+    completed: int
+    partial: int
+    failed: int
+    cancelled: int
+
+
+class AdminCrawlerCalendar(BaseModel):
+    time_zone: str
+    today: AdminCrawlerDaySummary
+    yesterday: AdminCrawlerDaySummary
+
+
 class AdminCrawlerOverview(BaseModel):
     as_of: datetime
     summary: AdminCrawlerSummary
+    calendar: AdminCrawlerCalendar
     items: list[AdminCrawlerItem]
     next_cursor: UUID | None
 
@@ -96,7 +114,14 @@ class AdminCrawlerRelatedPage(BaseModel):
 async def get_crawler_overview(
     container: AdminContainer,
     view: Literal["active", "recent"] = "active",
-    status: CrawlPhase | CrawlOutcome | Literal["issues"] | None = None,
+    status: CrawlOverviewStatus | None = None,
+    period: CrawlHistoryPeriod = CrawlHistoryPeriod.LAST_24_HOURS,
+    time_zone: Annotated[
+        str,
+        Query(
+            max_length=100, description="IANA time zone used for today and yesterday."
+        ),
+    ] = "UTC",
     search: Annotated[str, Query(max_length=200)] = "",
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     cursor: UUID | None = None,
@@ -104,12 +129,18 @@ async def get_crawler_overview(
     """Read tenant-wide crawl metadata, including spaces the Owner cannot open."""
     user = container.user()
     validate_permission(user, Permission.ADMIN)
+    try:
+        zone = ZoneInfo(time_zone)
+    except (ZoneInfoNotFoundError, ValueError) as error:
+        raise BadRequestException("Invalid IANA time zone") from error
     as_of = datetime.now(timezone.utc)
     overview = await container.crawl_run_repo().tenant_overview(
         user.tenant_id,
         as_of=as_of,
         view=view,
         status=status,
+        period=period,
+        time_zone=zone,
         search=search,
         limit=limit,
         cursor=cursor,
@@ -118,6 +149,15 @@ async def get_crawler_overview(
         as_of=as_of,
         summary=AdminCrawlerSummary(
             ongoing=overview.ongoing, queued=overview.queued, issues=overview.issues
+        ),
+        calendar=AdminCrawlerCalendar(
+            time_zone=zone.key,
+            today=AdminCrawlerDaySummary.model_validate(
+                overview.today, from_attributes=True
+            ),
+            yesterday=AdminCrawlerDaySummary.model_validate(
+                overview.yesterday, from_attributes=True
+            ),
         ),
         items=[
             AdminCrawlerItem(
