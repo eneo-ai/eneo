@@ -46,11 +46,11 @@ export function initAdminCrawler(client) {
         params: { path: { id } }
       }),
 
-    /** @param {{id: string, limit?: number, cursor?: string | null}} options */
-    failures: async ({ id, limit = 100, cursor }) =>
+    /** @param {import('../types/resources').CrawlFailureQuery} options */
+    failures: async ({ id, limit = 100, cursor, kind }) =>
       client.fetch("/api/v1/admin/crawler/runs/{id}/failures/", {
         method: "get",
-        params: { path: { id }, query: { limit, cursor } }
+        params: { path: { id }, query: { limit, cursor, kind } }
       })
   };
 }

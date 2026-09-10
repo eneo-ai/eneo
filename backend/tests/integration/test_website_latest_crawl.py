@@ -223,7 +223,7 @@ async def test_failed_addresses_are_paginated_and_require_website_access(
                 {
                     "id": id,
                     "crawl_run_id": run_id,
-                    "kind": "file" if index == 0 else "page",
+                    "kind": "file" if index == 104 else "page",
                     "url": f"https://example.test/{index}",
                     "reason": "http_404",
                 }
@@ -238,7 +238,7 @@ async def test_failed_addresses_are_paginated_and_require_website_access(
     assert first["run"]["id"] == str(run_id)
     assert first["total_count"] == 105
     assert [item["id"] for item in first["items"]] == list(map(str, ids[:100]))
-    assert first["items"][0]["kind"] == "file"
+    assert all(item["kind"] == "page" for item in first["items"])
     response = await client.get(
         url, headers=headers, params={"cursor": first["next_cursor"]}
     )
@@ -253,6 +253,33 @@ async def test_failed_addresses_are_paginated_and_require_website_access(
     assert (
         await client.get(url, headers=headers, params={"limit": 101})
     ).status_code == 422
+
+    for failure_url in (url, f"/api/v1/admin/crawler/runs/{run_id}/failures/"):
+        files = await client.get(failure_url, headers=headers, params={"kind": "file"})
+        assert files.status_code == 200, files.text
+        assert files.json()["total_count"] == 1
+        assert [item["id"] for item in files.json()["items"]] == [str(ids[-1])]
+        assert files.json()["next_cursor"] is None
+        assert files.json()["run"]["pages_failed"] == 104
+        pages = await client.get(
+            failure_url, headers=headers, params={"kind": "page", "limit": 2}
+        )
+        assert pages.status_code == 200, pages.text
+        assert pages.json()["limit"] == 2
+        assert pages.json()["total_count"] == 104
+        assert [item["id"] for item in pages.json()["items"]] == list(map(str, ids[:2]))
+        following = await client.get(
+            failure_url,
+            headers=headers,
+            params={"kind": "page", "limit": 2, "cursor": pages.json()["next_cursor"]},
+        )
+        assert following.status_code == 200, following.text
+        assert [item["id"] for item in following.json()["items"]] == list(
+            map(str, ids[2:4])
+        )
+        assert (
+            await client.get(failure_url, headers=headers, params={"kind": "unknown"})
+        ).status_code == 422
 
     foreign_user = admin_user.model_copy(update={"tenant_id": uuid4()})
     async with db_container(user=foreign_user) as container:

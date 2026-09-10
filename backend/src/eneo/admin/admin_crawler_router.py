@@ -16,7 +16,7 @@ from eneo.main.models import CursorPaginatedResponse
 from eneo.roles.permissions import Permission, validate_permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
-from eneo.websites.domain.crawl_run import CrawlRun
+from eneo.websites.domain.crawl_run import CrawlResourceKind, CrawlRun
 from eneo.websites.domain.crawl_run_repo import CrawlHistoryPeriod, CrawlOverviewStatus
 from eneo.websites.domain.website import UpdateInterval, WebsiteSparse
 from eneo.websites.presentation.website_models import (
@@ -228,12 +228,13 @@ async def get_crawler_failures(
     container: AdminContainer,
     limit: Annotated[int, Query(ge=1, le=100)] = 100,
     cursor: UUID | None = None,
+    kind: CrawlResourceKind | None = None,
 ) -> CrawlFailurePagePublic:
     user = container.user()
     validate_permission(user, Permission.ADMIN)
     repo = container.crawl_run_repo()
     run = await repo.one_for_tenant(id, user.tenant_id)
-    page = await repo.get_failures(id, limit=limit, cursor=cursor)
+    page = await repo.get_failures(id, limit=limit, cursor=cursor, kind=kind)
     return CrawlFailurePagePublic(
         run=CrawlRunPublic.from_domain(run),
         details_available=run.failure_details_available,
@@ -243,6 +244,7 @@ async def get_crawler_failures(
             )
             for item in page.items
         ],
+        limit=limit,
         total_count=page.total_count,
         next_cursor=str(page.next_cursor) if page.next_cursor else None,
     )

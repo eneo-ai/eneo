@@ -510,13 +510,21 @@ class CrawlRunRepository:
         )
 
     async def get_failures(
-        self, run_id: UUID, *, limit: int = 100, cursor: UUID | None = None
+        self,
+        run_id: UUID,
+        *,
+        limit: int = 100,
+        cursor: UUID | None = None,
+        kind: CrawlResourceKind | None = None,
     ) -> CrawlFailurePage:
         if not 1 <= limit <= 100:
             raise BadRequestException("Failure page size must be between 1 and 100")
+        conditions = [CrawlRunFailures.crawl_run_id == run_id]
+        if kind is not None:
+            conditions.append(CrawlRunFailures.kind == kind.value)
         query = (
             sa.select(CrawlRunFailures)
-            .where(CrawlRunFailures.crawl_run_id == run_id)
+            .where(*conditions)
             .order_by(CrawlRunFailures.created_at, CrawlRunFailures.id)
             .limit(limit + 1)
         )
@@ -546,9 +554,7 @@ class CrawlRunRepository:
             for row in records[:limit]
         ]
         total_count = await self.session.scalar(
-            sa.select(sa.func.count())
-            .select_from(CrawlRunFailures)
-            .where(CrawlRunFailures.crawl_run_id == run_id)
+            sa.select(sa.func.count()).select_from(CrawlRunFailures).where(*conditions)
         )
         return CrawlFailurePage(
             items=items,

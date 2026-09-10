@@ -22416,6 +22416,7 @@ export interface operations {
       query?: {
         limit?: number;
         cursor?: string | null;
+        kind?: components["schemas"]["CrawlResourceKind"] | null;
       };
       header?: never;
       path: {
@@ -30577,6 +30578,7 @@ export interface operations {
       query?: {
         limit?: number;
         cursor?: string | null;
+        kind?: components["schemas"]["CrawlResourceKind"] | null;
       };
       header?: never;
       path: {

@@ -39,6 +39,14 @@ export function canRequestCrawlStop(crawl: CrawlRun): boolean {
   return isActiveCrawlRun(crawl) && crawl.phase !== "stopping";
 }
 
+export function hasCrawlIssues(crawl: CrawlRun): boolean {
+  return (
+    (crawl.pages_failed ?? 0) > 0 ||
+    (crawl.files_failed ?? 0) > 0 ||
+    ["partial", "failed", "interrupted", "unknown"].includes(crawlRunState(crawl))
+  );
+}
+
 export function crawlRunStateLabel(state: CrawlRunState): string {
   switch (state) {
     case "queued":
@@ -108,11 +116,15 @@ export function crawlRunFailureMessage(crawl: CrawlRun): string {
   return crawlFailureMessage(crawl.failure_code);
 }
 
-export function crawlFailureReasonLabel(reason: string): string {
-  const normalizedReason = reason
+function normalizeFailureReason(reason: string): string {
+  return reason
     .replace(/^_/, "")
     .replace(/([a-z])([A-Z])/g, "$1_$2")
     .toLowerCase();
+}
+
+export function crawlFailureReasonLabel(reason: string): string {
+  const normalizedReason = normalizeFailureReason(reason);
   const labels: Record<string, () => string> = {
     processing_failed: () => m.failure_reason_PROCESSING_FAILED(),
     empty_content: () => m.failure_reason_EMPTY_CONTENT(),
@@ -138,8 +150,41 @@ export function crawlFailureReasonLabel(reason: string): string {
     robots_disallowed: () => m.failure_reason_robots_disallowed(),
     file_out_of_scope: () => m.failure_reason_file_out_of_scope()
   };
+  if (normalizedReason === "http_404" || normalizedReason === "http_410") {
+    return m.failure_reason_not_found({ status: normalizedReason.slice(5) });
+  }
   if (/^http_\d{3}$/.test(normalizedReason)) {
     return m.failure_reason_http({ status: normalizedReason.slice(5) });
   }
   return labels[normalizedReason]?.() ?? m.failure_reason_other();
+}
+
+export function crawlFailureReasonHelp(reason: string): string | undefined {
+  const normalizedReason = normalizeFailureReason(reason);
+  if (/^http_5\d{2}$/.test(normalizedReason)) return m.crawl_failure_help_server();
+  switch (normalizedReason) {
+    case "http_404":
+    case "http_410":
+      return m.crawl_failure_help_not_found();
+    case "http_401":
+    case "http_403":
+      return m.crawl_failure_help_access();
+    case "http_429":
+      return m.crawl_failure_help_rate_limit();
+    case "redirect_rejected":
+    case "file_out_of_scope":
+      return m.crawl_failure_help_scope();
+    case "robots_disallowed":
+      return m.crawl_failure_help_robots();
+    case "request_timeout":
+    case "connection_error":
+    case "embedding_timeout":
+      return m.crawl_failure_help_temporary();
+    case "tenant_quota_exceeded":
+      return m.crawl_failure_tenant_quota_exceeded();
+    case "user_quota_exceeded":
+      return m.crawl_failure_user_quota_exceeded();
+    default:
+      return undefined;
+  }
 }

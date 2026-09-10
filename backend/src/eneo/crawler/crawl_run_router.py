@@ -7,6 +7,7 @@ from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
+from eneo.websites.domain.crawl_run import CrawlResourceKind
 from eneo.websites.presentation.website_models import (
     CrawlFailurePagePublic,
     CrawlResourceFailurePublic,
@@ -44,9 +45,10 @@ async def get_crawl_failures(
     container: ContainerDep,
     limit: Annotated[int, Query(ge=1, le=100)] = 100,
     cursor: Annotated[UUID | None, Query()] = None,
+    kind: Annotated[CrawlResourceKind | None, Query()] = None,
 ) -> CrawlFailurePagePublic:
     run, page = await container.website_crud_service().get_crawl_failures(
-        id, limit=limit, cursor=cursor
+        id, limit=limit, cursor=cursor, kind=kind
     )
     return CrawlFailurePagePublic(
         run=CrawlRunPublic.from_domain(run),

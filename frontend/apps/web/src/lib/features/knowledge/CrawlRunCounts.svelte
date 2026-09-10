@@ -1,13 +1,27 @@
 <script lang="ts">
-  import type { CrawlRun } from "@eneo/eneo-js";
+  import type { CrawlResourceFailure, CrawlRun } from "@eneo/eneo-js";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import { cn } from "$lib/utils";
 
-  let { run }: { run: CrawlRun } = $props();
+  let {
+    run,
+    onshowFailures
+  }: { run: CrawlRun; onshowFailures?: (kind: CrawlResourceFailure["kind"]) => void } = $props();
   const rows = $derived([
-    { label: m.crawl_counts_pages(), succeeded: run.pages_crawled, failed: run.pages_failed },
-    { label: m.crawl_counts_files(), succeeded: run.files_downloaded, failed: run.files_failed }
+    {
+      kind: "page" as const,
+      label: m.crawl_counts_pages(),
+      succeeded: run.pages_crawled,
+      failed: run.pages_failed
+    },
+    {
+      kind: "file" as const,
+      label: m.crawl_counts_files(),
+      succeeded: run.files_downloaded,
+      failed: run.files_failed
+    }
   ]);
 </script>
 
@@ -28,13 +42,25 @@
           <td
             class={cn(
               "py-0.5 pl-3 text-right",
-              column === 1 && count != null && count > 0 && "text-negative-default font-medium"
+              column === 1 && count != null && count > 0 && "text-negative-stronger font-medium"
             )}
           >
             {#if count == null}
               <span aria-hidden="true">—</span><span class="sr-only"
                 >{m.crawl_counts_unknown()}</span
               >
+            {:else if column === 1 && count > 0 && onshowFailures}
+              <Button
+                variant="link"
+                size="xs"
+                class="text-accent-stronger h-auto p-0 underline"
+                onclick={() => onshowFailures?.(row.kind)}
+                aria-label={row.kind === "page"
+                  ? m.crawl_view_failed_pages({ count })
+                  : m.crawl_view_failed_files({ count })}
+              >
+                {count.toLocaleString(getLocale())}
+              </Button>
             {:else}{count.toLocaleString(getLocale())}{/if}
           </td>
         {/each}

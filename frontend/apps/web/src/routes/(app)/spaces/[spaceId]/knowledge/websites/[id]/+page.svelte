@@ -12,14 +12,35 @@
   import { formatWebsiteName } from "$lib/core/formatting/formatWebsiteName.js";
   import CrawlCreateRun from "./CrawlCreateRun.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { isActiveCrawlRun } from "$lib/features/knowledge/crawlRunState";
-  import { LoaderCircle } from "lucide-svelte";
-  import type { WebsiteInfoBlobPage } from "@eneo/eneo-js";
+  import { hasCrawlIssues, isActiveCrawlRun } from "$lib/features/knowledge/crawlRunState";
+  import { LoaderCircle, TriangleAlert } from "lucide-svelte";
+  import type { CrawlResourceFailure, CrawlRun, WebsiteInfoBlobPage } from "@eneo/eneo-js";
+  import CrawlRunDetails from "$lib/features/knowledge/CrawlRunDetails.svelte";
+  import CrawlFailureActions from "$lib/features/knowledge/CrawlFailureActions.svelte";
+  import dayjs from "dayjs";
   import { mergeLatestCrawlRun, pollWebsiteDetail } from "./websiteDetailPolling";
 
   export let data;
 
   const eneo = getEneo();
+  let startDialogOpen = false;
+  let selectedRun: CrawlRun | null = null;
+  let initialKind: CrawlResourceFailure["kind"] | null = null;
+  let detailsOpen = false;
+  $: latestCompletedRun = crawlRuns.find((run) => !isActiveCrawlRun(run));
+  $: onrerun =
+    !data.readonly && !activeRun
+      ? () => {
+          startDialogOpen = true;
+        }
+      : undefined;
+
+  function showContentFailures(kind: CrawlResourceFailure["kind"] | null) {
+    selectedRun = latestCompletedRun ?? null;
+    initialKind = kind;
+    detailsOpen = true;
+  }
+
   let serverCrawlRuns = data.crawlRuns;
   let crawlRuns = data.crawlRuns;
   let nextCrawlRunCursor = data.nextCrawlRunCursor;
@@ -216,7 +237,11 @@
       <Page.TabTrigger tab="blobs">{m.indexed_content()}</Page.TabTrigger>
     </Page.Tabbar>
     {#if !data.readonly}
-      <CrawlCreateRun website={data.website} {activeRun} hasHistory={crawlRuns.length > 0}
+      <CrawlCreateRun
+        website={data.website}
+        {activeRun}
+        hasHistory={crawlRuns.length > 0}
+        bind:startDialogOpen
       ></CrawlCreateRun>
     {/if}
   </Page.Header>
@@ -225,7 +250,7 @@
       {#if data.environment.integrationRequestFormUrl}
         <CrawlLimitations></CrawlLimitations>
       {/if}
-      <CrawlRunsTable runs={crawlRuns} />
+      <CrawlRunsTable runs={crawlRuns} {onrerun} />
       {#if nextCrawlRunCursor !== null}
         <div class="mt-4 flex justify-center">
           <Button
@@ -250,6 +275,25 @@
     <Page.Tab id="blobs">
       {#if data.environment.integrationRequestFormUrl}
         <CrawlLimitations></CrawlLimitations>
+      {/if}
+      {#if latestCompletedRun && hasCrawlIssues(latestCompletedRun)}
+        <div class="mb-4 flex flex-wrap items-start justify-between gap-3 rounded-lg border p-4">
+          <div class="flex min-w-0 items-start gap-3">
+            <TriangleAlert
+              class="text-negative-stronger mt-0.5 size-4 shrink-0"
+              aria-hidden="true"
+            />
+            <div>
+              <h2 class="text-sm font-semibold">{m.crawl_content_has_failures()}</h2>
+              <p class="text-secondary mt-1 max-w-prose text-sm">
+                {m.crawl_content_failure_description({
+                  date: dayjs(latestCompletedRun.created_at).format("YYYY-MM-DD HH:mm")
+                })}
+              </p>
+            </div>
+          </div>
+          <CrawlFailureActions run={latestCompletedRun} onselect={showContentFailures} />
+        </div>
       {/if}
       <BlobTable
         blobs={infoBlobs}
@@ -280,3 +324,7 @@
     </Page.Tab>
   </Page.Main>
 </Page.Root>
+
+{#if selectedRun}
+  <CrawlRunDetails run={selectedRun} bind:open={detailsOpen} {initialKind} {onrerun} />
+{/if}

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { WebsiteSparse } from "@eneo/eneo-js";
+  import type { CrawlResourceFailure, WebsiteSparse } from "@eneo/eneo-js";
   import { Label } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
@@ -16,7 +16,11 @@
   dayjs.extend(relativeTime);
   dayjs.extend(utc);
 
+  import CrawlFailureActions from "$lib/features/knowledge/CrawlFailureActions.svelte";
+
   export let website: WebsiteSparse;
+  export let onshowFailures: ((kind: CrawlResourceFailure["kind"] | null) => void) | undefined =
+    undefined;
 
   // Set dayjs locale based on paraglide locale
   // eslint-disable-next-line svelte/no-immutable-reactive-statements
@@ -57,8 +61,10 @@
             });
           } else if (pagesFailed > 0) {
             failureText = m.pages_failed({ count: pagesFailed.toString() });
-          } else {
+          } else if (filesFailed > 0) {
             failureText = m.files_failed({ count: filesFailed.toString() });
+          } else {
+            failureText = m.crawl_view_errors();
           }
 
           return {
@@ -130,4 +136,9 @@
   }
 </script>
 
-<Label.Single item={statusInfo(website)}></Label.Single>
+<div class="flex flex-col items-start gap-2">
+  <Label.Single item={statusInfo(website)}></Label.Single>
+  {#if website.latest_crawl && onshowFailures}
+    <CrawlFailureActions run={website.latest_crawl} onselect={onshowFailures} />
+  {/if}
+</div>

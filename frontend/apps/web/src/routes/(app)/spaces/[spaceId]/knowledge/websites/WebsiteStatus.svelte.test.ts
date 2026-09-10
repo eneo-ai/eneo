@@ -1,7 +1,7 @@
 import type { CrawlRun, WebsiteSparse } from "@eneo/eneo-js";
 import { page } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
 import WebsiteStatus from "./WebsiteStatus.svelte";
 
@@ -24,7 +24,8 @@ it("updates website status when refreshed knowledge replaces its latest crawl", 
     attempt_count: 1
   };
   const website = { id: "website-1", latest_crawl: run } as WebsiteSparse;
-  const rendered = render(WebsiteStatus, { website });
+  const onshowFailures = vi.fn();
+  const rendered = render(WebsiteStatus, { website, onshowFailures });
   await expect.element(page.getByText(m.queued(), { exact: true })).toBeVisible();
 
   await rendered.rerender({
@@ -48,6 +49,8 @@ it("updates website status when refreshed knowledge replaces its latest crawl", 
     }
   });
   await expect.element(page.getByText(m.failed(), { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: m.crawl_view_errors() }).click();
+  expect(onshowFailures).toHaveBeenLastCalledWith(null);
 
   await rendered.rerender({
     website: {
@@ -64,6 +67,8 @@ it("updates website status when refreshed knowledge replaces its latest crawl", 
       }
     }
   });
+  await page.getByRole("button", { name: m.crawl_view_failed_pages({ count: 2 }) }).click();
+  expect(onshowFailures).toHaveBeenLastCalledWith("page");
   await page.getByText(m.crawl_completed_with_warnings(), { exact: true }).hover();
   const tooltip = page.getByRole("tooltip");
   await expect.element(tooltip).toHaveTextContent(m.pages_failed({ count: "2" }));

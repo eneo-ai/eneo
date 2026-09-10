@@ -167,14 +167,14 @@ export function initWebsites(client) {
     crawlRuns: {
       /**
        * List recorded page and file failures for one crawl run.
-       * @param {{id: string, limit?: number, cursor?: string | null}} options
+       * @param {import('../types/resources').CrawlFailureQuery} options
        * @returns {Promise<CrawlFailurePage>}
        * @throws {EneoError}
        */
-      failures: async ({ id, limit = 100, cursor }) =>
+      failures: async ({ id, limit = 100, cursor, kind }) =>
         client.fetch("/api/v1/crawl-runs/{id}/failures/", {
           method: "get",
-          params: { path: { id }, query: { limit, cursor } }
+          params: { path: { id }, query: { limit, cursor, kind } }
         }),
 
       /**

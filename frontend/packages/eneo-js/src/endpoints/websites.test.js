@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { initAdminCrawler } from "./adminCrawler.js";
 import { initWebsites } from "./websites.js";
 
 test("latest crawl uses the bounded endpoint and preserves the no-run response", async () => {
@@ -153,4 +154,38 @@ test("bulk delete sends website IDs to the bounded delete endpoint", async () =>
       }
     }
   ]);
+});
+
+test("normal and admin failure pagination retain the selected resource kind", async () => {
+  for (const admin of [false, true]) {
+    const calls = [];
+    const response = { items: [], total_count: 2, next_cursor: "next-file" };
+    const client = {
+      fetch: async (endpoint, request) => {
+        calls.push({ endpoint, request });
+        return response;
+      }
+    };
+    const failures = admin
+      ? initAdminCrawler(client).failures
+      : initWebsites(client).crawlRuns.failures;
+    assert.equal(
+      await failures({ id: "run-id", kind: "file", cursor: "first-file", limit: 1 }),
+      response
+    );
+    assert.deepEqual(calls, [
+      {
+        endpoint: admin
+          ? "/api/v1/admin/crawler/runs/{id}/failures/"
+          : "/api/v1/crawl-runs/{id}/failures/",
+        request: {
+          method: "get",
+          params: {
+            path: { id: "run-id" },
+            query: { kind: "file", cursor: "first-file", limit: 1 }
+          }
+        }
+      }
+    ]);
+  }
 });

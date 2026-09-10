@@ -91,6 +91,30 @@ annan flik är öppen. Åtgärderna följer också en nyare status som hämtas m
 körningens feladresser. Servern återanvänder en befintlig aktiv körning vid upprepad start, och ett stopp
 av en äldre körning påverkar inte en senare körning.
 
+## Feladresser från Kunskap
+
+I webbplatslistan och indexeringshistoriken öppnar **Visa misslyckade sidor**
+och **Visa misslyckade filer** rätt adresslista direkt. I körningsdetaljerna
+går det att växla mellan **Alla**, **Sidor** och **Filer**, även genom att klicka
+på ett positivt felantal. Typfiltret används på servern före sidindelningen,
+så filer går att hitta även när de ligger efter många sidfel. Samma filter
+finns i adminpanelens körningsdetaljer.
+
+Varje adress visar en översatt felorsak. **Vad betyder felen och vad kan jag
+göra?** förklarar vanliga orsaker och nästa steg. Äldre körningar utan sparade
+adresser anges uttryckligen; de presenteras inte som felfria.
+
+**Indexerat innehåll** visar en genväg till felen i den senaste avslutade
+körningen, med körningens tid. Genvägen försvinner när en senare körning
+avslutas utan fel. Tabellen visar fortfarande lagrat innehåll: en adress som
+misslyckades nu kan ha en äldre indexerad version.
+
+På webbplatsens kunskapssida kan den som har rätt att starta indexering välja
+**Kör om hela webbplatsen** från felvyn. Det öppnar den befintliga
+bekräftelsen och startar hela webbplatsen med aktuella inställningar. Endast
+adresser som fortfarande kan upptäckas omfattas. Enskilda feladresser kan
+inte köras om separat. Start erbjuds inte medan en körning redan är aktiv.
+
 ## Shadcn och uppdatering
 
 Sidan använder projektets installerade **shadcn-svelte, Nova**, adminlayout och

@@ -18,7 +18,7 @@
 
   let isStarting = false;
   let isStopping = false;
-  let startDialogOpen = false;
+  export let startDialogOpen = false;
   let stopDialogOpen = false;
 
   $: isStopRequested = activeRun?.phase === "stopping" || isStopping;

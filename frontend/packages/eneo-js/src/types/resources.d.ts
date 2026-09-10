@@ -1,4 +1,4 @@
-import { components } from "./schema";
+import { components, paths } from "./schema";
 
 export type Assistant =
   components["schemas"]["AssistantPublic"] | components["schemas"]["DefaultAssistant"];
@@ -117,6 +117,9 @@ export type AdminCrawlerQuery = NonNullable<
   import("./schema").paths["/api/v1/admin/crawler/"]["get"]["parameters"]["query"]
 >;
 export type CrawlResourceFailure = components["schemas"]["CrawlResourceFailurePublic"];
+export type CrawlFailureQuery = { id: string } & NonNullable<
+  paths["/api/v1/crawl-runs/{id}/failures/"]["get"]["parameters"]["query"]
+>;
 export type CrawlFailurePage = components["schemas"]["CrawlFailurePagePublic"];
 export type WebsiteCrawlRunPage = components["schemas"]["CursorPaginatedResponse_CrawlRunPublic_"];
 export type Limits = components["schemas"]["Limits"];

@@ -1,7 +1,7 @@
 import type { CrawlRun } from "@eneo/eneo-js";
 import { page } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
 import CrawlResultCell from "./CrawlResultCell.svelte";
 
@@ -28,7 +28,7 @@ function crawlRun(overrides: Partial<CrawlRun> = {}): CrawlRun {
 
 describe("CrawlResultCell", () => {
   it("updates result counters when polling replaces a queued crawl", async () => {
-    const rendered = render(CrawlResultCell, { crawl: crawlRun() });
+    const rendered = render(CrawlResultCell, { crawl: crawlRun(), onshowFailures: vi.fn() });
 
     await expect.element(page.getByText(m.queued(), { exact: true })).toBeVisible();
 
@@ -49,12 +49,13 @@ describe("CrawlResultCell", () => {
       .element(page.getByText(m.pages_and_files_succeeded({ pages: 5, files: 2 }), { exact: true }))
       .toBeVisible();
     await expect
-      .element(page.getByText(m.pages_failed({ count: 1 }), { exact: true }))
+      .element(page.getByText(m.crawl_view_failed_pages({ count: 1 }), { exact: true }))
       .toBeVisible();
   });
 
   it("shows stopping and cancelled states instead of treating them as running", async () => {
     const rendered = render(CrawlResultCell, {
+      onshowFailures: vi.fn(),
       crawl: crawlRun({ phase: "stopping", status: "in progress" })
     });
 
@@ -74,6 +75,7 @@ describe("CrawlResultCell", () => {
 
   it("shows persisted counters while a crawl is running", async () => {
     const rendered = render(CrawlResultCell, {
+      onshowFailures: vi.fn(),
       crawl: crawlRun({
         phase: "running",
         status: "in progress",
@@ -90,7 +92,7 @@ describe("CrawlResultCell", () => {
       )
       .toBeVisible();
     await expect
-      .element(page.getByText(m.pages_failed({ count: 1 }), { exact: true }))
+      .element(page.getByText(m.crawl_view_failed_pages({ count: 1 }), { exact: true }))
       .toBeVisible();
 
     await rendered.rerender({
@@ -109,32 +111,19 @@ describe("CrawlResultCell", () => {
       )
       .toBeVisible();
     await expect
-      .element(page.getByText(m.pages_failed({ count: 4 }), { exact: true }))
+      .element(page.getByText(m.crawl_view_failed_pages({ count: 4 }), { exact: true }))
       .toBeVisible();
   });
 
-  it("turns legacy internal crawler reasons into human-readable guidance", async () => {
+  it("opens page and file failures directly from their counts", async () => {
+    const onshowFailures = vi.fn();
     render(CrawlResultCell, {
-      crawl: crawlRun({
-        phase: "terminal",
-        outcome: "partial",
-        status: "complete",
-        pages_crawled: 507,
-        pages_failed: 6,
-        failure_summary: { _RedirectRejected: 6 }
-      })
+      onshowFailures,
+      crawl: crawlRun({ phase: "terminal", outcome: "partial", pages_failed: 6, files_failed: 2 })
     });
-
-    await page.getByText(m.pages_failed({ count: 6 }), { exact: true }).hover();
-    await expect
-      .element(
-        page.getByText("Omdirigeringen ledde utanför den tillåtna webbplatsen: 6", {
-          exact: false
-        })
-      )
-      .toBeVisible();
-    await expect
-      .element(page.getByText("_RedirectRejected", { exact: false }))
-      .not.toBeInTheDocument();
+    await page.getByRole("button", { name: m.crawl_view_failed_pages({ count: 6 }) }).click();
+    expect(onshowFailures).toHaveBeenLastCalledWith("page");
+    await page.getByRole("button", { name: m.crawl_view_failed_files({ count: 2 }) }).click();
+    expect(onshowFailures).toHaveBeenLastCalledWith("file");
   });
 });

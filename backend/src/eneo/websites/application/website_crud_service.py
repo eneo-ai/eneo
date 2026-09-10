@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from eneo.spaces.space_repo import SpaceRepository
     from eneo.spaces.space_service import SpaceService
     from eneo.users.user import UserInDB
-    from eneo.websites.domain.crawl_run import CrawlRun, CrawlType
+    from eneo.websites.domain.crawl_run import CrawlResourceKind, CrawlRun, CrawlType
     from eneo.websites.domain.crawl_run_repo import (
         CrawlFailurePage,
         CrawlRunPage,
@@ -274,10 +274,17 @@ class WebsiteCRUDService:
         return crawl_run
 
     async def get_crawl_failures(
-        self, id: UUID, *, limit: int = 100, cursor: UUID | None = None
+        self,
+        id: UUID,
+        *,
+        limit: int = 100,
+        cursor: UUID | None = None,
+        kind: "CrawlResourceKind | None" = None,
     ) -> tuple["CrawlRun", "CrawlFailurePage"]:
         run = await self.get_crawl_run(id)
-        page = await self.crawl_run_repo.get_failures(id, limit=limit, cursor=cursor)
+        page = await self.crawl_run_repo.get_failures(
+            id, limit=limit, cursor=cursor, kind=kind
+        )
         return run, page
 
     async def cancel_crawl_run(self, id: UUID) -> "CrawlRun":

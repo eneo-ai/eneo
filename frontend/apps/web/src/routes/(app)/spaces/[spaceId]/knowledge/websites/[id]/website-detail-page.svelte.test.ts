@@ -8,6 +8,7 @@ import { m } from "$lib/paraglide/messages";
 const latestRun = vi.hoisted(() => vi.fn());
 const listRuns = vi.hoisted(() => vi.fn());
 const listBlobs = vi.hoisted(() => vi.fn());
+const createRun = vi.hoisted(() => vi.fn());
 const cancelRun = vi.hoisted(() => vi.fn());
 const listFailures = vi.hoisted(() => vi.fn());
 const showError = vi.hoisted(() => vi.fn());
@@ -23,6 +24,7 @@ vi.mock("$lib/core/Eneo", () => ({
         latest: latestRun,
         listPage: listRuns,
         cancel: cancelRun,
+        create: createRun,
         failures: listFailures
       },
       indexedBlobs: { listPage: listBlobs }
@@ -102,6 +104,7 @@ beforeEach(() => {
   latestRun.mockReset().mockResolvedValue(running);
   listRuns.mockReset().mockResolvedValue({ ...emptyPage, items: [running], total_count: 1 });
   listBlobs.mockReset().mockResolvedValue(emptyPage);
+  createRun.mockReset().mockResolvedValue({});
   cancelRun.mockReset().mockResolvedValue({});
   listFailures.mockReset();
   showError.mockReset();
@@ -459,3 +462,125 @@ test.each([false, true])(
     expect(listRuns).toHaveBeenCalledOnce();
   }
 );
+
+test("a file count opens the file filter and ignores an old response after switching", async () => {
+  const run: CrawlRun = {
+    ...terminal,
+    outcome: "partial",
+    pages_failed: 104,
+    files_failed: 2,
+    failure_summary: { http_404: 2, _RedirectRejected: 104 }
+  };
+  const file = {
+    id: "file-1",
+    url: "https://example.test/missing.pdf",
+    kind: "file",
+    reason: "http_404"
+  };
+  let resolveFilePage: (value: unknown) => void = () => {};
+  listFailures.mockResolvedValueOnce({
+    ...emptyPage,
+    run,
+    details_available: true,
+    items: [file],
+    total_count: 2,
+    next_cursor: file.id
+  });
+  render(WebsiteDetailPage, { data: { ...data, crawlRuns: [run] } as never });
+  await page.getByRole("button", { name: m.crawl_view_failed_files({ count: 2 }) }).click();
+  const dialog = page.getByRole("dialog");
+  await expect.element(dialog.getByRole("link", { name: file.url })).toBeVisible();
+  expect(listFailures).toHaveBeenLastCalledWith({
+    id: run.id,
+    limit: 100,
+    cursor: null,
+    kind: "file"
+  });
+  await expect
+    .element(dialog.getByRole("button", { name: m.crawl_counts_files(), exact: true }))
+    .toHaveAttribute("aria-pressed", "true");
+  listFailures.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        resolveFilePage = resolve;
+      })
+  );
+  await dialog
+    .getByRole("button", { name: m.crawl_failures_load_more({ current: 1, total: 2 }) })
+    .click();
+  expect(listFailures).toHaveBeenLastCalledWith({
+    id: run.id,
+    limit: 100,
+    cursor: file.id,
+    kind: "file"
+  });
+  const address = "https://example.test/moved";
+  listFailures.mockResolvedValueOnce({
+    ...emptyPage,
+    run,
+    details_available: true,
+    items: [{ id: "page-1", url: address, kind: "page", reason: "_RedirectRejected" }],
+    total_count: 104
+  });
+  await dialog.getByRole("button", { name: m.crawl_counts_pages(), exact: true }).click();
+  await expect.element(dialog.getByRole("link", { name: address })).toBeVisible();
+  expect(listFailures).toHaveBeenLastCalledWith({
+    id: run.id,
+    limit: 100,
+    cursor: null,
+    kind: "page"
+  });
+  resolveFilePage({
+    ...emptyPage,
+    run,
+    details_available: true,
+    items: [{ ...file, id: "file-2" }],
+    total_count: 2
+  });
+  await expect.element(dialog.getByRole("link", { name: file.url })).not.toBeInTheDocument();
+  await dialog.getByText(m.crawl_failure_help_title(), { exact: true }).click();
+  await expect.element(dialog.getByText(m.crawl_failure_help_scope())).toBeVisible();
+  await expect.element(dialog.getByText(m.crawl_failure_help_not_found())).toBeVisible();
+  await expect
+    .element(dialog.getByText("_RedirectRejected", { exact: false }))
+    .not.toBeInTheDocument();
+  await expect
+    .element(dialog.getByRole("button", { name: m.crawl_retry_whole_website() }))
+    .not.toBeInTheDocument();
+});
+
+test("indexed content links to the latest finished errors and clears them after a clean crawl", async () => {
+  route.url = new URL("http://localhost/?tab=blobs");
+  route.state = { tab: "blobs" };
+  const run: CrawlRun = { ...terminal, outcome: "partial", pages_failed: 6, files_failed: 2 };
+  listFailures.mockResolvedValue({ ...emptyPage, run, details_available: true });
+  const rendered = render(WebsiteDetailPage, {
+    data: { ...data, crawlRuns: [running, run] } as never
+  });
+  await expect.element(page.getByText(m.crawl_content_has_failures())).toBeVisible();
+  await page.getByRole("button", { name: m.crawl_view_failed_files({ count: 2 }) }).click();
+  await expect.element(page.getByRole("dialog")).toBeVisible();
+  expect(listFailures).toHaveBeenCalledWith({ id: run.id, limit: 100, cursor: null, kind: "file" });
+  await page.getByRole("button", { name: m.close(), exact: true }).click();
+  await rendered.rerender({
+    data: {
+      ...data,
+      infoBlobPage: { ...emptyPage, items: [] },
+      crawlRuns: [{ ...terminal, id: "clean-run" }, { ...run }]
+    } as never
+  });
+  await expect.element(page.getByText(m.crawl_content_has_failures())).not.toBeInTheDocument();
+});
+
+test("retrying from failure details uses the existing whole-website confirmation", async () => {
+  const run: CrawlRun = { ...terminal, outcome: "partial", pages_failed: 1 };
+  listFailures.mockResolvedValue({ ...emptyPage, run, details_available: true });
+  render(WebsiteDetailPage, { data: { ...data, readonly: false, crawlRuns: [run] } as never });
+  await page.getByRole("button", { name: m.crawl_view_failed_pages({ count: 1 }) }).click();
+  await page.getByRole("button", { name: m.crawl_retry_whole_website() }).click();
+  const confirmation = page.getByRole("alertdialog");
+  await expect.element(confirmation).toBeVisible();
+  expect(createRun).not.toHaveBeenCalled();
+  await confirmation.getByRole("button", { name: m.start_crawl(), exact: true }).click();
+  expect(createRun).toHaveBeenCalledExactlyOnceWith(data.website);
+});

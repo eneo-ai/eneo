@@ -3,12 +3,13 @@
   import WebsiteActions from "./WebsiteActions.svelte";
   import { createRender } from "svelte-headless-table";
   import WebsiteStatus from "./WebsiteStatus.svelte";
+  import CrawlRunDetails from "$lib/features/knowledge/CrawlRunDetails.svelte";
   import WebsiteSync from "./WebsiteSync.svelte";
   import SelectionHeaderCheckbox from "./SelectionHeaderCheckbox.svelte";
   import SelectionCellCheckbox from "./SelectionCellCheckbox.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { derived, writable } from "svelte/store";
-  import type { WebsiteSparse } from "@eneo/eneo-js";
+  import type { CrawlResourceFailure, CrawlRun, WebsiteSparse } from "@eneo/eneo-js";
   import { IconWeb } from "@eneo/icons/web";
   import { formatWebsiteName } from "$lib/core/formatting/formatWebsiteName";
   import { m } from "$lib/paraglide/messages";
@@ -26,6 +27,9 @@
     $currentSpace.knowledge.websites.filter((c) => c.space_id === $currentSpace.id)
   );
 
+  let selectedRun: CrawlRun | null = null;
+  let initialKind: CrawlResourceFailure["kind"] | null = null;
+  let detailsOpen = false;
   const websites = ownedWebsites;
   const visibleWebsiteIds = writable<string[]>([]);
 
@@ -138,7 +142,12 @@
       header: m.status(),
       cell: (item) => {
         return createRender(WebsiteStatus, {
-          website: item.value
+          website: item.value,
+          onshowFailures: (kind) => {
+            selectedRun = item.value.latest_crawl ?? null;
+            initialKind = kind;
+            detailsOpen = true;
+          }
         });
       },
       plugins: {
@@ -213,3 +222,7 @@
     <Table.Group></Table.Group>
   {/if}
 </Table.Root>
+
+{#if selectedRun}
+  <CrawlRunDetails run={selectedRun} bind:open={detailsOpen} {initialKind} />
+{/if}

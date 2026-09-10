@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { CrawlRun } from "@eneo/eneo-js";
+  import type { CrawlResourceFailure, CrawlRun } from "@eneo/eneo-js";
   import { Table } from "@eneo/ui";
   import { createRender } from "svelte-headless-table";
   import { m } from "$lib/paraglide/messages";
@@ -21,6 +21,14 @@
   $: dayjs.locale(getLocale());
 
   export let runs: CrawlRun[];
+  export let onrerun: (() => void) | undefined = undefined;
+  let initialKind: CrawlResourceFailure["kind"] | null = null;
+
+  function showFailures(run: CrawlRun, kind: CrawlResourceFailure["kind"] | null = null) {
+    selectedRun = run;
+    initialKind = kind;
+    detailsOpen = true;
+  }
   let selectedRun: CrawlRun | null = null;
   let detailsOpen = false;
   const table = Table.createWithResource(runs);
@@ -33,10 +41,7 @@
       cell: (item) => {
         return createRender(Table.ButtonCell, {
           label: dayjs(item.value.created_at).format("YYYY-MM-DD HH:mm"),
-          onclick: () => {
-            selectedRun = item.value;
-            detailsOpen = true;
-          }
+          onclick: () => showFailures(item.value)
         });
       },
       plugins: {
@@ -68,7 +73,8 @@
       header: m.results(),
       cell: (item) => {
         return createRender(CrawlResultCell, {
-          crawl: item.value
+          crawl: item.value,
+          onshowFailures: (kind) => showFailures(item.value, kind)
         });
       },
       plugins: { sort: { disable: true } }
@@ -112,5 +118,5 @@
 ></Table.Root>
 
 {#if selectedRun}
-  <CrawlRunDetails run={selectedRun} bind:open={detailsOpen} />
+  <CrawlRunDetails run={selectedRun} bind:open={detailsOpen} {initialKind} {onrerun} />
 {/if}
