@@ -3304,6 +3304,8 @@
   "api_keys_admin_super_keys_info": "Sysadmin-nyckeln konfigureras endast via en miljövariabel. Rotera den genom att uppdatera miljövärdet och starta om backend.",
   "api_keys_admin_policy_require_expiration": "Kräv utgångsdatum",
   "api_keys_admin_policy_require_expiration_desc": "Tvinga alla nya API-nycklar att inkludera ett utgångsdatum för förbättrad säkerhet",
+  "api_keys_admin_policy_require_tenant_origin": "Kräv tenant-godkända origins",
+  "api_keys_admin_policy_require_tenant_origin_desc": "Kräv att publika API-nycklars origins även finns under tenantens tillåtna origins. Inaktivera för att lita på varje aktiv publik nyckels egen origin-lista.",
   "api_keys_admin_policy_max_expiration": "Maximalt antal utgångsdagar",
   "api_keys_admin_policy_max_expiration_desc": "Maximal tillåten utgångsperiod för nya nycklar. Lämna tomt för ingen gräns.",
   "api_keys_admin_policy_auto_expire": "Automatiskt förfalla oanvända nycklar",

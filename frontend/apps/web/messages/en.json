@@ -3271,6 +3271,8 @@
   "api_keys_admin_super_keys_info": "The sysadmin key is configured via an environment variable only. Rotate it by updating the environment value and restarting the backend.",
   "api_keys_admin_policy_require_expiration": "Require expiration",
   "api_keys_admin_policy_require_expiration_desc": "Force all new API keys to include an expiration date for improved security",
+  "api_keys_admin_policy_require_tenant_origin": "Require tenant-approved origins",
+  "api_keys_admin_policy_require_tenant_origin_desc": "Require public API key origins to also be listed under the tenant's allowed origins. Disable to trust each active public key's own origin list.",
   "api_keys_admin_policy_max_expiration": "Maximum expiration days",
   "api_keys_admin_policy_max_expiration_desc": "Maximum allowed expiration period for new keys. Leave empty for no limit.",
   "api_keys_admin_policy_auto_expire": "Auto-expire unused keys",

@@ -383,6 +383,7 @@ class ApiKeyV2InDB(ApiKeyV2):
 class ApiKeyPolicyUpdate(BaseModel):
     max_delegation_depth: Optional[int] = None
     revocation_cascade_enabled: Optional[bool] = None
+    require_tenant_allowed_origin: bool = True
     require_expiration: Optional[bool] = None
     max_expiration_days: Optional[int] = None
     auto_expire_unused_days: Optional[int] = None
@@ -422,6 +423,7 @@ class ApiKeyPolicyUpdate(BaseModel):
 class ApiKeyPolicyResponse(BaseModel):
     max_delegation_depth: Optional[int] = None
     revocation_cascade_enabled: Optional[bool] = None
+    require_tenant_allowed_origin: bool = True
     require_expiration: Optional[bool] = None
     max_expiration_days: Optional[int] = None
     auto_expire_unused_days: Optional[int] = None
