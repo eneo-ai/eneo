@@ -10,7 +10,7 @@
     isCurrentPasswordChangeDialogSubmission,
     validatePasswordChange,
     type PasswordChangeActionFailure,
-    type PasswordChangeCapability,
+    type AvailablePasswordChangeCapability,
     type PasswordChangeFormError,
     type PasswordField,
     type PasswordFieldErrors,
@@ -20,13 +20,8 @@
   import { Eye, EyeOff } from "lucide-svelte";
   import type { SubmitFunction } from "./$types";
 
-  type AvailablePasswordCapability = Extract<
-    PasswordChangeCapability,
-    { source: "eneo" | "zitadel" }
-  >;
-
   let { capability, username } = $props<{
-    capability: AvailablePasswordCapability;
+    capability: AvailablePasswordChangeCapability;
     username: string;
   }>();
 
@@ -83,6 +78,8 @@
         return m.password_must_be_different();
       case "too_short":
         return m.password_policy_min_length({ min: capability.policy.minLength });
+      case "too_short_bytes":
+        return m.password_policy_min_bytes({ min: capability.policy.minLength });
       case "too_long_bytes":
         return m.password_policy_max_bytes({ max: capability.policy.maxBytes ?? 0 });
       case "uppercase_required":
@@ -133,6 +130,7 @@
       "password_unchanged",
       "policy_rejected",
       "too_short",
+      "too_short_bytes",
       "too_long_bytes",
       "uppercase_required",
       "lowercase_required",
@@ -375,7 +373,11 @@
         <p class="text-default font-medium">{m.password_policy_intro()}</p>
         <ul class="mt-1 list-inside list-disc">
           {#if capability.policy.minLength > 0}
-            <li>{m.password_policy_min_length({ min: capability.policy.minLength })}</li>
+            <li>
+              {capability.source === "zitadel"
+                ? m.password_policy_min_bytes({ min: capability.policy.minLength })
+                : m.password_policy_min_length({ min: capability.policy.minLength })}
+            </li>
           {/if}
           {#if capability.policy.maxBytes !== null}
             <li>{m.password_policy_max_bytes({ max: capability.policy.maxBytes })}</li>

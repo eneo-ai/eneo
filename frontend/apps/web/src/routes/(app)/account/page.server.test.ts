@@ -107,6 +107,46 @@ describe("account password action", () => {
     expect(mocks.clearFrontendCookies).toHaveBeenCalledWith(event);
   });
 
+  test.each([
+    { password: "å".repeat(8), requiresSymbol: false },
+    { password: "Correct horse battery1", requiresSymbol: true }
+  ])(
+    "submits a password accepted by Zitadel's policy: $password",
+    async ({ password, requiresSymbol }) => {
+      mocks.discoverPasswordChangeCapability.mockResolvedValue({
+        source: "zitadel",
+        policy: { ...capability.policy, maxBytes: null, requiresSymbol }
+      });
+      const event = eventWithPasswords("current secret", password, password);
+
+      await expect(actions.changePassword!(event as never)).rejects.toMatchObject({
+        status: 303,
+        location: "/login?message=password_changed"
+      });
+      expect(mocks.changePassword).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ source: "zitadel" }),
+        "current secret",
+        password
+      );
+    }
+  );
+
+  test("rejects a provider password without an ASCII uppercase letter before mutation", async () => {
+    mocks.discoverPasswordChangeCapability.mockResolvedValue({
+      source: "zitadel",
+      policy: { ...capability.policy, maxBytes: null, requiresUppercase: true }
+    });
+    const password = "Åbcdefghijklmn1!";
+    const event = eventWithPasswords("current secret", password, password);
+
+    await expect(actions.changePassword!(event as never)).resolves.toMatchObject({
+      status: 400,
+      data: { passwordChange: { fieldErrors: { newPassword: "uppercase_required" } } }
+    });
+    expect(mocks.changePassword).not.toHaveBeenCalled();
+  });
+
   test("surfaces the non-rollbackable session invalidation failure as partial success", async () => {
     mocks.changePassword.mockResolvedValue("session_invalidation_failed");
     const event = eventWithPasswords(

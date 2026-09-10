@@ -68,7 +68,10 @@
   function hasValidPassword(): boolean {
     if (!userPassword) return mode === "update";
 
-    const validationError = validateNewPassword(userPassword, ENEO_PASSWORD_POLICY);
+    const validationError = validateNewPassword(userPassword, {
+      source: "eneo",
+      policy: ENEO_PASSWORD_POLICY
+    });
     if (validationError === "too_long_bytes") {
       toast.warning(m.password_policy_max_bytes({ max: ENEO_PASSWORD_POLICY.maxBytes }));
       return false;
