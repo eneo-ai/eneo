@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 
 import aiohttp
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,11 +17,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.audit.domain.outcome import Outcome
+from eneo.audit.infrastructure.rate_limiting import (
+    RateLimitConfig,
+    RateLimitExceededError,
+    RateLimitServiceUnavailableError,
+    enforce_rate_limit,
+)
 from eneo.authentication import auth_dependencies
 from eneo.authentication.auth_dependencies import (
     require_api_key_permission,
     require_api_key_scope_check,
     require_permission,
+    require_session_auth,
     require_user_identity,
 )
 from eneo.authentication.auth_models import (
@@ -41,7 +49,11 @@ from eneo.roles.permissions import Permission, validate_permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.tenants.tenant import TenantPublic
+from eneo.users.password import PasswordChangeError
 from eneo.users.user import (
+    EneoPasswordChangeCapabilityPublic,
+    ExternalPasswordChangeCapabilityPublic,
+    PasswordChangeRequest,
     PropUserInvite,
     PropUserUpdate,
     UserAdminView,
@@ -57,6 +69,12 @@ logger = get_logger(__name__)
 
 router = APIRouter()
 users_admin_router = APIRouter()
+
+_PASSWORD_CHANGE_RATE_LIMIT = RateLimitConfig(
+    max_requests=5,
+    window_seconds=15 * 60,
+    key_prefix="rate_limit:password_change",
+)
 
 
 class _ProvisioningService(Protocol):
@@ -759,10 +777,169 @@ async def get_currently_authenticated_user(
         tenant_id=current_user.tenant_id, owner_user_id=current_user.id
     )
     truncated_key = latest_key.key_suffix if latest_key is not None else None
+    password_change = (
+        EneoPasswordChangeCapabilityPublic()
+        if current_user.password is not None
+        else ExternalPasswordChangeCapabilityPublic()
+    )
     return UserPublic(
         **current_user.model_dump(),
         truncated_api_key=truncated_key,
+        password_change=password_change,
     )
+
+
+async def _audit_password_change(
+    *,
+    container: Container,
+    user: UserInDB,
+    success: bool,
+    failure_reason: str | None = None,
+) -> None:
+    action = (
+        ActionType.PASSWORD_CHANGED if success else ActionType.PASSWORD_CHANGE_FAILED
+    )
+    await container.audit_service().log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=action,
+        entity_type=EntityType.USER,
+        entity_id=user.id,
+        description=(
+            "Changed local Eneo password"
+            if success
+            else "Local Eneo password change failed"
+        ),
+        metadata=AuditMetadata.authentication(
+            actor=user,
+            method="local_password_change",
+            success=success,
+            failure_reason=failure_reason,
+        ),
+        outcome=Outcome.SUCCESS if success else Outcome.FAILURE,
+        error_message=failure_reason if not success else None,
+    )
+
+
+@router.post(
+    "/me/password/",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    response_model=None,
+    name="Change current user's local password",
+    description=(
+        "Change the authenticated user's local Eneo password and invalidate "
+        "previously issued Eneo sessions."
+    ),
+    responses=responses.get_responses([400, 403, 404, 409, 429, 503]),
+)
+async def change_current_user_password(
+    password_change: PasswordChangeRequest,
+    container: Annotated[
+        Container,
+        Depends(get_container(with_user=True, transaction_scope="function")),
+    ],
+    _session_guard: None = Depends(require_session_auth),
+) -> Response:
+    """Change the caller's local Eneo password and revoke older Eneo JWTs."""
+
+    current_user = container.user()
+    try:
+        await enforce_rate_limit(
+            redis_client=container.redis_client(),
+            user_id=current_user.id,
+            tenant_id=current_user.tenant_id,
+            config=_PASSWORD_CHANGE_RATE_LIMIT,
+        )
+    except RateLimitExceededError as exc:
+        await _audit_password_change(
+            container=container,
+            user=current_user,
+            success=False,
+            failure_reason="rate_limit_exceeded",
+        )
+        retry_after = exc.result.window_seconds
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={
+                "code": "rate_limit_exceeded",
+                "message": "Too many password change attempts. Try again later.",
+                "retry_after_seconds": retry_after,
+            },
+            headers={"Retry-After": str(retry_after)},
+        ) from exc
+    except RateLimitServiceUnavailableError as exc:
+        logger.warning("Password-change rate limiter unavailable", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "rate_limit_unavailable",
+                "message": "Password changes are temporarily unavailable.",
+            },
+        ) from exc
+
+    try:
+        updated_user = await container.user_service().change_local_password(
+            user_id=current_user.id,
+            current_password=password_change.current_password.get_secret_value(),
+            new_password=password_change.new_password.get_secret_value(),
+        )
+    except PasswordChangeError as exc:
+        await _audit_password_change(
+            container=container,
+            user=current_user,
+            success=False,
+            failure_reason=exc.code,
+        )
+        raise
+
+    await _audit_password_change(
+        container=container,
+        user=updated_user,
+        success=True,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/me/sessions/invalidate/",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    response_model=None,
+    name="Invalidate current user's Eneo sessions",
+    description=(
+        "Invalidate previously issued Eneo sessions at the authenticated "
+        "user's request."
+    ),
+    responses=responses.get_responses([403, 404]),
+)
+async def invalidate_current_user_sessions(
+    container: Annotated[
+        Container,
+        Depends(get_container(with_user=True, transaction_scope="function")),
+    ],
+    _session_guard: None = Depends(require_session_auth),
+) -> Response:
+    """Invalidate previously issued Eneo sessions at the user's request."""
+
+    current_user = container.user()
+    updated_user = await container.user_service().invalidate_sessions(
+        user_id=current_user.id
+    )
+    await container.audit_service().log_async(
+        tenant_id=updated_user.tenant_id,
+        user=updated_user,
+        action=ActionType.SESSIONS_INVALIDATED,
+        entity_type=EntityType.USER,
+        entity_id=updated_user.id,
+        description="Invalidated Eneo sessions at the user's request",
+        metadata=AuditMetadata.authentication(
+            actor=updated_user,
+            method="user_session_invalidation",
+            success=True,
+        ),
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get(

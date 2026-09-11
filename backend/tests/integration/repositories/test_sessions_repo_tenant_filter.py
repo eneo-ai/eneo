@@ -45,7 +45,7 @@ async def second_tenant_user(db_container, test_settings):
         quota_limit=1_000_000,
         user_name=f"sessions_filter_user_{suffix}",
         user_email=email,
-        user_password="test_password",
+        user_password="RepositoryTestPass123!",
     )
     conn.close()
 

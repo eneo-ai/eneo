@@ -144,7 +144,7 @@ async def test_multi_tenant_oidc_login_isolated(
 
     email_a = f"alice@{slug_a}.example.com"
     email_b = f"bruno@{slug_b}.example.com"
-    password = "ValidPassw0rd!"
+    password = "ValidPassw0rd123!"
 
     await _create_user(client, super_admin_token, tenant_a["id"], email_a, password)
     await _create_user(client, super_admin_token, tenant_b["id"], email_b, password)

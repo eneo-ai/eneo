@@ -140,7 +140,7 @@ async def test_register_user_creates_a_user_and_settings(service: UserService):
     new_user = UserAddSuperAdmin(
         email="realuser@test.com",
         username="realuser",
-        password="1234asd",
+        password="a sufficiently long password",
         tenant_id=TEST_TENANT.id,
     )
 

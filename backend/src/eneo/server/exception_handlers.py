@@ -2,6 +2,7 @@ import logging
 from typing import Protocol, cast
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 
@@ -65,6 +66,12 @@ from eneo.skills.domain.skill import (
     SkillNotPublishedForBindingError,
     SkillRuntimePolicyChangedError,
     SkillSlugConflictError,
+)
+from eneo.users.password import (
+    CurrentPasswordIncorrectError,
+    LocalPasswordChangeUnavailableError,
+    PasswordPolicyViolationError,
+    PasswordReuseError,
 )
 
 # Partial unique indexes that guard active model display names, per
@@ -150,6 +157,23 @@ logger = logging.getLogger(__name__)
 # server adapter may depend on a domain package without reversing that
 # dependency. One map, so "where do I register this?" has one answer.
 DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] = {
+    # --- Local user credentials ---
+    CurrentPasswordIncorrectError: (
+        400,
+        None,
+        ErrorCodes.CURRENT_PASSWORD_INCORRECT,
+    ),
+    PasswordReuseError: (400, None, ErrorCodes.PASSWORD_REUSE),
+    PasswordPolicyViolationError: (
+        400,
+        None,
+        ErrorCodes.PASSWORD_POLICY_VIOLATION,
+    ),
+    LocalPasswordChangeUnavailableError: (
+        409,
+        None,
+        ErrorCodes.LOCAL_PASSWORD_CHANGE_UNAVAILABLE,
+    ),
     # --- Object content and files ---
     ObjectContentUnavailableError: (503, None, ErrorCodes.RESOURCE_NOT_READY),
     ObjectContentIntegrityError: (503, None, ErrorCodes.RESOURCE_NOT_READY),
@@ -269,6 +293,31 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
 
 
 def add_exception_handlers(app: FastAPI):
+    async def request_validation_error_handler(
+        request: Request, exc: Exception
+    ) -> JSONResponse:
+        # Keep the documented HTTPValidationError shape, but never serialize
+        # raw input, validation context or validator-generated messages. Even
+        # SecretStr cannot redact input when a required sibling is missing,
+        # and a custom validator may embed a secret in its error message.
+        validation_exc = cast(RequestValidationError, exc)
+        public_messages = {
+            "missing": "Field required",
+            "string_type": "Input should be a valid string",
+            "json_invalid": "Invalid JSON",
+        }
+        details: list[dict[str, object]] = [
+            {
+                "loc": error["loc"],
+                "type": error["type"],
+                "msg": public_messages.get(error["type"], "Invalid value"),
+            }
+            for error in validation_exc.errors()
+        ]
+        return JSONResponse(status_code=422, content={"detail": details})
+
+    app.add_exception_handler(RequestValidationError, request_validation_error_handler)
+
     exception_handlers = (
         *EXCEPTION_MAP.items(),
         *DOMAIN_EXCEPTION_MAP.items(),

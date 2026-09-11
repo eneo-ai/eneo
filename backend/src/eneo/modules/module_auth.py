@@ -287,6 +287,7 @@ class ModuleAuthBroker:
                 "user_id": str(user.id),
                 "tenant_id": str(user.tenant_id),
                 "module_id": str(module.id),
+                "credential_version": getattr(user, "credential_version", 0),
             }
         )
         await self.redis_client.setex(_ticket_redis_key(ticket), ttl, payload)
@@ -363,6 +364,13 @@ class ModuleAuthBroker:
         consumed = await self.redis_client.getdel(ticket_key)
         if consumed is None or consumed != raw:
             raise AuthenticationException("Invalid or expired module ticket.")
+
+        # Consume before comparing so a ticket issued before a credential
+        # change cannot be retried. Tickets from before this field existed
+        # belong to the version-zero compatibility baseline.
+        self.auth_service.validate_local_credential_version(
+            data.get("credential_version", 0), user
+        )
 
         handoff_at = int(time.time())
         expires_in_seconds, session_expires_at = self._token_window(handoff_at)
@@ -501,8 +509,10 @@ class ModuleAuthBroker:
         settings = get_settings()
         key = str(settings.jwt_secret)
         aud = module_audience(module.name)
-        self.auth_service.get_jwt_payload(token, key=key, aud=aud)
-        return self.auth_service.get_verified_claims(token, key=key, aud=aud)
+        _payload, claims = self.auth_service.get_jwt_payload_with_claims(
+            token, key=key, aud=aud
+        )
+        return claims
 
     async def authenticate_resource_request(
         self,
@@ -561,6 +571,7 @@ class ModuleAuthBroker:
         )
         if user is None or not user.is_active:
             raise AuthenticationException("Module user is not active in this tenant.")
+        self.auth_service.validate_credential_version(claims, user)
 
         await self.user_service.validate_active_identity(
             user, correlation_id="module-resource-auth"

@@ -117,6 +117,21 @@ class UsersRepository:
 
         return await self._get_model_from_query(query, with_deleted=with_deleted)
 
+    async def get_user_by_id_for_update(self, id: UUID) -> UserInDB | None:
+        """Load one active user while serializing credential mutations."""
+
+        # The user may already be present in this session's identity map from
+        # request authentication. Force a refresh after the row lock is
+        # acquired, otherwise a waiter could continue with the password hash
+        # and credential version cached before another request committed.
+        query = (
+            sa.select(Users)
+            .where(Users.id == id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return await self._get_model_from_query(query, with_deleted=False)
+
     async def get_user_by_assistant_id(
         self, assistant_id: UUID, with_deleted: bool = False
     ) -> UserInDB | None:

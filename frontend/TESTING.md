@@ -98,7 +98,7 @@ but into a *separate* SvelteKit output dir (`SVELTE_KIT_OUT_DIR=.svelte-kit-e2e`
 set in `playwright.config.ts` and honoured by `svelte.config.js`). It never writes
 the `.svelte-kit` your dev server uses, so you can keep developing while the suite
 runs — no more blank-page corruption, no need to stop dev first. The seeded login
-is `e2e@example.com` / `E2ePassword1!` in tenant `E2ETenant`.
+is `e2e@example.com` / `E2ePassword123!` in tenant `E2ETenant`.
 
 **Deterministic chat.** The stack includes a tiny OpenAI-compatible **mock model
 server** (`e2e/mock_model_server.py`); `e2e/seed.py` seeds a default completion

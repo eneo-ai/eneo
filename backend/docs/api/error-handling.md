@@ -25,6 +25,19 @@ Fields:
 - `context` (optional): safe, non-sensitive metadata.
 - `request_id` (optional): request correlation ID for support/debugging.
 
+## Request validation errors
+
+Request validation returns HTTP 422 using the documented `HTTPValidationError`
+shape: `detail` is a list containing `loc`, `type` and `msg`. Clients should use
+the field location and error type for specific feedback. Messages are static
+public descriptions; unrecognized validation types use `Invalid value`.
+
+The API does not return raw `input`, validation `ctx`, or validator-generated
+messages. Those can contain credentials even when the request model uses
+`SecretStr`, particularly when a required field is missing. Do not log the
+request body or the raw validation exception. SCIM retains its separate RFC 7644
+error contract.
+
 ## Trace ID and error ID
 
 Independent of the response body shape, every HTTP response (including 4xx and 5xx) carries the OpenTelemetry trace ID in the `X-Trace-Id` response header (32 hex chars). The legacy `X-Correlation-ID` header is emitted in parallel as a same-value alias during the migration period. Both headers are exposed via CORS.
