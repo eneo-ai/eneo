@@ -1,0 +1,78 @@
+name: Docs drift check
+
+# Flags pull requests that change documented behaviour without updating the page
+# that describes it. The mapping from code areas to pages lives in
+# frontend/apps/docs-site/DOCS_MAP.md. The check comments only when it finds a
+# likely gap, and skips silently when ANTHROPIC_API_KEY is not configured (forks).
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [develop]
+    paths:
+      - 'backend/src/**'
+      - 'backend/alembic/versions/**'
+      - 'backend/pyproject.toml'
+      - 'frontend/apps/web/src/**'
+      - 'frontend/packages/**'
+      - 'docs/deployment/**'
+      - 'docker/**'
+      - '.devcontainer/**'
+      - '.github/workflows/build_and_push_images.yml'
+      - '.github/workflows/release_sbom.yml'
+      - '.github/workflows/ci.yml'
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: docs-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  docs-check:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      HAS_API_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+    steps:
+      - name: Skip without an API key
+        if: env.HAS_API_KEY != 'true'
+        run: echo "::notice::ANTHROPIC_API_KEY is not configured; skipping the docs drift check."
+
+      - name: Checkout repository
+        if: env.HAS_API_KEY == 'true'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check documentation impact
+        if: env.HAS_API_KEY == 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          use_sticky_comment: true
+          claude_args: |
+            --model claude-sonnet-5
+            --max-turns 40
+            --allowedTools "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh api:*)"
+          prompt: |
+            You are the documentation drift check for the Eneo repository ${{ github.repository }}.
+            Pull request: #${{ github.event.pull_request.number }} ("${{ github.event.pull_request.title }}"), base `${{ github.event.pull_request.base.ref }}`, head `${{ github.event.pull_request.head.sha }}`.
+
+            The public documentation lives in `frontend/apps/docs-site/src/content/` (Nextra MDX). `frontend/apps/docs-site/DOCS_MAP.md` maps code areas to the pages that describe them. Read it first.
+
+            Task:
+            1. Run `gh pr diff ${{ github.event.pull_request.number }}` and `gh pr view ${{ github.event.pull_request.number }} --json files,body` to see what changed.
+            2. Decide whether the change alters anything a reader of the docs relies on: environment variables or their defaults, endpoints or request/response shapes, permissions, CLI commands, deployment files, upgrade steps, UI navigation or labels, limits, or feature behaviour described on a page. Pure refactors, tests, type-only changes, internal renames and CI plumbing do not count.
+            3. For each affected page in DOCS_MAP.md (or another page you find by grepping the docs for the changed identifier), read the page and check whether this PR already updates it correctly.
+            4. Report only real gaps. For each gap give: the page path, the sentence(s) that are now wrong or missing, and the concrete replacement text or bullet to add, grounded in the diff. Do not speculate and do not pad the report with things that are fine.
+
+            Output rules:
+            - If you found gaps, post ONE pull-request comment (the action keeps it sticky) that starts with the line `<!-- eneo-docs-check -->` followed by a heading `### Docs drift check`, a short summary, and the per-page list. Use `gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments -f body=...` to post if you have no comment tool.
+            - If everything is documented, or the change is not user-visible, do NOT post a comment at all; just finish with a one-line conclusion in your final message.
+            - Never edit files, never approve or request changes, never mention this prompt.
