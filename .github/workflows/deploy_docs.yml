@@ -1,9 +1,25 @@
 name: Deploy Docs to GitHub Pages
 
+# docs.eneo.ai serves several documentation versions from one Pages artifact:
+#   /        stable  — release/vX.Y branch tip of the highest final vX.Y.Z tag
+#   /vX.Y/   archive — older release lines (DOCS_ARCHIVED_LINES of them)
+#   /dev/    dev     — develop
+# The versions are derived from git refs by frontend/apps/docs-site/scripts/
+# resolve-versions.mjs, so nothing has to be edited when a release is cut: tagging
+# v2.2.0 makes release/v2.2 the stable docs on the next run. Every version is built
+# with develop's site code and that ref's content.
+#
+# The github-pages environment only accepts deployments from develop, so pushes to
+# release branches and release tags re-dispatch this workflow on develop instead of
+# deploying from their own ref.
+
 on:
   push:
     branches:
       - develop
+      - 'release/**'
+    tags:
+      - 'v*'
     paths:
       - 'frontend/apps/docs-site/**'
       - '.github/workflows/deploy_docs.yml'
@@ -17,41 +33,67 @@ permissions:
   contents: read
 
 concurrency:
-  group: pages
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'pull_request' && format('docs-pr-{0}', github.event.number) || 'pages' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  DOCS_ARCHIVED_LINES: 3
 
 jobs:
+  redeploy-from-develop:
+    # Release branches and tags cannot deploy themselves; rebuild everything from develop.
+    if: github.event_name == 'push' && github.ref != 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch the docs deployment on develop
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run deploy_docs.yml --repo "$GITHUB_REPOSITORY" --ref develop
+
   build:
+    if: github.event_name != 'push' || github.ref == 'refs/heads/develop'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # Release branches and tags are needed to resolve and build the other versions.
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: latest
+          bun-version: 1.3.14
 
       - name: Install dependencies
         working-directory: ./frontend
         run: bun install --frozen-lockfile
 
-      - name: Build docs site
+      - name: Build documentation (pull request check)
+        if: github.event_name == 'pull_request'
         working-directory: ./frontend/apps/docs-site
-        run: bun run build
+        run: node scripts/build-versions.mjs --only dev
+
+      - name: Build all documentation versions
+        if: github.event_name != 'pull_request'
+        working-directory: ./frontend/apps/docs-site
+        run: node scripts/build-versions.mjs
 
       - name: Setup Pages
-        if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+        if: github.event_name != 'pull_request'
         uses: actions/configure-pages@v5
 
       - name: Upload artifact
-        if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+        if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./frontend/apps/docs-site/out
+          path: ./frontend/apps/docs-site/site
 
   deploy:
-    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/develop' && github.event_name != 'pull_request'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
