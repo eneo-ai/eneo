@@ -15,6 +15,7 @@ from eneo.completion_models.infrastructure.completion_service import (
 )
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderProviderRequestEvidence,
+    classify_ai_builder_provider_failure,
     record_ai_builder_provider_failure,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
@@ -124,6 +125,33 @@ async def call_proposal_completion(
             request_budget=request_budget,
         )
     provider_started_at = time.perf_counter()
+
+    def admit_request_without_refused_control(control: str, error: Exception) -> bool:
+        # One more request costs one call of the turn's budget and is its own
+        # call record; the refused one is recorded as failed. The incident
+        # evidence describes the request actually sent, so it loses the control.
+        nonlocal incident_evidence
+        if not request.call_budget.try_start_call():
+            return False
+        if usage_tracker is not None:
+            usage_tracker.retry_call(
+                failure=classify_ai_builder_provider_failure(
+                    error,
+                    stage="proposal_completion",
+                    request_id=usage_tracker.request_id,
+                )
+            )
+        provider_kwargs.pop(control, None)
+        incident_evidence = _proposal_request_evidence(
+            request=request,
+            max_tokens=request_budget.provider_output_cap_tokens,
+            timeout_seconds=request_budget.timeout_seconds,
+            messages=messages,
+            tool_schemas=tool_schemas,
+            provider_kwargs=provider_kwargs,
+        )
+        return True
+
     try:
         raw_response = await complete_with_silence_deadline(
             litellm_client,
@@ -139,6 +167,7 @@ async def call_proposal_completion(
                 "max_tokens": request_budget.provider_output_cap_tokens,
                 **provider_kwargs,
             },
+            retry_without_refused_control=admit_request_without_refused_control,
         )
     except Exception as error:
         failure = record_ai_builder_provider_failure(

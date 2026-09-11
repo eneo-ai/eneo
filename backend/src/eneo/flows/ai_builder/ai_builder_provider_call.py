@@ -18,6 +18,15 @@ contract applies instead of an SDK count passing as the provider's.
 
 A client that answers whole (a provider route without streaming, a test
 double) is accepted as it is.
+
+A provider that refuses the request while it is being established, because
+of one optional sampling control (temperature, top_p, reasoning_effort, ...),
+has done no work; when the caller admits another request, the call is sent
+once more without that control, which is the provider's default, under the
+same ceiling. A refusal after a stream was acquired is never retried here: the
+provider may have generated. The persisted capability snapshot said the
+control was accepted, so the refusal is logged as evidence that the snapshot
+is wider than the route.
 """
 
 from __future__ import annotations
@@ -30,9 +39,22 @@ import unittest.mock
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from typing import Any, Protocol, cast
 
+import httpx
 import litellm
+from litellm.exceptions import BadRequestError
+
+from eneo.main.logging import get_logger
+
+logger = get_logger(__name__)
 
 _STREAM_CLOSE_SECONDS = 5.0
+_MAX_PROVIDER_ERROR_BODY_BYTES = 65_536
+# Provider error codes that state one named request field was refused.
+_UNSUPPORTED_PARAMETER_CODES = frozenset({"unsupported_parameter", "unsupported_value"})
+
+# Whether the caller admits one more request without the refused control;
+# the caller charges it to its own call budget and telemetry.
+RetryAdmission = Callable[[str, Exception], bool]
 
 
 class CompletionClient(Protocol):
@@ -61,14 +83,19 @@ async def complete_with_silence_deadline(
     silence_deadline_seconds: float,
     ceiling_seconds: float,
     request: Mapping[str, Any],
+    retry_without_refused_control: RetryAdmission | None = None,
 ) -> Any:
     """The provider's complete answer, streamed under a silence deadline.
 
     ``silence_deadline_seconds`` is the longest wait for the next yielded
-    chunk; ``ceiling_seconds`` bounds the whole call. Each expiry raises its
-    own ``TimeoutError`` subclass, which the failure classifier records as a
-    timeout with an unknown provider outcome. The stream is closed on every
-    exit, within a bounded wait that never hides the original error.
+    chunk; ``ceiling_seconds`` bounds the whole call, a retried request
+    included. Each expiry raises its own ``TimeoutError`` subclass, which the
+    failure classifier records as a timeout with an unknown provider outcome.
+    The stream is closed on every exit, within a bounded wait that never
+    hides the original error. ``retry_without_refused_control`` is asked, with
+    the refused control's name and the provider's error, whether one more
+    request without that control may be sent; without it every refusal is
+    raised.
     """
 
     if not (math.isfinite(silence_deadline_seconds) and silence_deadline_seconds > 0):
@@ -92,9 +119,33 @@ async def complete_with_silence_deadline(
     ceiling = asyncio.timeout(ceiling_seconds)
     try:
         async with ceiling:
-            response = await _under_silence(
-                litellm_client.acompletion(**outbound), silence_deadline_seconds
-            )
+            try:
+                response = await _under_silence(
+                    litellm_client.acompletion(**outbound), silence_deadline_seconds
+                )
+            except BadRequestError as error:
+                parameter = rejected_sampling_parameter(error)
+                if (
+                    parameter is None
+                    or parameter not in outbound
+                    or retry_without_refused_control is None
+                    or not retry_without_refused_control(parameter, error)
+                ):
+                    raise
+                logger.warning(
+                    "ai_builder_provider_sampling_parameter_rejected",
+                    extra={
+                        "parameter": parameter,
+                        "model": outbound.get("model"),
+                        "provider_error_code": provider_error_fields(error).get("code"),
+                    },
+                )
+                outbound = {
+                    key: value for key, value in outbound.items() if key != parameter
+                }
+                response = await _under_silence(
+                    litellm_client.acompletion(**outbound), silence_deadline_seconds
+                )
             if not _is_stream(response):
                 return response
             stream: AsyncIterator[Any] = response.__aiter__()
@@ -123,7 +174,7 @@ async def complete_with_silence_deadline(
             "The provider stream ended before a finish reason was received"
         )
     builder = cast(Callable[..., Any], getattr(litellm, "stream_chunk_builder"))
-    built = builder(chunks, messages=request.get("messages"))
+    built = builder(chunks, messages=outbound.get("messages"))
     if built is None:
         raise ProviderStreamIncomplete("The provider stream could not be rebuilt")
     # The SDK's rebuilt usage is its own count whenever the provider's usage
@@ -133,6 +184,65 @@ async def complete_with_silence_deadline(
     # there are none, the existing estimate contract takes over.
     built.usage = _native_usage(response, chunks)
     return built
+
+
+def rejected_sampling_parameter(error: BaseException) -> str | None:
+    """The optional sampling control a 400 refused by name, or None."""
+
+    if not isinstance(error, BadRequestError):
+        return None
+    fields = provider_error_fields(error)
+    code = fields.get("code")
+    if not isinstance(code, str) or code not in _UNSUPPORTED_PARAMETER_CODES:
+        return None
+    parameter = getattr(error, "param", None)
+    if parameter is None:
+        parameter = fields.get("param")
+    if isinstance(parameter, str) and parameter in _sampling_controls():
+        return parameter
+    return None
+
+
+def _sampling_controls() -> frozenset[str]:
+    """The optional sampling controls the capability snapshot owns.
+
+    Imported when asked, not at module load: the capability module's package
+    imports the Builder's error contract, which imports this owner.
+    """
+
+    from eneo.completion_models.domain.model_kwargs_capabilities import (
+        SupportedModelKwargs,
+    )
+
+    return frozenset(SupportedModelKwargs.model_fields)
+
+
+def provider_error_fields(error: BaseException) -> Mapping[str, object]:
+    """The ``code`` and ``param`` a provider error body names, if any.
+
+    Some LiteLLM adapters retain only the HTTP response; already buffered
+    content is inspected, never a stream, and no I/O happens during recovery.
+    """
+
+    body = getattr(error, "body", None)
+    if not isinstance(body, Mapping):
+        response = getattr(error, "response", None)
+        if not isinstance(response, httpx.Response) or not response.is_stream_consumed:
+            return {}
+        try:
+            if len(response.content) > _MAX_PROVIDER_ERROR_BODY_BYTES:
+                return {}
+            body = response.json()
+        except (ValueError, httpx.ResponseNotRead):
+            return {}
+    if not isinstance(body, Mapping):
+        return {}
+    body_fields = cast(Mapping[object, object], body)
+    fields = body_fields.get("error", body_fields)
+    if not isinstance(fields, Mapping):
+        return {}
+    error_fields = cast(Mapping[object, object], fields)
+    return {"code": error_fields.get("code"), "param": error_fields.get("param")}
 
 
 def _provider_finished(response: object, chunks: list[Any]) -> bool:

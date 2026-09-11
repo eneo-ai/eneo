@@ -1990,3 +1990,110 @@ def test_completion_keeps_the_prepared_allocation_and_only_a_repair_plans_again(
         fit_proposal_request_budget(
             budget=planned, message_groups=oversized, tool_schemas=[], model_name="test"
         )
+
+
+def _refusal_of_temperature() -> BadRequestError:
+    return BadRequestError(
+        message="temperature",
+        model="gpt-test",
+        llm_provider="azure",
+        body={"error": {"param": "temperature", "code": "unsupported_value"}},
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_one_call_budget_admits_no_request_without_the_refused_control() -> (
+    None
+):
+    client = SimpleNamespace(
+        acompletion=AsyncMock(side_effect=_refusal_of_temperature())
+    )
+
+    with pytest.raises(AIBuilderKnownProviderRejectionException):
+        await call_proposal_completion(
+            litellm_client=client,
+            request=_completion_request(
+                messages=[{"role": "user", "content": "Build a flow"}],
+                tool_schemas=[],
+                route=_route(),
+                max_output_tokens=100,
+                temperature=0.0,
+                call_budget=ProposalCallBudget(call_limit=1),
+            ),
+        )
+
+    assert client.acompletion.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_an_admitted_request_without_the_control_is_its_own_call() -> None:
+    client = SimpleNamespace(
+        acompletion=AsyncMock(
+            side_effect=[
+                _refusal_of_temperature(),
+                _make_response_with_text("{}"),
+            ]
+        )
+    )
+    tracker = ProposalTurnTelemetry(
+        request_id="req-retry", model="gpt-test", target_kind=TargetKind.CREATE
+    )
+    call_budget = ProposalCallBudget(call_limit=2)
+
+    await call_proposal_completion(
+        litellm_client=client,
+        usage_tracker=tracker,
+        request=_completion_request(
+            messages=[{"role": "user", "content": "Build a flow"}],
+            tool_schemas=[],
+            route=_route(),
+            max_output_tokens=100,
+            temperature=0.0,
+            call_budget=call_budget,
+        ),
+    )
+
+    assert client.acompletion.await_count == 2
+    assert "temperature" not in client.acompletion.call_args_list[1].kwargs
+    assert call_budget.calls_started == 2
+    assert tracker.llm_calls_made == 2
+    assert tracker.call_records[0].provider_failure_kind == "rejected"
+    assert tracker.call_records[1].provider_failure_kind is None
+
+
+@pytest.mark.asyncio
+async def test_failure_evidence_after_recovery_describes_the_request_sent() -> None:
+    client = SimpleNamespace(
+        acompletion=AsyncMock(
+            side_effect=[_refusal_of_temperature(), _unprocessable_entity_error()]
+        )
+    )
+
+    with (
+        patch.object(error_contract_module.logger, "info") as event_log,
+        pytest.raises(AIBuilderKnownProviderRejectionException),
+    ):
+        await call_proposal_completion(
+            litellm_client=client,
+            request=_completion_request(
+                messages=[{"role": "user", "content": "Build a flow"}],
+                tool_schemas=[],
+                route=_route(),
+                max_output_tokens=100,
+                temperature=0.0,
+                call_budget=ProposalCallBudget(call_limit=2),
+            ),
+        )
+
+    assert client.acompletion.await_count == 2
+    evidence = [
+        call.kwargs["extra"][
+            error_contract_module.AI_BUILDER_PROVIDER_INCIDENT_EVIDENCE_LOG_KEY
+        ]
+        for call in event_log.call_args_list
+        if call.args and call.args[0] == "ai_builder_provider_incident_evidence"
+    ]
+    assert len(evidence) == 1
+    outgoing = [field["name"] for field in evidence[0]["outgoing_fields"]]
+    assert "temperature" not in outgoing
+    assert "max_tokens" in outgoing

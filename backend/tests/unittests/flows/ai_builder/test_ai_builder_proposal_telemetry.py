@@ -1210,3 +1210,27 @@ def test_a_503_before_the_deadline_is_an_upstream_failure_not_a_timeout() -> Non
     assert safe_detail["deadline_reached"] is False
     assert "upstream_timeout_suspected" not in safe_detail
     event_logger.warning.assert_not_called()
+
+
+def test_a_refused_request_is_a_failed_call_and_its_replacement() -> None:
+    tracker = ProposalTurnTelemetry(
+        request_id="req-retry", model="gpt-test", target_kind=TargetKind.CREATE
+    )
+    refused = tracker.begin_call(call_kind="slot_classification")
+    failure = classify_ai_builder_provider_failure(
+        BadRequestError(
+            message="temperature",
+            model="gpt-test",
+            llm_provider="azure",
+            body={"error": {"param": "temperature", "code": "unsupported_value"}},
+        ),
+        stage="slot_classification",
+    )
+
+    replacement = tracker.retry_call(call=refused, failure=failure)
+
+    assert tracker.llm_calls_made == 2
+    assert tracker.call_records[0].provider_failure_kind == "rejected"
+    assert tracker.call_records[0].provider_status_class == "4xx"
+    assert replacement.attempt == 2
+    assert replacement.call_kind == "slot_classification"

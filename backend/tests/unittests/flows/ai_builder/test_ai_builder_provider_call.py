@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
+import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import litellm
 import pytest
+from litellm.exceptions import BadRequestError
 from litellm.types import utils as litellm_types
 
 from eneo.flows.ai_builder.ai_builder_provider_call import (
@@ -396,6 +399,256 @@ async def test_a_provider_finish_reason_and_usage_come_through_the_wrapper(
     assert response.choices[0].message.content == "Hej"
     assert response.choices[0].finish_reason == "stop"
     assert (response.usage.prompt_tokens, response.usage.completion_tokens) == (12, 3)
+
+
+_UNSUPPORTED_TEMPERATURE = {
+    "error": {
+        "message": "Unsupported value: 'temperature' does not support 0.0 with "
+        "this model. Only the default (1) value is supported.",
+        "type": "invalid_request_error",
+        "param": "temperature",
+        "code": "unsupported_value",
+    }
+}
+
+
+def _rejection(body: dict[str, object]) -> BadRequestError:
+    return BadRequestError(
+        message=str(body["error"]),
+        model="gpt-test",
+        llm_provider="azure",
+        body=body,
+    )
+
+
+def _admit(_control: str, _error: Exception) -> bool:
+    return True
+
+
+@pytest.mark.asyncio
+async def test_without_admission_a_refusal_is_raised() -> None:
+    client = SimpleNamespace(
+        acompletion=AsyncMock(side_effect=_rejection(_UNSUPPORTED_TEMPERATURE))
+    )
+
+    with pytest.raises(BadRequestError):
+        await complete_with_silence_deadline(
+            client,
+            silence_deadline_seconds=5.0,
+            ceiling_seconds=10.0,
+            request={**_REQUEST, "temperature": 0.0},
+        )
+
+    assert client.acompletion.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_the_caller_can_refuse_the_second_request() -> None:
+    client = SimpleNamespace(
+        acompletion=AsyncMock(side_effect=_rejection(_UNSUPPORTED_TEMPERATURE))
+    )
+    asked: list[str] = []
+
+    def refuse(control: str, _error: Exception) -> bool:
+        asked.append(control)
+        return False
+
+    with pytest.raises(BadRequestError):
+        await complete_with_silence_deadline(
+            client,
+            silence_deadline_seconds=5.0,
+            ceiling_seconds=10.0,
+            request={**_REQUEST, "temperature": 0.0},
+            retry_without_refused_control=refuse,
+        )
+
+    assert asked == ["temperature"]
+    assert client.acompletion.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_after_the_stream_started_is_not_retried() -> None:
+    # A 4xx the provider raises mid-stream may follow generation; the owner
+    # never sends the request again on its own.
+    async def refused_midstream():
+        yield _tool_chunk('{"name": "x"}', first=True, finish=None)
+        raise _rejection(_UNSUPPORTED_TEMPERATURE)
+
+    client = SimpleNamespace(acompletion=AsyncMock(return_value=refused_midstream()))
+    asked: list[str] = []
+
+    def admit(control: str, _error: Exception) -> bool:
+        asked.append(control)
+        return True
+
+    with pytest.raises(BadRequestError):
+        await complete_with_silence_deadline(
+            client,
+            silence_deadline_seconds=5.0,
+            ceiling_seconds=10.0,
+            request={**_REQUEST, "temperature": 0.0},
+            retry_without_refused_control=admit,
+        )
+
+    assert asked == []
+    assert client.acompletion.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_both_requests_share_one_ceiling() -> None:
+    requests = 0
+
+    async def slow_provider(**_kwargs: object) -> object:
+        nonlocal requests
+        requests += 1
+        await asyncio.sleep(0.08)
+        if requests == 1:
+            raise _rejection(_UNSUPPORTED_TEMPERATURE)
+        return SimpleNamespace(choices=[], usage=None)
+
+    client = SimpleNamespace(acompletion=slow_provider)
+
+    with pytest.raises(ProviderCallCeilingExpired):
+        await complete_with_silence_deadline(
+            client,
+            silence_deadline_seconds=0.1,
+            ceiling_seconds=0.12,
+            request={**_REQUEST, "temperature": 0.0},
+            retry_without_refused_control=_admit,
+        )
+
+
+@pytest.mark.asyncio
+async def test_an_odd_error_code_shape_keeps_the_refusal() -> None:
+    body = {"error": {"param": "temperature", "code": []}}
+    client = SimpleNamespace(acompletion=AsyncMock(side_effect=_rejection(body)))
+
+    with pytest.raises(BadRequestError):
+        await complete_with_silence_deadline(
+            client,
+            silence_deadline_seconds=5.0,
+            ceiling_seconds=10.0,
+            request={**_REQUEST, "temperature": 0.0},
+            retry_without_refused_control=_admit,
+        )
+
+    assert client.acompletion.await_count == 1
+
+
+def test_the_owner_imports_in_a_fresh_process() -> None:
+    # The capability snapshot's package imports the Builder's error contract,
+    # which imports this owner; the owner must not import it at load time.
+    completed = subprocess.run(
+        [sys.executable, "-c", "import eneo.flows.ai_builder.ai_builder_provider_call"],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert completed.returncode == 0, completed.stderr[-2000:]
+
+
+@pytest.mark.asyncio
+async def test_a_refused_sampling_control_is_dropped_once() -> None:
+    answer = SimpleNamespace(choices=[], usage=None)
+    client = SimpleNamespace(
+        acompletion=AsyncMock(
+            side_effect=[_rejection(_UNSUPPORTED_TEMPERATURE), answer]
+        )
+    )
+
+    response = await complete_with_silence_deadline(
+        client,
+        silence_deadline_seconds=5.0,
+        ceiling_seconds=10.0,
+        request={**_REQUEST, "temperature": 0.0, "max_tokens": 50},
+        retry_without_refused_control=_admit,
+    )
+
+    assert response is answer
+    first, second = (call.kwargs for call in client.acompletion.call_args_list)
+    assert first["temperature"] == 0.0
+    assert "temperature" not in second
+    assert second["max_tokens"] == 50 and second["stream"] is True
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_of_anything_else_is_not_retried() -> None:
+    body = {"error": {"param": "messages", "code": "unsupported_value"}}
+    client = SimpleNamespace(acompletion=AsyncMock(side_effect=_rejection(body)))
+
+    with pytest.raises(BadRequestError):
+        await complete_with_silence_deadline(
+            client,
+            silence_deadline_seconds=5.0,
+            ceiling_seconds=10.0,
+            request={**_REQUEST, "temperature": 0.0},
+            retry_without_refused_control=_admit,
+        )
+
+    assert client.acompletion.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_a_second_refusal_is_raised() -> None:
+    client = SimpleNamespace(
+        acompletion=AsyncMock(
+            side_effect=[
+                _rejection(_UNSUPPORTED_TEMPERATURE),
+                _rejection({"error": {"param": "top_p", "code": "unsupported_value"}}),
+            ]
+        )
+    )
+
+    with pytest.raises(BadRequestError):
+        await complete_with_silence_deadline(
+            client,
+            silence_deadline_seconds=5.0,
+            ceiling_seconds=10.0,
+            request={**_REQUEST, "temperature": 0.0, "top_p": 0.5},
+            retry_without_refused_control=_admit,
+        )
+
+    assert client.acompletion.await_count == 2
+
+
+@pytest.mark.filterwarnings("ignore::pydantic.warnings.PydanticDeprecatedSince211")
+@pytest.mark.asyncio
+async def test_a_provider_refusing_temperature_gets_the_call_without_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Azure GPT-5-class deployments accept only the default temperature; the
+    # capability snapshot said it was tunable, so the first request carries it.
+    sent: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(json.loads(request.content))
+        if "temperature" in sent[-1]:
+            return httpx.Response(400, json=_UNSUPPORTED_TEMPERATURE)
+        return httpx.Response(
+            200,
+            content=_sse([_delta("Hej", None), _delta(None, "stop")]),
+            headers={"content-type": "text/event-stream"},
+        )
+
+    monkeypatch.setattr(
+        AsyncHTTPHandler,
+        "_create_async_transport",
+        staticmethod(lambda **_kwargs: httpx.MockTransport(handler)),
+    )
+    monkeypatch.setattr(litellm, "in_memory_llm_clients_cache", LLMClientCache())
+    monkeypatch.setattr(litellm, "disable_aiohttp_transport", True)
+    monkeypatch.setattr(litellm, "num_retries", 0)
+
+    response = await complete_with_silence_deadline(
+        litellm,
+        silence_deadline_seconds=5.0,
+        ceiling_seconds=10.0,
+        request={**_WRAPPED_REQUEST, "temperature": 0.0},
+        retry_without_refused_control=_admit,
+    )
+
+    assert response.choices[0].message.content == "Hej"
+    assert [("temperature" in body) for body in sent] == [True, False]
 
 
 def _anthropic_event(name: str, data: dict[str, object]) -> str:

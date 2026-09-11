@@ -222,6 +222,20 @@ its first event and output tokens in its last), and none when the provider
 sent none, so the existing estimate contract applies; the SDK's own recount
 never passes as the provider's.
 
+A provider that refuses the request while it is being established, before
+any stream is acquired, because of one optional sampling control (a 400 naming
+`temperature`, `top_p`, `reasoning_effort` or another control from the
+capability snapshot as unsupported) has done no work. When the caller admits
+one more request, the owner sends the call once more without that control,
+which is the provider's default, under the same ceiling, and logs the refusal
+as evidence that the persisted capability snapshot is wider than the route
+(LiteLLM's discovery lists the controls it maps, not the values a deployment
+accepts; the observed case is an Azure `gpt-5.6` deployment that accepts only
+the default temperature and for which LiteLLM's `drop_params` keeps the
+value). The caller charges the second request to its own call budget and
+records the refused one as a failed call. A refusal after a stream was
+acquired, a refusal of anything else, or a second refusal is raised.
+
 Expiry stops the local wait and closes the stream; remote work may continue.
 SDK retries are disabled, so nothing repeats provider work. The turn retains
 its unknown-outcome state and requires acknowledgement before another provider

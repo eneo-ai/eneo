@@ -9,7 +9,6 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal, TypeAlias, TypeGuard, cast
 from uuid import UUID, uuid4
 
-import httpx
 from litellm.exceptions import (
     APIConnectionError,
     APIError,
@@ -30,6 +29,7 @@ from eneo.flows.ai_builder.ai_builder_provider_call import (
     ProviderCallCeilingExpired,
     ProviderSilenceExpired,
     ProviderStreamIncomplete,
+    provider_error_fields,
 )
 from eneo.main.exceptions import (
     BadRequestException,
@@ -100,7 +100,6 @@ _MAX_MESSAGE_LENGTH = 4096
 _MAX_REQUEST_ID_LENGTH = 128
 _DIAGNOSTIC_CONTEXT_STRING_LENGTH = 256
 _MAX_PROVIDER_FACT_LENGTH = 64
-_MAX_PROVIDER_ERROR_BODY_BYTES = 65_536
 # The one gateway status that states a timeout; 502 and 503 say an upstream
 # failed or is unavailable, which is not the same fact.
 _UPSTREAM_GATEWAY_STATUS_CODES = frozenset({504})
@@ -614,27 +613,7 @@ def _provider_error_fields(error: Exception) -> Mapping[str, object]:
         error, (*_KNOWN_PROVIDER_REJECTION_ERRORS, *_AMBIGUOUS_PROVIDER_ERRORS)
     ):
         return {}
-    body = getattr(error, "body", None)
-    if not isinstance(body, Mapping):
-        # Some LiteLLM adapters retain only the HTTP response. Inspect already
-        # buffered content; never read a stream or perform I/O during recovery.
-        response = getattr(error, "response", None)
-        if not isinstance(response, httpx.Response) or not response.is_stream_consumed:
-            return {}
-        try:
-            if len(response.content) > _MAX_PROVIDER_ERROR_BODY_BYTES:
-                return {}
-            body = response.json()
-        except (ValueError, httpx.ResponseNotRead):
-            return {}
-    if not isinstance(body, Mapping):
-        return {}
-    body_fields = cast(Mapping[object, object], body)
-    fields = body_fields.get("error", body_fields)
-    if not isinstance(fields, Mapping):
-        return {}
-    error_fields = cast(Mapping[object, object], fields)
-    return {"code": error_fields.get("code"), "param": error_fields.get("param")}
+    return provider_error_fields(error)
 
 
 def _bounded_provider_status(value: object) -> int | None:

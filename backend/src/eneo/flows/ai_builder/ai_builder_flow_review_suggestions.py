@@ -667,6 +667,9 @@ async def generate_review_suggestions(
                 "drop_params": True,
                 **completion_kwargs,
             },
+            # A review makes one call and keeps no call budget; a request
+            # without the refused control is always admitted.
+            retry_without_refused_control=lambda _control, _error: True,
         )
     except Exception as error:
         failure = record_ai_builder_provider_failure(

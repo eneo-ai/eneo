@@ -28,6 +28,7 @@ from eneo.flows.ai_builder.ai_builder_attachment_context import (
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderKnownProviderRejectionException,
     build_ai_builder_request_budget_exhausted_error,
+    classify_ai_builder_provider_failure,
     record_ai_builder_provider_failure,
 )
 from eneo.flows.ai_builder.ai_builder_provider_call import (
@@ -246,6 +247,22 @@ async def classify_slots(
         else None
     )
     provider_started_at = time.perf_counter()
+
+    def admit_request_without_refused_control(_control: str, error: Exception) -> bool:
+        # The refused request is its own failed call record; the one sent
+        # without the control replaces it.
+        nonlocal call
+        if call is not None and usage_tracker is not None:
+            call = usage_tracker.retry_call(
+                call=call,
+                failure=classify_ai_builder_provider_failure(
+                    error,
+                    stage="slot_classification",
+                    request_id=usage_tracker.request_id,
+                ),
+            )
+        return True
+
     try:
         response = await complete_with_silence_deadline(
             litellm_client,
@@ -257,6 +274,7 @@ async def classify_slots(
                 "drop_params": True,
                 **completion_kwargs,
             },
+            retry_without_refused_control=admit_request_without_refused_control,
         )
     except Exception as error:
         failure = record_ai_builder_provider_failure(

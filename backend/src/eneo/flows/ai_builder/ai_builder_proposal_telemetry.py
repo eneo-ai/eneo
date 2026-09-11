@@ -315,6 +315,28 @@ class ProposalTurnTelemetry:
             provider_turn_state=failure.turn_state,
         )
 
+    def retry_call(
+        self,
+        *,
+        failure: AIBuilderProviderFailure,
+        call: ProposalCallRecord | None = None,
+    ) -> ProposalCallRecord:
+        """Record a refused request as a failed call and begin its replacement.
+
+        The replacement keeps the refused call's kind and budget; without
+        ``call`` the attempt's pending call is the one refused.
+        """
+        refused = call if call is not None else self._pending_call
+        if refused is None:
+            raise ValueError("No provider call to retry")
+        self.fail_call(call=refused, failure=failure)
+        replacement = self.begin_call(
+            call_kind=refused.call_kind, request_budget=refused.request_budget
+        )
+        if call is None:
+            self._pending_call = replacement
+        return replacement
+
     def start_attempt(
         self,
         *,
