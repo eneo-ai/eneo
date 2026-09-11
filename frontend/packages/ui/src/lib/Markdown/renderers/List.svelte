@@ -6,7 +6,7 @@
 </script>
 
 <svelte:element this={token.ordered ? "ol" : "ul"} start={token.start || 1}>
-  {#each token.items as item (item)}
+  {#each token.items as item, i (i)}
     <RenderToken token={item}></RenderToken>
   {/each}
 </svelte:element>
