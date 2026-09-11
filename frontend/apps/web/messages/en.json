@@ -1540,6 +1540,7 @@
   "no_icons_found": "No icons found for \"{query}\"",
   "select_icon": "Select icon: {iconName}",
   "showing_first_icons": "Showing first 200 of {total} results. Refine your search for more.",
+  "icon_picker_load_error": "The icons could not be loaded.",
   "icon_picker_title": "Choose Icon",
   "icon_picker_empty": "No icons available. Upload one to get started.",
   "select": "Select",
