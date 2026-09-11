@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -29,6 +28,9 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     fit_proposal_request_budget,
     flatten_proposal_message_groups,
     outbound_proposal_tool_schemas,
+)
+from eneo.flows.ai_builder.ai_builder_provider_call import (
+    complete_with_silence_deadline,
 )
 from eneo.flows.ai_builder.ai_builder_token_usage import (
     TOKEN_USAGE_SOURCE_PROVIDER,
@@ -123,19 +125,21 @@ async def call_proposal_completion(
         )
     provider_started_at = time.perf_counter()
     try:
-        async with asyncio.timeout(request_budget.timeout_seconds):
-            raw_response = await litellm_client.acompletion(
-                model=request.route.litellm_model,
-                messages=messages,
-                tools=tool_schemas,
-                tool_choice=request.tool_choice,
-                parallel_tool_calls=False,
-                stream=False,
-                drop_params=True,
-                max_tokens=request_budget.provider_output_cap_tokens,
-                timeout=request_budget.timeout_seconds,
+        raw_response = await complete_with_silence_deadline(
+            litellm_client,
+            silence_deadline_seconds=request_budget.timeout_seconds,
+            ceiling_seconds=request_budget.ceiling_seconds,
+            request={
+                "model": request.route.litellm_model,
+                "messages": messages,
+                "tools": tool_schemas,
+                "tool_choice": request.tool_choice,
+                "parallel_tool_calls": False,
+                "drop_params": True,
+                "max_tokens": request_budget.provider_output_cap_tokens,
                 **provider_kwargs,
-            )
+            },
+        )
     except Exception as error:
         failure = record_ai_builder_provider_failure(
             error,

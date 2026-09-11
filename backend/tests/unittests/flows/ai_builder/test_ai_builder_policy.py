@@ -412,3 +412,50 @@ def test_a_planned_budget_is_one_allocation_until_a_new_call_plans_again() -> No
     assert again is not None
     assert (again.reserved_output_tokens, again.available_input_tokens) == (25, 75)
     assert planned.unplanned() == budget
+
+
+def test_the_call_ceiling_is_policy_of_its_own_and_never_below_the_silence_deadline() -> (
+    None
+):
+    policy = resolve_ai_builder_budget_policy(
+        None,
+        defaults=SimpleNamespace(
+            ai_builder_conversation_safety_buffer_tokens=2_000,
+            ai_builder_minimum_conversation_budget_tokens=4_000,
+            ai_builder_proposal_timeout_seconds=300.0,
+            ai_builder_provider_call_ceiling_seconds=2_400.0,
+            ai_builder_classification_timeout_seconds=None,
+        ),
+    )
+    budget = policy.proposal_request_budget(
+        context_window_tokens=128_000, model_output_ceiling_tokens=16_384
+    )
+    assert (budget.timeout_seconds, budget.ceiling_seconds) == (300.0, 2_400.0)
+    with pytest.raises(ValueError):
+        AIBuilderRequestBudget(
+            context_window_tokens=1_000,
+            model_output_ceiling_tokens=100,
+            safety_buffer_tokens=0,
+            timeout_seconds=300.0,
+            ceiling_seconds=200.0,
+        )
+
+
+@pytest.mark.parametrize("value", [float("inf"), float("nan")])
+def test_non_finite_budget_durations_are_refused(value: float) -> None:
+    with pytest.raises(ValueError):
+        AIBuilderRequestBudget(
+            context_window_tokens=1_000,
+            model_output_ceiling_tokens=100,
+            safety_buffer_tokens=0,
+            timeout_seconds=300.0,
+            ceiling_seconds=value,
+        )
+    with pytest.raises(ValueError):
+        AIBuilderRequestBudget(
+            context_window_tokens=1_000,
+            model_output_ceiling_tokens=100,
+            safety_buffer_tokens=0,
+            timeout_seconds=value,
+            ceiling_seconds=1_800.0,
+        )

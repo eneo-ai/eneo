@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 import os
 import sys
 from datetime import datetime, timezone
@@ -222,6 +223,10 @@ _SHAREPOINT_FIXTURE_ALLOWED_ENVIRONMENTS = frozenset(
 # and the ceiling, and this value only splits what is left. Even split when
 # nothing is known about the answer.
 AI_BUILDER_ANSWER_RESERVE_SHARE_DEFAULT = 0.5
+# The whole of one AI Builder provider call, whatever it keeps producing; the
+# silence deadline is what detects a dead call, this only bounds a runaway one.
+# Independent of the send-lock lease, which the turn renews while it works.
+AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS_DEFAULT = 1800.0
 
 
 class Settings(BaseSettings):
@@ -379,10 +384,19 @@ class Settings(BaseSettings):
     ai_builder_conversation_safety_buffer_tokens: int = 2_000
     ai_builder_minimum_conversation_budget_tokens: int = 4_000
     ai_builder_answer_reserve_share: float = AI_BUILDER_ANSWER_RESERVE_SHARE_DEFAULT
-    # Unset classification follows the proposal deadline: both may read the
-    # selected model's full context. A value preserves an explicit override.
+    # Provider-call deadlines bound *silence*: the longest wait for the
+    # provider's next yielded chunk (the first one included), not the whole
+    # answer, so a model that keeps yielding is not cut off by this deadline
+    # while a dead connection is. Reasoning models are silent for minutes on
+    # large prompts before their first token. The whole call is bounded by
+    # AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS, policy of its own. Unset
+    # classification follows the proposal deadline; a value preserves an
+    # explicit override.
     ai_builder_classification_timeout_seconds: float | None = None
-    ai_builder_proposal_timeout_seconds: float = 180.0
+    ai_builder_proposal_timeout_seconds: float = 300.0
+    ai_builder_provider_call_ceiling_seconds: float = (
+        AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS_DEFAULT
+    )
     ai_builder_send_lock_lease_seconds: int = 900
 
     # Orphaned crawl run cleanup (prevents "Crawl already in progress" blocking)
@@ -776,6 +790,39 @@ class Settings(BaseSettings):
             logging.error(
                 "AI_BUILDER_CLASSIFICATION_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
                 self.ai_builder_classification_timeout_seconds,
+            )
+            sys.exit(1)
+
+        silence_settings = {
+            "AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS": (
+                self.ai_builder_proposal_timeout_seconds
+            ),
+            "AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS": (
+                self.ai_builder_provider_call_ceiling_seconds
+            ),
+        }
+        if self.ai_builder_classification_timeout_seconds is not None:
+            silence_settings["AI_BUILDER_CLASSIFICATION_TIMEOUT_SECONDS"] = (
+                self.ai_builder_classification_timeout_seconds
+            )
+        for name, value in silence_settings.items():
+            if not (math.isfinite(value) and value > 0):
+                logging.error(
+                    "%s must be a finite number of seconds greater than zero. "
+                    "Current value: %s",
+                    name,
+                    value,
+                )
+                sys.exit(1)
+        longest_silence = max(
+            self.ai_builder_proposal_timeout_seconds,
+            self.ai_builder_classification_timeout_seconds or 0.0,
+        )
+        if self.ai_builder_provider_call_ceiling_seconds < longest_silence:
+            logging.error(
+                "AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS must not be below the "
+                "proposal or classification silence deadline. Current value: %s",
+                self.ai_builder_provider_call_ceiling_seconds,
             )
             sys.exit(1)
 

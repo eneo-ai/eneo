@@ -57,6 +57,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     log_proposal_repair_invoked,
     proposal_repair_reason_from_tool_failure,
 )
+from eneo.flows.ai_builder.ai_builder_provider_call import ProviderSilenceExpired
 from eneo.flows.ai_builder.ai_builder_settings import (
     AIBuilderRequestBudget,
     AIBuilderResolvedRequestBudget,
@@ -1143,11 +1144,11 @@ def test_a_gateway_status_before_the_deadline_is_named_as_an_upstream_timeout() 
     assert "sensitive-provider-material" not in str(event_logger.warning.call_args)
 
 
-def test_a_call_that_ran_into_the_deadline_is_not_blamed_on_a_proxy() -> None:
+def test_a_call_that_ran_into_the_silence_deadline_is_not_blamed_on_a_proxy() -> None:
     event_logger = MagicMock()
 
     record_ai_builder_provider_failure(
-        TimeoutError(),
+        ProviderSilenceExpired(300.0),
         stage="slot_classification",
         request_id="req-local-deadline",
         request_budget=_classification_budget_at_the_gateway(),
@@ -1157,8 +1158,34 @@ def test_a_call_that_ran_into_the_deadline_is_not_blamed_on_a_proxy() -> None:
 
     safe_detail = event_logger.info.call_args.kwargs["extra"]["safe_detail"]
     assert safe_detail["deadline_reached"] is True
+    assert safe_detail["local_deadline"] == "silence"
     assert "upstream_timeout_suspected" not in safe_detail
     event_logger.warning.assert_not_called()
+
+
+def test_a_provider_error_after_long_healthy_streaming_is_not_a_deadline() -> None:
+    # 350 s of arriving chunks, then a provider error: no local timer expired,
+    # so the elapsed time says nothing about the silence deadline.
+    event_logger = MagicMock()
+
+    record_ai_builder_provider_failure(
+        APIError(
+            500,
+            "sensitive-provider-material",
+            model="private-model",
+            llm_provider="private-provider",
+        ),
+        stage="proposal_completion",
+        request_id="req-long-stream",
+        request_budget=_classification_budget_at_the_gateway(),
+        provider_elapsed_ms=350_000,
+        event_logger=event_logger,
+    )
+
+    safe_detail = event_logger.info.call_args.kwargs["extra"]["safe_detail"]
+    assert safe_detail["deadline_reached"] is False
+    assert "local_deadline" not in safe_detail
+    assert "upstream_timeout_suspected" not in safe_detail
 
 
 def test_a_503_before_the_deadline_is_an_upstream_failure_not_a_timeout() -> None:

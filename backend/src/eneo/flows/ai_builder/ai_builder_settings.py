@@ -18,9 +18,13 @@ from eneo.flows.flow_ai_builder_budget_settings import (
     parse_ai_builder_budget_token,
     parse_ai_builder_operating_limit,
 )
-from eneo.main.config import AI_BUILDER_ANSWER_RESERVE_SHARE_DEFAULT, get_settings
+from eneo.main.config import (
+    AI_BUILDER_ANSWER_RESERVE_SHARE_DEFAULT,
+    AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS_DEFAULT,
+    get_settings,
+)
 
-AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS = 180.0
+AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS = 300.0
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -40,10 +44,13 @@ class AIBuilderRequestBudget:
     context_window_tokens: int
     model_output_ceiling_tokens: int
     safety_buffer_tokens: int
+    # Silence deadline: the longest wait for the provider's next chunk.
     timeout_seconds: float
     # The share of the room after the required input that packing keeps free
     # for the answer. Dimensionless deployment policy, never a token count.
     answer_reserve_share: float = AI_BUILDER_ANSWER_RESERVE_SHARE_DEFAULT
+    # The whole call's bound, however much it keeps producing.
+    ceiling_seconds: float = AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS_DEFAULT
     request_id: str | None = None
     # Bounds the complete input only; the answer is never charged to it.
     input_cap_tokens: int | None = None
@@ -65,8 +72,15 @@ class AIBuilderRequestBudget:
             and 0 < self.answer_reserve_share < 1
         ):
             raise ValueError("AI Builder answer reserve share must be within (0, 1)")
-        if self.timeout_seconds <= 0:
-            raise ValueError("AI Builder request timeout must be positive")
+        if not (math.isfinite(self.timeout_seconds) and self.timeout_seconds > 0):
+            raise ValueError("AI Builder request timeout must be positive and finite")
+        if not (
+            math.isfinite(self.ceiling_seconds)
+            and self.ceiling_seconds >= self.timeout_seconds
+        ):
+            raise ValueError(
+                "AI Builder call ceiling must be finite and not below the silence deadline"
+            )
 
     @property
     def usable_window_tokens(self) -> int:
@@ -106,6 +120,7 @@ class AIBuilderRequestBudget:
             model_output_ceiling_tokens=self.model_output_ceiling_tokens,
             safety_buffer_tokens=self.safety_buffer_tokens,
             answer_reserve_share=self.answer_reserve_share,
+            ceiling_seconds=self.ceiling_seconds,
             timeout_seconds=self.timeout_seconds,
             request_id=self.request_id,
             input_cap_tokens=self.input_cap_tokens,
@@ -159,6 +174,7 @@ class AIBuilderPlannedRequestBudget(AIBuilderRequestBudget):
             model_output_ceiling_tokens=self.model_output_ceiling_tokens,
             safety_buffer_tokens=self.safety_buffer_tokens,
             answer_reserve_share=self.answer_reserve_share,
+            ceiling_seconds=self.ceiling_seconds,
             timeout_seconds=self.timeout_seconds,
             request_id=self.request_id,
             input_cap_tokens=self.input_cap_tokens,
@@ -185,6 +201,7 @@ class AIBuilderPlannedRequestBudget(AIBuilderRequestBudget):
             model_output_ceiling_tokens=self.model_output_ceiling_tokens,
             safety_buffer_tokens=self.safety_buffer_tokens,
             answer_reserve_share=self.answer_reserve_share,
+            ceiling_seconds=self.ceiling_seconds,
             timeout_seconds=self.timeout_seconds,
             request_id=self.request_id,
             input_cap_tokens=self.input_cap_tokens,
@@ -208,6 +225,10 @@ class AIBuilderBudgetPolicy:
     minimum_conversation_budget_tokens: int
     # See AIBuilderRequestBudget.answer_reserve_share.
     answer_reserve_share: float = AI_BUILDER_ANSWER_RESERVE_SHARE_DEFAULT
+    # See AIBuilderRequestBudget.ceiling_seconds.
+    provider_call_ceiling_seconds: float = (
+        AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS_DEFAULT
+    )
     # Classification shares the proposal deadline unless deployment policy
     # explicitly gives it a different one.
     classification_timeout_seconds: float | None = None
@@ -266,6 +287,7 @@ class AIBuilderBudgetPolicy:
             model_output_ceiling_tokens=model_output_ceiling_tokens,
             safety_buffer_tokens=self.conversation_safety_buffer_tokens,
             answer_reserve_share=self.answer_reserve_share,
+            ceiling_seconds=self.provider_call_ceiling_seconds,
             timeout_seconds=(
                 self.classification_timeout_seconds
                 if self.classification_timeout_seconds is not None
@@ -289,6 +311,7 @@ class AIBuilderBudgetPolicy:
             model_output_ceiling_tokens=model_output_ceiling_tokens,
             safety_buffer_tokens=self.conversation_safety_buffer_tokens,
             answer_reserve_share=self.answer_reserve_share,
+            ceiling_seconds=self.provider_call_ceiling_seconds,
             timeout_seconds=self.proposal_timeout_seconds,
             request_id=request_id,
         )
@@ -311,6 +334,7 @@ class AIBuilderBudgetPolicy:
             model_output_ceiling_tokens=model_output_ceiling_tokens,
             safety_buffer_tokens=self.conversation_safety_buffer_tokens,
             answer_reserve_share=self.answer_reserve_share,
+            ceiling_seconds=self.provider_call_ceiling_seconds,
             timeout_seconds=self.proposal_timeout_seconds,
             request_id=request_id,
         )
@@ -330,6 +354,13 @@ def _default_policy(defaults: Any | None = None) -> AIBuilderBudgetPolicy:
                 source,
                 "ai_builder_answer_reserve_share",
                 AI_BUILDER_ANSWER_RESERVE_SHARE_DEFAULT,
+            )
+        ),
+        provider_call_ceiling_seconds=float(
+            getattr(
+                source,
+                "ai_builder_provider_call_ceiling_seconds",
+                AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS_DEFAULT,
             )
         ),
         classification_timeout_seconds=(
@@ -437,6 +468,7 @@ def resolve_ai_builder_budget_policy(
         conversation_safety_buffer_tokens=safety_buffer,
         minimum_conversation_budget_tokens=minimum_budget,
         answer_reserve_share=resolved_defaults.answer_reserve_share,
+        provider_call_ceiling_seconds=resolved_defaults.provider_call_ceiling_seconds,
         classification_timeout_seconds=(
             resolved_defaults.classification_timeout_seconds
         ),

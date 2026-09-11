@@ -115,8 +115,8 @@ model's context and output limits, reserved answer space, configured deadline,
 and elapsed provider-call time. Recognized rejection codes and parameter names
 are included when available. Two derived facts make slow-path failures
 attributable: `deadline_reached` says whether the call ran into Eneo's own
-deadline, and `upstream_timeout_suspected` is set when a 504 arrived before
-that deadline, which means a proxy or gateway between Eneo and the provider
+deadline, and `upstream_timeout_suspected` is set when a 504 arrived while no local
+deadline had expired, which means a proxy or gateway between Eneo and the provider
 gave up first; that case is also logged as a warning naming the proxy timeout
 as the thing to check, since raising Eneo's deadline cannot fix it. A 502 or
 503 is an upstream failure, not a timeout, and is recorded as its status. These are request measurements; a failed call's token usage
@@ -192,20 +192,42 @@ Upload byte limits protect storage and file processing. Message, collection,
 schema, and archive inspection bounds protect their respective API, persistence,
 and parsing boundaries. Those limits remain independent of model context size.
 
-`AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS` sets the default provider-call deadline for
-classification, proposals, and review (180 seconds). An explicitly configured
-`AI_BUILDER_CLASSIFICATION_TIMEOUT_SECONDS` overrides it for classification;
-leaving it unset restores inheritance. Deployments that previously used the
-implicit 60-second classification deadline now inherit the proposal deadline.
-Model context capacity does not establish
-provider processing speed, so deadlines are deployment policy.
+Every Builder provider call goes through one owner
+(`ai_builder_provider_call.complete_with_silence_deadline`). The answer is
+streamed and rebuilt into the complete completion, so a slow model is
+observable while it works. `AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS` (default 300)
+bounds *silence*: the longest wait for the provider's next yielded chunk, the
+first one included. A model that keeps yielding is not cut off by that
+deadline however long its answer takes, while a dead connection is still
+detected; reasoning models can be silent for minutes on large prompts before
+their first token, which is what the default allows for.
+`AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS` (default 1800) bounds the whole
+call, however much it keeps producing; it is policy of its own and never below
+the silence deadline. Neither is the send-lock lease, which the turn renews
+while it works. An explicitly configured
+`AI_BUILDER_CLASSIFICATION_TIMEOUT_SECONDS` overrides the silence deadline for
+classification; leaving it unset restores inheritance. Model context capacity
+does not establish provider processing speed, so deadlines are deployment
+policy. A proxy between Eneo and the provider that closes idle connections must
+allow at least this silence; see the failure telemetry above for how such a
+timeout is recognised (`local_deadline` names the timer that expired, silence
+or ceiling, when one did).
 
-Each call has a local deadline as well as the SDK timeout, with automatic SDK
-retries disabled. Expiry stops the local wait; remote work may continue. The
-turn retains its unknown-outcome state and requires acknowledgement before
-another provider call. HTTP 400 rejections should be investigated using the
-rejection fields and request budget; increasing the deadline does not resolve
-an invalid request.
+A stream that ends without a terminal finish reason is an incomplete answer
+with an unknown provider outcome, even when what arrived parses; it is never
+accepted and never retried by the call itself. Usage keeps its provenance:
+the rebuilt answer carries the usage the provider itself sent, combined
+across its chunks as running totals (a provider may report input tokens in
+its first event and output tokens in its last), and none when the provider
+sent none, so the existing estimate contract applies; the SDK's own recount
+never passes as the provider's.
+
+Expiry stops the local wait and closes the stream; remote work may continue.
+SDK retries are disabled, so nothing repeats provider work. The turn retains
+its unknown-outcome state and requires acknowledgement before another provider
+call. HTTP 400 rejections should be investigated using the rejection fields
+and request budget; increasing the deadline does not resolve an invalid
+request.
 
 ## Retention and deletion
 

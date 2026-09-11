@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import os
@@ -30,6 +29,9 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderKnownProviderRejectionException,
     build_ai_builder_request_budget_exhausted_error,
     record_ai_builder_provider_failure,
+)
+from eneo.flows.ai_builder.ai_builder_provider_call import (
+    complete_with_silence_deadline,
 )
 from eneo.flows.ai_builder.ai_builder_result_contract import RESULT_OBLIGATION_VALUES
 from eneo.flows.ai_builder.ai_builder_schema_evidence import (
@@ -245,15 +247,17 @@ async def classify_slots(
     )
     provider_started_at = time.perf_counter()
     try:
-        async with asyncio.timeout(request_budget.timeout_seconds):
-            response = await litellm_client.acompletion(
-                model=litellm_model,
-                messages=messages,
-                stream=False,
-                drop_params=True,
-                timeout=request_budget.timeout_seconds,
+        response = await complete_with_silence_deadline(
+            litellm_client,
+            silence_deadline_seconds=request_budget.timeout_seconds,
+            ceiling_seconds=request_budget.ceiling_seconds,
+            request={
+                "model": litellm_model,
+                "messages": messages,
+                "drop_params": True,
                 **completion_kwargs,
-            )
+            },
+        )
     except Exception as error:
         failure = record_ai_builder_provider_failure(
             error,

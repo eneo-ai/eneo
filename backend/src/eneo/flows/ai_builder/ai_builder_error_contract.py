@@ -26,6 +26,11 @@ from litellm.exceptions import (
 )
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from eneo.flows.ai_builder.ai_builder_provider_call import (
+    ProviderCallCeilingExpired,
+    ProviderSilenceExpired,
+    ProviderStreamIncomplete,
+)
 from eneo.main.exceptions import (
     BadRequestException,
     ErrorCodes,
@@ -391,9 +396,12 @@ def classify_ai_builder_provider_failure(
         kind = "timeout"
         status_code = _bounded_provider_status(error.status_code)
     elif isinstance(error, TimeoutError):
-        # asyncio.timeout bounds the whole call independently of SDK socket
-        # timeouts. Local expiry provides no HTTP status or provider outcome.
+        # A local deadline (silence or call ceiling) expired, independently of
+        # SDK socket timeouts. Local expiry provides no HTTP status or outcome.
         kind = "timeout"
+    elif isinstance(error, ProviderStreamIncomplete):
+        # The stream ended without the provider saying it was done.
+        kind = "transport_ambiguous"
     elif isinstance(error, APIConnectionError):
         kind = "transport_ambiguous"
     elif isinstance(error, _KNOWN_PROVIDER_REJECTION_ERRORS):
@@ -493,22 +501,32 @@ def record_ai_builder_provider_failure(
             safe_detail["input_cap_tokens"] = request_budget.input_cap_tokens
     if provider_elapsed_ms is not None:
         safe_detail["provider_elapsed_ms"] = provider_elapsed_ms
+        local_deadline = (
+            "silence"
+            if isinstance(error, ProviderSilenceExpired)
+            else "ceiling"
+            if isinstance(error, ProviderCallCeilingExpired)
+            else None
+        )
+        safe_detail["deadline_reached"] = local_deadline is not None
+        if local_deadline is not None:
+            safe_detail["local_deadline"] = local_deadline
         if request_budget is not None:
-            deadline_ms = int(request_budget.timeout_seconds * 1000)
-            safe_detail["deadline_reached"] = provider_elapsed_ms >= deadline_ms
-            # A gateway status before our own deadline means something between
-            # Eneo and the provider gave up first (a proxy server timeout, for
-            # example); the deadline setting cannot fix that, the proxy can.
+            # A gateway timeout while no local deadline expired means something
+            # between Eneo and the provider gave up first (a proxy server
+            # timeout, for example); the deadline setting cannot fix that, the
+            # proxy can.
             if (
                 failure.status_code in _UPSTREAM_GATEWAY_STATUS_CODES
-                and provider_elapsed_ms < deadline_ms
+                and local_deadline is None
             ):
                 safe_detail["upstream_timeout_suspected"] = True
                 event_logger.warning(
-                    "AI Builder provider call answered %s after %s ms, before the "
-                    "%s s deadline: a proxy or gateway between Eneo and the "
-                    "provider likely timed out first. Check proxy server "
-                    "timeouts against AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS.",
+                    "AI Builder provider call answered %s after %s ms while no "
+                    "local deadline (%s s of silence) had expired: a proxy or "
+                    "gateway between Eneo and the provider likely timed out "
+                    "first. Check proxy server timeouts against "
+                    "AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS.",
                     failure.status_code,
                     provider_elapsed_ms,
                     request_budget.timeout_seconds,

@@ -2833,7 +2833,7 @@ async def test_slot_classification_provider_failure_uses_typed_disposition(
     assert payload["safe_detail"]["context_window_tokens"] == 100_000
     assert payload["safe_detail"]["fixed_input_tokens"] > 0
     assert payload["safe_detail"]["model_output_ceiling_tokens"] == 4_096
-    assert payload["safe_detail"]["timeout_seconds"] == 180.0
+    assert payload["safe_detail"]["timeout_seconds"] == 300.0
     assert payload["safe_detail"]["provider_elapsed_ms"] >= 0
     encoded = str(payload)
     assert "sensitive-provider-material" not in encoded

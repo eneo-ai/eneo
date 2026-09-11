@@ -166,7 +166,7 @@ async def test_a_sourced_answer_becomes_suggestions_with_the_sample_floor():
     assert [item.kind for item in result.suggestions] == ["duplicated_work"]
     assert result.sample.excerpts_included == 1
     (call,) = client.calls
-    assert call["stream"] is False and call["max_tokens"] > 0
+    assert call["stream"] is True and call["max_tokens"] > 0
     assert call["num_retries"] == 0
     assert call["max_retries"] == 0
     assert call["messages"][0]["role"] == "system"
