@@ -1731,8 +1731,6 @@ class TenantModelAdapter(CompletionModelAdapter):
                     )
 
                 async for chunk in s:
-                    logger.debug(f"[DEBUG] Raw chunk: {chunk}")
-
                     # Capture usage from final chunk (when stream_options include_usage is set)
                     chunk_usage_obj = getattr(chunk, "usage", None)
                     if chunk_usage_obj:
@@ -1757,7 +1755,6 @@ class TenantModelAdapter(CompletionModelAdapter):
 
                     delta = chunk.choices[0].delta
                     finish_reason = chunk.choices[0].finish_reason
-                    logger.debug(f"[DEBUG] Delta: {delta}")
 
                     # Forward provider reasoning/thinking deltas (e.g. Anthropic
                     # extended thinking surfaced by LiteLLM as reasoning_content)
