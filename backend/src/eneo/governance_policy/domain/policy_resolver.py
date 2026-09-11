@@ -54,6 +54,8 @@ class EffectiveConfig:
     reasoning_policy_configured: bool = False
     default_reasoning_effort: str | None = None
     reasoning_effort_user_configurable: bool = False
+    # None = not governed; otherwise replaces the assistant's own flag.
+    inline_file_text: bool | None = None
 
     # Allowed servers that start switched OFF in the user's chat (UX seed
     # only — the user can still enable them per conversation).
@@ -228,6 +230,7 @@ def resolve_personal_default(
         reasoning_policy_configured=policy.reasoning_policy_configured,
         default_reasoning_effort=policy.default_reasoning_effort,
         reasoning_effort_user_configurable=policy.allow_user_reasoning_effort,
+        inline_file_text=policy.inline_file_text,
         governance_skill_resolution=(
             governance_skill_resolution
             if governance_skill_resolution is not None
@@ -267,6 +270,19 @@ def select_effective_completion_model(
         if effective_config.available_models
         else None
     )
+
+
+def select_effective_inline_file_text(
+    stored: bool, effective_config: "EffectiveConfig | None"
+) -> bool:
+    """Whether attachment text is inlined, honoring a governed file policy.
+
+    Shared by ask-time enforcement, read-time preflight and the public model
+    so the meter, the tool list and the actual request never disagree.
+    """
+    if effective_config is None or effective_config.inline_file_text is None:
+        return stored
+    return effective_config.inline_file_text
 
 
 def select_effective_reasoning_effort(

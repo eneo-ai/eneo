@@ -6,11 +6,13 @@
 
 <script lang="ts">
   import { Settings } from "$lib/components/layout";
+  import { hasPermission } from "$lib/core/hasPermission.js";
   import {
     loadSkillBindingCatalogPage,
     loadSkillBindingPreview
   } from "$lib/features/skills/skillBindingCatalog";
   import { m } from "$lib/paraglide/messages";
+  import FilePolicySection from "./FilePolicySection.svelte";
   import McpRestrictionSection from "./McpRestrictionSection.svelte";
   import ModelRestrictionSection from "./ModelRestrictionSection.svelte";
   import PolicyConfirmDialog from "./PolicyConfirmDialog.svelte";
@@ -30,6 +32,13 @@
   $effect(() => {
     draft.sync(data);
   });
+
+  // Same gates as the assistant editor: the file policy only exists where
+  // signed file references are configured, and inlining can only be switched
+  // off once the original files live in object storage.
+  const showFilePolicy = $derived(data.settings.file_references_enabled === true);
+  const objectStoreConfigured = $derived(data.settings.object_store_configured === true);
+  const canConfigureStorage = $derived(hasPermission(data.user)({ allOf: ["admin", "storage"] }));
 </script>
 
 <svelte:head>
@@ -86,6 +95,14 @@
         promptSummary={draft.promptSummary}
         badgeVariant={draft.badgeVariant}
       />
+      {#if showFilePolicy}
+        <FilePolicySection
+          bind:openFilesEnabled={draft.openFilesEnabled}
+          summary={draft.filesSummary}
+          {objectStoreConfigured}
+          {canConfigureStorage}
+        />
+      {/if}
       <SkillsPolicySection
         bind:skillBindings={draft.skillBindings}
         initialCatalogPage={draft.skillCatalogPage}

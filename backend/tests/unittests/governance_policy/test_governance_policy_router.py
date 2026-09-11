@@ -9,6 +9,7 @@ from eneo.governance_policy.domain.governance_policy import (
     PolicyScope,
 )
 from eneo.governance_policy.presentation.governance_policy_models import (
+    FilePolicyInput,
     GovernancePolicyUpdate,
     McpRestrictionInput,
     ModelsRestrictionInput,
@@ -16,6 +17,7 @@ from eneo.governance_policy.presentation.governance_policy_models import (
     SkillsPolicyInput,
 )
 from eneo.governance_policy.presentation.governance_policy_router import (
+    _policy_changes,
     update_governance_policy,
 )
 
@@ -107,6 +109,54 @@ async def test_mcp_only_update_revalidates_personal_skill_activation():
     )
 
     assistant_service.assert_personal_default_governance_context_fit.assert_awaited_once()
+
+
+async def test_file_policy_update_forwards_inline_flag_and_skips_context_fit():
+    # Message uploads are not part of the persistent baseline the fit gate
+    # checks, so the file policy never triggers that validation.
+    policy = GovernancePolicy(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        scope=PolicyScope.PERSONAL_DEFAULT_ASSISTANT,
+    )
+    service = MagicMock()
+    service.get_policy_for_update = AsyncMock(return_value=policy)
+    service.get_skill_bindings = AsyncMock(return_value=[])
+    service.get_skill_binding_projections = AsyncMock(return_value=[])
+    service.update_policy = AsyncMock(return_value=policy)
+    assistant_service = MagicMock()
+    assistant_service.assert_personal_default_governance_context_fit = AsyncMock()
+    container = MagicMock()
+    container.governance_policy_service.return_value = service
+    container.governance_policy_assembler.return_value = MagicMock()
+    container.assistant_service.return_value = assistant_service
+
+    await update_governance_policy(
+        payload=GovernancePolicyUpdate(
+            file_policy=FilePolicyInput(inline_file_text=False)
+        ),
+        request=_session_request(),
+        container=container,
+    )
+
+    assert service.update_policy.await_args.kwargs["inline_file_text"] is False
+    assistant_service.assert_personal_default_governance_context_fit.assert_not_awaited()
+
+
+def test_policy_changes_records_file_policy_transitions():
+    before = GovernancePolicy(
+        id=uuid4(), tenant_id=uuid4(), scope=PolicyScope.PERSONAL_DEFAULT_ASSISTANT
+    )
+    after = GovernancePolicy(
+        id=before.id,
+        tenant_id=before.tenant_id,
+        scope=PolicyScope.PERSONAL_DEFAULT_ASSISTANT,
+        inline_file_text=False,
+    )
+
+    changes = _policy_changes(before, after, before_skills=[], after_skills=[])
+
+    assert changes == {"inline_file_text": {"old": None, "new": False}}
 
 
 async def test_reasoning_only_update_skips_unrelated_context_fit_validation():

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Page, Settings } from "$lib/components/layout";
+  import OpenFilesHelp from "$lib/features/assistants/components/OpenFilesHelp.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager.js";
   import { hasPermission } from "$lib/core/hasPermission.js";
 
@@ -582,9 +583,12 @@
         {/if}
 
         {#if data.settings.file_references_enabled}
+          <!-- Phrased as a capability, matching the personal-assistant policy:
+               "on" hands large files to the model as references it reads with a
+               tool, which the backend stores as inline_file_text = false. -->
           <Settings.Row
-            title={m.inline_file_text()}
-            description={m.inline_file_text_description()}
+            title={m.attachments_open_files_label()}
+            description=""
             hasChanges={$currentChanges.diff.inline_file_text !== undefined}
             revertFn={() => {
               discardChanges("inline_file_text");
@@ -596,12 +600,13 @@
               {/if}
             </svelte:fragment>
             <svelte:fragment slot="description">
+              <OpenFilesHelp />
               {#if objectStorageMissing}
                 <p
                   class="label-warning border-label-default bg-label-dimmer text-label-stronger mt-2.5 rounded-md border px-2 py-1 text-sm"
                 >
                   <span class="font-bold">{m.hint()}:&nbsp;</span
-                  >{m.inline_file_text_object_storage_hint()}
+                  >{m.attachments_open_files_storage_hint()}
                   {#if canConfigureStorage}
                     <a href={resolve("/admin/storage")} class="underline"
                       >{m.configure_object_storage()}</a
@@ -612,7 +617,9 @@
             </svelte:fragment>
             <div class="border-default flex h-14 border-b py-2">
               <Input.RadioSwitch
-                bind:value={$update.inline_file_text}
+                bind:value={
+                  () => !$update.inline_file_text, (on) => ($update.inline_file_text = !on)
+                }
                 disabled={objectStorageMissing}
                 labelTrue={m.enable()}
                 labelFalse={m.disable()}

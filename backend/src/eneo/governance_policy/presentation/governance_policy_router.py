@@ -134,6 +134,12 @@ def _policy_changes(
             "new": after.allow_user_reasoning_effort,
         }
 
+    if before.inline_file_text != after.inline_file_text:
+        changes["inline_file_text"] = {
+            "old": before.inline_file_text,
+            "new": after.inline_file_text,
+        }
+
     before_skill_entries = skill_binding_audit_entries(before_skills)
     after_skill_entries = skill_binding_audit_entries(after_skills)
     if before_skill_entries != after_skill_entries:
@@ -225,6 +231,10 @@ async def update_governance_policy(
             payload.reasoning_policy.allow_user_override,
         )
 
+    inline_file_text = None
+    if payload.file_policy is not None:
+        inline_file_text = payload.file_policy.inline_file_text
+
     skill_intents = None
     if payload.skills is not None:
         skill_intents = assistant_skill_binding_intents_from_input(
@@ -242,6 +252,7 @@ async def update_governance_policy(
         else None,
         prompt_enforcement=prompt_enforcement,
         reasoning_policy=reasoning_policy,
+        inline_file_text=inline_file_text,
         skill_intents=skill_intents,
     )
     if (

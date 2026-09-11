@@ -68,6 +68,41 @@ describe("PolicyDraft", () => {
     });
   });
 
+  it("submits only the file facet when open-files handling is switched on", async () => {
+    const update = vi.fn(async () => {});
+    const draft = new PolicyDraft();
+    draft.sync({
+      eneo: { governancePolicy: { update } } as never,
+      policy: {
+        models_restriction: { enabled: false, models: [], provider_ids: [] },
+        mcp_restriction: { enabled: false, servers: [], disabled_tool_ids: [] },
+        prompt_enforcement: { enabled: false, prompt_library_id: null },
+        reasoning_policy: { configured: false, default_effort: null, allow_user_override: false },
+        file_policy: { configured: false, inline_file_text: null },
+        skills: { bindings: [] }
+      },
+      models: { completionModels: [] },
+      modelProviders: [],
+      mcpSettings: { items: [] },
+      promptLibrary: { items: [] },
+      skills: emptySkillBindingCatalogPage(),
+      skillRuntimePolicy: { selective_activation_enabled: true }
+    });
+
+    // An ungoverned policy seeds the switch to the assistant default (whole
+    // text inlined, so large files off) without registering a pending change.
+    expect(draft.openFilesEnabled).toBe(false);
+    expect(draft.dirty).toBe(false);
+
+    // "On" grants the capability, which the backend stores as inlining off.
+    draft.openFilesEnabled = true;
+    expect(draft.dirty).toBe(true);
+    draft.save();
+
+    await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
+    expect(update).toHaveBeenCalledWith({ file_policy: { inline_file_text: false } });
+  });
+
   it("activates an explicit provider-default policy without changing its values", async () => {
     const update = vi.fn(async () => {});
     const draft = new PolicyDraft();

@@ -88,6 +88,10 @@ type Policy = {
     default_effort?: string | null;
     allow_user_override?: boolean;
   } | null;
+  file_policy?: {
+    configured?: boolean;
+    inline_file_text?: boolean | null;
+  } | null;
   skills: { bindings: AssistantSkillBindingSummary[] };
 };
 
@@ -110,6 +114,9 @@ type PolicyUpdate = {
   reasoning_policy?: {
     default_effort: string | null;
     allow_user_override: boolean;
+  };
+  file_policy?: {
+    inline_file_text: boolean;
   };
   skills?: {
     bindings: AssistantSkillBindingInput[];
@@ -134,6 +141,7 @@ const EMPTY_POLICY: Policy = {
   mcp_restriction: { enabled: false, servers: [], disabled_tool_ids: [] },
   prompt_enforcement: { enabled: false, prompt_library_id: null },
   reasoning_policy: { default_effort: null, allow_user_override: false },
+  file_policy: { configured: false, inline_file_text: null },
   skills: { bindings: [] }
 };
 
@@ -174,6 +182,12 @@ export class PolicyDraft {
   reasoningPolicyConfigured = $state(false);
   defaultReasoningEffort = $state<string | null>(null);
   allowUserReasoningEffort = $state(false);
+  // Whether personal assistants hand large attachments to the model as file
+  // references it reads with a tool (backend: inline_file_text = false) instead
+  // of inlining the whole text. The switch is phrased positively — "on" grants
+  // the capability. Ungoverned policies seed as off (the assistant default);
+  // flipping the switch governs the dimension on save.
+  openFilesEnabled = $state(false);
   skillBindings = $state<AssistantSkillBindingInput[]>([]);
 
   // ---- Save lifecycle ------------------------------------------------------
@@ -258,6 +272,7 @@ export class PolicyDraft {
     this.reasoningPolicyConfigured = policy.reasoning_policy?.configured ?? false;
     this.defaultReasoningEffort = policy.reasoning_policy?.default_effort ?? null;
     this.allowUserReasoningEffort = policy.reasoning_policy?.allow_user_override ?? false;
+    this.openFilesEnabled = policy.file_policy?.inline_file_text === false;
     this.skillBindingSummaries = policy.skills.bindings;
     this.skillBindings = policy.skills.bindings.map((binding) => ({
       skill_id: binding.skill_id,
@@ -389,6 +404,9 @@ export class PolicyDraft {
       this.allowUserReasoningEffort !==
         (this.#policy.reasoning_policy?.allow_user_override ?? false)
   );
+  #fileDirty = $derived(
+    this.openFilesEnabled !== (this.#policy.file_policy?.inline_file_text === false)
+  );
   #initialSkillBindings = $derived(
     this.#policy.skills.bindings.map((binding) => ({
       skill_id: binding.skill_id,
@@ -412,6 +430,7 @@ export class PolicyDraft {
       this.#reasoningDirty ||
       this.#mcpDirty ||
       this.#promptDirty ||
+      this.#fileDirty ||
       this.#skillsDirty
   );
 
@@ -489,6 +508,15 @@ export class PolicyDraft {
       ? m.governance_reasoning_summary_user_choice({ effort: defaultLabel })
       : m.governance_reasoning_summary_fixed({ effort: defaultLabel });
   });
+  // Governed once saved with either value; a pristine ungoverned policy reads
+  // as inactive even though the switch shows the "off" default.
+  filesSummary = $derived(
+    !(this.#policy.file_policy?.configured || this.#fileDirty)
+      ? m.governance_files_summary_inactive()
+      : this.openFilesEnabled
+        ? m.governance_files_summary_open_files()
+        : m.governance_files_summary_inline()
+  );
   promptSummary = $derived(
     !this.promptEnabled
       ? m.governance_prompt_summary_inactive()
@@ -670,6 +698,9 @@ export class PolicyDraft {
           default_effort: this.defaultReasoningEffort,
           allow_user_override: this.allowUserReasoningEffort
         };
+      }
+      if (this.#fileDirty) {
+        update.file_policy = { inline_file_text: !this.openFilesEnabled };
       }
       if (this.#skillsDirty) {
         update.skills = {
