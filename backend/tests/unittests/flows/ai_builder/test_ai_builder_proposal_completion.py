@@ -1285,27 +1285,30 @@ async def test_the_proposal_is_sent_with_the_selected_models_output_ceiling() ->
 
 
 @pytest.mark.asyncio
-async def test_request_budget_refuses_when_full_model_output_cannot_fit() -> None:
+async def test_a_ceiling_equal_to_the_window_gets_the_room_the_request_leaves() -> None:
+    # Catalogue metadata often declares the ceiling equal to the window. The
+    # request is admitted, and the model is told it may write what the window
+    # leaves after the packed request: less than the ceiling, more than none.
     response = _make_response_with_text("ok")
     litellm_client = SimpleNamespace(acompletion=AsyncMock(return_value=response))
 
-    with pytest.raises(AIBuilderKnownProviderRejectionException):
-        await call_proposal_completion(
-            litellm_client=litellm_client,
-            request=_completion_request(
-                messages=[{"role": "user", "content": "Keep this current turn"}],
-                tool_schemas=[],
-                route=_route(),
-                max_output_tokens=100,
-                temperature=0.2,
-                request_budget=_request_budget(
-                    context_window_tokens=100,
-                    output_tokens=100,
-                ),
+    await call_proposal_completion(
+        litellm_client=litellm_client,
+        request=_completion_request(
+            messages=[{"role": "user", "content": "Keep this current turn"}],
+            tool_schemas=[],
+            route=_route(),
+            max_output_tokens=100,
+            temperature=0.2,
+            request_budget=_request_budget(
+                context_window_tokens=100,
+                output_tokens=100,
             ),
-        )
+        ),
+    )
 
-    litellm_client.acompletion.assert_not_awaited()
+    sent = litellm_client.acompletion.await_args.kwargs
+    assert 0 < sent["max_tokens"] < 100
 
 
 @pytest.mark.asyncio
@@ -1315,8 +1318,9 @@ async def test_protected_only_overflow_rejects_before_provider_work_or_call_slot
     system_message = {"role": "system", "content": "protected system"}
     current_turn = {"role": "user", "content": "protected current turn"}
     call_budget = ProposalCallBudget()
+    # Eleven protected tokens in a window of eleven: no room for any answer.
     request_budget = _request_budget(
-        context_window_tokens=20,
+        context_window_tokens=11,
         output_tokens=10,
         request_id="req-budget-overflow",
     )
@@ -1397,8 +1401,10 @@ async def test_final_strict_tool_payload_is_admitted_before_provider_work(
                 protected=True,
             ),
         ),
+        # The strict schema costs eleven tokens as sent; a window of eleven
+        # leaves no room for an answer only if that outbound cost is measured.
         proposal_request_budget=_request_budget(
-            context_window_tokens=20,
+            context_window_tokens=11,
             output_tokens=10,
             request_id="req-strict-payload-overflow",
         ),
@@ -1501,7 +1507,7 @@ def test_request_budget_evicts_oldest_optional_groups_and_preserves_repair_conte
     assert resolved.model_output_ceiling_tokens == 1
 
 
-def test_optional_history_yields_to_the_models_full_output_capacity(
+def test_optional_history_yields_to_the_reserved_answer_room_not_the_ceiling(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system_message = {"role": "system", "content": "system"}
@@ -1541,21 +1547,35 @@ def test_optional_history_yields_to_the_models_full_output_capacity(
             timeout_seconds=180.0,
         )
 
-    # A larger window carries the history beside the complete output allowance.
+    # A large window carries the history and the whole ceiling: the answer
+    # room kept while packing is the ceiling, and the model may write all of it.
     fitted, resolved = fit_proposal_request_budget(
         budget=budget(100), message_groups=groups, tool_schemas=[], model_name="test"
     )
     assert len(flatten_proposal_message_groups(fitted)) == 3
     assert resolved.fixed_input_tokens == 30
-    assert resolved.model_output_ceiling_tokens == 60
+    assert resolved.reserved_output_tokens == 40
+    assert resolved.provider_output_cap_tokens == 60
 
-    # A smaller window drops optional history and preserves output capacity.
+    # A tighter window still carries the history: half of the room after the
+    # protected input stays free for the answer, and the model is told the
+    # room the packed request actually leaves.
     fitted, resolved = fit_proposal_request_budget(
         budget=budget(80), message_groups=groups, tool_schemas=[], model_name="test"
     )
+    assert len(flatten_proposal_message_groups(fitted)) == 3
+    assert resolved.fixed_input_tokens == 30
+    assert resolved.reserved_output_tokens == 30
+    assert resolved.provider_output_cap_tokens == 50
+
+    # A window too small for both drops optional history, never the reserve.
+    fitted, resolved = fit_proposal_request_budget(
+        budget=budget(39), message_groups=groups, tool_schemas=[], model_name="test"
+    )
     assert len(flatten_proposal_message_groups(fitted)) == 2
     assert resolved.fixed_input_tokens == 20
-    assert resolved.model_output_ceiling_tokens == 60
+    assert resolved.reserved_output_tokens == 10
+    assert resolved.provider_output_cap_tokens == 19
 
 
 def test_an_all_protected_request_is_measured_once(
@@ -1892,3 +1912,81 @@ async def test_turn_usage_aggregates_real_auxiliary_initial_and_repair_calls() -
     assert summary["total_tokens_total"] == 3 + 8 + 11
     assert summary["llm_calls_made_total"] == 3
     assert summary["auxiliary_llm_call_count"] == 1
+
+
+def test_completion_keeps_the_prepared_allocation_and_only_a_repair_plans_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Window 100, ceiling 100, no buffer. Preparation planned from 20 required
+    # tokens: reserve 40, input up to 60. Packing then grew the protected
+    # system prompt to 50 tokens. Re-planning from 50 would shrink the reserve
+    # to 25 and admit 75 tokens of input; the prepared allocation admits 60
+    # and sends the cap the packed request leaves, never below 40.
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_proposal_tool_contracts.measure_provider_input_reserve",
+        lambda candidate, _tools, _model: SimpleNamespace(
+            tokens=sum(len(message["content"]) for message in candidate)
+        ),
+    )
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_proposal_tool_contracts.count_tool_tokens",
+        lambda _tools, _model: 0,
+    )
+    planned = _request_budget(context_window_tokens=100, output_tokens=100).plan(
+        required_input_tokens=20
+    )
+    assert planned is not None
+    assert (planned.reserved_output_tokens, planned.available_input_tokens) == (40, 60)
+    groups = (
+        ProposalMessageGroup(
+            messages=({"role": "system", "content": "s" * 50},),
+            kind="system",
+            protected=True,
+        ),
+        ProposalMessageGroup(
+            messages=({"role": "user", "content": "h" * 15},),
+            kind="history",
+            protected=False,
+        ),
+        ProposalMessageGroup(
+            messages=({"role": "user", "content": "c" * 5},),
+            kind="current_turn",
+            protected=True,
+        ),
+    )
+
+    fitted, sent = fit_proposal_request_budget(
+        budget=planned, message_groups=groups, tool_schemas=[], model_name="test"
+    )
+    # 50 + 15 + 5 = 70 exceeds the allocation: history yields, the reserve holds.
+    assert len(flatten_proposal_message_groups(fitted)) == 2
+    assert sent.reserved_output_tokens == 40
+    assert sent.fixed_input_tokens == 55
+    assert sent.provider_output_cap_tokens == 45
+
+    repaired, sent_repair = fit_proposal_request_budget(
+        budget=planned,
+        message_groups=groups,
+        tool_schemas=[],
+        model_name="test",
+        replan=True,
+    )
+    # A repair carries new protected content and plans from it: 55 required,
+    # room 45, reserve 23, input up to 77, so the history fits again.
+    assert len(flatten_proposal_message_groups(repaired)) == 3
+    assert sent_repair.reserved_output_tokens == 23
+    assert sent_repair.fixed_input_tokens == 70
+    assert sent_repair.provider_output_cap_tokens == 30
+
+    # Protected content beyond the prepared allocation is refused, not squeezed.
+    oversized = (
+        ProposalMessageGroup(
+            messages=({"role": "system", "content": "s" * 61},),
+            kind="system",
+            protected=True,
+        ),
+    )
+    with pytest.raises(AIBuilderKnownProviderRejectionException):
+        fit_proposal_request_budget(
+            budget=planned, message_groups=oversized, tool_schemas=[], model_name="test"
+        )

@@ -131,7 +131,7 @@ def test_attachment_text_admission_scales_with_selected_model_context() -> None:
         policy=policy,
         model_name="gpt-4o-mini",
         max_input_tokens=2_000,
-        max_output_tokens=500,
+        answer_reserve_tokens=500,
         safety_buffer_tokens=250,
         minimum_conversation_tokens=500,
     )
@@ -140,7 +140,7 @@ def test_attachment_text_admission_scales_with_selected_model_context() -> None:
         policy=policy,
         model_name="gpt-4o-mini",
         max_input_tokens=8_000,
-        max_output_tokens=500,
+        answer_reserve_tokens=500,
         safety_buffer_tokens=250,
         minimum_conversation_tokens=500,
     )

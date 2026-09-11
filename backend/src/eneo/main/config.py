@@ -216,6 +216,14 @@ _SHAREPOINT_FIXTURE_ALLOWED_ENVIRONMENTS = frozenset(
 )
 
 
+# The share of the room after a request's required input that AI Builder
+# packing keeps free for the answer (the rest carries optional input). It is
+# a dimensionless allocation policy: the model's own limits decide the window
+# and the ceiling, and this value only splits what is left. Even split when
+# nothing is known about the answer.
+AI_BUILDER_ANSWER_RESERVE_SHARE_DEFAULT = 0.5
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
@@ -370,6 +378,7 @@ class Settings(BaseSettings):
     flow_mapped_step_max_provider_calls_default: int | None = 100
     ai_builder_conversation_safety_buffer_tokens: int = 2_000
     ai_builder_minimum_conversation_budget_tokens: int = 4_000
+    ai_builder_answer_reserve_share: float = AI_BUILDER_ANSWER_RESERVE_SHARE_DEFAULT
     # Unset classification follows the proposal deadline: both may read the
     # selected model's full context. A value preserves an explicit override.
     ai_builder_classification_timeout_seconds: float | None = None
@@ -767,6 +776,13 @@ class Settings(BaseSettings):
             logging.error(
                 "AI_BUILDER_CLASSIFICATION_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
                 self.ai_builder_classification_timeout_seconds,
+            )
+            sys.exit(1)
+
+        if not (0 < self.ai_builder_answer_reserve_share < 1):
+            logging.error(
+                "AI_BUILDER_ANSWER_RESERVE_SHARE must be within (0, 1). Current value: %s",
+                self.ai_builder_answer_reserve_share,
             )
             sys.exit(1)
 

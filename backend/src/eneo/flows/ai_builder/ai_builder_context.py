@@ -226,17 +226,21 @@ def build_planner_context(
             code=AIBuilderErrorCode.PLANNER_MODEL_MISSING_OUTPUT_TOKENS,
         )
 
+    # Request-independent: the window, less the configured safety buffer, must
+    # leave room for some request at all. Whether a particular request fits is
+    # decided where that request is measured, before its provider call.
     if (
         budget_policy.classification_request_budget(
             context_window_tokens=max_input_tokens,
             model_output_ceiling_tokens=max_output_tokens,
-        ).available_input_tokens
-        == 0
+        ).plan(required_input_tokens=0)
+        is None
     ):
         raise AIBuilderBadRequestException(
-            "This model's configured output allowance and safety buffer leave no room "
-            "for AI Builder input. Choose a model with input capacity remaining after "
-            "its full output allowance, or ask an administrator to correct inaccurate model limits.",
+            "This model's context window does not exceed the configured safety "
+            "buffer, so no AI Builder request can fit. Choose a model with a larger "
+            "context window, or ask an administrator to correct inaccurate model "
+            "limits or the safety buffer policy.",
             code=AIBuilderErrorCode.PLANNER_MODEL_INCOMPATIBLE_TOKEN_LIMITS,
         )
 

@@ -212,6 +212,16 @@ async def classify_slots(
     completion_kwargs.update(num_retries=0, max_retries=0)
     request_budget = _resolve_slot_classification_request_budget(
         messages=messages,
+        protected_messages=_build_slot_classification_prompt(
+            classification_input=_protected_slot_classification_input(
+                classification_input
+            ),
+            allowed_slot_values=slot_values,
+            schema_candidates=schema_candidates,
+            active_checkpoint_producers=active_checkpoint_producers,
+            ui_language=ui_language,
+            bias=bias,
+        ),
         response_format=response_format,
         litellm_model=litellm_model,
         max_input_tokens=max_input_tokens,
@@ -222,7 +232,7 @@ async def classify_slots(
         raise AIBuilderKnownProviderRejectionException(
             build_ai_builder_request_budget_exhausted_error(request_id=None)
         )
-    completion_kwargs["max_tokens"] = request_budget.model_output_ceiling_tokens
+    completion_kwargs["max_tokens"] = request_budget.provider_output_cap_tokens
     if before_provider_call is not None:
         await before_provider_call()
     call = (
@@ -316,15 +326,14 @@ async def classify_slots(
     return SlotClassificationAttempt(outcome="resolved", result=result)
 
 
-def _resolve_slot_classification_request_budget(
+def _slot_classification_request_tokens(
     *,
     messages: list[dict[str, Any]],
     response_format: dict[str, object],
     litellm_model: str,
-    max_input_tokens: int,
-    max_output_tokens: int,
-    budget_policy: AIBuilderBudgetPolicy,
-) -> AIBuilderResolvedRequestBudget | None:
+) -> int:
+    """The request measured whole, response schema included, by the reserving counter."""
+
     request_tokens = measure_provider_input_reserve(messages, [], litellm_model).tokens
     if response_format:
         request_tokens += measure_provider_input_reserve(
@@ -339,10 +348,63 @@ def _resolve_slot_classification_request_budget(
             [],
             litellm_model,
         ).tokens
-    return budget_policy.classification_request_budget(
+    return request_tokens
+
+
+def _protected_slot_classification_input(
+    classification_input: SlotClassificationInput,
+) -> SlotClassificationInput:
+    """The sources a classification request must carry: the current user
+    message and its structured answers. Everything else is optional and packs
+    against the allocation these leave."""
+
+    return replace(
+        classification_input,
+        sources=tuple(
+            source
+            for source in classification_input.sources
+            if source.kind in {"user_message", "structured_answer"}
+            and source.message_id == classification_input.current_user_message_id
+        ),
+    )
+
+
+def _resolve_slot_classification_request_budget(
+    *,
+    messages: list[dict[str, Any]],
+    protected_messages: list[dict[str, Any]],
+    response_format: dict[str, object],
+    litellm_model: str,
+    max_input_tokens: int,
+    max_output_tokens: int,
+    budget_policy: AIBuilderBudgetPolicy,
+) -> AIBuilderResolvedRequestBudget | None:
+    """The budget of an admitted classification request.
+
+    The allocation is the one admission made from the protected sources, so
+    the reserve the call records is the reserve the optional sources were
+    packed against; the packed request is then measured whole.
+    """
+
+    planned = budget_policy.classification_request_budget(
         context_window_tokens=max_input_tokens,
         model_output_ceiling_tokens=max_output_tokens,
-    ).resolve(input_tokens=request_tokens)
+    ).plan(
+        required_input_tokens=_slot_classification_request_tokens(
+            messages=protected_messages,
+            response_format=response_format,
+            litellm_model=litellm_model,
+        )
+    )
+    if planned is None:
+        return None
+    return planned.resolve(
+        input_tokens=_slot_classification_request_tokens(
+            messages=messages,
+            response_format=response_format,
+            litellm_model=litellm_model,
+        )
+    )
 
 
 def admit_slot_classification_input(
@@ -369,10 +431,8 @@ def admit_slot_classification_input(
         mode=structured_output_mode,
     )
 
-    def request_budget_for(
-        candidate: SlotClassificationInput,
-    ) -> AIBuilderResolvedRequestBudget | None:
-        return _resolve_slot_classification_request_budget(
+    def request_tokens_for(candidate: SlotClassificationInput) -> int:
+        return _slot_classification_request_tokens(
             messages=_build_slot_classification_prompt(
                 classification_input=candidate,
                 allowed_slot_values=normalized_values,
@@ -383,17 +443,15 @@ def admit_slot_classification_input(
             ),
             response_format=response_format,
             litellm_model=litellm_model,
-            max_input_tokens=max_input_tokens,
-            max_output_tokens=max_output_tokens,
-            budget_policy=budget_policy,
         )
 
-    protected_source_ids = {
-        source.source_id
-        for source in classification_input.sources
-        if source.kind in {"user_message", "structured_answer"}
-        and source.message_id == classification_input.current_user_message_id
-    }
+    request_budget = budget_policy.classification_request_budget(
+        context_window_tokens=max_input_tokens,
+        model_output_ceiling_tokens=max_output_tokens,
+    )
+
+    protected_input = _protected_slot_classification_input(classification_input)
+    protected_source_ids = {source.source_id for source in protected_input.sources}
     transcript_only_input = replace(
         classification_input,
         sources=tuple(
@@ -402,21 +460,21 @@ def admit_slot_classification_input(
             if source.kind != "uploaded_file"
         ),
     )
-    protected_input = replace(
-        transcript_only_input,
-        sources=tuple(
-            source
-            for source in transcript_only_input.sources
-            if source.source_id in protected_source_ids
-        ),
+    # The answer room is fixed from the protected input alone; every optional
+    # source is then admitted against the same allocation.
+    planned_budget = request_budget.plan(
+        required_input_tokens=request_tokens_for(protected_input)
     )
-    if request_budget_for(protected_input) is None:
+    if planned_budget is None:
         raise AIBuilderKnownProviderRejectionException(
             build_ai_builder_request_budget_exhausted_error(request_id=None)
         )
 
     def fits(candidate: SlotClassificationInput) -> bool:
-        return request_budget_for(candidate) is not None
+        return (
+            planned_budget.resolve(input_tokens=request_tokens_for(candidate))
+            is not None
+        )
 
     if attachment_context is not None:
 

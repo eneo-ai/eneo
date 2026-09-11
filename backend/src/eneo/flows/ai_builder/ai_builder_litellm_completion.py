@@ -28,15 +28,12 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ProposalCompletionRequest,
     fit_proposal_request_budget,
     flatten_proposal_message_groups,
+    outbound_proposal_tool_schemas,
 )
 from eneo.flows.ai_builder.ai_builder_token_usage import (
     TOKEN_USAGE_SOURCE_PROVIDER,
     CompletionTokenUsage,
     completion_token_usage_from_response,
-)
-from eneo.flows.ai_builder.ai_builder_tools import (
-    ProposalToolSchema,
-    build_native_strict_tool_schema,
 )
 from eneo.main.logging import get_logger
 
@@ -93,6 +90,7 @@ async def call_proposal_completion(
         message_groups=request.message_groups,
         tool_schemas=tool_schemas,
         model_name=request.route.litellm_model,
+        replan=request.counts_as_repair,
     )
     messages = flatten_proposal_message_groups(fitted_message_groups)
     if not request.call_budget.try_start_call():
@@ -109,7 +107,7 @@ async def call_proposal_completion(
         logger.debug("ai_builder_proposal_completion_dropped_response_format")
     incident_evidence = _proposal_request_evidence(
         request=request,
-        max_tokens=request_budget.model_output_ceiling_tokens,
+        max_tokens=request_budget.provider_output_cap_tokens,
         timeout_seconds=request_budget.timeout_seconds,
         messages=messages,
         tool_schemas=tool_schemas,
@@ -134,7 +132,7 @@ async def call_proposal_completion(
                 parallel_tool_calls=False,
                 stream=False,
                 drop_params=True,
-                max_tokens=request_budget.model_output_ceiling_tokens,
+                max_tokens=request_budget.provider_output_cap_tokens,
                 timeout=request_budget.timeout_seconds,
                 **provider_kwargs,
             )
@@ -170,15 +168,9 @@ async def call_proposal_completion(
 def _outbound_proposal_tool_schemas(
     request: ProposalCompletionRequest,
 ) -> list[dict[str, Any]]:
-    if not request.route.supports_strict_tool_schema:
-        return request.tool_schemas
-    return [
-        cast(
-            dict[str, Any],
-            build_native_strict_tool_schema(cast(ProposalToolSchema, tool_schema)),
-        )
-        for tool_schema in request.tool_schemas
-    ]
+    return outbound_proposal_tool_schemas(
+        request.tool_schemas, strict=request.route.supports_strict_tool_schema
+    )
 
 
 def _proposal_request_evidence(

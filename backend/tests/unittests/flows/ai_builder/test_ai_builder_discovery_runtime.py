@@ -2195,7 +2195,7 @@ async def test_runtime_refits_saturated_attachment_before_admitting_transcript()
         policy=AIBuilderAttachmentContextPolicy(),
         model_name="gpt-test",
         max_input_tokens=16_000,
-        max_output_tokens=1_000,
+        answer_reserve_tokens=1_000,
         safety_buffer_tokens=1_000,
         minimum_conversation_tokens=4_000,
     )

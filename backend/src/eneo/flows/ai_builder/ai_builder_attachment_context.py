@@ -526,16 +526,21 @@ def build_ai_builder_attachment_context_for_model(
     policy: AIBuilderAttachmentContextPolicy,
     model_name: str,
     max_input_tokens: int,
-    max_output_tokens: int,
+    answer_reserve_tokens: int,
     safety_buffer_tokens: int,
     minimum_conversation_tokens: int,
 ) -> AIBuilderAttachmentContext | None:
-    """Admit attachment text against the selected model's usable input budget."""
+    """Admit attachment text against the selected model's usable input budget.
+
+    ``answer_reserve_tokens`` is the room the request budget keeps free for the
+    answer (see ``AIBuilderBudgetPolicy.answer_reserve_tokens``), not the
+    model's whole output ceiling.
+    """
 
     attachment_token_budget = max(
         0,
         max_input_tokens
-        - max_output_tokens
+        - answer_reserve_tokens
         - safety_buffer_tokens
         - minimum_conversation_tokens,
     )

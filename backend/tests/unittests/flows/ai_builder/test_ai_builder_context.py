@@ -320,15 +320,48 @@ def test_an_evidence_floor_narrows_the_candidates_and_refuses_a_lower_named_mode
     )
 
 
-@pytest.mark.parametrize("output_tokens", [128_000, 126_000])
-def test_model_limits_leaving_no_input_have_a_distinct_admission_error(
+_BUDGET_SETTINGS = {
+    "ai_builder": {
+        "conversation_safety_buffer_tokens": 2_000,
+        "minimum_conversation_budget_tokens": 4_000,
+    }
+}
+
+
+@pytest.mark.parametrize("context_window", [2_000, 1_024])
+def test_a_window_within_the_safety_buffer_has_a_distinct_error(
+    context_window: int,
+) -> None:
+    # Request-independent: no request can be shortened into a window the
+    # safety buffer already fills.
+    provider_id = uuid4()
+    model = _model(provider_id=provider_id)
+    model.max_input_tokens = context_window
+    model.max_output_tokens = 1_024
+    with pytest.raises(AIBuilderBadRequestException) as error:
+        build_planner_context(
+            _space([model]),
+            active_provider_ids={provider_id},
+            tenant_flow_settings=_BUDGET_SETTINGS,
+        )
+    assert error.value.code.value == "planner_model_incompatible_token_limits"
+    assert "safety buffer" in str(error.value).lower()
+
+
+@pytest.mark.parametrize("output_tokens", [128_000, 262_144])
+def test_a_declared_output_ceiling_at_or_above_the_window_is_not_refused(
     output_tokens: int,
 ) -> None:
+    # Catalogue metadata often declares the ceiling equal to the window; the
+    # request budget bounds the answer by the room each request leaves.
     provider_id = uuid4()
     model = _model(provider_id=provider_id)
     model.max_input_tokens = 128_000
     model.max_output_tokens = output_tokens
-    with pytest.raises(AIBuilderBadRequestException) as error:
-        build_planner_context(_space([model]), active_provider_ids={provider_id})
-    assert error.value.code.value == "planner_model_incompatible_token_limits"
-    assert "output" in str(error.value).lower()
+    context = build_planner_context(
+        _space([model]),
+        active_provider_ids={provider_id},
+        tenant_flow_settings=_BUDGET_SETTINGS,
+    )
+    assert context.max_input_tokens == 128_000
+    assert context.max_output_tokens == output_tokens

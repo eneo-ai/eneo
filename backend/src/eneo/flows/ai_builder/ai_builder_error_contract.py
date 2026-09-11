@@ -96,6 +96,9 @@ _MAX_REQUEST_ID_LENGTH = 128
 _DIAGNOSTIC_CONTEXT_STRING_LENGTH = 256
 _MAX_PROVIDER_FACT_LENGTH = 64
 _MAX_PROVIDER_ERROR_BODY_BYTES = 65_536
+# The one gateway status that states a timeout; 502 and 503 say an upstream
+# failed or is unavailable, which is not the same fact.
+_UPSTREAM_GATEWAY_STATUS_CODES = frozenset({504})
 # Provider messages can echo prompts, schemas, and credentials. Only protocol
 # identifiers from these closed sets may enter the shared failure event.
 _PROVIDER_ERROR_CODES = frozenset(
@@ -479,7 +482,10 @@ def record_ai_builder_provider_failure(
         safe_detail.update(
             context_window_tokens=request_budget.context_window_tokens,
             fixed_input_tokens=request_budget.fixed_input_tokens,
+            required_input_tokens=request_budget.required_input_tokens,
             model_output_ceiling_tokens=request_budget.model_output_ceiling_tokens,
+            reserved_output_tokens=request_budget.reserved_output_tokens,
+            provider_output_cap_tokens=request_budget.provider_output_cap_tokens,
             safety_buffer_tokens=request_budget.safety_buffer_tokens,
             timeout_seconds=request_budget.timeout_seconds,
         )
@@ -487,6 +493,31 @@ def record_ai_builder_provider_failure(
             safe_detail["input_cap_tokens"] = request_budget.input_cap_tokens
     if provider_elapsed_ms is not None:
         safe_detail["provider_elapsed_ms"] = provider_elapsed_ms
+        if request_budget is not None:
+            deadline_ms = int(request_budget.timeout_seconds * 1000)
+            safe_detail["deadline_reached"] = provider_elapsed_ms >= deadline_ms
+            # A gateway status before our own deadline means something between
+            # Eneo and the provider gave up first (a proxy server timeout, for
+            # example); the deadline setting cannot fix that, the proxy can.
+            if (
+                failure.status_code in _UPSTREAM_GATEWAY_STATUS_CODES
+                and provider_elapsed_ms < deadline_ms
+            ):
+                safe_detail["upstream_timeout_suspected"] = True
+                event_logger.warning(
+                    "AI Builder provider call answered %s after %s ms, before the "
+                    "%s s deadline: a proxy or gateway between Eneo and the "
+                    "provider likely timed out first. Check proxy server "
+                    "timeouts against AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS.",
+                    failure.status_code,
+                    provider_elapsed_ms,
+                    request_budget.timeout_seconds,
+                    extra={
+                        "operation": failure.stage,
+                        "failure_fingerprint": failure.fingerprint,
+                        "request_id": request_id,
+                    },
+                )
     log_failure_event(
         event_logger,
         event="ai_builder.provider.failure",
@@ -658,9 +689,11 @@ def build_ai_builder_request_budget_exhausted_error(
 ) -> AIBuilderPublicError:
     return build_ai_builder_error(
         message=(
-            "The required AI planner input and the model's full output allowance "
-            "do not fit together. Start a new turn with a shorter request or choose a "
-            "model with a larger context window."
+            "The AI planner request exceeds its budget: the required input leaves "
+            "no room for an answer in the model's context window, or exceeds the "
+            "organisation's input cap. Start a new turn with a shorter request, "
+            "choose a model with a larger context window, or ask an administrator "
+            "about the cap."
         ),
         code=AIBuilderErrorCode.PLANNER_CONTEXT_LIMIT_EXCEEDED,
         phase=AIBuilderErrorPhase.PLANNER,

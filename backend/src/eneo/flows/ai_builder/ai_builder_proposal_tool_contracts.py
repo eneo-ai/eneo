@@ -42,11 +42,15 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
 from eneo.flows.ai_builder.ai_builder_resource_catalog import AIBuilderResourceCatalog
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from eneo.flows.ai_builder.ai_builder_settings import (
+    AIBuilderPlannedRequestBudget,
     AIBuilderRequestBudget,
     AIBuilderResolvedRequestBudget,
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
-from eneo.flows.ai_builder.ai_builder_tools import ProposalToolSchema
+from eneo.flows.ai_builder.ai_builder_tools import (
+    ProposalToolSchema,
+    build_native_strict_tool_schema,
+)
 from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from eneo.flows.ai_builder.planning_state import AggregationIntent, PlanningState
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
@@ -119,6 +123,22 @@ def proposal_turn_tool_schemas(
     if decline_tool_schema is not None:
         schemas.append(cast(dict[str, Any], decline_tool_schema))
     return schemas
+
+
+def outbound_proposal_tool_schemas(
+    tool_schemas: list[dict[str, Any]], *, strict: bool
+) -> list[dict[str, Any]]:
+    """The tools as the provider receives them: what they cost and what is sent."""
+
+    if not strict:
+        return tool_schemas
+    return [
+        cast(
+            dict[str, Any],
+            build_native_strict_tool_schema(cast(ProposalToolSchema, tool_schema)),
+        )
+        for tool_schema in tool_schemas
+    ]
 
 
 class ProposalCompletionFn(Protocol):
@@ -285,7 +305,19 @@ def fit_proposal_request_budget(
     message_groups: tuple[ProposalMessageGroup, ...],
     tool_schemas: list[dict[str, Any]],
     model_name: str,
+    replan: bool = False,
 ) -> tuple[tuple[ProposalMessageGroup, ...], AIBuilderResolvedRequestBudget]:
+    """Fit the optional groups and resolve what the model may write.
+
+    A budget planned during preparation (from the scaffold prompt, the
+    outbound tools and the current turn, before anything optional was packed)
+    is used as it is: the attachment text and evidence packing grew the
+    protected system prompt inside that allocation, and re-planning from the
+    grown input would shrink the reserve the packing was measured against.
+    ``replan`` asks for a new allocation from this call's own protected
+    input: a repair call carries different protected content.
+    """
+
     tool_tokens = count_tool_tokens(tool_schemas, model_name)
     protected_messages = flatten_proposal_message_groups(
         tuple(group for group in message_groups if group.protected)
@@ -295,23 +327,32 @@ def fit_proposal_request_budget(
         [],
         model_name,
     ).tokens
-    resolved = budget.resolve(input_tokens=tool_tokens + protected_tokens)
-    if resolved is None:
-        raise AIBuilderKnownProviderRejectionException(
-            build_ai_builder_request_budget_exhausted_error(
-                request_id=budget.request_id
-            )
+    exhausted = AIBuilderKnownProviderRejectionException(
+        build_ai_builder_request_budget_exhausted_error(request_id=budget.request_id)
+    )
+    if isinstance(budget, AIBuilderPlannedRequestBudget) and not replan:
+        planned: AIBuilderPlannedRequestBudget | None = budget
+        if tool_tokens + protected_tokens > budget.available_input_tokens:
+            raise exhausted
+    else:
+        base = (
+            budget.unplanned()
+            if isinstance(budget, AIBuilderPlannedRequestBudget)
+            else budget
         )
+        planned = base.plan(required_input_tokens=tool_tokens + protected_tokens)
+        if planned is None:
+            raise exhausted
     fitted = _fit_proposal_message_groups_measured(
         message_groups,
-        token_limit=resolved.available_input_tokens - tool_tokens,
+        token_limit=planned.available_input_tokens - tool_tokens,
         model_name=model_name,
         protected_tokens=protected_tokens,
     )
-    assert fitted is not None, "resolved protected proposal context must fit"
+    assert fitted is not None, "planned protected proposal context must fit"
     fitted_groups, fitted_tokens = fitted
-    # Record the fitted request's input measurement for provider accounting.
-    sent = budget.resolve(input_tokens=tool_tokens + fitted_tokens)
+    # The packed request, measured whole, decides what the model may write.
+    sent = planned.resolve(input_tokens=tool_tokens + fitted_tokens)
     assert sent is not None, "a fitted proposal request keeps its reserved room"
     return fitted_groups, sent
 

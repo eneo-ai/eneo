@@ -8,6 +8,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
 )
 from eneo.flows.ai_builder.ai_builder_settings import (
     AIBuilderBudgetPolicy,
+    AIBuilderRequestBudget,
     apply_ai_builder_budget_policy_patch,
     resolve_ai_builder_budget_policy,
 )
@@ -76,46 +77,158 @@ def test_ai_builder_policy_rejects_operating_limits_above_system_ceiling(
     assert exc_info.value.code is AIBuilderErrorCode.INVALID_AI_BUILDER_SETTINGS
 
 
+def _policy(**overrides: object) -> AIBuilderBudgetPolicy:
+    return AIBuilderBudgetPolicy(
+        conversation_safety_buffer_tokens=2_000,
+        minimum_conversation_budget_tokens=4_000,
+        **overrides,  # type: ignore[arg-type]
+    )
+
+
 @pytest.mark.parametrize("operation", ["classification", "proposal", "review"])
 @pytest.mark.parametrize(
     ("context_window", "output_ceiling"),
     [(1_000_000, 128_000), (128_000, 16_384)],
 )
-def test_request_admission_preserves_the_selected_models_full_output_capacity(
+def test_a_ceiling_within_half_the_room_is_reserved_whole(
     operation: str, context_window: int, output_ceiling: int
 ) -> None:
-    policy = AIBuilderBudgetPolicy(
-        conversation_safety_buffer_tokens=2_000,
-        minimum_conversation_budget_tokens=4_000,
-    )
-    budget = getattr(policy, f"{operation}_request_budget")(
+    # The common case: the ceiling fits in half of what the required input
+    # leaves, so packing keeps the whole ceiling free and the input budget is
+    # exactly the window less the buffer and the ceiling.
+    budget = getattr(_policy(), f"{operation}_request_budget")(
         context_window_tokens=context_window,
         model_output_ceiling_tokens=output_ceiling,
     )
-    input_limit = context_window - output_ceiling - 2_000
-
-    resolved = budget.resolve(input_tokens=20_000)
+    planned = budget.plan(required_input_tokens=20_000)
+    assert planned is not None
+    assert planned.reserved_output_tokens == output_ceiling
+    input_limit = context_window - 2_000 - output_ceiling
+    assert planned.available_input_tokens == input_limit
+    resolved = planned.resolve(input_tokens=20_000)
     assert resolved is not None
-    assert resolved.available_input_tokens == input_limit
-    assert resolved.model_output_ceiling_tokens == output_ceiling
-    assert budget.resolve(input_tokens=input_limit) is not None
-    assert budget.resolve(input_tokens=input_limit + 1) is None
+    assert resolved.provider_output_cap_tokens == output_ceiling
+    assert planned.resolve(input_tokens=input_limit) is not None
+    assert planned.resolve(input_tokens=input_limit + 1) is None
 
 
 @pytest.mark.parametrize("operation", ["classification", "proposal", "review"])
-def test_request_admission_refuses_a_window_without_room_for_full_output(
+def test_a_ceiling_at_or_above_the_window_shares_the_room_evenly(
     operation: str,
 ) -> None:
-    policy = AIBuilderBudgetPolicy(
-        conversation_safety_buffer_tokens=2_000,
-        minimum_conversation_budget_tokens=4_000,
-    )
-    budget = getattr(policy, f"{operation}_request_budget")(
+    # Catalogue metadata often declares the ceiling equal to the window. The
+    # request is not refused: half of the room after the required input is
+    # kept for the answer, the rest carries optional input, and the model is
+    # told it may write what the packed request leaves.
+    budget = getattr(_policy(), f"{operation}_request_budget")(
         context_window_tokens=128_000,
         model_output_ceiling_tokens=128_000,
     )
+    planned = budget.plan(required_input_tokens=20_000)
+    assert planned is not None
+    assert planned.reserved_output_tokens == 53_000
+    assert planned.available_input_tokens == 126_000 - 53_000
+    resolved = planned.resolve(input_tokens=20_000)
+    assert resolved is not None
+    assert resolved.provider_output_cap_tokens == 106_000
+    packed = planned.resolve(input_tokens=planned.available_input_tokens)
+    assert packed is not None
+    assert packed.provider_output_cap_tokens == planned.reserved_output_tokens
 
-    assert budget.resolve(input_tokens=1) is None
+
+def test_required_input_that_leaves_no_room_is_refused_and_one_token_is_not() -> None:
+    budget = _policy().proposal_request_budget(
+        context_window_tokens=128_000, model_output_ceiling_tokens=16_384
+    )
+    assert budget.plan(required_input_tokens=126_000) is None
+    planned = budget.plan(required_input_tokens=125_999)
+    assert planned is not None
+    assert planned.reserved_output_tokens == 1
+    assert planned.available_input_tokens == 125_999
+    resolved = planned.resolve(input_tokens=125_999)
+    assert resolved is not None
+    assert resolved.provider_output_cap_tokens == 1
+    assert budget.resolve_whole(input_tokens=126_000) is None
+
+
+def test_the_reserve_rounds_up_and_never_exceeds_the_room() -> None:
+    budget = AIBuilderRequestBudget(
+        context_window_tokens=105,
+        model_output_ceiling_tokens=100,
+        safety_buffer_tokens=0,
+        answer_reserve_share=0.5,
+        timeout_seconds=1.0,
+    )
+    planned = budget.plan(required_input_tokens=4)
+    assert planned is not None
+    assert planned.reserved_output_tokens == 51
+    assert planned.available_input_tokens == 54
+    resolved = planned.resolve(input_tokens=54)
+    assert resolved is not None
+    assert resolved.provider_output_cap_tokens == 51
+    tiny = budget.plan(required_input_tokens=104)
+    assert tiny is not None
+    assert tiny.reserved_output_tokens == 1
+
+
+@pytest.mark.parametrize("share", [0.0, 1.0, -0.5, float("nan"), float("inf")])
+def test_the_answer_reserve_share_must_be_a_fraction_of_the_room(share: float) -> None:
+    with pytest.raises(ValueError):
+        AIBuilderRequestBudget(
+            context_window_tokens=1_000,
+            model_output_ceiling_tokens=100,
+            safety_buffer_tokens=0,
+            answer_reserve_share=share,
+            timeout_seconds=1.0,
+        )
+
+
+def test_the_share_is_deployment_policy_read_once() -> None:
+    policy = resolve_ai_builder_budget_policy(
+        None,
+        defaults=SimpleNamespace(
+            ai_builder_conversation_safety_buffer_tokens=2_000,
+            ai_builder_minimum_conversation_budget_tokens=4_000,
+            ai_builder_answer_reserve_share=0.25,
+            ai_builder_classification_timeout_seconds=None,
+            ai_builder_proposal_timeout_seconds=180.0,
+        ),
+    )
+    assert policy.answer_reserve_share == 0.25
+    planned = policy.proposal_request_budget(
+        context_window_tokens=128_000, model_output_ceiling_tokens=128_000
+    ).plan(required_input_tokens=26_000)
+    assert planned is not None
+    assert planned.reserved_output_tokens == 25_000
+
+
+def test_the_answer_reserve_for_a_packer_stands_in_for_unmeasured_input() -> None:
+    policy = _policy()
+    assert (
+        policy.answer_reserve_tokens(
+            context_window_tokens=128_000,
+            model_output_ceiling_tokens=16_384,
+            required_input_tokens=4_000,
+        )
+        == 16_384
+    )
+    assert (
+        policy.answer_reserve_tokens(
+            context_window_tokens=128_000,
+            model_output_ceiling_tokens=128_000,
+            required_input_tokens=4_000,
+        )
+        == 61_000
+    )
+    # A window with no room keeps the whole ceiling: the packer admits nothing.
+    assert (
+        policy.answer_reserve_tokens(
+            context_window_tokens=6_000,
+            model_output_ceiling_tokens=1_024,
+            required_input_tokens=4_000,
+        )
+        == 1_024
+    )
 
 
 @pytest.mark.parametrize("context_window", [128_000, 1_000_000])
@@ -131,12 +244,13 @@ def test_classification_uses_model_capacity_and_the_shared_request_deadline(
     budget = policy.classification_request_budget(
         context_window_tokens=context_window, model_output_ceiling_tokens=32_000
     )
-    resolved = budget.resolve(input_tokens=20_000)
+    resolved = budget.resolve_whole(input_tokens=20_000)
 
     assert budget.context_window_tokens == context_window
     assert budget.timeout_seconds == 240.0
     assert resolved is not None
     assert resolved.model_output_ceiling_tokens == 32_000
+    assert resolved.provider_output_cap_tokens == 32_000
 
 
 def test_classification_honors_an_explicit_deployment_deadline() -> None:
@@ -167,18 +281,25 @@ def test_review_evidence_cap_limits_input_within_the_models_capacity() -> None:
         {"ai_builder": {"review_evidence_max_input_tokens": 32_000}}
     )
     assert capped.review_evidence_max_input_tokens == 32_000
+    wide = capped.review_request_budget(
+        context_window_tokens=1_000_000, model_output_ceiling_tokens=8_000
+    ).plan(required_input_tokens=1)
+    assert wide is not None
+    assert wide.available_input_tokens == 32_000
+    # A cap above the model's window never widens it: the window less the
+    # buffer is 14 000, of which half the room after the required input
+    # (7 000) stays free for the answer.
+    narrow = capped.review_request_budget(
+        context_window_tokens=16_000, model_output_ceiling_tokens=8_000
+    ).plan(required_input_tokens=1)
+    assert narrow is not None
+    assert narrow.available_input_tokens == 7_000
+    # Required input above the cap is refused before any packing.
     assert (
         capped.review_request_budget(
             context_window_tokens=1_000_000, model_output_ceiling_tokens=8_000
-        ).available_input_tokens
-        == 32_000
-    )
-    # A cap above the model's window never widens it.
-    assert (
-        capped.review_request_budget(
-            context_window_tokens=16_000, model_output_ceiling_tokens=8_000
-        ).available_input_tokens
-        == 6_000
+        ).plan(required_input_tokens=32_001)
+        is None
     )
     with pytest.raises(AIBuilderBadRequestException):
         resolve_ai_builder_budget_policy(
@@ -198,7 +319,9 @@ def test_the_review_evidence_cap_bounds_every_request_that_carries_run_evidence(
         carries_review_evidence=True,
     )
     assert review_backed.context_window_tokens == 1_000_000
-    assert review_backed.available_input_tokens == 12_000
+    planned = review_backed.plan(required_input_tokens=1)
+    assert planned is not None
+    assert planned.available_input_tokens == 12_000
     ordinary = capped.proposal_request_budget(
         context_window_tokens=1_000_000, model_output_ceiling_tokens=8_000
     )
@@ -260,6 +383,32 @@ def test_review_input_cap_preserves_output_outside_the_cap(
         **kwargs,
     )
     assert budget.context_window_tokens == 1_000_000
-    assert budget.available_input_tokens == input_cap
-    assert budget.resolve(input_tokens=input_cap) is not None
-    assert budget.resolve(input_tokens=input_cap + 1) is None
+    planned = budget.plan(required_input_tokens=1)
+    assert planned is not None
+    assert planned.available_input_tokens == input_cap
+    at_cap = planned.resolve(input_tokens=input_cap)
+    assert at_cap is not None
+    # The answer is never charged to the input cap.
+    assert at_cap.provider_output_cap_tokens == 128_000
+    assert planned.resolve(input_tokens=input_cap + 1) is None
+
+
+def test_a_planned_budget_is_one_allocation_until_a_new_call_plans_again() -> None:
+    budget = AIBuilderRequestBudget(
+        context_window_tokens=100,
+        model_output_ceiling_tokens=100,
+        safety_buffer_tokens=0,
+        answer_reserve_share=0.5,
+        timeout_seconds=1.0,
+    )
+    planned = budget.plan(required_input_tokens=20)
+    assert planned is not None
+    assert (planned.reserved_output_tokens, planned.available_input_tokens) == (40, 60)
+    with pytest.raises(TypeError):
+        planned.plan(required_input_tokens=50)
+    with pytest.raises(TypeError):
+        planned.resolve_whole(input_tokens=50)
+    again = planned.unplanned().plan(required_input_tokens=50)
+    assert again is not None
+    assert (again.reserved_output_tokens, again.available_input_tokens) == (25, 75)
+    assert planned.unplanned() == budget

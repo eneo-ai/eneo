@@ -85,6 +85,7 @@ from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     ServerOutputPrepared,
     _fit_replayed_requirements,
     build_proposal_prepared,
+    conversation_message_to_llm_message,
     prepare_planner_request,
     validate_preprovider_schema_gate,
 )
@@ -203,7 +204,11 @@ from eneo.flows.flow_resource_bindings import (
 )
 from eneo.flows.input_binding_contract_rules import source_ref_bindings
 from eneo.main.exceptions import BadRequestException, ErrorCodes
-from eneo.tokens.token_utils import count_message_tokens, count_tool_tokens
+from eneo.tokens.token_utils import (
+    count_message_tokens,
+    count_tool_tokens,
+    measure_provider_input_reserve,
+)
 from tests.unittests.flows.ai_builder.conftest import SendLockReleaseSpy
 
 _DISCOVERY_STATUSES = {"understanding_request", "reading_sources"}
@@ -1817,7 +1822,7 @@ async def test_send_message_builds_attachment_context_once_before_request_prepar
         policy=AIBuilderAttachmentContextPolicy(),
         model_name="openai/gpt-5.4",
         max_input_tokens=4096,
-        max_output_tokens=1024,
+        answer_reserve_tokens=1024,
         safety_buffer_tokens=128,
         minimum_conversation_tokens=256,
     )
@@ -2456,10 +2461,19 @@ def test_real_proposal_boundary_fits_attachments_and_protects_current_turn() -> 
     final_request_tokens = (
         count_message_tokens(fitted_messages, model_name)
         + count_tool_tokens([prepared_tool_schema_for_budget], model_name)
-        + resolved_budget.model_output_ceiling_tokens
+        + resolved_budget.provider_output_cap_tokens
         + resolved_budget.safety_buffer_tokens
     )
     assert final_request_tokens <= tight_context_window
+    # The allocation made during preparation is the one the call is sent
+    # with: the packed request never eats into the room it kept for the answer.
+    assert resolved_budget.reserved_output_tokens == (
+        prepared.request_budget.reserved_output_tokens
+    )
+    assert (
+        resolved_budget.provider_output_cap_tokens
+        >= prepared.request_budget.reserved_output_tokens
+    )
     assert current_turn.content in [message["content"] for message in fitted_messages]
     system_content = fitted_messages[0]["content"]
     assert isinstance(system_content, str)
@@ -2467,9 +2481,12 @@ def test_real_proposal_boundary_fits_attachments_and_protects_current_turn() -> 
     assert "ATTACHMENT-EVIDENCE" in system_content
 
     assert baseline.request_budget is not None
+    # A window that cannot carry the protected messages and the schema at all
+    # (the output allowance set aside, one token short) is refused before any
+    # provider work; a window short of the full ceiling alone is not.
     impossible_budget = replace(
-        baseline.request_budget,
-        context_window_tokens=irreducible_request_tokens - 1,
+        baseline.request_budget.unplanned(),
+        context_window_tokens=irreducible_request_tokens - 1_024 - 1,
     )
     with pytest.raises(AIBuilderKnownProviderRejectionException):
         fit_proposal_request_budget(
@@ -2541,25 +2558,124 @@ def test_proposal_attachment_fitting_reserves_the_whole_create_schema() -> None:
     true_reserve = count_tool_tokens([tool_schema], model_name)
     assert true_reserve > old_charge
 
-    system_prompt_tokens = count_message_tokens(baseline.llm_messages[:1], model_name)
-    fixed = (
-        system_prompt_tokens
-        + 256
-        + policy.conversation_safety_buffer_tokens
-        + policy.minimum_conversation_budget_tokens
-    )
+    # The scaffold prompt and the schema are the request's required input,
+    # measured with the reserving counter the budget uses.
+    scaffold_tokens = measure_provider_input_reserve(
+        [dict(baseline.llm_messages[0])], [], model_name
+    ).tokens
+    current_turn_tokens = measure_provider_input_reserve(
+        [{"role": "user", "content": current_turn.content}], [], model_name
+    ).tokens
+    required = scaffold_tokens + true_reserve + current_turn_tokens
+    # A window that leaves no room after the required input is refused before
+    # any packing; charging the schema at the old, lower cost would have
+    # admitted it.
+    with pytest.raises(AIBuilderKnownProviderRejectionException):
+        build_proposal_prepared(
+            **common,
+            conversation=[current_turn],
+            max_input_tokens=required + policy.conversation_safety_buffer_tokens,
+            attachment_context=attachment_context,
+            current_turn_start=0,
+        )
+    # One token of room beyond the real cost is admitted, and the attachment
+    # text, which has nowhere to go, is left out rather than overrunning.
     prepared = build_proposal_prepared(
         **common,
         conversation=[current_turn],
-        # Room for the schema as it used to be charged, but not as it costs.
-        max_input_tokens=fixed + old_charge + 64,
+        max_input_tokens=required + policy.conversation_safety_buffer_tokens + 1,
         attachment_context=attachment_context,
         current_turn_start=0,
     )
-
     system_content = prepared.llm_messages[0]["content"]
     assert isinstance(system_content, str)
     assert "ATTACHMENT-EVIDENCE" not in system_content
+
+
+def test_confirmed_requirements_without_history_are_prepared_on_a_tight_window() -> (
+    None
+):
+    # The replayed decisions and descriptions are required input, and the
+    # current turn counts toward the conversation minimum: a window with room
+    # for exactly that must prepare, keep the replay, and keep its allocation
+    # through completion.
+    model_name = "gpt-4o-mini"
+    version = "b" * 64
+    summary = _requirements_summary(version)
+    conversation = [
+        ConversationMessage(
+            role="assistant",
+            content="Requirements presented to user. Awaiting confirmation.",
+            metadata={
+                "requirements_summary": summary.model_dump(mode="json"),
+                "requirements_version": version,
+            },
+        ),
+        ConversationMessage(
+            role="user",
+            content="",
+            metadata={"requirements_confirmed": True, "requirements_version": version},
+        ),
+    ]
+    policy = AIBuilderBudgetPolicy(
+        conversation_safety_buffer_tokens=128,
+        minimum_conversation_budget_tokens=256,
+    )
+    common = {
+        "requirements_state": _requirements_state_confirmed(version),
+        "ui_language": "sv",
+        "slot_classification_metadata": None,
+        "planning_state": PlanningState.empty(),
+        "flow_context": None,
+        "is_edit_mode": False,
+        "resource_catalog": build_ai_builder_resource_catalog(
+            available_models=None, available_kbs=None
+        ),
+        "flow": None,
+        "assistant_snapshots": None,
+        "plan_edit_context": None,
+        "prior_plan_for_revision": None,
+        "litellm_model": model_name,
+        "max_output_tokens": 256,
+        "budget_policy": policy,
+        "attachment_file_count": 0,
+        "attachment_context": None,
+        "conversation": conversation,
+        "current_turn_start": 1,
+    }
+    wide = build_proposal_prepared(**common, max_input_tokens=100_000)
+    wide_prompt = wide.llm_messages[0]["content"]
+    assert isinstance(wide_prompt, str)
+    assert "Use text input" in wide_prompt
+    tool_schema = cast(dict[str, Any], wide.proposal_tool_schema)
+    current_turn_tokens = measure_provider_input_reserve(
+        [dict(conversation_message_to_llm_message(conversation[1]))], [], model_name
+    ).tokens
+    required = (
+        measure_provider_input_reserve(
+            [dict(wide.llm_messages[0])], [], model_name
+        ).tokens
+        + count_tool_tokens([tool_schema], model_name)
+        + max(current_turn_tokens, policy.minimum_conversation_budget_tokens)
+    )
+
+    prepared = build_proposal_prepared(
+        **common,
+        max_input_tokens=required + policy.conversation_safety_buffer_tokens + 1,
+    )
+
+    prompt = prepared.llm_messages[0]["content"]
+    assert isinstance(prompt, str)
+    assert "Use text input" in prompt
+    fitted, sent = fit_proposal_request_budget(
+        budget=prepared.request_budget,
+        message_groups=prepared.message_groups,
+        tool_schemas=[tool_schema],
+        model_name=model_name,
+    )
+    assert len(flatten_proposal_message_groups(fitted)) >= 2
+    assert sent.reserved_output_tokens == prepared.request_budget.reserved_output_tokens
+    assert sent.provider_output_cap_tokens >= sent.reserved_output_tokens
 
 
 def test_proposal_boundary_rejects_confirmed_primary_input_shadow() -> None:

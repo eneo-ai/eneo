@@ -57,7 +57,10 @@ from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
     log_proposal_repair_invoked,
     proposal_repair_reason_from_tool_failure,
 )
-from eneo.flows.ai_builder.ai_builder_settings import AIBuilderRequestBudget
+from eneo.flows.ai_builder.ai_builder_settings import (
+    AIBuilderRequestBudget,
+    AIBuilderResolvedRequestBudget,
+)
 from eneo.flows.ai_builder.ai_builder_telemetry import (
     planner_call_records_from_metadata,
 )
@@ -183,7 +186,7 @@ def test_turn_call_records_are_the_usage_and_call_count_owner() -> None:
         model_output_ceiling_tokens=16_000,
         safety_buffer_tokens=2_000,
         timeout_seconds=180.0,
-    ).resolve(input_tokens=6_000)
+    ).resolve_whole(input_tokens=6_000)
     assert request_budget is not None
     for kind, usage in zip(kinds, usages, strict=True):
         call = telemetry.begin_call(
@@ -216,7 +219,9 @@ def test_turn_call_records_are_the_usage_and_call_count_owner() -> None:
         "token_usage_estimated": False,
         "context_window_tokens": 32_000,
         "model_output_ceiling_tokens": 16_000,
-        "output_reserve_tokens": 16_000,
+        # Half of the room the 6 000-token request leaves in the 30 000 usable
+        # tokens was kept for the answer; the model may write its whole ceiling.
+        "output_reserve_tokens": 12_000,
         "provider_output_cap_tokens": 16_000,
         "fixed_input_tokens": 6_000,
         "safety_buffer_tokens": 2_000,
@@ -1098,3 +1103,83 @@ def test_call_records_an_older_build_wrote_in_another_shape_are_counted_as_skipp
     assert planner_call_records_from_metadata(None).skipped == 0
     assert planner_call_records_from_metadata({"planner_telemetry": {}}).skipped == 1
     assert planner_call_records_from_metadata({"planner_telemetry": []}).skipped == 1
+
+
+def _classification_budget_at_the_gateway() -> AIBuilderResolvedRequestBudget:
+    resolved = AIBuilderRequestBudget(
+        context_window_tokens=131_072,
+        model_output_ceiling_tokens=16_384,
+        safety_buffer_tokens=2_000,
+        timeout_seconds=180.0,
+    ).resolve_whole(input_tokens=112_688)
+    assert resolved is not None
+    return resolved
+
+
+def test_a_gateway_status_before_the_deadline_is_named_as_an_upstream_timeout() -> None:
+    event_logger = MagicMock()
+
+    failure = record_ai_builder_provider_failure(
+        APIError(
+            504,
+            "sensitive-provider-material",
+            model="private-model",
+            llm_provider="private-provider",
+        ),
+        stage="slot_classification",
+        request_id="req-upstream-timeout",
+        request_budget=_classification_budget_at_the_gateway(),
+        provider_elapsed_ms=125_172,
+        event_logger=event_logger,
+    )
+
+    assert failure.turn_state == "provider_outcome_unknown"
+    safe_detail = event_logger.info.call_args.kwargs["extra"]["safe_detail"]
+    assert safe_detail["provider_status_code"] == 504
+    assert safe_detail["provider_elapsed_ms"] == 125_172
+    assert safe_detail["deadline_reached"] is False
+    assert safe_detail["upstream_timeout_suspected"] is True
+    event_logger.warning.assert_called_once()
+    assert "sensitive-provider-material" not in str(event_logger.warning.call_args)
+
+
+def test_a_call_that_ran_into_the_deadline_is_not_blamed_on_a_proxy() -> None:
+    event_logger = MagicMock()
+
+    record_ai_builder_provider_failure(
+        TimeoutError(),
+        stage="slot_classification",
+        request_id="req-local-deadline",
+        request_budget=_classification_budget_at_the_gateway(),
+        provider_elapsed_ms=180_004,
+        event_logger=event_logger,
+    )
+
+    safe_detail = event_logger.info.call_args.kwargs["extra"]["safe_detail"]
+    assert safe_detail["deadline_reached"] is True
+    assert "upstream_timeout_suspected" not in safe_detail
+    event_logger.warning.assert_not_called()
+
+
+def test_a_503_before_the_deadline_is_an_upstream_failure_not_a_timeout() -> None:
+    event_logger = MagicMock()
+
+    record_ai_builder_provider_failure(
+        APIError(
+            503,
+            "sensitive-provider-material",
+            model="private-model",
+            llm_provider="private-provider",
+        ),
+        stage="slot_classification",
+        request_id="req-upstream-503",
+        request_budget=_classification_budget_at_the_gateway(),
+        provider_elapsed_ms=2_000,
+        event_logger=event_logger,
+    )
+
+    safe_detail = event_logger.info.call_args.kwargs["extra"]["safe_detail"]
+    assert safe_detail["provider_status_code"] == 503
+    assert safe_detail["deadline_reached"] is False
+    assert "upstream_timeout_suspected" not in safe_detail
+    event_logger.warning.assert_not_called()

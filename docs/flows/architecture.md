@@ -113,9 +113,15 @@ when its protection preconditions are not met.
 Builder provider failures log the estimated request input tokens, selected
 model's context and output limits, reserved answer space, configured deadline,
 and elapsed provider-call time. Recognized rejection codes and parameter names
-are included when available. These are request measurements; a failed call's
-token usage remains unknown unless the provider reports it. Prompts, attachment
-text, credentials, and raw provider messages are excluded.
+are included when available. Two derived facts make slow-path failures
+attributable: `deadline_reached` says whether the call ran into Eneo's own
+deadline, and `upstream_timeout_suspected` is set when a 504 arrived before
+that deadline, which means a proxy or gateway between Eneo and the provider
+gave up first; that case is also logged as a warning naming the proxy timeout
+as the thing to check, since raising Eneo's deadline cannot fix it. A 502 or
+503 is an upstream failure, not a timeout, and is recorded as its status. These are request measurements; a failed call's token usage
+remains unknown unless the provider reports it. Prompts, attachment text,
+credentials, and raw provider messages are excluded.
 
 The AI Builder failure summary reads `builder_sessions`, `flow_runs`, and
 `builder_client_errors`. Each section returns at most 20 failure families and
@@ -133,32 +139,54 @@ older than 90 days.
 
 ### AI Builder request budgets
 
-The selected model's declared context window and output ceiling determine how
-much each request can carry. Classification, proposals, and review reserve the
-model's full output ceiling before fitting input: available input is the context
-window minus that ceiling and the configured safety buffer. The request sends
-that same output ceiling through LiteLLM; there is no fixed answer-token cap.
-Required instructions, schemas, and the current turn must fit or the request is
-refused before calling the provider. Attachment excerpts and older messages share
-the remaining space, with truncated evidence marked. Larger models can retain
-more text; the original uploaded files remain available. A tenant review-evidence cap limits the complete
-input for review suggestions and review-backed proposals; it does not consume
-any of the model's output allowance.
+The selected model contributes two facts to every request: its context window
+(`max_input_tokens`, treated as the window that input and answer share) and its
+output ceiling (`max_output_tokens`). Nothing else about the model enters the
+budget, and no provider or model is special-cased.
+
+Each provider call is allocated once, in two steps, by one owner
+(`AIBuilderRequestBudget` in `ai_builder_settings.py`); the allocation made
+during preparation is the one the call is sent with, and only a repair call,
+which carries new protected content, plans again:
+
+1. The request's required input is measured with the conservative token reserve:
+   the scaffold prompt, the tool schemas as the provider receives them and the
+   current turn for a proposal, the protected sources and response schema for
+   classification, the prompt and schema without excerpts for review. If that input, together with the configured safety buffer, leaves no
+   room in the window, the request is refused before any provider work
+   (`planner_context_limit_exceeded`). If the required input already exceeds a
+   tenant input cap, the same refusal applies.
+2. Answer room is reserved from what the required input leaves: the model's
+   ceiling when it fits within the configured share of that room, otherwise that
+   share. The share (`AI_BUILDER_ANSWER_RESERVE_SHARE`, default one half) is a
+   dimensionless allocation policy, not a token count. Optional input
+   (conversation history, attachment excerpts, run evidence) is then packed into
+   the rest, with truncation marked; the reserve is fixed for the whole packing
+   pass, so growing input can never shrink it.
+
+The packed request is measured whole and the model is told it may write the
+ceiling within the room that request leaves, never a fixed number and never less
+than the reserve. For models whose ceiling is small next to their window
+(gpt-4o, Claude, Gemini) this is the full ceiling. For models whose catalogue
+metadata declares a ceiling at or above the window (Mistral, Grok, several Azure
+and Ollama entries) the request is not refused: half of the room stays free for
+the answer and the rest carries input. A request-independent check still refuses
+a model whose window does not exceed the safety buffer
+(`planner_model_incompatible_token_limits`).
 
 Configured model limits take precedence. Missing limits may come from Eneo's
 shared provider-aware LiteLLM metadata resolver; unknown output capacity is never
-inferred from the input window. Existing configured values are preserved. Admission
-uses the shared conservative token reserve, including response schemas and tool
-definitions, so an unavailable tokenizer cannot silently reduce the estimate.
-A classifier response marked as length-limited is recorded as incomplete and is
-neither accepted nor cached.
+inferred from the input window. Where a catalogue entry reports an input-only
+ceiling rather than the shared window (GPT-5 is one), treating it as the window
+is conservative and may leave capacity unused; an administrator who knows the
+true window can raise the stored value. Every call kind rejects a
+provider answer marked as length-limited as incomplete output: it is neither
+accepted nor cached, even when what arrived parses. A tenant review-evidence cap
+bounds the complete input of review suggestions and review-backed proposals; it
+never consumes any of the answer's room.
 
-Some provider metadata declares an output ceiling equal to the context window.
-If the full output allowance and safety buffer leave no input capacity, model
-admission returns `planner_model_incompatible_token_limits`. Shortening the
-request cannot resolve that configuration. Choose a model with enough remaining
-input capacity, or correct inaccurate configured limits; AI Builder does not
-lower a model's declared output ceiling automatically.
+Provider-call telemetry keeps the three numbers apart: the model's ceiling, the
+reserve kept while packing, and the cap the call was sent.
 
 Upload byte limits protect storage and file processing. Message, collection,
 schema, and archive inspection bounds protect their respective API, persistence,

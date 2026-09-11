@@ -87,9 +87,15 @@ def _sample() -> FlowReviewSample:
 
 
 class _Client:
-    def __init__(self, content: str | None = None, error: Exception | None = None):
+    def __init__(
+        self,
+        content: str | None = None,
+        error: Exception | None = None,
+        finish_reason: str = "stop",
+    ):
         self.content = content
         self.error = error
+        self.finish_reason = finish_reason
         self.calls: list[dict] = []
 
     async def acompletion(self, **kwargs):
@@ -97,7 +103,9 @@ class _Client:
         if self.error is not None:
             raise self.error
         message = SimpleNamespace(content=self.content)
-        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=message, finish_reason=self.finish_reason)]
+        )
 
 
 def _route():
@@ -341,12 +349,29 @@ async def test_a_tenant_cap_bounds_the_evidence_below_the_models_window():
 
 
 @pytest.mark.asyncio
-async def test_a_scaffold_that_leaves_less_than_the_answer_is_refused_before_the_call():
-    """The required prompt and full output must fit before any provider call."""
+async def test_a_ceiling_above_the_window_gets_the_room_the_request_leaves():
+    """Catalogue metadata may declare an output ceiling at or above the window.
+
+    The request is not refused for it: the model is told it may write what the
+    window leaves after the packed request, never more than the provider
+    permits and never less than the room the plan kept for the answer.
+    """
     client = _Client(content=json.dumps({"suggestions": []}))
-    with pytest.raises(AIBuilderKnownProviderRejectionException):
-        await _generate(client, max_input_tokens=6_000)
-    assert client.calls == []
+    result = await _generate(
+        client, max_input_tokens=100_000, max_output_tokens=200_000
+    )
+    (call,) = client.calls
+    assert 0 < call["max_tokens"] < 200_000
+    assert result.sample.excerpts_included >= 1
+
+
+@pytest.mark.asyncio
+async def test_a_length_limited_answer_is_incomplete_even_when_it_parses():
+    client = _Client(content=json.dumps({"suggestions": []}), finish_reason="length")
+    with pytest.raises(AIBuilderBadRequestException) as error:
+        await _generate(client)
+    assert error.value.code is AIBuilderErrorCode.REVIEW_SUGGESTIONS_INVALID_OUTPUT
+    assert error.value.context == {"problems": ["output_limit_exceeded"]}
 
 
 @pytest.mark.asyncio

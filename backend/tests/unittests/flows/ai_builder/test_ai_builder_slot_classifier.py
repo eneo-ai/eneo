@@ -4505,22 +4505,21 @@ async def test_classify_slots_rejects_request_that_cannot_fit_selected_model() -
 
 
 @pytest.mark.asyncio
-async def test_classify_slots_rejects_insufficient_headroom_for_full_model_output() -> (
+async def test_classify_slots_sends_the_room_the_request_leaves_below_the_ceiling() -> (
     None
 ):
+    # The ceiling exceeds what the window leaves after the request: the call
+    # goes ahead with the room that remains, never a fixed number.
     litellm_client = AsyncMock()
     litellm_client.acompletion.return_value = _make_response(
         json.dumps(_VALID_CLASSIFICATION_RESPONSE)
     )
 
-    with (
-        patch.object(
-            classifier,
-            "measure_provider_input_reserve",
-            return_value=TokenCount(tokens=60, source=TokenCountSource.LITELLM),
-        ),
-        pytest.raises(AIBuilderKnownProviderRejectionException),
-    ):
+    with patch.object(
+        classifier,
+        "measure_provider_input_reserve",
+        return_value=TokenCount(tokens=60, source=TokenCountSource.LITELLM),
+    ) as measure:
         await classify_slots(
             litellm_client=litellm_client,
             completion_model_route=_route(),
@@ -4535,7 +4534,13 @@ async def test_classify_slots_rejects_insufficient_headroom_for_full_model_outpu
             ),
         )
 
-    litellm_client.acompletion.assert_not_awaited()
+    sent = litellm_client.acompletion.await_args.kwargs
+    # The patched counter charges 60 tokens per measurement: the packed request
+    # is its messages plus the response schema, 120 tokens in a 900-token
+    # usable window, so the model may write 780 of its 800-token ceiling.
+    assert measure.call_count >= 2
+    assert sent["max_tokens"] == 1_000 - 100 - 120
+    assert sent["max_tokens"] < 800
 
 
 @pytest.mark.asyncio
@@ -5235,3 +5240,77 @@ def test_only_the_users_own_sources_yield_words_to_quote_back() -> None:
         "en kort sammanfattning"
     )
     assert first_user_owned_quoted_text([]) is None
+
+
+@pytest.mark.asyncio
+async def test_classify_slots_records_the_allocation_its_optional_sources_were_packed_against() -> (
+    None
+):
+    # The reserve comes from the protected sources alone (the current user
+    # message); the uploaded text is optional and must not shrink it.
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps(_VALID_CLASSIFICATION_RESPONSE)
+    )
+    tracker = ProposalTurnTelemetry(
+        request_id="req-classifier-allocation",
+        model="private-model",
+        target_kind=TargetKind.CREATE,
+    )
+    classification_input = SlotClassificationInput(
+        sources=(
+            SlotClassificationSource(
+                source_id="user_message:user-1",
+                kind="user_message",
+                text="Return JSON with case_id.",
+                message_id="user-1",
+            ),
+            SlotClassificationSource(
+                source_id=f"uploaded_file:{uuid4()}",
+                kind="uploaded_file",
+                text="evidence " * 400,
+                file_id=uuid4(),
+                coverage="fully_seen",
+            ),
+        ),
+        current_user_message_id="user-1",
+    )
+
+    def measured(messages, _tools, _model):
+        return TokenCount(
+            tokens=sum(len(str(message.get("content", ""))) for message in messages)
+            // 10,
+            source=TokenCountSource.LITELLM,
+        )
+
+    with patch.object(
+        classifier, "measure_provider_input_reserve", side_effect=measured
+    ):
+        await classify_slots(
+            litellm_client=litellm_client,
+            completion_model_route=_route(),
+            classification_input=classification_input,
+            allowed_slot_values={"terminal_output": {"structured_json"}},
+            tenant_id=uuid4(),
+            usage_tracker=tracker,
+            max_input_tokens=4_000,
+            max_output_tokens=4_000,
+            budget_policy=AIBuilderBudgetPolicy(
+                conversation_safety_buffer_tokens=0,
+                minimum_conversation_budget_tokens=0,
+            ),
+        )
+
+    (record,) = tracker.call_records
+    budget = record.request_budget
+    assert budget is not None
+    # Uploaded text made the packed request larger than its required part...
+    assert budget.fixed_input_tokens > budget.required_input_tokens
+    # ...and the reserve is still the one planned from the required part alone.
+    assert budget.reserved_output_tokens == min(
+        4_000, -(-(4_000 - budget.required_input_tokens) // 2)
+    )
+    assert budget.provider_output_cap_tokens == min(
+        4_000, 4_000 - budget.fixed_input_tokens
+    )
+    assert budget.provider_output_cap_tokens >= budget.reserved_output_tokens

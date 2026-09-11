@@ -387,7 +387,11 @@ class AIBuilderPlanner:
             policy=attachment_context_policy,
             model_name=litellm_model,
             max_input_tokens=max_input_tokens,
-            max_output_tokens=max_output_tokens,
+            answer_reserve_tokens=budget_policy.answer_reserve_tokens(
+                context_window_tokens=max_input_tokens,
+                model_output_ceiling_tokens=max_output_tokens,
+                required_input_tokens=budget_policy.minimum_conversation_budget_tokens,
+            ),
             safety_buffer_tokens=budget_policy.conversation_safety_buffer_tokens,
             minimum_conversation_tokens=(
                 budget_policy.minimum_conversation_budget_tokens

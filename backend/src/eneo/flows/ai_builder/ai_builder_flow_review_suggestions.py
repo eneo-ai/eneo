@@ -616,9 +616,21 @@ async def generate_review_suggestions(
             + response_format_tokens
         )
 
+    # The answer room is fixed from the request without any excerpt; the
+    # excerpts are the optional part and pack against that one allocation.
+    planned_budget = request_budget.plan(
+        required_input_tokens=request_tokens_for(
+            sample.model_copy(update={"excerpts": []})
+        )
+    )
+    if planned_budget is None:
+        raise AIBuilderKnownProviderRejectionException(
+            build_ai_builder_request_budget_exhausted_error(request_id=None)
+        )
+
     def fits(candidate: FlowReviewSample) -> bool:
         return (
-            request_budget.resolve(input_tokens=request_tokens_for(candidate))
+            planned_budget.resolve(input_tokens=request_tokens_for(candidate))
             is not None
         )
 
@@ -627,7 +639,7 @@ async def generate_review_suggestions(
     fit_ms = int((time.monotonic() - fit_started) * 1000)
     messages = build_review_suggestions_messages(sample, ui_language=ui_language)
     request_tokens = request_tokens_for(sample)
-    resolved_budget = request_budget.resolve(input_tokens=request_tokens)
+    resolved_budget = planned_budget.resolve(input_tokens=request_tokens)
     if resolved_budget is None:
         raise AIBuilderKnownProviderRejectionException(
             build_ai_builder_request_budget_exhausted_error(request_id=None)
@@ -640,7 +652,7 @@ async def generate_review_suggestions(
     completion_kwargs.pop("timeout", None)
     # A failed review must not silently repeat work through SDK retries.
     completion_kwargs.update(num_retries=0, max_retries=0)
-    completion_kwargs["max_tokens"] = resolved_budget.model_output_ceiling_tokens
+    completion_kwargs["max_tokens"] = resolved_budget.provider_output_cap_tokens
     started = time.monotonic()
     try:
         async with asyncio.timeout(resolved_budget.timeout_seconds):
@@ -662,6 +674,17 @@ async def generate_review_suggestions(
         )
         raise failure.as_exception() from error
 
+    # An answer the provider cut off is incomplete even when what arrived
+    # parses: it is neither accepted nor reported as the model's review.
+    if (
+        response.choices
+        and getattr(response.choices[0], "finish_reason", None) == "length"
+    ):
+        raise AIBuilderBadRequestException(
+            "The review model's answer was cut off before it finished.",
+            code=AIBuilderErrorCode.REVIEW_SUGGESTIONS_INVALID_OUTPUT,
+            context={"problems": ["output_limit_exceeded"]},
+        )
     content = response.choices[0].message.content if response.choices else None
     if not isinstance(content, str) or not content.strip():
         raise AIBuilderBadRequestException(
@@ -694,7 +717,9 @@ async def generate_review_suggestions(
             "request_tokens": request_tokens,
             "context_window_tokens": request_budget.context_window_tokens,
             "input_cap_tokens": request_budget.input_cap_tokens,
-            "max_output_tokens": resolved_budget.model_output_ceiling_tokens,
+            "model_output_ceiling_tokens": resolved_budget.model_output_ceiling_tokens,
+            "reserved_output_tokens": resolved_budget.reserved_output_tokens,
+            "max_output_tokens": resolved_budget.provider_output_cap_tokens,
             "excerpts_included": summary.excerpts_included,
             "excerpts_truncated": summary.excerpts_truncated,
             "excerpts_omitted_by_budget": summary.excerpts_omitted_by_budget,

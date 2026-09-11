@@ -96,6 +96,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     fit_proposal_message_groups,
     flatten_proposal_message_groups,
     group_proposal_messages,
+    outbound_proposal_tool_schemas,
     proposal_turn_tool_schemas,
 )
 from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
@@ -123,6 +124,7 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
 )
 from eneo.flows.ai_builder.ai_builder_settings import (
     AIBuilderBudgetPolicy,
+    AIBuilderPlannedRequestBudget,
     AIBuilderRequestBudget,
 )
 from eneo.flows.ai_builder.ai_builder_tools import (
@@ -270,7 +272,13 @@ async def prepare_planner_request(
             policy=request.attachment_context_policy,
             model_name=request.completion_model_route.litellm_model,
             max_input_tokens=request.max_input_tokens,
-            max_output_tokens=request.max_output_tokens,
+            answer_reserve_tokens=request.budget_policy.answer_reserve_tokens(
+                context_window_tokens=request.max_input_tokens,
+                model_output_ceiling_tokens=request.max_output_tokens,
+                required_input_tokens=(
+                    request.budget_policy.minimum_conversation_budget_tokens
+                ),
+            ),
             safety_buffer_tokens=request.budget_policy.conversation_safety_buffer_tokens,
             minimum_conversation_tokens=(
                 request.budget_policy.minimum_conversation_budget_tokens
@@ -441,6 +449,9 @@ async def prepare_planner_request(
         plan_edit_context=request.plan_edit_context,
         prior_plan_for_revision=request.prior_plan_for_revision,
         litellm_model=request.completion_model_route.litellm_model,
+        supports_strict_tool_schema=(
+            request.completion_model_route.supports_strict_tool_schema
+        ),
         max_input_tokens=request.max_input_tokens,
         max_output_tokens=request.max_output_tokens,
         budget_policy=request.budget_policy,
@@ -580,6 +591,7 @@ def build_proposal_prepared(
     budget_policy: AIBuilderBudgetPolicy,
     attachment_file_count: int,
     current_turn_start: int,
+    supports_strict_tool_schema: bool = False,
     architecture_revised_this_turn: bool = False,
 ) -> ProposalPrepared:
     confirmed_requirements = latest_confirmed_requirements(conversation)
@@ -695,12 +707,59 @@ def build_proposal_prepared(
             can_decline=decline_tool_schema is not None,
         )
 
-    system_prompt_token_limit = _proposal_system_prompt_token_limit(
-        turn_tool_schemas=proposal_turn_tool_schemas(
-            proposal_tool_schema, decline_tool_schema
+    turn_tool_schemas = proposal_turn_tool_schemas(
+        proposal_tool_schema, decline_tool_schema
+    )
+    # The turn's one allocation is fixed from what the proposal request
+    # carries whatever gets packed: the scaffold prompt, the tools in the form
+    # the provider receives them, and the current turn. Attachment text,
+    # evidence, replayed requirements and history then pack inside it, so the
+    # reserve they were measured against is the reserve the call is sent with.
+    # The policy's conversation minimum is headroom the scaffold limit keeps
+    # below for history, not measured input.
+    tool_tokens = count_tool_tokens(
+        outbound_proposal_tool_schemas(
+            turn_tool_schemas, strict=supports_strict_tool_schema
         ),
-        litellm_model=litellm_model,
-        request_budget=proposal_request_budget,
+        litellm_model,
+    )
+    current_turn_tokens = measure_provider_input_reserve(
+        [
+            dict(conversation_message_to_llm_message(message))
+            for message in conversation[current_turn_start:]
+        ],
+        [],
+        litellm_model,
+    ).tokens
+    # Confirmed decisions and descriptions are replayed whatever the room;
+    # only the assumptions yield. The required prompt carries that core.
+    required_requirements = (
+        confirmed_requirements.model_copy(update={"assumptions": []}, deep=True)
+        if confirmed_requirements is not None
+        else None
+    )
+    required_prompt_tokens = measure_provider_input_reserve(
+        [
+            {
+                "role": "system",
+                "content": build_proposal_prompt(None, required_requirements),
+            }
+        ],
+        [],
+        litellm_model,
+    ).tokens
+    planned_request_budget = proposal_request_budget.plan(
+        required_input_tokens=required_prompt_tokens + tool_tokens + current_turn_tokens
+    )
+    if planned_request_budget is None:
+        raise AIBuilderKnownProviderRejectionException(
+            build_ai_builder_request_budget_exhausted_error(request_id=None)
+        )
+    system_prompt_token_limit = _proposal_system_prompt_token_limit(
+        tool_tokens=tool_tokens,
+        current_turn_tokens=current_turn_tokens,
+        required_prompt_tokens=required_prompt_tokens,
+        request_budget=planned_request_budget,
         budget_policy=budget_policy,
     )
 
@@ -788,8 +847,8 @@ def build_proposal_prepared(
         conversation=conversation,
         system_prompt=proposal_system_prompt,
         litellm_model=litellm_model,
-        request_budget=proposal_request_budget,
-        budget_policy=budget_policy,
+        request_budget=planned_request_budget,
+        tool_tokens=tool_tokens,
         current_turn_start=current_turn_start,
     )
     logger.info(
@@ -813,6 +872,8 @@ def build_proposal_prepared(
             ),
             "context_window_tokens": proposal_request_budget.context_window_tokens,
             "input_cap_tokens": proposal_request_budget.input_cap_tokens,
+            "reserved_output_tokens": planned_request_budget.reserved_output_tokens,
+            "available_input_tokens": planned_request_budget.available_input_tokens,
             "review_evidence_fit_ms": review_evidence_fit_ms,
             **_review_excerpt_counts(fitted_review_evidence),
         },
@@ -832,7 +893,7 @@ def build_proposal_prepared(
         proposal_tool_schema=proposal_tool_schema,
         decline_tool_schema=decline_tool_schema,
         obligation_projection=obligation_projection,
-        request_budget=proposal_request_budget,
+        request_budget=planned_request_budget,
     )
 
 
@@ -896,19 +957,38 @@ def _review_excerpt_counts(evidence: FlowReviewEvidence | None) -> dict[str, int
 
 def _proposal_system_prompt_token_limit(
     *,
-    turn_tool_schemas: list[dict[str, Any]],
-    litellm_model: str,
-    request_budget: AIBuilderRequestBudget,
+    tool_tokens: int,
+    current_turn_tokens: int,
+    required_prompt_tokens: int,
+    request_budget: AIBuilderPlannedRequestBudget,
     budget_policy: AIBuilderBudgetPolicy,
 ) -> int:
-    """What the model can actually carry as a system prompt this turn."""
+    """What the model can actually carry as a system prompt this turn.
 
-    tool_tokens = count_tool_tokens(turn_tool_schemas, litellm_model)
+    The required prompt always fits: the allocation was planned from it. The
+    policy's conversation minimum is optional headroom for history; the
+    current turn counts toward it, and it yields before required content.
+    """
+
+    after_required = (
+        request_budget.available_input_tokens
+        - tool_tokens
+        - current_turn_tokens
+        - required_prompt_tokens
+    )
+    history_headroom = max(
+        0,
+        min(
+            budget_policy.minimum_conversation_budget_tokens - current_turn_tokens,
+            after_required,
+        ),
+    )
     return max(
         0,
         request_budget.available_input_tokens
-        - budget_policy.minimum_conversation_budget_tokens
-        - tool_tokens,
+        - tool_tokens
+        - current_turn_tokens
+        - history_headroom,
     )
 
 
@@ -1057,8 +1137,8 @@ def _prepare_prompt_messages(
     conversation: list[ConversationMessage],
     system_prompt: str,
     litellm_model: str,
-    request_budget: AIBuilderRequestBudget,
-    budget_policy: AIBuilderBudgetPolicy,
+    request_budget: AIBuilderPlannedRequestBudget,
+    tool_tokens: int,
     current_turn_start: int,
 ) -> PreparedPromptMessages:
     prompt_tokens = measure_provider_input_reserve(
@@ -1069,6 +1149,7 @@ def _prepare_prompt_messages(
     conversation_budget = compute_conversation_token_budget(
         request_budget=request_budget,
         system_prompt_tokens=prompt_tokens,
+        tool_tokens=tool_tokens,
     )
     raw_messages = [
         conversation_message_to_llm_message(message) for message in conversation
@@ -1102,10 +1183,15 @@ def _prepare_prompt_messages(
 
 def compute_conversation_token_budget(
     *,
-    request_budget: AIBuilderRequestBudget,
+    request_budget: AIBuilderPlannedRequestBudget,
     system_prompt_tokens: int,
+    tool_tokens: int = 0,
 ) -> int:
-    return max(request_budget.available_input_tokens - system_prompt_tokens, 0)
+    """What the conversation may carry beside the prompt and the tools."""
+
+    return max(
+        request_budget.available_input_tokens - system_prompt_tokens - tool_tokens, 0
+    )
 
 
 def trim_conversation_for_context(
