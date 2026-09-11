@@ -3,10 +3,15 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from eneo.actors import SpaceAction
 from eneo.groups_legacy.group_service import GroupService
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
 from eneo.info_blobs.info_blob_service import InfoBlobService
-from eneo.main.exceptions import NameCollisionException, NotFoundException
+from eneo.main.exceptions import (
+    NameCollisionException,
+    NotFoundException,
+    UnauthorizedException,
+)
 
 
 @dataclass
@@ -47,11 +52,12 @@ async def test_get_info_blob_does_not_exist(setup: Setup):
 
 
 async def test_update_info_blob_does_not_exist(setup: Setup):
-    setup.repo.update.return_value = None
-    setup.repo.get_by_title_and_group.return_value = None
+    setup.repo.get.return_value = None
 
     with pytest.raises(NotFoundException, match="InfoBlob not found"):
-        await setup.service.update_info_blob(MagicMock())
+        await setup.service.update_info_blob(MagicMock(id="blob-id", title=None))
+
+    setup.repo.update.assert_not_awaited()
 
 
 async def test_delete_info_blob_does_not_exist(setup: Setup):
@@ -145,3 +151,17 @@ async def test_delete_projects_unavailable_after_reference_removal(setup: Setup)
 
     assert result is projected
     setup.repo.hydrate_original_availability.assert_awaited_once_with([deleted])
+
+
+async def test_update_checks_edit_permission_on_the_stored_blob_before_writing(
+    setup: Setup,
+):
+    current = MagicMock(group_id=None)
+    setup.repo.get.return_value = current
+    setup.service._validate = AsyncMock(side_effect=UnauthorizedException())
+
+    with pytest.raises(UnauthorizedException):
+        await setup.service.update_info_blob(MagicMock(id="blob-id", title=None))
+
+    setup.service._validate.assert_awaited_once_with(current, action=SpaceAction.EDIT)
+    setup.repo.update.assert_not_awaited()
