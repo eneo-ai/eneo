@@ -29,6 +29,16 @@ def test_default_policy_has_all_restrictions_disabled():
     assert p.default_reasoning_effort is None
     assert p.allow_user_reasoning_effort is False
     assert p.reasoning_policy_configured is False
+    assert p.inline_file_text is None
+
+
+@pytest.mark.parametrize("inline_file_text", [True, False])
+def test_set_file_policy_governs_attachment_inlining(inline_file_text: bool):
+    p = _empty_policy()
+
+    p.set_file_policy(inline_file_text=inline_file_text)
+
+    assert p.inline_file_text is inline_file_text
 
 
 def test_set_reasoning_policy_stores_default_and_user_choice():

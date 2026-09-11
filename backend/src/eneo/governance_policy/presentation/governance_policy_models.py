@@ -62,6 +62,13 @@ class ReasoningPolicyInput(BaseModel):
     allow_user_override: bool = False
 
 
+class FilePolicyInput(BaseModel):
+    # True inlines attachment text into the prompt; False sends signed URLs
+    # the model reads with the files tool (keeps large uploads out of the
+    # context window). Saving either value makes the dimension governed.
+    inline_file_text: bool
+
+
 class SkillsPolicyInput(BaseModel):
     bindings: list[AssistantSkillBindingInput] = Field(
         default_factory=lambda: list[AssistantSkillBindingInput]()
@@ -73,6 +80,7 @@ class GovernancePolicyUpdate(BaseModel):
     mcp_restriction: McpRestrictionInput | None = None
     prompt_enforcement: PromptEnforcementInput | None = None
     reasoning_policy: ReasoningPolicyInput | None = None
+    file_policy: FilePolicyInput | None = None
     skills: SkillsPolicyInput | None = None
 
 
@@ -117,6 +125,11 @@ class ReasoningPolicyPublic(BaseModel):
     allow_user_override: bool
 
 
+class FilePolicyPublic(BaseModel):
+    configured: bool
+    inline_file_text: bool | None
+
+
 class SkillsPolicyPublic(BaseModel):
     bindings: list[AssistantSkillBindingSummary]
 
@@ -126,6 +139,7 @@ class GovernancePolicyPublic(BaseModel):
     mcp_restriction: McpRestrictionPublic
     prompt_enforcement: PromptEnforcementPublic
     reasoning_policy: ReasoningPolicyPublic
+    file_policy: FilePolicyPublic
     skills: SkillsPolicyPublic
     updated_at: datetime | None
     updated_by_user_id: UUID | None

@@ -22,14 +22,15 @@ def _make_service(
     group_chat=None,
     session=None,
     files=None,
+    effective_config=None,
 ):
     assistant_service = AsyncMock()
     if assistant is not None:
-        assistant_service.get_assistant = AsyncMock(return_value=(assistant, []))
-        # Preflight resolves the model through the governance-aware path, which
-        # returns the effective model directly (mirrors ask()).
-        assistant_service.get_effective_completion_model = AsyncMock(
-            return_value=assistant.completion_model
+        # Preflight resolves the model and file-inlining mode through the
+        # governance-aware path (mirrors ask()); no policy unless a test sets
+        # one via `effective_config`.
+        assistant_service.get_assistant_with_effective_config = AsyncMock(
+            return_value=(assistant, [], effective_config)
         )
         # Default: no persistent prompt/attachments. Baseline-specific tests
         # override this. Without it the AsyncMock returns a non-iterable.
@@ -206,6 +207,78 @@ async def test_preflight_excludes_url_only_file_text_when_inline_disabled(monkey
 
     assert result.file_tokens == 0
     assert result.excluded_file_count == 1
+
+
+@pytest.mark.asyncio
+async def test_preflight_honors_governed_file_policy_over_assistant_flag(monkeypatch):
+    """A personal-assistant file policy that turns inlining off wins over the
+    assistant's own flag, so the meter drops the file exactly as the send will."""
+    settings = SimpleNamespace(
+        file_reference_base_url="http://host.docker.internal:8123",
+        public_origin=None,
+        attachment_context_reserve_tokens=0,
+    )
+    monkeypatch.setattr(conversation_service_mod, "get_settings", lambda: settings)
+    monkeypatch.setattr(file_reference_mod, "get_settings", lambda: settings)
+    monkeypatch.setattr(file_reference_mod, "object_store_configured", lambda: True)
+
+    text_file = MagicMock()
+    text_file.file_type = FileType.TEXT
+    text_file.text = "the quick brown fox" * 100
+    text_file.name = "big.csv"
+    text_file.original_available = True
+
+    assistant = _make_assistant()
+    assistant.inline_file_text = True
+    effective_config = SimpleNamespace(models_enforced=False, inline_file_text=False)
+
+    service = _make_service(
+        assistant=assistant, files=[text_file], effective_config=effective_config
+    )
+
+    result = await service.preflight_tokens(
+        question="summarize this",
+        file_ids=[uuid4()],
+        assistant_id=uuid4(),
+    )
+
+    assert result.file_tokens == 0
+    assert result.excluded_file_count == 1
+
+
+@pytest.mark.asyncio
+async def test_preflight_inlines_file_text_when_model_cannot_call_tools(monkeypatch):
+    """URL-only mode needs the files tool. A model without tool calling gets
+    the text inlined instead, so the meter must count the file in full."""
+    settings = SimpleNamespace(
+        file_reference_base_url="http://host.docker.internal:8123",
+        public_origin=None,
+        attachment_context_reserve_tokens=0,
+    )
+    monkeypatch.setattr(conversation_service_mod, "get_settings", lambda: settings)
+    monkeypatch.setattr(file_reference_mod, "get_settings", lambda: settings)
+    monkeypatch.setattr(file_reference_mod, "object_store_configured", lambda: True)
+
+    text_file = MagicMock()
+    text_file.file_type = FileType.TEXT
+    text_file.text = "the quick brown fox" * 100
+    text_file.name = "big.csv"
+    text_file.original_available = True
+
+    assistant = _make_assistant()
+    assistant.completion_model.supports_tool_calling = False
+    assistant.inline_file_text = False
+
+    service = _make_service(assistant=assistant, files=[text_file])
+
+    result = await service.preflight_tokens(
+        question="summarize this",
+        file_ids=[uuid4()],
+        assistant_id=uuid4(),
+    )
+
+    assert result.file_tokens > 0
+    assert result.excluded_file_count == 0
 
 
 @pytest.mark.asyncio
@@ -573,7 +646,7 @@ async def test_preflight_resolves_session_assistant_model():
     assert result.input_tokens > 0
     assert result.model_name == "gpt-4o"
     service.session_service.get_session_by_uuid.assert_awaited_once_with(session_id)
-    service.assistant_service.get_effective_completion_model.assert_awaited_once_with(
+    service.assistant_service.get_assistant_with_effective_config.assert_awaited_once_with(
         assistant_id
     )
 

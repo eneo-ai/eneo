@@ -117,6 +117,7 @@ class GovernancePolicyService:
         capabilities: list[PolicyCapability] | None = None,
         prompt_enforcement: tuple[bool, UUID | None] | None = None,
         reasoning_policy: tuple[str | None, bool] | None = None,
+        inline_file_text: bool | None = None,
         skill_intents: list[SkillBindingIntent] | None = None,
     ) -> GovernancePolicy:
         policy = await self.get_policy_for_update()
@@ -172,6 +173,9 @@ class GovernancePolicyService:
                 default_effort=default_effort,
                 allow_user_override=allow_user_override,
             )
+
+        if inline_file_text is not None:
+            policy.set_file_policy(inline_file_text=inline_file_text)
 
         if (
             models_restriction is not None or reasoning_policy is not None

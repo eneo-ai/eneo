@@ -27,7 +27,8 @@ function initAssistantEditor(data: {
     defaults: {
       prompt: { description: "", text: "" },
       insight_enabled: false,
-      inline_file_text: true,
+      // Widened so the editor's inverted "open files" switch can write false.
+      inline_file_text: true as boolean,
       // On-demand knowledge is opt-in. Missing values must preserve the
       // legacy retrieve-and-inject behavior for existing assistants.
       knowledge_mode: "inject" as Assistant["knowledge_mode"],
