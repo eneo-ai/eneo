@@ -4,21 +4,37 @@
   import python from "highlight.js/lib/languages/python";
   import c from "highlight.js/lib/languages/c";
   import xml from "highlight.js/lib/languages/xml";
+  import json from "highlight.js/lib/languages/json";
+  import bash from "highlight.js/lib/languages/bash";
+  import yaml from "highlight.js/lib/languages/yaml";
+  import sql from "highlight.js/lib/languages/sql";
   import { IconCopy } from "@eneo/icons/copy";
 
   hljs.registerLanguage("javascript", js);
   hljs.registerLanguage("python", python);
   hljs.registerLanguage("c", c);
   hljs.registerLanguage("xml", xml);
+  hljs.registerLanguage("json", json);
+  hljs.registerLanguage("bash", bash);
+  hljs.registerLanguage("yaml", yaml);
+  hljs.registerLanguage("sql", sql);
 
   export let source: string;
+  /** The fence info string (```python), when the markdown provided one. */
+  export let lang: string | undefined = undefined;
   let cls = "";
   export { cls as class };
 
   let showCopiedMessage = false;
-  // Maybe we can do smth here, marked will take the lang from the source
-  // export let lang: string | undefined = undefined
-  $: highlighted = hljs.highlightAuto(source, ["javascript", "python", "c"]).value;
+
+  // A fenced language we know is highlighted as that language; anything else
+  // falls back to detection among the common ones. Detection is also what
+  // mislabels JSON as JavaScript, so the fence wins whenever it is present.
+  $: fenced = lang?.trim().split(/\s+/)[0]?.toLowerCase();
+  $: language = fenced && hljs.getLanguage(fenced) ? fenced : undefined;
+  $: highlighted = language
+    ? hljs.highlight(source, { language, ignoreIllegals: true }).value
+    : hljs.highlightAuto(source, ["javascript", "python", "c"]).value;
 </script>
 
 <div class="code-wrapper group relative p-0" style="color-scheme: dark;">
