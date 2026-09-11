@@ -85,6 +85,7 @@ from eneo.spaces.api.space_models import SpaceGroupMember, SpaceMember
 from eneo.spaces.space import Space
 from eneo.spaces.space_applications_projection import SpaceApplicationsProjection
 from eneo.spaces.space_factory import SpaceFactory
+from eneo.spaces.utils.space_utils import effective_space_ids_for
 from eneo.user_groups.user_group import UserGroupState
 
 logger = get_logger(__name__)
@@ -129,6 +130,79 @@ if TYPE_CHECKING:
     from eneo.websites.infrastructure.http_auth_encryption import (
         HttpAuthEncryptionService,
     )
+
+
+@dataclass(frozen=True)
+class KnowledgeSource:
+    """One kind of knowledge a space can hold: the table that owns it and the
+    association table that distributes it to other spaces.
+
+    A source is visible to a space when the space owns it or it is distributed
+    to the space, and a space also sees everything visible to its organization
+    space (``effective_space_ids_for``). ``visible_to`` and ``spaces_seeing``
+    are the two directions of that one rule, so what a space loads as knowledge
+    and what a user may preview from a citation cannot drift apart.
+    """
+
+    table: type[CollectionsTable] | type[WebsitesTable] | type[IntegrationKnowledge]
+    distribution: (
+        type[GroupsSpaces] | type[WebsitesSpaces] | type[IntegrationKnowledgesSpaces]
+    )
+    # Stored as a column expression, not the mapped attribute: a mapped
+    # attribute is a descriptor, so reading it off an instance would type as
+    # the Python value instead of the column.
+    distribution_source_id: sa.ColumnElement[UUID]
+
+    def visible_to(self, space_ids: Sequence[UUID]) -> sa.ColumnElement[bool]:
+        """Sources owned by, or distributed to, one of the spaces."""
+        return sa.or_(
+            self.table.space_id.in_(space_ids),
+            sa.exists(
+                sa.select(sa.literal(1))
+                .select_from(self.distribution)
+                .where(self.distribution_source_id == self.table.id)
+                .where(self.distribution.space_id.in_(space_ids))
+            ),
+        )
+
+    def spaces_seeing(
+        self, source_id: UUID, tenant_id: UUID
+    ) -> sa.CompoundSelect[tuple[UUID | None]]:
+        """Spaces that own the source or have it distributed to them."""
+        source_filter = (self.table.id == source_id, self.table.tenant_id == tenant_id)
+        return (
+            sa.select(self.table.space_id)
+            .where(*source_filter)
+            .union(
+                sa.select(self.distribution.space_id)
+                .join(self.table, self.distribution_source_id == self.table.id)
+                .where(*source_filter)
+            )
+        )
+
+
+COLLECTION_SOURCE = KnowledgeSource(
+    CollectionsTable, GroupsSpaces, GroupsSpaces.collection_id.expression
+)
+WEBSITE_SOURCE = KnowledgeSource(
+    WebsitesTable, WebsitesSpaces, WebsitesSpaces.website_id.expression
+)
+INTEGRATION_KNOWLEDGE_SOURCE = KnowledgeSource(
+    IntegrationKnowledge,
+    IntegrationKnowledgesSpaces,
+    IntegrationKnowledgesSpaces.integration_knowledge_id.expression,
+)
+
+
+def knowledge_source_for(info_blob: "InfoBlobInDB") -> tuple[KnowledgeSource, UUID]:
+    """The source an info blob belongs to and that source's id."""
+    if info_blob.group_id is not None:
+        return COLLECTION_SOURCE, info_blob.group_id
+    if info_blob.website_id is not None:
+        return WEBSITE_SOURCE, info_blob.website_id
+    if info_blob.integration_knowledge_id is not None:
+        return INTEGRATION_KNOWLEDGE_SOURCE, info_blob.integration_knowledge_id
+    raise ValueError("InfoBlob missing scope reference")
 
 
 class SpaceRepository:
@@ -261,7 +335,6 @@ class SpaceRepository:
     ) -> Sequence[tuple[CollectionsTable, int]]:
         c = CollectionsTable
         ib = InfoBlobs
-        gs = GroupsSpaces
 
         ib_count_sq = (
             sa.select(sa.func.count(sa.distinct(ib.id)))
@@ -275,17 +348,7 @@ class SpaceRepository:
                 c,
                 sa.func.coalesce(ib_count_sq, 0).label("infoblob_count"),
             )
-            .where(
-                sa.or_(
-                    c.space_id.in_(space_ids),
-                    sa.exists(
-                        sa.select(sa.literal(1))
-                        .select_from(gs)
-                        .where(gs.collection_id == c.id)
-                        .where(gs.space_id.in_(space_ids))
-                    ),
-                )
-            )
+            .where(COLLECTION_SOURCE.visible_to(space_ids))
             .order_by(c.created_at)
             .options(selectinload(c.embedding_model))
         )
@@ -1235,21 +1298,10 @@ class SpaceRepository:
             space_ids = [space_ids]
 
         ws = WebsitesTable
-        wss = WebsitesSpaces
 
         stmt = (
             sa.select(ws)
-            .where(
-                sa.or_(
-                    ws.space_id.in_(space_ids),
-                    sa.exists(
-                        sa.select(sa.literal(1))
-                        .select_from(wss)
-                        .where(wss.website_id == ws.id)
-                        .where(wss.space_id.in_(space_ids))
-                    ),
-                )
-            )
+            .where(WEBSITE_SOURCE.visible_to(space_ids))
             .options(
                 selectinload(ws.latest_crawl).selectinload(CrawlRunsTable.job),  # type: ignore[attr-defined]
             )
@@ -1410,13 +1462,7 @@ class SpaceRepository:
         if not entry_in_db:
             return
 
-        # Build effective_space_ids inline to avoid passing Spaces (DB type) where
-        # Space (domain type) is expected — cross-file change would be needed otherwise.
-        space_ids: list[UUID] = (
-            [entry_in_db.id, entry_in_db.tenant_space_id]
-            if entry_in_db.tenant_space_id
-            else [entry_in_db.id]
-        )
+        space_ids = effective_space_ids_for(entry_in_db.id, entry_in_db.tenant_space_id)
 
         collections = await self._get_collections(space_ids)
         websites = await self._get_websites(space_ids)
@@ -1892,47 +1938,17 @@ class SpaceRepository:
     async def get_info_blob_read_access(
         self, info_blob: "InfoBlobInDB"
     ) -> list[SpaceAccessFacts]:
-        """Resolve reader memberships through source ownership and distribution.
+        """Reader memberships through the source's ownership and distribution.
 
-        Mirrors the knowledge lists loaded by _get_from_query: child spaces also
-        see sources owned by or distributed to their organization. These facts
+        The inverse of what ``_get_from_query`` loads: a user may read a blob
+        from any space they belong to that sees the blob's source, including
+        child spaces of an organization the source is visible to. These facts
         cover membership-derived reads only; resource-scoped key IDs are omitted.
         """
         if info_blob.tenant_id != self.user.tenant_id:
             return []
-        if info_blob.group_id is not None:
-            source = CollectionsTable
-            source_id = info_blob.group_id
-            distribution_space_id = GroupsSpaces.space_id
-            distribution_source_id = GroupsSpaces.collection_id
-        elif info_blob.website_id is not None:
-            source = WebsitesTable
-            source_id = info_blob.website_id
-            distribution_space_id = WebsitesSpaces.space_id
-            distribution_source_id = WebsitesSpaces.website_id
-        elif info_blob.integration_knowledge_id is not None:
-            source = IntegrationKnowledge
-            source_id = info_blob.integration_knowledge_id
-            distribution_space_id = IntegrationKnowledgesSpaces.space_id
-            distribution_source_id = (
-                IntegrationKnowledgesSpaces.integration_knowledge_id
-            )
-        else:
-            raise ValueError("InfoBlob missing scope reference")
-
-        source_filter = (
-            source.id == source_id,
-            source.tenant_id == self.user.tenant_id,
-        )
-        source_space_ids = (
-            sa.select(source.space_id)
-            .where(*source_filter)
-            .union(
-                sa.select(distribution_space_id)
-                .join(source, distribution_source_id == source.id)
-                .where(*source_filter)
-            )
-        )
+        source, source_id = knowledge_source_for(info_blob)
+        source_space_ids = source.spaces_seeing(source_id, self.user.tenant_id)
         user_group_ids = sa.select(UserGroups.id).where(
             UserGroups.id.in_(self.user.user_groups_ids),
             UserGroups.tenant_id == self.user.tenant_id,
@@ -1958,6 +1974,8 @@ class SpaceRepository:
             )
             .where(
                 Spaces.tenant_id == self.user.tenant_id,
+                # Inverse of effective_space_ids_for: the space itself, or a
+                # child space whose organization space sees the source.
                 sa.or_(
                     Spaces.id.in_(source_space_ids),
                     Spaces.tenant_space_id.in_(source_space_ids),
@@ -2072,28 +2090,12 @@ class SpaceRepository:
     async def _get_integration_knowledge_union(
         self, space_ids: list[UUID]
     ) -> list[IntegrationKnowledge]:
-        """Fetch integration knowledge both directly owned and distributed via org space.
-
-        A space can access integration knowledge in two ways:
-        1. Direct ownership: integration_knowledge.space_id = space.id
-        2. Distribution: integration_knowledge is in org space and shared via junction table
-        """
+        """Integration knowledge owned by the spaces or distributed to them."""
         ik = IntegrationKnowledge
-        iks = IntegrationKnowledgesSpaces
 
         stmt = (
             sa.select(ik)
-            .where(
-                sa.or_(
-                    ik.space_id.in_(space_ids),  # Direct ownership
-                    sa.exists(
-                        sa.select(sa.literal(1))
-                        .select_from(iks)
-                        .where(iks.integration_knowledge_id == ik.id)
-                        .where(iks.space_id.in_(space_ids))  # Distributed to this space
-                    ),
-                )
-            )
+            .where(INTEGRATION_KNOWLEDGE_SOURCE.visible_to(space_ids))
             .options(
                 selectinload(ik.embedding_model),
                 selectinload(ik.user_integration)
