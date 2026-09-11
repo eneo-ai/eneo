@@ -201,6 +201,7 @@ SHARED_SPACE_PERMISSIONS = {
         SpaceResourceType.INFO_BLOB: {
             SpaceAction.READ,
             SpaceAction.CREATE,
+            SpaceAction.EDIT,
             SpaceAction.DELETE,
         },
         SpaceResourceType.SPACE: {
@@ -273,6 +274,7 @@ SHARED_SPACE_PERMISSIONS = {
         SpaceResourceType.INFO_BLOB: {
             SpaceAction.READ,
             SpaceAction.CREATE,
+            SpaceAction.EDIT,
             SpaceAction.DELETE,
         },
         SpaceResourceType.SPACE: {
@@ -359,6 +361,7 @@ PERSONAL_SPACE_PERMISSIONS = {
         SpaceResourceType.INFO_BLOB: {
             SpaceAction.READ,
             SpaceAction.CREATE,
+            SpaceAction.EDIT,
             SpaceAction.DELETE,
         },
         SpaceResourceType.SPACE: {
@@ -438,6 +441,7 @@ ORG_SPACE_PERMISSIONS = {
         SpaceResourceType.INFO_BLOB: {
             SpaceAction.READ,
             SpaceAction.CREATE,
+            SpaceAction.EDIT,
             SpaceAction.DELETE,
         },
         SpaceResourceType.SPACE: {
@@ -1082,6 +1086,12 @@ class SpaceActor:
     def can_create_info_blobs(self):
         return self.can_perform_action(
             action=SpaceAction.CREATE,
+            resource_type=SpaceResourceType.INFO_BLOB,
+        )
+
+    def can_edit_info_blobs(self):
+        return self.can_perform_action(
+            action=SpaceAction.EDIT,
             resource_type=SpaceResourceType.INFO_BLOB,
         )
 
