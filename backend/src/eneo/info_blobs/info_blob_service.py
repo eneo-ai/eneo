@@ -374,11 +374,16 @@ class InfoBlobService:
             case SpaceAction.CREATE:
                 if not actor.can_create_info_blobs():
                     raise UnauthorizedException()
+            case SpaceAction.EDIT:
+                if not actor.can_edit_info_blobs():
+                    raise UnauthorizedException()
             case SpaceAction.DELETE:
                 if not actor.can_delete_info_blobs():
                     raise UnauthorizedException()
             case _:
-                pass  # Other SpaceAction values are not applicable to info blobs
+                # Fail closed: an action this check does not know about must
+                # not pass silently.
+                raise UnauthorizedException()
 
     async def publish_info_blob_without_validation(
         self,
@@ -473,6 +478,8 @@ class InfoBlobService:
 
     async def update_info_blob(self, info_blob: InfoBlobUpdate):
         current_info_blob = await self.repo.get(info_blob.id)
+        # Authorize on the stored blob before anything is written.
+        await self._validate(current_info_blob, action=SpaceAction.EDIT)
         assert current_info_blob is not None
 
         if info_blob.title:
@@ -490,8 +497,6 @@ class InfoBlobService:
                 )
 
         info_blob_updated = await self.repo.update(info_blob)
-
-        await self._validate(info_blob_updated, action=SpaceAction.EDIT)
 
         return (await self._project_original_availability([info_blob_updated]))[0]
 
