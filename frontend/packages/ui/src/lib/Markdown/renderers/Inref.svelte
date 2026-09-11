@@ -25,7 +25,11 @@
 </script>
 
 {#if CustomRenderer}
-  <CustomRenderer {token} />
+  <!-- Blocks are reused by position while an answer streams; a citation
+       renderer may cache what it loaded, so it is remounted per reference. -->
+  {#key token.id}
+    <CustomRenderer {token} />
+  {/key}
 {:else if reference}
   <!-- eslint-disable svelte/no-navigation-without-resolve -- external URL from reference metadata -->
   <a
