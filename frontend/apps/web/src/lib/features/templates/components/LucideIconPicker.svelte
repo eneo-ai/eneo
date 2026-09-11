@@ -1,16 +1,17 @@
 <script lang="ts">
   import { Dialog, Button } from "@eneo/ui";
+  import {
+    loadLucideIcons,
+    toKebabCase,
+    toPascalCase,
+    type LucideIconRegistry
+  } from "../lucideIcons";
   import Search from "lucide-svelte/icons/search";
   import X from "lucide-svelte/icons/x";
   import Sparkles from "lucide-svelte/icons/sparkles";
   import Check from "lucide-svelte/icons/check";
   import { writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
-  import {
-    getTemplateIconComponent,
-    templateIconOptions,
-    type TemplateIconOption
-  } from "$lib/features/templates/templateIconRegistry";
 
   let {
     value = $bindable(null),
@@ -23,21 +24,86 @@
   const dialogOpen = writable(false);
   let searchQuery = $state("");
 
-  const filteredIcons = $derived(
-    searchQuery
-      ? templateIconOptions.filter((option) =>
-          `${option.name} ${option.value}`.toLowerCase().includes(searchQuery.toLowerCase())
-        )
+  // Popular/recommended icons to show first
+  const popularIcons = [
+    "Rocket",
+    "Sparkles",
+    "Zap",
+    "Star",
+    "Heart",
+    "MessageSquare",
+    "Mail",
+    "Bell",
+    "Calendar",
+    "Clock",
+    "User",
+    "Users",
+    "Building",
+    "Home",
+    "Briefcase",
+    "ShoppingCart",
+    "CreditCard",
+    "DollarSign",
+    "FileText",
+    "Image",
+    "Video",
+    "Music",
+    "Code",
+    "Database"
+  ];
+
+  // The full registry is large, so it is fetched only when the picker opens
+  // or a chosen icon has to be shown (see lucideIcons.ts).
+  let icons = $state<LucideIconRegistry | null>(null);
+  let loadFailed = $state(false);
+  let loadAttempt = $state(0);
+
+  function loadIcons() {
+    loadFailed = false;
+    void loadLucideIcons().then(
+      (registry) => (icons = registry),
+      () => (loadFailed = true)
+    );
+  }
+
+  $effect(() => {
+    // Read both triggers before deciding, so opening the dialog re-runs this
+    // even when a selected value already asked for the registry once.
+    const open = $dialogOpen;
+    const wanted = Boolean(value) || open;
+    void loadAttempt;
+    if (icons || !wanted) return;
+    loadIcons();
+  });
+
+  // All available Lucide icon names
+  const allIcons = $derived(
+    icons
+      ? Object.keys(icons)
+          .filter((name) => name !== "Icon" && name !== "icons" && !name.startsWith("Lucide"))
+          .sort()
       : []
   );
 
-  const SelectedIconComponent = $derived.by(() => {
+  // Filter icons based on search query
+  const filteredIcons = $derived(
+    searchQuery
+      ? allIcons.filter((iconName) => iconName.toLowerCase().includes(searchQuery.toLowerCase()))
+      : []
+  );
+
+  function getIconComponent(name: string) {
+    return icons?.[name] ?? null;
+  }
+
+  const selectedIconComponent = $derived.by(() => {
     if (!value) return null;
-    return getTemplateIconComponent(value);
+    return getIconComponent(toPascalCase(value));
   });
 
-  function handleIconClick(option: TemplateIconOption) {
-    value = option.value;
+  function handleIconClick(iconName: string) {
+    const kebabName = toKebabCase(iconName);
+    value = kebabName;
     dialogOpen.set(false);
     searchQuery = "";
   }
@@ -48,6 +114,7 @@
 </script>
 
 {#if compact}
+  <!-- Compact mode: Icon button only (for inline placement) -->
   <button
     type="button"
     onclick={() => dialogOpen.set(true)}
@@ -58,13 +125,15 @@
     title={value ? m.change_icon_current({ iconName: value }) : m.choose_icon_optional()}
     aria-label={value ? m.change_icon_current({ iconName: value }) : m.choose_template_icon()}
   >
-    {#if SelectedIconComponent}
-      <SelectedIconComponent class="text-text h-5 w-5" />
+    {#if selectedIconComponent}
+      {@const SelectedIcon = selectedIconComponent}
+      <SelectedIcon class="text-text h-5 w-5" />
     {:else}
       <Sparkles class="text-text-dimmer h-5 w-5" />
     {/if}
   </button>
 {:else}
+  <!-- Full mode: With label and description -->
   <div class="flex flex-col gap-2">
     <div class="text-default text-sm font-medium">{m.choose_icon_optional()}</div>
 
@@ -74,8 +143,9 @@
         onclick={() => dialogOpen.set(true)}
         class="border-strong bg-component hover:bg-hover-subtle flex h-10 min-w-10 items-center gap-2 rounded-lg border px-3 transition-colors"
       >
-        {#if SelectedIconComponent}
-          <SelectedIconComponent class="text-text h-5 w-5" />
+        {#if selectedIconComponent}
+          {@const SelectedIcon = selectedIconComponent}
+          <SelectedIcon class="text-text h-5 w-5" />
           <span class="text-text text-sm">{value}</span>
         {:else}
           <Sparkles class="text-text-dimmer h-5 w-5" />
@@ -101,6 +171,16 @@
 
     <Dialog.Section>
       <div class="flex flex-col gap-4 p-6">
+        {#if loadFailed}
+          <div
+            class="border-default bg-secondary flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-sm"
+            role="alert"
+          >
+            <span>{m.icon_picker_load_error()}</span>
+            <Button variant="outlined" onclick={() => loadAttempt++}>{m.retry()}</Button>
+          </div>
+        {/if}
+        <!-- Search input -->
         <div class="relative">
           <input
             type="text"
@@ -111,26 +191,30 @@
           <Search class="text-text-dimmer absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
         </div>
 
+        <!-- Popular icons (when no search) -->
         {#if !searchQuery}
           <div>
             <h4 class="text-text-dimmer mb-2 text-xs font-medium tracking-wide uppercase">
               {m.popular_icons()}
             </h4>
             <div class="grid grid-cols-4 gap-3 sm:grid-cols-6 md:grid-cols-8">
-              {#each templateIconOptions as option (option.value)}
-                {@const IconComp = option.component}
-                {@const isSelected = value === option.value}
+              {#each popularIcons as iconName (iconName)}
+                {@const IconComp = getIconComponent(iconName)}
+                {@const kebabName = toKebabCase(iconName)}
+                {@const isSelected = value === kebabName}
                 <button
                   type="button"
-                  onclick={() => handleIconClick(option)}
+                  onclick={() => handleIconClick(iconName)}
                   class="hover:bg-hover-subtle relative flex h-11 w-11 items-center justify-center rounded-lg transition-colors
                     {isSelected
                     ? 'bg-accent-dimmer border-accent-stronger border-2'
                     : 'border-2 border-transparent'}"
-                  title={option.value}
-                  aria-label={m.select_icon({ iconName: option.value })}
+                  title={kebabName}
+                  aria-label={m.select_icon({ iconName: kebabName })}
                 >
-                  <IconComp class="h-5 w-5 {isSelected ? 'text-accent-stronger' : 'text-text'}" />
+                  {#if IconComp}
+                    <IconComp class="h-5 w-5 {isSelected ? 'text-accent-stronger' : 'text-text'}" />
+                  {/if}
                   {#if isSelected}
                     <div
                       class="bg-accent-stronger absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full"
@@ -146,23 +230,27 @@
           <hr class="border-default" />
         {/if}
 
+        <!-- All icons / Search results -->
         {#if searchQuery && filteredIcons.length > 0}
           <div class="border-strong max-h-96 overflow-y-auto rounded-lg border p-3">
             <div class="grid grid-cols-4 gap-3 sm:grid-cols-6 md:grid-cols-8">
-              {#each filteredIcons as option (option.value)}
-                {@const IconComp = option.component}
-                {@const isSelected = value === option.value}
+              {#each filteredIcons.slice(0, 200) as iconName (iconName)}
+                {@const IconComp = getIconComponent(iconName)}
+                {@const kebabName = toKebabCase(iconName)}
+                {@const isSelected = value === kebabName}
                 <button
                   type="button"
-                  onclick={() => handleIconClick(option)}
+                  onclick={() => handleIconClick(iconName)}
                   class="hover:bg-hover-subtle relative flex h-11 w-11 items-center justify-center rounded-lg transition-colors
                     {isSelected
                     ? 'bg-accent-dimmer border-accent-stronger border-2'
                     : 'border-2 border-transparent'}"
-                  title={option.value}
-                  aria-label={m.select_icon({ iconName: option.value })}
+                  title={kebabName}
+                  aria-label={m.select_icon({ iconName: kebabName })}
                 >
-                  <IconComp class="h-5 w-5 {isSelected ? 'text-accent-stronger' : 'text-text'}" />
+                  {#if IconComp}
+                    <IconComp class="h-5 w-5 {isSelected ? 'text-accent-stronger' : 'text-text'}" />
+                  {/if}
                   {#if isSelected}
                     <div
                       class="bg-accent-stronger absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full"
@@ -173,6 +261,12 @@
                 </button>
               {/each}
             </div>
+
+            {#if filteredIcons.length > 200}
+              <div class="text-text-dimmer mt-3 text-center text-xs">
+                {m.showing_first_icons({ total: filteredIcons.length })}
+              </div>
+            {/if}
           </div>
         {:else if searchQuery}
           <div class="text-text-dimmer flex items-center justify-center py-12 text-sm">

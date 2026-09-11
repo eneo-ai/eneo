@@ -1,7 +1,10 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
   import { Tooltip } from "@eneo/ui";
-  import { getTemplateIconComponent } from "$lib/features/templates/templateIconRegistry";
+  import {
+    loadLucideIconOrNull,
+    type LucideIconComponent
+  } from "$lib/features/templates/lucideIcons";
 
   interface Props {
     name: string;
@@ -12,19 +15,30 @@
 
   let { name, description, isDefault = false, iconName }: Props = $props();
 
+  // Show tooltip only for long descriptions that would be truncated
   const showTooltip = $derived(description && description.length > 80);
 
-  const IconComponent = $derived.by(() => {
-    if (!iconName) return null;
-    return getTemplateIconComponent(iconName);
+  // Icons resolve on demand from the lazily loaded registry (lucideIcons.ts).
+  let IconComponent = $state<LucideIconComponent | null>(null);
+  $effect(() => {
+    const name = iconName;
+    let stale = false;
+    void loadLucideIconOrNull(name).then((icon) => {
+      if (!stale) IconComponent = icon;
+    });
+    return () => {
+      stale = true;
+    };
   });
 </script>
 
 <div class="flex flex-col gap-1 py-1">
   <div class="flex items-center gap-2">
-    {#if IconComponent}
+    {#if iconName}
       <div class="border-strong bg-subtle flex h-6 w-6 items-center justify-center rounded border">
-        <IconComponent class="text-text h-4 w-4" />
+        {#if IconComponent}
+          <IconComponent class="text-text h-4 w-4" />
+        {/if}
       </div>
     {/if}
     <span class="text-default font-medium">{name}</span>

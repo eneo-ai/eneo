@@ -5,10 +5,14 @@ import { Callout } from "nextra/components";
 Model Context Protocol (MCP) servers give assistants access to external tools and live data. This guide covers setup, tool approval, user-specific catalogs, cross-turn state, and day-to-day operation.
 
 <Callout type="info">
-  This guide covers administrator setup for external MCP servers. For the deeper
-  architecture—including knowledge retrieval modes, Eneo's built-in loopback MCP
-  servers, and how internal and external tools interoperate—see [Knowledge
-  Retrieval and MCP Interoperability](/docs/knowledge-retrieval-and-mcp).
+  This guide covers administrator setup for external MCP servers. For the
+  deeper architecture—including knowledge retrieval modes, Eneo's built-in
+  loopback MCP servers, and how internal and external tools interoperate—see
+  [Knowledge Retrieval and MCP
+  Interoperability](/docs/knowledge-retrieval-and-mcp). Servers that act as
+  the organisation's search engine or image generator are managed as
+  functions instead; see [Web Search & Image
+  Generation](/guides/capabilities).
 </Callout>
 
 ## Overview
@@ -41,7 +45,9 @@ allowed to call. A tool must pass both checks.
 
 ## Adding an MCP Server
 
-MCP servers are managed in **Admin → MCP Servers**. Only admins can add, edit, or remove servers.
+MCP servers are managed on the **MCP servers** tab of **Admin → Tools** (`/admin/tools`; the former `/admin/mcp-servers` URL redirects there). Only admins can add, edit, or remove servers.
+
+The server form has a **Function** selection. Leave it at **General tools** for a server whose tools attach directly to assistants. Choose **Web search** or **Image generation** to register the server as a source for that function; it is then managed on the **Functions** tab and covered by [Web Search & Image Generation](/guides/capabilities).
 
 ### Steps
 

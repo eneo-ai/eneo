@@ -1,7 +1,6 @@
 <script lang="ts">
   import type { AssistantSkillBindingInput, AssistantSkillBindingSummary } from "@eneo/eneo-js";
   import BookOpenCheck from "lucide-svelte/icons/book-open-check";
-  import Info from "lucide-svelte/icons/info";
   import { resolve } from "$app/paths";
   import { Button } from "$lib/components/ui/button/index.js";
   import SkillBindingsEditor from "$lib/features/skills/SkillBindingsEditor.svelte";
@@ -50,16 +49,11 @@
   {/snippet}
 
   <div class="space-y-5">
-    <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-      <div class="flex items-start gap-3" role="note">
-        <Info class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-        <div class="min-w-0">
-          <p class="text-sm font-medium">{m.governance_skills_scope_title()}</p>
-          <p class="text-muted-foreground mt-1 max-w-[65ch] text-sm leading-6">
-            {m.governance_skills_scope_description()}
-          </p>
-        </div>
-      </div>
+    <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+      <p class="text-muted-foreground max-w-[65ch] text-sm leading-6" role="note">
+        <span class="text-foreground font-medium">{m.governance_skills_scope_title()}</span>.
+        {m.governance_skills_scope_description()}
+      </p>
 
       <Button
         href={resolve("/spaces/organization/skills")}

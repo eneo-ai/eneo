@@ -854,22 +854,22 @@
               </Badge>
             </div>
 
-            <dl class="grid grid-cols-2 gap-x-4 gap-y-3 text-sm lg:grid-cols-1">
-              <div>
+            <dl class="grid grid-cols-2 gap-x-4 gap-y-4 text-sm lg:grid-cols-1">
+              <div class="flex flex-col gap-0.5">
                 <dt class="text-muted-foreground">
                   {m.organization_skills_current_revision_label()}
                 </dt>
-                <dd class="mt-1 font-medium">
+                <dd class="font-medium tabular-nums">
                   {m.organization_skills_version({
                     version: String(data.skill.current_revision_number)
                   })}
                 </dd>
               </div>
-              <div>
+              <div class="flex flex-col gap-0.5">
                 <dt class="text-muted-foreground">
                   {m.organization_skills_approved_revision_label()}
                 </dt>
-                <dd class="mt-1 font-medium">
+                <dd class="font-medium tabular-nums">
                   {data.skill.published_revision_number === null
                     ? m.organization_skills_not_published()
                     : m.organization_skills_version({
@@ -923,15 +923,16 @@
 
             {#if data.skill.first_published_at !== null}
               <section
-                class="border-border flex flex-col gap-4 border-t pt-5"
+                class="border-border mt-1 flex flex-col gap-4 border-t pt-6"
                 aria-labelledby="organization-skill-execution-heading"
               >
                 <div class="flex flex-col items-start gap-2">
                   <div>
                     <h2
                       id="organization-skill-execution-heading"
-                      class="text-foreground font-semibold"
+                      class="text-destructive flex items-center gap-1.5 font-semibold"
                     >
+                      <ShieldAlert class="size-4" aria-hidden="true" />
                       {m.organization_skills_execution_heading()}
                     </h2>
                     <p class="text-muted-foreground mt-1 max-w-[32ch] text-sm leading-6">
@@ -956,7 +957,7 @@
                       <span class="mt-2 block font-medium text-current">
                         {executionBlock.block.reason}
                       </span>
-                      <span class="mt-1 block text-xs text-current/80">
+                      <span class="mt-1 block text-xs text-current/80 tabular-nums">
                         {m.organization_skills_execution_blocked_at({
                           time: formatExecutionDate(executionBlock.block.blocked_at)
                         })}

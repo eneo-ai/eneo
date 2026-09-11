@@ -33062,6 +33062,8 @@ export interface components {
       meta?: {
         [key: string]: unknown;
       } | null;
+      /** Purpose */
+      purpose?: string | null;
       /** Result */
       result?: string | null;
       /** Result Status */
@@ -47526,6 +47528,8 @@ export interface operations {
                     meta?: {
                       [key: string]: unknown;
                     } | null;
+                    /** Purpose */
+                    purpose?: string | null;
                     /** Result */
                     result?: string | null;
                     /** Result Status */
@@ -47583,6 +47587,8 @@ export interface operations {
                     meta?: {
                       [key: string]: unknown;
                     } | null;
+                    /** Purpose */
+                    purpose?: string | null;
                     /** Result */
                     result?: string | null;
                     /** Result Status */
@@ -47640,6 +47646,8 @@ export interface operations {
                     meta?: {
                       [key: string]: unknown;
                     } | null;
+                    /** Purpose */
+                    purpose?: string | null;
                     /** Result */
                     result?: string | null;
                     /** Result Status */

@@ -390,7 +390,7 @@
           ? m.skills_binding_personal_chat_draft_description()
           : m.skills_binding_draft_description()}
     </p>
-    {#if rows.length > 0}
+    {#if rows.length > 0 && activationSurface !== "personal_chat"}
       <Badge variant="secondary" class="shrink-0">
         {m.skills_binding_count({ count: String(rows.length) })}
       </Badge>
@@ -398,15 +398,13 @@
   </div>
 
   {#if activationSurface !== undefined}
-    <div class="border-border flex items-start gap-2 border-y py-3 text-sm">
-      <Info class="text-muted-foreground mt-0.5 size-4 shrink-0" aria-hidden="true" />
-      <div class="min-w-0">
-        <p id={runtimeStatusId}>{runtimeStatus()}</p>
-        <p id={runtimeHintId} class="text-muted-foreground mt-1 text-xs">
-          {runtimeHint()}
-        </p>
+    <Alert.Root role="status">
+      <Info aria-hidden="true" />
+      <Alert.Title id={runtimeStatusId} class="font-normal">{runtimeStatus()}</Alert.Title>
+      <Alert.Description id={runtimeHintId}>
+        <span class="block">{runtimeHint()}</span>
         {#if skillRuntime}
-          <p class="text-muted-foreground mt-1 text-xs tabular-nums">
+          <span class="mt-1 block tabular-nums">
             {m.skills_activation_runtime_tokens({
               used: String(skillRuntime.skill_context_tokens),
               limit: String(skillRuntime.skill_context_token_limit)
@@ -416,10 +414,10 @@
                 {m.skills_activation_runtime_estimated()}
               </Badge>
             {/if}
-          </p>
+          </span>
         {/if}
-      </div>
-    </div>
+      </Alert.Description>
+    </Alert.Root>
   {/if}
 
   {#if upgradeError}
@@ -442,95 +440,102 @@
             id={rowId(row.reference.skill_id)}
             tabindex="-1"
             data-execution-blocked={row.executionBlocked || undefined}
-            class="focus-visible:ring-ring data-[execution-blocked]:bg-destructive/5 flex flex-col gap-3 p-3 outline-none focus-visible:ring-2 focus-visible:ring-inset sm:flex-row sm:items-start sm:justify-between"
+            class="focus-visible:ring-ring data-[execution-blocked]:bg-destructive/5 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-3 p-3 outline-none focus-visible:ring-2 focus-visible:ring-inset sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-start"
           >
-            <div class="flex min-w-0 flex-1 items-start gap-3">
-              <Badge variant="outline" class="mt-0.5 min-w-7 justify-center px-1.5 tabular-nums">
-                {index + 1}
-              </Badge>
-              <div class="min-w-0 flex-1">
-                <p class="truncate text-sm font-medium">{rowName(row)}</p>
-                {#if row.description}
-                  <p class="text-muted-foreground mt-1 line-clamp-2 max-w-[75ch] text-sm leading-6">
-                    {row.description}
-                  </p>
+            <Badge variant="outline" class="mt-0.5 min-w-7 justify-center px-1.5 tabular-nums">
+              {index + 1}
+            </Badge>
+            <div class="min-w-0">
+              <p class="truncate text-sm font-medium">{rowName(row)}</p>
+              {#if row.description}
+                <p class="text-muted-foreground mt-1 line-clamp-2 max-w-[75ch] text-sm leading-6">
+                  {row.description}
+                </p>
+              {/if}
+              <div class="mt-2 flex flex-wrap items-center gap-1.5">
+                {#if row.pinnedRevision !== undefined}
+                  <Badge variant="outline">
+                    {m.skills_revision_label({ revision: String(row.pinnedRevision) })}
+                  </Badge>
                 {/if}
-                <div class="mt-2 flex flex-wrap items-center gap-1.5">
-                  {#if row.pinnedRevision !== undefined}
-                    <Badge variant="outline">
-                      {m.skills_revision_label({ revision: String(row.pinnedRevision) })}
-                    </Badge>
-                  {/if}
-                  {#if row.isActive === false && !row.executionBlocked}
-                    <Badge variant="outline">{m.skills_unavailable_status()}</Badge>
-                    <span class="text-muted-foreground text-xs">
-                      {m.skills_unavailable_binding_explanation()}
-                    </span>
-                  {/if}
-                  {#if row.executionBlocked}
-                    <Badge variant="destructive">{m.skills_execution_blocked_status()}</Badge>
-                    <span class="text-destructive text-xs">
-                      {m.skills_execution_blocked_binding_explanation()}
-                    </span>
-                  {/if}
-                  {#if row.hasNewerRevision && row.attachableRevisionNumber !== undefined && !row.executionBlocked}
-                    <Badge variant="secondary">
-                      {m.skills_newer_revision_available({
-                        revision: String(row.attachableRevisionNumber)
-                      })}
-                    </Badge>
-                  {/if}
-                </div>
-                {#if activationSurface !== undefined}
-                  <div class="mt-3 w-full sm:max-w-56">
-                    <Select.Root
-                      type="single"
-                      value={activationMode(row)}
-                      disabled={!canEditBindings ||
-                        row.executionBlocked ||
-                        (!canChooseOnDemand && activationMode(row) === "always")}
-                      onValueChange={(value) => updateActivationMode(row, value)}
-                    >
-                      <Select.Trigger
-                        class="w-full"
-                        aria-label={m.skills_activation_mode_label({ name: rowName(row) })}
-                        aria-describedby={`${runtimeStatusId} ${runtimeHintId}`}
-                      >
-                        <span data-slot="select-value">
-                          {activationModeLabel(activationMode(row))}
-                        </span>
-                      </Select.Trigger>
-                      <Select.Content class="w-(--bits-select-anchor-width) min-w-56">
-                        <Select.Group>
-                          <Select.Item value="always" label={activationModeLabel("always")}>
-                            <span class="flex flex-col items-start gap-0.5 text-left">
-                              <span>{activationModeLabel("always")}</span>
-                              <span class="text-muted-foreground text-xs font-normal">
-                                {m.skills_activation_mode_always_description()}
-                              </span>
-                            </span>
-                          </Select.Item>
-                          <Select.Item
-                            value="on_demand"
-                            label={activationModeLabel("on_demand")}
-                            disabled={!canChooseOnDemand}
-                          >
-                            <span class="flex flex-col items-start gap-0.5 text-left">
-                              <span>{activationModeLabel("on_demand")}</span>
-                              <span class="text-muted-foreground text-xs font-normal">
-                                {m.skills_activation_mode_on_demand_description()}
-                              </span>
-                            </span>
-                          </Select.Item>
-                        </Select.Group>
-                      </Select.Content>
-                    </Select.Root>
-                  </div>
+                {#if row.isActive === false && !row.executionBlocked}
+                  <Badge variant="outline">{m.skills_unavailable_status()}</Badge>
+                  <span class="text-muted-foreground text-xs">
+                    {m.skills_unavailable_binding_explanation()}
+                  </span>
+                {/if}
+                {#if row.executionBlocked}
+                  <Badge variant="destructive">{m.skills_execution_blocked_status()}</Badge>
+                  <span class="text-destructive text-xs">
+                    {m.skills_execution_blocked_binding_explanation()}
+                  </span>
+                {/if}
+                {#if row.hasNewerRevision && row.attachableRevisionNumber !== undefined && !row.executionBlocked}
+                  <Badge variant="secondary">
+                    {m.skills_newer_revision_available({
+                      revision: String(row.attachableRevisionNumber)
+                    })}
+                  </Badge>
                 {/if}
               </div>
+              {#if activationSurface !== undefined}
+                <div class="mt-3 w-full sm:max-w-56">
+                  <Select.Root
+                    type="single"
+                    value={activationMode(row)}
+                    disabled={!canEditBindings ||
+                      row.executionBlocked ||
+                      (!canChooseOnDemand && activationMode(row) === "always")}
+                    onValueChange={(value) => updateActivationMode(row, value)}
+                  >
+                    <Select.Trigger
+                      class="w-full"
+                      aria-label={m.skills_activation_mode_label({ name: rowName(row) })}
+                      aria-describedby={`${runtimeStatusId} ${runtimeHintId}`}
+                    >
+                      <span data-slot="select-value">
+                        {activationModeLabel(activationMode(row))}
+                      </span>
+                    </Select.Trigger>
+                    <Select.Content
+                      class="w-max max-w-[min(26rem,calc(100vw-2rem))] min-w-(--bits-select-anchor-width)"
+                    >
+                      <Select.Group>
+                        <Select.Item
+                          value="always"
+                          label={activationModeLabel("always")}
+                          class="items-start py-1.5"
+                        >
+                          <div class="flex min-w-0 flex-col gap-0.5 text-left">
+                            <span class="font-medium">{activationModeLabel("always")}</span>
+                            <span class="text-muted-foreground text-xs leading-4 font-normal">
+                              {m.skills_activation_mode_always_description()}
+                            </span>
+                          </div>
+                        </Select.Item>
+                        <Select.Item
+                          value="on_demand"
+                          label={activationModeLabel("on_demand")}
+                          disabled={!canChooseOnDemand}
+                          class="items-start py-1.5"
+                        >
+                          <div class="flex min-w-0 flex-col gap-0.5 text-left">
+                            <span class="font-medium">{activationModeLabel("on_demand")}</span>
+                            <span class="text-muted-foreground text-xs leading-4 font-normal">
+                              {m.skills_activation_mode_on_demand_description()}
+                            </span>
+                          </div>
+                        </Select.Item>
+                      </Select.Group>
+                    </Select.Content>
+                  </Select.Root>
+                </div>
+              {/if}
             </div>
 
-            <div class="flex shrink-0 flex-wrap items-center gap-1 sm:justify-end">
+            <div
+              class="col-start-2 flex flex-wrap items-center gap-1 sm:col-start-3 sm:justify-end"
+            >
               {#if row.hasNewerRevision && row.attachableRevisionNumber !== undefined && row.isActive && !row.executionBlocked}
                 <Button
                   type="button"
@@ -609,8 +614,9 @@
         {/snippet}
       </Popover.Trigger>
       <Popover.Content
+        side="bottom"
         align="start"
-        sideOffset={8}
+        sideOffset={6}
         collisionPadding={16}
         class="w-[min(32rem,calc(100vw-2rem))] p-0"
       >
@@ -626,7 +632,7 @@
             oninput={(event) => skillCatalog.setQuery(event.currentTarget.value)}
           />
           <Command.List
-            class="max-h-[min(24rem,55dvh)]"
+            class="max-h-[min(20rem,50dvh)]"
             aria-label={m.skills_available_group()}
             aria-busy={skillCatalog.loading || skillCatalog.loadingMore}
           >
@@ -715,7 +721,7 @@
         class="flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl"
         closeLabel={m.close()}
       >
-        <Dialog.Header class="shrink-0 border-b px-4 py-4 pr-12 sm:px-6 sm:py-5">
+        <Dialog.Header class="border-border shrink-0 border-b px-4 py-4 pr-12 sm:px-6 sm:py-5">
           <Dialog.Title>
             {m.skills_preview_title({
               name: preview?.displayName ?? previewCandidate?.display_name ?? m.skills()
@@ -747,7 +753,7 @@
             <SkillPreview {preview} />
           {/if}
         </div>
-        <Dialog.Footer class="shrink-0 border-t px-4 py-4 sm:px-6">
+        <Dialog.Footer class="border-border mx-0 mb-0 shrink-0 border-t px-4 py-4 sm:px-6 sm:py-5">
           <Button type="button" variant="outline" onclick={() => setPreviewOpen(false)}>
             {m.cancel()}
           </Button>
@@ -779,7 +785,7 @@
           class="grid max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0 sm:max-w-2xl"
           closeLabel={m.close()}
         >
-          <Dialog.Header class="border-b px-6 py-5 pr-12">
+          <Dialog.Header class="border-border border-b px-6 py-5 pr-12">
             <Dialog.Title>{m.skills_create_dialog_title()}</Dialog.Title>
             <Dialog.Description>{m.skills_create_dialog_description()}</Dialog.Description>
           </Dialog.Header>

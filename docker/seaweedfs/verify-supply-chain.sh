@@ -7,7 +7,7 @@ readonly SOURCE_TREE="f6590c71c41ec414fc193b89e9d9dd586d39ad17"
 readonly SOURCE_ARCHIVE_SHA256="2e37f5d8980256e490324e3759d38437ecfee734f60aa3e75528b05f7d19460e"
 readonly SOURCE_LICENSE_SHA256="d789d433cc11da163273d1e39be2e8fa67642f9a58ef220d3f258fa9c14ef613"
 readonly DOWNSTREAM_PATCH_NAME="0001-upgrade-vulnerable-dependencies.patch"
-readonly DOWNSTREAM_PATCH_SHA256="e3a2962e263e5de759e10080ee7bfaf4fb0554dc746a4a6d8b8613cc8bfa457e"
+readonly DOWNSTREAM_PATCH_SHA256="61e69dc77847b5dad578b3796ecb00fadc9430cc71247dd114d9987382ff442d"
 readonly SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly DOWNSTREAM_PATCH="$SCRIPT_DIRECTORY/patches/$DOWNSTREAM_PATCH_NAME"
 IMAGE_VERSION="$(tr -d '[:space:]' <"$SCRIPT_DIRECTORY/VERSION")"
@@ -128,7 +128,13 @@ audit_source() {
             and .Version == "v0.24.0"
             and .Replace == null)
         and any(.[]; .Path == "google.golang.org/grpc"
-            and .Version == "v1.83.1")
+            and .Version == "v1.83.2")
+        and any(.[]; .Path == "go.etcd.io/etcd/api/v3"
+            and .Version == "v3.6.14")
+        and any(.[]; .Path == "go.etcd.io/etcd/client/v3"
+            and .Version == "v3.6.14")
+        and any(.[]; .Path == "go.etcd.io/etcd/client/pkg/v3"
+            and .Version == "v3.6.14")
         and any(.[]; .Path == "golang.org/x/image"
             and .Version == "v0.45.0")
         and any(.[]; .Path == "golang.org/x/crypto"

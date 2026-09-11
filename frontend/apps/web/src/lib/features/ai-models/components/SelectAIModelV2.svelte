@@ -129,14 +129,12 @@
 
   <ModelSelector.Content
     align="start"
-    class="w-auto max-w-[calc(100vw-1rem)] border-0 bg-transparent p-0 shadow-none ring-0"
+    class="w-auto max-w-[calc(100vw-1rem)] gap-0 overflow-hidden rounded-xl p-0 shadow-lg"
     commandClass="size-auto overflow-visible rounded-none! bg-transparent p-0"
   >
-    <div class="flex items-start gap-2">
-      <div
-        class="bg-popover/95 ring-foreground/10 w-72 shrink-0 overflow-hidden rounded-xl shadow-lg ring-1 backdrop-blur-xl"
-      >
-        <ModelSelector.Input placeholder={dropdownLabel} />
+    <div class="flex items-stretch">
+      <div class="w-72 shrink-0">
+        <ModelSelector.Input placeholder={m.search_models()} />
         <ModelSelector.List class="max-h-[20rem] p-1 pt-0">
           <ModelSelector.Empty>{m.no_models_found()}</ModelSelector.Empty>
           {#each modelGroups as group (group.label)}
@@ -159,7 +157,7 @@
       </div>
 
       {#if detailModel}
-        <ChatModelDetails model={detailModel} />
+        <ChatModelDetails model={detailModel} class="border-border border-l" />
       {/if}
     </div>
   </ModelSelector.Content>

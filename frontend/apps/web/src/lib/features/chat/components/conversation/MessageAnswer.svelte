@@ -4,16 +4,19 @@
   import McpImageAttachments from "./McpImageAttachments.svelte";
   import ReasoningTrace from "./ReasoningTrace.svelte";
   import InternalToolStep from "./InternalToolStep.svelte";
+  import SkillActivationStep from "./SkillActivationStep.svelte";
   import { dynamicColour } from "$lib/core/colours";
   import { IconSpeechBubble } from "@eneo/icons/speech-bubble";
   import { formatEmojiTitle } from "$lib/core/formatting/formatEmojiTitle";
   import { getChatService } from "../../ChatService.svelte";
   import {
     internalReadFileId,
+    capabilityProviderDetail,
     internalToolDoneLabel,
-    isInternalServer,
+    isBuiltinToolCall,
     serverDisplayName,
-    toolDisplayName
+    toolDisplayName,
+    SKILLS_SERVER
   } from "../../internalToolLabels";
   import { getAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte";
   import { getMessageContext } from "../../MessageContext.svelte";
@@ -52,6 +55,7 @@
           tool_call_id?: string;
           approved?: boolean;
           result_status?: string;
+          purpose?: string | null;
         }>
       | undefined
   );
@@ -128,18 +132,28 @@
               : toolsStillExecuting && isLastTraced
                 ? "running"
                 : "complete";
-      const toolName = toolDisplayName(tc.tool_name, tc.server_name, tc.title, tc.arguments);
+      const toolName = toolDisplayName(
+        tc.tool_name,
+        tc.server_name,
+        tc.title,
+        tc.arguments,
+        tc.purpose
+      );
       return {
-        // Eneo's own built-in tools get localized labels; otherwise prefer the
-        // server-provided title annotation, falling back to the raw tool name.
+        // Eneo's own tools and capability calls get localized labels; otherwise
+        // prefer the server-provided title, falling back to the raw tool name.
         toolName,
-        doneLabel: internalToolDoneLabel(tc.tool_name, tc.server_name, tc.arguments) ?? toolName,
-        serverName: serverDisplayName(tc.server_name),
-        detail: readFileDetail(tc),
+        doneLabel:
+          internalToolDoneLabel(tc.tool_name, tc.server_name, tc.arguments, tc.purpose) ?? toolName,
+        serverName: serverDisplayName(tc.server_name, tc.purpose),
+        detail: readFileDetail(tc) ?? capabilityProviderDetail(tc),
+        skillName: tc.server_name === SKILLS_SERVER ? (tc.title ?? tc.tool_name) : null,
         args: tc.arguments,
         toolCallId: tc.tool_call_id,
         status,
-        internal: isInternalServer(tc.server_name)
+        // Capability calls render as built-in steps whichever provider served
+        // them; general external servers keep their cards.
+        internal: isBuiltinToolCall(tc)
       };
     })
   );
@@ -309,18 +323,27 @@
         {#if !folded || openInternalRuns.has(runIndex)}
           <div class="flex flex-col gap-0.5 {folded ? 'pl-7' : ''}">
             {#each visibleSteps as step, i (step.toolCallId ?? i)}
-              <InternalToolStep
-                runningLabel={step.toolName}
-                doneLabel={step.doneLabel}
-                serverName={step.serverName}
-                detail={step.detail}
-                args={step.args}
-                toolCallId={step.toolCallId}
-                status={step.status}
-                onLoadResult={step.toolCallId
-                  ? () => chat.getToolCallResult(step.toolCallId!)
-                  : undefined}
-              />
+              {#if step.skillName !== null}
+                <SkillActivationStep
+                  name={step.skillName}
+                  live={isStreamingTurn}
+                  args={step.args}
+                  status={step.status}
+                />
+              {:else}
+                <InternalToolStep
+                  runningLabel={step.toolName}
+                  doneLabel={step.doneLabel}
+                  serverName={step.serverName}
+                  detail={step.detail}
+                  args={step.args}
+                  toolCallId={step.toolCallId}
+                  status={step.status}
+                  onLoadResult={step.toolCallId
+                    ? () => chat.getToolCallResult(step.toolCallId!)
+                    : undefined}
+                />
+              {/if}
             {/each}
           </div>
         {/if}
@@ -379,7 +402,13 @@
             <div class="flex min-w-0 flex-1 flex-col gap-0.5">
               <div class="flex items-center gap-2">
                 <span class="text-default truncate text-sm font-medium"
-                  >{toolDisplayName(toolCall.tool_name, toolCall.server_name, toolCall.title)}</span
+                  >{toolDisplayName(
+                    toolCall.tool_name,
+                    toolCall.server_name,
+                    toolCall.title,
+                    undefined,
+                    toolCall.purpose
+                  )}</span
                 >
                 {#if pendingDetail}
                   <span class="text-muted min-w-0 truncate text-xs">{pendingDetail}</span>
@@ -398,7 +427,9 @@
                   </span>
                 {/if}
               </div>
-              <span class="text-muted text-xs">{serverDisplayName(toolCall.server_name)}</span>
+              <span class="text-muted text-xs"
+                >{serverDisplayName(toolCall.server_name, toolCall.purpose)}</span
+              >
             </div>
 
             <!-- Expand indicator -->

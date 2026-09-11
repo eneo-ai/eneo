@@ -9,6 +9,7 @@ const meta: MetaRecord = {
   "flows-for-developers": "Flows for Developers",
   "module-authentication": "Module Authentication",
   "knowledge-retrieval-and-mcp": "Knowledge Retrieval and MCP",
+  "builtin-tool-servers": "Built-in Tool Servers",
   "object-content-architecture": "Object Content Architecture",
   "audit-logging": "Audit Logging",
   "api-key-management": "API Key Management",

@@ -65,6 +65,31 @@ function report(error: unknown) {
 }
 
 describe("headerFilterHandle", () => {
+  test("preloads the page's scripts and styles but not fonts or other assets", async () => {
+    const { preload } = await resolveOptions();
+
+    expect(preload?.({ type: "js", path: "/_app/immutable/chunks/a.js" })).toBe(true);
+    expect(preload?.({ type: "css", path: "/_app/immutable/assets/0.css" })).toBe(true);
+    expect(preload?.({ type: "font", path: "/_app/immutable/assets/inter.woff2" })).toBe(false);
+    expect(preload?.({ type: "asset", path: "/_app/immutable/assets/logo.png" })).toBe(false);
+  });
+
+  test("strips the Link header the reverse proxy rejects when it grows too large", async () => {
+    const response = await headerFilterHandle({
+      event: {} as RequestEvent,
+      resolve: () =>
+        new Response(null, {
+          headers: {
+            link: '</_app/immutable/chunks/a.js>; rel="modulepreload"; nopush',
+            "x-trace-id": TRACE_ID
+          }
+        })
+    });
+
+    expect(response.headers.get("link")).toBeNull();
+    expect(response.headers.get("x-trace-id")).toBe(TRACE_ID);
+  });
+
   test("lets the headers the Eneo client reads survive a load-function fetch", async () => {
     const { filterSerializedResponseHeaders: allowed } = await resolveOptions();
 

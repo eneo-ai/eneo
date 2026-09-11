@@ -27,12 +27,12 @@
 <Collapsible.Root bind:open class="border-border border-b">
   <h2 class="m-0">
     <Collapsible.Trigger
-      class="hover:bg-muted/60 focus-visible:ring-ring flex w-full items-center gap-2 px-5 py-3 text-left focus-visible:ring-1 focus-visible:outline-none [&[data-state=closed]>svg]:-rotate-90"
+      class="hover:bg-muted/60 focus-visible:ring-ring flex min-h-11 w-full items-center gap-2 px-5 py-2 text-left focus-visible:ring-1 focus-visible:outline-none [&[data-state=closed]>svg]:-rotate-90"
       aria-controls={id}
     >
       <span class="min-w-0 flex-1 truncate text-sm font-semibold">{title}</span>
       {#if count !== null}
-        <Badge variant={count > 0 ? "secondary" : "outline"} class="tabular-nums">{count}</Badge>
+        <Badge variant="outline" class="tabular-nums">{count}</Badge>
       {/if}
       <ChevronDown
         aria-hidden="true"

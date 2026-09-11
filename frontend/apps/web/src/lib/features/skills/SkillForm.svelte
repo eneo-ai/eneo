@@ -14,6 +14,7 @@
   import type { SkillFormValue, SkillRevisionFormValue } from "./skillBindings";
 
   type SharedProps = {
+    class?: string;
     submitLabel?: string;
     submittingLabel?: string;
     showDiscardAction?: boolean;
@@ -193,7 +194,7 @@
 </script>
 
 <form
-  class="flex w-full max-w-[80ch] flex-col gap-5"
+  class={["flex w-full max-w-[80ch] flex-col gap-5", props.class]}
   onsubmit={handleSubmit}
   aria-busy={isSubmitting}
   novalidate

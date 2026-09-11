@@ -5,4 +5,4 @@
   export let token: Tokens.Code;
 </script>
 
-<CodeBlock source={token.text}></CodeBlock>
+<CodeBlock source={token.text} lang={token.lang}></CodeBlock>

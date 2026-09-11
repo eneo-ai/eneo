@@ -140,6 +140,10 @@ class _FakeMCPProxy:
     def is_internal_tool(self, prefixed_tool_name: str) -> bool:
         return False
 
+    def get_tool_purpose(self, prefixed_tool_name: str) -> str | None:
+        del prefixed_tool_name
+        return None
+
     async def call_tools_parallel(self, proxy_calls):
         self.calls.append(proxy_calls)
         return [

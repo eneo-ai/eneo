@@ -125,10 +125,22 @@ class ProviderToolCall:
 
 
 @dataclass(frozen=True)
+class SkillActivationOutcome:
+    """What happened to one activation call, for the chat UI and persistence."""
+
+    call_id: str
+    activation_key: str | None
+    display_name: str | None
+    status: str  # "activated" | "already_active" | "rejected"
+    reason: SkillActivationRejectionReason | None = None
+
+
+@dataclass(frozen=True)
 class SkillToolCallApplication:
     external_calls: tuple[ProviderToolCall, ...]
     deferred_calls: tuple[ProviderToolCall, ...]
     assistant_message_appended: bool
+    outcomes: tuple[SkillActivationOutcome, ...] = ()
 
 
 def _compose_prompt(
@@ -804,9 +816,11 @@ class SkillActivationRuntime:
                 external_calls=external,
                 deferred_calls=deferred,
                 assistant_message_appended=True,
+                outcomes=self._outcomes(requests, result),
             )
 
         previous_prompt = self.prompt
+        last_result: SkillActivationRoundResult | None = None
         bounded_requests = requests[:MAX_SKILL_ACTIVATIONS_PER_TURN]
         overflow_requests = requests[MAX_SKILL_ACTIVATIONS_PER_TURN:]
         forced_rejections: dict[str, SkillActivationRejectionReason] = {}
@@ -843,6 +857,8 @@ class SkillActivationRuntime:
                 decisions=(*result.decisions, *overflow_decisions),
                 accepted_any=result.accepted_any,
             )
+            nonlocal last_result
+            last_result = result
             staged_messages = [message.copy() for message in messages]
             if result.accepted_any:
                 had_system_prompt, rendered_suffix = self._capture_rendered_suffix(
@@ -957,6 +973,59 @@ class SkillActivationRuntime:
             external_calls=external,
             deferred_calls=deferred,
             assistant_message_appended=True,
+            outcomes=(
+                self._outcomes(requests, last_result) if last_result is not None else ()
+            ),
+        )
+
+    def _outcomes(
+        self,
+        requests: tuple[SkillActivationRequest, ...],
+        result: SkillActivationRoundResult,
+    ) -> tuple[SkillActivationOutcome, ...]:
+        """Per-call outcome of a committed round, read from the provider payloads."""
+        payload_by_call_id = {
+            decision.call_id: decision.provider_payload for decision in result.decisions
+        }
+        outcomes: list[SkillActivationOutcome] = []
+        for request in requests:
+            key = request.activation_key
+            skill = self._skills_by_key.get(key) if key is not None else None
+            payload = payload_by_call_id.get(request.call_id, {})
+            if payload.get("already_active"):
+                status = "already_active"
+            elif payload.get("activated"):
+                status = "activated"
+            else:
+                status = "rejected"
+            reason = None
+            if status == "rejected":
+                evidence_key = self._evidence_key(key)
+                reason = next(
+                    (
+                        rejection.reason
+                        for rejection in reversed(self._rejected)
+                        if rejection.activation_key == evidence_key
+                    ),
+                    None,
+                )
+            outcomes.append(
+                SkillActivationOutcome(
+                    call_id=request.call_id,
+                    activation_key=key,
+                    display_name=skill.display_name if skill else None,
+                    status=status,
+                    reason=reason,
+                )
+            )
+        return tuple(outcomes)
+
+    def initially_active_skills(self) -> tuple[tuple[str, str], ...]:
+        """(activation_key, display_name) of the Skills in context from turn start."""
+        return tuple(
+            (skill.activation_key, skill.display_name)
+            for skill in self._skills
+            if skill.initially_active
         )
 
     def snapshot(self) -> SkillActivationSnapshot:

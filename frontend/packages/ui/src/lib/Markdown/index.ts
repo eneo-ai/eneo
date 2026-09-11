@@ -1,4 +1,4 @@
-import { marked, type TokenizerAndRendererExtension } from "marked";
+import { Marked, type TokenizerAndRendererExtension } from "marked";
 import type { EneoInrefToken, EneoMentionToken } from "./CustomComponents";
 
 export { default as Markdown } from "./Markdown.svelte";
@@ -84,8 +84,10 @@ export function eneoMarkdownLexer() {
     }
   };
 
-  // Configure marked.js to preserve whitespace
-  marked.use({
+  // A private instance: registering the extensions on the global `marked`
+  // appended them once per Markdown component mount (marked does not
+  // deduplicate), so lexing got slower with every message rendered.
+  const instance = new Marked({
     extensions: [eneoInref, eneoInrefBlock, eneoMention],
     // Preserve whitespace and newlines entered by the user
     breaks: true,
@@ -94,8 +96,7 @@ export function eneoMarkdownLexer() {
 
   return {
     lex(source: string) {
-      const tokens = marked.lexer(source);
-      return tokens;
+      return instance.lexer(source);
     }
   };
 }

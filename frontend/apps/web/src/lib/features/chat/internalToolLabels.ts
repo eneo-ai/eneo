@@ -5,8 +5,12 @@
 */
 
 import { m } from "$lib/paraglide/messages";
+import { getCapability, type CapabilityPurpose } from "$lib/features/mcp/capabilities";
 
 type ToolArgs = Record<string, unknown> | undefined;
+
+/** The parts of a tool call the display rules need. */
+type ToolCallLike = { server_name: string; purpose?: string | null };
 
 type CatalogLabels = { title: () => string; description: () => string };
 
@@ -117,43 +121,117 @@ export function builtinToolCatalogLabels(
   return labels ? { title: labels.title(), description: labels.description() } : null;
 }
 
-/** Whether a server name refers to one of Eneo's built-in loopback servers. */
-export function isInternalServer(serverName: string): boolean {
-  return serverName in INTERNAL_SERVERS;
+/**
+ * Labels for capability calls, keyed by purpose rather than tool name: a
+ * capability (web search, image generation) is one function from the user's
+ * point of view whichever provider serves it, and external providers name
+ * their tools freely. The backend stamps `purpose` on a call served by a
+ * capability provider, external or built-in.
+ */
+const CAPABILITY_STEPS: Record<
+  CapabilityPurpose,
+  { running: (args?: ToolArgs) => string; done: (args?: ToolArgs) => string }
+> = {
+  web_search: {
+    running: (args) => {
+      const query = searchQuery(args);
+      return query ? m.tool_web_search_query({ query }) : m.tool_web_search();
+    },
+    done: (args) => {
+      const query = searchQuery(args);
+      return query ? m.tool_web_search_query_done({ query }) : m.tool_web_search_done();
+    }
+  },
+  image_generation: INTERNAL_SERVERS.image_generation.tools.generate_image
+};
+
+function capabilityPurpose(purpose: string | null | undefined): CapabilityPurpose | null {
+  return purpose && purpose in CAPABILITY_STEPS ? (purpose as CapabilityPurpose) : null;
 }
 
 /**
- * Past-tense label for a finished internal tool call ("Sökte i kunskap"), or
- * null for external servers and unknown internal tools.
+ * Skill activations arrive as steps on this pseudo-server: the tool name is
+ * the activation key and the title is the Skill's display name. The chat
+ * renders them with their own pill (SkillActivationStep); these helpers only
+ * cover the labels shared with other built-in steps.
+ */
+export const SKILLS_SERVER = "skills";
+
+/** Whether a server name refers to one of Eneo's built-in loopback servers. */
+export function isInternalServer(serverName: string): boolean {
+  return serverName === SKILLS_SERVER || serverName in INTERNAL_SERVERS;
+}
+
+/**
+ * Whether a tool call renders as a built-in step (slim line, localized
+ * labels) rather than as an external tool card: capability calls whichever
+ * provider served them, and calls on Eneo's own loopback servers. Rows
+ * persisted before `purpose` existed fall back to the server name alone.
+ */
+export function isBuiltinToolCall(call: ToolCallLike): boolean {
+  return capabilityPurpose(call.purpose) !== null || isInternalServer(call.server_name);
+}
+
+/**
+ * Past-tense label for a finished built-in tool call ("Sökte i kunskap",
+ * "Sökte på webben"), or null for external tools and unknown internal tools.
  */
 export function internalToolDoneLabel(
   toolName: string,
   serverName: string,
-  args?: ToolArgs
+  args?: ToolArgs,
+  purpose?: string | null
 ): string | null {
-  return INTERNAL_SERVERS[serverName]?.tools[toolName]?.done(args) ?? null;
+  const internal = INTERNAL_SERVERS[serverName]?.tools[toolName]?.done(args);
+  if (internal) return internal;
+  const capability = capabilityPurpose(purpose);
+  return capability ? CAPABILITY_STEPS[capability].done(args) : null;
 }
 
 /**
- * Display name for a tool call: internal mapping > server title > raw name.
- * The internal mapping only applies to Eneo's own loopback servers.
+ * Display name for a tool call: internal mapping > capability label > server
+ * title > raw name. The internal mapping only applies to Eneo's own loopback
+ * servers; the capability label to any provider of that capability.
  */
 export function toolDisplayName(
   toolName: string,
   serverName: string,
   title?: string | null,
-  args?: ToolArgs
+  args?: ToolArgs,
+  purpose?: string | null
 ): string {
-  const internal = INTERNAL_SERVERS[serverName];
-  if (internal) {
-    return internal.tools[toolName]?.running(args) ?? title ?? toolName;
+  if (serverName === SKILLS_SERVER) {
+    return m.tool_activate_skill({ name: title ?? toolName });
   }
+  const internal = INTERNAL_SERVERS[serverName]?.tools[toolName]?.running(args);
+  if (internal) return internal;
+  const capability = capabilityPurpose(purpose);
+  if (capability) return CAPABILITY_STEPS[capability].running(args);
   return title ?? toolName;
 }
 
-/** Display name for the server line under a tool call. */
-export function serverDisplayName(serverName: string): string {
-  return INTERNAL_SERVERS[serverName]?.label() ?? serverName;
+/**
+ * Display name for the server line under a tool call: Eneo's own servers and
+ * capabilities by their localized name, external general servers by name.
+ */
+export function serverDisplayName(serverName: string, purpose?: string | null): string {
+  if (serverName === SKILLS_SERVER) return m.skills();
+  const internal = INTERNAL_SERVERS[serverName]?.label();
+  if (internal) return internal;
+  const capability = capabilityPurpose(purpose);
+  return capability ? (getCapability(capability)?.label() ?? serverName) : serverName;
+}
+
+/**
+ * The provider's own name for a capability call served by an external
+ * provider ("GDM Safe Search"), shown as the step's detail so the source
+ * stays visible; null for Eneo's own servers and general tools.
+ */
+export function capabilityProviderDetail(call: ToolCallLike): string | null {
+  if (capabilityPurpose(call.purpose) === null || isInternalServer(call.server_name)) {
+    return null;
+  }
+  return call.server_name;
 }
 
 /** Path of a signed file reference URL, mirroring the backend's parser. */
@@ -188,9 +266,9 @@ function hasReferenceImages(args?: ToolArgs): boolean {
 /** Longest query shown inline in a tool label before being cut with an ellipsis. */
 const MAX_INLINE_QUERY_LENGTH = 60;
 
-/** Query argument of a search_knowledge call, if present and non-empty. */
+/** Query argument of a search call (`query`, or `q` as some providers name it). */
 function searchQuery(args?: ToolArgs): string | null {
-  const query = args?.query;
+  const query = args?.query ?? args?.q;
   if (typeof query !== "string") return null;
   const trimmed = query.trim();
   if (trimmed.length === 0) return null;

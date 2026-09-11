@@ -806,3 +806,26 @@ def test_truncate_knowledge_if_too_many_chunks(context_builder: ContextBuilder):
     )
 
     assert context.token_count < 10000
+
+
+def test_skill_activation_call_is_not_replayed(context_builder: ContextBuilder):
+    # The activation tool is rebuilt per turn from the Skill runtime and may
+    # not be registered later, so a persisted activation step must not become
+    # a tool_use in history.
+    tc = ToolCallInfo(
+        server_name="skills",
+        tool_name="skill-1",
+        arguments={"skill_key": "skill-1"},
+        tool_call_id="activate-1",
+        approved=True,
+        result_status="completed",
+        result='{"activated": true}',
+        mcp_tool_name="eneo_activate_skill",
+    )
+    session = MagicMock(questions=[_question_mock("Q?", "A.", [tc])])
+
+    context = context_builder.build_context(
+        input_str=QUESTION, session=session, max_tokens=10000
+    )
+
+    assert context.messages[0].tool_calls == []

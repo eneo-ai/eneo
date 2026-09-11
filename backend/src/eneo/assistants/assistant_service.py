@@ -2380,6 +2380,8 @@ class AssistantService:
                                             existing.result = tc.result
                                         if tc.meta is not None:
                                             existing.meta = tc.meta
+                                        if tc.purpose is not None:
+                                            existing.purpose = tc.purpose
                                     else:
                                         # Add new tool call
                                         tool_calls.append(
@@ -2396,6 +2398,7 @@ class AssistantService:
                                                 result_status=tc.result_status,
                                                 result=tc.result,
                                                 mcp_tool_name=tc.mcp_tool_name,
+                                                purpose=tc.purpose,
                                                 meta=tc.meta,
                                             )
                                         )
@@ -2439,6 +2442,7 @@ class AssistantService:
                                                 approved=None,
                                                 result_status=tc.result_status,
                                                 mcp_tool_name=tc.mcp_tool_name,
+                                                purpose=tc.purpose,
                                             )
                                         )
                             yield chunk
@@ -2475,6 +2479,7 @@ class AssistantService:
                                                 result_status=tc.result_status
                                                 or "timeout_denied",
                                                 mcp_tool_name=tc.mcp_tool_name,
+                                                purpose=tc.purpose,
                                             )
                                         )
                             yield chunk
@@ -2676,6 +2681,7 @@ class AssistantService:
                             result_status=tc.result_status,
                             result=tc.result,
                             mcp_tool_name=tc.mcp_tool_name,
+                            purpose=tc.purpose,
                             meta=tc.meta,
                         )
                         for tc in non_streaming_tool_metadata
@@ -2969,8 +2975,6 @@ class AssistantService:
                 },
             )
 
-        space.can_ask_assistant(assistant=active_assistant)
-
         if tool_assistant_id is not None:
             tool_assistant = space.get_assistant(assistant_id=tool_assistant_id)
             if tool_assistant_id not in [
@@ -3045,6 +3049,16 @@ class AssistantService:
                         )
                     )
 
+        # Space checks run after policy resolution so a personal default
+        # assistant with no stored model is judged on the model it will use.
+        space.can_ask_assistant(
+            assistant=active_assistant,
+            completion_model=(
+                completion_model_override
+                if assistant_to_ask is active_assistant
+                else None
+            ),
+        )
         effective_completion_model = (
             completion_model_override or assistant_to_ask.completion_model
         )
