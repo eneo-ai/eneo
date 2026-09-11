@@ -60,8 +60,8 @@ or provider-specific product branch.
 
 File and Icon are the first adopted product owners. Existing legacy bytes stay
 readable while a staged, resumable backfill creates and verifies concrete typed
-references. The old columns remain the recovery source until a later contract
-release passes both the campaign-completion and locked live-reference checks
+references. The old columns remain the recovery source until the optional cleanup command passes the campaign-completion and locked
+live-reference checks
 defined in [Close the recovery window and reclaim
 disk](#close-the-recovery-window-and-reclaim-disk). Eligible new File and Icon
 writes use the target selected in **Admin > Storage**. InfoBlob generations and
@@ -658,7 +658,7 @@ The organizational sequence is:
 4. Monitor status, disk, WAL and request latency. Verify old/new content and a
    restore of the new release after adoption completes.
 5. Optionally select S3-compatible storage and queue verified moves. Preserve the
-   old columns until the separate contract release; space reclamation is separate.
+   old columns until optional cleanup; space reclamation is separate.
 
 Before an Eneo or object-store upgrade, take a paired backup and retain the old
 image digests. Upgrade the byte plane without changing endpoint semantics,
@@ -715,7 +715,7 @@ is missing.
 
 PostgreSQL inline remains the complete destination when no S3-compatible store
 is configured. Choosing inline still needs capacity for the second verified
-copy until the later contract and table rewrite reclaim the legacy storage, but
+copy until optional cleanup and a table rewrite reclaim the legacy storage, but
 the work no longer blocks `db-init`. This release has no adapter that adopts
 legacy bytes directly into object storage. Choosing object storage before a
 campaign starts leaves adoption waiting; it does not avoid the inline copy. A
@@ -855,8 +855,9 @@ increments the recovery revision, or rewrites ledger state. Use the recovery
 procedure below for a halted campaign. Stop the worker as well if its ongoing
 work must be interrupted.
 
-The command and pause field are temporary upgrade tooling and leave with the
-File/Icon ledger in the later contract release.
+The commands, settings, fallback readers, and ledger remain in 2.2, including
+after optional cleanup. A later release can retire this upgrade tooling once
+the supported upgrade path no longer needs it.
 
 ### Bound throughput and recover a halted campaign
 
@@ -1091,17 +1092,50 @@ with any object-store authority need a matching PostgreSQL and object-store
 backup pair. Retain the pre-upgrade recovery point until that restore succeeds
 and the deployment's retention rules allow its removal.
 
-Install the later contract release only after the campaign is `complete` and
-the ledger has no `pending`, `ready`, `leased`, or `failed` row. Its migration
-must treat that as a necessary but insufficient precondition. In the same
-transaction that drops legacy columns, it must lock and recheck that every
-surviving ledger key has its matching File or Icon reference and that the
-referenced object content is still `available`. A missing or failed reference
-must abort before any legacy column is dropped. Do not drop the columns
-manually. Installing that release closes direct rollback to the old image;
-recovery remains forward or through the retained coordinated backup.
+Version 2.2 includes an explicit cleanup command. Normal `db-init` only adds the
+nullable cleanup timestamp in revision `202609081400`; it does not remove legacy
+columns or require adoption to have finished. Keep using this same image before,
+during, and after cleanup.
 
-After the contract release, measure the remaining relations before deciding
+When the verification period and backup restore test are complete:
+
+1. Check `status`: the campaign must be `complete`, admission unpaused, and no
+   ledger item may be pending, ready, leased, or failed. Keep the configured
+   capacity and migration controls for installations still adopting.
+2. Stop every API, worker, and maintenance-worker process, including replicas.
+   Use a one-off container from the **same 2.2 image** to run:
+
+   ```bash
+   python -m eneo.object_content.file_icon_migration cleanup
+   ```
+
+3. Check the JSON result and exit status. Success reports `legacy_cleaned: true`.
+   Repeating cleanup reports `changed: false`. A failed prerequisite exits 2;
+   a database/lock failure exits 3. A failed transaction preserves the sources.
+   Resolve the reported condition and rerun; do not drop columns manually.
+4. Restart the same image. Check `status` (`legacy_cleaned: true`), representative
+   old downloads, and a new upload. `preflight` reports schema state `cleaned` and
+   no remaining legacy adoption capacity; workers no longer claim legacy work.
+
+The command requires READ COMMITTED isolation and waits at most five seconds to
+acquire each required lock. It fences owner, reference, content, and migration
+writers, then verifies actual live sources and exact surviving ledger references
+in the transaction that removes all eight legacy columns. It compares source
+size and SHA-256, including empty values, and hashes inline authoritative bytes.
+For remote authority it checks recorded verification metadata; it does not
+contact the object store under the database fence. Verify remote availability
+and the coordinated backup before the maintenance window. Source verification
+scans retained payloads and needs a measured maintenance window on large data.
+
+Cleanup also removes the legacy-write freeze triggers, while retaining the
+ledger, migration controls, and owner-deletion triggers for this release. The
+transaction records cleanup alongside the column removals. Afterward the same
+application uses object-content references, and backend failures cannot reopen
+legacy repair against columns that no longer exist. Recover failed content
+forward or restore the coordinated pre-cleanup backup; an Alembic downgrade
+cannot recreate discarded bytes. Restoring a backup discards later writes.
+
+After cleanup, measure the remaining relations before deciding
 whether filesystem reclamation is worth the operational cost:
 
 ```sql

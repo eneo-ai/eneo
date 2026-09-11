@@ -956,6 +956,8 @@ class ObjectContentRepository:
         campaign: FileIconBackfillCampaign | None,
         failure_code: ContentFailureCode,
     ) -> None:
+        if admission_state.legacy_cleaned_at is not None:
+            return
         now = await self._database_now()
         for item in items:
             item.content_id = None

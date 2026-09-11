@@ -20,7 +20,7 @@ from eneo.database.tables.base_class import BaseWithTableName
 
 
 class FileIconBackfillItems(BaseWithTableName):
-    """Temporary Release A ledger; removed by the Release B contract."""
+    """Adoption ledger retained throughout the 2.2 upgrade and optional cleanup."""
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     owner_kind: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -129,6 +129,8 @@ class FileIconBackfillAdmissionState(BaseWithTableName):
         server_default=text("false"),
         nullable=False,
     )
+
+    legacy_cleaned_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
 
     __table_args__ = (
         CheckConstraint(

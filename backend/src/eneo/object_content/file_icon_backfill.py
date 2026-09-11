@@ -44,6 +44,7 @@ from eneo.object_content.content import (
     StorageKind,
 )
 from eneo.object_content.content_service import ObjectContentService
+from eneo.object_content.file_icon_cleanup import file_icon_legacy_is_cleaned
 
 _MEBIBYTE = 1024 * 1024
 _GIBIBYTE = 1024 * _MEBIBYTE
@@ -112,6 +113,7 @@ class FileIconBackfillStatus:
     configured_capacity_ack_bytes: int
     configured_resume_revision: int
     campaign_resume_revision: int | None
+    legacy_cleaned: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -227,7 +229,12 @@ async def read_file_icon_backfill_status(
                     detail = repository.capacity_detail(required_bytes)
                 else:
                     detail = "Admission is ready for the next migration worker run"
+    cleaned = await file_icon_legacy_is_cleaned(session)
+    if cleaned:
+        state = FileIconBackfillState.COMPLETE
+        detail = "Legacy columns have been cleaned; adoption is complete"
     return FileIconBackfillStatus(
+        legacy_cleaned=cleaned,
         state=state,
         paused=paused,
         target_kind=target_kind,
@@ -1225,6 +1232,14 @@ class FileIconBackfill:
 
     async def run_once(self) -> FileIconBackfillResult:
         async with self._database.session() as session, session.begin():
+            if await file_icon_legacy_is_cleaned(session):
+                return self._result(
+                    _Campaign(
+                        state=FileIconBackfillState.COMPLETE,
+                        target_kind=None,
+                        detail="Legacy columns have been cleaned; adoption is complete",
+                    )
+                )
             if await _FileIconBackfillRepository(session).is_paused():
                 return self._paused_result()
         if self._completed_result is not None:

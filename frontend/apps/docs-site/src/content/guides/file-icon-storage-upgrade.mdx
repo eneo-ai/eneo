@@ -34,7 +34,7 @@ For an organization upgrading an existing installation:
    window.
 5. **Choose optional storage changes later.** Once adoption is complete, you may
    select S3-compatible storage and explicitly move existing content. Retain the
-   legacy columns until the separate contract release removes them; completion
+   legacy columns until you choose the cleanup command; completion
    alone does not reclaim filesystem space.
 
 ## What this changes
@@ -62,7 +62,7 @@ flowchart LR
   expand --> online["Eneo starts\nlegacy files remain readable"]
   online --> adopt["Worker\nbounded copy · SHA-256 · reference"]
   adopt --> verify["Verification period\nfiles · backup · restore"]
-  verify --> contract["Later contract release\nlock · recheck · remove legacy schema"]
+  verify --> contract["Optional cleanup in 2.2\nlock · recheck · remove legacy columns"]
   contract --> reclaim["Optional maintenance\nreclaim filesystem space"]
 ```
 
@@ -207,7 +207,7 @@ WAL generated and recycled over time. Keep backup and replica capacity separate
 when they use another volume or host.
 
 Put simply, the affected file bytes are roughly doubled until the later
-contract release: existing `L` plus new `D`. Capacity planning asks how much
+cleanup and table rewrite: existing `L` plus new `D`. Capacity planning asks how much
 **additional** free space the new copy and simultaneous WAL growth need; it does
 not count the already allocated `L` a second time.
 
@@ -598,29 +598,49 @@ Worker completion opens a verification period; it does not delete the old
 bytes. This preserves a recovery source while operators test real files and a
 current restore.
 
-Keep the bridge release running through this period. Existing installations must
-finish its online work before installing the later contraction release. The
-published bridge version, supported upgrade sources, and verification window
-must be part of that release's instructions.
+Version 2.2 includes optional cleanup. An ordinary upgrade preserves legacy
+columns and starts adoption as before. The same image supports migration,
+verification, and operation after cleanup; another release is not required.
 
-1. Confirm campaign state `complete` and no `pending`, `ready`, `leased`, or
-   `failed` ledger rows.
+1. Confirm campaign state `complete`, unpaused admission, and no `pending`,
+   `ready`, `leased`, or `failed` ledger rows.
 2. Download representative old text, PDF/image, audio/transcription, and Icon
    content through normal product workflows.
 3. Create and restore-test a current backup. Use a paired PostgreSQL/object-store
-   restore when any authoritative content is remote.
-4. Keep the pre-upgrade recovery point until the restore succeeds and your
-   retention policy permits removal.
-5. Install the later contract release during a planned window. Its migration
-   must fence writers and verify every remaining legacy source and exact
-   surviving File/Icon reference in the same transaction that drops legacy
-   columns. Matching available content must cover the actual sources; ledger
-   completion alone is not enough. This closes direct rollback to the old image.
+   restore when any authoritative content is remote. Keep the pre-upgrade
+   recovery point until the restore succeeds and your retention policy permits
+   removal.
+4. Stop all API, worker, and maintenance-worker processes, including replicas.
+   Run this in a one-off container from the same 2.2 image:
+
+   ```bash
+   python -m eneo.object_content.file_icon_migration cleanup
+   ```
+
+5. Success reports `legacy_cleaned: true`; a repeat reports `changed: false`.
+   Failed prerequisites exit 2; database or lock failures exit 3. Resolve the
+   condition and retry. The command's transaction preserves legacy storage on
+   failure. Restart the same image and verify old downloads and a new upload.
 6. Reclaim filesystem space only if measurements justify it.
+
+Cleanup uses READ COMMITTED isolation and a five-second lock-acquisition timeout.
+It fences writers, verifies every live legacy source and exact surviving
+File/Icon reference, and drops all eight columns in one transaction. Inline
+bytes must match their recorded size and SHA-256. Remote verification uses
+recorded database evidence; check remote availability and the backup pair before
+stopping services. The verification scans retained payloads, so measure its
+maintenance window on a representative restored database.
+
+The upgrade commands, fallback readers, settings, and migration ledger remain in
+2.2. After cleanup, `status` includes `legacy_cleaned: true`, `preflight` reports
+`cleaned`, and the worker leaves legacy work complete. Ordinary content failures
+remain visible but cannot reopen repair from deleted legacy data. Recovery is
+forward or through a coordinated pre-cleanup backup; downgrading cannot recreate
+these bytes, and restoring a backup discards later writes.
 
 Dropping legacy columns is metadata-only in PostgreSQL. It does not rewrite the
 existing rows, and ordinary `VACUUM` does not perform that rewrite or shrink the
-table files. Choose one tested physical rewrite after the contract release:
+table files. Choose one tested physical rewrite after cleanup:
 
 - [`pg_repack`](https://github.com/reorg/pg_repack/blob/master/doc/pg_repack.rst)
   minimizes blocking but needs the extension, a short final lock, and temporary
@@ -693,8 +713,8 @@ stable estimate before copying.
 
 ### Why are old bytes not deleted immediately?
 
-They are the recovery source during verification. The later contract release
-performs the final locked live-reference check before it removes the columns.
+They are the recovery source during verification. The optional cleanup command
+in 2.2 performs the final locked source and reference checks before removing the columns.
 Filesystem space is reclaimed separately because a table rewrite has its own
 lock, time, and temporary-disk requirements.
 

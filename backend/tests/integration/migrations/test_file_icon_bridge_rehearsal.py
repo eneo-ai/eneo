@@ -27,6 +27,7 @@ from uuid import UUID, uuid4
 
 import psycopg2
 import pytest
+from sqlalchemy import create_engine
 from sqlalchemy.engine import make_url
 from testcontainers.postgres import PostgresContainer
 
@@ -54,7 +55,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
 _MIB = 1024 * 1024
 _RELEASED_REVISION = "3eb6a34b6733"
-_BRIDGE_REVISION = "202609071000"
+_BRIDGE_REVISION = "202609081400"
 _BARRIER = 793_202_609
 _PROFILE = os.environ.get("ENEO_FILE_ICON_REHEARSAL_PROFILE", "smoke")
 assert _PROFILE in {"smoke", "capacity"}
@@ -527,6 +528,75 @@ async def test_released_upgrade_recovers_from_process_death_and_backup_restore(
                     client, headers, UUID(file_id), original=True
                 )
                 assert response.status_code == 200 and response.content == expected
+        # The same installed build must work after an operator chooses cleanup.
+        # Stop pools/runtime just as the maintenance procedure requires.
+        from eneo.object_content.file_icon_cleanup import (
+            cleanup_file_icon_legacy_storage,
+        )
+        from eneo.object_content.file_icon_backfill import (
+            read_file_icon_backfill_status,
+        )
+
+        await object_content_runtime.stop()
+        await sessionmanager.close()
+        engine = create_engine(after_url)
+        try:
+            with engine.begin() as connection:
+                assert cleanup_file_icon_legacy_storage(connection)
+            with engine.begin() as connection:
+                assert not cleanup_file_icon_legacy_storage(connection)
+        finally:
+            engine.dispose()
+        preflight = await run_file_icon_preflight(after_url)
+        assert preflight.outcome == "ready" and preflight.schema_state == "cleaned"
+        await startup()
+        async with sessionmanager.session() as session, session.begin():
+            status = await read_file_icon_backfill_status(
+                session, FileIconBackfillSettings()
+            )
+            assert (
+                status.legacy_cleaned and status.state is FileIconBackfillState.COMPLETE
+            )
+        async with db_container():
+            icon = await client.get(f"/api/v1/icons/{state['icon_id']}/")
+            assert icon.status_code == 200 and icon.content == b"icon bytes"
+            for file_id, expected in state["files"][:4]:
+                response = await _signed_download(
+                    client, headers, UUID(file_id), original=False
+                )
+                assert response.status_code == 200 and response.content == expected
+            payload = b"upload after optional cleanup\n"
+            upload = await client.post(
+                "/api/v1/files/",
+                headers=headers,
+                files={"upload_file": ("after.txt", payload, "text/plain")},
+            )
+            assert upload.status_code == 200, upload.text
+            cleaned_upload_id = UUID(upload.json()["id"])
+            response = await _signed_download(
+                client, headers, cleaned_upload_id, original=True
+            )
+            assert response.status_code == 200 and response.content == payload
+        await object_content_runtime.stop()
+        await sessionmanager.close()
+        _dump(postgres_container, "after_restore", path / "cleaned.dump")
+        _restore(postgres_container, path / "cleaned.dump", "cleaned_restore")
+        set_settings(
+            test_settings.model_copy(update={"postgres_db": "cleaned_restore"})
+        )
+        await startup()
+        async with db_container():
+            response = await _signed_download(
+                client, headers, cleaned_upload_id, original=True
+            )
+            assert response.status_code == 200 and response.content == payload
+            icon = await client.get(f"/api/v1/icons/{state['icon_id']}/")
+            assert icon.status_code == 200 and icon.content == b"icon bytes"
+        report["optional_cleanup"] = {
+            "same_build_reads_and_uploads": True,
+            "repeat_cleanup": "no change",
+            "cleaned_backup_restore": True,
+        }
         ordered = sorted(durations)
         report["foreground_api"] = {
             "transport": "authenticated File and public Icon production routes through ASGI",
@@ -557,7 +627,7 @@ async def test_released_upgrade_recovers_from_process_death_and_backup_restore(
             Path(output).write_text(json.dumps(report, indent=2) + "\n")
         backup_output = os.getenv("ENEO_FILE_ICON_REHEARSAL_BACKUP")
         if backup_output:
-            # Preserve synthetic bridge state for the separate contraction image.
+            # Optionally retain the synthetic adopted backup for recovery inspection.
             # Exclusive creation prevents replacing an existing recovery artifact.
             with (
                 Path(backup_output).open("xb") as destination,

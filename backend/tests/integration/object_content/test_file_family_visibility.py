@@ -357,7 +357,7 @@ def _explain_nodes(plan: dict[str, object]):
 
 
 @pytest.mark.asyncio
-async def test_family_visibility_is_one_query_with_indexed_content_lookups(
+async def test_family_visibility_has_bounded_queries_and_indexed_content_lookups(
     object_content_database: DatabaseSessionManager,
 ) -> None:
     root_ids: list[UUID] = []
@@ -429,16 +429,22 @@ async def test_family_visibility_is_one_query_with_indexed_content_lookups(
         sa.event.listen(engine, "before_cursor_execute", capture_statement)
         try:
             files = await FileRepository(session).get_by_ids(root_ids)
+            repeated = await FileRepository(session).get_by_ids(root_ids)
         finally:
             sa.event.remove(engine, "before_cursor_execute", capture_statement)
 
         assert {file.id for file in files} == set(root_ids)
-        assert len(statements) == 1
+        # One schema-state lookup chooses valid SQL before or after column removal;
+        # the whole family set still uses one indexed metadata query.
+        assert {file.id for file in repeated} == set(root_ids)
+        assert len(statements) == 3
+        assert "file_icon_backfill_admission_state.legacy_cleaned_at" in statements[0]
+        assert all("FROM files" in statement for statement in statements[1:])
 
         assert representative_root_id is not None
         statement = sa.select(Files.id).where(
             Files.id == representative_root_id,
-            FileRepository._visible_family(),
+            await FileRepository(session)._visible_family(),
         )
         sql = str(
             statement.compile(

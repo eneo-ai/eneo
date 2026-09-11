@@ -242,6 +242,15 @@ jobs:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
 
+      - name: Verify File/Icon upgrade and optional cleanup on PostgreSQL 13
+        working-directory: backend
+        run: |
+          uv run pytest -q -m migration_isolation tests/integration/migrations/test_file_icon_preflight.py tests/integration/migrations/test_file_icon_legacy_cleanup.py
+          uv run pytest -q -m migration_isolation tests/integration/migrations/test_file_icon_bridge_rehearsal.py
+        env:
+          TESTCONTAINERS_RYUK_DISABLED: "true"
+          DOCKER_HOST: unix:///var/run/docker.sock
+
   script-tests:
     name: Script tests
     needs: changes
