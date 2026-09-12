@@ -242,6 +242,20 @@ jobs:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
 
+      - name: Verify File and Icon bridge upgrades
+        # Migration tests are opt-in and must run outside the parallel suite.
+        # The restore rehearsal needs its own application/database session.
+        timeout-minutes: 10
+        run: |
+          uv run pytest -v -m migration_isolation \
+            tests/integration/migrations/test_file_icon_preflight.py
+          uv run pytest -v -m migration_isolation \
+            tests/integration/migrations/test_file_icon_bridge_rehearsal.py
+        env:
+          ENEO_FILE_ICON_REHEARSAL_PROFILE: smoke
+          TESTCONTAINERS_RYUK_DISABLED: "true"
+          DOCKER_HOST: unix:///var/run/docker.sock
+
   script-tests:
     name: Script tests
     needs: changes
