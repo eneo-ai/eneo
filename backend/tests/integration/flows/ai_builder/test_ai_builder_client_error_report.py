@@ -685,6 +685,92 @@ async def test_another_reporter_cannot_change_a_stored_observation(
 
 
 @pytest.mark.asyncio
+async def test_a_reused_event_id_with_another_identity_fills_nothing(
+    client,
+    bearer_token: str,
+    db_container,
+) -> None:
+    # The immutable identity must match before any gap is filled: a report
+    # that names a different failure under the same event id is a no-op.
+    payload = _report(code="identity_case")
+    assert (await _post(client, bearer_token, payload)).status_code == 204
+
+    other = await _post(
+        client,
+        bearer_token,
+        {
+            **payload,
+            "code": "identity_case_other",
+            "surface": "generation",
+            "first_action": "retry_requested",
+        },
+    )
+    assert other.status_code == 204
+
+    row = await _stored(db_container, "identity_case")
+    assert (row.surface, row.first_action) == (None, None)
+    async with db_container() as container:
+        others = (
+            (
+                await container.session().execute(
+                    select(BuilderClientErrors).where(
+                        BuilderClientErrors.code == "identity_case_other"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert others == []
+
+
+@pytest.mark.asyncio
+async def test_a_later_report_fills_only_the_gap_and_audits_what_was_kept(
+    client,
+    bearer_token: str,
+    db_container,
+) -> None:
+    payload = _report(code="gap_case")
+    assert (
+        await _post(
+            client, bearer_token, {**payload, "first_action": "retry_requested"}
+        )
+    ).status_code == 204
+
+    # A conflicting action beside a new surface: the surface fills, the
+    # stored action stays, and the audit names the stored action.
+    later = await _post(
+        client,
+        bearer_token,
+        {**payload, "surface": "chat", "first_action": "dismissed"},
+    )
+    assert later.status_code == 204
+
+    row = await _stored(db_container, "gap_case")
+    assert (row.surface, row.first_action) == ("chat", "retry_requested")
+    async with db_container() as container:
+        audits = (
+            (
+                await container.session().execute(
+                    select(AuditLogTable)
+                    .where(
+                        AuditLogTable.entity_id == row.id,
+                        AuditLogTable.action
+                        == ActionType.AI_BUILDER_CLIENT_ERROR_OUTCOME_RECORDED.value,
+                    )
+                    .order_by(AuditLogTable.created_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        extras = [audit.log_metadata["extra"] for audit in audits]
+    assert [(extra["surface"], extra["first_action"]) for extra in extras] == [
+        ("chat", "retry_requested")
+    ]
+
+
+@pytest.mark.asyncio
 async def test_report_client_error_rejects_unknown_presentation_values(
     client,
     bearer_token: str,

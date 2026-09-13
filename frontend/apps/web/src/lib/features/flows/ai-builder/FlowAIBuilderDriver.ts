@@ -22,6 +22,7 @@ import type {
   AIBuilderConversationMessage,
   AIBuilderDraftSession,
   AIBuilderError,
+  AIBuilderLatestTurn,
   AIBuilderModel,
   AIBuilderModelsResponse,
   AIBuilderPhase,
@@ -90,6 +91,26 @@ export interface PendingPlanOperation {
 export type CreateFailureOutcome = "confirmed_not_applied" | "unknown";
 
 export type AIBuilderStreamState = "idle" | "streaming" | "failed";
+
+/** One immutable client observation of a displayed failure. */
+interface FailureObservation {
+  client_event_id: string;
+  phase: AIBuilderError["phase"];
+  category: AIBuilderError["category"];
+  code: string;
+  request_id: string | null;
+  session_id: string | null;
+  surface: AIBuilderClientErrorSurface | null;
+  presented_as: AIBuilderClientErrorPresentation | null;
+}
+
+type DisplayedFailure =
+  | { kind: "error"; error: AIBuilderError }
+  | { kind: "turn"; sessionId: string; turn: AIBuilderLatestTurn };
+
+function turnObservationKey(subject: Extract<DisplayedFailure, { kind: "turn" }>): string {
+  return `${subject.sessionId}:${subject.turn.client_turn_id}:${subject.turn.state}`;
+}
 export type ModelLoadStatus = "loading" | "loaded" | "failed";
 
 export interface FlowAIBuilderState {
@@ -238,10 +259,10 @@ export class FlowAIBuilderDriver {
   // surface displays it, the same identity on every later report about it,
   // and at most one recorded first action. The session a failure belonged
   // to is remembered at parse time because a resume failure clears state.
-  #failureIdentities = new WeakMap<AIBuilderError, string>();
   #failureSessions = new WeakMap<AIBuilderError, string | null>();
-  #actedFailures = new WeakSet<AIBuilderError>();
-  #observationReports = new Map<string, Promise<void>>();
+  #errorObservations = new WeakMap<AIBuilderError, FailureObservation>();
+  #turnObservations = new Map<string, FailureObservation>();
+  #actedObservations = new Set<string>();
 
   constructor(
     transport: AIBuilderClientTransport,
@@ -333,7 +354,7 @@ export class FlowAIBuilderDriver {
     // value the new model does not accept.
     this.#state.selectedReasoningEffort = null;
     this.#notify();
-    this.recordDisplayedFailureAction("model_switched");
+    this.reportFailureAction("model_switched");
   }
 
   selectReasoningEffort(reasoningEffort: string | null): void {
@@ -821,20 +842,7 @@ export class FlowAIBuilderDriver {
       message,
       ui_language: getLocale()
     };
-    // Silence lets the server apply its own default, so an unchanged composer
-    // never pins a model. An effort is the exception: it is one of the options
-    // a particular model advertised, so it has to name that model. Sent alone,
-    // the server would judge it against whatever its default resolves to now,
-    // and either apply the choice to a different model or refuse the turn.
-    const reasoningEffort = this.#state.selectedReasoningEffort;
-    const modelId =
-      this.#state.selectedModelId ?? (reasoningEffort ? (this.effectiveModel?.id ?? null) : null);
-    if (modelId) {
-      requestBody.model_id = modelId;
-    }
-    if (reasoningEffort) {
-      requestBody.reasoning_effort = reasoningEffort;
-    }
+    Object.assign(requestBody, this.#plannerSelection());
     if (questionAnswer) {
       requestBody.question_answer = questionAnswer;
     }
@@ -876,14 +884,35 @@ export class FlowAIBuilderDriver {
     ) {
       return "not_started";
     }
+    // A new turn runs under the planner the user has chosen now, exactly as
+    // a fresh message would; only a same-turn replay keeps the retained
+    // settings to the letter.
+    const { model_id: _retainedModel, reasoning_effort: _retainedEffort, ...request } = retained;
     return await this.#streamMessageRequest(
       {
-        ...retained,
+        ...request,
         client_turn_id: crypto.randomUUID(),
-        acknowledge_duplicate_provider_spend: false
+        acknowledge_duplicate_provider_spend: false,
+        ...this.#plannerSelection()
       },
       null
     );
+  }
+
+  /** The planner controls as a request would carry them. Silence lets the
+   *  server apply its own default, so an unchanged composer never pins a
+   *  model. An effort is the exception: it is one of the options a
+   *  particular model advertised, so it has to name that model. Sent alone,
+   *  the server would judge it against whatever its default resolves to now,
+   *  and either apply the choice to a different model or refuse the turn. */
+  #plannerSelection(): Pick<AIBuilderSendMessageRequest, "model_id" | "reasoning_effort"> {
+    const reasoningEffort = this.#state.selectedReasoningEffort;
+    const modelId =
+      this.#state.selectedModelId ?? (reasoningEffort ? (this.effectiveModel?.id ?? null) : null);
+    return {
+      ...(modelId ? { model_id: modelId } : {}),
+      ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {})
+    };
   }
 
   async #recoverLatestTurn(
@@ -1874,88 +1903,107 @@ export class FlowAIBuilderDriver {
     return parsed;
   }
 
-  /** A surface displayed this failure. The first display mints the
-   *  observation identity and sends the report; a rerender, an authoritative
-   *  refresh that confirms the same failure, or a second surface showing the
-   *  same object all reuse it and send nothing. Observations are client
+  /** What the user is looking at when a surface reports a failure: the
+   *  error on screen, or a retained turn state the server restored without
+   *  an error payload (a pre-provider failure or an unknown outcome). */
+  #displayedFailure(error?: AIBuilderError): DisplayedFailure | null {
+    if (error) return { kind: "error", error };
+    if (this.#state.error) return { kind: "error", error: this.#state.error };
+    const session = this.#state.session;
+    const turn = session?.latest_turn;
+    if (
+      session &&
+      turn &&
+      (turn.state === "failed_before_provider" || turn.state === "provider_outcome_unknown")
+    ) {
+      return { kind: "turn", sessionId: session.session_id, turn };
+    }
+    return null;
+  }
+
+  #observationOf(subject: DisplayedFailure): FailureObservation | undefined {
+    return subject.kind === "error"
+      ? this.#errorObservations.get(subject.error)
+      : this.#turnObservations.get(turnObservationKey(subject));
+  }
+
+  /** A surface displayed this failure. The first display builds ONE
+   *  immutable observation envelope (identity, session, where and as what it
+   *  was shown) and sends it; a rerender, an authoritative refresh that
+   *  confirms the same failure, or a second surface showing the same subject
+   *  reuse it and send nothing. A restored turn state without an error
+   *  payload is observed under its turn identity. Observations are client
    *  facts, distinct from the server's own failure incidents. */
   reportFailureDisplayed(
-    error: AIBuilderError,
     facts: {
       surface: AIBuilderClientErrorSurface | null;
       presentedAs: AIBuilderClientErrorPresentation | null;
-    }
+    },
+    error?: AIBuilderError
   ): void {
-    if (this.#failureIdentities.has(error)) return;
-    const eventId = crypto.randomUUID();
-    this.#failureIdentities.set(error, eventId);
-    this.#observationReports.set(
-      eventId,
-      this.#sendClientErrorReport(eventId, error, {
-        surface: facts.surface,
-        presented_as: facts.presentedAs
-      })
-    );
+    const subject = this.#displayedFailure(error);
+    if (!subject || this.#observationOf(subject)) return;
+    const observation: FailureObservation =
+      subject.kind === "error"
+        ? {
+            client_event_id: crypto.randomUUID(),
+            phase: subject.error.phase,
+            category: subject.error.category,
+            code: subject.error.code,
+            request_id: subject.error.request_id,
+            session_id:
+              this.#failureSessions.get(subject.error) ?? this.#state.session?.session_id ?? null,
+            surface: facts.surface,
+            presented_as: facts.presentedAs
+          }
+        : {
+            client_event_id: crypto.randomUUID(),
+            phase: "client",
+            category: "internal",
+            code: `turn_${subject.turn.state}`,
+            request_id: subject.turn.client_turn_id,
+            session_id: subject.sessionId,
+            surface: facts.surface,
+            presented_as: facts.presentedAs
+          };
+    if (subject.kind === "error") {
+      this.#errorObservations.set(subject.error, observation);
+    } else {
+      this.#turnObservations.set(turnObservationKey(subject), observation);
+    }
+    this.#sendClientErrorReport(observation);
   }
 
-  /** The user's first explicit selection on a displayed failure, recorded
-   *  once. Later selections are not sent; a failure never displayed has no
-   *  identity and records nothing. */
-  reportFailureAction(error: AIBuilderError, action: AIBuilderClientErrorFirstAction): void {
-    const eventId = this.#failureIdentities.get(error);
-    if (!eventId || this.#actedFailures.has(error)) return;
-    this.#actedFailures.add(error);
-    // After the observation, so the row exists before the action reaches it;
-    // the server would accept either order.
-    const observed = this.#observationReports.get(eventId) ?? Promise.resolve();
-    void observed.then(() => this.#sendClientErrorReport(eventId, error, { first_action: action }));
-  }
-
-  /** A selection made away from the failure surface (a model switch in the
-   *  composer, the conversation button in the header) counts for the
-   *  failure on screen. */
-  recordDisplayedFailureAction(action: AIBuilderClientErrorFirstAction): void {
-    const error = this.#state.error;
-    if (error) this.reportFailureAction(error, action);
+  /** The user's first explicit selection on the displayed failure, sent
+   *  once with the same envelope. A failure never displayed has no
+   *  observation and records nothing. A stored null first_action therefore
+   *  means "no selection was observed", not "nothing was selected". */
+  reportFailureAction(action: AIBuilderClientErrorFirstAction, error?: AIBuilderError): void {
+    const subject = this.#displayedFailure(error);
+    const observation = subject ? this.#observationOf(subject) : undefined;
+    if (!observation || this.#actedObservations.has(observation.client_event_id)) return;
+    this.#actedObservations.add(observation.client_event_id);
+    // The server accepts either arrival order, so no chaining is needed.
+    this.#sendClientErrorReport({ ...observation, first_action: action });
   }
 
   /** Deferred off the interaction path and never awaited by a command:
    *  telemetry must not delay a recovery, and its failure must not surface. */
   #sendClientErrorReport(
-    eventId: string,
-    error: AIBuilderError,
-    facts: {
-      surface?: AIBuilderClientErrorSurface | null;
-      presented_as?: AIBuilderClientErrorPresentation | null;
-      first_action?: AIBuilderClientErrorFirstAction;
-    }
-  ): Promise<void> {
-    return new Promise<void>((resolve) => {
-      setTimeout(() => {
-        try {
-          void this.#transport
-            .fetch(FLOW_AI_BUILDER_ROUTES.clientErrors, {
-              method: "post",
-              requestBody: {
-                "application/json": {
-                  client_event_id: eventId,
-                  phase: error.phase,
-                  category: error.category,
-                  code: error.code,
-                  request_id: error.request_id,
-                  session_id:
-                    this.#failureSessions.get(error) ?? this.#state.session?.session_id ?? null,
-                  ...facts
-                }
-              }
-            })
-            .catch(() => {})
-            .finally(resolve);
-        } catch {
-          resolve();
-        }
-      }, 0);
-    });
+    body: FailureObservation & { first_action?: AIBuilderClientErrorFirstAction }
+  ): void {
+    setTimeout(() => {
+      try {
+        void this.#transport
+          .fetch(FLOW_AI_BUILDER_ROUTES.clientErrors, {
+            method: "post",
+            requestBody: { "application/json": body }
+          })
+          .catch(() => {});
+      } catch {
+        // Never let telemetry interfere with the failing operation itself.
+      }
+    }, 0);
   }
 
   #normalizePlan(plan: IncomingProposedPlan): ProposedPlan {

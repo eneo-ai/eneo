@@ -569,12 +569,12 @@
     const error = service.error;
     const kind = untrack(() => generationFailure?.kind ?? null);
     if (!error || !kind) return;
-    service.reportFailureDisplayed(error, { surface: "generation", presentedAs: kind });
+    service.reportFailureDisplayed({ surface: "generation", presentedAs: kind }, error);
   });
   // An apply failure is shown by this screen's own cards.
   $effect(() => {
     const error = service.applyError;
-    if (error) service.reportFailureDisplayed(error, { surface: "apply", presentedAs: null });
+    if (error) service.reportFailureDisplayed({ surface: "apply", presentedAs: null }, error);
   });
 
   // ---- Failure card motion ------------------------------------------------
@@ -740,7 +740,7 @@
   async function runGenerationFailureAction(action: FailureAction) {
     const error = service.error;
     if (!error) return;
-    service.reportFailureAction(error, action.records);
+    service.reportFailureAction(action.records, error);
     switch (action.kind) {
       case "retry_same_turn":
         await service.retryLatestTurn();
@@ -1748,7 +1748,7 @@
                 size="xs"
                 onselect={() => {
                   if (service.error)
-                    service.reportFailureAction(service.error, "diagnostic_copied");
+                    service.reportFailureAction("diagnostic_copied", service.error);
                 }}
               />
             </div>

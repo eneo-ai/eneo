@@ -920,7 +920,7 @@ async def report_client_error(
                 if reported
                 else (
                     "Client recorded AI builder error outcome "
-                    f"({body.first_action.value if body.first_action else 'displayed'})"
+                    f"({record.first_action or 'displayed'})"
                 )
             ),
             metadata=dict(
@@ -931,21 +931,16 @@ async def report_client_error(
                         "phase": str(body.phase),
                         "category": str(body.category),
                         "code": body.code,
-                        # The tenant-resolved session that was stored — never
-                        # the client's unverified claim.
+                        # What the row holds after this report — the
+                        # tenant-resolved session and the facts a fill kept —
+                        # never the client's unverified claim.
                         "session_id": (
-                            str(record.resolved_session_id)
-                            if record.resolved_session_id
-                            else None
+                            str(record.session_id) if record.session_id else None
                         ),
                         "request_id": body.request_id,
-                        "surface": body.surface.value if body.surface else None,
-                        "presented_as": (
-                            body.presented_as.value if body.presented_as else None
-                        ),
-                        "first_action": (
-                            body.first_action.value if body.first_action else None
-                        ),
+                        "surface": record.surface,
+                        "presented_as": record.presented_as,
+                        "first_action": record.first_action,
                     },
                 )
             ),

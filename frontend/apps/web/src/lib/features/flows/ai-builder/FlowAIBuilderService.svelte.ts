@@ -515,18 +515,19 @@ export class FlowAIBuilderService {
     turnActive: this.latestTurnState === "open" || this.latestTurnState === "processing"
   });
 
+  /** The failure on screen (or the one given) was displayed here. */
   reportFailureDisplayed(
-    error: AIBuilderError,
     facts: {
       surface: AIBuilderClientErrorSurface | null;
       presentedAs: AIBuilderClientErrorPresentation | null;
-    }
+    },
+    error?: AIBuilderError
   ): void {
-    this.#driver.reportFailureDisplayed(error, facts);
+    this.#driver.reportFailureDisplayed(facts, error);
   }
 
-  reportFailureAction(error: AIBuilderError, action: AIBuilderClientErrorFirstAction): void {
-    this.#driver.reportFailureAction(error, action);
+  reportFailureAction(action: AIBuilderClientErrorFirstAction, error?: AIBuilderError): void {
+    this.#driver.reportFailureAction(action, error);
   }
 
   async approvePlan(): Promise<void> {
@@ -585,7 +586,7 @@ export class FlowAIBuilderService {
     // Opening the transcript while a failure is on screen is the user's way
     // back; the surface that presented the failure records it as such.
     if (open && !this.#conversationOpen) {
-      this.#driver.recordDisplayedFailureAction("conversation_opened");
+      this.#driver.reportFailureAction("conversation_opened");
     }
     this.#conversationOpen = open;
   }

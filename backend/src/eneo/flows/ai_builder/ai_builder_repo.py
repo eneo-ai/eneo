@@ -199,11 +199,18 @@ def _roles_allowing_flow_edit(
 
 @dataclass(frozen=True, slots=True)
 class ClientErrorRecord:
-    """What one client error report did to its row."""
+    """What one client error report did to its row, and what the row holds now.
+
+    The persisted facts are returned so callers audit what was stored, never
+    what the report carried: a fill keeps the stored value when both exist.
+    """
 
     error_id: UUID
     outcome: Literal["inserted", "updated"]
-    resolved_session_id: UUID | None
+    session_id: UUID | None
+    surface: str | None
+    presented_as: str | None
+    first_action: str | None
 
 
 class AIBuilderRepository:
@@ -293,13 +300,16 @@ class AIBuilderRepository:
         """Store one client-observed failure and the facts that arrive later.
 
         The first report for a (tenant, client_event_id) inserts the row. A
-        later report for the same row from the same reporter fills only what
-        is still unset: `surface`, `presented_as` and `first_action` (the
-        server stamps `first_action_received_at`). Identity fields and a set
-        action are never overwritten, so a replay, a late initial report
-        after an action, and a conflicting second action are all no-ops.
-        Order does not matter: an action reported before the observation
-        inserts the row with the action already set.
+        later report for the same row from the same reporter, carrying the
+        same immutable identity (code, category, phase, request_id and the
+        resolved session), fills only what is still unset: `surface`,
+        `presented_as` and `first_action` (the server stamps
+        `first_action_received_at`). Identity fields and a set action are
+        never overwritten, so a replay, a late initial report after an
+        action, a conflicting second action, and a report that names a
+        different failure under a reused event id are all no-ops. Order does
+        not matter: an action reported before the observation inserts the
+        row with the action already set.
 
         A report under the same event id from another reporter (a different
         `user_id` in the same tenant) is ignored rather than rejected: the
@@ -375,11 +385,20 @@ class AIBuilderRepository:
                 },
                 where=sa.and_(
                     stored.user_id.is_not_distinct_from(incoming.user_id),
+                    stored.code == incoming.code,
+                    stored.category == incoming.category,
+                    stored.phase == incoming.phase,
+                    stored.request_id.is_not_distinct_from(incoming.request_id),
+                    stored.session_id.is_not_distinct_from(incoming.session_id),
                     fills_a_gap,
                 ),
             ).returning(
                 BuilderClientErrors.id,
                 sa.literal_column("(xmax = 0)", type_=sa.Boolean).label("inserted"),
+                BuilderClientErrors.session_id,
+                BuilderClientErrors.surface,
+                BuilderClientErrors.presented_as,
+                BuilderClientErrors.first_action,
             )
             row = (await self.session.execute(stmt)).one_or_none()
             if row is None:
@@ -387,7 +406,10 @@ class AIBuilderRepository:
             return ClientErrorRecord(
                 error_id=row.id,
                 outcome="inserted" if row.inserted else "updated",
-                resolved_session_id=resolved_session_id,
+                session_id=row.session_id,
+                surface=row.surface,
+                presented_as=row.presented_as,
+                first_action=row.first_action,
             )
 
     async def find_latest_resumable_session(

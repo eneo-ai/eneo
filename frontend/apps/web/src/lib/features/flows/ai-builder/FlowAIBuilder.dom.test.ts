@@ -2516,7 +2516,7 @@ describe("FlowAIBuilder confirm, build and review", () => {
       error: Object.assign(new Error("Failed to fetch"), { status: 0, stage: "CONNECTION" }),
       latestTurn: "processing",
       kind: "network_loss",
-      heading: () => m.ai_builder_failure_heading_network_loss(),
+      heading: () => m.ai_builder_failure_heading_network_loss_generation(),
       cause: () => m.ai_builder_failure_cause_network_loss_turn_active(),
       primary: () => m.ai_builder_failure_action_refresh(),
       secondary: null,
@@ -2722,11 +2722,18 @@ describe("FlowAIBuilder confirm, build and review", () => {
       expect(observed).not.toHaveProperty("message");
 
       await fireEvent.click(within(card).getByRole("button", { name: primary() }));
-      await waitFor(() => expect(reports).toHaveLength(2));
-      expect(reports[1]).toMatchObject({
-        client_event_id: observed.client_event_id,
-        first_action: records
-      });
+      // The same envelope again, with the first selection; a turn state the
+      // alert may show after the retry is its own observation, not this one.
+      await waitFor(() =>
+        expect(
+          reports.filter((report) => report.client_event_id === observed.client_event_id)
+        ).toHaveLength(2)
+      );
+      const { first_action, ...envelope } = reports.find(
+        (report) => report.client_event_id === observed.client_event_id && report.first_action
+      )!;
+      expect(first_action).toBe(records);
+      expect(envelope).toEqual(observed);
     }
   );
 
@@ -3330,11 +3337,26 @@ describe("FlowAIBuilder edit host contract", () => {
 
 describe("FlowAIBuilder turn recovery", () => {
   it("offers a safe exact retry when no provider work started", async () => {
-    const { fetch } = makeFetch({ sessions: [turnSession("failed_before_provider")] });
+    const { fetch, reports } = makeFetch({ sessions: [turnSession("failed_before_provider")] });
     const { stream, calls } = makeStream();
     renderShell({ fetch, stream, resumeSessionId: "s-turn" });
 
-    expect(await screen.findByText(m.ai_builder_turn_failed_before_provider_title())).toBeTruthy();
+    const title = await screen.findByText(m.ai_builder_turn_failed_before_provider_title());
+    // A polite status, never an interrupting alert.
+    const alert = title.closest("[data-slot='alert']")!;
+    expect(alert.getAttribute("role")).toBe("status");
+    expect(alert.getAttribute("aria-live")).toBe("polite");
+    // A restored turn state without an error payload is still observed,
+    // under its turn identity, with the class the alert showed.
+    await waitFor(() => expect(reports).toHaveLength(1));
+    expect(reports[0]).toMatchObject({
+      code: "turn_failed_before_provider",
+      request_id: TURN_ID,
+      session_id: "s-turn",
+      surface: "chat",
+      presented_as: "failed_before_provider"
+    });
+
     await fireEvent.click(button(m.ai_builder_turn_retry()));
 
     await waitFor(() => expect(calls).toHaveLength(1));
@@ -3342,6 +3364,11 @@ describe("FlowAIBuilder turn recovery", () => {
       client_turn_id: TURN_ID,
       message: "Build a flow",
       acknowledge_duplicate_provider_spend: false
+    });
+    await waitFor(() => expect(reports).toHaveLength(2));
+    expect(reports[1]).toMatchObject({
+      client_event_id: reports[0]!.client_event_id,
+      first_action: "retry_requested"
     });
   });
 

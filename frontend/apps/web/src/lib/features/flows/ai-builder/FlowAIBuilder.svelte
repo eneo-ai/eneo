@@ -519,7 +519,7 @@
   $effect(() => {
     const error = service.error;
     if (failedAttempt !== null && !service.hasSession && error) {
-      service.reportFailureDisplayed(error, { surface: null, presentedAs: null });
+      service.reportFailureDisplayed({ surface: null, presentedAs: null }, error);
     }
   });
 

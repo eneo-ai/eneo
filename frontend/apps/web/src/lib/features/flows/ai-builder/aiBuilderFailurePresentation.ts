@@ -153,7 +153,10 @@ function heading(kind: FailureKind, surface: FailureSurface): string {
     case "failed_before_provider":
       return m.ai_builder_turn_failed_before_provider_title();
     case "network_loss":
-      return m.ai_builder_failure_heading_network_loss();
+      // Only the generation surface knows a plan was being drafted.
+      return surface === "generation"
+        ? m.ai_builder_failure_heading_network_loss_generation()
+        : m.ai_builder_failure_heading_network_loss();
     case "provider_rejected":
       return m.ai_builder_failure_heading_provider_rejected();
     case "request_budget_exhausted":
@@ -263,7 +266,12 @@ function actionsFor(
     return { primary: action.retryAcknowledged(), secondary: null };
   }
   if (capabilities.replay === "failed_before_provider") {
-    return { primary: action.retrySameTurn(), secondary: chat ? null : action.clarify(kind) };
+    // Rewording is only offered where the composer will accept it; a
+    // retained pre-provider turn usually fences new messages.
+    return {
+      primary: action.retrySameTurn(),
+      secondary: !chat && capabilities.canStartNewTurn ? action.clarify(kind) : null
+    };
   }
   // A turn still running, a refresh still owed, or a recovery in flight: the
   // only honest step is to fetch the state.

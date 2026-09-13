@@ -1,7 +1,6 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
   import { fade } from "svelte/transition";
-  import { untrack } from "svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import IconAlertTriangle from "@lucide/svelte/icons/triangle-alert";
@@ -69,9 +68,7 @@
   );
 
   async function runAction(action: FailureAction) {
-    // A retained turn state can be presented without an error payload; the
-    // selection is then executed but there is no observation to record on.
-    if (service.error) service.reportFailureAction(service.error, action.records);
+    service.reportFailureAction(action.records);
     switch (action.kind) {
       case "retry_same_turn":
         await service.retryLatestTurn();
@@ -114,13 +111,13 @@
     !suppressStreamError && (service.error !== null || turnRecoveryState !== null || turnIsActive)
   );
 
-  // A failure this alert shows is observed as the chat surface, once.
+  // A failure this alert shows is observed as the chat surface, once, whether
+  // it is an error payload or a restored turn state without one.
   $effect(() => {
     if (!visible) return;
-    const error = service.error;
-    const kind = untrack(() => presentation?.kind ?? null);
-    if (!error || !kind) return;
-    service.reportFailureDisplayed(error, { surface: "chat", presentedAs: kind });
+    const kind = presentation?.kind ?? null;
+    if (!kind) return;
+    service.reportFailureDisplayed({ surface: "chat", presentedAs: kind });
   });
 </script>
 
@@ -131,6 +128,8 @@
   >
     <Alert.Root
       variant="default"
+      role="status"
+      aria-live="polite"
       class="mx-auto grid max-w-[43.75rem] grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 rounded-lg px-3.5 py-3"
     >
       {#if presentation}
@@ -215,7 +214,7 @@
               variant="ghost"
               size="xs"
               onselect={() => {
-                if (service.error) service.reportFailureAction(service.error, "diagnostic_copied");
+                service.reportFailureAction("diagnostic_copied");
               }}
             />
           {/if}

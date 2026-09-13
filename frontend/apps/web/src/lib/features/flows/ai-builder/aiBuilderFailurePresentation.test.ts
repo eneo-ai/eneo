@@ -119,7 +119,7 @@ describe("describeFailure", () => {
       name: "a transport failure this client saw",
       failure: error({ code: "network", category: "network", phase: "client" }),
       kind: "network_loss",
-      heading: m.ai_builder_failure_heading_network_loss(),
+      heading: m.ai_builder_failure_heading_network_loss_generation(),
       primary: "retry_new_turn",
       secondary: "clarify"
     },
@@ -189,7 +189,8 @@ describe("describeFailure", () => {
     const presentation = present({
       error: error({ code: "planner_budget_missing", message: "No planner budget." }),
       latestTurn: turn("failed_before_provider"),
-      capabilities: { ...committed, replay: "failed_before_provider" },
+      // A retained pre-provider turn fences new messages: no rewording offer.
+      capabilities: { ...committed, replay: "failed_before_provider", canStartNewTurn: false },
       context: generation
     });
 
@@ -203,7 +204,7 @@ describe("describeFailure", () => {
       kind: "retry_same_turn",
       records: "retry_requested"
     });
-    expect(presentation.secondary?.kind).toBe("clarify");
+    expect(presentation.secondary).toBeNull();
   });
 
   it("only fetches the latest state while the lost turn still runs or a refresh is owed", () => {
@@ -282,6 +283,24 @@ describe("describeFailure", () => {
     });
 
     expect(onChat.heading).toBe(onGeneration.heading);
+    // Only the generation surface may say a plan was being drafted.
+    const network = error({ code: "network", category: "network", phase: "client" });
+    expect(
+      present({
+        error: network,
+        latestTurn: turn("committed"),
+        capabilities: committed,
+        context: chat
+      }).heading
+    ).toBe(m.ai_builder_failure_heading_network_loss());
+    expect(
+      present({
+        error: network,
+        latestTurn: turn("committed"),
+        capabilities: committed,
+        context: generation
+      }).heading
+    ).toBe(m.ai_builder_failure_heading_network_loss_generation());
     // No preservation claim away from the plan that failed to arrive.
     expect(onChat.consequence).toBe(m.ai_builder_failure_cause_provider_rejected());
     expect(onChat.primary).toMatchObject({ kind: "dismiss", records: "dismissed" });

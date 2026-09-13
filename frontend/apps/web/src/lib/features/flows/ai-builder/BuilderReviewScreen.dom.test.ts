@@ -836,8 +836,7 @@ describe("BuilderReviewScreen recovery surfaces", () => {
     expect(acknowledge).toHaveBeenCalledOnce();
   });
 
-  it("keeps the safe retry first and rewording second for a pre-provider failure", async () => {
-    const onclarify = vi.fn();
+  it("offers the safe retry alone for a pre-provider failure that fences new messages", () => {
     render(BuilderReviewScreenHarness, {
       currentSpace: makeSpace({ transcriptionModels: [] }),
       state: {
@@ -845,7 +844,7 @@ describe("BuilderReviewScreen recovery surfaces", () => {
         currentPlan: null,
         error: makeError("unknown")
       },
-      screenProps: { showGenerationFailure: true, onclarify }
+      screenProps: { showGenerationFailure: true }
     });
 
     expect(
@@ -855,13 +854,12 @@ describe("BuilderReviewScreen recovery surfaces", () => {
     expect(
       screen.queryByRole("button", { name: m.ai_builder_turn_retry_with_cost_acknowledgement() })
     ).toBeNull();
+    // The composer would refuse a new message here, so no rewording is offered.
+    expect(
+      screen.queryByRole("button", { name: m.ai_builder_failure_action_clarify() })
+    ).toBeNull();
     // The way back to the conversation lives in the header, not in the card.
     expect(screen.queryByRole("button", { name: m.ai_builder_show_conversation() })).toBeNull();
-
-    await fireEvent.click(
-      screen.getByRole("button", { name: m.ai_builder_failure_action_clarify() })
-    );
-    expect(onclarify).toHaveBeenCalledOnce();
   });
 
   it("names a committed provider rejection, sends the request again, and opens once", async () => {
