@@ -2854,12 +2854,28 @@ async def test_ai_builder_known_provider_rejection_commits_and_replays_without_r
     )
     client_turn_id = uuid4()
     message = "Hjälp mig bygga ett flöde."
-    completion = AsyncMock(
-        side_effect=[
-            provider_error,
-            _make_llm_response(content="Jag kan hjälpa dig bygga flödet."),
-        ]
-    )
+    scripted_responses: list[object] = [
+        provider_error,
+        _make_llm_response(content="Jag kan hjälpa dig bygga flödet."),
+    ]
+    # Every proposal call carries the tool schemas; the classifier asks for
+    # a structured object instead. Naming the kind is what lets the counts
+    # below say which provider work they count.
+    request_kinds: list[str] = []
+
+    async def scripted_completion(**kwargs: object) -> object:
+        if "tools" in kwargs:
+            request_kinds.append("proposal")
+        elif "response_format" in kwargs:
+            request_kinds.append("slot_classification")
+        else:
+            request_kinds.append("unknown")
+        response = scripted_responses.pop(0)
+        if isinstance(response, BaseException):
+            raise response
+        return response
+
+    completion = AsyncMock(side_effect=scripted_completion)
 
     with patch(
         "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
@@ -2891,6 +2907,7 @@ async def test_ai_builder_known_provider_rejection_commits_and_replays_without_r
             assert "private-provider" not in encoded_error
             calls_after_rejection = completion.await_count
             assert calls_after_rejection == 1
+            assert request_kinds == ["slot_classification"]
 
             committed_session = await client.get(
                 f"/api/v1/flows/ai-builder/sessions/{session_id}",
@@ -2948,15 +2965,37 @@ async def test_ai_builder_known_provider_rejection_commits_and_replays_without_r
             )
             assert completion.await_count == calls_after_rejection
 
+            new_turn_id = uuid4()
             new_turn_events = await _send_builder_message(
                 client=client,
                 bearer_token=bearer_token,
                 session_id=session_id,
                 message=message,
-                client_turn_id=uuid4(),
+                client_turn_id=new_turn_id,
             )
-            assert any(event["event"] == "text" for event in new_turn_events)
+            # The rejected turn's message was accepted without a classification
+            # and nothing is cached for a rejected attempt, so the new turn reads
+            # the conversation again. The prose answer resolves no slot, turn
+            # control asks a server-owned question, and no proposal call follows.
+            assert request_kinds == ["slot_classification", "slot_classification"]
             assert completion.await_count == calls_after_rejection + 1
+            assert [
+                event["event"]
+                for event in new_turn_events
+                if event["event"] != "status"
+            ] == ["text", "question", "usage", "done"], _builder_event_outline(
+                new_turn_events
+            )
+
+            new_turn_session = await client.get(
+                f"/api/v1/flows/ai-builder/sessions/{session_id}",
+                headers={"Authorization": f"Bearer {bearer_token}"},
+            )
+            assert new_turn_session.status_code == 200, new_turn_session.text
+            new_latest_turn = new_turn_session.json()["latest_turn"]
+            assert new_latest_turn["client_turn_id"] == str(new_turn_id)
+            assert new_latest_turn["state"] == "committed"
+            assert new_latest_turn["error"] is None
 
 
 @pytest.mark.integration
