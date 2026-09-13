@@ -68,6 +68,14 @@ that still never intimidates.
    labels, forgiving interactions, and guiding empty states over terse power-user
    affordances.
 
+6. **Nordic clean.** Light, calm surfaces, generous whitespace, restrained
+   colour, clear typography, no decoration. Easy to understand comes first,
+   aesthetically pleasing second; both are required. (Owner constraint, 2026-09-13.)
+
+## Platform
+
+web
+
 ## Accessibility & Inclusion
 
 Target **WCAG 2.2 AA** across the app — a superset of the EU Web Accessibility
