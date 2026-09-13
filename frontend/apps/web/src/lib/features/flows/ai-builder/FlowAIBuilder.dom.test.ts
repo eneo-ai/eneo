@@ -2722,16 +2722,13 @@ describe("FlowAIBuilder confirm, build and review", () => {
       expect(observed).not.toHaveProperty("message");
 
       await fireEvent.click(within(card).getByRole("button", { name: primary() }));
-      // The same envelope again, with the first selection; a turn state the
-      // alert may show after the retry is its own observation, not this one.
-      await waitFor(() =>
-        expect(
-          reports.filter((report) => report.client_event_id === observed.client_event_id)
-        ).toHaveLength(2)
-      );
-      const { first_action, ...envelope } = reports.find(
-        (report) => report.client_event_id === observed.client_event_id && report.first_action
-      )!;
+      // The same envelope again, with the first selection, and nothing else:
+      // the retained turn is not shown or observed again while its retry
+      // is in flight.
+      await waitFor(() => expect(reports).toHaveLength(2));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(reports).toHaveLength(2);
+      const { first_action, ...envelope } = reports[1]!;
       expect(first_action).toBe(records);
       expect(envelope).toEqual(observed);
     }

@@ -922,38 +922,6 @@ describe("BuilderReviewScreen recovery surfaces", () => {
     await fireEvent.click(primary);
     expect(resend).toHaveBeenCalledOnce();
   });
-
-  it("keeps the card, closed, on its last words while a retry clears the error", async () => {
-    let service!: Parameters<NonNullable<HarnessProps["onservice"]>>[0];
-    const { rerender } = render(BuilderReviewScreenHarness, {
-      currentSpace: makeSpace({ transcriptionModels: [] }),
-      state: {
-        session: makeRecoverableSession("committed"),
-        currentPlan: null,
-        error: { ...makeError("planner_output_too_long"), category: "upstream" }
-      },
-      screenProps: { showGenerationFailure: true },
-      onservice: (s) => (service = s)
-    });
-    const heading = screen.getByRole("heading", {
-      name: m.ai_builder_failure_heading_output_too_long()
-    });
-    const card = heading.closest<HTMLElement>("[role='status']")!;
-    await waitFor(() => expect(card.getAttribute("data-open")).toBe("true"));
-
-    // The retry clears the error before the stream starts; the host keeps
-    // the surface mounted and marks it closing for the close duration.
-    await rerender({
-      screenProps: { showGenerationFailure: true, closingGenerationFailure: true }
-    });
-    service.seedState({ error: null });
-
-    await waitFor(() => expect(card.getAttribute("data-open")).toBe("false"));
-    expect(card.isConnected).toBe(true);
-    expect(
-      screen.getByRole("heading", { name: m.ai_builder_failure_heading_output_too_long() })
-    ).toBe(heading);
-  });
 });
 
 // ---- fixtures --------------------------------------------------------------

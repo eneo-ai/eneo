@@ -261,8 +261,9 @@ export class FlowAIBuilderDriver {
   // to is remembered at parse time because a resume failure clears state.
   #failureSessions = new WeakMap<AIBuilderError, string | null>();
   #errorObservations = new WeakMap<AIBuilderError, FailureObservation>();
-  #turnObservations = new Map<string, FailureObservation>();
-  #actedObservations = new Set<string>();
+  /** The observation of the current session's retained turn, if displayed. */
+  #turnObservation: { key: string; observation: FailureObservation } | null = null;
+  #actedObservations = new WeakSet<FailureObservation>();
 
   constructor(
     transport: AIBuilderClientTransport,
@@ -286,6 +287,11 @@ export class FlowAIBuilderDriver {
     // back — a turn stored by an older build — there is nothing to retry, so
     // no surface offers it.
     if (!this.#state.session?.latest_turn?.retry_request) return null;
+    // While that retry (or any stream) is in flight the retained state is
+    // being resolved: the surface that started it keeps the failure, and no
+    // other surface displays or observes the turn again until the result
+    // lands with the authoritative refresh.
+    if (this.#isRecoveringLatestTurn || this.#state.streamState === "streaming") return null;
     return state === "failed_before_provider" || state === "provider_outcome_unknown"
       ? state
       : null;
@@ -1772,6 +1778,7 @@ export class FlowAIBuilderDriver {
     this.#requiresAuthoritativeRefresh = false;
     this.#authoritativeRefreshError = false;
     this.#isRecoveringLatestTurn = false;
+    this.#turnObservation = null;
     this.#state = createInitialFlowAIBuilderState();
   }
 
@@ -1922,9 +1929,9 @@ export class FlowAIBuilderDriver {
   }
 
   #observationOf(subject: DisplayedFailure): FailureObservation | undefined {
-    return subject.kind === "error"
-      ? this.#errorObservations.get(subject.error)
-      : this.#turnObservations.get(turnObservationKey(subject));
+    if (subject.kind === "error") return this.#errorObservations.get(subject.error);
+    const key = turnObservationKey(subject);
+    return this.#turnObservation?.key === key ? this.#turnObservation.observation : undefined;
   }
 
   /** A surface displayed this failure. The first display builds ONE
@@ -1969,7 +1976,8 @@ export class FlowAIBuilderDriver {
     if (subject.kind === "error") {
       this.#errorObservations.set(subject.error, observation);
     } else {
-      this.#turnObservations.set(turnObservationKey(subject), observation);
+      // Only the current retained turn is remembered; a later turn replaces it.
+      this.#turnObservation = { key: turnObservationKey(subject), observation };
     }
     this.#sendClientErrorReport(observation);
   }
@@ -1981,8 +1989,8 @@ export class FlowAIBuilderDriver {
   reportFailureAction(action: AIBuilderClientErrorFirstAction, error?: AIBuilderError): void {
     const subject = this.#displayedFailure(error);
     const observation = subject ? this.#observationOf(subject) : undefined;
-    if (!observation || this.#actedObservations.has(observation.client_event_id)) return;
-    this.#actedObservations.add(observation.client_event_id);
+    if (!observation || this.#actedObservations.has(observation)) return;
+    this.#actedObservations.add(observation);
     // The server accepts either arrival order, so no chaining is needed.
     this.#sendClientErrorReport({ ...observation, first_action: action });
   }

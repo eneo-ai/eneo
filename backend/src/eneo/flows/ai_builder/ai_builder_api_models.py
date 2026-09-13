@@ -411,8 +411,9 @@ class AIBuilderClientErrorFirstAction(enum.StrEnum):
 
     Intent-named and observable: each value is a control the user chose,
     never an inferred outcome. This measures the response to the failure UI,
-    not whether the recovery succeeded. Null means nothing was selected
-    while the failure was displayed, which is not the same as giving up.
+    not whether the recovery succeeded. Null means no selection was
+    observed: the user may have chosen nothing, or the report of a choice
+    may never have arrived. It is not the same as giving up.
     """
 
     RETRY_REQUESTED = "retry_requested"

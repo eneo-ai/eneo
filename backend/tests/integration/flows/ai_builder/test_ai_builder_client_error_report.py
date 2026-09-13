@@ -791,9 +791,10 @@ async def test_presented_as_by_first_action_counts_are_one_bounded_query(
     db_container,
 ) -> None:
     """The query an operator runs to see how users respond to each failure
-    class. A null first_action means nothing was selected while the failure
-    was displayed; it is not abandonment, and no action means recovery
-    succeeded. The window and the limit keep it bounded."""
+    class. A null first_action means no selection was observed (the user
+    chose nothing, or the report never arrived); it is not abandonment, and
+    no action means recovery succeeded. The window and the limit keep it
+    bounded."""
     for presented_as, first_action in (
         ("provider_rejected", "retry_requested"),
         ("provider_rejected", "retry_requested"),

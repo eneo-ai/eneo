@@ -18,11 +18,7 @@
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import FlowAIBuilderDiagnosticCopyButton from "./FlowAIBuilderDiagnosticCopyButton.svelte";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
-  import {
-    describeFailure,
-    type FailureAction,
-    type FailurePresentation
-  } from "./aiBuilderFailurePresentation";
+  import { describeFailure, type FailureAction } from "./aiBuilderFailurePresentation";
   import type {
     AIBuilderPlanEditContext,
     AIBuilderStatus,
@@ -62,19 +58,11 @@
     showGenerationFailure?: boolean;
     /** Open the composer, answers kept, so the user can reword the task. */
     onclarify?: () => void;
-    /** The failure card is leaving: work resumed and the working state returns. */
-    closingGenerationFailure?: boolean;
     /** Narrow layouts: bring the conversation back into view. */
     onshowconversation?: () => void;
   }
 
-  let {
-    onapplied,
-    showGenerationFailure = false,
-    onshowconversation,
-    onclarify,
-    closingGenerationFailure = false
-  }: Props = $props();
+  let { onapplied, showGenerationFailure = false, onshowconversation, onclarify }: Props = $props();
 
   const service = getAIBuilderService();
   const {
@@ -551,16 +539,6 @@
       : null
   );
   const generationFailureBusy = $derived(service.isStreaming || service.isRecoveringLatestTurn);
-  // A retry clears the error before the stream starts, which would destroy
-  // the card mid-close. The last presentation stays on screen while the
-  // card is closing, so the close moment plays on the words it had.
-  let closingSnapshot = $state<FailurePresentation | null>(null);
-  $effect(() => {
-    if (generationFailure) closingSnapshot = generationFailure;
-  });
-  const shownGenerationFailure = $derived(
-    generationFailure ?? (closingGenerationFailure ? closingSnapshot : null)
-  );
 
   // The displayed failure is observed once, with the class the user saw; the
   // driver reuses the identity across rerenders and refreshes of the same one.
@@ -580,7 +558,8 @@
   // ---- Failure card motion ------------------------------------------------
   // One authored moment: the working state giving way to the card. The card
   // mounts closed, is painted once, then opens; it never replays for a
-  // rerender of the same failure, and it closes when work resumes.
+  // rerender of the same failure. There is no exit: work resuming simply
+  // replaces it.
   let generationCardEl = $state<HTMLElement | undefined>();
   let generationCardOpened = $state(false);
   $effect(() => {
@@ -592,7 +571,6 @@
     void el.offsetHeight;
     generationCardOpened = true;
   });
-  const generationCardOpen = $derived(generationCardOpened && !closingGenerationFailure);
 
   function progressStatusLabel(status: AIBuilderStatus | null): string {
     if (status === "repairing") return m.ai_builder_status_repairing();
@@ -1678,7 +1656,7 @@
   >
     <div class="w-full max-w-[43.75rem]">{@render conflictCard()}</div>
   </div>
-{:else if showGenerationFailure && shownGenerationFailure}
+{:else if showGenerationFailure && generationFailure}
   <div
     class="bg-secondary flex flex-1 justify-center px-7 pt-6 pb-10 max-lg:px-5 max-md:px-4 max-sm:pt-4"
   >
@@ -1686,7 +1664,7 @@
       <div
         bind:this={generationCardEl}
         class="t-panel-slide border-default bg-primary rounded-xl border p-6 max-sm:p-4"
-        data-open={generationCardOpen}
+        data-open={generationCardOpened}
         role="status"
         aria-live="polite"
       >
@@ -1701,14 +1679,14 @@
               tabindex="-1"
               data-builder-screen-heading
             >
-              {shownGenerationFailure.heading}
+              {generationFailure.heading}
             </h2>
             <p class="text-secondary mt-1.5 text-[0.8125rem] leading-relaxed text-pretty">
-              {shownGenerationFailure.consequence}
+              {generationFailure.consequence}
             </p>
             <div class="mt-5 flex flex-wrap items-center gap-2">
-              {#if shownGenerationFailure.primary}
-                {@const primary = shownGenerationFailure.primary}
+              {#if generationFailure.primary}
+                {@const primary = generationFailure.primary}
                 <Button
                   size="sm"
                   disabled={generationFailureBusy}
@@ -1717,8 +1695,8 @@
                   {primary.label}
                 </Button>
               {/if}
-              {#if shownGenerationFailure.secondary}
-                {@const secondary = shownGenerationFailure.secondary}
+              {#if generationFailure.secondary}
+                {@const secondary = generationFailure.secondary}
                 <Button
                   variant="outline"
                   size="sm"
@@ -1730,8 +1708,8 @@
               {/if}
             </div>
             <div class="mt-5 flex flex-wrap items-center gap-x-3 gap-y-1">
-              {#if shownGenerationFailure.technical}
-                {@const technical = shownGenerationFailure.technical}
+              {#if generationFailure.technical}
+                {@const technical = generationFailure.technical}
                 <p class="text-secondary text-xs leading-relaxed select-text">
                   <span>{m.ai_builder_failure_technical_code({ code: technical.code })}</span>
                   {#if technical.requestId}
@@ -1781,10 +1759,6 @@
     opacity: 0;
     filter: blur(var(--panel-blur));
     pointer-events: none;
-    transition:
-      transform var(--panel-close-dur) var(--panel-ease),
-      opacity var(--panel-close-dur) var(--panel-ease),
-      filter var(--panel-close-dur) var(--panel-ease);
     will-change: transform, opacity, filter;
   }
   .t-panel-slide[data-open="true"] {

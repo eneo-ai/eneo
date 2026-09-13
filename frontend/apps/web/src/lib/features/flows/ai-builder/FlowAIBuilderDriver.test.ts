@@ -3447,6 +3447,49 @@ describe("FlowAIBuilderDriver client error reporting", () => {
     });
   });
 
+  it("forgets turn observations and actions with the session it belonged to", async () => {
+    const session = makeRecoverableSession("failed_before_provider");
+    const fetch = vi.fn().mockImplementation((route: string) => {
+      if (route === CLIENT_ERRORS_ROUTE) return Promise.resolve(undefined);
+      if (route.endsWith("/models")) return Promise.resolve({ models: [], default_model_id: null });
+      return Promise.resolve(session);
+    });
+    const { driver } = makeDriver({ fetchImpl: fetch });
+
+    vi.useFakeTimers();
+    try {
+      driver.seedState({ session });
+      driver.reportFailureDisplayed({ surface: "chat", presentedAs: "failed_before_provider" });
+      driver.reportFailureAction("retry_requested");
+      // The refresh keeps the same turn: nothing new is sent.
+      driver.seedState({ session: { ...session, updated_at: "2026-07-11T10:00:00Z" } });
+      driver.reportFailureDisplayed({ surface: "chat", presentedAs: "failed_before_provider" });
+      driver.reportFailureAction("dismissed");
+      await vi.runAllTimersAsync();
+      expect(clientErrorCalls(fetch)).toHaveLength(2);
+
+      // A resume resets the session state and drops the bookkeeping: the
+      // same turn shown again is a new observation with its own first action.
+      await driver.resumeSession(session.session_id);
+      driver.reportFailureDisplayed({ surface: "chat", presentedAs: "failed_before_provider" });
+      driver.reportFailureAction("dismissed");
+      await vi.runAllTimersAsync();
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const bodies = clientErrorCalls(fetch).map(([, init]) => init.requestBody["application/json"]);
+    // Four sends: the turn was observed and acted on again after the reset,
+    // which the retained bookkeeping would have suppressed.
+    expect(bodies.map((body) => [body.code, body.first_action ?? null])).toEqual([
+      ["turn_failed_before_provider", null],
+      ["turn_failed_before_provider", "retry_requested"],
+      ["turn_failed_before_provider", null],
+      ["turn_failed_before_provider", "dismissed"]
+    ]);
+    expect(bodies[3].client_event_id).toBe(bodies[2].client_event_id);
+  });
+
   it("swallows a failing telemetry request without disturbing the error state", async () => {
     const fetchError = { status: 500, response: { message: "boom" } };
     const fetch = vi.fn().mockImplementation((route: string) => {

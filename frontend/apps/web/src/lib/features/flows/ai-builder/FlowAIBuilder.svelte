@@ -1,9 +1,8 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import { prefersReducedMotion } from "$lib/core/prefersReducedMotion";
   import { getLocale } from "$lib/paraglide/runtime";
   import { resolve } from "$app/paths";
-  import { onMount, tick, onDestroy, untrack } from "svelte";
+  import { onMount, tick } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -451,37 +450,6 @@
   const generationFailedWithoutPlan = $derived(
     planSurfaceOwnsError && (service.streamState === "failed" || restoredGenerationFailure)
   );
-  // The failure card leaves the way it came: it stays mounted, closed, for
-  // the close duration before the working state returns. Under reduced
-  // motion the swap is immediate.
-  let failureSurfaceMounted = $state(false);
-  let failureSurfaceClosing = $state(false);
-  let failureSurfaceCloseTimer: ReturnType<typeof setTimeout> | null = null;
-  $effect(() => {
-    if (generationFailedWithoutPlan) {
-      if (failureSurfaceCloseTimer) clearTimeout(failureSurfaceCloseTimer);
-      failureSurfaceCloseTimer = null;
-      failureSurfaceClosing = false;
-      failureSurfaceMounted = true;
-      return;
-    }
-    if (!untrack(() => failureSurfaceMounted)) return;
-    failureSurfaceClosing = true;
-    failureSurfaceCloseTimer = setTimeout(() => {
-      failureSurfaceMounted = false;
-      failureSurfaceClosing = false;
-      failureSurfaceCloseTimer = null;
-    }, failureCardCloseMs());
-  });
-  onDestroy(() => {
-    if (failureSurfaceCloseTimer) clearTimeout(failureSurfaceCloseTimer);
-  });
-  function failureCardCloseMs(): number {
-    if (prefersReducedMotion()) return 0;
-    const raw = getComputedStyle(document.documentElement).getPropertyValue("--panel-close-dur");
-    const ms = parseFloat(raw);
-    return Number.isFinite(ms) ? ms : 0;
-  }
   // The plan surface claims the failure from the moment it arrives inside
   // the stream until the settled failure surface is up, so the turn alert
   // never shows the same error first.
@@ -933,12 +901,11 @@
           oneditanswer={handleEditAnswer}
           onreopenassumption={handleReopenAssumption}
         />
-      {:else if screen === "build" && (generationFailedWithoutPlan || failureSurfaceMounted)}
+      {:else if screen === "build" && generationFailedWithoutPlan}
         <!-- A failed generation keeps its one existing failure/retry surface. -->
         <div class="bg-primary flex min-h-0 flex-1 flex-col">
           <BuilderReviewScreen
             showGenerationFailure={true}
-            closingGenerationFailure={failureSurfaceClosing}
             onapplied={(detail) => onapplied?.(detail)}
             onshowconversation={() => (service.conversationOpen = true)}
             onclarify={handleClarifyTask}

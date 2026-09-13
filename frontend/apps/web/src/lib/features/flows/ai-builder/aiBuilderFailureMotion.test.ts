@@ -14,11 +14,11 @@ describe("failure card motion", () => {
   it("declares every transition of the card through tokens", () => {
     const style = component.slice(component.indexOf("<style"));
     const declarations = [...style.matchAll(/transition:\s*([^;]+);/g)].map((match) => match[1]);
-    expect(declarations.length).toBeGreaterThanOrEqual(2);
+    expect(declarations.length).toBeGreaterThanOrEqual(1);
     for (const declaration of declarations) {
       if (declaration.trim().startsWith("none")) continue;
       expect(declaration).not.toMatch(/\d+m?s\b/);
-      expect(declaration).toMatch(/var\(--panel-(open-dur|close-dur)\)/);
+      expect(declaration).toMatch(/var\(--panel-open-dur\)/);
       expect(declaration).toMatch(/var\(--panel-ease\)/);
     }
     expect(style).toContain("@media (prefers-reduced-motion: reduce)");
@@ -29,10 +29,12 @@ describe("failure card motion", () => {
 
   it("maps the panel reveal onto the shared scale", () => {
     expect(appCss).toMatch(/--panel-open-dur:\s*var\(--duration-slow\)/);
-    expect(appCss).toMatch(/--panel-close-dur:\s*var\(--duration-medium\)/);
+    // Entrance only: no exit token, no exit machinery.
+    expect(appCss).not.toContain("--panel-close-dur");
+    expect(component).not.toContain("panel-close-dur");
     expect(appCss).toMatch(/--panel-ease:\s*var\(--ease-smooth-out\)/);
     expect(appCss).toMatch(/--panel-blur:\s*var\(--blur-small\)/);
-    expect(appCss).toMatch(/--duration-medium:\s*350ms/);
+    expect(appCss).toMatch(/--duration-slow:\s*400ms/);
     expect(appCss).not.toContain("--text-swap-");
   });
 });
