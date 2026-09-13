@@ -816,7 +816,7 @@ describe("BuilderReviewScreen recovery surfaces", () => {
       }
     });
 
-    expect(screen.getByText(m.ai_builder_generation_failed_title())).toBeTruthy();
+    expect(screen.getByText(m.ai_builder_turn_provider_outcome_unknown_title())).toBeTruthy();
     expect(screen.queryByRole("button", { name: m.ai_builder_turn_retry() })).toBeNull();
 
     await fireEvent.click(
@@ -840,6 +840,37 @@ describe("BuilderReviewScreen recovery surfaces", () => {
     expect(
       screen.queryByRole("button", { name: m.ai_builder_turn_retry_with_cost_acknowledgement() })
     ).toBeNull();
+    expect(screen.getByRole("button", { name: m.ai_builder_show_conversation() })).toBeTruthy();
+  });
+
+  it("names a committed provider rejection and offers only a new turn", () => {
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [] }),
+      state: {
+        session: makeSession({ status: "chatting", target_kind: "create", flow_id: null }),
+        currentPlan: null,
+        error: {
+          ...makeError("planner_upstream_error"),
+          category: "upstream",
+          details: {
+            another_call_permitted: false,
+            provider_disposition: "known_rejection",
+            retry_scope: "new_turn"
+          }
+        }
+      },
+      screenProps: { showGenerationFailure: true }
+    });
+
+    expect(screen.getByText(m.ai_builder_generation_failed_provider_rejected())).toBeTruthy();
+    expect(screen.getByText(m.ai_builder_generation_failed_preserved_create())).toBeTruthy();
+    expect(screen.queryByText("Något gick fel")).toBeNull();
+    // A committed turn is retried as a new turn, so no replay is offered.
+    expect(screen.queryByRole("button", { name: m.ai_builder_turn_retry() })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: m.ai_builder_turn_retry_with_cost_acknowledgement() })
+    ).toBeNull();
+    expect(screen.getByText(m.ai_builder_generation_failed_new_turn())).toBeTruthy();
     expect(screen.getByRole("button", { name: m.ai_builder_show_conversation() })).toBeTruthy();
   });
 });

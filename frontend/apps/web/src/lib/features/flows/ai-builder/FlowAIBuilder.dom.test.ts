@@ -374,6 +374,8 @@ interface StreamCall {
   body: Record<string, unknown>;
   emit: (events: StreamEvent[]) => void;
   finish: () => void;
+  /** End the stream the way a dropped connection does: the transport rejects. */
+  fail: (error: Error) => void;
 }
 
 /**
@@ -409,7 +411,8 @@ function makeStream(
             emit([{ event: "done", data: "" }]);
             handlers.onClose?.();
             resolve();
-          }
+          },
+          fail: reject
         };
         const outcome = script(calls.length);
         calls.push(call);
@@ -2479,47 +2482,198 @@ describe("FlowAIBuilder confirm, build and review", () => {
     calls[1]!.finish();
   });
 
-  it("shows one failure surface with recovery when generation fails without a plan", async () => {
-    // The authoritative refresh after a stream error must return the real
-    // transcript (task, summary, confirmation), as the server does.
-    const confirmedSession = makeSession({
-      latest_plan_id: null,
-      conversation: planSession().conversation
-    });
-    const { fetch } = makeFetch({ sessions: [[makeSession(), confirmedSession]] });
-    const { stream, calls } = makeStream((index) =>
-      index === 0 ? [textEvent("Här är min tolkning."), summaryEvent(SUMMARY)] : "hold"
-    );
-    renderShell({ fetch, stream });
-    await sendTask();
-    await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
-    await fireEvent.click(button(m.ai_builder_confirm_action()));
-    await waitFor(() => expect(calls).toHaveLength(2));
+  // Every public failure class the server can report without a plan, plus the
+  // one class only this client can see (a dropped connection). The copy must
+  // name what actually happened and the actions must follow the turn state.
+  const generationFailures: {
+    name: string;
+    error: Record<string, unknown> | Error;
+    latestTurn: "committed" | "provider_outcome_unknown" | null;
+    title: () => string;
+    body: () => string;
+    retry: "none" | "acknowledged";
+  }[] = [
+    {
+      name: "a connection this client lost",
+      error: Object.assign(new Error("Failed to fetch"), { status: 0, stage: "CONNECTION" }),
+      latestTurn: null,
+      title: () => m.ai_builder_generation_failed_title(),
+      body: () => m.ai_builder_generation_failed_network(),
+      retry: "none"
+    },
+    {
+      name: "a provider rejection",
+      error: {
+        code: "planner_upstream_error",
+        category: "upstream",
+        message: "The AI provider rejected this request. Start a new turn to try again.",
+        details: {
+          another_call_permitted: false,
+          provider_disposition: "known_rejection",
+          provider_exception_class: "bad_request",
+          retry_scope: "new_turn"
+        }
+      },
+      latestTurn: "committed",
+      title: () => m.ai_builder_generation_failed_title(),
+      body: () => m.ai_builder_generation_failed_provider_rejected(),
+      retry: "none"
+    },
+    {
+      name: "an exhausted request budget",
+      error: {
+        code: "planner_context_limit_exceeded",
+        category: "upstream",
+        message: "The AI planner request exceeds its budget.",
+        details: { another_call_permitted: false, retry_scope: "new_turn" }
+      },
+      latestTurn: "committed",
+      title: () => m.ai_builder_generation_failed_title(),
+      body: () => m.ai_builder_generation_failed_request_budget(),
+      retry: "none"
+    },
+    {
+      name: "a truncated model answer",
+      error: {
+        code: "planner_output_too_long",
+        category: "upstream",
+        message: "The AI planner output was cut off.",
+        phase: "proposal"
+      },
+      latestTurn: "committed",
+      title: () => m.ai_builder_generation_failed_title(),
+      body: () => m.ai_builder_generation_failed_output_too_long(),
+      retry: "none"
+    },
+    {
+      name: "an invalid proposal after repairs",
+      error: {
+        code: "self_correction_invalid_plan",
+        category: "internal",
+        message: "The AI planner could not produce a valid plan.",
+        phase: "self_correction"
+      },
+      latestTurn: "committed",
+      title: () => m.ai_builder_generation_failed_title(),
+      body: () => m.ai_builder_generation_failed_invalid_proposal(),
+      retry: "none"
+    },
+    {
+      name: "an unknown provider outcome",
+      error: {
+        code: "session_turn_provider_outcome_unknown",
+        category: "upstream",
+        message: "The provider outcome is unknown.",
+        details: {
+          another_call_permitted: false,
+          provider_disposition: "provider_outcome_unknown",
+          provider_exception_class: "timeout",
+          retry_scope: "acknowledged_same_turn"
+        }
+      },
+      latestTurn: "provider_outcome_unknown",
+      title: () => m.ai_builder_turn_provider_outcome_unknown_title(),
+      body: () => m.ai_builder_turn_provider_outcome_unknown_description(),
+      retry: "acknowledged"
+    },
+    {
+      name: "any other server failure, quoted as sent",
+      error: {
+        code: "planner_stream_failed",
+        category: "upstream",
+        message: "Modellen svarade inte i tid."
+      },
+      latestTurn: "committed",
+      title: () => m.ai_builder_generation_failed_title(),
+      body: () => "Modellen svarade inte i tid.",
+      retry: "none"
+    }
+  ];
 
-    calls[1]!.emit([
-      statusEvent("architecture_committed"),
-      {
-        event: "error",
-        data: JSON.stringify({
-          schema_version: 2,
-          code: "planner_stream_failed",
-          category: "upstream",
-          message: "Modellen svarade inte i tid.",
-          phase: "planner",
-          eneo_error_code: 9000,
-          request_id: "req-1"
-        })
+  it.each(generationFailures)(
+    "shows one truthful failure surface for $name",
+    async ({ error, latestTurn, title, body, retry }) => {
+      // The authoritative refresh after the failure returns the real
+      // transcript (task, summary, confirmation) and the turn's final state.
+      const failedSession = makeSession({
+        latest_plan_id: null,
+        conversation: planSession().conversation,
+        latest_turn:
+          latestTurn === null
+            ? null
+            : {
+                client_turn_id: TURN_ID,
+                state: latestTurn,
+                user_message_id: "11111111-1111-4111-8111-111111111112",
+                error: null,
+                requires_duplicate_provider_spend_acknowledgement:
+                  latestTurn === "provider_outcome_unknown",
+                retry_request:
+                  latestTurn === "provider_outcome_unknown"
+                    ? {
+                        client_turn_id: TURN_ID,
+                        message: "",
+                        ui_language: "sv",
+                        acknowledge_duplicate_provider_spend: false
+                      }
+                    : null
+              }
+      });
+      const { fetch } = makeFetch({ sessions: [[makeSession(), failedSession]] });
+      const { stream, calls } = makeStream((index) =>
+        index === 0 ? [textEvent("Här är min tolkning."), summaryEvent(SUMMARY)] : "hold"
+      );
+      renderShell({ fetch, stream });
+      await sendTask();
+      await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
+      await fireEvent.click(button(m.ai_builder_confirm_action()));
+      await waitFor(() => expect(calls).toHaveLength(2));
+
+      calls[1]!.emit([statusEvent("architecture_committed")]);
+      if (error instanceof Error) {
+        calls[1]!.fail(error);
+      } else {
+        calls[1]!.emit([
+          {
+            event: "error",
+            data: JSON.stringify({
+              schema_version: 2,
+              phase: "planner",
+              eneo_error_code: 9000,
+              request_id: "req-1",
+              ...error
+            })
+          }
+        ]);
+        calls[1]!.finish();
       }
-    ]);
-    calls[1]!.finish();
 
-    // The skeleton must never hide a failed generation: exactly one surface names it.
-    expect(
-      await screen.findByText(new RegExp(escape(m.ai_builder_generation_failed_title())))
-    ).toBeTruthy();
-    expect(screen.queryByRole("heading", { name: m.ai_builder_build_title() })).toBeNull();
-    expect(screen.getAllByText("Modellen svarade inte i tid.")).toHaveLength(1);
-  });
+      // The skeleton must never hide a failed generation: exactly one surface
+      // names it, with the class the server reported and the facts that hold.
+      expect(await screen.findByText(new RegExp(escape(title())))).toBeTruthy();
+      expect(screen.queryByRole("heading", { name: m.ai_builder_build_title() })).toBeNull();
+      // The turn alert that carried the error while the stream settled has
+      // left by now; the failure surface is the only place that names it.
+      await waitFor(() => expect(screen.getAllByText(body())).toHaveLength(1));
+      expect(screen.getByText(m.ai_builder_generation_failed_preserved_create())).toBeTruthy();
+      expect(screen.queryByText(m.ai_builder_generation_failed_network())).toEqual(
+        body() === m.ai_builder_generation_failed_network() ? expect.anything() : null
+      );
+
+      const plainRetry = screen.queryByRole("button", { name: m.ai_builder_turn_retry() });
+      const acknowledgedRetry = screen.queryByRole("button", {
+        name: m.ai_builder_turn_retry_with_cost_acknowledgement()
+      });
+      expect(plainRetry).toBeNull();
+      if (retry === "acknowledged") {
+        expect(acknowledgedRetry).toBeTruthy();
+      } else {
+        expect(acknowledgedRetry).toBeNull();
+        expect(screen.getByText(m.ai_builder_generation_failed_new_turn())).toBeTruthy();
+      }
+      expect(screen.getByRole("button", { name: m.ai_builder_show_conversation() })).toBeTruthy();
+    }
+  );
 
   it("opens the review surface when the plan arrives", async () => {
     await driveToConfirm(() => [planEvent(), usageEvent()]);

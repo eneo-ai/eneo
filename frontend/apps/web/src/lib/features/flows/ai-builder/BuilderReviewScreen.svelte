@@ -18,6 +18,7 @@
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import FlowAIBuilderDiagnosticCopyButton from "./FlowAIBuilderDiagnosticCopyButton.svelte";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
+  import { describeAIBuilderGenerationFailure } from "./aiBuilderError";
   import type {
     AIBuilderPlanEditContext,
     AIBuilderStatus,
@@ -520,6 +521,11 @@
   });
 
   const turnRecoveryState = $derived(service.turnRecoveryState);
+  // One mapping names the failure the server actually reported; the
+  // recovery actions below follow the authoritative turn state, not the copy.
+  const generationFailure = $derived(
+    service.error ? describeAIBuilderGenerationFailure(service.error, turnRecoveryState) : null
+  );
 
   function progressStatusLabel(status: AIBuilderStatus | null): string {
     if (status === "repairing") return m.ai_builder_status_repairing();
@@ -1586,7 +1592,7 @@
   >
     <div class="w-full max-w-[43.75rem]">{@render conflictCard()}</div>
   </div>
-{:else if showGenerationFailure}
+{:else if showGenerationFailure && generationFailure}
   <div
     class="bg-secondary flex flex-1 justify-center px-7 pt-6 pb-10 max-lg:px-5 max-md:px-4 max-sm:pt-4"
   >
@@ -1599,10 +1605,15 @@
           />
           <div class="min-w-0">
             <h2 class="text-primary text-[0.9375rem] font-bold">
-              {m.ai_builder_generation_failed_title()}
+              {generationFailure.title}
             </h2>
             <p class="text-secondary mt-1 text-[0.8125rem] leading-relaxed text-pretty">
-              {m.ai_builder_generation_failed_body()}
+              {generationFailure.body}
+            </p>
+            <p class="text-secondary mt-1 text-[0.8125rem] leading-relaxed text-pretty">
+              {isCreateMode
+                ? m.ai_builder_generation_failed_preserved_create()
+                : m.ai_builder_generation_failed_preserved_edit()}
             </p>
             <div class="mt-3 flex flex-wrap items-center gap-2">
               {#if turnRecoveryState}
@@ -1626,10 +1637,14 @@
               />
             </div>
             <p class="text-secondary mt-3 text-xs leading-relaxed text-pretty">
-              {m.ai_builder_generation_failed_late_note()}
-            </p>
-            <p class="text-secondary mt-1 text-xs leading-relaxed text-pretty">
-              {m.ai_builder_generation_failed_clarify()}
+              {#if turnRecoveryState === "failed_before_provider"}
+                {m.ai_builder_turn_failed_before_provider_description()}
+                {m.ai_builder_generation_failed_clarify()}
+              {:else if turnRecoveryState}
+                {m.ai_builder_generation_failed_clarify()}
+              {:else}
+                {m.ai_builder_generation_failed_new_turn()}
+              {/if}
             </p>
           </div>
         </div>

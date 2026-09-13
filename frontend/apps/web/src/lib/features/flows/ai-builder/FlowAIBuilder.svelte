@@ -437,6 +437,12 @@
   const generationFailedWithoutPlan = $derived(
     planSurfaceOwnsError && service.streamState === "failed"
   );
+  // The plan surface claims the failure from the moment it arrives inside
+  // the stream until the settled failure surface is up, so the turn alert
+  // never shows the same error first.
+  const planSurfaceClaimsError = $derived(
+    planSurfaceOwnsError && (service.isStreaming || service.streamState === "failed")
+  );
 
   // ---- Actions --------------------------------------------------------------
 
@@ -780,7 +786,7 @@
     </div>
 
     <div class="flex min-h-0 flex-1 flex-col overflow-y-auto" bind:this={screenScrollEl}>
-      <BuilderTurnAlert {targetKind} suppressStreamError={generationFailedWithoutPlan} />
+      <BuilderTurnAlert {targetKind} suppressStreamError={planSurfaceClaimsError} />
 
       {#if screen === "conversation"}
         <BuilderConversationScreen

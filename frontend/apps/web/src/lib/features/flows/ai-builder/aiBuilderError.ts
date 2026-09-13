@@ -5,7 +5,8 @@ import type {
   AIBuilderErrorCategory,
   AIBuilderErrorDetails,
   AIBuilderErrorDetailValue,
-  AIBuilderPublicErrorPayload
+  AIBuilderPublicErrorPayload,
+  AIBuilderTurnRecoveryState
 } from "./protocol";
 import { parseAIBuilderPublicErrorPayload } from "./protocol";
 
@@ -234,4 +235,96 @@ function prefixOriginalDetails(details: AIBuilderErrorDetails): AIBuilderErrorDe
   return Object.fromEntries(
     Object.entries(details).map(([key, value]) => [`original_details_${key}`, value])
   );
+}
+
+// ---- Generation failure surface ---------------------------------------------
+
+export type AIBuilderGenerationFailureKind =
+  | "provider_outcome_unknown"
+  | "network"
+  | "provider_rejected"
+  | "request_budget_exhausted"
+  | "output_too_long"
+  | "invalid_proposal"
+  | "other";
+
+const INVALID_PROPOSAL_CODES: ReadonlySet<string> = new Set([
+  "planner_invalid_repair_response",
+  "planner_parse_error",
+  "self_correction_invalid_payload",
+  "self_correction_invalid_plan",
+  "self_correction_quality_failure"
+]);
+
+/** Which public failure a generation that produced no plan actually hit.
+ *
+ *  The turn state outranks the error: an unknown provider outcome is the one
+ *  class whose recovery costs money, so it wins whatever the payload says. A
+ *  network class is only claimed for a transport failure this client saw. */
+export function classifyAIBuilderGenerationFailure(
+  error: AIBuilderError,
+  turnRecoveryState: AIBuilderTurnRecoveryState | null
+): AIBuilderGenerationFailureKind {
+  if (
+    turnRecoveryState === "provider_outcome_unknown" ||
+    error.code === "session_turn_provider_outcome_unknown" ||
+    error.details.provider_disposition === "provider_outcome_unknown"
+  ) {
+    return "provider_outcome_unknown";
+  }
+  if (error.category === "network") return "network";
+  if (error.details.provider_disposition === "known_rejection") return "provider_rejected";
+  if (error.code === "planner_context_limit_exceeded") return "request_budget_exhausted";
+  if (error.code === "planner_output_too_long") return "output_too_long";
+  if (INVALID_PROPOSAL_CODES.has(error.code)) return "invalid_proposal";
+  return "other";
+}
+
+/** Title and body for the generation failure surface. Only a class this
+ *  client can vouch for gets its own words; anything else quotes the server. */
+export function describeAIBuilderGenerationFailure(
+  error: AIBuilderError,
+  turnRecoveryState: AIBuilderTurnRecoveryState | null
+): { kind: AIBuilderGenerationFailureKind; title: string; body: string } {
+  const kind = classifyAIBuilderGenerationFailure(error, turnRecoveryState);
+  switch (kind) {
+    case "provider_outcome_unknown":
+      return {
+        kind,
+        title: m.ai_builder_turn_provider_outcome_unknown_title(),
+        body: m.ai_builder_turn_provider_outcome_unknown_description()
+      };
+    case "network":
+      return {
+        kind,
+        title: m.ai_builder_generation_failed_title(),
+        body: m.ai_builder_generation_failed_network()
+      };
+    case "provider_rejected":
+      return {
+        kind,
+        title: m.ai_builder_generation_failed_title(),
+        body: m.ai_builder_generation_failed_provider_rejected()
+      };
+    case "request_budget_exhausted":
+      return {
+        kind,
+        title: m.ai_builder_generation_failed_title(),
+        body: m.ai_builder_generation_failed_request_budget()
+      };
+    case "output_too_long":
+      return {
+        kind,
+        title: m.ai_builder_generation_failed_title(),
+        body: m.ai_builder_generation_failed_output_too_long()
+      };
+    case "invalid_proposal":
+      return {
+        kind,
+        title: m.ai_builder_generation_failed_title(),
+        body: m.ai_builder_generation_failed_invalid_proposal()
+      };
+    case "other":
+      return { kind, title: m.ai_builder_generation_failed_title(), body: error.message };
+  }
 }
