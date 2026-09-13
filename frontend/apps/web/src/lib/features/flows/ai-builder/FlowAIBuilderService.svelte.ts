@@ -13,9 +13,14 @@ import {
 } from "./FlowAIBuilderDriver";
 import { classifyAIBuilderConflict, type AIBuilderConflict } from "./aiBuilderConflict";
 import { parseAIBuilderError } from "./aiBuilderError";
+import type { FailureRecoveryCapabilities } from "./aiBuilderFailurePresentation";
 import type {
+  AIBuilderClientErrorFirstAction,
+  AIBuilderClientErrorPresentation,
+  AIBuilderClientErrorSurface,
   AIBuilderDraftSession,
   AIBuilderError,
+  AIBuilderLatestTurn,
   AIBuilderModel,
   AIBuilderEditContext,
   AIBuilderPhase,
@@ -488,6 +493,42 @@ export class FlowAIBuilderService {
     await this.#driver.acknowledgeAndRetryLatestTurn();
   }
 
+  async resendLatestTurn(): Promise<AIBuilderSendOutcome> {
+    return await this.#driver.resendLatestTurn();
+  }
+
+  get latestTurn(): AIBuilderLatestTurn | null {
+    return this.#state.session?.latest_turn ?? null;
+  }
+
+  /** What the driver allows for the failure on screen. The presentation
+   *  owner reads this instead of judging the turn on its own. */
+  failureRecoveryCapabilities: FailureRecoveryCapabilities = $derived({
+    replay: this.turnRecoveryState,
+    canResend:
+      this.latestTurn?.retry_request != null &&
+      (this.latestTurnState === "committed" || this.latestTurnState === null),
+    canStartNewTurn:
+      this.#canStartNewTurn &&
+      this.#state.streamState !== "streaming" &&
+      this.#state.pendingOperation === null,
+    turnActive: this.latestTurnState === "open" || this.latestTurnState === "processing"
+  });
+
+  reportFailureDisplayed(
+    error: AIBuilderError,
+    facts: {
+      surface: AIBuilderClientErrorSurface | null;
+      presentedAs: AIBuilderClientErrorPresentation | null;
+    }
+  ): void {
+    this.#driver.reportFailureDisplayed(error, facts);
+  }
+
+  reportFailureAction(error: AIBuilderError, action: AIBuilderClientErrorFirstAction): void {
+    this.#driver.reportFailureAction(error, action);
+  }
+
   async approvePlan(): Promise<void> {
     await this.#driver.approvePlan();
   }
@@ -534,7 +575,20 @@ export class FlowAIBuilderService {
 
   /** Whether the transcript replaces the phase screen. It lives here because
    *  the button that opens it can sit outside the builder, in the page header. */
-  conversationOpen = $state(false);
+  #conversationOpen = $state(false);
+
+  get conversationOpen(): boolean {
+    return this.#conversationOpen;
+  }
+
+  set conversationOpen(open: boolean) {
+    // Opening the transcript while a failure is on screen is the user's way
+    // back; the surface that presented the failure records it as such.
+    if (open && !this.#conversationOpen) {
+      this.#driver.recordDisplayedFailureAction("conversation_opened");
+    }
+    this.#conversationOpen = open;
+  }
 
   toggleConversation(): void {
     this.conversationOpen = !this.conversationOpen;

@@ -115,6 +115,7 @@ class TestCategoryMappings:
             ActionType.AI_BUILDER_ATTACHMENT_DETACHED,
             ActionType.AI_BUILDER_SESSION_CANCELLED,
             ActionType.AI_BUILDER_CLIENT_ERROR_REPORTED,
+            ActionType.AI_BUILDER_CLIENT_ERROR_OUTCOME_RECORDED,
         }
 
         actual_actions = {

@@ -193,6 +193,50 @@
   --text-xs--line-height: calc(1 / 0.8);
 }
 
+/* ------------------------------------------------------------------ */
+/* Motion tokens (transitions-dev shared scale)                        */
+/* ------------------------------------------------------------------ */
+/* One scale for durations, easings, distances and blur. Components    */
+/* reference these by name; the per-transition variables below map the */
+/* installed snippets (text states swap, panel reveal) onto the scale. */
+:root {
+  --duration-stagger: 40ms;
+  --duration-micro: 80ms;
+  --duration-quick: 150ms;
+  --duration-fast: 250ms;
+  --duration-medium: 350ms;
+  --duration-slow: 400ms;
+  --duration-very-slow: 500ms;
+  --ease-smooth-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: ease-in-out;
+  --ease-out: ease-out;
+  --ease-linear: linear;
+  --distance-micro: 4px;
+  --distance-small: 6px;
+  --distance-base: 8px;
+  --distance-medium: 12px;
+  --distance-large: 30px;
+  --scale-large: 0.96;
+  --scale-medium: 0.97;
+  --scale-small: 0.98;
+  --scale-tiny: 0.99;
+  --blur-small: 2px;
+  --blur-medium: 3px;
+  --blur-large: 8px;
+
+  /* Text states swap (04): the failure card's heading and body entering. */
+  --text-swap-dur: var(--duration-quick);
+  --text-swap-translate-y: var(--distance-micro);
+  --text-swap-blur: var(--blur-small);
+  --text-swap-ease: var(--ease-in-out);
+  /* Panel reveal (07): the failure card container opening and closing. */
+  --panel-open-dur: var(--duration-slow);
+  --panel-close-dur: var(--duration-medium);
+  --panel-translate-y: var(--distance-medium);
+  --panel-blur: var(--blur-small);
+  --panel-ease: var(--ease-smooth-out);
+}
+
 @font-face {
   font-family: Inter;
   font-style: normal;

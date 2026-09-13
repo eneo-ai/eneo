@@ -1,8 +1,9 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
+  import { prefersReducedMotion } from "$lib/core/prefersReducedMotion";
   import { getLocale } from "$lib/paraglide/runtime";
   import { resolve } from "$app/paths";
-  import { onMount, tick } from "svelte";
+  import { onMount, tick, onDestroy, untrack } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -431,17 +432,62 @@
       hadGenerationStatus = true;
     }
   });
+  // A generation failure the server persisted with the turn, shown again
+  // after a resume: no stream ran here, but the plan surface still owns it.
+  const restoredGenerationFailure = $derived(
+    service.phase === "building" &&
+      !service.isStreaming &&
+      service.currentPlan === null &&
+      service.latestTurn?.state === "committed" &&
+      service.latestTurn.error != null &&
+      service.error !== null &&
+      service.error.request_id === service.latestTurn.error.request_id
+  );
   const planSurfaceOwnsError = $derived(
-    hadGenerationStatus && service.error !== null && service.currentPlan === null
+    (hadGenerationStatus || restoredGenerationFailure) &&
+      service.error !== null &&
+      service.currentPlan === null
   );
   const generationFailedWithoutPlan = $derived(
-    planSurfaceOwnsError && service.streamState === "failed"
+    planSurfaceOwnsError && (service.streamState === "failed" || restoredGenerationFailure)
   );
+  // The failure card leaves the way it came: it stays mounted, closed, for
+  // the close duration before the working state returns. Under reduced
+  // motion the swap is immediate.
+  let failureSurfaceMounted = $state(false);
+  let failureSurfaceClosing = $state(false);
+  let failureSurfaceCloseTimer: ReturnType<typeof setTimeout> | null = null;
+  $effect(() => {
+    if (generationFailedWithoutPlan) {
+      if (failureSurfaceCloseTimer) clearTimeout(failureSurfaceCloseTimer);
+      failureSurfaceCloseTimer = null;
+      failureSurfaceClosing = false;
+      failureSurfaceMounted = true;
+      return;
+    }
+    if (!untrack(() => failureSurfaceMounted)) return;
+    failureSurfaceClosing = true;
+    failureSurfaceCloseTimer = setTimeout(() => {
+      failureSurfaceMounted = false;
+      failureSurfaceClosing = false;
+      failureSurfaceCloseTimer = null;
+    }, failureCardCloseMs());
+  });
+  onDestroy(() => {
+    if (failureSurfaceCloseTimer) clearTimeout(failureSurfaceCloseTimer);
+  });
+  function failureCardCloseMs(): number {
+    if (prefersReducedMotion()) return 0;
+    const raw = getComputedStyle(document.documentElement).getPropertyValue("--panel-close-dur");
+    const ms = parseFloat(raw);
+    return Number.isFinite(ms) ? ms : 0;
+  }
   // The plan surface claims the failure from the moment it arrives inside
   // the stream until the settled failure surface is up, so the turn alert
   // never shows the same error first.
   const planSurfaceClaimsError = $derived(
-    planSurfaceOwnsError && (service.isStreaming || service.streamState === "failed")
+    planSurfaceOwnsError &&
+      (service.isStreaming || service.streamState === "failed" || restoredGenerationFailure)
   );
 
   // ---- Actions --------------------------------------------------------------
@@ -466,6 +512,23 @@
       undefined,
       activeEditContext
     );
+  }
+
+  // The bootstrap failure panel displays the error before a session exists;
+  // it is observed here since no listed surface owns it.
+  $effect(() => {
+    const error = service.error;
+    if (failedAttempt !== null && !service.hasSession && error) {
+      service.reportFailureDisplayed(error, { surface: null, presentedAs: null });
+    }
+  });
+
+  // Rewording the task after a failed generation: the transcript, with every
+  // answer still in place, and the caret already in the composer.
+  async function handleClarifyTask() {
+    service.conversationOpen = true;
+    await tick();
+    await conversationRef?.focusComposer();
   }
 
   function handleEditAnswer(questionId: string) {
@@ -870,13 +933,15 @@
           oneditanswer={handleEditAnswer}
           onreopenassumption={handleReopenAssumption}
         />
-      {:else if screen === "build" && generationFailedWithoutPlan}
+      {:else if screen === "build" && (generationFailedWithoutPlan || failureSurfaceMounted)}
         <!-- A failed generation keeps its one existing failure/retry surface. -->
         <div class="bg-primary flex min-h-0 flex-1 flex-col">
           <BuilderReviewScreen
             showGenerationFailure={true}
+            closingGenerationFailure={failureSurfaceClosing}
             onapplied={(detail) => onapplied?.(detail)}
             onshowconversation={() => (service.conversationOpen = true)}
+            onclarify={handleClarifyTask}
           />
         </div>
       {:else if screen === "build"}
@@ -892,6 +957,7 @@
             showGenerationFailure={generationFailedWithoutPlan}
             onapplied={(detail) => onapplied?.(detail)}
             onshowconversation={() => (service.conversationOpen = true)}
+            onclarify={handleClarifyTask}
           />
         </div>
       {:else}

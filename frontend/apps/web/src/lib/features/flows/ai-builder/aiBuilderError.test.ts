@@ -1,12 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { AIBuilderError } from "./protocol";
-import {
-  classifyAIBuilderGenerationFailure,
-  describeAIBuilderGenerationFailure,
-  isStaleApplyError,
-  parseAIBuilderError
-} from "./aiBuilderError";
+import { isStaleApplyError, parseAIBuilderError } from "./aiBuilderError";
 
 describe("parseAIBuilderError", () => {
   it("parses SSE and HTTP apply errors to the same public contract", () => {
@@ -105,85 +99,5 @@ describe("parseAIBuilderError", () => {
       status: 400,
       original_code: "legacy_code"
     });
-  });
-});
-
-describe("classifyAIBuilderGenerationFailure", () => {
-  const error = (overrides: Partial<AIBuilderError>): AIBuilderError => ({
-    schema_version: 2,
-    code: "unknown",
-    category: "internal",
-    message: "Modellen svarade inte i tid.",
-    phase: "planner",
-    request_id: "req-1",
-    eneo_error_code: null,
-    diagnostic_context: null,
-    details: {},
-    ...overrides
-  });
-  const rejected = {
-    another_call_permitted: false,
-    provider_disposition: "known_rejection",
-    retry_scope: "new_turn"
-  };
-
-  it.each([
-    [
-      "an unknown provider outcome from the turn state, whatever the payload says",
-      error({ code: "planner_upstream_error", category: "upstream", details: rejected }),
-      "provider_outcome_unknown",
-      "provider_outcome_unknown"
-    ],
-    [
-      "a transport failure this client saw",
-      error({ code: "network", category: "network", phase: "client" }),
-      null,
-      "network"
-    ],
-    [
-      "a provider rejection",
-      error({ code: "planner_upstream_error", category: "upstream", details: rejected }),
-      null,
-      "provider_rejected"
-    ],
-    [
-      "an exhausted request budget",
-      error({ code: "planner_context_limit_exceeded", category: "upstream" }),
-      null,
-      "request_budget_exhausted"
-    ],
-    [
-      "a truncated model answer",
-      error({ code: "planner_output_too_long", category: "upstream" }),
-      null,
-      "output_too_long"
-    ],
-    [
-      "an invalid proposal after repairs",
-      error({ code: "self_correction_invalid_plan", phase: "self_correction" }),
-      null,
-      "invalid_proposal"
-    ],
-    [
-      "a server-reported stream failure as the quoted fallback, never as a connection loss",
-      error({ code: "planner_stream_failed", category: "upstream" }),
-      null,
-      "other"
-    ]
-  ] as const)("classifies %s", (_name, failure, turnRecoveryState, kind) => {
-    expect(classifyAIBuilderGenerationFailure(failure, turnRecoveryState)).toBe(kind);
-  });
-
-  it("quotes the server message only for the fallback class", () => {
-    const fallback = describeAIBuilderGenerationFailure(
-      error({ code: "planner_stream_failed", category: "upstream" }),
-      null
-    );
-    expect(fallback.body).toBe("Modellen svarade inte i tid.");
-    const rejection = describeAIBuilderGenerationFailure(
-      error({ code: "planner_upstream_error", category: "upstream", details: rejected }),
-      null
-    );
-    expect(rejection.body).not.toBe("Modellen svarade inte i tid.");
   });
 });

@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
-  import { onDestroy, tick } from "svelte";
+  import { onDestroy, tick, untrack } from "svelte";
   import { m } from "$lib/paraglide/messages";
   import IconLoaderCircle from "@lucide/svelte/icons/loader-circle";
   import { getLocale } from "$lib/paraglide/runtime";
@@ -18,7 +18,7 @@
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import FlowAIBuilderDiagnosticCopyButton from "./FlowAIBuilderDiagnosticCopyButton.svelte";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
-  import { describeAIBuilderGenerationFailure } from "./aiBuilderError";
+  import { describeFailure, type FailureAction } from "./aiBuilderFailurePresentation";
   import type {
     AIBuilderPlanEditContext,
     AIBuilderStatus,
@@ -56,11 +56,21 @@
      *  changes in place, so the prop stays part of the contract but unused. */
     /** A generation attempt failed before a plan became available. */
     showGenerationFailure?: boolean;
+    /** Open the composer, answers kept, so the user can reword the task. */
+    onclarify?: () => void;
+    /** The failure card is leaving: work resumed and the working state returns. */
+    closingGenerationFailure?: boolean;
     /** Narrow layouts: bring the conversation back into view. */
     onshowconversation?: () => void;
   }
 
-  let { onapplied, showGenerationFailure = false, onshowconversation }: Props = $props();
+  let {
+    onapplied,
+    showGenerationFailure = false,
+    onshowconversation,
+    onclarify,
+    closingGenerationFailure = false
+  }: Props = $props();
 
   const service = getAIBuilderService();
   const {
@@ -520,12 +530,55 @@
     }
   });
 
-  const turnRecoveryState = $derived(service.turnRecoveryState);
-  // One mapping names the failure the server actually reported; the
-  // recovery actions below follow the authoritative turn state, not the copy.
+  // One presentation owner names the failure the server actually reported
+  // and the one best next step the driver allows; this screen renders it.
   const generationFailure = $derived(
-    service.error ? describeAIBuilderGenerationFailure(service.error, turnRecoveryState) : null
+    service.error
+      ? describeFailure({
+          error: service.error,
+          latestTurn: service.latestTurn,
+          capabilities: service.failureRecoveryCapabilities,
+          context: {
+            surface: "generation",
+            targetKind: service.session?.target_kind ?? "create",
+            offersStartFresh: false
+          }
+        })
+      : null
   );
+  const generationFailureBusy = $derived(service.isStreaming || service.isRecoveringLatestTurn);
+
+  // The displayed failure is observed once, with the class the user saw; the
+  // driver reuses the identity across rerenders and refreshes of the same one.
+  $effect(() => {
+    if (!showGenerationFailure) return;
+    const error = service.error;
+    const kind = untrack(() => generationFailure?.kind ?? null);
+    if (!error || !kind) return;
+    service.reportFailureDisplayed(error, { surface: "generation", presentedAs: kind });
+  });
+  // An apply failure is shown by this screen's own cards.
+  $effect(() => {
+    const error = service.applyError;
+    if (error) service.reportFailureDisplayed(error, { surface: "apply", presentedAs: null });
+  });
+
+  // ---- Failure card motion ------------------------------------------------
+  // One authored moment: the working state giving way to the card. The card
+  // mounts closed, is painted once, then opens; it never replays for a
+  // rerender of the same failure, and it closes when work resumes.
+  let generationCardEl = $state<HTMLElement | undefined>();
+  let generationCardOpened = $state(false);
+  $effect(() => {
+    const el = generationCardEl;
+    if (!el) {
+      generationCardOpened = false;
+      return;
+    }
+    void el.offsetHeight;
+    generationCardOpened = true;
+  });
+  const generationCardOpen = $derived(generationCardOpened && !closingGenerationFailure);
 
   function progressStatusLabel(status: AIBuilderStatus | null): string {
     if (status === "repairing") return m.ai_builder_status_repairing();
@@ -670,11 +723,30 @@
     }
   }
 
-  async function handleGenerationRetry() {
-    if (turnRecoveryState === "failed_before_provider") {
-      await service.retryLatestTurn();
-    } else if (turnRecoveryState === "provider_outcome_unknown") {
-      await service.acknowledgeAndRetryLatestTurn();
+  async function runGenerationFailureAction(action: FailureAction) {
+    const error = service.error;
+    if (!error) return;
+    service.reportFailureAction(error, action.records);
+    switch (action.kind) {
+      case "retry_same_turn":
+        await service.retryLatestTurn();
+        return;
+      case "retry_same_turn_acknowledged":
+        await service.acknowledgeAndRetryLatestTurn();
+        return;
+      case "retry_new_turn":
+        await service.resendLatestTurn();
+        return;
+      case "clarify":
+        (onclarify ?? onshowconversation)?.();
+        return;
+      case "refresh":
+        await service.refreshSession();
+        return;
+      case "start_fresh":
+      case "dismiss":
+        // Never produced for the generation surface.
+        return;
     }
   }
 </script>
@@ -1594,58 +1666,82 @@
   </div>
 {:else if showGenerationFailure && generationFailure}
   <div
-    class="bg-secondary flex flex-1 justify-center px-7 pt-6 pb-10 max-lg:px-5 max-md:px-4 max-sm:pt-4"
+    class="bg-secondary flex flex-1 justify-center px-7 pt-8 pb-10 max-lg:px-5 max-md:px-4 max-sm:pt-5"
   >
     <div class="w-full max-w-[43.75rem]">
-      <div class="border-default bg-primary rounded-xl border p-5" role="status" aria-live="polite">
-        <div class="flex items-start gap-3">
+      <div
+        bind:this={generationCardEl}
+        class="t-panel-slide border-default bg-primary rounded-xl border p-6 max-sm:p-4"
+        data-open={generationCardOpen}
+        role="status"
+        aria-live="polite"
+      >
+        <div class="flex items-start gap-3.5">
           <IconAlertTriangle
-            class="text-warning-stronger mt-0.5 size-4 shrink-0"
+            class="text-warning-stronger mt-0.5 size-[1.125rem] shrink-0"
             aria-hidden="true"
           />
-          <div class="min-w-0">
-            <h2 class="text-primary text-[0.9375rem] font-bold">
-              {generationFailure.title}
+          <div class="max-w-[60ch] min-w-0">
+            <h2
+              class="t-text-swap failure-copy text-primary text-[0.9375rem] leading-snug font-bold text-balance"
+              class:is-enter-start={!generationCardOpen}
+              tabindex="-1"
+              data-builder-screen-heading
+            >
+              {generationFailure.heading}
             </h2>
-            <p class="text-secondary mt-1 text-[0.8125rem] leading-relaxed text-pretty">
-              {generationFailure.body}
+            <p
+              class="t-text-swap failure-copy text-secondary mt-1.5 text-[0.8125rem] leading-relaxed text-pretty"
+              class:is-enter-start={!generationCardOpen}
+            >
+              {generationFailure.consequence}
             </p>
-            <p class="text-secondary mt-1 text-[0.8125rem] leading-relaxed text-pretty">
-              {isCreateMode
-                ? m.ai_builder_generation_failed_preserved_create()
-                : m.ai_builder_generation_failed_preserved_edit()}
-            </p>
-            <div class="mt-3 flex flex-wrap items-center gap-2">
-              {#if turnRecoveryState}
+            <div class="mt-5 flex flex-wrap items-center gap-2">
+              {#if generationFailure.primary}
+                {@const primary = generationFailure.primary}
                 <Button
                   size="sm"
-                  disabled={service.isStreaming || service.isRecoveringLatestTurn}
-                  onclick={() => void handleGenerationRetry()}
+                  disabled={generationFailureBusy}
+                  onclick={() => void runGenerationFailureAction(primary)}
                 >
-                  {turnRecoveryState === "provider_outcome_unknown"
-                    ? m.ai_builder_turn_retry_with_cost_acknowledgement()
-                    : m.ai_builder_turn_retry()}
+                  {primary.label}
                 </Button>
               {/if}
-              <Button variant="outline" size="sm" onclick={onshowconversation}>
-                {m.ai_builder_show_conversation()}
-              </Button>
+              {#if generationFailure.secondary}
+                {@const secondary = generationFailure.secondary}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={generationFailureBusy}
+                  onclick={() => void runGenerationFailureAction(secondary)}
+                >
+                  {secondary.label}
+                </Button>
+              {/if}
+            </div>
+            <div class="mt-5 flex flex-wrap items-center gap-x-3 gap-y-1">
+              {#if generationFailure.technical}
+                {@const technical = generationFailure.technical}
+                <p class="text-secondary text-xs leading-relaxed select-text">
+                  <span>{m.ai_builder_failure_technical_code({ code: technical.code })}</span>
+                  {#if technical.requestId}
+                    <span aria-hidden="true"> · </span>
+                    <span>
+                      {m.ai_builder_failure_technical_request({ request: technical.requestId })}
+                    </span>
+                  {/if}
+                </p>
+              {/if}
               <FlowAIBuilderDiagnosticCopyButton
                 report={generationErrorDiagnosticReport}
                 variant="ghost"
                 size="xs"
+                onselect={() => {
+                  if (service.error)
+                    service.reportFailureAction(service.error, "diagnostic_copied");
+                }}
               />
             </div>
-            <p class="text-secondary mt-3 text-xs leading-relaxed text-pretty">
-              {#if turnRecoveryState === "failed_before_provider"}
-                {m.ai_builder_turn_failed_before_provider_description()}
-                {m.ai_builder_generation_failed_clarify()}
-              {:else if turnRecoveryState}
-                {m.ai_builder_generation_failed_clarify()}
-              {:else}
-                {m.ai_builder_generation_failed_new_turn()}
-              {/if}
-            </p>
           </div>
         </div>
       </div>
@@ -1668,6 +1764,59 @@
 {/if}
 
 <style lang="postcss">
+  /* transitions-dev: panel reveal (07) for the failure card container and
+     text states swap (04) for its heading and body. The tokens live in
+     app.css; only the enter phase of the swap is used here. */
+  .t-panel-slide {
+    transform: translateY(var(--panel-translate-y));
+    opacity: 0;
+    filter: blur(var(--panel-blur));
+    pointer-events: none;
+    transition:
+      transform var(--panel-close-dur) var(--panel-ease),
+      opacity var(--panel-close-dur) var(--panel-ease),
+      filter var(--panel-close-dur) var(--panel-ease);
+    will-change: transform, opacity, filter;
+  }
+  .t-panel-slide[data-open="true"] {
+    transform: translateY(0);
+    opacity: 1;
+    filter: blur(0);
+    pointer-events: auto;
+    transition:
+      transform var(--panel-open-dur) var(--panel-ease),
+      opacity var(--panel-open-dur) var(--panel-ease),
+      filter var(--panel-open-dur) var(--panel-ease);
+  }
+  .t-text-swap {
+    display: inline-block;
+    transform: translateY(0);
+    filter: blur(0);
+    opacity: 1;
+    transition:
+      transform var(--text-swap-dur) var(--text-swap-ease),
+      filter var(--text-swap-dur) var(--text-swap-ease),
+      opacity var(--text-swap-dur) var(--text-swap-ease);
+    will-change: transform, filter, opacity;
+  }
+  .t-text-swap.is-enter-start {
+    transform: translateY(var(--text-swap-translate-y));
+    filter: blur(var(--text-swap-blur));
+    opacity: 0;
+    transition: none;
+  }
+  .failure-copy {
+    display: block;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .t-panel-slide,
+    .t-text-swap {
+      transition: none !important;
+      transform: none !important;
+      filter: none !important;
+    }
+  }
+
   .success-ring,
   .success-tick {
     stroke-dasharray: 64;

@@ -860,8 +860,11 @@ def _ai_builder_json_error_response(
         "Persist one client-observed Builder failure using the stable error "
         "identity the UI parsed (code, category, phase, request_id) — no "
         "display text — so operators can join the user-visible symptom to "
-        "the stored session. Replaying a client_event_id is a no-op "
-        "(best-effort deduplication)."
+        "the stored session. Later reports under the same client_event_id "
+        "fill in, once, where and as which class the failure was displayed "
+        "and the user's first explicit selection on it; the server stamps "
+        "the action's receipt time. Replays, late initial reports and "
+        "conflicting later actions are no-ops."
     ),
     responses={
         204: {
@@ -883,7 +886,7 @@ async def report_client_error(
         user = container.user()
         require_flow_action(user, FlowApiAction.BUILDER_CLIENT_ERROR_REPORT)
         repo = container.ai_builder_repo()
-        error_id, resolved_session_id = await repo.record_client_error(
+        record = await repo.record_client_error(
             tenant_id=user.tenant_id,
             user_id=user.id,
             client_event_id=body.client_event_id,
@@ -892,22 +895,38 @@ async def report_client_error(
             category=str(body.category),
             code=body.code,
             request_id=body.request_id,
+            surface=body.surface.value if body.surface else None,
+            presented_as=body.presented_as.value if body.presented_as else None,
+            first_action=body.first_action.value if body.first_action else None,
         )
-        if error_id is None:
-            # A replayed client_event_id: already stored and audited once.
+        if record is None:
+            # A replay, a late initial report, a conflicting action or another
+            # reporter: nothing was stored, and it was audited when it was.
             return
         audit_service = _get_audit_service(container)
+        reported = record.outcome == "inserted"
         await audit_service.log(
             tenant_id=user.tenant_id,
             actor_id=user.id,
-            action=ActionType.AI_BUILDER_CLIENT_ERROR_REPORTED,
+            action=(
+                ActionType.AI_BUILDER_CLIENT_ERROR_REPORTED
+                if reported
+                else ActionType.AI_BUILDER_CLIENT_ERROR_OUTCOME_RECORDED
+            ),
             entity_type=EntityType.AI_BUILDER_CLIENT_ERROR,
-            entity_id=error_id,
-            description=f"Client reported AI builder error ({body.code})",
+            entity_id=record.error_id,
+            description=(
+                f"Client reported AI builder error ({body.code})"
+                if reported
+                else (
+                    "Client recorded AI builder error outcome "
+                    f"({body.first_action.value if body.first_action else 'displayed'})"
+                )
+            ),
             metadata=dict(
                 AuditMetadata.minimal(
                     actor_id=user.id,
-                    target_id=error_id,
+                    target_id=record.error_id,
                     extra={
                         "phase": str(body.phase),
                         "category": str(body.category),
@@ -915,9 +934,18 @@ async def report_client_error(
                         # The tenant-resolved session that was stored — never
                         # the client's unverified claim.
                         "session_id": (
-                            str(resolved_session_id) if resolved_session_id else None
+                            str(record.resolved_session_id)
+                            if record.resolved_session_id
+                            else None
                         ),
                         "request_id": body.request_id,
+                        "surface": body.surface.value if body.surface else None,
+                        "presented_as": (
+                            body.presented_as.value if body.presented_as else None
+                        ),
+                        "first_action": (
+                            body.first_action.value if body.first_action else None
+                        ),
                     },
                 )
             ),

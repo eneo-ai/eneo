@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from uuid import uuid4
+from types import SimpleNamespace
+from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
@@ -526,3 +527,225 @@ async def test_expired_client_errors_are_deleted_in_batches(
         }
     # The boundary row (created_at == cutoff) is not older than the window.
     assert remaining == {"ttl_boundary", "ttl_fresh"}
+
+
+async def _stored(db_container, code: str) -> SimpleNamespace:
+    # A snapshot: the ORM row expires with the container's session.
+    async with db_container() as container:
+        row = (
+            await container.session().execute(
+                select(BuilderClientErrors).where(BuilderClientErrors.code == code)
+            )
+        ).scalar_one()
+        return SimpleNamespace(
+            id=row.id,
+            user_id=row.user_id,
+            surface=row.surface,
+            presented_as=row.presented_as,
+            first_action=row.first_action,
+            first_action_received_at=row.first_action_received_at,
+        )
+
+
+async def _audit_actions(db_container, error_id) -> list[str]:
+    async with db_container() as container:
+        rows = (
+            (
+                await container.session().execute(
+                    select(AuditLogTable)
+                    .where(
+                        AuditLogTable.entity_id == error_id,
+                        AuditLogTable.action.in_(
+                            [
+                                ActionType.AI_BUILDER_CLIENT_ERROR_REPORTED.value,
+                                ActionType.AI_BUILDER_CLIENT_ERROR_OUTCOME_RECORDED.value,
+                            ]
+                        ),
+                    )
+                    .order_by(AuditLogTable.created_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [row.action for row in rows]
+
+
+@pytest.mark.asyncio
+async def test_observation_report_stores_where_and_as_what_it_was_displayed(
+    client,
+    bearer_token: str,
+    db_container,
+) -> None:
+    response = await _post(
+        client,
+        bearer_token,
+        _report(code="displayed_case", surface="generation", presented_as="other"),
+    )
+    assert response.status_code == 204
+
+    row = await _stored(db_container, "displayed_case")
+    assert (row.surface, row.presented_as) == ("generation", "other")
+    assert row.first_action is None
+    assert row.first_action_received_at is None
+
+
+@pytest.mark.asyncio
+async def test_first_action_is_stored_once_with_a_server_receipt_time(
+    client,
+    bearer_token: str,
+    db_container,
+) -> None:
+    # The same client_event_id carries the observation, then the user's
+    # first explicit selection. A replay and a conflicting later action
+    # change nothing; each stored fact is audited once.
+    payload = _report(code="acted_case", surface="generation", presented_as="other")
+    assert (await _post(client, bearer_token, payload)).status_code == 204
+    before = datetime.now(timezone.utc)
+
+    acted = await _post(
+        client, bearer_token, {**payload, "first_action": "retry_requested"}
+    )
+    assert acted.status_code == 204
+    replayed = await _post(
+        client, bearer_token, {**payload, "first_action": "retry_requested"}
+    )
+    assert replayed.status_code == 204
+    conflicting = await _post(
+        client, bearer_token, {**payload, "first_action": "conversation_opened"}
+    )
+    assert conflicting.status_code == 204
+
+    row = await _stored(db_container, "acted_case")
+    assert row.first_action == "retry_requested"
+    assert row.first_action_received_at is not None
+    assert row.first_action_received_at >= before - timedelta(seconds=5)
+    assert await _audit_actions(db_container, row.id) == [
+        ActionType.AI_BUILDER_CLIENT_ERROR_REPORTED.value,
+        ActionType.AI_BUILDER_CLIENT_ERROR_OUTCOME_RECORDED.value,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_an_action_reported_before_the_observation_keeps_both(
+    client,
+    bearer_token: str,
+    db_container,
+) -> None:
+    # Telemetry is fire-and-forget on the client, so the action can land
+    # first. It inserts the row; the late initial report fills only the
+    # presentation facts and never touches the action.
+    payload = _report(code="action_first_case")
+    assert (
+        await _post(client, bearer_token, {**payload, "first_action": "dismissed"})
+    ).status_code == 204
+    assert (
+        await _post(
+            client,
+            bearer_token,
+            {**payload, "surface": "chat", "presented_as": "provider_rejected"},
+        )
+    ).status_code == 204
+
+    row = await _stored(db_container, "action_first_case")
+    assert (row.surface, row.presented_as) == ("chat", "provider_rejected")
+    assert row.first_action == "dismissed"
+    assert row.first_action_received_at is not None
+
+
+@pytest.mark.asyncio
+async def test_another_reporter_cannot_change_a_stored_observation(
+    client,
+    bearer_token: str,
+    db_container,
+) -> None:
+    # The first reporter owns the observation. A report under the same
+    # event id from another user in the tenant is ignored, not rejected:
+    # telemetry never fails its caller.
+    payload = _report(code="other_reporter_case")
+    assert (await _post(client, bearer_token, payload)).status_code == 204
+
+    async with db_container() as container:
+        user = container.user()
+        record = await container.ai_builder_repo().record_client_error(
+            tenant_id=user.tenant_id,
+            user_id=uuid4(),
+            client_event_id=UUID(str(payload["client_event_id"])),
+            session_id=None,
+            phase="client",
+            category="network",
+            code="other_reporter_case",
+            request_id=None,
+            first_action="retry_requested",
+        )
+    assert record is None
+
+    row = await _stored(db_container, "other_reporter_case")
+    assert row.first_action is None
+
+
+@pytest.mark.asyncio
+async def test_report_client_error_rejects_unknown_presentation_values(
+    client,
+    bearer_token: str,
+) -> None:
+    for field, value in (
+        ("surface", "toast"),
+        ("presented_as", "prose"),
+        ("first_action", "gave_up"),
+    ):
+        response = await _post(client, bearer_token, _report(**{field: value}))
+        assert response.status_code == 422, field
+
+
+@pytest.mark.asyncio
+async def test_presented_as_by_first_action_counts_are_one_bounded_query(
+    client,
+    bearer_token: str,
+    db_container,
+) -> None:
+    """The query an operator runs to see how users respond to each failure
+    class. A null first_action means nothing was selected while the failure
+    was displayed; it is not abandonment, and no action means recovery
+    succeeded. The window and the limit keep it bounded."""
+    for presented_as, first_action in (
+        ("provider_rejected", "retry_requested"),
+        ("provider_rejected", "retry_requested"),
+        ("provider_rejected", None),
+        ("request_budget_exhausted", "conversation_opened"),
+    ):
+        payload = _report(
+            code="counts_case", surface="generation", presented_as=presented_as
+        )
+        if first_action is not None:
+            payload["first_action"] = first_action
+        assert (await _post(client, bearer_token, payload)).status_code == 204
+
+    async with db_container() as container:
+        user = container.user()
+        rows = (
+            await container.session().execute(
+                text(
+                    """
+                    SELECT presented_as, first_action, count(*) AS reports
+                    FROM builder_client_errors
+                    WHERE tenant_id = :tenant_id
+                      AND code = :code
+                      AND created_at >= :since
+                    GROUP BY presented_as, first_action
+                    ORDER BY reports DESC, presented_as, first_action
+                    LIMIT 100
+                    """
+                ),
+                {
+                    "tenant_id": user.tenant_id,
+                    "code": "counts_case",
+                    "since": datetime.now(timezone.utc) - timedelta(days=1),
+                },
+            )
+        ).all()
+    assert [tuple(row) for row in rows] == [
+        ("provider_rejected", "retry_requested", 2),
+        ("provider_rejected", None, 1),
+        ("request_budget_exhausted", "conversation_opened", 1),
+    ]

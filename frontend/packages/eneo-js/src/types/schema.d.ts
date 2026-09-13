@@ -3110,7 +3110,7 @@ export interface paths {
     };
     /**
      * Get per-action audit configuration
-     * @description Retrieve all 175 actions with their enabled status for the modal UI.
+     * @description Retrieve all 176 actions with their enabled status for the modal UI.
      */
     get: operations["get_action_config_api_v1_audit_config_actions_get"];
     put?: never;
@@ -4042,7 +4042,7 @@ export interface paths {
     put?: never;
     /**
      * Report AI Builder Client Error
-     * @description Persist one client-observed Builder failure using the stable error identity the UI parsed (code, category, phase, request_id) — no display text — so operators can join the user-visible symptom to the stored session. Replaying a client_event_id is a no-op (best-effort deduplication).
+     * @description Persist one client-observed Builder failure using the stable error identity the UI parsed (code, category, phase, request_id) — no display text — so operators can join the user-visible symptom to the stored session. Later reports under the same client_event_id fill in, once, where and as which class the failure was displayed and the user's first explicit selection on it; the server stamps the action's receipt time. Replays, late initial reports and conflicting later actions are no-ops.
      */
     post: operations["report_ai_builder_client_error"];
     delete?: never;
@@ -10326,6 +10326,50 @@ export interface components {
        */
       review_investigation_evidence_max_tokens?: number | null;
     };
+    /**
+     * AIBuilderClientErrorFirstAction
+     * @description The user's first explicit selection on a displayed failure.
+     *
+     *     Intent-named and observable: each value is a control the user chose,
+     *     never an inferred outcome. This measures the response to the failure UI,
+     *     not whether the recovery succeeded. Null means nothing was selected
+     *     while the failure was displayed, which is not the same as giving up.
+     * @enum {string}
+     */
+    AIBuilderClientErrorFirstAction:
+      | "retry_requested"
+      | "retry_with_acknowledgement_requested"
+      | "resend_requested"
+      | "refresh_requested"
+      | "conversation_opened"
+      | "model_switched"
+      | "diagnostic_copied"
+      | "start_fresh_requested"
+      | "dismissed";
+    /**
+     * AIBuilderClientErrorPresentation
+     * @description The failure class the frontend's presentation owner showed the user.
+     *
+     *     One closed vocabulary shared with the frontend through the generated
+     *     schema, so a stored row says what the user was told, not only what the
+     *     server sent.
+     * @enum {string}
+     */
+    AIBuilderClientErrorPresentation:
+      | "provider_outcome_unknown"
+      | "failed_before_provider"
+      | "network_loss"
+      | "provider_rejected"
+      | "request_budget_exhausted"
+      | "output_too_long"
+      | "invalid_proposal"
+      | "other";
+    /**
+     * AIBuilderClientErrorSurface
+     * @description Where in the Builder a client-observed failure was displayed.
+     * @enum {string}
+     */
+    AIBuilderClientErrorSurface: "generation" | "chat" | "apply";
     /** AIBuilderConversationMessage */
     AIBuilderConversationMessage: {
       /** Content */
@@ -11049,6 +11093,7 @@ export interface components {
       | "ai_builder_flow_applied"
       | "ai_builder_attachment_detached"
       | "ai_builder_client_error_reported"
+      | "ai_builder_client_error_outcome_recorded"
       | "ai_builder_session_cancelled"
       | "security_classification_created"
       | "security_classification_updated"
@@ -13034,7 +13079,7 @@ export interface components {
      *           ]
      *         },
      *         {
-     *           "action_count": 81,
+     *           "action_count": 82,
      *           "category": "user_actions",
      *           "enabled": true,
      *           "example_actions": [
@@ -28823,8 +28868,17 @@ export interface components {
      *     frontend renders — code, category, phase, request_id — the part clients
      *     are told to branch on. No display text is accepted: the session and the
      *     request id resolve the details server-side. `client_event_id` is minted
-     *     by the client per observed error; replaying the same report is a no-op
-     *     (best-effort deduplication).
+     *     by the client once per displayed failure; every later report about the
+     *     same failure carries the same id.
+     *
+     *     The optional facts arrive when they become known: where the failure was
+     *     displayed and as which class (`surface`, `presented_as`), and the user's
+     *     first explicit selection on it (`first_action`). Each is stored once by
+     *     the reporter who observed the failure; the server stamps the receipt time
+     *     of the action. A replayed report, a late initial report and a conflicting
+     *     later action are all no-ops. These are client observations, distinct from
+     *     the server's own failure incidents, and they measure the response to the
+     *     failure UI, not recovery success.
      * @example {
      *       "category": "upstream",
      *       "client_event_id": "3f6ad7a6-1d5f-4b70-9df7-6a4a4de4d7e1",
@@ -28844,12 +28898,15 @@ export interface components {
       client_event_id: string;
       /** Code */
       code: string;
+      first_action?: components["schemas"]["AIBuilderClientErrorFirstAction"] | null;
       /** Phase */
       phase: components["schemas"]["AIBuilderErrorPhase"] | "client";
+      presented_as?: components["schemas"]["AIBuilderClientErrorPresentation"] | null;
       /** Request Id */
       request_id?: string | null;
       /** Session Id */
       session_id?: string | null;
+      surface?: components["schemas"]["AIBuilderClientErrorSurface"] | null;
     };
     /** RequirementsConfirmationMetadata */
     RequirementsConfirmationMetadata: {

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import enum
 import hashlib
 import json
 from datetime import datetime
@@ -379,6 +380,52 @@ class AIBuilderClassifierDiagnosticsResponse(BaseModel):
     classifier_runs: list[AIBuilderClassifierDiagnostic]
 
 
+class AIBuilderClientErrorSurface(enum.StrEnum):
+    """Where in the Builder a client-observed failure was displayed."""
+
+    GENERATION = "generation"
+    CHAT = "chat"
+    APPLY = "apply"
+
+
+class AIBuilderClientErrorPresentation(enum.StrEnum):
+    """The failure class the frontend's presentation owner showed the user.
+
+    One closed vocabulary shared with the frontend through the generated
+    schema, so a stored row says what the user was told, not only what the
+    server sent.
+    """
+
+    PROVIDER_OUTCOME_UNKNOWN = "provider_outcome_unknown"
+    FAILED_BEFORE_PROVIDER = "failed_before_provider"
+    NETWORK_LOSS = "network_loss"
+    PROVIDER_REJECTED = "provider_rejected"
+    REQUEST_BUDGET_EXHAUSTED = "request_budget_exhausted"
+    OUTPUT_TOO_LONG = "output_too_long"
+    INVALID_PROPOSAL = "invalid_proposal"
+    OTHER = "other"
+
+
+class AIBuilderClientErrorFirstAction(enum.StrEnum):
+    """The user's first explicit selection on a displayed failure.
+
+    Intent-named and observable: each value is a control the user chose,
+    never an inferred outcome. This measures the response to the failure UI,
+    not whether the recovery succeeded. Null means nothing was selected
+    while the failure was displayed, which is not the same as giving up.
+    """
+
+    RETRY_REQUESTED = "retry_requested"
+    RETRY_WITH_ACKNOWLEDGEMENT_REQUESTED = "retry_with_acknowledgement_requested"
+    RESEND_REQUESTED = "resend_requested"
+    REFRESH_REQUESTED = "refresh_requested"
+    CONVERSATION_OPENED = "conversation_opened"
+    MODEL_SWITCHED = "model_switched"
+    DIAGNOSTIC_COPIED = "diagnostic_copied"
+    START_FRESH_REQUESTED = "start_fresh_requested"
+    DISMISSED = "dismissed"
+
+
 class ReportClientErrorRequest(BaseModel):
     """One client-observed Builder failure, in the UI's own error identity.
 
@@ -386,8 +433,17 @@ class ReportClientErrorRequest(BaseModel):
     frontend renders — code, category, phase, request_id — the part clients
     are told to branch on. No display text is accepted: the session and the
     request id resolve the details server-side. `client_event_id` is minted
-    by the client per observed error; replaying the same report is a no-op
-    (best-effort deduplication).
+    by the client once per displayed failure; every later report about the
+    same failure carries the same id.
+
+    The optional facts arrive when they become known: where the failure was
+    displayed and as which class (`surface`, `presented_as`), and the user's
+    first explicit selection on it (`first_action`). Each is stored once by
+    the reporter who observed the failure; the server stamps the receipt time
+    of the action. A replayed report, a late initial report and a conflicting
+    later action are all no-ops. These are client observations, distinct from
+    the server's own failure incidents, and they measure the response to the
+    failure UI, not recovery success.
     """
 
     model_config = ConfigDict(
@@ -417,6 +473,9 @@ class ReportClientErrorRequest(BaseModel):
     code: str = Field(min_length=1, max_length=128, pattern=r"^[a-z][a-z0-9_]*$")
     session_id: UUID | None = None
     request_id: str | None = Field(default=None, max_length=64)
+    surface: AIBuilderClientErrorSurface | None = None
+    presented_as: AIBuilderClientErrorPresentation | None = None
+    first_action: AIBuilderClientErrorFirstAction | None = None
 
 
 class CreateSessionRequest(BaseModel):

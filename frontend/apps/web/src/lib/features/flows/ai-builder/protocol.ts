@@ -45,6 +45,15 @@ export type AIBuilderSendMessageRequest = components["schemas"]["SendMessageRequ
 
 export type AIBuilderTurnState = components["schemas"]["BuilderTurnState"];
 
+export type AIBuilderLatestTurn = NonNullable<GeneratedAIBuilderSessionResponse["latest_turn"]>;
+
+/** Closed vocabularies shared with the server for client error observations. */
+export type AIBuilderClientErrorSurface = components["schemas"]["AIBuilderClientErrorSurface"];
+export type AIBuilderClientErrorPresentation =
+  components["schemas"]["AIBuilderClientErrorPresentation"];
+export type AIBuilderClientErrorFirstAction =
+  components["schemas"]["AIBuilderClientErrorFirstAction"];
+
 export type AIBuilderTurnRecoveryState = Extract<
   AIBuilderTurnState,
   "failed_before_provider" | "provider_outcome_unknown"

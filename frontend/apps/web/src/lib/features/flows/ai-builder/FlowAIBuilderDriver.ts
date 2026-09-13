@@ -16,6 +16,9 @@ import {
 import { classifyAIBuilderConflict } from "./aiBuilderConflict";
 import { isDiscoveryStatus, isRecoverableCreateDraft, parseAIBuilderStreamEvent } from "./protocol";
 import type {
+  AIBuilderClientErrorFirstAction,
+  AIBuilderClientErrorPresentation,
+  AIBuilderClientErrorSurface,
   AIBuilderConversationMessage,
   AIBuilderDraftSession,
   AIBuilderError,
@@ -231,6 +234,14 @@ export class FlowAIBuilderDriver {
   #requiresAuthoritativeRefresh = false;
   #authoritativeRefreshError = false;
   #isRecoveringLatestTurn = false;
+  // Client error observations: a failure gets one identity the moment a
+  // surface displays it, the same identity on every later report about it,
+  // and at most one recorded first action. The session a failure belonged
+  // to is remembered at parse time because a resume failure clears state.
+  #failureIdentities = new WeakMap<AIBuilderError, string>();
+  #failureSessions = new WeakMap<AIBuilderError, string | null>();
+  #actedFailures = new WeakSet<AIBuilderError>();
+  #observationReports = new Map<string, Promise<void>>();
 
   constructor(
     transport: AIBuilderClientTransport,
@@ -322,6 +333,7 @@ export class FlowAIBuilderDriver {
     // value the new model does not accept.
     this.#state.selectedReasoningEffort = null;
     this.#notify();
+    this.recordDisplayedFailureAction("model_switched");
   }
 
   selectReasoningEffort(reasoningEffort: string | null): void {
@@ -471,7 +483,7 @@ export class FlowAIBuilderDriver {
     } catch (e) {
       if (sessionGeneration !== this.#sessionGeneration) return false;
       this.#restoreReplacedSession(replacedState, replacedRefreshRequired, replacedRefreshError);
-      const createError = this.#parseAndReportError({
+      const createError = this.#parseError({
         transport: "apply",
         payload: e,
         fallbackMessage: m.ai_builder_error_fallback_create_session()
@@ -494,7 +506,7 @@ export class FlowAIBuilderDriver {
     } catch (adoptionError) {
       if (sessionGeneration !== this.#sessionGeneration) return false;
       this.#restoreReplacedSession(replacedState, replacedRefreshRequired, replacedRefreshError);
-      this.#state.error = this.#parseAndReportError(
+      this.#state.error = this.#parseError(
         {
           transport: "apply",
           payload: adoptionError,
@@ -589,7 +601,7 @@ export class FlowAIBuilderDriver {
       if ((await this.#adoptSession(result, sessionGeneration)) === null) return;
     } catch (error) {
       if (sessionGeneration !== this.#sessionGeneration) return;
-      this.#state.error = this.#parseAndReportError(
+      this.#state.error = this.#parseError(
         {
           transport: "apply",
           payload: error,
@@ -727,7 +739,7 @@ export class FlowAIBuilderDriver {
       this.#requiresAuthoritativeRefresh = mustRefresh;
       if (mustRefresh && this.#state.error === null) {
         this.#authoritativeRefreshError = true;
-        this.#state.error = this.#parseAndReportError({
+        this.#state.error = this.#parseError({
           transport: "apply",
           payload: error,
           fallbackMessage: m.ai_builder_error_fallback_refresh_session()
@@ -848,6 +860,30 @@ export class FlowAIBuilderDriver {
   async acknowledgeAndRetryLatestTurn(): Promise<void> {
     if (this.#state.pendingOperation) return;
     await this.#recoverLatestTurn("provider_outcome_unknown", true);
+  }
+
+  /** The retained request again, as a new turn. For a committed failure the
+   *  server offers no replay of the same turn; the request itself is still
+   *  the user's, so sending it under a fresh turn id is the one retry that
+   *  needs no new words from them. Fenced like any other new message. */
+  async resendLatestTurn(): Promise<AIBuilderSendOutcome> {
+    const retained = this.#state.session?.latest_turn?.retry_request;
+    if (
+      !retained ||
+      this.#state.pendingOperation !== null ||
+      this.isStreaming ||
+      !this.canStartNewTurn
+    ) {
+      return "not_started";
+    }
+    return await this.#streamMessageRequest(
+      {
+        ...retained,
+        client_turn_id: crypto.randomUUID(),
+        acknowledge_duplicate_provider_spend: false
+      },
+      null
+    );
   }
 
   async #recoverLatestTurn(
@@ -1065,7 +1101,7 @@ export class FlowAIBuilderDriver {
     } catch (e) {
       if (!abortController.signal.aborted && ownsCurrentStream()) {
         this.#requiresAuthoritativeRefresh = true;
-        this.#state.error = this.#parseAndReportError({
+        this.#state.error = this.#parseError({
           transport: "apply",
           payload: e,
           fallbackMessage: m.ai_builder_error_fallback_stream()
@@ -1109,7 +1145,7 @@ export class FlowAIBuilderDriver {
       this.#notify();
     } catch (e) {
       if (this.#ownsPlan(owner, plan.plan_id)) {
-        this.#state.error = this.#parseAndReportError({
+        this.#state.error = this.#parseError({
           transport: "apply",
           payload: e,
           fallbackMessage: m.ai_builder_error_fallback_approve_plan()
@@ -1187,7 +1223,7 @@ export class FlowAIBuilderDriver {
         }
       }
 
-      const parsed = this.#parseAndReportError({
+      const parsed = this.#parseError({
         transport: "apply",
         payload: initialError,
         fallbackMessage: m.ai_builder_error_fallback_create_flow()
@@ -1278,7 +1314,7 @@ export class FlowAIBuilderDriver {
       return result;
     } catch (e: unknown) {
       if (!this.#ownsPlan(owner, plan.plan_id)) throw e;
-      const parsed = this.#parseAndReportError({
+      const parsed = this.#parseError({
         transport: "apply",
         payload: e,
         fallbackMessage: m.ai_builder_error_fallback_apply_plan()
@@ -1331,7 +1367,7 @@ export class FlowAIBuilderDriver {
       this.#notify();
     } catch (e) {
       if (!this.#ownsPlan(owner, plan.plan_id)) throw e;
-      this.#state.error = this.#parseAndReportError({
+      this.#state.error = this.#parseError({
         transport: "apply",
         payload: e,
         fallbackMessage: m.ai_builder_error_fallback_unpublish_flow()
@@ -1344,7 +1380,7 @@ export class FlowAIBuilderDriver {
       return await this.#applyPlan(plan, owner);
     } catch (e) {
       if (!this.#ownsPlan(owner, plan.plan_id)) throw e;
-      const parsedApplyError = this.#parseAndReportError({
+      const parsedApplyError = this.#parseError({
         transport: "apply",
         payload: e,
         fallbackMessage: m.ai_builder_error_fallback_apply_plan()
@@ -1423,7 +1459,7 @@ export class FlowAIBuilderDriver {
       this.#notify();
     } catch (e) {
       if (this.#ownsPlan(owner, plan.plan_id)) {
-        this.#state.error = this.#parseAndReportError({
+        this.#state.error = this.#parseError({
           transport: "apply",
           payload: e,
           fallbackMessage: m.ai_builder_error_fallback_revise_plan()
@@ -1808,51 +1844,118 @@ export class FlowAIBuilderDriver {
       payload: latestTurn.error,
       fallbackMessage: m.ai_builder_error_fallback_turn()
     });
-    this.#state.error = isSoftBlockAIBuilderError(error) ? null : error;
+    if (isSoftBlockAIBuilderError(error)) {
+      this.#state.error = null;
+      return;
+    }
+    // The refresh confirming the failure already on screen keeps that
+    // object: its telemetry identity (the event id) lives with it.
+    const shown = this.#state.error;
+    if (shown && shown.code === error.code && shown.request_id === error.request_id) return;
+    this.#state.error = error;
   }
 
   /** Parse a fresh client-observed failure and report it, fire-and-forget.
    *  Rehydrated committed-turn errors are parsed elsewhere and never
    *  reported: the server already persisted them. Reporting must never
    *  break the UI, so every failure path here is swallowed. */
-  #parseAndReportError(
+  /** Parse a fresh client-observed failure and remember which session it
+   *  belonged to. Nothing is reported here: the surface that displays the
+   *  failure reports it, so what is stored is what the user saw. */
+  #parseError(
     input: Parameters<typeof parseAIBuilderError>[0],
     options?: { sessionId?: string | null }
   ): AIBuilderError {
     const parsed = parseAIBuilderError(input);
-    this.#reportClientError(parsed, options);
+    this.#failureSessions.set(
+      parsed,
+      options?.sessionId ?? this.#state.session?.session_id ?? null
+    );
     return parsed;
   }
 
-  #reportClientError(error: AIBuilderError, options?: { sessionId?: string | null }): void {
-    // Deferred off the failure path: recovery fetches that follow an error
-    // must never queue behind telemetry.
-    const sessionId = options?.sessionId ?? this.#state.session?.session_id ?? null;
-    setTimeout(() => this.#sendClientErrorReport(error, sessionId), 0);
+  /** A surface displayed this failure. The first display mints the
+   *  observation identity and sends the report; a rerender, an authoritative
+   *  refresh that confirms the same failure, or a second surface showing the
+   *  same object all reuse it and send nothing. Observations are client
+   *  facts, distinct from the server's own failure incidents. */
+  reportFailureDisplayed(
+    error: AIBuilderError,
+    facts: {
+      surface: AIBuilderClientErrorSurface | null;
+      presentedAs: AIBuilderClientErrorPresentation | null;
+    }
+  ): void {
+    if (this.#failureIdentities.has(error)) return;
+    const eventId = crypto.randomUUID();
+    this.#failureIdentities.set(error, eventId);
+    this.#observationReports.set(
+      eventId,
+      this.#sendClientErrorReport(eventId, error, {
+        surface: facts.surface,
+        presented_as: facts.presentedAs
+      })
+    );
   }
 
-  #sendClientErrorReport(error: AIBuilderError, sessionId: string | null): void {
-    try {
-      void this.#transport
-        .fetch(FLOW_AI_BUILDER_ROUTES.clientErrors, {
-          method: "post",
-          requestBody: {
-            "application/json": {
-              client_event_id: crypto.randomUUID(),
-              phase: error.phase,
-              category: error.category,
-              code: error.code,
-              request_id: error.request_id,
-              // The caller's known session wins: some failures (resume)
-              // happen after driver state was cleared.
-              session_id: sessionId
-            }
-          }
-        })
-        .catch(() => {});
-    } catch {
-      // Never let telemetry interfere with the failing operation itself.
+  /** The user's first explicit selection on a displayed failure, recorded
+   *  once. Later selections are not sent; a failure never displayed has no
+   *  identity and records nothing. */
+  reportFailureAction(error: AIBuilderError, action: AIBuilderClientErrorFirstAction): void {
+    const eventId = this.#failureIdentities.get(error);
+    if (!eventId || this.#actedFailures.has(error)) return;
+    this.#actedFailures.add(error);
+    // After the observation, so the row exists before the action reaches it;
+    // the server would accept either order.
+    const observed = this.#observationReports.get(eventId) ?? Promise.resolve();
+    void observed.then(() => this.#sendClientErrorReport(eventId, error, { first_action: action }));
+  }
+
+  /** A selection made away from the failure surface (a model switch in the
+   *  composer, the conversation button in the header) counts for the
+   *  failure on screen. */
+  recordDisplayedFailureAction(action: AIBuilderClientErrorFirstAction): void {
+    const error = this.#state.error;
+    if (error) this.reportFailureAction(error, action);
+  }
+
+  /** Deferred off the interaction path and never awaited by a command:
+   *  telemetry must not delay a recovery, and its failure must not surface. */
+  #sendClientErrorReport(
+    eventId: string,
+    error: AIBuilderError,
+    facts: {
+      surface?: AIBuilderClientErrorSurface | null;
+      presented_as?: AIBuilderClientErrorPresentation | null;
+      first_action?: AIBuilderClientErrorFirstAction;
     }
+  ): Promise<void> {
+    return new Promise<void>((resolve) => {
+      setTimeout(() => {
+        try {
+          void this.#transport
+            .fetch(FLOW_AI_BUILDER_ROUTES.clientErrors, {
+              method: "post",
+              requestBody: {
+                "application/json": {
+                  client_event_id: eventId,
+                  phase: error.phase,
+                  category: error.category,
+                  code: error.code,
+                  request_id: error.request_id,
+                  session_id:
+                    this.#failureSessions.get(error) ?? this.#state.session?.session_id ?? null,
+                  ...facts
+                }
+              }
+            })
+            .catch(() => {})
+            .finally(resolve);
+        } catch {
+          resolve();
+        }
+      }, 0);
+    });
   }
 
   #normalizePlan(plan: IncomingProposedPlan): ProposedPlan {

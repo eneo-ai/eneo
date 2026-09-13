@@ -816,8 +816,19 @@ describe("BuilderReviewScreen recovery surfaces", () => {
       }
     });
 
-    expect(screen.getByText(m.ai_builder_turn_provider_outcome_unknown_title())).toBeTruthy();
+    expect(
+      screen.getByRole("heading", {
+        name: m.ai_builder_failure_heading_provider_outcome_unknown()
+      })
+    ).toBeTruthy();
+    expect(
+      screen.getByText(new RegExp(m.ai_builder_failure_cause_provider_outcome_unknown()))
+    ).toBeTruthy();
+    // One action, and it says what it does; no plain retry, no reword offer.
     expect(screen.queryByRole("button", { name: m.ai_builder_turn_retry() })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: m.ai_builder_failure_action_clarify() })
+    ).toBeNull();
 
     await fireEvent.click(
       screen.getByRole("button", { name: m.ai_builder_turn_retry_with_cost_acknowledgement() })
@@ -825,7 +836,8 @@ describe("BuilderReviewScreen recovery surfaces", () => {
     expect(acknowledge).toHaveBeenCalledOnce();
   });
 
-  it("keeps the plain retry and the conversation escape for a pre-provider failure", () => {
+  it("keeps the safe retry first and rewording second for a pre-provider failure", async () => {
+    const onclarify = vi.fn();
     render(BuilderReviewScreenHarness, {
       currentSpace: makeSpace({ transcriptionModels: [] }),
       state: {
@@ -833,25 +845,37 @@ describe("BuilderReviewScreen recovery surfaces", () => {
         currentPlan: null,
         error: makeError("unknown")
       },
-      screenProps: { showGenerationFailure: true }
+      screenProps: { showGenerationFailure: true, onclarify }
     });
 
+    expect(
+      screen.getByText(new RegExp(m.ai_builder_turn_failed_before_provider_description()))
+    ).toBeTruthy();
     expect(screen.getByRole("button", { name: m.ai_builder_turn_retry() })).toBeTruthy();
     expect(
       screen.queryByRole("button", { name: m.ai_builder_turn_retry_with_cost_acknowledgement() })
     ).toBeNull();
-    expect(screen.getByRole("button", { name: m.ai_builder_show_conversation() })).toBeTruthy();
+    // The way back to the conversation lives in the header, not in the card.
+    expect(screen.queryByRole("button", { name: m.ai_builder_show_conversation() })).toBeNull();
+
+    await fireEvent.click(
+      screen.getByRole("button", { name: m.ai_builder_failure_action_clarify() })
+    );
+    expect(onclarify).toHaveBeenCalledOnce();
   });
 
-  it("names a committed provider rejection and offers only a new turn", () => {
+  it("names a committed provider rejection, sends the request again, and opens once", async () => {
+    const resend = vi.fn().mockResolvedValue("delivered");
+    let service!: Parameters<NonNullable<HarnessProps["onservice"]>>[0];
     render(BuilderReviewScreenHarness, {
       currentSpace: makeSpace({ transcriptionModels: [] }),
       state: {
-        session: makeSession({ status: "chatting", target_kind: "create", flow_id: null }),
+        session: makeRecoverableSession("committed"),
         currentPlan: null,
         error: {
           ...makeError("planner_upstream_error"),
           category: "upstream",
+          request_id: "req-42",
           details: {
             another_call_permitted: false,
             provider_disposition: "known_rejection",
@@ -859,19 +883,47 @@ describe("BuilderReviewScreen recovery surfaces", () => {
           }
         }
       },
-      screenProps: { showGenerationFailure: true }
+      screenProps: { showGenerationFailure: true },
+      onservice: (s) => {
+        service = s;
+        s.resendLatestTurn = resend;
+      }
     });
 
-    expect(screen.getByText(m.ai_builder_generation_failed_provider_rejected())).toBeTruthy();
-    expect(screen.getByText(m.ai_builder_generation_failed_preserved_create())).toBeTruthy();
+    const heading = screen.getByRole("heading", {
+      name: m.ai_builder_failure_heading_provider_rejected()
+    });
     expect(screen.queryByText("Något gick fel")).toBeNull();
-    // A committed turn is retried as a new turn, so no replay is offered.
-    expect(screen.queryByRole("button", { name: m.ai_builder_turn_retry() })).toBeNull();
+    expect(screen.getByText(new RegExp(m.ai_builder_failure_preserved_create()))).toBeTruthy();
+    // The technical facts sit in one quiet line, after the actions.
+    const technical = screen.getByText(
+      new RegExp(m.ai_builder_failure_technical_code({ code: "planner_upstream_error" }))
+    );
+    expect(technical.closest("p")?.textContent).toContain(
+      m.ai_builder_failure_technical_request({ request: "req-42" })
+    );
+    const primary = screen.getByRole("button", { name: m.ai_builder_turn_retry() });
     expect(
-      screen.queryByRole("button", { name: m.ai_builder_turn_retry_with_cost_acknowledgement() })
-    ).toBeNull();
-    expect(screen.getByText(m.ai_builder_generation_failed_new_turn())).toBeTruthy();
-    expect(screen.getByRole("button", { name: m.ai_builder_show_conversation() })).toBeTruthy();
+      primary.compareDocumentPosition(technical) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+
+    // The card mounted closed and opened once; a rerender of the same
+    // failure keeps the same element open and does not replay the moment.
+    const card = heading.closest<HTMLElement>("[role='status']")!;
+    await waitFor(() => expect(card.getAttribute("data-open")).toBe("true"));
+    expect(heading.classList.contains("is-enter-start")).toBe(false);
+    service.seedState({
+      session: { ...makeRecoverableSession("committed"), updated_at: "2026-07-11T10:00:00Z" }
+    });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: m.ai_builder_failure_heading_provider_rejected() })
+      ).toBe(heading)
+    );
+    expect(card.getAttribute("data-open")).toBe("true");
+
+    await fireEvent.click(primary);
+    expect(resend).toHaveBeenCalledOnce();
   });
 });
 
@@ -977,7 +1029,7 @@ function makeSession(overrides: Partial<AIBuilderSession> = {}): AIBuilderSessio
 }
 
 function makeRecoverableSession(
-  state: "failed_before_provider" | "provider_outcome_unknown"
+  state: "failed_before_provider" | "provider_outcome_unknown" | "committed"
 ): AIBuilderSession {
   return makeSession({
     status: "chatting",

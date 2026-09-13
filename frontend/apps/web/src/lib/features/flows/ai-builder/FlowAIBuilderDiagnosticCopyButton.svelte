@@ -17,6 +17,8 @@
     variant?: ButtonVariant;
     size?: ButtonSize;
     class?: string;
+    /** The click, before the copy: a surface that records selections listens here. */
+    onselect?: () => void;
   }
 
   let {
@@ -25,7 +27,8 @@
     label = m.ai_builder_copy_technical_details(),
     variant = "outline",
     size = "sm",
-    class: className = ""
+    class: className = "",
+    onselect
   }: Props = $props();
 
   let copied = $state(false);
@@ -44,6 +47,7 @@
   }
 
   async function copyReport() {
+    onselect?.();
     const currentReport = buildReport?.() ?? report;
     if (!currentReport) return;
     try {

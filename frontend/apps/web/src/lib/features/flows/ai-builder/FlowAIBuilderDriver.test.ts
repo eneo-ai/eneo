@@ -1212,6 +1212,41 @@ describe("FlowAIBuilderDriver", () => {
     expect(driver.state.messages).toHaveLength(1);
   });
 
+  it("sends the retained request again as a new turn after a committed failure", async () => {
+    const session = makeRecoverableSession("failed_before_provider");
+    const latestTurn = session.latest_turn;
+    if (!latestTurn) throw new Error("Expected retained latest turn");
+    const { driver, stream } = makeDriver({
+      streamImpl: vi.fn(async (_path, _init, handlers) => {
+        completeStream(handlers);
+      })
+    });
+    driver.seedState({
+      session: { ...session, latest_turn: { ...latestTurn, state: "committed" } },
+      messages: [{ role: "user", content: "Build a flow", timestamp: 1 }]
+    });
+
+    await driver.resendLatestTurn();
+
+    expect(stream).toHaveBeenCalledOnce();
+    const body = stream.mock.calls[0]?.[1].requestBody["application/json"];
+    expect(body).toMatchObject({
+      message: latestTurn.retry_request?.message,
+      acknowledge_duplicate_provider_spend: false
+    });
+    // A new turn, never a replay of the committed one.
+    expect(body.client_turn_id).not.toBe(latestTurn.client_turn_id);
+  });
+
+  it("refuses to resend while an unknown outcome fences the session", async () => {
+    const session = makeRecoverableSession("provider_outcome_unknown");
+    const { driver, stream } = makeDriver();
+    driver.seedState({ session });
+
+    expect(await driver.resendLatestTurn()).toBe("not_started");
+    expect(stream).not.toHaveBeenCalled();
+  });
+
   it("prevents concurrent retry transport calls", async () => {
     let finishStream: (() => void) | undefined;
     const { driver, stream } = makeDriver({
@@ -3299,18 +3334,10 @@ describe("FlowAIBuilderDriver client error reporting", () => {
     return fetch.mock.calls.filter(([route]) => route === CLIENT_ERRORS_ROUTE);
   }
 
-  it("reports a failed resume with the caller's session id and the stable identity only", async () => {
+  it("observes a displayed failure once and records only its first action", async () => {
     const fetchError = {
       status: 503,
-      response: {
-        schema_version: 2,
-        code: "planner_upstream_error",
-        category: "upstream",
-        message: "The saved draft could not be loaded.",
-        phase: "planner",
-        eneo_error_code: 9024,
-        request_id: "request-resume"
-      }
+      response: { message: "The saved draft could not be loaded." }
     };
     const fetch = vi.fn().mockImplementation((route: string) => {
       if (route === CLIENT_ERRORS_ROUTE) return Promise.resolve(undefined);
@@ -3321,25 +3348,32 @@ describe("FlowAIBuilderDriver client error reporting", () => {
     vi.useFakeTimers();
     try {
       await driver.resumeSession("session-gone");
-      // The report is deliberately deferred behind a timer; drain it.
+      const error = driver.state.error;
+      if (!error) throw new Error("Expected a parsed error");
+      // Nothing is sent until a surface displays the failure.
+      await vi.runAllTimersAsync();
+      expect(clientErrorCalls(fetch)).toHaveLength(0);
+
+      driver.reportFailureDisplayed(error, { surface: null, presentedAs: null });
+      driver.reportFailureDisplayed(error, { surface: "chat", presentedAs: "other" });
+      driver.reportFailureAction(error, "retry_requested");
+      driver.reportFailureAction(error, "dismissed");
       await vi.runAllTimersAsync();
     } finally {
       vi.useRealTimers();
     }
 
-    const reports = clientErrorCalls(fetch);
-    expect(reports).toHaveLength(1);
-    const body = reports[0][1].requestBody["application/json"];
-    // The resume cleared driver state, so the payload must carry the
-    // caller's known session id, not null.
-    expect(body.session_id).toBe("session-gone");
-    expect(body.phase).toBe("planner");
-    expect(body.category).toBe("upstream");
-    expect(body.code).toBe("planner_upstream_error");
-    expect(body.request_id).toBe("request-resume");
-    expect(body.client_event_id).toMatch(/^[0-9a-f-]{36}$/);
+    const bodies = clientErrorCalls(fetch).map(([, init]) => init.requestBody["application/json"]);
+    expect(bodies).toHaveLength(2);
+    // One identity for the failure, minted at first display and reused.
+    expect(bodies[0].client_event_id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(bodies[1].client_event_id).toBe(bodies[0].client_event_id);
+    // The session the failure belonged to, even after the resume cleared state.
+    expect(bodies[0].session_id).toBe("session-gone");
+    expect(bodies[0]).toMatchObject({ surface: null, presented_as: null });
+    expect(bodies[1]).toMatchObject({ first_action: "retry_requested" });
     // No display text leaves the client.
-    expect(body).not.toHaveProperty("message");
+    for (const body of bodies) expect(body).not.toHaveProperty("message");
   });
 
   it("swallows a failing telemetry request without disturbing the error state", async () => {
@@ -3355,14 +3389,18 @@ describe("FlowAIBuilderDriver client error reporting", () => {
     vi.useFakeTimers();
     try {
       await driver.resumeSession("session-gone");
-      // Drain the deferred report; its rejection must not surface.
+      const error = driver.state.error;
+      if (!error) throw new Error("Expected a parsed error");
+      driver.reportFailureDisplayed(error, { surface: null, presentedAs: null });
+      driver.reportFailureAction(error, "retry_requested");
+      // Drain the deferred reports; their rejections must not surface.
       await vi.runAllTimersAsync();
     } finally {
       vi.useRealTimers();
     }
 
-    expect(clientErrorCalls(fetch)).toHaveLength(1);
-    expect(driver.state.error).not.toBeNull();
+    expect(clientErrorCalls(fetch)).toHaveLength(2);
+    expect(driver.state.error?.code).toBe("unknown");
   });
 
   it("does not report a rehydrated committed-turn error", async () => {

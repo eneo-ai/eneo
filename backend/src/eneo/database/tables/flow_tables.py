@@ -2233,6 +2233,16 @@ class BuilderClientErrors(BasePublic):
     category: Mapped[str] = mapped_column(sa.String(32), nullable=False)
     code: Mapped[str] = mapped_column(sa.String(128), nullable=False)
     request_id: Mapped[Optional[str]] = mapped_column(sa.String(64), nullable=True)
+    # Where and as which class the failure was displayed, and the user's first
+    # explicit selection on it (closed vocabularies in ai_builder_api_models).
+    # Each is written once by the reporter; the receipt time of the action is
+    # the server's clock. Null means not reported, never "abandoned".
+    surface: Mapped[Optional[str]] = mapped_column(sa.String(32), nullable=True)
+    presented_as: Mapped[Optional[str]] = mapped_column(sa.String(64), nullable=True)
+    first_action: Mapped[Optional[str]] = mapped_column(sa.String(64), nullable=True)
+    first_action_received_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.TIMESTAMP(timezone=True), nullable=True
+    )
 
     # Referential cleanup is the schema (session, then tenant cascade);
     # time-based retention is the daily data-retention worker's TTL step.

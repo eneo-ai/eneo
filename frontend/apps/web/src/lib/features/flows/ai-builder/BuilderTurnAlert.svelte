@@ -1,8 +1,11 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
   import { fade } from "svelte/transition";
+  import { untrack } from "svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
+  import IconAlertTriangle from "@lucide/svelte/icons/triangle-alert";
+  import IconInfo from "@lucide/svelte/icons/info";
   import FlowAIBuilderDiagnosticCopyButton from "./FlowAIBuilderDiagnosticCopyButton.svelte";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
   import {
@@ -10,7 +13,14 @@
     buildAIBuilderDiagnosticReportPlan,
     buildAIBuilderDiagnosticReportSession
   } from "./aiBuilderDiagnosticReport";
+  import { describeFailure, type FailureAction } from "./aiBuilderFailurePresentation";
 
+  /**
+   * The chat surface for a failure: the same presentation the generation
+   * card renders, above whatever screen is showing. It also carries the
+   * one notice that is not a failure, a turn the server is still working
+   * on. Ownership rule: it stays out while the plan surface owns the error.
+   */
   interface Props {
     targetKind: "create" | "edit";
     /** Another surface (the build screen) already shows this stream error. */
@@ -37,76 +47,56 @@
     service.latestTurnState === "open" || service.latestTurnState === "processing"
   );
   const turnRefreshFailed = $derived(service.authoritativeRefreshFailed && service.error !== null);
-  const isUnsupportedArchitectureError = $derived(
-    service.error?.code === "unsupported_architecture"
+  // A refused start-over replaces the unsupported-architecture error with its
+  // own, which would take the offer away with it. In create mode it is the
+  // only way out, so the offer stays while the driver's refusal error stands.
+  const offersStartFresh = $derived(
+    targetKind === "create" &&
+      (service.error?.code === "unsupported_architecture" ||
+        service.forcedCreateRefusedFor(targetKind))
   );
-  // A refused delegation is about this one question, so it is named in the
-  // user's terms rather than shown as a payload error.
-  const delegationRefusal = $derived.by(() => {
-    if (service.error?.code !== "invalid_question_payload") return null;
-    const reason = service.error.details?.reason;
-    if (reason === "delegation_without_recommendation") {
-      return m.ai_builder_question_delegation_unavailable();
-    }
-    if (reason === "delegation_without_pending_question") {
-      return m.ai_builder_question_delegation_stale();
-    }
-    // Editing the content list is refused for two different reasons that need
-    // two different actions: read the card again, or pick another name.
-    if (reason === "requirements_version_stale") {
-      return m.ai_builder_content_field_edit_stale();
-    }
-    if (reason === "invalid_field_name") {
-      const field = service.error?.details?.field_name;
-      return typeof field === "string" && field.trim()
-        ? m.ai_builder_content_field_edit_invalid_named({ field })
-        : m.ai_builder_content_field_edit_invalid();
-    }
-    return null;
-  });
-  const turnAlertCopy = $derived.by(() => {
-    if (turnRecoveryState === "failed_before_provider") {
-      return {
-        title: m.ai_builder_turn_failed_before_provider_title(),
-        description: m.ai_builder_turn_failed_before_provider_description()
-      };
-    }
-    if (turnRecoveryState === "provider_outcome_unknown") {
-      return {
-        title: m.ai_builder_turn_provider_outcome_unknown_title(),
-        description: m.ai_builder_turn_provider_outcome_unknown_description()
-      };
-    }
-    if (delegationRefusal) {
-      return {
-        title: m.ai_builder_question_delegate(),
-        description: delegationRefusal
-      };
-    }
-    if (isUnsupportedArchitectureError) {
-      return {
-        title: m.ai_builder_unsupported_architecture_title(),
-        description: m.ai_builder_unsupported_architecture_description()
-      };
-    }
-    if (turnIsActive) {
-      return {
-        title: m.ai_builder_turn_active_title(),
-        description: m.ai_builder_turn_active_description()
-      };
-    }
-    return null;
-  });
+  const presentation = $derived(
+    describeFailure({
+      error: service.error,
+      latestTurn: service.latestTurn,
+      capabilities: service.failureRecoveryCapabilities,
+      context: { surface: "chat", targetKind, offersStartFresh }
+    })
+  );
   let isRefreshingTurn = $state(false);
+  const busy = $derived(
+    service.isStreaming || service.isRecoveringLatestTurn || service.isCreating || isRefreshingTurn
+  );
 
-  // An unknown provider outcome must keep its explicit cost acknowledgement.
-  async function handleTurnRetry() {
-    if (turnRecoveryState === "failed_before_provider") {
-      await service.retryLatestTurn();
-      return;
-    }
-    if (turnRecoveryState === "provider_outcome_unknown") {
-      await service.acknowledgeAndRetryLatestTurn();
+  async function runAction(action: FailureAction) {
+    // A retained turn state can be presented without an error payload; the
+    // selection is then executed but there is no observation to record on.
+    if (service.error) service.reportFailureAction(service.error, action.records);
+    switch (action.kind) {
+      case "retry_same_turn":
+        await service.retryLatestTurn();
+        return;
+      case "retry_same_turn_acknowledged":
+        await service.acknowledgeAndRetryLatestTurn();
+        return;
+      case "refresh":
+        await handleTurnRefresh();
+        return;
+      case "start_fresh":
+        try {
+          await service.startFreshSession(targetKind);
+        } catch {
+          // The driver keeps the session it was replacing, its typed error
+          // and the standing offer to try again.
+        }
+        return;
+      case "dismiss":
+        service.clearError();
+        return;
+      case "retry_new_turn":
+      case "clarify":
+        // Never produced for the chat surface.
+        return;
     }
   }
 
@@ -120,21 +110,18 @@
     }
   }
 
-  // A refused start-over replaces the unsupported-architecture error with its
-  // own, which would take this button away with it. In create mode it is the
-  // only way out, so the offer stays while the driver's refusal error stands.
-  async function handleUnsupportedArchitectureStartFresh() {
-    try {
-      await service.startFreshSession(targetKind);
-    } catch {
-      // The driver keeps the session it was replacing, its typed error and
-      // the standing offer to try again.
-    }
-  }
-
   const visible = $derived(
     !suppressStreamError && (service.error !== null || turnRecoveryState !== null || turnIsActive)
   );
+
+  // A failure this alert shows is observed as the chat surface, once.
+  $effect(() => {
+    if (!visible) return;
+    const error = service.error;
+    const kind = untrack(() => presentation?.kind ?? null);
+    if (!error || !kind) return;
+    service.reportFailureDisplayed(error, { surface: "chat", presentedAs: kind });
+  });
 </script>
 
 {#if visible}
@@ -143,67 +130,62 @@
     transition:fade={{ duration: 160 }}
   >
     <Alert.Root
-      variant={turnIsActive && !service.error ? "default" : "destructive"}
+      variant="default"
       class="mx-auto grid max-w-[43.75rem] grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 rounded-lg px-3.5 py-3"
     >
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        viewBox="0 0 20 20"
-        fill="currentColor"
-        class="mt-0.5 size-4 shrink-0"
-        aria-hidden="true"
-      >
-        <path
-          fill-rule="evenodd"
-          d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-7-4a1 1 0 1 0-2 0v4a1 1 0 1 0 2 0V6Zm-1 8a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"
-          clip-rule="evenodd"
+      {#if presentation}
+        <IconAlertTriangle
+          class="text-warning-stronger mt-0.5 size-4 shrink-0"
+          aria-hidden="true"
         />
-      </svg>
+      {:else}
+        <IconInfo class="text-secondary mt-0.5 size-4 shrink-0" aria-hidden="true" />
+      {/if}
       <div class="min-w-0">
-        {#if turnAlertCopy}
-          <Alert.Title class="text-sm leading-snug">{turnAlertCopy.title}</Alert.Title>
-        {/if}
+        <Alert.Title class="text-sm leading-snug">
+          {presentation?.heading ?? m.ai_builder_turn_active_title()}
+        </Alert.Title>
         <Alert.Description
           id="ai-builder-turn-recovery-description"
           class="text-[0.8125rem] leading-relaxed"
         >
-          {turnAlertCopy?.description ?? service.error?.message ?? ""}
-          {#if turnAlertCopy && turnRefreshFailed}
+          {presentation?.consequence ?? m.ai_builder_turn_active_description()}
+          {#if turnRefreshFailed}
             <span class="mt-1 block">{m.ai_builder_turn_refresh_failed()}</span>
-          {:else if turnAlertCopy && service.error && !isUnsupportedArchitectureError}
-            <span class="mt-1 block">{service.error.message}</span>
           {/if}
         </Alert.Description>
         <div
           class="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center"
           aria-busy={service.isStreaming || service.isRecoveringLatestTurn}
         >
-          {#if (isUnsupportedArchitectureError || service.forcedCreateRefusedFor(targetKind)) && targetKind === "create"}
-            <Button
-              variant="default"
-              size="sm"
-              class="w-full whitespace-normal sm:w-auto"
-              disabled={service.isCreating}
-              aria-describedby="ai-builder-turn-recovery-description"
-              onclick={handleUnsupportedArchitectureStartFresh}
-            >
-              {m.ai_builder_start_fresh()}
-            </Button>
-          {:else if turnRecoveryState}
-            <Button
-              variant={turnRecoveryState === "provider_outcome_unknown" ? "destructive" : "default"}
-              size="sm"
-              class="w-full whitespace-normal sm:w-auto"
-              disabled={service.isStreaming || service.isRecoveringLatestTurn}
-              aria-describedby="ai-builder-turn-recovery-description"
-              onclick={handleTurnRetry}
-            >
-              {service.isStreaming || service.isRecoveringLatestTurn
-                ? m.ai_builder_turn_retrying()
-                : turnRecoveryState === "provider_outcome_unknown"
-                  ? m.ai_builder_turn_retry_with_cost_acknowledgement()
-                  : m.ai_builder_turn_retry()}
-            </Button>
+          {#if presentation}
+            {#if presentation.primary && presentation.primary.kind !== "dismiss"}
+              {@const primary = presentation.primary}
+              <Button
+                variant="default"
+                size="sm"
+                class="w-full whitespace-normal sm:w-auto"
+                disabled={busy}
+                aria-describedby="ai-builder-turn-recovery-description"
+                onclick={() => void runAction(primary)}
+              >
+                {service.isStreaming || service.isRecoveringLatestTurn
+                  ? m.ai_builder_turn_retrying()
+                  : primary.label}
+              </Button>
+            {/if}
+            {#if presentation.secondary}
+              {@const secondary = presentation.secondary}
+              <Button
+                variant="outline"
+                size="sm"
+                class="w-full whitespace-normal sm:w-auto"
+                disabled={busy}
+                onclick={() => void runAction(secondary)}
+              >
+                {secondary.label}
+              </Button>
+            {/if}
           {:else if turnIsActive}
             <Button
               variant="default"
@@ -220,17 +202,20 @@
               report={streamErrorDiagnosticReport}
               variant="ghost"
               size="xs"
-              class="text-destructive hover:bg-destructive/10 hover:text-destructive"
+              onselect={() => {
+                if (service.error) service.reportFailureAction(service.error, "diagnostic_copied");
+              }}
             />
           {/if}
-          {#if !turnRecoveryState && service.error}
+          {#if presentation?.primary?.kind === "dismiss"}
+            {@const dismiss = presentation.primary}
             <Button
               variant="ghost"
               size="xs"
-              class="text-destructive hover:bg-destructive/10 hover:text-destructive"
-              onclick={() => service.clearError()}
+              class="text-secondary"
+              onclick={() => void runAction(dismiss)}
             >
-              {m.ai_builder_dismiss()}
+              {dismiss.label}
             </Button>
           {/if}
         </div>

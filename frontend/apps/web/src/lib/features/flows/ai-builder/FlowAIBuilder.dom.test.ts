@@ -29,6 +29,7 @@ import type { StructuredQuestion } from "./structuredQuestionAnswer";
 // ---- Routes and fixtures ----------------------------------------------------
 
 const SESSIONS_ROUTE = "/api/v1/flows/ai-builder/sessions";
+const CLIENT_ERRORS_ROUTE = "/api/v1/flows/ai-builder/client-errors";
 // A published version with one run and nothing to point at: enough for the
 // findings screen to own the phase.
 const REVIEW_PACKET = {
@@ -289,6 +290,10 @@ interface FetchOptions {
   plans?: Record<string, unknown>;
   /** Session ids whose GET rejects once, then succeeds. */
   failOnce?: string[];
+  /** The client error endpoint rejects every report. */
+  telemetryDown?: boolean;
+  /** Session ids whose Nth GET (1-based) rejects. */
+  failRead?: Record<string, number>;
 }
 
 function makeFetch(options: FetchOptions = {}) {
@@ -300,6 +305,8 @@ function makeFetch(options: FetchOptions = {}) {
   const reads = new Map<string, number>();
   const failOnce = new Set(options.failOnce ?? []);
   const posts: Record<string, unknown>[] = [];
+  /** Client error observations, in the order the driver sent them. */
+  const reports: Record<string, unknown>[] = [];
   const fetch = vi.fn(
     async (
       path: string,
@@ -331,6 +338,8 @@ function makeFetch(options: FetchOptions = {}) {
         if (!entry) throw new Error(`Unknown session ${id}`);
         const count = (reads.get(id) ?? 0) + 1;
         reads.set(id, count);
+        if (options.failRead?.[id] === count)
+          throw new Error("The session could not be refreshed.");
         return Array.isArray(entry) ? entry[Math.min(count, entry.length) - 1] : entry;
       }
       if (path === PLAN_ROUTE) {
@@ -338,10 +347,15 @@ function makeFetch(options: FetchOptions = {}) {
         if (!plan) throw new Error("Unknown plan");
         return plan;
       }
+      if (path === CLIENT_ERRORS_ROUTE) {
+        if (options.telemetryDown) throw new Error("telemetry down");
+        reports.push(init?.requestBody?.["application/json"] ?? {});
+        return undefined;
+      }
       throw new Error(`Unexpected request: ${path}`);
     }
   );
-  return { fetch, posts };
+  return { fetch, posts, reports };
 }
 
 interface StreamEvent {
@@ -2483,23 +2497,30 @@ describe("FlowAIBuilder confirm, build and review", () => {
   });
 
   // Every public failure class the server can report without a plan, plus the
-  // one class only this client can see (a dropped connection). The copy must
-  // name what actually happened and the actions must follow the turn state.
+  // one class only this client can see (a dropped connection). The card must
+  // name what happened, offer the one step the driver allows, and observe
+  // the failure once with the class shown and the user's first selection.
   const generationFailures: {
     name: string;
     error: Record<string, unknown> | Error;
-    latestTurn: "committed" | "provider_outcome_unknown" | null;
-    title: () => string;
-    body: () => string;
-    retry: "none" | "acknowledged";
+    latestTurn: "committed" | "processing" | "provider_outcome_unknown";
+    kind: string;
+    heading: () => string;
+    cause: () => string;
+    primary: () => string;
+    secondary: (() => string) | null;
+    records: string;
   }[] = [
     {
-      name: "a connection this client lost",
+      name: "a connection this client lost while the turn still runs",
       error: Object.assign(new Error("Failed to fetch"), { status: 0, stage: "CONNECTION" }),
-      latestTurn: null,
-      title: () => m.ai_builder_generation_failed_title(),
-      body: () => m.ai_builder_generation_failed_network(),
-      retry: "none"
+      latestTurn: "processing",
+      kind: "network_loss",
+      heading: () => m.ai_builder_failure_heading_network_loss(),
+      cause: () => m.ai_builder_failure_cause_network_loss_turn_active(),
+      primary: () => m.ai_builder_failure_action_refresh(),
+      secondary: null,
+      records: "refresh_requested"
     },
     {
       name: "a provider rejection",
@@ -2515,9 +2536,12 @@ describe("FlowAIBuilder confirm, build and review", () => {
         }
       },
       latestTurn: "committed",
-      title: () => m.ai_builder_generation_failed_title(),
-      body: () => m.ai_builder_generation_failed_provider_rejected(),
-      retry: "none"
+      kind: "provider_rejected",
+      heading: () => m.ai_builder_failure_heading_provider_rejected(),
+      cause: () => m.ai_builder_failure_cause_provider_rejected(),
+      primary: () => m.ai_builder_turn_retry(),
+      secondary: () => m.ai_builder_failure_action_clarify(),
+      records: "resend_requested"
     },
     {
       name: "an exhausted request budget",
@@ -2528,9 +2552,12 @@ describe("FlowAIBuilder confirm, build and review", () => {
         details: { another_call_permitted: false, retry_scope: "new_turn" }
       },
       latestTurn: "committed",
-      title: () => m.ai_builder_generation_failed_title(),
-      body: () => m.ai_builder_generation_failed_request_budget(),
-      retry: "none"
+      kind: "request_budget_exhausted",
+      heading: () => m.ai_builder_failure_heading_request_budget_exhausted(),
+      cause: () => m.ai_builder_failure_cause_request_budget_exhausted(),
+      primary: () => m.ai_builder_failure_action_shorten(),
+      secondary: null,
+      records: "conversation_opened"
     },
     {
       name: "a truncated model answer",
@@ -2541,9 +2568,12 @@ describe("FlowAIBuilder confirm, build and review", () => {
         phase: "proposal"
       },
       latestTurn: "committed",
-      title: () => m.ai_builder_generation_failed_title(),
-      body: () => m.ai_builder_generation_failed_output_too_long(),
-      retry: "none"
+      kind: "output_too_long",
+      heading: () => m.ai_builder_failure_heading_output_too_long(),
+      cause: () => m.ai_builder_failure_cause_output_too_long(),
+      primary: () => m.ai_builder_failure_action_shorten(),
+      secondary: () => m.ai_builder_turn_retry(),
+      records: "conversation_opened"
     },
     {
       name: "an invalid proposal after repairs",
@@ -2554,9 +2584,12 @@ describe("FlowAIBuilder confirm, build and review", () => {
         phase: "self_correction"
       },
       latestTurn: "committed",
-      title: () => m.ai_builder_generation_failed_title(),
-      body: () => m.ai_builder_generation_failed_invalid_proposal(),
-      retry: "none"
+      kind: "invalid_proposal",
+      heading: () => m.ai_builder_failure_heading_invalid_proposal(),
+      cause: () => m.ai_builder_failure_cause_invalid_proposal(),
+      primary: () => m.ai_builder_failure_action_clarify(),
+      secondary: () => m.ai_builder_turn_retry(),
+      records: "conversation_opened"
     },
     {
       name: "an unknown provider outcome",
@@ -2572,9 +2605,12 @@ describe("FlowAIBuilder confirm, build and review", () => {
         }
       },
       latestTurn: "provider_outcome_unknown",
-      title: () => m.ai_builder_turn_provider_outcome_unknown_title(),
-      body: () => m.ai_builder_turn_provider_outcome_unknown_description(),
-      retry: "acknowledged"
+      kind: "provider_outcome_unknown",
+      heading: () => m.ai_builder_failure_heading_provider_outcome_unknown(),
+      cause: () => m.ai_builder_failure_cause_provider_outcome_unknown(),
+      primary: () => m.ai_builder_turn_retry_with_cost_acknowledgement(),
+      secondary: null,
+      records: "retry_with_acknowledgement_requested"
     },
     {
       name: "any other server failure, quoted as sent",
@@ -2584,96 +2620,181 @@ describe("FlowAIBuilder confirm, build and review", () => {
         message: "Modellen svarade inte i tid."
       },
       latestTurn: "committed",
-      title: () => m.ai_builder_generation_failed_title(),
-      body: () => "Modellen svarade inte i tid.",
-      retry: "none"
+      kind: "other",
+      heading: () => m.ai_builder_failure_heading_other_generation(),
+      cause: () => "Modellen svarade inte i tid.",
+      primary: () => m.ai_builder_turn_retry(),
+      secondary: () => m.ai_builder_failure_action_clarify(),
+      records: "resend_requested"
     }
   ];
 
-  it.each(generationFailures)(
-    "shows one truthful failure surface for $name",
-    async ({ error, latestTurn, title, body, retry }) => {
-      // The authoritative refresh after the failure returns the real
-      // transcript (task, summary, confirmation) and the turn's final state.
-      const failedSession = makeSession({
-        latest_plan_id: null,
-        conversation: planSession().conversation,
-        latest_turn:
-          latestTurn === null
-            ? null
-            : {
-                client_turn_id: TURN_ID,
-                state: latestTurn,
-                user_message_id: "11111111-1111-4111-8111-111111111112",
-                error: null,
-                requires_duplicate_provider_spend_acknowledgement:
-                  latestTurn === "provider_outcome_unknown",
-                retry_request:
-                  latestTurn === "provider_outcome_unknown"
-                    ? {
-                        client_turn_id: TURN_ID,
-                        message: "",
-                        ui_language: "sv",
-                        acknowledge_duplicate_provider_spend: false
-                      }
-                    : null
-              }
-      });
-      const { fetch } = makeFetch({ sessions: [[makeSession(), failedSession]] });
-      const { stream, calls } = makeStream((index) =>
-        index === 0 ? [textEvent("Här är min tolkning."), summaryEvent(SUMMARY)] : "hold"
-      );
-      renderShell({ fetch, stream });
-      await sendTask();
-      await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
-      await fireEvent.click(button(m.ai_builder_confirm_action()));
-      await waitFor(() => expect(calls).toHaveLength(2));
-
-      calls[1]!.emit([statusEvent("architecture_committed")]);
-      if (error instanceof Error) {
-        calls[1]!.fail(error);
-      } else {
-        calls[1]!.emit([
-          {
-            event: "error",
-            data: JSON.stringify({
-              schema_version: 2,
-              phase: "planner",
-              eneo_error_code: 9000,
-              request_id: "req-1",
-              ...error
-            })
-          }
-        ]);
-        calls[1]!.finish();
+  async function driveGenerationFailure(
+    error: Record<string, unknown> | Error,
+    latestTurn: "committed" | "processing" | "provider_outcome_unknown",
+    fetchOptions: Partial<FetchOptions> = {}
+  ) {
+    // The authoritative refresh after the failure returns the real
+    // transcript (task, summary, confirmation) and the turn's final state,
+    // with the retained request the server can send again.
+    const failedSession = makeSession({
+      latest_plan_id: null,
+      conversation: planSession().conversation,
+      latest_turn: {
+        client_turn_id: TURN_ID,
+        state: latestTurn,
+        user_message_id: "11111111-1111-4111-8111-111111111112",
+        error: null,
+        requires_duplicate_provider_spend_acknowledgement:
+          latestTurn === "provider_outcome_unknown",
+        retry_request: {
+          client_turn_id: TURN_ID,
+          message: "",
+          ui_language: "sv",
+          acknowledge_duplicate_provider_spend: false
+        }
       }
+    });
+    const { fetch, reports } = makeFetch({
+      sessions: [[makeSession(), failedSession]],
+      ...fetchOptions
+    });
+    const { stream, calls } = makeStream((index) =>
+      index === 0 ? [textEvent("Här är min tolkning."), summaryEvent(SUMMARY)] : "hold"
+    );
+    renderShell({ fetch, stream });
+    await sendTask();
+    await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
+    await fireEvent.click(button(m.ai_builder_confirm_action()));
+    await waitFor(() => expect(calls).toHaveLength(2));
+
+    calls[1]!.emit([statusEvent("architecture_committed")]);
+    if (error instanceof Error) {
+      calls[1]!.fail(error);
+    } else {
+      calls[1]!.emit([
+        {
+          event: "error",
+          data: JSON.stringify({
+            schema_version: 2,
+            phase: "planner",
+            eneo_error_code: 9000,
+            request_id: "req-1",
+            ...error
+          })
+        }
+      ]);
+      calls[1]!.finish();
+    }
+    return { reports, calls };
+  }
+
+  it.each(generationFailures)(
+    "shows one assistive failure card for $name",
+    async ({ error, latestTurn, kind, heading, cause, primary, secondary, records }) => {
+      const { reports } = await driveGenerationFailure(error, latestTurn);
 
       // The skeleton must never hide a failed generation: exactly one surface
-      // names it, with the class the server reported and the facts that hold.
-      expect(await screen.findByText(new RegExp(escape(title())))).toBeTruthy();
+      // names it, in the user's words, with the facts that still hold.
+      const headingEl = await screen.findByRole("heading", { name: heading() });
       expect(screen.queryByRole("heading", { name: m.ai_builder_build_title() })).toBeNull();
-      // The turn alert that carried the error while the stream settled has
-      // left by now; the failure surface is the only place that names it.
-      await waitFor(() => expect(screen.getAllByText(body())).toHaveLength(1));
-      expect(screen.getByText(m.ai_builder_generation_failed_preserved_create())).toBeTruthy();
-      expect(screen.queryByText(m.ai_builder_generation_failed_network())).toEqual(
-        body() === m.ai_builder_generation_failed_network() ? expect.anything() : null
-      );
+      expect(screen.getAllByText(new RegExp(escape(cause())))).toHaveLength(1);
+      expect(
+        screen.getByText(new RegExp(escape(m.ai_builder_failure_preserved_create())))
+      ).toBeTruthy();
+      // The way back to the transcript is the header's, not a third button.
+      expect(screen.queryByRole("button", { name: m.ai_builder_show_conversation() })).toBeNull();
 
-      const plainRetry = screen.queryByRole("button", { name: m.ai_builder_turn_retry() });
-      const acknowledgedRetry = screen.queryByRole("button", {
-        name: m.ai_builder_turn_retry_with_cost_acknowledgement()
+      // Exactly the actions the driver allows, primary first.
+      const card = headingEl.closest<HTMLElement>("[role='status']")!;
+      const actions = within(card)
+        .getAllByRole("button")
+        .map((element) => element.textContent?.trim())
+        .filter((label) => label !== m.ai_builder_copy_technical_details());
+      expect(actions).toEqual([primary(), ...(secondary ? [secondary()] : [])]);
+
+      // One observation, with the class the user saw, then the first
+      // selection under the same identity, and nothing more.
+      await waitFor(() => expect(reports).toHaveLength(1));
+      const observed = reports[0]!;
+      expect(observed.client_event_id).toMatch(/^[0-9a-f-]{36}$/);
+      expect(observed).toMatchObject({ surface: "generation", presented_as: kind });
+      expect(observed).not.toHaveProperty("message");
+
+      await fireEvent.click(within(card).getByRole("button", { name: primary() }));
+      await waitFor(() => expect(reports).toHaveLength(2));
+      expect(reports[1]).toMatchObject({
+        client_event_id: observed.client_event_id,
+        first_action: records
       });
-      expect(plainRetry).toBeNull();
-      if (retry === "acknowledged") {
-        expect(acknowledgedRetry).toBeTruthy();
-      } else {
-        expect(acknowledgedRetry).toBeNull();
-        expect(screen.getByText(m.ai_builder_generation_failed_new_turn())).toBeTruthy();
-      }
-      expect(screen.getByRole("button", { name: m.ai_builder_show_conversation() })).toBeTruthy();
     }
   );
+
+  it("observes a restored committed failure once, as what the card shows", async () => {
+    // A failure the server persisted with the turn is displayed after a
+    // resume: it gets its own observation identity when the card shows it.
+    const restored = makeSession({
+      session_id: "s-restored",
+      latest_plan_id: null,
+      conversation: planSession().conversation,
+      latest_turn: {
+        client_turn_id: TURN_ID,
+        state: "committed",
+        user_message_id: "11111111-1111-4111-8111-111111111112",
+        error: {
+          schema_version: 2,
+          code: "planner_output_too_long",
+          category: "upstream",
+          message: "The AI planner output was cut off.",
+          phase: "proposal",
+          eneo_error_code: 9000,
+          request_id: "req-restored"
+        },
+        requires_duplicate_provider_spend_acknowledgement: false,
+        retry_request: {
+          client_turn_id: TURN_ID,
+          message: "",
+          ui_language: "sv",
+          acknowledge_duplicate_provider_spend: false
+        }
+      }
+    });
+    const { fetch, reports } = makeFetch({ sessions: [restored] });
+    renderShell({ fetch, stream: makeStream().stream, resumeSessionId: "s-restored" });
+
+    await screen.findByRole("heading", {
+      name: m.ai_builder_failure_heading_output_too_long()
+    });
+    await waitFor(() => expect(reports).toHaveLength(1));
+    expect(reports[0]).toMatchObject({
+      code: "planner_output_too_long",
+      request_id: "req-restored",
+      surface: "generation",
+      presented_as: "output_too_long"
+    });
+  });
+
+  it("keeps recovery responsive when the telemetry endpoint is down", async () => {
+    const { reports, calls } = await driveGenerationFailure(
+      {
+        code: "planner_upstream_error",
+        category: "upstream",
+        message: "The AI provider rejected this request.",
+        details: { provider_disposition: "known_rejection", retry_scope: "new_turn" }
+      },
+      "committed",
+      { telemetryDown: true }
+    );
+    await screen.findByRole("heading", { name: m.ai_builder_failure_heading_provider_rejected() });
+
+    await fireEvent.click(button(m.ai_builder_turn_retry()));
+
+    // The resend went out as a new turn; no report ever landed.
+    await waitFor(() => expect(calls).toHaveLength(3));
+    expect(calls[2]!.body.client_turn_id).not.toBe(TURN_ID);
+    expect(reports).toHaveLength(0);
+    calls[2]!.finish();
+  });
 
   it("opens the review surface when the plan arrives", async () => {
     await driveToConfirm(() => [planEvent(), usageEvent()]);
@@ -3230,7 +3351,9 @@ describe("FlowAIBuilder turn recovery", () => {
     renderShell({ fetch, stream, resumeSessionId: "s-turn" });
 
     expect(
-      await screen.findByText(m.ai_builder_turn_provider_outcome_unknown_description())
+      await screen.findByText(
+        new RegExp(escape(m.ai_builder_failure_cause_provider_outcome_unknown()))
+      )
     ).toBeTruthy();
     expect(screen.queryByRole("button", { name: m.ai_builder_turn_retry() })).toBeNull();
     await fireEvent.click(button(m.ai_builder_turn_retry_with_cost_acknowledgement()));
@@ -3239,6 +3362,35 @@ describe("FlowAIBuilder turn recovery", () => {
     expect(calls[0]!.body).toMatchObject({
       client_turn_id: TURN_ID,
       acknowledge_duplicate_provider_spend: true
+    });
+  });
+
+  it("observes a failed reconciliation on the chat surface, once", async () => {
+    // The refresh of a turn still processing fails: the alert shows that
+    // failure, and the observation names the chat surface and the class shown.
+    const [processing] = turnSession("processing");
+    const { fetch, reports } = makeFetch({
+      sessions: [processing!],
+      failRead: { "s-turn": 2 }
+    });
+    renderShell({ fetch, stream: makeStream().stream, resumeSessionId: "s-turn" });
+    expect(await screen.findByText(m.ai_builder_turn_active_title())).toBeTruthy();
+
+    await fireEvent.click(button(m.refresh()));
+
+    expect(await screen.findByText(m.ai_builder_turn_refresh_failed())).toBeTruthy();
+    await waitFor(() => expect(reports).toHaveLength(1));
+    expect(reports[0]).toMatchObject({
+      session_id: "s-turn",
+      surface: "chat",
+      presented_as: "other"
+    });
+    // The first selection lands under the same identity.
+    await fireEvent.click(button(m.ai_builder_failure_action_refresh()));
+    await waitFor(() => expect(reports).toHaveLength(2));
+    expect(reports[1]).toMatchObject({
+      client_event_id: reports[0]!.client_event_id,
+      first_action: "refresh_requested"
     });
   });
 

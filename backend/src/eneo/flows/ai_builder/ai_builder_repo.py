@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import contextlib
 from collections.abc import AsyncGenerator, Mapping
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -196,6 +197,15 @@ def _roles_allowing_flow_edit(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class ClientErrorRecord:
+    """What one client error report did to its row."""
+
+    error_id: UUID
+    outcome: Literal["inserted", "updated"]
+    resolved_session_id: UUID | None
+
+
 class AIBuilderRepository:
     """Persistence layer for builder sessions and plans."""
 
@@ -276,17 +286,32 @@ class AIBuilderRepository:
         category: str,
         code: str,
         request_id: str | None,
-    ) -> tuple[UUID | None, UUID | None]:
-        """Persist one client-observed failure with best-effort deduplication.
+        surface: str | None = None,
+        presented_as: str | None = None,
+        first_action: str | None = None,
+    ) -> ClientErrorRecord | None:
+        """Store one client-observed failure and the facts that arrive later.
 
-        Returns ``(error_id, resolved_session_id)``; ``error_id`` is None when
-        the (tenant, client_event_id) pair was already stored — a replayed
-        report is a no-op, so callers write no second audit row.
+        The first report for a (tenant, client_event_id) inserts the row. A
+        later report for the same row from the same reporter fills only what
+        is still unset: `surface`, `presented_as` and `first_action` (the
+        server stamps `first_action_received_at`). Identity fields and a set
+        action are never overwritten, so a replay, a late initial report
+        after an action, and a conflicting second action are all no-ops.
+        Order does not matter: an action reported before the observation
+        inserts the row with the action already set.
 
-        A session id that does not exist (or belongs to another tenant) is
-        stored as NULL rather than rejected: the failure report must never fail
-        because the thing that failed is gone. The resolved session id is
-        returned so callers audit what was stored, never the raw claim.
+        A report under the same event id from another reporter (a different
+        `user_id` in the same tenant) is ignored rather than rejected: the
+        first reporter owns the observation, and telemetry must never fail
+        the caller over it.
+
+        Returns the row id and whether this report inserted or updated it,
+        or None when it changed nothing. A session id that does not exist
+        (or belongs to another tenant) is stored as NULL rather than
+        rejected: the failure report must never fail because the thing that
+        failed is gone. The resolved session id is returned so callers audit
+        what was stored, never the raw claim.
         """
 
         async with self._transaction():
@@ -300,25 +325,70 @@ class AIBuilderRepository:
                         )
                     )
                 ).scalar_one_or_none()
-            stmt = (
-                pg_insert(BuilderClientErrors)
-                .values(
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                    client_event_id=client_event_id,
-                    session_id=resolved_session_id,
-                    phase=phase,
-                    category=category,
-                    code=code,
-                    request_id=request_id,
-                )
-                .on_conflict_do_nothing(
-                    constraint="uq_builder_client_errors_tenant_event"
-                )
-                .returning(BuilderClientErrors.id)
+            insert_stmt = pg_insert(BuilderClientErrors).values(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                client_event_id=client_event_id,
+                session_id=resolved_session_id,
+                phase=phase,
+                category=category,
+                code=code,
+                request_id=request_id,
+                surface=surface,
+                presented_as=presented_as,
+                first_action=first_action,
+                first_action_received_at=(
+                    sa.func.now() if first_action is not None else None
+                ),
             )
-            error_id = (await self.session.execute(stmt)).scalar_one_or_none()
-            return error_id, resolved_session_id
+            stored = BuilderClientErrors
+            incoming = insert_stmt.excluded
+            fills_a_gap = sa.or_(
+                sa.and_(stored.surface.is_(None), incoming.surface.is_not(None)),
+                sa.and_(
+                    stored.presented_as.is_(None), incoming.presented_as.is_not(None)
+                ),
+                sa.and_(
+                    stored.first_action.is_(None), incoming.first_action.is_not(None)
+                ),
+            )
+            stmt = insert_stmt.on_conflict_do_update(
+                constraint="uq_builder_client_errors_tenant_event",
+                set_={
+                    "surface": sa.func.coalesce(stored.surface, incoming.surface),
+                    "presented_as": sa.func.coalesce(
+                        stored.presented_as, incoming.presented_as
+                    ),
+                    "first_action": sa.func.coalesce(
+                        stored.first_action, incoming.first_action
+                    ),
+                    "first_action_received_at": sa.case(
+                        (
+                            sa.and_(
+                                stored.first_action.is_(None),
+                                incoming.first_action.is_not(None),
+                            ),
+                            sa.func.now(),
+                        ),
+                        else_=stored.first_action_received_at,
+                    ),
+                },
+                where=sa.and_(
+                    stored.user_id.is_not_distinct_from(incoming.user_id),
+                    fills_a_gap,
+                ),
+            ).returning(
+                BuilderClientErrors.id,
+                sa.literal_column("(xmax = 0)", type_=sa.Boolean).label("inserted"),
+            )
+            row = (await self.session.execute(stmt)).one_or_none()
+            if row is None:
+                return None
+            return ClientErrorRecord(
+                error_id=row.id,
+                outcome="inserted" if row.inserted else "updated",
+                resolved_session_id=resolved_session_id,
+            )
 
     async def find_latest_resumable_session(
         self,

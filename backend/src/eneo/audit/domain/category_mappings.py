@@ -134,6 +134,7 @@ CATEGORY_MAPPINGS = {
     ActionType.AI_BUILDER_ATTACHMENT_DETACHED.value: "user_actions",
     ActionType.AI_BUILDER_SESSION_CANCELLED.value: "user_actions",
     ActionType.AI_BUILDER_CLIENT_ERROR_REPORTED.value: "user_actions",
+    ActionType.AI_BUILDER_CLIENT_ERROR_OUTCOME_RECORDED.value: "user_actions",
     ActionType.TRANSCRIPTION_MODEL_DELETED.value: "user_actions",
     ActionType.TRANSCRIPTION_MODEL_MIGRATED.value: "user_actions",
     ActionType.IMAGE_MODEL_CREATED.value: "user_actions",
