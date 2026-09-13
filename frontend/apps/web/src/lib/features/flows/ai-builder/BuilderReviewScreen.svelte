@@ -18,7 +18,11 @@
   import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import FlowAIBuilderDiagnosticCopyButton from "./FlowAIBuilderDiagnosticCopyButton.svelte";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
-  import { describeFailure, type FailureAction } from "./aiBuilderFailurePresentation";
+  import {
+    describeFailure,
+    type FailureAction,
+    type FailurePresentation
+  } from "./aiBuilderFailurePresentation";
   import type {
     AIBuilderPlanEditContext,
     AIBuilderStatus,
@@ -547,6 +551,16 @@
       : null
   );
   const generationFailureBusy = $derived(service.isStreaming || service.isRecoveringLatestTurn);
+  // A retry clears the error before the stream starts, which would destroy
+  // the card mid-close. The last presentation stays on screen while the
+  // card is closing, so the close moment plays on the words it had.
+  let closingSnapshot = $state<FailurePresentation | null>(null);
+  $effect(() => {
+    if (generationFailure) closingSnapshot = generationFailure;
+  });
+  const shownGenerationFailure = $derived(
+    generationFailure ?? (closingGenerationFailure ? closingSnapshot : null)
+  );
 
   // The displayed failure is observed once, with the class the user saw; the
   // driver reuses the identity across rerenders and refreshes of the same one.
@@ -1664,11 +1678,11 @@
   >
     <div class="w-full max-w-[43.75rem]">{@render conflictCard()}</div>
   </div>
-{:else if showGenerationFailure && generationFailure}
+{:else if showGenerationFailure && shownGenerationFailure}
   <div
-    class="bg-secondary flex flex-1 justify-center px-7 pt-8 pb-10 max-lg:px-5 max-md:px-4 max-sm:pt-5"
+    class="bg-secondary flex flex-1 justify-center px-7 pt-6 pb-10 max-lg:px-5 max-md:px-4 max-sm:pt-4"
   >
-    <div class="w-full max-w-[43.75rem]">
+    <div class="w-full max-w-[53.75rem] 2xl:max-w-[62.5rem]">
       <div
         bind:this={generationCardEl}
         class="t-panel-slide border-default bg-primary rounded-xl border p-6 max-sm:p-4"
@@ -1683,22 +1697,18 @@
           />
           <div class="max-w-[60ch] min-w-0">
             <h2
-              class="t-text-swap failure-copy text-primary text-[0.9375rem] leading-snug font-bold text-balance"
-              class:is-enter-start={!generationCardOpen}
+              class="text-primary text-[0.9375rem] leading-snug font-bold text-balance"
               tabindex="-1"
               data-builder-screen-heading
             >
-              {generationFailure.heading}
+              {shownGenerationFailure.heading}
             </h2>
-            <p
-              class="t-text-swap failure-copy text-secondary mt-1.5 text-[0.8125rem] leading-relaxed text-pretty"
-              class:is-enter-start={!generationCardOpen}
-            >
-              {generationFailure.consequence}
+            <p class="text-secondary mt-1.5 text-[0.8125rem] leading-relaxed text-pretty">
+              {shownGenerationFailure.consequence}
             </p>
             <div class="mt-5 flex flex-wrap items-center gap-2">
-              {#if generationFailure.primary}
-                {@const primary = generationFailure.primary}
+              {#if shownGenerationFailure.primary}
+                {@const primary = shownGenerationFailure.primary}
                 <Button
                   size="sm"
                   disabled={generationFailureBusy}
@@ -1707,8 +1717,8 @@
                   {primary.label}
                 </Button>
               {/if}
-              {#if generationFailure.secondary}
-                {@const secondary = generationFailure.secondary}
+              {#if shownGenerationFailure.secondary}
+                {@const secondary = shownGenerationFailure.secondary}
                 <Button
                   variant="outline"
                   size="sm"
@@ -1720,8 +1730,8 @@
               {/if}
             </div>
             <div class="mt-5 flex flex-wrap items-center gap-x-3 gap-y-1">
-              {#if generationFailure.technical}
-                {@const technical = generationFailure.technical}
+              {#if shownGenerationFailure.technical}
+                {@const technical = shownGenerationFailure.technical}
                 <p class="text-secondary text-xs leading-relaxed select-text">
                   <span>{m.ai_builder_failure_technical_code({ code: technical.code })}</span>
                   {#if technical.requestId}
@@ -1764,9 +1774,8 @@
 {/if}
 
 <style lang="postcss">
-  /* transitions-dev: panel reveal (07) for the failure card container and
-     text states swap (04) for its heading and body. The tokens live in
-     app.css; only the enter phase of the swap is used here. */
+  /* transitions-dev: panel reveal (07) for the failure card, the one authored
+     moment of this screen. The tokens live in app.css. */
   .t-panel-slide {
     transform: translateY(var(--panel-translate-y));
     opacity: 0;
@@ -1788,29 +1797,8 @@
       opacity var(--panel-open-dur) var(--panel-ease),
       filter var(--panel-open-dur) var(--panel-ease);
   }
-  .t-text-swap {
-    display: inline-block;
-    transform: translateY(0);
-    filter: blur(0);
-    opacity: 1;
-    transition:
-      transform var(--text-swap-dur) var(--text-swap-ease),
-      filter var(--text-swap-dur) var(--text-swap-ease),
-      opacity var(--text-swap-dur) var(--text-swap-ease);
-    will-change: transform, filter, opacity;
-  }
-  .t-text-swap.is-enter-start {
-    transform: translateY(var(--text-swap-translate-y));
-    filter: blur(var(--text-swap-blur));
-    opacity: 0;
-    transition: none;
-  }
-  .failure-copy {
-    display: block;
-  }
   @media (prefers-reduced-motion: reduce) {
-    .t-panel-slide,
-    .t-text-swap {
+    .t-panel-slide {
       transition: none !important;
       transform: none !important;
       filter: none !important;

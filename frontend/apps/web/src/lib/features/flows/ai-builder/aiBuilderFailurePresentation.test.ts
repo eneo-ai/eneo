@@ -198,7 +198,7 @@ describe("describeFailure", () => {
     expect(presentation.consequence).toContain(
       m.ai_builder_turn_failed_before_provider_description()
     );
-    expect(presentation.consequence).toContain("No planner budget.");
+    expect(presentation.consequence).not.toContain("No planner budget.");
     expect(presentation.primary).toMatchObject({
       kind: "retry_same_turn",
       records: "retry_requested"

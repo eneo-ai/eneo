@@ -181,10 +181,9 @@ function cause(
     case "provider_outcome_unknown":
       return m.ai_builder_failure_cause_provider_outcome_unknown();
     case "failed_before_provider":
-      // The server's own words follow the fact that nothing was spent.
-      return error
-        ? `${m.ai_builder_turn_failed_before_provider_description()} ${error.message}`
-        : m.ai_builder_turn_failed_before_provider_description();
+      // The fact that nothing was spent stands alone; the code is in the
+      // technical line and the server's words in the diagnostic report.
+      return m.ai_builder_turn_failed_before_provider_description();
     case "network_loss":
       if (capabilities.turnActive) return m.ai_builder_failure_cause_network_loss_turn_active();
       return surface === "generation"

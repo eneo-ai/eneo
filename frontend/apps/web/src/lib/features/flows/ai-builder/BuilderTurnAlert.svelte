@@ -197,6 +197,18 @@
               {m.refresh()}
             </Button>
           {/if}
+          {#if presentation?.technical}
+            {@const technical = presentation.technical}
+            <p class="text-secondary text-xs leading-relaxed select-text">
+              <span>{m.ai_builder_failure_technical_code({ code: technical.code })}</span>
+              {#if technical.requestId}
+                <span aria-hidden="true"> · </span>
+                <span
+                  >{m.ai_builder_failure_technical_request({ request: technical.requestId })}</span
+                >
+              {/if}
+            </p>
+          {/if}
           {#if streamErrorDiagnosticReport}
             <FlowAIBuilderDiagnosticCopyButton
               report={streamErrorDiagnosticReport}

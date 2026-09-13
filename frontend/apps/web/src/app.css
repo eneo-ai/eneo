@@ -198,7 +198,7 @@
 /* ------------------------------------------------------------------ */
 /* One scale for durations, easings, distances and blur. Components    */
 /* reference these by name; the per-transition variables below map the */
-/* installed snippets (text states swap, panel reveal) onto the scale. */
+/* installed snippet (panel reveal) onto the scale.                     */
 :root {
   --duration-stagger: 40ms;
   --duration-micro: 80ms;
@@ -224,11 +224,6 @@
   --blur-medium: 3px;
   --blur-large: 8px;
 
-  /* Text states swap (04): the failure card's heading and body entering. */
-  --text-swap-dur: var(--duration-quick);
-  --text-swap-translate-y: var(--distance-micro);
-  --text-swap-blur: var(--blur-small);
-  --text-swap-ease: var(--ease-in-out);
   /* Panel reveal (07): the failure card container opening and closing. */
   --panel-open-dur: var(--duration-slow);
   --panel-close-dur: var(--duration-medium);
