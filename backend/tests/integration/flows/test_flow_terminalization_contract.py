@@ -853,3 +853,56 @@ async def test_terminalization_rolls_back_when_audit_outbox_insert_fails(
         )
         assert outbox_count == 0
         assert _flow_lifecycle_records(caplog) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_tenant_sweeps_survive_a_tenant_row_the_model_refuses(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    # A tenants.state value written outside the code (the column is a free
+    # string) must not stop the platform sweep for every other tenant.
+    from eneo.database.tables.tenant_table import Tenants
+
+    async with sessionmanager.session() as setup_session, setup_session.begin():
+        run, _flow, _run_repo = await _create_running_run(
+            session=setup_session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        run_id = run.id
+        tenant_id = admin_user.tenant_id
+        await setup_session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .values(updated_at=datetime.now(timezone.utc) - timedelta(hours=3))
+        )
+        await setup_session.execute(
+            sa.insert(Tenants).values(
+                name="tenant-with-a-state-the-model-refuses",
+                state="inactive",
+                quota_limit=0,
+            )
+        )
+
+    result = await flow_runtime_tasks._reconcile_stale_running_runs_all_tenants(
+        limit=10
+    )
+
+    assert result["status"] == "ok"
+    assert result["reconciled"] >= 1
+    assert (
+        await flow_runtime_tasks._redispatch_stale_queued_runs_all_tenants(limit=10)
+    )["status"] == "ok"
+    assert (
+        await flow_runtime_tasks._reconcile_expired_review_checkpoints_all_tenants(
+            limit=10
+        )
+    )["status"] == "ok"
