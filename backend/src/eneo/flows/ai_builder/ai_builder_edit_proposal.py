@@ -44,6 +44,7 @@ from eneo.flows.ai_builder.ai_builder_flow_review import (
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     ResolvedAIBuilderEditContext,
+    is_saved_step_revision,
     validate_scoped_edit_proposal,
     validate_scoped_plan_revision,
 )
@@ -76,11 +77,19 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
 )
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
+from eneo.flows.ai_builder.ai_builder_validation_references import (
+    iter_step_template_expressions,
+)
+from eneo.flows.ai_builder.ai_builder_validator import validate_spec
 from eneo.flows.ai_builder.planning_state import PlanningState
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.flows.domain.flow import FlowStep
 from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
+from eneo.flows.input_binding_contract_rules import (
+    source_ref_bindings,
+)
 from eneo.flows.step_lineage import existing_step_ref_for_order
+from eneo.flows.template_reference_analyzer import analyze_template
 from eneo.main.exceptions import BadRequestException
 from eneo.main.logging import get_logger
 
@@ -182,6 +191,11 @@ async def process_edit_arguments(
         existing_step_ref_for_order(step.step_order)
         for step in sorted(flow.steps, key=lambda step: step.step_order)
     ]
+    saved_step_revision = is_saved_step_revision(
+        context=plan_edit_context,
+        prior_spec=prior_spec_for_revision,
+        current_step_refs=current_step_refs,
+    )
     # Judged on what the model wrote, before the server fills in the fields it
     # owns: an omitted form_fields that the server then preserves must not read
     # as the model having changed them.
@@ -194,15 +208,16 @@ async def process_edit_arguments(
     )
     if review_feedback is not None:
         return CorrectableFailure(feedback=review_feedback, kind="quality")
-    proposal = _apply_server_owned_input_fields(
-        authored_proposal, planning_state=planning_state
-    )
     scoped_proposal_feedback = validate_scoped_edit_proposal(
         context=plan_edit_context,
-        proposal=proposal,
+        proposal=authored_proposal,
+        saved_step_revision=saved_step_revision,
     )
     if scoped_proposal_feedback is not None:
         return CorrectableFailure(feedback=scoped_proposal_feedback, kind="quality")
+    proposal = _apply_server_owned_input_fields(
+        authored_proposal, planning_state=planning_state
+    )
     ui_language = compile_context.ui_language if compile_context is not None else None
 
     def compile_and_prepare(
@@ -220,6 +235,7 @@ async def process_edit_arguments(
                 current_metadata_json=flow.metadata_json,
                 assistant_snapshots=assistant_snapshots,
                 resource_catalog=resource_catalog,
+                revision_spec=prior_spec_for_revision if saved_step_revision else None,
                 requested_primary_runtime_input_type=(
                     compile_context.runtime_input_type
                     if compile_context is not None
@@ -332,6 +348,16 @@ async def process_edit_arguments(
 
     compiled_spec = candidate.spec
     validation = candidate.validation
+    if saved_step_revision:
+        assert plan_edit_context is not None and prior_spec_for_revision is not None
+        consumer_failure = _validate_saved_step_consumers(
+            proposal=authored_proposal,
+            target_ref=plan_edit_context.target_existing_step_ref,
+            prior_spec=prior_spec_for_revision,
+            proposed_spec=compiled_spec,
+        )
+        if consumer_failure is not None:
+            return consumer_failure
     if validation.errors:
         error_messages = [err.message for err in validation.errors]
         return CorrectableFailure(
@@ -377,6 +403,7 @@ async def process_edit_arguments(
 
     scoped_rejection = validate_scoped_plan_revision(
         target_kind=TargetKind.EDIT,
+        saved_step_revision=saved_step_revision,
         context=plan_edit_context,
         prior_spec=prior_spec_for_revision,
         proposed_spec=compiled_spec,
@@ -466,3 +493,86 @@ def _format_edit_compilation_request_error(exc: BadRequestException) -> str:
             f"{overlap_refs}."
         )
     return f"Edit validation failed: {exc}"
+
+
+def _validate_saved_step_consumers(
+    *,
+    proposal: OrderedEditProposal,
+    target_ref: str | None,
+    prior_spec: FlowDraftSpecCore,
+    proposed_spec: FlowDraftSpecCore,
+) -> CorrectableFailure | None:
+    if not any(
+        step.kind == "modify"
+        and step.existing_step_ref == target_ref
+        and step.model_fields_set - {"kind", "existing_step_ref"}
+        for step in proposal.steps
+    ):
+        return None
+    proposed_target = next(
+        (step for step in proposed_spec.steps if step.existing_step_ref == target_ref),
+        None,
+    )
+    if proposed_target is None:
+        return None
+    # Keep entries carry no model contribution. Validate the target against the
+    # prior consumers without attributing compiler housekeeping to the model.
+    target_effect = prior_spec.model_copy(
+        update={
+            "steps": [
+                proposed_target if step.existing_step_ref == target_ref else step
+                for step in prior_spec.steps
+            ],
+        }
+    )
+    prior_errors = set(validate_spec(prior_spec).errors)
+    errors = [
+        error
+        for error in validate_spec(target_effect).errors
+        if error not in prior_errors
+    ]
+    if errors:
+        return CorrectableFailure(
+            feedback="Selected-step consumer validation failed: "
+            + "; ".join(error.message for error in errors),
+            kind="validation",
+            codes=frozenset(error.code for error in errors),
+        )
+    prior_target = next(
+        step for step in prior_spec.steps if step.existing_step_ref == target_ref
+    )
+    if (
+        prior_target.output_contract is None
+        or proposed_target.output_contract is not None
+    ):
+        return None
+    step_refs = {
+        step.plan_step_ref: order for order, step in enumerate(prior_spec.steps, 1)
+    }
+    target_order = step_refs[prior_target.plan_step_ref]
+    for consumer in prior_spec.steps:
+        if consumer.existing_step_ref == target_ref:
+            continue
+        uses_structured_target = any(
+            source.step_ref == prior_target.plan_step_ref
+            and source.output == "structured"
+            for source in source_ref_bindings(consumer.input_bindings)
+        ) or any(
+            reference.step_order == target_order
+            and (
+                reference.tail == "output.structured"
+                or reference.tail.startswith("output.structured.")
+            )
+            for expression in iter_step_template_expressions(consumer)
+            for reference in analyze_template(
+                "{{ " + expression + " }}", step_refs=step_refs, form_field_names=set()
+            )
+        )
+        if uses_structured_target:
+            return CorrectableFailure(
+                feedback=f"Step `{consumer.plan_step_ref}` consumes structured output from `{prior_target.plan_step_ref}`. "
+                "Preserve the producer output_contract, or use a whole-plan edit to revise its consumers.",
+                kind="validation",
+                codes=frozenset({"consumer_requires_output_contract"}),
+            )
+    return None

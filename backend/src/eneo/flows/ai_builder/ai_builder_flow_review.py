@@ -56,6 +56,7 @@ from eneo.flows.ai_builder.ai_builder_flow_review_suggestions import (
     MAX_SUGGESTIONS,
     FlowReviewSuggestionKind,
 )
+from eneo.flows.ai_builder.ai_builder_plan_edit_context import EditOperationPermissions
 from eneo.flows.application.flow_run_access_policy import FlowRunAccessKind
 from eneo.flows.application.flow_run_evidence_bundle import RedactedEvidenceBundle
 from eneo.flows.domain.flow import Flow, FlowRun, FlowRunStatusSnapshot, FlowVersion
@@ -546,7 +547,7 @@ _REVIEW_EDIT_OPERATIONS: dict[str, frozenset[str]] = {
 }
 
 
-class ReviewEditScope(BaseModel):
+class ReviewEditScope(EditOperationPermissions):
     """What a turn that acts on review suggestions may change.
 
     The user picked findings on a screen, not a free edit: the steps they
@@ -556,15 +557,6 @@ class ReviewEditScope(BaseModel):
     (its housekeeping of a persisted shape) is exempt and stays visible in
     the plan the user approves.
     """
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    step_refs: frozenset[str]
-    # Removal is granted by the finding that justifies it, never by the batch:
-    # investigating drift in one step beside duplicated work in another must
-    # not make the drifting step deletable.
-    removable_step_refs: frozenset[str]
-    may_add: bool
 
 
 def review_edit_scope(

@@ -3854,3 +3854,445 @@ async def test_edit_ignores_an_old_mapping_the_replacement_template_no_longer_ha
     terminal = result.compiled.content.spec.steps[-1]
     assert terminal.output_mode is OutputMode.TEMPLATE_FILL
     assert terminal.output_config == {"bindings": {"datum": "{{ datum }}"}}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "authored",
+    [
+        {"flow_name": "Changed flow"},
+        {"flow_description": "Changed description"},
+        {"form_fields": []},
+    ],
+)
+async def test_saved_step_authored_effect_policy_rejects_flow_fields(authored):
+    flow = _flow(_flow_step(step_order=1, user_description="Analyze"))
+    context = ResolvedAIBuilderEditContext(
+        request=AIBuilderSavedFlowStepEditContext(flow_step_id=flow.steps[0].id),
+        scope="step",
+        target_existing_step_ref="existing_step_1",
+    )
+    prior = _prior_spec_for_revision(
+        context=context,
+        prior_plan=None,
+        flow=flow,
+        assistant_snapshots=None,
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=None, available_kbs=None
+        ),
+    )
+    result = await _process(
+        flow=flow,
+        plan_edit_context=context,
+        prior_spec_for_revision=prior,
+        arguments={
+            "plan_rationale": "Improve instructions.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "assistant_spec": {"instructions": "Improved instructions"},
+                }
+            ],
+            **authored,
+        },
+    )
+    assert isinstance(result, CorrectableFailure), result
+    assert "flow" in result.feedback.lower()
+
+
+def _saved_step_consumer_fixture(consumer_kind):
+    contract = {
+        "type": "object",
+        "properties": {
+            "report": {"type": "object", "properties": {"summary": {"type": "string"}}},
+            "items": {
+                "type": "array",
+                "items": {"type": "object", "properties": {"name": {"type": "string"}}},
+            },
+        },
+    }
+    consumer = _flow_step(
+        step_order=2,
+        user_description="Use result",
+        input_source="previous_step",
+        input_bindings={"question": "Independent input"},
+    )
+    consumer_instructions = "Keep these consumer instructions"
+    if consumer_kind == "projection":
+        consumer.input_type = "json"
+        consumer.input_bindings = {
+            "source_refs": [
+                {
+                    "step_ref": "step_1",
+                    "output": "structured",
+                    "field_path": "report.summary",
+                }
+            ]
+        }
+        consumer.input_contract = derive_structured_projection_contract(
+            input_bindings=consumer.input_bindings,
+            source_contracts_by_step_ref={"step_1": contract},
+        )
+    elif consumer_kind == "array":
+        consumer.output_mode = FlowOutputMode.COMPOSE_TEXT
+        consumer.input_bindings = {
+            "source_refs": [
+                {
+                    "step_ref": "step_1",
+                    "output": "structured",
+                    "field_path": "items",
+                    "item_template": "{name}",
+                }
+            ]
+        }
+    elif consumer_kind == "whole":
+        consumer.input_bindings = {"question": "Use {{ step_1.output.structured }}"}
+    elif consumer_kind == "instructions":
+        consumer_instructions += " {{ step_1.output.structured.report.summary }}"
+    elif consumer_kind == "template":
+        consumer = _flow_step(
+            step_order=2,
+            user_description="Fill template",
+            input_source="previous_step",
+            output_mode="template_fill",
+            output_type="docx",
+            input_bindings={"question": "Independent input"},
+            output_config={
+                "template_asset_id": str(uuid4()),
+                "bindings": {
+                    "SUMMARY": "{{ step_1.output.structured.report.summary }}"
+                },
+            },
+        )
+    else:
+        consumer.output_config = {
+            "nested": {"text": "{{ step_1.output.structured.report.summary }}"}
+        }
+    flow = _flow(
+        _flow_step(
+            step_order=1,
+            user_description="Analyze",
+            output_type="json",
+            output_contract=contract,
+        ),
+        consumer,
+    )
+    snapshots = {
+        flow.steps[0].assistant_id: AssistantAuthoringSnapshot(
+            instructions="Analyze the source"
+        ),
+        consumer.assistant_id: AssistantAuthoringSnapshot(
+            instructions=consumer_instructions
+        ),
+    }
+    catalog = build_ai_builder_resource_catalog(
+        available_models=None, available_kbs=None
+    )
+    context = ResolvedAIBuilderEditContext(
+        request=AIBuilderSavedFlowStepEditContext(flow_step_id=flow.steps[0].id),
+        scope="step",
+        target_existing_step_ref="existing_step_1",
+    )
+    prior = _prior_spec_for_revision(
+        context=context,
+        prior_plan=None,
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=catalog,
+    )
+    return flow, snapshots, catalog, context, prior
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("consumer_kind", "target_patch", "feedback_fragment"),
+    [
+        (
+            "projection",
+            {
+                "output_fields": [
+                    {
+                        "name": "unrelated",
+                        "field_type": "string",
+                        "description": "Result field",
+                    }
+                ]
+            },
+            "report.summary",
+        ),
+        (
+            "projection",
+            {
+                "output_fields": [
+                    {
+                        "name": "report",
+                        "field_type": "object",
+                        "description": "Result field",
+                        "children": [
+                            {
+                                "name": "summary",
+                                "field_type": "number",
+                                "description": "Result field",
+                            }
+                        ],
+                    }
+                ]
+            },
+            "contract",
+        ),
+        (
+            "array",
+            {
+                "output_fields": [
+                    {
+                        "name": "items",
+                        "field_type": "array",
+                        "description": "Result field",
+                    }
+                ]
+            },
+            "object",
+        ),
+        (
+            "array",
+            {
+                "output_fields": [
+                    {
+                        "name": "items",
+                        "field_type": "array",
+                        "description": "Result field",
+                        "children": [
+                            {
+                                "name": "other",
+                                "field_type": "string",
+                                "description": "Result field",
+                            }
+                        ],
+                    }
+                ]
+            },
+            "name",
+        ),
+        ("whole", {"output_type": "text", "output_fields": []}, "structured"),
+        ("whole", {"output_fields": []}, "contract"),
+        ("instructions", {"output_fields": []}, "contract"),
+        (
+            "instructions",
+            {
+                "output_fields": [
+                    {
+                        "name": "unrelated",
+                        "field_type": "string",
+                        "description": "Result field",
+                    }
+                ]
+            },
+            "report",
+        ),
+        (
+            "output_config",
+            {
+                "output_fields": [
+                    {
+                        "name": "unrelated",
+                        "field_type": "string",
+                        "description": "Result field",
+                    }
+                ]
+            },
+            "report",
+        ),
+    ],
+)
+async def test_saved_step_incompatible_consumer_returns_repair(
+    consumer_kind, target_patch, feedback_fragment
+):
+    from eneo.flows.ai_builder.ai_builder_proposal_retry import repair_feedback
+    from eneo.flows.ai_builder.ai_builder_validator import validate_spec
+
+    flow, snapshots, catalog, context, prior = _saved_step_consumer_fixture(
+        consumer_kind
+    )
+    assert prior is not None
+    baseline_validation = validate_spec(prior)
+    assert baseline_validation.valid, baseline_validation.errors
+    before = prior.steps[1].model_dump(mode="json")
+    result = await _process(
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=catalog,
+        plan_edit_context=context,
+        prior_spec_for_revision=prior,
+        arguments={
+            "plan_rationale": "Revise the result schema.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    **target_patch,
+                },
+                {"kind": "keep", "existing_step_ref": "existing_step_2"},
+            ],
+        },
+    )
+    assert isinstance(result, CorrectableFailure), result
+    assert result.kind != "parse", result
+    assert feedback_fragment in repair_feedback(result).lower(), result
+    assert prior.steps[1].model_dump(mode="json") == before
+
+
+@pytest.mark.parametrize("consumer_kind", ["instructions", "output_config"])
+def test_reference_validator_skips_missing_contract_for_prose_only_consumer(
+    consumer_kind,
+):
+    from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
+    from eneo.flows.ai_builder.ai_builder_validation_references import (
+        validate_variable_references,
+    )
+
+    _, _, _, _, prior = _saved_step_consumer_fixture(consumer_kind)
+    assert prior is not None
+    missing = prior.model_copy(
+        update={
+            "steps": [
+                prior.steps[0].model_copy(update={"output_contract": None}),
+                prior.steps[1],
+            ]
+        }
+    )
+    result = SpecValidationResult()
+    validate_variable_references(missing, result)
+    assert result.valid, result.errors
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("remove_contract", [False, True])
+async def test_saved_step_preserves_contract_used_by_template_bindings(remove_contract):
+    from eneo.flows.ai_builder.ai_builder_validator import validate_spec
+
+    flow, snapshots, catalog, context, prior = _saved_step_consumer_fixture("template")
+    assert prior is not None
+    baseline_validation = validate_spec(prior)
+    assert baseline_validation.valid, baseline_validation.errors
+    target_patch = (
+        {"output_fields": []}
+        if remove_contract
+        else {
+            "assistant_spec": {"instructions": "Improved analysis"},
+        }
+    )
+    result = await _process(
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=catalog,
+        plan_edit_context=context,
+        prior_spec_for_revision=prior,
+        arguments={
+            "plan_rationale": "Remove the schema.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    **target_patch,
+                },
+                {"kind": "keep", "existing_step_ref": "existing_step_2"},
+            ],
+        },
+    )
+    if remove_contract:
+        assert isinstance(result, CorrectableFailure), result
+        assert "consumer_requires_output_contract" in result.codes
+        assert "step_b" in result.feedback
+    else:
+        assert isinstance(result, ProposalReady), result
+        assert (
+            result.compiled.content.spec.steps[1].output_mode
+            == OutputMode.TEMPLATE_FILL
+        )
+        assert (
+            result.compiled.content.spec.steps[1].output_config
+            == prior.steps[1].output_config
+        )
+
+
+@pytest.mark.asyncio
+async def test_saved_step_unchanged_composer_is_not_judged_as_model_change():
+    flow, snapshots, catalog, context, prior = _saved_step_consumer_fixture("array")
+    result = await _process(
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=catalog,
+        plan_edit_context=context,
+        prior_spec_for_revision=prior,
+        arguments={
+            "plan_rationale": "Clarify instructions.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "assistant_spec": {"instructions": "Improved analysis"},
+                },
+                {"kind": "keep", "existing_step_ref": "existing_step_2"},
+            ],
+        },
+    )
+    assert isinstance(result, CorrectableFailure), result
+    assert result.feedback.startswith("Compiled edit spec validation failed:")
+    assert "only supported for output_mode 'compose_text'" in result.feedback
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scoped", [False, True])
+async def test_keep_composer_mode_change_at_approval_boundary(scoped):
+    flow, snapshots, catalog, context, _ = _saved_step_consumer_fixture("array")
+    flow.steps[1].input_bindings = {
+        "source_refs": [
+            {
+                "step_ref": "step_1",
+                "output": "structured",
+                "field_path": "report.summary",
+            }
+        ]
+    }
+    prior = _prior_spec_for_revision(
+        context=context,
+        prior_plan=None,
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=catalog,
+    )
+    result = await _process(
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=catalog,
+        plan_edit_context=context if scoped else None,
+        prior_spec_for_revision=prior if scoped else None,
+        arguments={
+            "plan_rationale": "Clarify analysis.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "assistant_spec": {"instructions": "Improved analysis"},
+                },
+                {"kind": "keep", "existing_step_ref": "existing_step_2"},
+            ],
+        },
+    )
+    if scoped:
+        assert isinstance(result, CorrectableFailure), result
+        assert "preserve unrelated steps" in result.feedback
+    else:
+        assert isinstance(result, ProposalReady), result
+        assert (
+            result.compiled.content.spec.steps[1].output_mode == OutputMode.PASS_THROUGH
+        )
+        assert result.compiled.content.edit is not None
+        fields = result.compiled.content.edit.diff.step_changes[1].field_changes
+        assert any(
+            field.field == "output_mode"
+            and field.previous == "compose_text"
+            and field.current == "pass_through"
+            for field in fields
+        )

@@ -29,6 +29,9 @@ from eneo.flows.step_lineage import existing_step_ref_for_order
 
 if TYPE_CHECKING:
     from eneo.flows.ai_builder.ai_builder_flow_review import ReviewEditScope
+    from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
+        EditOperationPermissions,
+    )
 
 
 def build_edit_flow_tool_schema(
@@ -37,18 +40,12 @@ def build_edit_flow_tool_schema(
     resource_catalog: AIBuilderResourceCatalog,
     tool_name: str,
     review_scope: "ReviewEditScope | None" = None,
+    permissions: "EditOperationPermissions | None" = None,
 ) -> dict[str, Any]:
-    """The edit tool: the complete ordered step list after the edit.
-
-    A turn that acts on review findings is bounded by their scope, and the
-    schema offers exactly that: the findings' steps take a full modify, every
-    other step is listed with a bare ``keep``, adding and removing appear
-    only where the findings allow them, and the flow-level fields are absent.
-    Whatever the schema does not offer, a strict provider cannot write. The
-    same scope governs the authored-proposal admission; what the compiler
-    and the plan preparation make of an admitted proposal is held to it by
-    their own final guards.
-    """
+    """Offer the complete ordered edit within the turn's operation permissions."""
+    if review_scope is not None and permissions is not None:
+        raise ValueError("Supply either review_scope or permissions, not both.")
+    permissions = permissions if permissions is not None else review_scope
 
     valid_refs = [existing_step_ref_for_order(s.step_order) for s in current_steps]
 
@@ -58,21 +55,16 @@ def build_edit_flow_tool_schema(
         model_refs=model_refs,
         kb_refs=kb_refs,
     )
-    if review_scope is None:
+    if permissions is None:
         modifiable_refs = valid_refs
     else:
-        # The scope was read from a review of this very definition (a turn
-        # whose flow moved on is refused before it gets here), so a finding's
-        # step the flow does not have is a broken server invariant, not a
-        # schema to degrade. Nothing before the provider call catches it: the
-        # stream boundary logs it and reports a failed turn.
-        absent = sorted(review_scope.step_refs.difference(valid_refs))
+        absent = sorted(permissions.step_refs.difference(valid_refs))
         if absent:
             raise ValueError(
-                "review scope names steps the flow does not have: "
+                "edit scope names steps the flow does not have: "
                 f"{', '.join(absent)} (flow has {', '.join(valid_refs)})"
             )
-        modifiable_refs = [ref for ref in valid_refs if ref in review_scope.step_refs]
+        modifiable_refs = [ref for ref in valid_refs if ref in permissions.step_refs]
     modify_step_schema = _build_modify_step_schema(
         valid_refs=modifiable_refs,
         kb_refs=kb_refs,
@@ -88,8 +80,8 @@ def build_edit_flow_tool_schema(
     }
     removable_refs = (
         valid_refs
-        if review_scope is None
-        else [ref for ref in valid_refs if ref in review_scope.removable_step_refs]
+        if permissions is None
+        else [ref for ref in valid_refs if ref in permissions.removable_step_refs]
     )
 
     properties: dict[str, Any] = {
@@ -100,7 +92,7 @@ def build_edit_flow_tool_schema(
             ),
         },
     }
-    if review_scope is None:
+    if permissions is None:
         properties["flow_name"] = {
             "type": ["string", "null"],
             "maxLength": MAX_FLOW_NAME_LENGTH,
@@ -132,18 +124,18 @@ def build_edit_flow_tool_schema(
             modify_step_schema,
             _build_keep_step_schema(valid_refs=valid_refs),
         ]
-        if review_scope.may_add:
+        if permissions.may_add:
             step_branches.append(add_step_schema)
         properties["steps"] = {
             "type": "array",
             "description": (
                 "Complete ordered step list after the edit, in the current "
-                "order. The findings' steps take kind=modify with only the "
+                "order. The permitted steps take kind=modify with only the "
                 "fields that change; every other existing step is listed with "
                 "kind=keep and nothing else."
                 + (
-                    " Add a step with kind=add only where the findings call for one."
-                    if review_scope.may_add
+                    " Add a step with kind=add only when the scope allows it."
+                    if permissions.may_add
                     else ""
                 )
             ),
@@ -159,7 +151,7 @@ def build_edit_flow_tool_schema(
                 "Omission is never deletion; list every removed ref here."
             ),
         }
-    if review_scope is None:
+    if permissions is None:
         properties["form_fields"] = {
             "type": ["array", "null"],
             "items": _build_form_field_spec_schema(),
@@ -183,10 +175,10 @@ def build_edit_flow_tool_schema(
         "fields, form_fields and every step field. Set form_fields to the "
         "complete desired list, or an empty list to clear all flow-level "
         "inmatningsfält/form fields."
-        if review_scope is None
+        if permissions is None
         else (
-            "Answer the selected review findings by returning the complete "
-            "ordered step list. Change only the findings' steps; list every "
+            "Answer the selected edit scope by returning the complete "
+            "ordered step list. Change only the permitted steps; list every "
             "other step with kind=keep. Null keeps a current step field. The "
             "flow's name, description and form fields are not part of this turn."
         )

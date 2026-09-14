@@ -49,6 +49,10 @@ from eneo.flows.ai_builder.ai_builder_flow_review import (
     AIBuilderReviewReference,
     FlowReviewEvidence,
 )
+from eneo.flows.ai_builder.ai_builder_non_plan_outcome import (
+    persist_non_plan_turn,
+    stale_saved_step_revision_message,
+)
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderEditContext,
     resolve_plan_edit_context,
@@ -65,6 +69,7 @@ from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     ServerOutputPrepared,
     build_proposal_prepared,
     prepare_planner_request,
+    resolve_ui_language,
     validate_preprovider_schema_gate,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_finalization import (
@@ -99,7 +104,10 @@ from eneo.flows.ai_builder.ai_builder_telemetry import (
 from eneo.flows.ai_builder.ai_builder_user_question_metadata import (
     prepare_user_question_metadata,
 )
-from eneo.flows.ai_builder.planning_state import PlanningStatePayloadTooLargeError
+from eneo.flows.ai_builder.planning_state import (
+    PlanningState,
+    PlanningStatePayloadTooLargeError,
+)
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.domain.mapped_execution_policy import (
@@ -479,6 +487,36 @@ class AIBuilderPlanner:
                 if metadata or file_ids
                 else None
             )
+            if (
+                flow is not None
+                and plan_edit_context is not None
+                and plan_edit_context.scope == "step"
+                and plan_edit_context.target_existing_step_ref is not None
+                and prior_plan_for_revision is not None
+                and prior_plan_for_revision.proposal.content.edit is not None
+                and prior_plan_for_revision.proposal.content.edit.base_flow_revision
+                != flow.draft_revision
+            ):
+                events = await persist_non_plan_turn(
+                    repo=self.repo,
+                    turn=turn,
+                    conversation=conversation,
+                    new_messages_start=new_messages_start,
+                    message=stale_saved_step_revision_message(
+                        ui_language=resolve_ui_language(conversation)
+                    ),
+                    base_assistant_metadata=build_assistant_message_metadata(
+                        conversation
+                    ),
+                    usage_tracker=usage_tracker,
+                    planning_state=persisted_planning_state or PlanningState.empty(),
+                    flow=flow,
+                )
+                await self.repo.complete_session_turn(turn=turn, error=None)
+                for event in events:
+                    yield event
+                yield build_done_event()
+                return
             yield build_status_event(AIBuilderStatus.UNDERSTANDING_REQUEST)
             try:
                 prepared_request = await prepare_planner_request(

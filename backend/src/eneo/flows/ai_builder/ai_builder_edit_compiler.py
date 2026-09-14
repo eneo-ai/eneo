@@ -41,6 +41,7 @@ from eneo.flows.ai_builder.ai_builder_form_fields import (
 from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
     schema_leaf_property_names,
 )
+from eneo.flows.ai_builder.ai_builder_new_step_compiler import make_plan_step_ref
 from eneo.flows.ai_builder.ai_builder_new_step_models import (
     NewStepDraft,
 )
@@ -89,6 +90,7 @@ from eneo.flows.step_lineage import (
     existing_step_order_from_ref,
     existing_step_ref_for_order,
 )
+from eneo.main.exceptions import BadRequestException
 
 _RUNTIME_STEP_ALIAS_PATTERN = re.compile(r"\{\{\s*step_(\d+)(\.[^{}]+?)\s*\}\}")
 _RUNTIME_STEP_REF_PATTERN = re.compile(r"^step_(\d+)$")
@@ -165,6 +167,7 @@ def compile_edit_proposal(
     selected_template_count: int | None = None,
     selected_template_placeholders: tuple[str, ...] | None = None,
     inherited_template_asset_id: UUID | None = None,
+    revision_spec: FlowDraftSpecCore | None = None,
 ) -> EditCompilationResult:
     """Compile an ordered edit proposal into a concrete flow preview + diff."""
     primary_runtime_input_type = (
@@ -199,8 +202,12 @@ def compile_edit_proposal(
         ),
         form_fields=base_form_fields,
     )
+    if revision_spec is not None and [
+        step.existing_step_ref for step in revision_spec.steps
+    ] != [step.existing_step_ref for step in base_spec.steps]:
+        raise BadRequestException("The revision must preserve the saved step sequence.")
     compiled_spec = compile_ordered_edit_proposal(
-        base_spec=base_spec,
+        base_spec=revision_spec if revision_spec is not None else base_spec,
         proposal=prepared.proposal,
         ui_language=ui_language,
     )
@@ -1011,6 +1018,27 @@ def _without_primary_runtime_shadow_fields(
     if filtered == step.uses_form_fields:
         return step, dropped
     return step.model_copy(update={"uses_form_fields": filtered}), dropped
+
+
+def canonicalize_saved_revision_spec(spec: FlowDraftSpecCore) -> FlowDraftSpecCore:
+    ref_mapping = {
+        step.plan_step_ref: make_plan_step_ref(index)
+        for index, step in enumerate(spec.steps)
+    }
+    steps = [
+        step.model_copy(update={"plan_step_ref": ref_mapping[step.plan_step_ref]})
+        for step in spec.steps
+    ]
+    return spec.model_copy(
+        update={
+            "steps": _canonicalize_existing_runtime_aliases(steps),
+            "document_body_writer_step_refs": tuple(
+                ref_mapping[ref] for ref in spec.document_body_writer_step_refs
+            )
+            if spec.document_body_writer_step_refs is not None
+            else None,
+        }
+    )
 
 
 def _existing_order_to_plan_ref(step_specs: list[StepSpec]) -> dict[int, str]:

@@ -38,6 +38,7 @@ ScopedRevisionRejectionReason = Literal[
     "step_sequence_changed",
     "unrelated_compiled_step_changed",
     "target_step_model_changed",
+    "flow_metadata_changed",
 ]
 
 
@@ -140,6 +141,47 @@ class ResolvedAIBuilderEditContext:
 
 
 ScopedEditContext: TypeAlias = AIBuilderPlanEditContext | ResolvedAIBuilderEditContext
+
+
+class EditOperationPermissions(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    step_refs: frozenset[str]
+    removable_step_refs: frozenset[str]
+    may_add: bool
+
+
+def saved_step_operation_permissions(
+    *,
+    context: ResolvedAIBuilderEditContext | None,
+    prior_spec: FlowDraftSpecCore | None,
+    current_step_refs: list[str],
+) -> EditOperationPermissions | None:
+    if not is_saved_step_revision(
+        context=context, prior_spec=prior_spec, current_step_refs=current_step_refs
+    ):
+        return None
+    assert context is not None and context.target_existing_step_ref is not None
+    return EditOperationPermissions(
+        step_refs=frozenset({context.target_existing_step_ref}),
+        removable_step_refs=frozenset(),
+        may_add=False,
+    )
+
+
+def is_saved_step_revision(
+    *,
+    context: ResolvedAIBuilderEditContext | None,
+    prior_spec: FlowDraftSpecCore | None,
+    current_step_refs: list[str],
+) -> bool:
+    return (
+        context is not None
+        and context.scope == "step"
+        and context.target_existing_step_ref in current_step_refs
+        and prior_spec is not None
+        and [step.existing_step_ref for step in prior_spec.steps] == current_step_refs
+    )
 
 
 def step_ref_for_context(context: ScopedEditContext) -> str | None:
@@ -279,6 +321,7 @@ def validate_scoped_edit_proposal(
     *,
     context: ResolvedAIBuilderEditContext | None,
     proposal: "OrderedEditProposal",
+    saved_step_revision: bool = False,
 ) -> str | None:
     """Reject model-authored changes outside a selected saved Flow step."""
 
@@ -287,6 +330,13 @@ def validate_scoped_edit_proposal(
     target_ref = context.target_existing_step_ref
     if target_ref is None:
         return None
+    if saved_step_revision and proposal.model_fields_set.intersection(
+        {"flow_name", "flow_description", "form_fields"}
+    ):
+        return (
+            "A selected saved-step edit must preserve the flow name, description "
+            "and runtime form fields. Use a whole-plan edit to change them."
+        )
 
     if proposal.removed_existing_step_refs:
         return (
@@ -318,6 +368,7 @@ def build_plan_revision_prompt_block(
     context: ScopedEditContext | None,
     prior_spec: FlowDraftSpecCore | None,
     can_decline: bool = False,
+    saved_step_revision: bool = False,
 ) -> str | None:
     if context is None or prior_spec is None:
         return None
@@ -367,10 +418,14 @@ def build_plan_revision_prompt_block(
                 "- The target step must change in the revised plan. Do not satisfy this by only changing the flow title, description, or an unrelated step.",
                 "- Preserve every other step unchanged. Use a whole-plan edit if the requested change also requires dataflow or downstream-step changes.",
                 "- Do not add, remove, or reorder steps. Use a whole-plan edit when the requested change alters the flow structure.",
-                "- Do not change runtime form fields. You may update the plan title or description only when needed to reflect the selected step change.",
+                "- Do not change runtime form fields or the flow name or description. Use a whole-plan edit when the requested change requires those changes."
+                if saved_step_revision
+                else "- Do not change runtime form fields. You may update the plan title or description only when needed to reflect the selected step change.",
             ]
         )
 
+    if saved_step_revision:
+        return "\n".join(lines)
     lines.append("- Prior plan steps:")
     for index, step in enumerate(prior_spec.steps, start=1):
         marker = " (target)" if step == _find_target_step(prior_spec, context) else ""
@@ -388,6 +443,7 @@ def validate_scoped_plan_revision(
     prior_spec: FlowDraftSpecCore | None,
     proposed_spec: FlowDraftSpecCore,
     target_kind: TargetKind,
+    saved_step_revision: bool = False,
 ) -> ScopedRevisionRejection | None:
     """Return repair feedback when a step-scoped plan edit drifts.
 
@@ -411,6 +467,15 @@ def validate_scoped_plan_revision(
 
     if context is None or context.scope != "step" or prior_spec is None:
         return None
+    if saved_step_revision and (
+        prior_spec.flow_name != proposed_spec.flow_name
+        or prior_spec.flow_description != proposed_spec.flow_description
+    ):
+        return ScopedRevisionRejection(
+            "flow_metadata_changed",
+            "A selected saved-step edit must preserve the flow name and description. "
+            "Use a whole-plan edit to change them.",
+        )
 
     exempt_renderer = target_kind is TargetKind.CREATE
     prior_renderer = (

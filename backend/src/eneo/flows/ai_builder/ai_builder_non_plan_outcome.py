@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Final, Literal, cast, get_args
 
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+    PersistedAssistantToolCall,
     make_persisted_assistant_tool_call,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
@@ -121,17 +122,35 @@ def scoped_revision_out_of_reach_message(*, ui_language: str | None) -> str:
     ]
 
 
+_STALE_SAVED_STEP_REVISION_MESSAGES: Final[dict[str, str]] = {
+    "sv": (
+        "Flödet har ändrats sedan det här förslaget skapades. "
+        "Välj steget igen i det aktuella flödet för att fortsätta."
+    ),
+    "en": (
+        "The flow has changed since this proposal was created. "
+        "Select the step again in the current flow to continue."
+    ),
+}
+
+
+def stale_saved_step_revision_message(*, ui_language: str | None) -> str:
+    return _STALE_SAVED_STEP_REVISION_MESSAGES[
+        "en" if _uses_english(ui_language) else "sv"
+    ]
+
+
 async def persist_non_plan_turn(
     *,
     repo: AIBuilderRepository,
     turn: SessionSendTurn,
     conversation: list[ConversationMessage],
     new_messages_start: int,
-    tool_name: str,
-    arguments: dict[str, Any],
-    tool_content: str,
+    tool_name: str | None = None,
+    arguments: dict[str, Any] | None = None,
+    tool_content: str | None = None,
     message: str,
-    tool_call_id: str,
+    tool_call_id: str | None = None,
     base_assistant_metadata: dict[str, Any] | None,
     usage_tracker: ProposalTurnTelemetry | None,
     planning_state: PlanningState,
@@ -144,33 +163,38 @@ async def persist_non_plan_turn(
     plan the session already has stays current.
     """
 
-    tool_call = make_persisted_assistant_tool_call(
-        tool_call_id=tool_call_id,
-        tool_name=tool_name,
-        arguments=arguments,
-    )
+    tool_calls: list[PersistedAssistantToolCall] = []
+    if tool_name is not None:
+        assert tool_call_id is not None and arguments is not None
+        assert tool_content is not None
+        tool_calls.append(
+            make_persisted_assistant_tool_call(
+                tool_call_id=tool_call_id,
+                tool_name=tool_name,
+                arguments=arguments,
+            )
+        )
     conversation.append(
         ConversationMessage(
             role="assistant",
             content=message,
-            # The turn reports the call it actually made, whether the answer was
-            # decided on the first attempt or after a repair.
             metadata=assistant_metadata_with_usage(
                 conversation=conversation,
                 base_metadata=base_assistant_metadata,
                 usage_tracker=usage_tracker,
-                tool_calls=[tool_call],
+                tool_calls=tool_calls or None,
             ),
-            tool_calls=[tool_call.model_dump(mode="json")],
+            tool_calls=[call.model_dump(mode="json") for call in tool_calls] or None,
         )
     )
-    conversation.append(
-        ConversationMessage(
-            role="tool",
-            content=tool_content,
-            tool_call_id=tool_call_id,
+    if tool_calls:
+        conversation.append(
+            ConversationMessage(
+                role="tool",
+                content=tool_content,
+                tool_call_id=tool_call_id,
+            )
         )
-    )
     # Before the turn is closed, while this send still holds the lease: the
     # plan this turn did not replace goes back to being approvable.
     await repo.restore_awaiting_approval_after_answered_turn(turn=turn)

@@ -43,7 +43,7 @@ def validate_variable_references(
     }
 
     for index, step in enumerate(spec.steps, start=1):
-        for expression in _iter_step_template_expressions(step):
+        for expression in iter_step_template_expressions(step):
             reference = _parse_reference_expression(
                 expression,
                 steps_by_plan_ref,
@@ -165,7 +165,8 @@ def validate_variable_references(
                 )
 
 
-def _iter_step_template_expressions(step: StepSpec) -> list[str]:
+def iter_step_template_expressions(step: StepSpec) -> list[str]:
+    """Enumerate templates in instructions, input bindings and output configuration."""
     expressions: list[str] = []
     expressions.extend(iter_template_expressions(step.assistant_spec.instructions))
 

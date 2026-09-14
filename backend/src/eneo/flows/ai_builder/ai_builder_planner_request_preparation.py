@@ -48,6 +48,9 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     ConversationMessage,
 )
+from eneo.flows.ai_builder.ai_builder_edit_compiler import (
+    canonicalize_saved_revision_spec,
+)
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
@@ -85,6 +88,7 @@ from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     ResolvedAIBuilderEditContext,
     build_plan_revision_prompt_block,
+    saved_step_operation_permissions,
 )
 from eneo.flows.ai_builder.ai_builder_plan_proposal_task import (
     build_plan_proposal_system_prompt,
@@ -150,6 +154,7 @@ from eneo.flows.domain.mapped_execution_policy import (
     max_mapped_items_per_step,
 )
 from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
+from eneo.flows.step_lineage import existing_step_ref_for_order
 from eneo.main.logging import get_logger
 from eneo.observability.failure_events import stable_hash
 from eneo.tokens.token_utils import (
@@ -253,7 +258,7 @@ async def prepare_planner_request(
     request: PlannerRequestPreparationInput,
 ) -> PreparedTurnOutcome:
     requirements_state = resolve_requirements_state(request.conversation)
-    ui_language = _resolve_ui_language(request.conversation)
+    ui_language = resolve_ui_language(request.conversation)
     reopen = unconsumed_reopen_question(request.conversation)
     # The user picked findings on the review screen; the server wrote the
     # message. Nothing was said about what the flow should do, so the turn
@@ -625,6 +630,30 @@ def build_proposal_prepared(
         ui_language=ui_language,
         requested_output_sections=requested_output_sections,
     )
+    saved_step_permissions = saved_step_operation_permissions(
+        context=plan_edit_context,
+        prior_spec=prior_spec_for_revision,
+        current_step_refs=[
+            existing_step_ref_for_order(step.step_order)
+            for step in sorted(flow.steps, key=lambda step: step.step_order)
+        ]
+        if flow is not None
+        else [],
+    )
+    if (
+        saved_step_permissions is not None
+        and flow is not None
+        and plan_edit_context is not None
+    ):
+        flow_context = build_flow_context(
+            flow,
+            is_edit_mode=True,
+            authoring_spec=prior_spec_for_revision,
+            target_existing_step_ref=plan_edit_context.target_existing_step_ref,
+            selected_template_placeholders=compile_context.selected_template_placeholders
+            if compile_context is not None
+            else None,
+        )
     is_pure_audio_transcription = (
         not is_edit_mode
         and compile_context is not None
@@ -649,6 +678,7 @@ def build_proposal_prepared(
         context=plan_edit_context,
         prior_spec=prior_spec_for_revision,
         can_decline=decline_tool_schema is not None,
+        saved_step_revision=saved_step_permissions is not None,
     )
     obligation_projection = named_result_projection(
         planning_state,
@@ -658,7 +688,10 @@ def build_proposal_prepared(
         current_steps=None if flow is None else list(flow.steps),
         resource_catalog=resource_catalog,
         is_pure_audio_transcription=is_pure_audio_transcription,
-        review_scope=review_edit_scope_for_turn(conversation),
+        review_scope=review_edit_scope_for_turn(conversation)
+        if saved_step_permissions is None
+        else None,
+        permissions=saved_step_permissions,
         confirmed_runtime_inputs=(
             compile_context.confirmed_runtime_input_requirements
             if compile_context is not None and not is_edit_mode
@@ -926,13 +959,15 @@ def _prior_spec_for_revision(
             "The saved Flow step is not available in this AI Builder session.",
             code=AIBuilderErrorCode.INVALID_EXISTING_STEP_REF,
         )
-    return current_flow_authoring_spec(
-        current_steps=list(flow.steps),
-        flow_name=flow.name,
-        flow_description=flow.description,
-        assistant_snapshots=assistant_snapshots,
-        assistant_snapshot_projector=resource_catalog.assistant_spec_from_snapshot,
-        form_fields=extract_form_fields_from_metadata(flow.metadata_json),
+    return canonicalize_saved_revision_spec(
+        current_flow_authoring_spec(
+            current_steps=list(flow.steps),
+            flow_name=flow.name,
+            flow_description=flow.description,
+            assistant_snapshots=assistant_snapshots,
+            assistant_snapshot_projector=resource_catalog.assistant_spec_from_snapshot,
+            form_fields=extract_form_fields_from_metadata(flow.metadata_json),
+        )
     )
 
 
@@ -1306,7 +1341,7 @@ def _llm_message_role(role: str) -> LLMMessageRole:
             raise ValueError(f"Unsupported AI Builder conversation role: {role!r}")
 
 
-def _resolve_ui_language(conversation: list[ConversationMessage]) -> str | None:
+def resolve_ui_language(conversation: list[ConversationMessage]) -> str | None:
     for message in reversed(conversation):
         if message.role != "user":
             continue
