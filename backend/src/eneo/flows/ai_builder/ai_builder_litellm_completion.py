@@ -177,7 +177,7 @@ async def call_proposal_completion(
             response,
             litellm_model=request.route.litellm_model,
             messages=messages,
-            completion_messages=_completion_messages_for_usage(response),
+            completion_messages=completion_messages_for_usage(response),
             finish_reason=finish_reason,
         )
         usage_tracker.record_response(
@@ -319,7 +319,7 @@ def _completion_metadata_from_response(
     )
 
 
-def _completion_messages_for_usage(
+def completion_messages_for_usage(
     response: LLMCompletionResponse,
 ) -> list[dict[str, Any]]:
     messages: list[dict[str, Any]] = []
@@ -402,6 +402,7 @@ __all__ = [
     "LLMCompletionToolCall",
     "LLMCompletionToolCallFunction",
     "call_proposal_completion",
+    "completion_messages_for_usage",
     "make_usage_tracked_proposal_completion",
     "normalize_litellm_completion_response",
 ]

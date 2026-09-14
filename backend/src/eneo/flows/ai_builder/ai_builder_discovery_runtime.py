@@ -75,6 +75,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     admit_slot_classification_input,
     classify_slots,
+    resolve_slot_classification_transport,
     slot_classification_prompt_hash,
     slot_classification_provider_identity,
 )
@@ -693,10 +694,13 @@ async def build_runtime_discovery_context(
         for intent in state.checkpoint_intents
         if intent.operation == "set"
     )
-    structured_output_mode = resolve_structured_output_capability(
-        litellm_model=completion_model_route.litellm_model,
-        provider_type=completion_model_route.provider_type,
-    ).mode
+    structured_output_mode = resolve_slot_classification_transport(
+        supports_strict_tool_schema=completion_model_route.supports_strict_tool_schema,
+        structured_output_mode=resolve_structured_output_capability(
+            litellm_model=completion_model_route.litellm_model,
+            provider_type=completion_model_route.provider_type,
+        ).mode,
+    )
     classification_input = admit_slot_classification_input(
         classification_input=classification_input,
         attachment_context=attachment_context,

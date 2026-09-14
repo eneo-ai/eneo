@@ -6,8 +6,9 @@ import os
 import time
 from collections.abc import Awaitable, Callable, Collection, Iterable, Mapping
 from dataclasses import replace
+from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 from uuid import UUID
 
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
@@ -31,6 +32,14 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     classify_ai_builder_provider_failure,
     record_ai_builder_provider_failure,
 )
+from eneo.flows.ai_builder.ai_builder_litellm_completion import (
+    completion_messages_for_usage,
+    normalize_litellm_completion_response,
+)
+from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+    ForcedToolChoiceParam,
+    forced_tool_choice,
+)
 from eneo.flows.ai_builder.ai_builder_provider_call import (
     complete_with_silence_deadline,
 )
@@ -48,6 +57,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     CLASSIFICATION_EVIDENCE_MAX_LENGTH,
     NAMED_RESULT_DELTA_CITATION_MAX_ITEMS,
     SLOT_CLASSIFICATION_SCHEMA_VERSION,
+    SLOT_CLASSIFICATION_TOOL_NAME,
     ResolvedSlotClassificationOutcome,
     SlotClassificationAttempt,
     SlotClassificationBias,
@@ -57,13 +67,18 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     normalize_slot_classification_values,
     slot_classification_input_is_valid,
     slot_classification_json_schema,
+    slot_classification_tool_parameters,
 )
 from eneo.flows.ai_builder.ai_builder_token_usage import (
     completion_token_usage_from_response,
 )
+from eneo.flows.ai_builder.ai_builder_tools import build_native_strict_tool_schema
 from eneo.flows.ai_builder.planning_state import CheckpointProducerKind
 from eneo.main.logging import get_logger
-from eneo.tokens.token_utils import measure_provider_input_reserve
+from eneo.tokens.token_utils import (
+    measure_provider_input_reserve,
+    measure_provider_input_tokens,
+)
 
 logger = get_logger(__name__)
 
@@ -125,6 +140,30 @@ _PROVIDER_EXECUTION_IDENTITY_FIELDS = (
 _PROVIDER_IDENTITY_LABEL_MAX_LENGTH = 63
 
 
+class SlotClassificationTransport(str, Enum):
+    STRICT_TOOL = "strict_tool"
+    STRICT_JSON_SCHEMA = "strict_json_schema"
+    JSON_OBJECT = "json_object"
+    PROMPT_WITH_PYDANTIC_VALIDATION = "prompt_with_pydantic_validation"
+
+
+class _SlotClassificationRequestFormat(TypedDict, total=False):
+    tools: list[dict[str, Any]]
+    tool_choice: ForcedToolChoiceParam
+    parallel_tool_calls: bool
+    response_format: dict[str, object]
+
+
+def resolve_slot_classification_transport(
+    *,
+    supports_strict_tool_schema: bool,
+    structured_output_mode: StructuredOutputMode | SlotClassificationTransport,
+) -> SlotClassificationTransport:
+    if supports_strict_tool_schema:
+        return SlotClassificationTransport.STRICT_TOOL
+    return SlotClassificationTransport(structured_output_mode.value)
+
+
 async def classify_slots(
     *,
     litellm_client: Any,
@@ -136,7 +175,7 @@ async def classify_slots(
     tenant_id: UUID,
     ui_language: str | None = None,
     bias: SlotClassificationBias | None = None,
-    structured_output_mode: StructuredOutputMode,
+    structured_output_mode: StructuredOutputMode | SlotClassificationTransport,
     usage_tracker: ProposalTurnTelemetry | None = None,
     before_provider_call: Callable[[], Awaitable[None]] | None = None,
     max_input_tokens: int,
@@ -148,6 +187,10 @@ async def classify_slots(
     if max_output_tokens < 1:
         raise ValueError("Slot classification max output tokens must be positive")
     slot_values = normalize_slot_classification_values(allowed_slot_values)
+    transport = resolve_slot_classification_transport(
+        supports_strict_tool_schema=completion_model_route.supports_strict_tool_schema,
+        structured_output_mode=structured_output_mode,
+    )
     if not slot_classification_input_is_valid(classification_input):
         raise ValueError("Slot classification input must contain unique, valid sources")
     schema_candidate_fingerprints = tuple(
@@ -167,10 +210,10 @@ async def classify_slots(
         ui_language=ui_language,
         bias=bias,
     )
-    response_format = _slot_classification_response_format(
+    request_format = _slot_classification_request_format(
         slot_values,
         schema_candidate_fingerprints=schema_candidate_fingerprints,
-        mode=structured_output_mode,
+        mode=transport,
     )
     cache_key = slot_classification_prompt_hash(
         classification_input=classification_input,
@@ -185,7 +228,7 @@ async def classify_slots(
         max_input_tokens=max_input_tokens,
         max_output_tokens=max_output_tokens,
         safety_buffer_tokens=budget_policy.conversation_safety_buffer_tokens,
-        structured_output_mode=structured_output_mode,
+        structured_output_mode=transport,
     )
     cached = _SLOT_CLASSIFICATION_CACHE.get(cache_key)
     if cached is not None:
@@ -207,8 +250,9 @@ async def classify_slots(
     completion_kwargs = completion_model_route.prepare_provider_kwargs(
         ModelKwargs(temperature=0.0)
     )
-    if response_format:
-        completion_kwargs["response_format"] = response_format
+    if transport is SlotClassificationTransport.STRICT_TOOL:
+        completion_kwargs.pop("response_format", None)
+    completion_kwargs.update(request_format)
     completion_kwargs.pop("timeout", None)
     # The turn owns retries. LiteLLM's OpenAI SDK retries are independent of
     # its process-wide num_retries setting and otherwise repeat timed-out work.
@@ -225,7 +269,7 @@ async def classify_slots(
             ui_language=ui_language,
             bias=bias,
         ),
-        response_format=response_format,
+        request_format=request_format,
         litellm_model=litellm_model,
         max_input_tokens=max_input_tokens,
         max_output_tokens=max_output_tokens,
@@ -291,18 +335,41 @@ async def classify_slots(
 
     content = response.choices[0].message.content if response.choices else None
     if call is not None and usage_tracker is not None:
+        usage = completion_token_usage_from_response(
+            response,
+            model_name=litellm_model,
+            messages=messages,
+            completion_text=content if isinstance(content, str) else None,
+            completion_messages=(
+                completion_messages_for_usage(
+                    normalize_litellm_completion_response(response)
+                )
+                if transport is SlotClassificationTransport.STRICT_TOOL
+                else None
+            ),
+        )
+        if usage.estimated and transport is SlotClassificationTransport.STRICT_TOOL:
+            prompt_tokens = measure_provider_input_tokens(
+                messages, request_format.get("tools", []), litellm_model
+            ).tokens
+            usage = replace(
+                usage,
+                prompt_tokens=prompt_tokens,
+                total_tokens=prompt_tokens + (usage.completion_tokens or 0),
+            )
         usage_tracker.complete_call(
             call=call,
-            usage=completion_token_usage_from_response(
-                response,
-                model_name=litellm_model,
-                messages=messages,
-                completion_text=content if isinstance(content, str) else None,
-            ),
+            usage=usage,
         )
 
     if response.choices and response.choices[0].finish_reason == "length":
         return SlotClassificationAttempt(outcome="output_limit_exceeded")
+
+    if transport is SlotClassificationTransport.STRICT_TOOL and response.choices:
+        arguments = _slot_classification_tool_arguments(response.choices[0].message)
+        if isinstance(arguments, SlotClassificationAttempt):
+            return arguments
+        content = arguments
 
     if content is None or (isinstance(content, str) and not content.strip()):
         return SlotClassificationAttempt(outcome="no_content")
@@ -348,15 +415,46 @@ async def classify_slots(
     return SlotClassificationAttempt(outcome="resolved", result=result)
 
 
+def _slot_classification_tool_arguments(
+    message: Any,
+) -> str | SlotClassificationAttempt:
+    tool_calls = getattr(message, "tool_calls", None)
+    if tool_calls is None:
+        return SlotClassificationAttempt(outcome="no_content")
+    if not isinstance(tool_calls, (list, tuple)):
+        return SlotClassificationAttempt(outcome="parse_failed")
+    calls = cast(list[object] | tuple[object, ...], tool_calls)
+    if not calls:
+        return SlotClassificationAttempt(outcome="no_content")
+    if len(calls) != 1:
+        return SlotClassificationAttempt(outcome="parse_failed")
+    tool_call = calls[0]
+    function = getattr(tool_call, "function", None)
+    if (
+        getattr(tool_call, "type", None) != "function"
+        or getattr(function, "name", None) != SLOT_CLASSIFICATION_TOOL_NAME
+    ):
+        return SlotClassificationAttempt(outcome="parse_failed")
+    arguments = getattr(function, "arguments", None)
+    if arguments is None or (isinstance(arguments, str) and not arguments.strip()):
+        return SlotClassificationAttempt(outcome="no_content")
+    if not isinstance(arguments, str):
+        return SlotClassificationAttempt(outcome="parse_failed")
+    return arguments
+
+
 def _slot_classification_request_tokens(
     *,
     messages: list[dict[str, Any]],
-    response_format: dict[str, object],
+    request_format: _SlotClassificationRequestFormat,
     litellm_model: str,
 ) -> int:
     """The request measured whole, response schema included, by the reserving counter."""
 
-    request_tokens = measure_provider_input_reserve(messages, [], litellm_model).tokens
+    request_tokens = measure_provider_input_reserve(
+        messages, request_format.get("tools", []), litellm_model
+    ).tokens
+    response_format = request_format.get("response_format")
     if response_format:
         request_tokens += measure_provider_input_reserve(
             [
@@ -395,7 +493,7 @@ def _resolve_slot_classification_request_budget(
     *,
     messages: list[dict[str, Any]],
     protected_messages: list[dict[str, Any]],
-    response_format: dict[str, object],
+    request_format: _SlotClassificationRequestFormat,
     litellm_model: str,
     max_input_tokens: int,
     max_output_tokens: int,
@@ -414,7 +512,7 @@ def _resolve_slot_classification_request_budget(
     ).plan(
         required_input_tokens=_slot_classification_request_tokens(
             messages=protected_messages,
-            response_format=response_format,
+            request_format=request_format,
             litellm_model=litellm_model,
         )
     )
@@ -423,7 +521,7 @@ def _resolve_slot_classification_request_budget(
     return planned.resolve(
         input_tokens=_slot_classification_request_tokens(
             messages=messages,
-            response_format=response_format,
+            request_format=request_format,
             litellm_model=litellm_model,
         )
     )
@@ -438,19 +536,19 @@ def admit_slot_classification_input(
     active_checkpoint_producers: tuple[CheckpointProducerKind, ...],
     ui_language: str | None,
     bias: SlotClassificationBias | None,
-    structured_output_mode: StructuredOutputMode,
+    structured_output_mode: StructuredOutputMode | SlotClassificationTransport,
     litellm_model: str,
     max_input_tokens: int,
     max_output_tokens: int,
     budget_policy: AIBuilderBudgetPolicy,
 ) -> SlotClassificationInput:
     normalized_values = normalize_slot_classification_values(allowed_slot_values)
-    response_format = _slot_classification_response_format(
+    request_format = _slot_classification_request_format(
         normalized_values,
         schema_candidate_fingerprints=tuple(
             candidate.fingerprint for candidate in schema_candidates
         ),
-        mode=structured_output_mode,
+        mode=SlotClassificationTransport(structured_output_mode.value),
     )
 
     def request_tokens_for(candidate: SlotClassificationInput) -> int:
@@ -463,7 +561,7 @@ def admit_slot_classification_input(
                 ui_language=ui_language,
                 bias=bias,
             ),
-            response_format=response_format,
+            request_format=request_format,
             litellm_model=litellm_model,
         )
 
@@ -655,6 +753,38 @@ def _fair_classification_source_allocations(
     return included_lengths
 
 
+def _slot_classification_request_format(
+    allowed_slot_values: Mapping[str, Collection[str]],
+    *,
+    schema_candidate_fingerprints: Collection[str],
+    mode: SlotClassificationTransport,
+) -> _SlotClassificationRequestFormat:
+    if mode is SlotClassificationTransport.STRICT_TOOL:
+        tool = build_native_strict_tool_schema(
+            {
+                "type": "function",
+                "function": {
+                    "name": SLOT_CLASSIFICATION_TOOL_NAME,
+                    "parameters": slot_classification_tool_parameters(
+                        allowed_slot_values,
+                        schema_candidate_fingerprints=schema_candidate_fingerprints,
+                    ),
+                },
+            }
+        )
+        return {
+            "tools": [cast(dict[str, Any], tool)],
+            "tool_choice": forced_tool_choice(SLOT_CLASSIFICATION_TOOL_NAME),
+            "parallel_tool_calls": False,
+        }
+    response_format = _slot_classification_response_format(
+        allowed_slot_values,
+        schema_candidate_fingerprints=schema_candidate_fingerprints,
+        mode=StructuredOutputMode(mode.value),
+    )
+    return {"response_format": response_format} if response_format else {}
+
+
 def _slot_classification_response_format(
     allowed_slot_values: Mapping[str, Collection[str]],
     *,
@@ -696,7 +826,7 @@ def slot_classification_prompt_hash(
     max_input_tokens: int | None = None,
     max_output_tokens: int | None = None,
     safety_buffer_tokens: int = 0,
-    structured_output_mode: StructuredOutputMode,
+    structured_output_mode: StructuredOutputMode | SlotClassificationTransport,
 ) -> str:
     return hashlib.sha256(
         _classification_cache_payload(
@@ -1087,7 +1217,7 @@ def _classification_cache_payload(
     max_input_tokens: int | None = None,
     max_output_tokens: int | None = None,
     safety_buffer_tokens: int = 0,
-    structured_output_mode: StructuredOutputMode,
+    structured_output_mode: StructuredOutputMode | SlotClassificationTransport,
 ) -> str:
     normalized_values = normalize_slot_classification_values(allowed_slot_values)
     prompt = _build_slot_classification_prompt(
@@ -1113,14 +1243,17 @@ def _classification_cache_payload(
         "model": litellm_model,
         "prompt": prompt,
         "provider": provider,
-        "response_format": _slot_classification_response_format(
+        "response_format": {},
+    }
+    payload.update(
+        _slot_classification_request_format(
             normalized_values,
             schema_candidate_fingerprints=tuple(
                 candidate.fingerprint for candidate in schema_candidates
             ),
-            mode=structured_output_mode,
-        ),
-    }
+            mode=SlotClassificationTransport(structured_output_mode.value),
+        )
+    )
     return json.dumps(payload, ensure_ascii=False, sort_keys=True)
 
 

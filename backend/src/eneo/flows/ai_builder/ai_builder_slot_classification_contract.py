@@ -68,6 +68,9 @@ _FIELD_STRUCTURAL_BOUNDARIES = frozenset(
 )
 UNKNOWN_SLOT_VALUE = "unknown"
 SLOT_CLASSIFICATION_SCHEMA_VERSION = 25
+SLOT_CLASSIFICATION_TOOL_NAME = (
+    f"ai_builder_slot_classification_v{SLOT_CLASSIFICATION_SCHEMA_VERSION}"
+)
 _DECLARED_SHAPE_BY_NOTATION: Mapping[str, NamedResultDeclaredShape] = {
     "[]": "array",
     "{}": "object",
@@ -2366,6 +2369,32 @@ def slot_classification_json_schema(
         "required": list(properties),
         "properties": properties,
     }
+
+
+def slot_classification_tool_parameters(
+    allowed_slot_values: Mapping[str, Collection[str]],
+    *,
+    schema_candidate_fingerprints: Collection[str] = (),
+) -> dict[str, Any]:
+    schema = slot_classification_json_schema(
+        allowed_slot_values,
+        schema_candidate_fingerprints=schema_candidate_fingerprints,
+    )
+    properties = cast(dict[str, Any], schema["properties"])
+    slots = cast(dict[str, Any], properties["slots"]["properties"])
+    for slot in slots.values():
+        # The outcome literals keep these branches mutually exclusive.
+        branches = slot.pop("oneOf")
+        slot["anyOf"] = branches
+        for branch in branches:
+            outcome = branch["properties"]["outcome"]
+            branch["properties"]["outcome"] = {
+                "type": "string",
+                "enum": [outcome["const"]],
+            }
+    if not schema_candidate_fingerprints:
+        properties["schema_direction"] = {"type": "null"}
+    return schema
 
 
 def _slot_classification_top_level_properties(

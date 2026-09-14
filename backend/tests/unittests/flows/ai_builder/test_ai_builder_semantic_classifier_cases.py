@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Annotated, Any, Literal, Self, cast
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
@@ -40,6 +41,7 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
 )
 from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
+    SLOT_CLASSIFICATION_TOOL_NAME,
     ClassifiedEvidence,
     ResolvedSlotClassificationOutcome,
     SlotClassificationBias,
@@ -235,18 +237,21 @@ def _canonical_question(slot_name: str, locale: Locale) -> StructuredQuestionPay
     )
 
 
-def _route() -> ResolvedCompletionModelRoute:
+def _route(*, strict_tool: bool = False) -> ResolvedCompletionModelRoute:
     return ResolvedCompletionModelRoute(
         litellm_model="openai/semantic-contract-test",
         provider_type="openai",
         litellm_kwargs={},
+        supports_strict_tool_schema=strict_tool,
         supported_model_kwargs=SupportedModelKwargs(
             temperature=ModelKwargCapability(supported=True)
         ),
     )
 
 
-def _mock_response(slots: list[dict[str, object]]) -> MagicMock:
+def _mock_response(
+    slots: list[dict[str, object]], *, strict_tool: bool = False
+) -> MagicMock:
     message = MagicMock()
     message.content = json.dumps(
         {
@@ -262,6 +267,28 @@ def _mock_response(slots: list[dict[str, object]]) -> MagicMock:
         ensure_ascii=False,
     )
     choice = MagicMock()
+    choice.finish_reason = "stop"
+    if strict_tool:
+        payload = json.loads(message.content)
+        payload["slots"] = {
+            slot_name: {"outcome": "absent"} for slot_name in ALLOWED_SLOT_VALUES
+        }
+        for slot in slots:
+            payload["slots"][slot["slot_name"]] = {
+                "outcome": "resolved",
+                **{key: value for key, value in slot.items() if key != "slot_name"},
+            }
+        message.tool_calls = [
+            SimpleNamespace(
+                id="semantic-classification",
+                type="function",
+                function=SimpleNamespace(
+                    name=SLOT_CLASSIFICATION_TOOL_NAME, arguments=json.dumps(payload)
+                ),
+            )
+        ]
+        message.content = None
+        choice.finish_reason = "tool_calls"
     choice.message = message
     response = MagicMock()
     response.choices = [choice]
@@ -423,8 +450,10 @@ def test_exact_label_uses_neutral_response_lifecycle(
     ids=[case.id for case in CLASSIFIER_BOUNDARY_CASES],
 )
 @pytest.mark.asyncio
+@pytest.mark.parametrize("strict_tool", [False, True])
 async def test_representative_exact_labels_cross_prompt_parse_and_citation_boundary(
     case: ExactLabelCase,
+    strict_tool: bool,
 ) -> None:
     question = _canonical_question(case.slot_name, case.locale)
     assistant_message = ConversationMessage(
@@ -459,12 +488,13 @@ async def test_representative_exact_labels_cross_prompt_parse_and_citation_bound
                     value=case.option_value,
                     source=source,
                 )
-            ]
+            ],
+            strict_tool=strict_tool,
         )
     )
     classification = await classify_slots(
         litellm_client=litellm_client,
-        completion_model_route=_route(),
+        completion_model_route=_route(strict_tool=strict_tool),
         classification_input=classification_input,
         allowed_slot_values=ALLOWED_SLOT_VALUES,
         tenant_id=UUID(int=1),

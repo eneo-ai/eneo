@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
@@ -11,6 +13,7 @@ from uuid import UUID, uuid4
 import httpx
 import litellm
 import pytest
+from jsonschema import Draft202012Validator
 from litellm.caching.llm_caching_handler import LLMClientCache
 from litellm.exceptions import (
     APIConnectionError,
@@ -68,6 +71,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classifier import (
 from eneo.flows.ai_builder.ai_builder_slot_classifier import (
     slot_classification_prompt_hash as _slot_classification_prompt_hash,
 )
+from eneo.flows.ai_builder.ai_builder_tools import validate_native_strict_schema
 from eneo.flows.ai_builder.planning_state import (
     CheckpointProducerKind,
     ExactNamedResultPlacement,
@@ -2594,6 +2598,7 @@ def _route(
     provider_type: str = "openai",
     kwargs: dict[str, object] | None = None,
     supported: SupportedModelKwargs | None = None,
+    supports_strict_tool_schema: bool = False,
 ) -> ResolvedCompletionModelRoute:
     return ResolvedCompletionModelRoute(
         litellm_model=model,
@@ -2601,6 +2606,7 @@ def _route(
         litellm_kwargs=kwargs or {},
         supported_model_kwargs=supported
         or SupportedModelKwargs(temperature=ModelKwargCapability(supported=True)),
+        supports_strict_tool_schema=supports_strict_tool_schema,
     )
 
 
@@ -5314,3 +5320,600 @@ async def test_classify_slots_records_the_allocation_its_optional_sources_were_p
         4_000, 4_000 - budget.fixed_input_tokens
     )
     assert budget.provider_output_cap_tokens >= budget.reserved_output_tokens
+
+
+def _classification_tool_response(arguments: object) -> SimpleNamespace:
+    return SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                finish_reason="tool_calls",
+                message=SimpleNamespace(
+                    content=None,
+                    tool_calls=[
+                        SimpleNamespace(
+                            id="classification-1",
+                            type="function",
+                            function=SimpleNamespace(
+                                name=(
+                                    "ai_builder_slot_classification_v"
+                                    f"{classification_contract.SLOT_CLASSIFICATION_SCHEMA_VERSION}"
+                                ),
+                                arguments=arguments,
+                            ),
+                        )
+                    ],
+                ),
+            )
+        ],
+        usage=None,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", list(StructuredOutputMode))
+@pytest.mark.parametrize("strict_tool", [True, False])
+async def test_classifier_transport_follows_route_capability(
+    mode: StructuredOutputMode,
+    strict_tool: bool,
+) -> None:
+    payload = json.dumps(
+        {**_VALID_CLASSIFICATION_RESPONSE, "slots": {"input": {"outcome": "absent"}}}
+    )
+    client = AsyncMock()
+    client.acompletion.return_value = (
+        _classification_tool_response(payload)
+        if strict_tool
+        else _make_response(payload)
+    )
+    attempt = await classify_slots(
+        litellm_client=client,
+        completion_model_route=_route(
+            supports_strict_tool_schema=strict_tool,
+            kwargs={"response_format": {"type": "json_object"}} if strict_tool else {},
+        ),
+        classification_input=_classification_input(f"transport-{uuid4()}"),
+        allowed_slot_values={"input": {"text"}},
+        tenant_id=uuid4(),
+        structured_output_mode=mode,
+    )
+
+    client.acompletion.assert_awaited_once()
+    sent = client.acompletion.await_args.kwargs
+    if strict_tool:
+        (tool,) = sent["tools"]
+        assert tool["type"] == "function"
+        assert tool["function"]["strict"] is True
+        assert sent["tool_choice"] == {
+            "type": "function",
+            "function": {"name": tool["function"]["name"]},
+        }
+        assert sent["parallel_tool_calls"] is False
+        assert "response_format" not in sent
+    else:
+        assert "tools" not in sent
+        assert "tool_choice" not in sent
+        if mode is StructuredOutputMode.STRICT_JSON_SCHEMA:
+            assert sent["response_format"]["type"] == "json_schema"
+            assert sent["response_format"]["json_schema"]["strict"] is False
+        elif mode is StructuredOutputMode.JSON_OBJECT:
+            assert sent["response_format"] == {"type": "json_object"}
+        else:
+            assert "response_format" not in sent
+    assert attempt.outcome == "resolved"
+    assert attempt.result is not None
+    assert attempt.result.slot_outcomes["input"].kind == "absent"
+
+
+@pytest.mark.asyncio
+async def test_strict_classifier_runtime_shares_transport_and_prompt_hash() -> None:
+    from eneo.flows.ai_builder import ai_builder_discovery_runtime as runtime
+    from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
+
+    client = AsyncMock()
+    client.acompletion.return_value = _classification_tool_response("")
+    with (
+        patch.object(
+            runtime,
+            "admit_slot_classification_input",
+            wraps=classifier.admit_slot_classification_input,
+        ) as admission,
+        patch.object(
+            runtime,
+            "slot_classification_prompt_hash",
+            wraps=classifier.slot_classification_prompt_hash,
+        ) as metadata_hash,
+        patch.object(
+            classifier,
+            "slot_classification_prompt_hash",
+            wraps=classifier.slot_classification_prompt_hash,
+        ) as cache_hash,
+    ):
+        context = await runtime.build_runtime_discovery_context(
+            [
+                ConversationMessage(
+                    message_id="strict-runtime",
+                    role="user",
+                    content=f"Help me build a document analysis flow {uuid4()}.",
+                )
+            ],
+            litellm_client=client,
+            completion_model_route=_route(supports_strict_tool_schema=True),
+            tenant_id=uuid4(),
+            max_input_tokens=100_000,
+            max_output_tokens=4_096,
+        )
+    assert admission.call_args.kwargs["structured_output_mode"] is (
+        classifier.SlotClassificationTransport.STRICT_TOOL
+    )
+    assert metadata_hash.call_args.kwargs == cache_hash.call_args.kwargs
+    assert context.slot_classification_metadata is not None
+    assert context.slot_classification_metadata.prompt_hash == (
+        classifier.slot_classification_prompt_hash(**cache_hash.call_args.kwargs)
+    )
+    client.acompletion.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider_usage", [True, False])
+@pytest.mark.parametrize(
+    "arguments", [json.dumps(_VALID_CLASSIFICATION_RESPONSE), "bad JSON"]
+)
+async def test_strict_classifier_usage_counts_tools_and_preserves_provider_usage(
+    provider_usage: bool,
+    arguments: str,
+) -> None:
+    response = _classification_tool_response(arguments)
+    if provider_usage:
+        response.usage = SimpleNamespace(
+            prompt_tokens=7, completion_tokens=11, total_tokens=18
+        )
+    tracker = ProposalTurnTelemetry(
+        request_id="strict-usage",
+        model="gpt-test",
+        target_kind=TargetKind.CREATE,
+    )
+    client = AsyncMock()
+    client.acompletion.return_value = response
+    with (
+        patch(
+            "litellm.token_counter",
+            side_effect=lambda **kwargs: 321 if kwargs.get("tools") else 123,
+        ),
+        patch(
+            "eneo.flows.ai_builder.ai_builder_token_usage.count_message_tokens",
+            side_effect=lambda messages, _model: (
+                47
+                if messages and messages[0].get("tool_calls")
+                else 123
+                if messages
+                else 0
+            ),
+        ),
+    ):
+        await classify_slots(
+            litellm_client=client,
+            completion_model_route=_route(supports_strict_tool_schema=True),
+            classification_input=_classification_input(f"usage-{uuid4()}"),
+            allowed_slot_values={},
+            tenant_id=uuid4(),
+            usage_tracker=tracker,
+        )
+    (usage,) = tracker.token_usages
+    assert (usage.prompt_tokens, usage.completion_tokens, usage.total_tokens) == (
+        (7, 11, 18) if provider_usage else (321, 47, 368)
+    )
+    assert usage.estimated is not provider_usage
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_candidates", [False, True])
+async def test_strict_classifier_outbound_schema_preserves_classification_shapes(
+    with_candidates: bool,
+) -> None:
+    candidate = build_declared_schema_candidate(
+        {"type": "object", "properties": {"case_id": {"type": "string"}}},
+        source_file_ids=(),
+        provenance=("user_message:user-1",),
+    )
+    candidates = (candidate,) if with_candidates else ()
+    values = {"input": {"text", "documents"}}
+    fallback = classification_contract.slot_classification_json_schema(values)
+    original = deepcopy(fallback)
+    payload = {
+        **_VALID_CLASSIFICATION_RESPONSE,
+        "slots": {"input": {"outcome": "absent"}},
+    }
+    client = AsyncMock()
+    client.acompletion.return_value = _classification_tool_response(json.dumps(payload))
+    await classify_slots(
+        litellm_client=client,
+        completion_model_route=_route(supports_strict_tool_schema=True),
+        classification_input=_classification_input(f"schema-{uuid4()}"),
+        allowed_slot_values=values,
+        schema_candidates=candidates,
+        tenant_id=uuid4(),
+    )
+    (tool,) = client.acompletion.await_args.kwargs["tools"]
+    schema = tool["function"]["parameters"]
+    validate_native_strict_schema(schema)
+    assert schema["required"] == [
+        "slots",
+        "file_roles",
+        "checkpoint_updates",
+        "form_intake",
+        "named_result_evidence",
+        "example_output_constraints",
+        "schema_direction",
+        "secondary_obligations",
+    ]
+    assert schema["additionalProperties"] is False
+    slots = schema["properties"]["slots"]
+    assert slots["required"] == ["input"]
+    assert slots["additionalProperties"] is False
+    resolved, uncertain, absent = slots["properties"]["input"]["anyOf"]
+    assert [
+        branch["properties"]["outcome"] for branch in (resolved, uncertain, absent)
+    ] == [
+        {"type": "string", "enum": ["resolved"]},
+        {"type": "string", "enum": ["explicitly_uncertain"]},
+        {"type": "string", "enum": ["absent"]},
+    ]
+    assert set(resolved["required"]) == {
+        "outcome",
+        "value",
+        "confidence",
+        "reason",
+        "evidence",
+        "evidence_level",
+    }
+    assert uncertain["required"] == ["outcome", "evidence"]
+    assert absent["required"] == ["outcome"]
+    assert resolved["properties"]["value"]["enum"] == ["documents", "text"]
+    assert resolved["properties"]["reason"] == {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500,
+    }
+    evidence = resolved["properties"]["evidence"]
+    assert evidence["maxItems"] == 3
+    assert evidence["items"] == uncertain["properties"]["evidence"]
+    assert evidence["items"] == {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["source_id", "quote"],
+        "properties": {
+            "source_id": {"type": "string", "minLength": 1},
+            "quote": {"type": "string", "minLength": 1, "maxLength": 240},
+        },
+    }
+    clear = schema["properties"]["checkpoint_updates"]["items"]["anyOf"][1]
+    assert "mode" in clear["required"]
+    assert clear["properties"]["mode"] == {"type": "null"}
+    direction = schema["properties"]["schema_direction"]
+    if with_candidates:
+        assert direction["anyOf"][0]["properties"]["input_fingerprint"]["anyOf"][0][
+            "enum"
+        ] == [candidate.fingerprint]
+    else:
+        assert direction == {"type": "null"}
+    validator = Draft202012Validator(schema)
+    assert validator.is_valid(payload)
+    assert not validator.is_valid({**payload, "slots": {"input": {"outcome": "text"}}})
+    assert (
+        fallback
+        == original
+        == classification_contract.slot_classification_json_schema(values)
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("case", "expected"),
+    [
+        ("no_choices", "no_content"),
+        ("no_calls", "no_content"),
+        ("null_calls", "no_content"),
+        ("several_calls", "parse_failed"),
+        ("malformed_calls", "parse_failed"),
+        ("wrong_name", "parse_failed"),
+        ("wrong_type", "parse_failed"),
+        ("missing_function", "parse_failed"),
+        ("null_arguments", "no_content"),
+        ("blank_arguments", "no_content"),
+        ("non_string_arguments", "parse_failed"),
+        ("invalid_json", "parse_failed"),
+        ("empty_object", "parse_failed"),
+        ("refusal", "no_content"),
+        ("truncated", "output_limit_exceeded"),
+    ],
+)
+async def test_strict_classifier_failed_response_is_recorded_and_not_cached(
+    case: str,
+    expected: str,
+) -> None:
+    valid = json.dumps({**_VALID_CLASSIFICATION_RESPONSE, "slots": {}})
+    response = _classification_tool_response(valid)
+    choice = response.choices[0]
+    message = choice.message
+    function = message.tool_calls[0].function
+    if case == "no_choices":
+        response.choices = []
+    elif case in {"no_calls", "refusal"}:
+        message.tool_calls = []
+        message.content = valid if case == "no_calls" else "I cannot help with that."
+        message.refusal = message.content if case == "refusal" else None
+    elif case == "null_calls":
+        message.tool_calls = None
+    elif case == "several_calls":
+        message.tool_calls *= 2
+    elif case == "malformed_calls":
+        message.tool_calls = "invalid"
+    elif case == "wrong_name":
+        function.name = "another_tool"
+    elif case == "wrong_type":
+        message.tool_calls[0].type = "custom"
+    elif case == "missing_function":
+        del message.tool_calls[0].function
+    elif case == "truncated":
+        choice.finish_reason = "length"
+    else:
+        function.arguments = {
+            "null_arguments": None,
+            "blank_arguments": " \n ",
+            "non_string_arguments": [],
+            "invalid_json": "not JSON",
+            "empty_object": "{}",
+        }[case]
+    client = AsyncMock()
+    client.acompletion.side_effect = [response, _classification_tool_response(valid)]
+    tracker = ProposalTurnTelemetry(
+        request_id="strict-failure", model="gpt-test", target_kind=TargetKind.CREATE
+    )
+    kwargs = dict(
+        litellm_client=client,
+        completion_model_route=_route(supports_strict_tool_schema=True),
+        classification_input=_classification_input(f"failure-{uuid4()}"),
+        allowed_slot_values={},
+        tenant_id=uuid4(),
+        usage_tracker=tracker,
+    )
+    with patch.object(
+        classification_contract,
+        "parse_slot_classification_response",
+        wraps=parse_slot_classification_response,
+    ) as parser:
+        attempt = await classify_slots(**kwargs)
+        assert attempt.outcome == expected
+        assert attempt.result is None
+        assert parser.call_count == (
+            1 if case in {"invalid_json", "empty_object"} else 0
+        )
+    assert tracker.llm_calls_made == 1
+    assert len(tracker.token_usages) == 1
+    assert (await classify_slots(**kwargs)).outcome == "resolved"
+    assert client.acompletion.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_strict_classifier_preserves_raw_arguments_and_semantic_diagnostics() -> (
+    None
+):
+    source = _classification_input("Use text input.")
+    resolved = {
+        "outcome": "resolved",
+        "value": "text",
+        "confidence": "high",
+        "reason": "User request",
+        "evidence": [_evidence("Use text input.")],
+        "evidence_level": "explicit",
+    }
+    values = {
+        name: {"text"}
+        for name in ("valid", "duplicate", "omitted", "fabricated", "overlong")
+    }
+    payload = {
+        **_VALID_CLASSIFICATION_RESPONSE,
+        "slots": {
+            "valid": resolved,
+            "duplicate": {"outcome": "absent"},
+            "fabricated": {**resolved, "evidence": [_evidence("Invented quotation")]},
+            "overlong": {**resolved, "evidence": [_evidence("x" * 241)]},
+        },
+        "named_result_evidence": {"operation": "invalid"},
+    }
+    arguments = json.dumps(payload).replace(
+        '"duplicate": {"outcome": "absent"}',
+        '"duplicate": {"outcome": "absent"}, "duplicate": {"outcome": "absent"}',
+    )
+    expected = parse_slot_classification_response(
+        arguments, allowed_slot_values=values, classification_input=source
+    )
+    client = AsyncMock()
+    client.acompletion.return_value = _classification_tool_response(arguments)
+    with (
+        patch.object(
+            classification_contract,
+            "parse_slot_classification_response",
+            wraps=parse_slot_classification_response,
+        ) as parser,
+        patch.object(classifier, "_capture_raw_classifier_response") as capture,
+    ):
+        attempt = await classify_slots(
+            litellm_client=client,
+            completion_model_route=_route(supports_strict_tool_schema=True),
+            classification_input=source,
+            allowed_slot_values=values,
+            tenant_id=uuid4(),
+        )
+    parser.assert_called_once_with(
+        arguments,
+        allowed_slot_values=values,
+        classification_input=source,
+        schema_candidate_fingerprints=(),
+    )
+    assert capture.call_args.args[0] == arguments
+    assert attempt.result == expected
+    assert expected is not None
+    assert {(d.slot_name, d.code) for d in expected.diagnostics} == {
+        ("duplicate", "slot_outcome_duplicate"),
+        ("omitted", "slot_outcome_omitted"),
+        ("overlong", "slot_outcome_malformed"),
+    }
+    assert expected.slot_outcomes["fabricated"].confidence == "low"
+    assert expected.named_result_evidence is None
+
+
+@pytest.mark.asyncio
+async def test_strict_classifier_hash_tracks_outbound_schema_without_changing_prompt() -> (
+    None
+):
+    source = _classification_input(f"hash-{uuid4()}")
+    values = {"input": {"documents", "text"}}
+    hash_kwargs = dict(
+        classification_input=source,
+        ui_language=None,
+        allowed_slot_values=values,
+        litellm_model="gpt-test",
+        provider="openai",
+        supported_model_kwargs=_route().supported_model_kwargs,
+    )
+    strict = classifier.SlotClassificationTransport.STRICT_TOOL
+    hashes = {
+        slot_classification_prompt_hash(**hash_kwargs, structured_output_mode=mode)
+        for mode in classifier.SlotClassificationTransport
+    }
+    assert len(hashes) == 4
+    baseline = slot_classification_prompt_hash(
+        **hash_kwargs, structured_output_mode=strict
+    )
+    projected = classifier.build_native_strict_tool_schema
+
+    def changed_schema(tool):
+        result = projected(tool)
+        result["function"]["parameters"]["properties"]["slots"]["properties"]["input"][
+            "anyOf"
+        ][0]["properties"]["reason"]["maxLength"] = 499
+        return result
+
+    with patch.object(
+        classifier, "build_native_strict_tool_schema", side_effect=changed_schema
+    ):
+        assert (
+            slot_classification_prompt_hash(
+                **hash_kwargs, structured_output_mode=strict
+            )
+            != baseline
+        )
+    assert (
+        slot_classification_prompt_hash(
+            **{**hash_kwargs, "allowed_slot_values": {"input": ("text", "documents")}},
+            structured_output_mode=strict,
+        )
+        == baseline
+    )
+    client = AsyncMock()
+    payload = json.dumps(
+        {**_VALID_CLASSIFICATION_RESPONSE, "slots": {"input": {"outcome": "absent"}}}
+    )
+    client.acompletion.side_effect = [
+        _make_response(payload),
+        _classification_tool_response(payload),
+    ]
+    for strict_tool in (False, True):
+        await classify_slots(
+            litellm_client=client,
+            completion_model_route=_route(supports_strict_tool_schema=strict_tool),
+            classification_input=source,
+            allowed_slot_values=values,
+            tenant_id=uuid4(),
+        )
+    first, second = client.acompletion.await_args_list
+    assert first.kwargs["messages"] == second.kwargs["messages"]
+
+
+@pytest.mark.asyncio
+async def test_strict_classifier_reserves_outbound_tools_in_admission_and_dispatch() -> (
+    None
+):
+    from dataclasses import replace
+
+    source = _classification_input(f"budget-{uuid4()}")
+    source = replace(
+        source,
+        sources=(
+            SlotClassificationSource(
+                source_id="user_message:old",
+                kind="user_message",
+                text="optional evidence",
+                message_id="old",
+            ),
+            *source.sources,
+        ),
+    )
+    measured_tools = []
+
+    def measured(messages, tools, _model):
+        measured_tools.append(tools)
+        optional = any("optional evidence" in m["content"] for m in messages)
+        return TokenCount(
+            tokens=100 + (250 if tools else 0) + (100 if optional else 0),
+            source=TokenCountSource.LITELLM,
+        )
+
+    policy = AIBuilderBudgetPolicy(
+        conversation_safety_buffer_tokens=0, minimum_conversation_budget_tokens=0
+    )
+    tracker = ProposalTurnTelemetry(
+        request_id="strict-budget", model="gpt-test", target_kind=TargetKind.CREATE
+    )
+    client = AsyncMock()
+    client.acompletion.return_value = _classification_tool_response(
+        json.dumps({**_VALID_CLASSIFICATION_RESPONSE, "slots": {}})
+    )
+    before_call = AsyncMock()
+    admission_kwargs = dict(
+        classification_input=source,
+        attachment_context=None,
+        allowed_slot_values={},
+        schema_candidates=(),
+        active_checkpoint_producers=(),
+        ui_language=None,
+        bias=None,
+        structured_output_mode=classifier.SlotClassificationTransport.STRICT_TOOL,
+        litellm_model="gpt-test",
+        max_input_tokens=800,
+        max_output_tokens=200,
+        budget_policy=policy,
+    )
+    call_kwargs = dict(
+        litellm_client=client,
+        completion_model_route=_route(supports_strict_tool_schema=True),
+        classification_input=source,
+        allowed_slot_values={},
+        tenant_id=uuid4(),
+        max_input_tokens=800,
+        max_output_tokens=200,
+        budget_policy=policy,
+        usage_tracker=tracker,
+        before_provider_call=before_call,
+    )
+    with patch.object(
+        classifier, "measure_provider_input_reserve", side_effect=measured
+    ):
+        assert classifier.admit_slot_classification_input(**admission_kwargs) == source
+        with pytest.raises(AIBuilderKnownProviderRejectionException):
+            classifier.admit_slot_classification_input(
+                **{**admission_kwargs, "max_input_tokens": 300}
+            )
+        with pytest.raises(AIBuilderKnownProviderRejectionException):
+            await classify_slots(**{**call_kwargs, "max_input_tokens": 300})
+        before_call.assert_not_awaited()
+        client.acompletion.assert_not_awaited()
+        await classify_slots(**call_kwargs)
+    sent = client.acompletion.await_args.kwargs
+    assert measured_tools and all(tools == sent["tools"] for tools in measured_tools)
+    (record,) = tracker.call_records
+    assert record.request_budget is not None
+    assert record.request_budget.required_input_tokens == 350
+    assert record.request_budget.fixed_input_tokens == 450
+    assert record.request_budget.reserved_output_tokens == sent["max_tokens"] == 200
