@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from typing import TypeGuard, cast
+from uuid import UUID
 
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
@@ -43,12 +45,9 @@ from eneo.flows.flow_variable_definitions import (
     template_placeholder_form_field_name,
 )
 
-# Inspection facts the flow service rewrites from the asset on every update.
-# `template_asset_id` is not among them: an edit of a bound flow keeps the
-# asset it already fills, and a replacement attached in the session overwrites
-# it when the plan is applied.
 _LOCAL_TEMPLATE_CONFIG_KEYS = frozenset(
     {
+        "template_asset_id",
         "template_checksum",
         "template_file_id",
         "template_name",
@@ -56,6 +55,7 @@ _LOCAL_TEMPLATE_CONFIG_KEYS = frozenset(
     }
 )
 _MAX_DIAGNOSTIC_PLACEHOLDER_LENGTH = 80
+_EXACT_TEMPLATE_EXPRESSION = re.compile(r"^\s*\{\{\s*([^{}]+?)\s*\}\}\s*$")
 MAX_TEMPLATE_PREPARATION_STAGES = 5
 MAX_TEMPLATE_MATERIALIZED_PATHS = NAMED_RESULT_EVIDENCE_MAX_ITEMS
 _TRANSCRIPTION_PLACEHOLDERS = frozenset(
@@ -89,8 +89,19 @@ def apply_template_attachment_contract(
     *,
     selected_template_count: int,
     placeholders: tuple[str, ...] | None,
+    existing_bindings: Mapping[str, str] | None = None,
+    inherited_template_asset_id: UUID | None = None,
 ) -> FlowDraftSpecCore:
-    """Compile one selected DOCX's exact runtime contract before approval."""
+    """Compile one selected DOCX's exact runtime contract before approval.
+
+    `existing_bindings` are the mappings the edited flow's template step
+    already carries: a placeholder among them keeps its mapping when it still
+    resolves in the edited flow, and a mapping the edit breaks is reported,
+    never re-derived behind the user's back. `inherited_template_asset_id` is
+    the flow's own asset when the edit keeps the flow's template: the final
+    template-fill step names it, wherever that step now is, so the apply has
+    nothing to materialize. A create session passes neither.
+    """
 
     template_step_indexes = [
         index
@@ -136,9 +147,34 @@ def apply_template_attachment_contract(
     )
     form_fields = list(spec.form_fields or ())
     terminal_step = spec.steps[-1]
+    existing_bindings = existing_bindings or {}
     bindings: dict[str, str] = {}
     unresolved: list[str] = []
     for placeholder in normalized_placeholders:
+        if placeholder in existing_bindings:
+            existing = existing_bindings[placeholder]
+            kept = _validated_existing_binding(
+                existing,
+                spec=spec,
+                form_fields=form_fields,
+            )
+            if kept is None:
+                raise _architecture_error(
+                    failure_code="template_binding_dependency_broken",
+                    repair_disposition="model_correctable",
+                    detail=(
+                        f"The flow's DOCX template maps placeholder "
+                        f"'{placeholder[:_MAX_DIAGNOSTIC_PLACEHOLDER_LENGTH]}' to "
+                        f"{existing[:_MAX_DIAGNOSTIC_PLACEHOLDER_LENGTH]}, which this "
+                        "edit breaks. Keep the step and output that mapping reads, "
+                        "or remove that dependency deliberately."
+                    ),
+                    placeholder=placeholder[:_MAX_DIAGNOSTIC_PLACEHOLDER_LENGTH],
+                    binding=existing[:_MAX_DIAGNOSTIC_PLACEHOLDER_LENGTH],
+                )
+            bindings[placeholder] = kept
+            continue
+
         field_name = template_placeholder_form_field_name(placeholder)
         if field_name is not None and _declared_form_field_name(
             form_fields,
@@ -199,6 +235,8 @@ def apply_template_attachment_contract(
         if key not in _LOCAL_TEMPLATE_CONFIG_KEYS and key != "bindings"
     }
     portable_output_config["bindings"] = bindings
+    if inherited_template_asset_id is not None:
+        portable_output_config["template_asset_id"] = str(inherited_template_asset_id)
     preparation_steps = _drop_unused_template_predecessor(
         steps=spec.steps[:-1],
         bindings=bindings,
@@ -284,6 +322,42 @@ def _require_transcription_input_when_referenced(
         update={"input_config": updated_input_config}
     )
     return spec.model_copy(update={"steps": [updated_root_step, *spec.steps[1:]]})
+
+
+def _validated_existing_binding(
+    binding: str,
+    *,
+    spec: FlowDraftSpecCore,
+    form_fields: list[FormFieldSpec],
+) -> str | None:
+    """The existing mapping in canonical form when it still resolves, else None.
+
+    Step references arrive already rewritten to plan refs by the edit
+    compiler; the same rules that derive a new mapping decide whether a kept
+    one still points at an earlier step's declared output, the runtime date,
+    the transcript, the previous step's text, or a declared Flow input field.
+    An explicit blank stays blank.
+    """
+
+    if not binding.strip():
+        return ""
+    match = _EXACT_TEMPLATE_EXPRESSION.match(binding)
+    if match is None:
+        return None
+    expression = match.group(1)
+    explicit = _explicit_runtime_binding(placeholder=expression, spec=spec)
+    if explicit is not None:
+        return explicit
+    if not expression.casefold().startswith(("flow_input.", "flow.input.")):
+        return None
+    field_name = template_placeholder_form_field_name(expression)
+    if field_name is None:
+        return None
+    requested_key = field_name.casefold()
+    for field in form_fields:
+        if field.name.casefold() == requested_key:
+            return form_field_reference_expression(field.name)
+    return None
 
 
 def _declared_form_field_name(

@@ -2448,3 +2448,59 @@ async def test_apply_edit_plan_keeps_the_flows_own_template_without_an_attachmen
     assert command.template_attachment_intent is None
     template_asset_service.create_from_existing_attached_file.assert_not_awaited()
     authoring_service.apply_prepared.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_apply_refuses_a_detached_replacement_instead_of_the_flows_template() -> (
+    None
+):
+    # The plan was compiled against a session template replacing the flow's
+    # own. Detaching it after approval must not apply the old layout under
+    # the new mappings; the apply fails and a later turn re-confirms.
+    user = _make_user()
+    repo = _make_repo_mock()
+    flow_id = uuid4()
+    replacement_file_id = uuid4()
+    session = _make_session(
+        tenant_id=user.tenant_id,
+        actor_user_id=user.id,
+        flow_id=flow_id,
+        target_kind=TargetKind.EDIT,
+    )
+    plan = _make_plan(
+        session_id=session.id,
+        tenant_id=user.tenant_id,
+        spec=_make_template_fill_spec(),
+        edit=_make_plan_edit_approval(_make_template_fill_spec()),
+    )
+    session.latest_plan_id = plan.id
+    repo.get_plan.return_value = plan
+    repo.get_plan_for_update.return_value = plan
+    repo.get_session.return_value = session
+    repo.get_session_for_update.return_value = session
+    planning_state = _planning_state_with_template_files(replacement_file_id)
+    planning_state.inherited_template = InheritedTemplateBinding(
+        template_asset_id=uuid4(),
+        placeholders=["case_id"],
+    )
+    repo.load_planning_state.return_value = planning_state
+    repo.list_session_file_ids.return_value = []
+    authoring_service = _make_authoring_service(flow_id=flow_id)
+    lifecycle = AIBuilderPlanLifecycle(
+        user=user,
+        repo=repo,
+        flow_service=AsyncMock(),
+        space_service=_make_space_service(),
+        authoring_service=authoring_service,
+        template_asset_service=AsyncMock(),
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await lifecycle.apply_plan(plan_id=plan.id, expected_revision=1)
+
+    assert exc_info.value.code == "builder_attachment_unavailable"
+    assert exc_info.value.context == {
+        "reason": "template_attachment_missing",
+        "template_count": 0,
+    }
+    authoring_service.prepare.assert_not_awaited()

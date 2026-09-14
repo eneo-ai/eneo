@@ -7170,8 +7170,9 @@ class TestEditSessionInheritsTheFlowTemplate:
             selection.count,
             selection.placeholders,
             selection.filename,
+            selection.template_asset_id,
             selection.origin,
-        ) == (1, ("sammanfattning", "datum"), "motesrapport.docx", "flow")
+        ) == (1, ("sammanfattning", "datum"), "motesrapport.docx", asset_id, "flow")
 
     def test_placeholders_fall_back_to_the_binding_keys(self) -> None:
         asset_id = uuid4()
@@ -7240,6 +7241,4 @@ class TestEditSessionInheritsTheFlowTemplate:
             replaced.filename,
             replaced.origin,
         ) == (1, ("ärende",), attached_file_id, "ny-mall.docx", "replacement")
-        # Detached again: the flow's own template is what the plan applies to.
-        detached = state.template_selection(attached_file_ids=set())
-        assert (detached.count, detached.inherited, detached.file_id) == (1, True, None)
+        assert replaced.template_asset_id is None

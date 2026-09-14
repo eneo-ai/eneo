@@ -37,7 +37,6 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Literal, TypeAlias, assert_never, cast
@@ -503,6 +502,9 @@ class TemplateSelection:
     # The session file the selection came from; None when inherited or absent.
     file_id: UUID | None
     filename: str | None
+    # The flow's own asset when inherited; a session template gets its asset
+    # when the plan is applied.
+    template_asset_id: UUID | None
     origin: TemplateSelectionOrigin
 
     @property
@@ -1163,24 +1165,19 @@ class PlanningState(_PlanningModel):
     def has_template_file_role(self) -> bool:
         return any(item.role == "template" for item in self.file_roles)
 
-    def template_selection(
-        self,
-        *,
-        attached_file_ids: Collection[UUID] | None = None,
-    ) -> TemplateSelection:
+    def template_selection(self) -> TemplateSelection:
         """Resolve which DOCX template a template-fill plan is bound to.
 
         Templates attached in the session are an explicit choice and win; an
         edit session with none inherits the flow's persisted binding, so the
         user is never asked again for a template the flow already carries.
-        `attached_file_ids` narrows session templates to files still attached.
+        The selection never falls back past a session template that is gone:
+        a detached replacement is reported by the caller, not replaced by the
+        flow's template behind the confirmation the user gave.
         """
 
         session_templates = [
-            item
-            for item in self.file_roles
-            if item.role == "template"
-            and (attached_file_ids is None or item.file_id in attached_file_ids)
+            item for item in self.file_roles if item.role == "template"
         ]
         if session_templates:
             sole = session_templates[0] if len(session_templates) == 1 else None
@@ -1193,6 +1190,7 @@ class PlanningState(_PlanningModel):
                 ),
                 file_id=sole.file_id if sole is not None else None,
                 filename=sole.filename if sole is not None else None,
+                template_asset_id=None,
                 origin=(
                     "replacement" if self.inherited_template is not None else "session"
                 ),
@@ -1203,10 +1201,16 @@ class PlanningState(_PlanningModel):
                 placeholders=tuple(self.inherited_template.placeholders),
                 file_id=None,
                 filename=self.inherited_template.template_name,
+                template_asset_id=self.inherited_template.template_asset_id,
                 origin="flow",
             )
         return TemplateSelection(
-            count=0, placeholders=None, file_id=None, filename=None, origin="session"
+            count=0,
+            placeholders=None,
+            file_id=None,
+            filename=None,
+            template_asset_id=None,
+            origin="session",
         )
 
     def replace_schema_resolution(

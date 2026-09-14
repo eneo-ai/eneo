@@ -3458,3 +3458,157 @@ async def test_edit_compiles_against_the_flows_own_template_binding() -> None:
             "datum": "{{ datum }}",
         },
     }
+
+
+def _bound_template_flow(
+    *,
+    template_asset_id,
+    bindings: dict[str, str],
+) -> SimpleNamespace:
+    return _flow(
+        _flow_step(
+            step_order=1,
+            user_description="Läs underlaget",
+            input_type="document",
+            output_type="text",
+        ),
+        _flow_step(
+            step_order=2,
+            user_description="Skriv rapporten",
+            input_source="previous_step",
+            input_type="text",
+            output_type="text",
+        ),
+        _flow_step(
+            step_order=3,
+            user_description="Fyll i mallen",
+            input_source="previous_step",
+            input_type="text",
+            output_mode="template_fill",
+            output_type="docx",
+            output_config={
+                "template_asset_id": str(template_asset_id),
+                "bindings": bindings,
+            },
+        ),
+    )
+
+
+def _inherited_planning_state(
+    template_asset_id, placeholders: list[str]
+) -> PlanningState:
+    state = PlanningState.empty()
+    state.inherited_template = InheritedTemplateBinding(
+        template_asset_id=template_asset_id,
+        placeholders=placeholders,
+    )
+    return state
+
+
+@pytest.mark.asyncio
+async def test_edit_keeps_the_flows_template_mappings_when_an_earlier_step_changes() -> (
+    None
+):
+    # "rapport" is not a derivable name: re-deriving it would bind a new Flow
+    # input field instead of the previous step's text the flow already maps.
+    template_asset_id = uuid4()
+    bindings = {
+        "rapport": "{{ föregående_steg }}",
+        "underlag": "{{ step_1.output.text }}",
+        "datum": "{{ datum }}",
+        "kommentar": "",
+    }
+    result = await _process(
+        flow=_bound_template_flow(
+            template_asset_id=template_asset_id, bindings=bindings
+        ),
+        planning_state=_inherited_planning_state(
+            template_asset_id, ["rapport", "underlag", "datum", "kommentar"]
+        ),
+        arguments={
+            "plan_rationale": "Byter bara namn på första steget.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "name": "Läs ärendet",
+                },
+                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+                {"kind": "modify", "existing_step_ref": "existing_step_3"},
+            ],
+        },
+    )
+
+    assert isinstance(result, ProposalReady), result
+    spec = result.compiled.content.spec
+    terminal = spec.steps[-1]
+    assert terminal.output_config == {
+        "template_asset_id": str(template_asset_id),
+        "bindings": {
+            "rapport": "{{ föregående_steg }}",
+            # A step alias moves with the step it names.
+            "underlag": "{{ " + spec.steps[0].plan_step_ref + ".output.text }}",
+            "datum": "{{ datum }}",
+            "kommentar": "",
+        },
+    }
+    assert not spec.form_fields
+
+
+@pytest.mark.asyncio
+async def test_edit_reports_a_template_mapping_whose_step_was_removed() -> None:
+    template_asset_id = uuid4()
+    result = await _process(
+        flow=_bound_template_flow(
+            template_asset_id=template_asset_id,
+            bindings={"rapport": "{{ step_2.output.text }}"},
+        ),
+        planning_state=_inherited_planning_state(template_asset_id, ["rapport"]),
+        arguments={
+            "plan_rationale": "Tar bort rapportsteget.",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+                {"kind": "modify", "existing_step_ref": "existing_step_3"},
+            ],
+            "removed_existing_step_refs": ["existing_step_2"],
+        },
+    )
+
+    assert isinstance(result, CorrectableFailure), result
+    assert "template_binding_dependency_broken" in result.codes
+    assert "rapport" in result.feedback
+
+
+@pytest.mark.asyncio
+async def test_edit_binds_the_flows_template_to_a_moved_terminal_step() -> None:
+    # The original terminal goes; its predecessor becomes the template-fill
+    # step. The flow's asset must land on that step or publication fails.
+    template_asset_id = uuid4()
+    result = await _process(
+        flow=_bound_template_flow(
+            template_asset_id=template_asset_id,
+            bindings={"rapport": "{{ föregående_steg }}"},
+        ),
+        planning_state=_inherited_planning_state(template_asset_id, ["rapport"]),
+        arguments={
+            "plan_rationale": "Fyller i mallen direkt från rapportsteget.",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_2",
+                    "output_type": "docx",
+                    "document_delivery_mode": "template_fill",
+                },
+            ],
+            "removed_existing_step_refs": ["existing_step_3"],
+        },
+    )
+
+    assert isinstance(result, ProposalReady), result
+    spec = result.compiled.content.spec
+    terminal = spec.steps[-1]
+    assert terminal.output_mode is OutputMode.TEMPLATE_FILL
+    assert terminal.output_config is not None
+    assert terminal.output_config["template_asset_id"] == str(template_asset_id)
+    assert terminal.output_config["bindings"] == {"rapport": "{{ föregående_steg }}"}

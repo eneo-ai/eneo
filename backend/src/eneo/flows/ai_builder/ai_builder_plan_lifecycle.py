@@ -726,21 +726,26 @@ class AIBuilderPlanLifecycle:
             )
         )
         selection = (
-            None
-            if planning_state is None
-            else planning_state.template_selection(attached_file_ids=attached_file_ids)
+            None if planning_state is None else planning_state.template_selection()
         )
         if selection is not None and selection.inherited:
-            # The compiled terminal step still names the flow's own asset;
-            # nothing new is attached, so nothing is materialized.
+            # The compiled terminal step names the flow's own asset; nothing
+            # new is attached, so nothing is materialized.
             return None
+        # The approved selection is what the plan was compiled against. A
+        # replacement detached since then fails here explicitly; the flow's
+        # own template is never applied behind that confirmation. Returning to
+        # it takes a turn that rebuilds the selection and re-confirms it.
         selected_file_id = None if selection is None else selection.file_id
-        if selected_file_id is None:
-            template_count = 0 if selection is None else selection.count
+        if selected_file_id is None or selected_file_id not in attached_file_ids:
+            template_count = (
+                selection.count if selection is not None and selection.count > 1 else 0
+            )
+            ambiguous = template_count > 1
             reason = (
-                "template_attachment_missing"
-                if template_count == 0
-                else "template_attachment_ambiguous"
+                "template_attachment_ambiguous"
+                if ambiguous
+                else "template_attachment_missing"
             )
             raise AIBuilderBadRequestException(
                 "Select exactly one attached DOCX template, confirm the plan, and try again.",

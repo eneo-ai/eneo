@@ -236,6 +236,11 @@ async def process_edit_arguments(
                     if compile_context is not None
                     else None
                 ),
+                inherited_template_asset_id=(
+                    compile_context.inherited_template_asset_id
+                    if compile_context is not None
+                    else None
+                ),
             )
         except BadRequestException as exc:
             return CorrectableFailure(

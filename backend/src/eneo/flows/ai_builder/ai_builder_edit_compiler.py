@@ -11,6 +11,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, cast
+from uuid import UUID
 
 from eneo.flows.ai_builder.ai_builder_architecture_errors import (
     AIBuilderArchitectureError,
@@ -69,6 +70,7 @@ from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.flows.domain.canonical_json_hash import canonical_json_bytes
 from eneo.flows.domain.flow import FlowStep
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
+from eneo.flows.enums import FlowOutputMode
 from eneo.flows.flow_authoring_name import normalize_flow_name
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
@@ -162,6 +164,7 @@ def compile_edit_proposal(
     mapped_execution_policy: FlowMappedExecutionPolicy | None = None,
     selected_template_count: int | None = None,
     selected_template_placeholders: tuple[str, ...] | None = None,
+    inherited_template_asset_id: UUID | None = None,
 ) -> EditCompilationResult:
     """Compile an ordered edit proposal into a concrete flow preview + diff."""
     primary_runtime_input_type = (
@@ -204,6 +207,10 @@ def compile_edit_proposal(
     compiled_steps = compiled_spec.steps
 
     compiled_steps = _canonicalize_existing_runtime_aliases(compiled_steps)
+    inherited_template_bindings = _inherited_template_bindings(
+        current_steps,
+        existing_order_to_plan_ref=_existing_order_to_plan_ref(compiled_steps),
+    )
     normalized_spec, normalization_changes = normalize_ai_builder_spec(
         FlowDraftSpecCore(
             flow_name=normalize_flow_name(compiled_spec.flow_name),
@@ -221,6 +228,10 @@ def compile_edit_proposal(
             normalized_spec,
             selected_template_count=selected_template_count,
             placeholders=selected_template_placeholders,
+            # An edit keeps the mappings the flow already has; only a
+            # placeholder without one is derived.
+            existing_bindings=inherited_template_bindings,
+            inherited_template_asset_id=inherited_template_asset_id,
         )
     compiled_steps = normalized_spec.steps
     final_name = normalized_spec.flow_name
@@ -1002,10 +1013,8 @@ def _without_primary_runtime_shadow_fields(
     return step.model_copy(update={"uses_form_fields": filtered}), dropped
 
 
-def _canonicalize_existing_runtime_aliases(
-    step_specs: list[StepSpec],
-) -> list[StepSpec]:
-    existing_order_to_plan_ref = {
+def _existing_order_to_plan_ref(step_specs: list[StepSpec]) -> dict[int, str]:
+    return {
         existing_order: step.plan_step_ref
         for step in step_specs
         if (
@@ -1013,6 +1022,42 @@ def _canonicalize_existing_runtime_aliases(
             is not None
         )
     }
+
+
+def _inherited_template_bindings(
+    current_steps: list[FlowStep],
+    *,
+    existing_order_to_plan_ref: dict[int, str],
+) -> dict[str, str] | None:
+    """The placeholder mappings the flow's terminal template step carries.
+
+    Read off the persisted flow, not the proposal, so they survive an edit
+    that moves the template-fill step; step aliases are rewritten to the plan
+    refs of the steps that remain, like every other persisted reference.
+    """
+
+    if not current_steps:
+        return None
+    terminal = max(current_steps, key=lambda step: step.step_order)
+    if terminal.output_mode != FlowOutputMode.TEMPLATE_FILL:
+        return None
+    raw = (terminal.output_config or {}).get("bindings")
+    if not isinstance(raw, dict):
+        return None
+    rewritten = _rewrite_runtime_alias_value(
+        cast(dict[str, Any], raw), existing_order_to_plan_ref
+    )
+    return {
+        key: value
+        for key, value in cast(dict[str, Any], rewritten).items()
+        if isinstance(value, str)
+    }
+
+
+def _canonicalize_existing_runtime_aliases(
+    step_specs: list[StepSpec],
+) -> list[StepSpec]:
+    existing_order_to_plan_ref = _existing_order_to_plan_ref(step_specs)
     if not existing_order_to_plan_ref:
         return step_specs
 

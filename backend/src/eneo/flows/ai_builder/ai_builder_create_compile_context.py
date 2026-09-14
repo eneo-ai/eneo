@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from uuid import UUID
 
 from eneo.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
@@ -59,6 +60,9 @@ class CreateCompileContext:
     template_placeholder_field_hints: tuple[RuntimeInputFieldHint, ...] = ()
     selected_template_count: int | None = None
     selected_template_placeholders: tuple[str, ...] | None = None
+    # The flow's own asset when an edit inherits its template; the compiled
+    # terminal step names it so the apply has nothing to materialize.
+    inherited_template_asset_id: UUID | None = None
     aggregation_intent: AggregationIntent = "linear"
     flow_input_schema: JsonObject | None = None
     terminal_output_schema: JsonObject | None = None
@@ -208,6 +212,7 @@ def create_compile_context_from_planning_state(
         template_placeholder_field_hints=template_placeholder_field_hints,
         selected_template_count=template_selection.count,
         selected_template_placeholders=template_selection.placeholders,
+        inherited_template_asset_id=template_selection.template_asset_id,
         aggregation_intent=_aggregation_intent_for_compile_context(
             architecture,
         ),
