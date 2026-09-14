@@ -598,7 +598,14 @@ def _provider_exception_class(
 def safe_provider_error_code(
     value: object, *, source: ProviderRejectionSource
 ) -> str | None:
-    if source not in {"body", "body.error", "response", "response.error"}:
+    if source not in {
+        "body",
+        "body.error",
+        "response",
+        "response.error",
+        "message",
+        "message.error",
+    }:
         return None
     if not isinstance(value, str) or not 1 <= len(value) <= _MAX_PROVIDER_FACT_LENGTH:
         return None

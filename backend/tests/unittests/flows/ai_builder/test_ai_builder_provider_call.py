@@ -167,6 +167,64 @@ def test_uninformative_nested_envelope_falls_back_to_flat_body(
     assert rejection.status == "found"
 
 
+_MESSAGE_ENVELOPES = {
+    "json": 'litellm.BadRequestError: AzureException BadRequestError - {"error":{"message":"Unsupported value: \'temperature\' does not support 0.4 with this model.","type":"invalid_request_error","param":"temperature","code":"unsupported_value"}}',
+    "python_literal": "Error code: 400 - {'error': {'message': \"Unsupported value: 'temperature'\", 'type': 'invalid_request_error', 'param': 'temperature', 'code': 'unsupported_value'}}",
+}
+
+
+@pytest.mark.parametrize(
+    "message", list(_MESSAGE_ENVELOPES.values()), ids=list(_MESSAGE_ENVELOPES)
+)
+def test_an_envelope_the_sdk_kept_only_as_message_text_is_read(message: str) -> None:
+    # LiteLLM's Responses-API bridge re-raises a provider 400 with the envelope
+    # text in the message, no body and a placeholder response.
+    error = BadRequestError(message, model="test", llm_provider="azure", body=None)
+
+    rejection = provider_error_fields(error)
+
+    assert rejection.code == "unsupported_value"
+    assert rejection.parameter == "temperature"
+    assert rejection.source == "message.error"
+    assert rejection.status == "found"
+
+
+@pytest.mark.parametrize(
+    ("message", "source", "status"),
+    [
+        # No literal at all: the placeholder response stays the strongest evidence.
+        ("Error code: 400", "response", "absent"),
+        ("Error code: 400 - {not a literal}", "message", "malformed"),
+        ("Error code: 400 - " + "{" * 70_000, "message", "suppressed"),
+    ],
+)
+def test_message_text_without_a_readable_envelope_keeps_its_failure(
+    message: str, source: str, status: str
+) -> None:
+    error = BadRequestError(message, model="test", llm_provider="azure", body=None)
+
+    rejection = provider_error_fields(error)
+
+    assert rejection.code is None
+    assert rejection.parameter is None
+    assert rejection.source == source
+    assert rejection.status == status
+
+
+def test_a_readable_body_wins_over_the_message_text() -> None:
+    error = BadRequestError(
+        _MESSAGE_ENVELOPES["json"],
+        model="test",
+        llm_provider="azure",
+        body={"error": {"param": "top_p", "code": "unsupported_value"}},
+    )
+
+    rejection = provider_error_fields(error)
+
+    assert rejection.parameter == "top_p"
+    assert rejection.source == "body.error"
+
+
 def _tool_chunk(arguments: str, *, first: bool, finish: str | None) -> object:
     call = litellm_types.ChatCompletionDeltaToolCall(
         id="call_1" if first else None,
@@ -856,6 +914,80 @@ async def test_a_provider_refusing_temperature_gets_the_call_without_it(
 
     assert response.choices[0].message.content == "Hej"
     assert [("temperature" in body) for body in sent] == [True, False]
+
+
+_BRIDGED_AZURE_TOOL_REQUEST = {
+    "model": "azure/gpt-5.6-luna",
+    "messages": _MESSAGES,
+    "tools": [
+        {
+            "type": "function",
+            "function": {
+                "name": "propose_flow",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+    ],
+    "tool_choice": "required",
+    "parallel_tool_calls": False,
+    "max_tokens": 128_000,
+    "drop_params": True,
+    "api_key": "test-key",
+    "api_base": "https://stream.invalid",
+    "api_version": "2025-01-01-preview",
+    "num_retries": 0,
+    "max_retries": 0,
+}
+
+
+@pytest.mark.asyncio
+async def test_a_bridged_azure_tool_call_refusing_temperature_is_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # LiteLLM sends Azure gpt-5.4+ requests with function tools over its
+    # Responses-API bridge, where a provider 400 surfaces with the envelope
+    # only in the exception message. The classifier (no tools) stays on Chat
+    # Completions, so only the proposal turn used to lose the retry.
+    sent: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(json.loads(request.content))
+        if "temperature" in sent[-1]:
+            return httpx.Response(
+                400, json=_UNSUPPORTED_TEMPERATURE, headers={"apim-request-id": "req-1"}
+            )
+        return httpx.Response(
+            400, json={"error": {"param": "tools", "code": "unsupported_value"}}
+        )
+
+    monkeypatch.setattr(
+        AsyncHTTPHandler,
+        "_create_async_transport",
+        staticmethod(lambda **_kwargs: httpx.MockTransport(handler)),
+    )
+    monkeypatch.setattr(litellm, "in_memory_llm_clients_cache", LLMClientCache())
+    monkeypatch.setattr(litellm, "disable_aiohttp_transport", True)
+    monkeypatch.setattr(litellm, "num_retries", 0)
+
+    with pytest.raises(BadRequestError) as raised:
+        await complete_with_silence_deadline(
+            litellm,
+            silence_deadline_seconds=5.0,
+            ceiling_seconds=10.0,
+            request={**_BRIDGED_AZURE_TOOL_REQUEST, "temperature": 0.4},
+            retry_without_refused_control=_admit,
+        )
+
+    # Both requests went over the bridge (Responses wire shape), the second
+    # without the refused control; the second refusal names something else.
+    assert [("temperature" in body, "input" in body) for body in sent] == [
+        (True, True),
+        (False, True),
+    ]
+    rejection = provider_error_fields(raised.value)
+    assert rejection.parameter == "tools"
+    assert rejection.source == "message.error"
+    assert rejection.correlation_id is None
 
 
 def _anthropic_event(name: str, data: dict[str, object]) -> str:

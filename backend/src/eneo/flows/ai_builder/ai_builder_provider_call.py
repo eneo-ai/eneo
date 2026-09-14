@@ -26,14 +26,20 @@ once more without that control, which is the provider's default, under the
 same ceiling. A refusal after a stream was acquired is never retried here: the
 provider may have generated. The persisted capability snapshot said the
 control was accepted, so the refusal is logged as evidence that the snapshot
-is wider than the route.
+is wider than the route. The refusal's envelope is read from wherever the
+SDK left it: LiteLLM's Responses-API bridge (which carries Azure and OpenAI
+gpt-5.4+ requests with function tools) re-raises a provider 400 with only
+the envelope text in the exception message, no body and a placeholder
+response, so the message is the last source tried.
 """
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import contextlib
 import inspect
+import json
 import math
 import unittest.mock
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
@@ -59,7 +65,14 @@ RetryAdmission = Callable[[str, Exception], bool]
 
 
 ProviderRejectionSource = Literal[
-    "unavailable", "body", "body.error", "response", "response.error", "exception.param"
+    "unavailable",
+    "body",
+    "body.error",
+    "response",
+    "response.error",
+    "message",
+    "message.error",
+    "exception.param",
 ]
 ProviderExtractionStatus = Literal["found", "absent", "malformed", "suppressed"]
 ProviderCorrelationSource = Literal[
@@ -245,9 +258,11 @@ def _sampling_controls() -> frozenset[str]:
 def provider_error_fields(error: BaseException) -> ProviderRejection:
     """Recover structured rejection facts without reading a response stream.
 
-    Try the nested and flat SDK body, then the buffered HTTP body. An envelope
-    wins only when it supplies a safe fact; otherwise preserve the strongest
-    extraction failure. Publication policy belongs to the error contract.
+    Try the nested and flat SDK body, then the buffered HTTP body, then the
+    one envelope literal the SDK embedded in the exception message. An
+    envelope wins only when it supplies a safe fact; otherwise preserve the
+    strongest extraction failure. Publication policy belongs to the error
+    contract.
     """
 
     from eneo.flows.ai_builder.ai_builder_error_contract import (
@@ -276,6 +291,8 @@ def provider_error_fields(error: BaseException) -> ProviderRejection:
         except (ValueError, RecursionError, httpx.ResponseNotRead):
             fallback = ProviderRejection(source="response", status="malformed")
         result = _select_rejection(result, fallback)
+    if result.code is None and result.parameter is None:
+        result = _select_rejection(result, _message_envelope_fields(error))
 
     raw_parameter = getattr(error, "param", None)
     if result.parameter is None and raw_parameter is not None:
@@ -318,6 +335,34 @@ def provider_error_fields(error: BaseException) -> ProviderRejection:
     return replace(
         result, correlation_id=correlation_id, correlation_source=correlation_source
     )
+
+
+def _message_envelope_fields(error: BaseException) -> ProviderRejection:
+    """The provider envelope an SDK kept only as text in the exception message.
+
+    The OpenAI SDK formats a readable error body as ``Error code: 400 - {…}``
+    (a Python literal); LiteLLM's Responses-API bridge forwards the raw JSON
+    text the same way and drops the body attribute. The outermost ``{…}``
+    span is parsed as one literal; the message itself is never retained.
+    """
+
+    message = getattr(error, "message", None)
+    if not isinstance(message, str):
+        message = str(error)
+    if len(message) > _MAX_PROVIDER_ERROR_BODY_BYTES:
+        return ProviderRejection(source="message", status="suppressed")
+    start, end = message.find("{"), message.rfind("}")
+    if start < 0 or end < start:
+        return ProviderRejection(source="message")
+    literal = message[start : end + 1]
+    try:
+        envelope: object = json.loads(literal)
+    except ValueError:
+        try:
+            envelope = ast.literal_eval(literal)
+        except (ValueError, SyntaxError, TypeError, MemoryError, RecursionError):
+            return ProviderRejection(source="message", status="malformed")
+    return _rejection_envelope_fields(envelope, "message", "message.error")
 
 
 def _rejection_envelope_fields(
