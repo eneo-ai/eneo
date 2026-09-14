@@ -24,6 +24,7 @@ from eneo.flows.flow_authoring_spec import (
     OutputMode,
     StepSpec,
 )
+from eneo.flows.flow_variable_definitions import PREVIOUS_STEP_TEXT_ALIAS
 from eneo.flows.input_binding_contract_rules import (
     effective_question_binding,
     source_ref_bindings,
@@ -111,9 +112,11 @@ def _authoring_dependencies(
             form_field_names=form_field_names,
         )
     ]
-    forms.update(referenced_form_fields(references))
+    forms.update(referenced_form_fields(references, form_field_names=form_field_names))
     for reference in references:
         producer_order = reference.step_order
+        if reference.head == PREVIOUS_STEP_TEXT_ALIAS and order > 1:
+            producer_order = order - 1
         if producer_order is not None and (
             only_producer_order is None or only_producer_order == producer_order
         ):
@@ -128,6 +131,8 @@ def _authoring_dependencies(
         and step.output_mode == OutputMode.TRANSCRIBE_ONLY
     )
     if effective_question_binding(step.input_bindings) is None and not replaces_chain:
+        if step.input_source == InputSource.FLOW_INPUT:
+            forms.update(form_field_names)
         prior_orders = (
             range(1, order)
             if step.input_source == InputSource.ALL_PREVIOUS_STEPS

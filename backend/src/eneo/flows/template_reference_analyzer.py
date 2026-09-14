@@ -81,7 +81,17 @@ def referenced_step_refs(references: list[TemplateReference]) -> set[str]:
     }
 
 
-def referenced_form_fields(references: list[TemplateReference]) -> set[str]:
+def referenced_form_fields(
+    references: list[TemplateReference],
+    *,
+    form_field_names: set[str] | None = None,
+) -> set[str]:
+    if form_field_names is not None and any(
+        (reference.head == "flow_input" and not reference.tail)
+        or (reference.head == "flow" and reference.tail in {"", "input"})
+        for reference in references
+    ):
+        return set(form_field_names)
     fields = {
         reference.head
         for reference in references
@@ -190,10 +200,11 @@ def _build_runtime_reference(
     path_error_context: dict[str, object] | None = None
     form_field_name = None
     root_shape = runtime_variable_shape(head)
-    if head == "flow_input":
-        form_field_name = _flow_input_form_field_name(tail, form_field_names)
+    if head == "flow_input" or (head == "flow" and tail.startswith("input.")):
+        input_tail = tail.removeprefix("input.") if head == "flow" else tail
+        form_field_name = _flow_input_form_field_name(input_tail, form_field_names)
         path_error_code, path_error_context = _validate_flow_input_path(
-            tail, form_field_names
+            input_tail, form_field_names
         )
     elif head == "step_input":
         path_error_code, path_error_context = _validate_step_input_path(tail)

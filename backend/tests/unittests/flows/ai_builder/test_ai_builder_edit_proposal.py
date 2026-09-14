@@ -3919,7 +3919,16 @@ def _saved_step_consumer_fixture(consumer_kind):
         input_bindings={"question": "Independent input"},
     )
     consumer_instructions = "Keep these consumer instructions"
-    if consumer_kind == "projection":
+    if consumer_kind == "implicit":
+        contract = {
+            "type": "object",
+            "properties": {"summary": {"type": "string"}},
+            "required": ["summary"],
+        }
+        consumer.input_type = "json"
+        consumer.input_bindings = None
+        consumer.input_contract = contract
+    elif consumer_kind == "projection":
         consumer.input_type = "json"
         consumer.input_bindings = {
             "source_refs": [
@@ -4140,6 +4149,53 @@ async def test_saved_step_incompatible_consumer_returns_repair(
     assert result.kind != "parse", result
     assert feedback_fragment in repair_feedback(result).lower(), result
     assert prior.steps[1].model_dump(mode="json") == before
+
+
+@pytest.mark.parametrize("field_name", ["summary", "different"])
+@pytest.mark.asyncio
+async def test_saved_step_implicit_json_consumer_contract_is_preserved(field_name):
+    from eneo.flows.ai_builder.ai_builder_validator import validate_spec
+
+    flow, snapshots, catalog, context, prior = _saved_step_consumer_fixture("implicit")
+    assert prior is not None
+    assert validate_spec(prior).valid
+    proposed = prior.model_copy(deep=True)
+    proposed.steps[0].output_contract = {
+        "type": "object",
+        "properties": {field_name: {"type": "string"}},
+        "required": [field_name],
+    }
+    validation = validate_spec(proposed)
+    assert validation.valid is (field_name == "summary"), validation.errors
+    result = await _process(
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=catalog,
+        plan_edit_context=context,
+        prior_spec_for_revision=prior,
+        arguments={
+            "plan_rationale": "Revise the result schema.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "output_fields": [
+                        {
+                            "name": field_name,
+                            "field_type": "string",
+                            "description": "Result summary",
+                        }
+                    ],
+                },
+                {"kind": "keep", "existing_step_ref": "existing_step_2"},
+            ],
+        },
+    )
+    if field_name == "summary":
+        assert isinstance(result, ProposalReady), result
+    else:
+        assert isinstance(result, CorrectableFailure), result
+        assert "input_contract_type_mismatch" in result.codes
 
 
 @pytest.mark.parametrize("consumer_kind", ["instructions", "output_config"])

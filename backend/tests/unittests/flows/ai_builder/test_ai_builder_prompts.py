@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from uuid import uuid4
 
+import pytest
+
 from eneo.flows.ai_builder.ai_builder_discovery_flow_defaults import (
     build_flow_capability_profile,
 )
@@ -546,6 +548,83 @@ class TestTrimConversation:
         messages = [{"role": "user", "content": f"Message {i}"} for i in range(50)]
         result = trim_conversation_for_context(messages, max_tokens=999_999)
         assert len(result) == 50
+
+
+@pytest.mark.parametrize("expression", ["föregående_steg", "step_1.output.text"])
+def test_saved_step_projection_includes_alias_producers_and_consumers(expression):
+    spec = FlowDraftSpecCore(
+        flow_name="Alias chain",
+        steps=[
+            StepSpec(
+                plan_step_ref=f"step_{letter}",
+                existing_step_ref=f"existing_step_{order}",
+                name=f"Step {order}",
+                assistant_spec=AssistantSpec(instructions="Use the input."),
+                input_source="flow_input" if order == 1 else "previous_step",
+                input_bindings={"question": "{{ " + expression + " }}"}
+                if order == 2
+                else None,
+            )
+            for order, letter in enumerate("ab", 1)
+        ],
+    )
+    for target, collection, expected in [
+        ("existing_step_2", "producers", "existing_step_1"),
+        ("existing_step_1", "consumers", "existing_step_2"),
+    ]:
+        data = json.loads(
+            build_flow_context(
+                _make_flow(),
+                is_edit_mode=True,
+                authoring_spec=spec,
+                target_existing_step_ref=target,
+            ).split("\n", 1)[1]
+        )
+        assert [row["existing_step_ref"] for row in data[collection]] == [expected]
+        assert data[collection][0]["template_expressions"] == [expression]
+
+
+@pytest.mark.parametrize(
+    ("expression", "expected_fields"),
+    [
+        ("flow_input", ["audience", "subject"]),
+        ("flow.input", ["audience", "subject"]),
+        ("flow", ["audience", "subject"]),
+        ("flow.input.audience", ["audience"]),
+        ("flow_input.audience", ["audience"]),
+        ("indata_text", []),
+        (None, ["audience", "subject"]),
+    ],
+)
+def test_saved_step_projection_includes_whole_flow_input(expression, expected_fields):
+    spec = FlowDraftSpecCore(
+        flow_name="Form input",
+        form_fields=[
+            FormFieldSpec(name=name, type="text", label=name)
+            for name in ["audience", "subject"]
+        ],
+        steps=[
+            StepSpec(
+                plan_step_ref="step_a",
+                existing_step_ref="existing_step_1",
+                name="Use form",
+                assistant_spec=AssistantSpec(instructions="Use the input."),
+                input_source="flow_input",
+                input_bindings={"question": "{{ " + expression + " }}"}
+                if expression is not None
+                else None,
+            )
+        ],
+    )
+    data = json.loads(
+        build_flow_context(
+            _make_flow(),
+            is_edit_mode=True,
+            authoring_spec=spec,
+            target_existing_step_ref="existing_step_1",
+        ).split("\n", 1)[1]
+    )
+    assert [field["name"] for field in data["form_fields"]] == expected_fields
 
 
 def _saved_step_authoring_fixture():

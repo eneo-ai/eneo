@@ -944,6 +944,147 @@ def test_validate_steps_rejects_unsupported_binding_keys_only_when_publish_stric
     )
 
 
+def test_validate_steps_rejects_incompatible_implicit_json_contract():
+    consumer_contract = {
+        "type": "object",
+        "properties": {"summary": {"type": "string"}},
+        "required": ["summary"],
+    }
+    producer = _step(output_contract=consumer_contract)
+    consumer = _step(2, input_type="json", input_contract=consumer_contract)
+    validate_steps([producer, consumer])
+
+    producer.output_contract = {
+        "type": "object",
+        "properties": {"different": {"type": "string"}},
+        "required": ["different"],
+    }
+    _assert_validate_steps_rejects(
+        [producer, consumer],
+        expected_type=FlowStepValidationError,
+        match="input_contract",
+        code=FlowGraphIssueCode.INPUT_CONTRACT_SOURCE_MISMATCH.value,
+        step_order=2,
+    )
+
+
+@pytest.mark.parametrize(
+    ("produced", "consumed", "compatible"),
+    [
+        ({"type": "string", "description": "New wording"}, {"type": "string"}, True),
+        ({"type": "string"}, {"type": ["string", "null"]}, True),
+        ({"type": ["string", "null"]}, {"type": "string"}, False),
+        ({"type": "integer"}, {"type": "number"}, True),
+        ({"type": "number"}, {"type": "integer"}, False),
+        ({"type": "number"}, {"type": "string"}, False),
+        ({"type": "array", "items": {"type": "string"}}, {"type": "array"}, True),
+        ({"type": "array"}, {"type": "array", "items": {"type": "string"}}, False),
+        (
+            {"type": "array", "items": {"type": "number"}},
+            {"type": "array", "items": {"type": "string"}},
+            False,
+        ),
+        (
+            {"type": "object", "properties": {"name": {"type": "string"}}},
+            {"type": "object", "required": ["name"]},
+            False,
+        ),
+        (
+            {
+                "type": "object",
+                "required": ["name"],
+                "properties": {"name": {"type": "string"}},
+            },
+            {"type": "object", "properties": {"name": {"type": "string"}}},
+            True,
+        ),
+        (
+            {"type": "object", "additionalProperties": {"type": "integer"}},
+            {"type": "object", "additionalProperties": {"type": "number"}},
+            True,
+        ),
+        (
+            {"type": "object", "properties": {"extra": {"type": "string"}}},
+            {"type": "object", "additionalProperties": False},
+            False,
+        ),
+        (
+            {"type": "object", "additionalProperties": False},
+            {"type": "object", "properties": {"optional": {"type": "string"}}},
+            True,
+        ),
+        (
+            {"type": "string", "pattern": "^a"},
+            {"type": "string", "pattern": "^a"},
+            True,
+        ),
+        (
+            {"type": "string", "pattern": "^b"},
+            {"type": "string", "pattern": "^a"},
+            False,
+        ),
+        ({"const": 1}, {"const": True}, False),
+        ({"enum": [0]}, {"enum": [False]}, False),
+    ],
+)
+def test_validate_steps_implicit_json_contract_subset(produced, consumed, compatible):
+    def contract(value):
+        return {
+            "type": "object",
+            "properties": {"value": value},
+            "required": ["value"],
+            "additionalProperties": False,
+        }
+
+    steps = [
+        _step(output_contract=contract(produced)),
+        _step(2, input_type="json", input_contract=contract(consumed)),
+    ]
+    if compatible:
+        validate_steps(steps)
+    else:
+        _assert_validate_steps_rejects(
+            steps,
+            expected_type=FlowStepValidationError,
+            match="input_contract",
+            code=FlowGraphIssueCode.INPUT_CONTRACT_SOURCE_MISMATCH.value,
+            step_order=2,
+        )
+
+
+@pytest.mark.parametrize("produced", [None, {"type": "object"}])
+def test_validate_steps_rejects_unproven_implicit_json_contract(produced):
+    _assert_validate_steps_rejects(
+        [
+            _step(output_contract=produced),
+            _step(
+                2,
+                input_type="json",
+                input_contract={"type": "object", "required": ["summary"]},
+            ),
+        ],
+        expected_type=FlowStepValidationError,
+        match="input_contract",
+        code=FlowGraphIssueCode.INPUT_CONTRACT_SOURCE_MISMATCH.value,
+        step_order=2,
+    )
+
+
+def test_validate_steps_implicit_contract_reports_malformed_binding():
+    with pytest.raises(FlowStepValidationError, match="source_refs"):
+        validate_steps(
+            [
+                _step(output_contract={"type": "object"}),
+                _step(
+                    2,
+                    input_type="json",
+                    input_contract={"type": "object"},
+                    input_bindings={"source_refs": ["invalid"]},
+                ),
+            ]
+        )
+
+
 def test_validate_steps_rejects_question_binding_with_input_contract():
     with pytest.raises(
         BadRequestException,

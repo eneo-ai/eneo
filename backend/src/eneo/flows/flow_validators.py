@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
@@ -443,7 +444,9 @@ def collect_step_graph_issues(
                 _capture_flow_step_validation(
                     issues,
                     FlowGraphIssueCode.INPUT_CONTRACT_SOURCE_MISMATCH,
-                    lambda: _validate_input_contract_source_compatibility(step=step),
+                    lambda: _validate_input_contract_source_compatibility(
+                        step=step, steps_by_order=steps_by_order
+                    ),
                 )
         if step.output_contract is not None:
             output_contract_valid = _capture_contract_syntax(
@@ -796,10 +799,35 @@ def _validate_output_contract_compatibility(*, step: FlowStepValidationView) -> 
 
 
 def _validate_input_contract_source_compatibility(
-    *, step: FlowStepValidationView
+    *,
+    step: FlowStepValidationView,
+    steps_by_order: dict[int, FlowStepValidationView],
 ) -> None:
     if step.input_contract is None:
         return
+    if step.input_source == "previous_step" and step.input_type == "json":
+        try:
+            if effective_question_binding(step.input_bindings) is not None:
+                return
+        except InputBindingContractError:
+            return
+        producer = steps_by_order.get(step.step_order - 1)
+        if producer is None:
+            return
+        produced = producer.output_contract
+        if produced is not None and (
+            json.dumps(produced, sort_keys=True)
+            == json.dumps(step.input_contract, sort_keys=True)
+            or _json_contract_is_subset(produced, step.input_contract)
+        ):
+            return
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: input_contract is not guaranteed by step "
+            f"{producer.step_order} output_contract for implicit JSON input. "
+            "Preserve the consumed contract or edit the consumer as well.",
+            step_order=step.step_order,
+            context={"producer_step_order": producer.step_order},
+        )
     if step.input_source != "all_previous_steps":
         return
     if step.input_type != "text":
@@ -812,6 +840,91 @@ def _validate_input_contract_source_compatibility(
         "is not a single JSON value.",
         step_order=step.step_order,
     )
+
+
+def _json_contract_is_subset(produced: object, consumed: object) -> bool:
+    """Prove inclusion for the authored type/object/array subset only."""
+    if consumed is True or produced is False:
+        return True
+    if produced is True:
+        produced = {}
+    if not isinstance(produced, dict) or not isinstance(consumed, dict):
+        return False
+    source = cast(FlowPersistedJsonObject, produced)
+    target = cast(FlowPersistedJsonObject, consumed)
+    supported = {
+        "type",
+        "properties",
+        "required",
+        "additionalProperties",
+        "items",
+        "title",
+        "description",
+        "default",
+        "examples",
+        "$comment",
+    }
+    # Unknown assertions and references require an unchanged whole contract;
+    # equal fragments can resolve differently against their enclosing schema.
+    if (source.keys() | target.keys()) - supported:
+        return False
+    source_types = _json_contract_types(source)
+    target_types = _json_contract_types(target)
+    if source_types is None or target_types is None:
+        return False
+    if not source_types <= target_types:
+        return False
+    if "object" in source_types:
+        source_properties = source.get("properties", {})
+        target_properties = target.get("properties", {})
+        source_required = source.get("required", [])
+        target_required = target.get("required", [])
+        if not isinstance(source_properties, dict) or not isinstance(
+            target_properties, dict
+        ):
+            return False
+        if not isinstance(source_required, list) or not isinstance(
+            target_required, list
+        ):
+            return False
+        source_required = cast(list[object], source_required)
+        target_required = cast(list[object], target_required)
+        if not all(
+            isinstance(key, str) for key in [*source_required, *target_required]
+        ):
+            return False
+        if not set(target_required) <= set(source_required):
+            return False
+        source_properties = cast(FlowPersistedJsonObject, source_properties)
+        target_properties = cast(FlowPersistedJsonObject, target_properties)
+        source_extra = source.get("additionalProperties", True)
+        target_extra = target.get("additionalProperties", True)
+        for key in source_properties.keys() | target_properties.keys():
+            if not _json_contract_is_subset(
+                source_properties.get(key, source_extra),
+                target_properties.get(key, target_extra),
+            ):
+                return False
+        if not _json_contract_is_subset(source_extra, target_extra):
+            return False
+    if "array" in source_types and not _json_contract_is_subset(
+        source.get("items", True), target.get("items", True)
+    ):
+        return False
+    return True
+
+
+def _json_contract_types(schema: FlowPersistedJsonObject) -> set[str] | None:
+    raw = schema.get("type", ["null", "boolean", "object", "array", "number", "string"])
+    values = [raw] if isinstance(raw, str) else raw
+    if not isinstance(values, list) or not all(
+        isinstance(value, str) for value in cast(list[object], values)
+    ):
+        return None
+    types = set(cast(list[str], values))
+    if "number" in types:
+        types.add("integer")
+    return types
 
 
 def _validate_input_contract_binding_compatibility(
