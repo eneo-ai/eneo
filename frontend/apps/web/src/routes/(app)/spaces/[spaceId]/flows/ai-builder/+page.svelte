@@ -10,6 +10,9 @@
   import { m } from "$lib/paraglide/messages";
   import { onDestroy, untrack } from "svelte";
 
+  /** The editor stage that lists the steps a plan just created. */
+  const FLOW_STEPS_STAGE = 4;
+
   let { data } = $props();
 
   const {
@@ -55,7 +58,11 @@
         statusInPageHeader
         {resumeSessionId}
         onapplied={async (detail) => {
-          goto(resolve(`/spaces/${$currentSpace.routeId}/flows/${detail.flow_id}`));
+          // Land on the steps that were just approved, not on the name and
+          // description the Builder already filled in.
+          const flowPath = resolve(`/spaces/${$currentSpace.routeId}/flows/${detail.flow_id}`);
+          // eslint-disable-next-line svelte/no-navigation-without-resolve -- resolved route above, with the stage query appended
+          goto(`${flowPath}?stage=${FLOW_STEPS_STAGE}`);
         }}
       />
     </div>

@@ -940,7 +940,7 @@
                 <Button
                   variant="ghost"
                   size="icon"
-                  class="size-6"
+                  class="size-7"
                   disabled={!previousStepForNav}
                   aria-label={m.flow_step_go_previous()}
                   onclick={() =>
@@ -951,7 +951,7 @@
                 <Button
                   variant="ghost"
                   size="icon"
-                  class="size-6"
+                  class="size-7"
                   disabled={!nextStepForNav}
                   aria-label={m.flow_step_go_next()}
                   onclick={() => nextStepForNav?.id && flowEditor.selectStep(nextStepForNav.id)}

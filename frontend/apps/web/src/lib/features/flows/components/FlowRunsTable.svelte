@@ -345,9 +345,13 @@
       <h2 class="text-primary text-base font-semibold tracking-tight sm:text-lg">
         {m.flow_history()}
       </h2>
-      <p class="text-secondary mt-1 max-w-2xl text-sm leading-relaxed">
-        {historyModeDescription}
-      </p>
+      <!-- The mode explainer describes what the list shows; with no runs there
+           is nothing to explain and the empty state carries the next step. -->
+      {#if displayRuns.length > 0}
+        <p class="text-secondary mt-1 max-w-2xl text-sm leading-relaxed">
+          {historyModeDescription}
+        </p>
+      {/if}
     </div>
     {#if onreview}
       <Button variant="outline" size="sm" class="h-9" onclick={() => onreview?.()}>
@@ -376,10 +380,16 @@
     </Alert.Root>
   {:else if displayRuns.length === 0}
     <div
-      class="border-default bg-primary rounded-xl border py-14 text-center"
+      class="border-default bg-primary rounded-xl border px-6 py-14 text-center"
       aria-label={m.flow_no_runs_yet()}
     >
-      <p class="text-muted text-sm">{m.flow_no_runs_yet()}</p>
+      <p class="text-primary text-sm font-semibold">{m.flow_no_runs_yet()}</p>
+      <!-- A draft cannot be run, so the honest next step differs. -->
+      <p class="text-secondary mx-auto mt-1 max-w-[42ch] text-sm leading-relaxed text-pretty">
+        {flow.published_version != null
+          ? m.flow_no_runs_yet_published()
+          : m.flow_no_runs_yet_draft()}
+      </p>
     </div>
   {:else}
     {#if history.refreshWarning}

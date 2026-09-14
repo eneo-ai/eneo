@@ -91,7 +91,16 @@
   let mobileStepsOpen = $state(false);
   const isDesktopStepLayout = new MediaQuery("(min-width: 80rem)");
   type BuilderStageId = 1 | 2 | 3 | 4 | 5;
-  let builderStage = $state<BuilderStageId>(1);
+  const FLOW_BUILDER_STAGE_IDS: readonly BuilderStageId[] = [1, 2, 3, 4, 5];
+  // Arriving from the AI Builder, the reader has just approved a list of steps;
+  // opening on "Grundinställningar" (the name and description the Builder just
+  // wrote) sends them backwards. `?stage=` lets the Builder hand over to the
+  // stage its work actually lives on.
+  const requestedStage = (() => {
+    const raw = Number(page.url.searchParams.get("stage"));
+    return FLOW_BUILDER_STAGE_IDS.includes(raw as BuilderStageId) ? (raw as BuilderStageId) : 1;
+  })();
+  let builderStage = $state<BuilderStageId>(requestedStage);
 
   const {
     state: { currentSpace }
