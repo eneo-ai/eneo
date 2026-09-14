@@ -274,6 +274,18 @@ def apply_existing_step_patch(
     return strip_inapplicable_completion_model(existing.model_copy(update=updates))
 
 
+_MODE_DETERMINING_FIELDS = frozenset(
+    {
+        "input_source",
+        "input_type",
+        "uses_previous_fields",
+        "uses_form_fields",
+        "output_type",
+        "document_delivery_mode",
+    }
+)
+
+
 def _compile_existing_step_modification(
     existing: StepSpec,
     patch: ModifyExistingStep,
@@ -334,12 +346,17 @@ def _compile_existing_step_modification(
         if input_config != step.input_config:
             step = step.model_copy(update={"input_config": input_config})
 
-    output_mode = _derive_existing_step_output_mode(
-        step,
-        document_delivery_mode=patch.document_delivery_mode,
-    )
-    if output_mode != step.output_mode:
-        step = step.model_copy(update={"output_mode": output_mode})
+    # Rederiving the mode normalises a persisted shape whose mode contradicts
+    # its types (the audio repair and review housekeeping rely on it). It must
+    # not touch compose_text, which no derivation can produce: an untouched
+    # composer step, or one whose instructions alone changed, keeps its mode.
+    if step.output_mode != OutputMode.COMPOSE_TEXT or fields & _MODE_DETERMINING_FIELDS:
+        output_mode = _derive_existing_step_output_mode(
+            step,
+            document_delivery_mode=patch.document_delivery_mode,
+        )
+        if output_mode != step.output_mode:
+            step = step.model_copy(update={"output_mode": output_mode})
 
     return strip_inapplicable_completion_model(step)
 

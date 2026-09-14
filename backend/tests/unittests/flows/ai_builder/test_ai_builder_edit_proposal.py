@@ -4740,33 +4740,16 @@ async def test_saved_step_preserves_contract_used_by_template_bindings(remove_co
 
 
 @pytest.mark.asyncio
-async def test_saved_step_unchanged_composer_is_not_judged_as_model_change():
-    flow, snapshots, catalog, context, prior = _saved_step_consumer_fixture("array")
-    result = await _process(
-        flow=flow,
-        assistant_snapshots=snapshots,
-        resource_catalog=catalog,
-        plan_edit_context=context,
-        prior_spec_for_revision=prior,
-        arguments={
-            "plan_rationale": "Clarify instructions.",
-            "steps": [
-                {
-                    "kind": "modify",
-                    "existing_step_ref": "existing_step_1",
-                    "assistant_spec": {"instructions": "Improved analysis"},
-                },
-            ],
-        },
-    )
-    assert isinstance(result, CorrectableFailure), result
-    assert result.feedback.startswith("Compiled edit spec validation failed:")
-    assert "only supported for output_mode 'compose_text'" in result.feedback
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize("scoped", [False, True])
-async def test_keep_composer_mode_change_at_approval_boundary(scoped):
+async def test_untouched_composer_step_keeps_its_mode(scoped):
+    """A step the model did not touch keeps its saved output_mode.
+
+    compose_text is never derivable from the step's types, so rederiving it
+    for an identity-only entry retyped the step to pass_through: a scoped
+    edit was then refused for changing an unrelated step (eneo-qmo) and a
+    whole-flow edit showed a mode change the user never asked for (eneo-380).
+    """
+
     flow, snapshots, catalog, context, _ = _saved_step_consumer_fixture("array")
     flow.steps[1].input_bindings = {
         "source_refs": [
@@ -4784,6 +4767,8 @@ async def test_keep_composer_mode_change_at_approval_boundary(scoped):
         assistant_snapshots=snapshots,
         resource_catalog=catalog,
     )
+    assert prior is not None
+    assert prior.steps[1].output_mode == OutputMode.COMPOSE_TEXT
     result = await _process(
         flow=flow,
         assistant_snapshots=snapshots,
@@ -4806,22 +4791,80 @@ async def test_keep_composer_mode_change_at_approval_boundary(scoped):
             ],
         },
     )
-    if scoped:
-        assert isinstance(result, CorrectableFailure), result
-        assert "preserve unrelated steps" in result.feedback
-    else:
-        assert isinstance(result, ProposalReady), result
-        assert (
-            result.compiled.content.spec.steps[1].output_mode == OutputMode.PASS_THROUGH
+    assert isinstance(result, ProposalReady), result
+    compiled = result.compiled.content.spec
+    assert compiled.steps[1].output_mode == OutputMode.COMPOSE_TEXT
+    assert compiled.steps[0].assistant_spec.instructions == "Improved analysis"
+    assert result.compiled.content.edit is not None
+    assert not [
+        field
+        for change in result.compiled.content.edit.diff.step_changes
+        for field in change.field_changes
+        if field.field == "output_mode"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_saved_step_fragment_keeps_untouched_composer_mode():
+    """The fragment expansion preserves the modes of the steps it fills in."""
+
+    flow = _flow(
+        _flow_step(step_order=1, user_description="Analys", input_source="flow_input"),
+        _flow_step(
+            step_order=2,
+            user_description="Sätt ihop texten",
+            input_source="previous_step",
+            output_mode="compose_text",
+        ),
+        _flow_step(
+            step_order=3, user_description="Granska", input_source="previous_step"
+        ),
+    )
+    snapshots = {
+        step.assistant_id: AssistantAuthoringSnapshot(
+            instructions=f"Saved instructions {step.step_order}."
         )
-        assert result.compiled.content.edit is not None
-        fields = result.compiled.content.edit.diff.step_changes[1].field_changes
-        assert any(
-            field.field == "output_mode"
-            and field.previous == "compose_text"
-            and field.current == "pass_through"
-            for field in fields
-        )
+        for step in flow.steps
+    }
+    catalog = build_ai_builder_resource_catalog(
+        available_models=None, available_kbs=None
+    )
+    context = ResolvedAIBuilderEditContext(
+        request=AIBuilderSavedFlowStepEditContext(flow_step_id=flow.steps[0].id),
+        scope="step",
+        target_existing_step_ref="existing_step_1",
+    )
+    prior = _prior_spec_for_revision(
+        context=context,
+        prior_plan=None,
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=catalog,
+    )
+    assert prior is not None
+    result = await _process(
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=catalog,
+        plan_edit_context=context,
+        prior_spec_for_revision=prior,
+        arguments={
+            "plan_rationale": "Förtydliga analysen.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "assistant_spec": {"instructions": "Förklara evidensen tydligt."},
+                }
+            ],
+        },
+    )
+    assert isinstance(result, ProposalReady), result
+    assert [step.output_mode for step in result.compiled.content.spec.steps] == [
+        OutputMode.PASS_THROUGH,
+        OutputMode.COMPOSE_TEXT,
+        OutputMode.PASS_THROUGH,
+    ]
 
 
 @pytest.mark.parametrize("field_name", ["summary", "different"])
