@@ -175,7 +175,7 @@
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div class="min-w-0">
         <div class="flex flex-wrap items-center gap-2">
-          <p class="text-muted text-xs font-medium tracking-[0.14em] uppercase">
+          <p class="text-muted text-xs font-medium">
             {labels.runtimeStepUploadTitle}
           </p>
           {#if step.required}
