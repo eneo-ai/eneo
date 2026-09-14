@@ -177,11 +177,6 @@ def create_compile_context_from_planning_state(
     template_placeholder_field_hints = (
         _template_placeholder_field_hints_from_planning_state(planning_state)
     )
-    selected_template_roles = (
-        []
-        if planning_state is None
-        else [role for role in planning_state.file_roles if role.role == "template"]
-    )
     if planning_state is None:
         if (
             ui_language is None
@@ -198,6 +193,7 @@ def create_compile_context_from_planning_state(
             requested_output_sections=requested_output_sections,
         )
     architecture = planning_state.architecture_commit
+    template_selection = planning_state.template_selection()
     runtime_input_type = _runtime_input_type_from_architecture(architecture)
     final_output_type = _final_output_type_from_architecture(architecture)
     return CreateCompileContext(
@@ -210,13 +206,8 @@ def create_compile_context_from_planning_state(
         ui_language=ui_language,
         runtime_input_fields=runtime_input_fields,
         template_placeholder_field_hints=template_placeholder_field_hints,
-        selected_template_count=len(selected_template_roles),
-        selected_template_placeholders=(
-            tuple(selected_template_roles[0].template_placeholders)
-            if len(selected_template_roles) == 1
-            and selected_template_roles[0].template_placeholders is not None
-            else None
-        ),
+        selected_template_count=template_selection.count,
+        selected_template_placeholders=template_selection.placeholders,
         aggregation_intent=_aggregation_intent_for_compile_context(
             architecture,
         ),

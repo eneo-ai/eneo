@@ -246,12 +246,10 @@ def _architecture_refusal_code(
     )
     if terminal_mode is not FlowAuthoringOutputMode.TEMPLATE_FILL:
         return None
-    selected_templates = [
-        role for role in session_state.file_roles if role.role == "template"
-    ]
-    if not template_attachment_selection_is_valid(len(selected_templates)):
+    selection = session_state.template_selection()
+    if not template_attachment_selection_is_valid(selection.count):
         return AIBuilderErrorCode.TEMPLATE_ATTACHMENT_SELECTION_INVALID
-    if not selected_template_is_readable(selected_templates[0].template_placeholders):
+    if not selected_template_is_readable(selection.placeholders):
         return AIBuilderErrorCode.TEMPLATE_ATTACHMENT_UNREADABLE
     return None
 

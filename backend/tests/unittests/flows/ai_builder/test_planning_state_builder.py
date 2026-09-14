@@ -87,6 +87,7 @@ from eneo.flows.ai_builder.planning_state import (
     ExampleOutputStyleConstraint,
     FileRole,
     FileRoleEvidence,
+    InheritedTemplateBinding,
     MappedFileLimit,
     NamedResultDeclaredShape,
     NamedResultEvidence,
@@ -109,6 +110,7 @@ from eneo.flows.ai_builder.planning_state_builder import (
     carry_forward_persisted_planner_state,
     carry_forward_turn_resolved_planner_state,
     complete_planning_state,
+    inherited_template_binding,
     llm_resolvable_slot_values_for_state,
     merge_llm_resolved_slots,
     resolve_docx_mode_from_template_evidence,
@@ -7098,3 +7100,147 @@ class TestModelOfferProjection:
         }
 
         assert "report_disposition" not in llm_resolvable_slot_values_for_state(state)
+
+
+class TestEditSessionInheritsTheFlowTemplate:
+    """Editing a template-fill flow starts from the template it already fills.
+
+    The Builder used to look for the template only among session attachments,
+    so every edit of a bound flow refused with
+    `template_attachment_selection_invalid` (eneo-v9p).
+    """
+
+    def _template_flow(
+        self,
+        *,
+        output_config: dict[str, object] | None,
+        output_mode: str = "template_fill",
+    ) -> Flow:
+        return Flow(
+            id=uuid4(),
+            tenant_id=uuid4(),
+            space_id=uuid4(),
+            name="Mötesrapport från ljud",
+            description="Fyller i mötesrapportmallen",
+            steps=[
+                FlowStep(
+                    assistant_id=uuid4(),
+                    step_order=1,
+                    user_description="Sammanfatta mötet",
+                    input_source="flow_input",
+                    input_type="audio",
+                    output_mode="pass_through",
+                    output_type="text",
+                ),
+                FlowStep(
+                    assistant_id=uuid4(),
+                    step_order=2,
+                    user_description="Fyll i mallen",
+                    input_source="previous_step",
+                    input_type="text",
+                    output_mode=output_mode,
+                    output_type="docx",
+                    output_config=output_config,
+                ),
+            ],
+        )
+
+    def test_bound_terminal_step_is_read_as_the_inherited_template(self) -> None:
+        asset_id = uuid4()
+        flow = self._template_flow(
+            output_config={
+                "template_asset_id": str(asset_id),
+                "placeholders": ["sammanfattning", "datum"],
+                "bindings": {"sammanfattning": "{{ föregående_steg }}"},
+            }
+        )
+
+        binding = inherited_template_binding(flow)
+
+        assert binding == InheritedTemplateBinding(
+            template_asset_id=asset_id,
+            placeholders=["sammanfattning", "datum"],
+        )
+        state = build_planning_state_from_conversation([], flow=flow)
+        assert state.inherited_template == binding
+        selection = state.template_selection()
+        assert (selection.count, selection.placeholders, selection.inherited) == (
+            1,
+            ("sammanfattning", "datum"),
+            True,
+        )
+
+    def test_placeholders_fall_back_to_the_binding_keys(self) -> None:
+        asset_id = uuid4()
+        flow = self._template_flow(
+            output_config={
+                "template_asset_id": str(asset_id),
+                "bindings": {"datum": "{{ datum }}", " ": "", "datum ": ""},
+            }
+        )
+
+        binding = inherited_template_binding(flow)
+
+        assert binding is not None
+        assert binding.placeholders == ["datum"]
+
+    def test_unbound_or_non_template_flows_inherit_nothing(self) -> None:
+        assert inherited_template_binding(None) is None
+        assert (
+            inherited_template_binding(self._template_flow(output_config=None)) is None
+        )
+        assert (
+            inherited_template_binding(
+                self._template_flow(
+                    output_config={"bindings": {"datum": "{{ datum }}"}}
+                )
+            )
+            is None
+        )
+        docx_flow = self._template_flow(output_config=None, output_mode="pass_through")
+        assert inherited_template_binding(docx_flow) is None
+        assert (
+            build_planning_state_from_conversation([], flow=docx_flow)
+            .template_selection()
+            .count
+            == 0
+        )
+
+    def test_a_template_attached_in_the_session_replaces_the_inherited_one(
+        self,
+    ) -> None:
+        state = PlanningState.empty()
+        state.inherited_template = InheritedTemplateBinding(
+            template_asset_id=uuid4(),
+            placeholders=["datum"],
+        )
+        attached_file_id = uuid4()
+        state.file_roles = [
+            FileRoleEvidence(
+                file_id=attached_file_id,
+                filename="ny-mall.docx",
+                file_type="document",
+                has_readable_text=True,
+                coverage="fully_seen",
+                role="template",
+                source="heuristic",
+                confidence="high",
+                template_placeholders=["ärende"],
+            )
+        ]
+
+        replaced = state.template_selection()
+        assert (
+            replaced.count,
+            replaced.placeholders,
+            replaced.file_id,
+            replaced.inherited,
+        ) == (
+            1,
+            ("ärende",),
+            attached_file_id,
+            False,
+        )
+        # Detached again: the flow's own template is what the plan applies to.
+        detached = state.template_selection(attached_file_ids=set())
+        assert (detached.count, detached.inherited, detached.file_id) == (1, True, None)

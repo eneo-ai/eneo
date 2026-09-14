@@ -725,19 +725,21 @@ class AIBuilderPlanLifecycle:
                 tenant_id=self.user.tenant_id,
             )
         )
-        selected = (
-            []
+        selection = (
+            None
             if planning_state is None
-            else [
-                role
-                for role in planning_state.file_roles
-                if role.role == "template" and role.file_id in attached_file_ids
-            ]
+            else planning_state.template_selection(attached_file_ids=attached_file_ids)
         )
-        if len(selected) != 1:
+        if selection is not None and selection.inherited:
+            # The compiled terminal step still names the flow's own asset;
+            # nothing new is attached, so nothing is materialized.
+            return None
+        selected_file_id = None if selection is None else selection.file_id
+        if selected_file_id is None:
+            template_count = 0 if selection is None else selection.count
             reason = (
                 "template_attachment_missing"
-                if not selected
+                if template_count == 0
                 else "template_attachment_ambiguous"
             )
             raise AIBuilderBadRequestException(
@@ -745,11 +747,11 @@ class AIBuilderPlanLifecycle:
                 code=AIBuilderErrorCode.BUILDER_ATTACHMENT_UNAVAILABLE,
                 context={
                     "reason": reason,
-                    "template_count": len(selected),
+                    "template_count": template_count,
                 },
             )
         return TemplateAttachmentIntent(
-            file_id=selected[0].file_id,
+            file_id=selected_file_id,
             terminal_plan_step_ref=template_steps[0].plan_step_ref,
         )
 

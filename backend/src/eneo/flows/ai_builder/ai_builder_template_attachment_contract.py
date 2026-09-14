@@ -43,9 +43,12 @@ from eneo.flows.flow_variable_definitions import (
     template_placeholder_form_field_name,
 )
 
+# Inspection facts the flow service rewrites from the asset on every update.
+# `template_asset_id` is not among them: an edit of a bound flow keeps the
+# asset it already fills, and a replacement attached in the session overwrites
+# it when the plan is applied.
 _LOCAL_TEMPLATE_CONFIG_KEYS = frozenset(
     {
-        "template_asset_id",
         "template_checksum",
         "template_file_id",
         "template_name",

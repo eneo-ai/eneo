@@ -57,6 +57,7 @@ from eneo.flows.ai_builder.ai_builder_tools import (
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
     ConfirmedRuntimeMetadataField,
+    InheritedTemplateBinding,
     PlanningState,
     ResolvedSlot,
     StepTriple,
@@ -3395,3 +3396,65 @@ async def test_an_investigation_that_finds_nothing_to_change_ends_the_turn():
 
     assert isinstance(result, ProposalAnswer)
     assert "hittar inget" in result.answer
+
+
+@pytest.mark.asyncio
+async def test_edit_compiles_against_the_flows_own_template_binding() -> None:
+    template_asset_id = uuid4()
+    flow = _flow(
+        _flow_step(
+            step_order=1,
+            user_description="Sammanfatta mötet",
+            input_type="document",
+            output_type="text",
+        ),
+        _flow_step(
+            step_order=2,
+            user_description="Fyll i mötesrapportmallen",
+            input_source="previous_step",
+            input_type="text",
+            output_mode="template_fill",
+            output_type="docx",
+            output_config={
+                "template_asset_id": str(template_asset_id),
+                "template_name": "motesrapport.docx",
+                "placeholders": ["föregående_steg", "datum"],
+                "bindings": {
+                    "föregående_steg": "{{ föregående_steg }}",
+                    "datum": "{{ datum }}",
+                },
+            },
+        ),
+    )
+    planning_state = PlanningState.empty()
+    planning_state.inherited_template = InheritedTemplateBinding(
+        template_asset_id=template_asset_id,
+        placeholders=["föregående_steg", "datum"],
+    )
+
+    result = await _process(
+        flow=flow,
+        planning_state=planning_state,
+        arguments={
+            "plan_rationale": "Förtydliga sammanfattningssteget, mallen är oförändrad.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "name": "Skriv mötesanteckningar",
+                },
+                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+            ],
+        },
+    )
+
+    assert isinstance(result, ProposalReady), result
+    terminal = result.compiled.content.spec.steps[-1]
+    assert terminal.output_mode is OutputMode.TEMPLATE_FILL
+    assert terminal.output_config == {
+        "template_asset_id": str(template_asset_id),
+        "bindings": {
+            "föregående_steg": "{{ föregående_steg }}",
+            "datum": "{{ datum }}",
+        },
+    }

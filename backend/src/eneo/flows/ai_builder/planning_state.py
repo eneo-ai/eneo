@@ -37,6 +37,8 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Collection
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Literal, TypeAlias, assert_never, cast
 from uuid import UUID
@@ -470,6 +472,29 @@ class FileRoleEvidence(_PlanningModel):
         if self.role not in seen:
             raise ValueError("candidate_roles must include role")
         return self
+
+
+class InheritedTemplateBinding(_PlanningModel):
+    """The DOCX template the flow being edited already fills.
+
+    Read off the flow's terminal template-fill step on every rebuild, never
+    remembered: it states what the flow carries today. A template attached in
+    the session is the user's explicit replacement and takes precedence.
+    """
+
+    template_asset_id: UUID
+    placeholders: list[str]
+
+
+@dataclass(frozen=True, slots=True)
+class TemplateSelection:
+    """The one DOCX template a template-fill plan compiles against."""
+
+    count: int
+    placeholders: tuple[str, ...] | None
+    # The session file the selection came from; None when inherited or absent.
+    file_id: UUID | None
+    inherited: bool
 
 
 class SchemaEvidence(_PlanningModel):
@@ -961,6 +986,7 @@ class PlanningState(_PlanningModel):
     )
     architecture_commit: ArchitectureCommit | None = None
     mapped_file_limit: MappedFileLimit = Field(default_factory=MappedFileLimit)
+    inherited_template: InheritedTemplateBinding | None = None
 
     def commit_grade_slot_value(self, slot_name: str) -> str | None:
         """The slot's value when it can drive irreversible planner decisions.
@@ -1123,6 +1149,48 @@ class PlanningState(_PlanningModel):
 
     def has_template_file_role(self) -> bool:
         return any(item.role == "template" for item in self.file_roles)
+
+    def template_selection(
+        self,
+        *,
+        attached_file_ids: Collection[UUID] | None = None,
+    ) -> TemplateSelection:
+        """Resolve which DOCX template a template-fill plan is bound to.
+
+        Templates attached in the session are an explicit choice and win; an
+        edit session with none inherits the flow's persisted binding, so the
+        user is never asked again for a template the flow already carries.
+        `attached_file_ids` narrows session templates to files still attached.
+        """
+
+        session_templates = [
+            item
+            for item in self.file_roles
+            if item.role == "template"
+            and (attached_file_ids is None or item.file_id in attached_file_ids)
+        ]
+        if session_templates:
+            sole = session_templates[0] if len(session_templates) == 1 else None
+            return TemplateSelection(
+                count=len(session_templates),
+                placeholders=(
+                    tuple(sole.template_placeholders)
+                    if sole is not None and sole.template_placeholders is not None
+                    else None
+                ),
+                file_id=sole.file_id if sole is not None else None,
+                inherited=False,
+            )
+        if self.inherited_template is not None:
+            return TemplateSelection(
+                count=1,
+                placeholders=tuple(self.inherited_template.placeholders),
+                file_id=None,
+                inherited=True,
+            )
+        return TemplateSelection(
+            count=0, placeholders=None, file_id=None, inherited=False
+        )
 
     def replace_schema_resolution(
         self,

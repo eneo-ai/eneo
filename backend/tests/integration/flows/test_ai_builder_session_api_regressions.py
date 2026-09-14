@@ -7767,6 +7767,7 @@ def _make_flow_step(
     output_type: str = "text",
     input_bindings: dict | None = None,
     input_config: dict | None = None,
+    output_config: dict | None = None,
 ) -> FlowStep:
     return FlowStep(
         id=None,
@@ -7783,7 +7784,7 @@ def _make_flow_step(
         input_contract=None,
         output_contract=None,
         input_config=input_config,
-        output_config=None,
+        output_config=output_config,
     )
 
 
@@ -10440,3 +10441,202 @@ async def test_ai_builder_api_named_content_fields_can_be_edited_on_the_card(
         ),
     ]
     assert edited_data["requirements_version"] != disclosed_data["requirements_version"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_ai_builder_api_edit_of_template_fill_flow_inherits_its_template(
+    client,
+    bearer_token,
+    completion_model_factory,
+    db_container,
+):
+    """Editing a bound template-fill flow never asks for its template again.
+
+    The template lives on the flow's terminal step as a template asset. The
+    edit session used to look for it only among session attachments and
+    refused every turn with `template_attachment_selection_invalid`
+    (eneo-v9p); the proposal and the apply must keep the flow's own asset.
+    """
+
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="AI Builder edit inherits template binding",
+        # The edit proposal's tool-schema reserve does not fit the 8000-token
+        # fixture default; the planner window must be owned by this test.
+        planner_model_overrides={"max_input_tokens": 128_000},
+        planner_model_is_only_space_model=True,
+    )
+    document = Document()
+    append_text_control(
+        document.add_paragraph("Sammanfattning: "),
+        tag="föregående_steg",
+        label="Sammanfattning",
+        hint="föregående_steg",
+    )
+    append_text_control(
+        document.add_paragraph("Datum: "), tag="datum", label="Datum", hint="datum"
+    )
+    payload = io.BytesIO()
+    document.save(payload)
+    template_file_id = UUID(
+        await _upload_reference_file(
+            client=client,
+            bearer_token=bearer_token,
+            filename="motesrapport-mall.docx",
+            content=payload.getvalue(),
+            mimetype=DOCX_MIME,
+        )
+    )
+    async with db_container() as container:
+        flow_service = container.flow_service()
+        flow = await flow_service.create_flow(
+            space_id=UUID(space_id),
+            name="Mötesrapport",
+            description="Fyller i mötesrapportmallen.",
+            steps=[],
+        )
+        asset = await container.flow_template_asset_service().create_from_existing_attached_file(
+            flow_id=flow.id,
+            file_id=template_file_id,
+        )
+        assistant, _ = await flow_service.create_flow_assistant(
+            flow_id=flow.id,
+            name="summary",
+        )
+        flow = await flow_service.update_flow(
+            flow_id=flow.id,
+            steps=[
+                _make_flow_step(
+                    assistant_id=assistant.id,
+                    step_order=1,
+                    user_description="Sammanfatta mötet",
+                    input_source="flow_input",
+                    input_type="document",
+                    output_type="text",
+                ),
+                _make_flow_step(
+                    assistant_id=assistant.id,
+                    step_order=2,
+                    user_description="Fyll i mötesrapportmallen",
+                    input_source="previous_step",
+                    input_type="text",
+                    output_mode="template_fill",
+                    output_type="docx",
+                    output_config={
+                        "template_asset_id": str(asset.id),
+                        "bindings": {
+                            "föregående_steg": "{{ föregående_steg }}",
+                            "datum": "{{ datum }}",
+                        },
+                    },
+                ),
+            ],
+        )
+        flow_id = flow.id
+        flow_revision = flow.draft_revision
+        bound_config = flow.steps[1].output_config
+        assert bound_config is not None
+        assert bound_config["template_asset_id"] == str(asset.id)
+        assert sorted(asset.placeholders) == ["datum", "föregående_steg"]
+
+    edit_flow = _make_tool_call(
+        tool_call_id="call_edit_template",
+        name=PROPOSE_FLOW_TOOL_NAME,
+        arguments={
+            "plan_rationale": "Förtydligar sammanfattningssteget och behåller mallen.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "name": "Skriv mötesanteckningar",
+                },
+                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+            ],
+        },
+    )
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
+        new=AsyncMock(return_value=_make_llm_response(tool_calls=[edit_flow])),
+    ):
+        with patch(
+            "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
+            new=AsyncMock(return_value=_route(kwargs={"api_key": "sk-test"})),
+        ):
+            session_id = await _create_ai_builder_session(
+                client=client,
+                bearer_token=bearer_token,
+                space_id=space_id,
+                target_kind="edit",
+                flow_id=str(flow_id),
+            )
+            plan_events = await _progress_builder_session_to_plan(
+                client=client,
+                bearer_token=bearer_token,
+                session_id=session_id,
+                initial_message=(
+                    "Döp om sammanfattningssteget till Skriv mötesanteckningar "
+                    "men behåll mallen."
+                ),
+                structured_answers={
+                    "document_material_scope": "single_document_case",
+                    "terminal_output": "docx_document",
+                    "docx_output_mode": "template_fill_docx",
+                    "report_disposition": "synthesized_overview",
+                },
+            )
+    assert not [event for event in plan_events if event["event"] == "error"], (
+        _builder_event_outline(plan_events)
+    )
+    plan_id = await _get_latest_plan_id(
+        client=client,
+        bearer_token=bearer_token,
+        session_id=session_id,
+    )
+    async with db_container() as container:
+        repo = AIBuilderRepository(container.session())
+        plan = await repo.get_plan(
+            plan_id=UUID(plan_id),
+            tenant_id=container.user().tenant_id,
+        )
+    terminal = plan.spec.steps[-1]
+    assert terminal.output_config is not None
+    assert terminal.output_config["template_asset_id"] == str(asset.id)
+    assert terminal.output_config["bindings"] == {
+        "föregående_steg": "{{ föregående_steg }}",
+        "datum": "{{ datum }}",
+    }
+
+    approve_response = await client.post(
+        f"/api/v1/flows/ai-builder/plans/{plan_id}/approve",
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+    assert approve_response.status_code == 200, approve_response.text
+    apply_response = await client.post(
+        f"/api/v1/flows/ai-builder/plans/{plan_id}/apply",
+        json={"expected_revision": flow_revision},
+        headers={"Authorization": f"Bearer {bearer_token}"},
+    )
+    assert apply_response.status_code == 200, apply_response.text
+
+    async with db_container() as container:
+        applied = await container.flow_service().get_flow(flow_id)
+        asset_ids = list(
+            (
+                await container.session().execute(
+                    select(FlowTemplateAssets.id).where(
+                        FlowTemplateAssets.flow_id == flow_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert applied.steps[0].user_description == "Skriv mötesanteckningar"
+    applied_config = applied.steps[1].output_config
+    assert applied_config is not None
+    assert applied_config["template_asset_id"] == str(asset.id)
+    assert asset_ids == [asset.id]

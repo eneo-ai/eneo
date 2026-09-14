@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
+from typing import cast
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -117,6 +118,7 @@ from eneo.flows.ai_builder.planning_state import (
     ExampleOutputSchemaInferenceOutcome,
     FileRole,
     FileRoleEvidence,
+    InheritedTemplateBinding,
     MappedFileLimit,
     NamedResultDeclaredShape,
     NamedResultEvidence,
@@ -134,11 +136,12 @@ from eneo.flows.ai_builder.planning_state import (
     named_result_location_id,
 )
 from eneo.flows.ai_builder.question_catalog import legal_slot_values
-from eneo.flows.domain.flow import Flow
+from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.domain.mapped_execution_policy import (
     FlowMappedExecutionPolicy,
     max_mapped_items_per_step,
 )
+from eneo.flows.enums import FlowOutputMode
 from eneo.json_types import JsonObject
 
 CLASSIFIER_REBUILD_INPUT_CLASSES: frozenset[ClassifierRetentionClass] = frozenset(
@@ -180,6 +183,7 @@ def build_planning_state_from_conversation(
             conversation,
             mapped_execution_policy=mapped_execution_policy,
         ),
+        inherited_template=inherited_template_binding(flow),
     )
     _replay_persisted_turn_evidence(state, conversation, flow=flow)
     _reconcile_report_disposition_after_classifier_replay(state, conversation)
@@ -1810,6 +1814,54 @@ def _model_slot_can_replace(
     if existing_slot.source == "model":
         return model_confidence in {"high", "medium"}
     return False
+
+
+def inherited_template_binding(flow: Flow | None) -> InheritedTemplateBinding | None:
+    """The DOCX template the flow's terminal step already fills, if any.
+
+    Read off the persisted step, so an edit session starts with the template
+    the flow carries instead of asking for it again. A template-fill step that
+    was never bound (no asset yet) inherits nothing and is asked as before.
+    Placeholders come from the step's own contract; an older step without
+    them degrades to an empty list rather than failing the rebuild.
+    """
+
+    if flow is None or not flow.steps:
+        return None
+    terminal = max(flow.steps, key=lambda step: step.step_order)
+    if terminal.output_mode is not FlowOutputMode.TEMPLATE_FILL:
+        return None
+    return _inherited_template_from_step(terminal)
+
+
+def _inherited_template_from_step(step: FlowStep) -> InheritedTemplateBinding | None:
+    output_config = step.output_config or {}
+    try:
+        template_asset_id = UUID(str(output_config.get("template_asset_id")))
+    except ValueError:
+        return None
+    raw_placeholders = output_config.get("placeholders")
+    candidates: list[object]
+    if isinstance(raw_placeholders, list):
+        candidates = cast(list[object], raw_placeholders)
+    else:
+        raw_bindings = output_config.get("bindings")
+        candidates = (
+            list(cast(dict[object, object], raw_bindings))
+            if isinstance(raw_bindings, dict)
+            else []
+        )
+    placeholders = list(
+        dict.fromkeys(
+            item.strip()
+            for item in candidates
+            if isinstance(item, str) and item.strip()
+        )
+    )
+    return InheritedTemplateBinding(
+        template_asset_id=template_asset_id,
+        placeholders=placeholders,
+    )
 
 
 def _resolve_slots(

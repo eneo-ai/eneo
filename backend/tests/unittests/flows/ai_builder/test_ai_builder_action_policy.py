@@ -26,6 +26,7 @@ from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
     CheckpointIntent,
     FileRoleEvidence,
+    InheritedTemplateBinding,
     PlanningState,
     ResolvedSlot,
     SlotConfidence,
@@ -1332,3 +1333,35 @@ def test_policy_allows_plan_after_architecture_and_requirements_confirmation() -
     )
 
     assert policy.allowed_action_kinds == ("propose_plan",)
+
+
+def test_policy_accepts_the_edited_flows_own_template_for_template_fill() -> None:
+    state = _state_with_resolved_slots(
+        "primary_runtime_input",
+        "terminal_output",
+        "document_material_scope",
+    )
+    state.resolved_slots["terminal_output"] = _slot(
+        "terminal_output",
+        "docx_document",
+    )
+    state.resolved_slots["docx_output_mode"] = _slot(
+        "docx_output_mode",
+        "template_fill_docx",
+    )
+    draft = derive_architecture_commit_draft(state)
+    assert draft is not None
+    state.architecture_commit = finalize_architecture_commit(draft)
+    state.inherited_template = InheritedTemplateBinding(
+        template_asset_id="00000000-0000-0000-0000-000000000702",
+        placeholders=["datum"],
+    )
+
+    policy = build_planner_action_policy(
+        session_state=state,
+        selected_discovery_question_ids=(),
+        is_edit_mode=True,
+    )
+
+    assert policy.architecture_refusal_code is None
+    assert policy.allowed_action_kinds == ("confirm_requirements",)
