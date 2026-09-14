@@ -7150,6 +7150,7 @@ class TestEditSessionInheritsTheFlowTemplate:
         flow = self._template_flow(
             output_config={
                 "template_asset_id": str(asset_id),
+                "template_name": "motesrapport.docx",
                 "placeholders": ["sammanfattning", "datum"],
                 "bindings": {"sammanfattning": "{{ föregående_steg }}"},
             }
@@ -7160,15 +7161,17 @@ class TestEditSessionInheritsTheFlowTemplate:
         assert binding == InheritedTemplateBinding(
             template_asset_id=asset_id,
             placeholders=["sammanfattning", "datum"],
+            template_name="motesrapport.docx",
         )
         state = build_planning_state_from_conversation([], flow=flow)
         assert state.inherited_template == binding
         selection = state.template_selection()
-        assert (selection.count, selection.placeholders, selection.inherited) == (
-            1,
-            ("sammanfattning", "datum"),
-            True,
-        )
+        assert (
+            selection.count,
+            selection.placeholders,
+            selection.filename,
+            selection.origin,
+        ) == (1, ("sammanfattning", "datum"), "motesrapport.docx", "flow")
 
     def test_placeholders_fall_back_to_the_binding_keys(self) -> None:
         asset_id = uuid4()
@@ -7234,13 +7237,9 @@ class TestEditSessionInheritsTheFlowTemplate:
             replaced.count,
             replaced.placeholders,
             replaced.file_id,
-            replaced.inherited,
-        ) == (
-            1,
-            ("ärende",),
-            attached_file_id,
-            False,
-        )
+            replaced.filename,
+            replaced.origin,
+        ) == (1, ("ärende",), attached_file_id, "ny-mall.docx", "replacement")
         # Detached again: the flow's own template is what the plan applies to.
         detached = state.template_selection(attached_file_ids=set())
         assert (detached.count, detached.inherited, detached.file_id) == (1, True, None)

@@ -68,6 +68,7 @@ from eneo.flows.ai_builder.planning_state import (
     ExampleOutputStyleConstraint,
     FileRole,
     FileRoleEvidence,
+    InheritedTemplateBinding,
     NamedResultEvidence,
     PlanningState,
     ResolvedSlot,
@@ -1404,6 +1405,9 @@ def test_server_confirmation_carries_typed_attachment_rows_with_the_commits_trav
     assert row.role == "template" and row.travels is True
     assert row.placeholders == ["diarienummer"]
     assert decision.payload.weak_role_file_ids == []
+    assert decision.payload.run_preview is not None
+    assert decision.payload.run_preview.template is not None
+    assert decision.payload.run_preview.template.origin == "session"
 
     generated = _state(
         primary_runtime_input="documents",
@@ -1932,3 +1936,62 @@ def test_slot_sources_land_in_exactly_one_summary_bucket() -> None:
             evidence_level="explicit",
         )
     )
+
+
+def _template_fill_edit_state(*, template_name: str | None) -> PlanningState:
+    state = _state(
+        primary_runtime_input="documents",
+        terminal_output="docx_document",
+        docx_output_mode="template_fill_docx",
+    )
+    state.inherited_template = InheritedTemplateBinding(
+        template_asset_id=UUID("00000000-0000-0000-0000-000000000777"),
+        placeholders=["diarienummer", "datum"],
+        template_name=template_name,
+    )
+    state.architecture_commit = _finalized_commit_for_state(state)
+    return state
+
+
+def test_server_confirmation_discloses_the_edited_flows_own_template() -> None:
+    # An edit of a bound template-fill flow attaches nothing, and the card
+    # still shows the one template a run fills, named as the flow's own.
+    state = _template_fill_edit_state(template_name="motesrapport.docx")
+    decision = _decision(state=state, ui_language="sv")
+    assert isinstance(decision, ConfirmRequirements)
+    assert decision.payload.attachment_rows == []
+    preview = decision.payload.run_preview
+    assert preview is not None and preview.template is not None
+    assert preview.template.filename == "motesrapport.docx"
+    assert preview.template.placeholder_count == 2
+    assert preview.template.origin == "flow"
+
+    # A binding made before publish carries no name; the row still exists.
+    unnamed = _decision(
+        state=_template_fill_edit_state(template_name=None), ui_language="sv"
+    )
+    assert isinstance(unnamed, ConfirmRequirements)
+    assert unnamed.payload.run_preview is not None
+    assert unnamed.payload.run_preview.template is not None
+    assert unnamed.payload.run_preview.template.filename is None
+    assert unnamed.payload.run_preview.template.origin == "flow"
+    # The template's identity is part of what the user signs.
+    assert unnamed.payload.requirements_version != decision.payload.requirements_version
+
+
+def test_server_confirmation_discloses_a_session_template_replacing_the_flows() -> None:
+    state = _template_fill_edit_state(template_name="motesrapport.docx")
+    state.file_roles = [_attachment("template", placeholders=["diarienummer"])]
+    decision = _decision(state=state, ui_language="sv")
+    assert isinstance(decision, ConfirmRequirements)
+    (row,) = decision.payload.attachment_rows
+    assert row.travels is True
+    preview = decision.payload.run_preview
+    assert preview is not None and preview.template is not None
+    assert preview.template.filename == "attached.docx"
+    assert preview.template.placeholder_count == 1
+    assert preview.template.origin == "replacement"
+    (sentence,) = [
+        text for text in decision.payload.assumptions if "attached.docx" in text
+    ]
+    assert "ersätter flödets nuvarande mall" in sentence

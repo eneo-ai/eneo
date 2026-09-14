@@ -1858,9 +1858,13 @@ def _inherited_template_from_step(step: FlowStep) -> InheritedTemplateBinding | 
             if isinstance(item, str) and item.strip()
         )
     )
+    raw_name = output_config.get("template_name")
     return InheritedTemplateBinding(
         template_asset_id=template_asset_id,
         placeholders=placeholders,
+        template_name=(
+            raw_name.strip() if isinstance(raw_name, str) and raw_name.strip() else None
+        ),
     )
 
 

@@ -29298,10 +29298,22 @@ export interface components {
       runtime_input_label?: string | null;
       template?: components["schemas"]["RunPreviewTemplatePayload"] | null;
     };
-    /** RunPreviewTemplatePayload */
+    /**
+     * RunPreviewTemplatePayload
+     * @description The one template a run fills, whatever its origin.
+     *
+     *     `filename` is None for a flow template bound before it was published,
+     *     whose name the step does not carry; the client then names it generically.
+     */
     RunPreviewTemplatePayload: {
       /** Filename */
-      filename: string;
+      filename?: string | null;
+      /**
+       * Origin
+       * @default session
+       * @enum {string}
+       */
+      origin?: "session" | "flow" | "replacement";
       /** Placeholder Count */
       placeholder_count: number;
     };

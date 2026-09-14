@@ -1037,6 +1037,122 @@ describe("FlowAIBuilder discovery screens", () => {
     expect(preview.textContent).toContain("mall.docx");
   });
 
+  it("names the edited flow's own template in the run preview with its origin", async () => {
+    // An edit of a bound template-fill flow attaches nothing; the card still
+    // shows the one template a run fills and says it comes from the flow.
+    const typed = {
+      ...SUMMARY,
+      attachment_rows: [],
+      run_preview: {
+        runtime_input: "documents",
+        runtime_input_label: "Dokument",
+        max_files: null,
+        result_type: "docx_document",
+        result_type_label: "Word-dokument",
+        report_layout: null,
+        report_layout_label: null,
+        template: { filename: "motesrapport.docx", placeholder_count: 2, origin: "flow" }
+      }
+    };
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          conversation: [
+            userMessage("u1", "Döp om sammanfattningssteget"),
+            assistantMessage("a1", "Här är min tolkning.", { requirements_summary: typed })
+          ]
+        })
+      ]
+    });
+    const { stream } = makeStream();
+    renderShell({ fetch, stream, resumeSessionId: "s-1" });
+
+    const preview = await screen.findByTestId("run-preview");
+    expect(preview.textContent).toContain("motesrapport.docx");
+    expect(preview.textContent).toContain(m.ai_builder_attachment_placeholders({ count: "2" }));
+    expect(preview.textContent).toContain(m.ai_builder_run_preview_template_from_flow());
+    expect(screen.queryByTestId("attachment-rows")).toBeNull();
+  });
+
+  it("says when a session template replaces the flow's own", async () => {
+    const typed = {
+      ...SUMMARY,
+      attachment_rows: [
+        {
+          file_id: "00000000-0000-0000-0000-000000000801",
+          filename: "ny-mall.docx",
+          role: "template",
+          readable: true,
+          coverage: "fully_seen",
+          travels: true,
+          placeholders: ["datum"]
+        }
+      ],
+      run_preview: {
+        runtime_input: "documents",
+        runtime_input_label: "Dokument",
+        max_files: null,
+        result_type: "docx_document",
+        result_type_label: "Word-dokument",
+        report_layout: null,
+        report_layout_label: null,
+        template: { filename: "ny-mall.docx", placeholder_count: 1, origin: "replacement" }
+      }
+    };
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          conversation: [
+            userMessage("u1", "Byt mall"),
+            assistantMessage("a1", "Här är min tolkning.", { requirements_summary: typed })
+          ]
+        })
+      ]
+    });
+    const { stream } = makeStream();
+    renderShell({ fetch, stream, resumeSessionId: "s-1" });
+
+    const rows = await screen.findByTestId("attachment-rows");
+    expect(rows.textContent).toContain(m.ai_builder_attachment_replaces_flow_template());
+    expect(rows.textContent).not.toContain(m.ai_builder_attachment_travels());
+    const preview = screen.getByTestId("run-preview");
+    expect(preview.textContent).toContain("ny-mall.docx");
+    expect(preview.textContent).toContain(m.ai_builder_run_preview_template_replaces_flow());
+  });
+
+  it("names a flow template bound before publish generically", async () => {
+    const typed = {
+      ...SUMMARY,
+      attachment_rows: [],
+      run_preview: {
+        runtime_input: "documents",
+        runtime_input_label: "Dokument",
+        max_files: null,
+        result_type: "docx_document",
+        result_type_label: "Word-dokument",
+        report_layout: null,
+        report_layout_label: null,
+        template: { filename: null, placeholder_count: 1, origin: "flow" }
+      }
+    };
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          conversation: [
+            userMessage("u1", "Ändra steget"),
+            assistantMessage("a1", "Här är min tolkning.", { requirements_summary: typed })
+          ]
+        })
+      ]
+    });
+    const { stream } = makeStream();
+    renderShell({ fetch, stream, resumeSessionId: "s-1" });
+
+    const preview = await screen.findByTestId("run-preview");
+    expect(preview.textContent).toContain(m.ai_builder_run_preview_template_unnamed());
+    expect(preview.textContent).toContain(m.ai_builder_run_preview_template_from_flow());
+  });
+
   it("keeps the attachment sentences of a disclosure saved before the typed rows existed", async () => {
     const legacy = {
       ...SUMMARY,

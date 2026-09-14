@@ -685,7 +685,11 @@ def _attachment_assumptions(
     travels = _attachment_travels(session_state)
     return [
         _attachment_assumption(
-            item, locale, render_value=render_value, travels=travels(item)
+            item,
+            locale,
+            render_value=render_value,
+            travels=travels(item),
+            session_state=session_state,
         )
         for item in ordered
     ]
@@ -697,6 +701,7 @@ def _attachment_assumption(
     *,
     render_value: RenderEvidenceValue,
     travels: bool,
+    session_state: PlanningState,
 ) -> str:
     role = _attachment_role_label(item.role, locale)
     coverage = _attachment_coverage_description(
@@ -711,7 +716,13 @@ def _attachment_assumption(
     # label, not an identity, so the whole id is disclosed.
     reference = str(item.file_id)
     placeholders = _template_placeholder_text(item, locale, render_value=render_value)
-    consequence = _attachment_run_consequence(travels, locale)
+    consequence = _attachment_run_consequence(
+        travels,
+        locale,
+        replaces_flow_template=(
+            travels and session_state.template_selection().origin == "replacement"
+        ),
+    )
     if locale == "sv":
         readable = "ja" if item.has_readable_text else "nej"
         return (
@@ -727,7 +738,12 @@ def _attachment_assumption(
     )
 
 
-def _attachment_run_consequence(travels: bool, locale: Locale) -> str:
+def _attachment_run_consequence(
+    travels: bool,
+    locale: Locale,
+    *,
+    replaces_flow_template: bool = False,
+) -> str:
     """What the attachment means for runs, read from the committed architecture.
 
     A role label is evidence about the file; whether the file travels with the
@@ -735,6 +751,13 @@ def _attachment_run_consequence(travels: bool, locale: Locale) -> str:
     business.
     """
 
+    if travels and replaces_flow_template:
+        return (
+            "Mallen ersätter flödets nuvarande mall och fylls i vid varje körning."
+            if locale == "sv"
+            else "The template replaces the flow's current template and is filled "
+            "at every run."
+        )
     if travels:
         return (
             "Mallen följer med flödet och fylls i vid varje körning."
@@ -875,6 +898,15 @@ def _attachment_travels(
     )
 
 
+def _commit_fills_template(session_state: PlanningState) -> bool:
+    commit = session_state.architecture_commit
+    return (
+        commit is not None
+        and bool(commit.tuples_chain)
+        and commit.tuples_chain[-1].output_mode is FlowAuthoringOutputMode.TEMPLATE_FILL
+    )
+
+
 def _attachment_rows(session_state: PlanningState) -> list[AttachmentRowPayload]:
     travels = _attachment_travels(session_state)
     return [
@@ -900,17 +932,18 @@ def _run_preview(
     runtime_input = session_state.commit_grade_slot_value("primary_runtime_input")
     result_type = session_state.commit_grade_slot_value("terminal_output")
     commit = session_state.architecture_commit
-    travels = _attachment_travels(session_state)
-    template = next(
-        (
-            RunPreviewTemplatePayload(
-                filename=item.filename,
-                placeholder_count=len(item.template_placeholders or []),
-            )
-            for item in session_state.file_roles
-            if travels(item)
-        ),
-        None,
+    # One row whatever the template's origin: the file attached here, the
+    # flow's own template in an edit, or an attachment replacing it. The same
+    # selection decides what the plan compiles against.
+    selection = session_state.template_selection()
+    template = (
+        RunPreviewTemplatePayload(
+            filename=selection.filename,
+            placeholder_count=len(selection.placeholders or []),
+            origin=selection.origin,
+        )
+        if _commit_fills_template(session_state) and selection.count == 1
+        else None
     )
     if (
         runtime_input is None

@@ -271,9 +271,21 @@ class AttachmentRowPayload(BaseModel):
     placeholders: list[str] | None = None
 
 
+# Where the template a run fills comes from: attached in this session, the
+# flow being edited, or attached in this session to replace the flow's own.
+RunPreviewTemplateOrigin = Literal["session", "flow", "replacement"]
+
+
 class RunPreviewTemplatePayload(BaseModel):
-    filename: str
+    """The one template a run fills, whatever its origin.
+
+    `filename` is None for a flow template bound before it was published,
+    whose name the step does not carry; the client then names it generically.
+    """
+
+    filename: str | None = None
     placeholder_count: int = Field(ge=0)
+    origin: RunPreviewTemplateOrigin = "session"
 
 
 class RunPreviewPayload(BaseModel):

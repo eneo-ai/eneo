@@ -626,8 +626,14 @@ const requirementsSummaryEventDataSchema = z.object({
       result_type_label: z.string().nullable().optional(),
       report_layout: z.string().nullable().optional(),
       report_layout_label: z.string().nullable().optional(),
+      // One template whatever its origin; a flow template bound before publish
+      // carries no filename and is named generically by the card.
       template: z
-        .object({ filename: z.string(), placeholder_count: z.int().nonnegative() })
+        .object({
+          filename: z.string().nullable().optional(),
+          placeholder_count: z.int().nonnegative(),
+          origin: z.enum(["session", "flow", "replacement"]).optional()
+        })
         .nullable()
         .optional()
     })

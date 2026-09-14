@@ -484,6 +484,14 @@ class InheritedTemplateBinding(_PlanningModel):
 
     template_asset_id: UUID
     placeholders: list[str]
+    # The asset's filename as published on the step; a draft-only binding
+    # has none, and the card then names the flow's template generically.
+    template_name: str | None = None
+
+
+# Where the selected template came from: attached in this session, carried by
+# the flow being edited, or attached in this session to replace the flow's.
+TemplateSelectionOrigin = Literal["session", "flow", "replacement"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -494,7 +502,12 @@ class TemplateSelection:
     placeholders: tuple[str, ...] | None
     # The session file the selection came from; None when inherited or absent.
     file_id: UUID | None
-    inherited: bool
+    filename: str | None
+    origin: TemplateSelectionOrigin
+
+    @property
+    def inherited(self) -> bool:
+        return self.origin == "flow"
 
 
 class SchemaEvidence(_PlanningModel):
@@ -1179,17 +1192,21 @@ class PlanningState(_PlanningModel):
                     else None
                 ),
                 file_id=sole.file_id if sole is not None else None,
-                inherited=False,
+                filename=sole.filename if sole is not None else None,
+                origin=(
+                    "replacement" if self.inherited_template is not None else "session"
+                ),
             )
         if self.inherited_template is not None:
             return TemplateSelection(
                 count=1,
                 placeholders=tuple(self.inherited_template.placeholders),
                 file_id=None,
-                inherited=True,
+                filename=self.inherited_template.template_name,
+                origin="flow",
             )
         return TemplateSelection(
-            count=0, placeholders=None, file_id=None, inherited=False
+            count=0, placeholders=None, file_id=None, filename=None, origin="session"
         )
 
     def replace_schema_resolution(

@@ -680,7 +680,9 @@
                           <span class="text-secondary">{attachmentRoleLabel(row.role)}</span>
                           <span class="text-secondary">
                             · {row.travels
-                              ? m.ai_builder_attachment_travels()
+                              ? runPreview?.template?.origin === "replacement"
+                                ? m.ai_builder_attachment_replaces_flow_template()
+                                : m.ai_builder_attachment_travels()
                               : m.ai_builder_attachment_not_carried()}
                           </span>
                           {#if row.readable}
@@ -781,9 +783,20 @@
                     {m.ai_builder_run_preview_template()}
                   </dt>
                   <dd class="text-primary text-[0.85rem] font-medium">
-                    {runPreview.template.filename}, {m.ai_builder_attachment_placeholders({
-                      count: String(runPreview.template.placeholder_count)
-                    })}
+                    {runPreview.template.filename ?? m.ai_builder_run_preview_template_unnamed()}, {m.ai_builder_attachment_placeholders(
+                      {
+                        count: String(runPreview.template.placeholder_count)
+                      }
+                    )}
+                    {#if runPreview.template.origin === "flow"}
+                      <span class="text-secondary font-normal">
+                        ({m.ai_builder_run_preview_template_from_flow()})
+                      </span>
+                    {:else if runPreview.template.origin === "replacement"}
+                      <span class="text-secondary font-normal">
+                        ({m.ai_builder_run_preview_template_replaces_flow()})
+                      </span>
+                    {/if}
                   </dd>
                 </div>
               {/if}
