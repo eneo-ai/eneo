@@ -1,7 +1,7 @@
 """add builder client error presentation and first action columns
 
 Revision ID: 202609131200
-Revises: 202609081000
+Revises: 202609081000, 202609111000
 Create Date: 2026-09-13 12:00:00.000000
 
 A reported client error learns, after the fact, where and as which class
@@ -17,7 +17,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "202609131200"
-down_revision: str | None = "202609081000"
+down_revision: str | Sequence[str] | None = ("202609081000", "202609111000")
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

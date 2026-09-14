@@ -738,6 +738,7 @@ def governed_reasoning_config(
         prompt_enforced=False,
         enforced_prompt_text=None,
         reasoning_policy_configured=True,
+        inline_file_text=None,
         reasoning_effort_user_configurable=user_configurable,
     )
 
@@ -789,6 +790,7 @@ async def test_personal_chat_can_change_reasoning_effort_when_policy_allows(
         prompt_enforced=False,
         enforced_prompt_text=None,
         reasoning_policy_configured=True,
+        inline_file_text=None,
         reasoning_effort_user_configurable=True,
     )
     kwargs = ModelKwargs(reasoning_effort="high")
@@ -1058,6 +1060,7 @@ async def test_personal_chat_cannot_store_unsupported_reasoning_effort(
         prompt_enforced=False,
         enforced_prompt_text=None,
         reasoning_policy_configured=True,
+        inline_file_text=None,
         reasoning_effort_user_configurable=True,
     )
 

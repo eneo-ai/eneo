@@ -15,6 +15,7 @@ from eneo.governance_policy.domain.policy_resolver import (
     EffectiveConfig,
     resolve,
     select_effective_completion_model,
+    select_effective_inline_file_text,
     select_effective_reasoning_effort,
 )
 from eneo.skills.domain.skill import (
@@ -109,6 +110,54 @@ def test_personal_default_projects_reasoning_governance():
     assert cfg.default_reasoning_effort == "medium"
     assert cfg.reasoning_effort_user_configurable is True
     assert cfg.reasoning_policy_configured is True
+
+
+def test_personal_default_projects_file_policy():
+    policy = _empty_policy()
+    policy.set_file_policy(inline_file_text=False)
+
+    cfg = resolve(
+        assistant=_mk_assistant(),
+        space_is_personal=True,
+        policy=policy,
+        tenant_completion_models=[],
+        tenant_mcp_servers=[],
+        library_prompt_text=None,
+    )
+
+    assert cfg.inline_file_text is False
+
+
+def test_ungoverned_file_policy_keeps_the_assistant_flag():
+    cfg = resolve(
+        assistant=_mk_assistant(),
+        space_is_personal=True,
+        policy=_empty_policy(),
+        tenant_completion_models=[],
+        tenant_mcp_servers=[],
+        library_prompt_text=None,
+    )
+
+    assert cfg.inline_file_text is None
+    assert select_effective_inline_file_text(True, cfg) is True
+    assert select_effective_inline_file_text(False, cfg) is False
+    assert select_effective_inline_file_text(False, None) is False
+
+
+def test_governed_file_policy_replaces_the_assistant_flag():
+    cfg = EffectiveConfig(
+        models_enforced=False,
+        available_models=[],
+        locked_model=None,
+        policy_default_model=None,
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+        inline_file_text=False,
+    )
+
+    assert select_effective_inline_file_text(True, cfg) is False
 
 
 def test_explicit_provider_default_suppresses_a_stale_user_choice():

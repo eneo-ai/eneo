@@ -16178,6 +16178,18 @@ export interface components {
        */
       file_id: string;
     };
+    /** FilePolicyInput */
+    FilePolicyInput: {
+      /** Inline File Text */
+      inline_file_text: boolean;
+    };
+    /** FilePolicyPublic */
+    FilePolicyPublic: {
+      /** Configured */
+      configured: boolean;
+      /** Inline File Text */
+      inline_file_text: boolean | null;
+    };
     /**
      * FilePublic
      * @example {
@@ -23616,6 +23628,7 @@ export interface components {
     };
     /** GovernancePolicyPublic */
     GovernancePolicyPublic: {
+      file_policy: components["schemas"]["FilePolicyPublic"];
       mcp_restriction: components["schemas"]["McpRestrictionPublic"];
       models_restriction: components["schemas"]["ModelsRestrictionPublic"];
       prompt_enforcement: components["schemas"]["PromptEnforcementPublic"];
@@ -23628,6 +23641,7 @@ export interface components {
     };
     /** GovernancePolicyUpdate */
     GovernancePolicyUpdate: {
+      file_policy?: components["schemas"]["FilePolicyInput"] | null;
       mcp_restriction?: components["schemas"]["McpRestrictionInput"] | null;
       models_restriction?: components["schemas"]["ModelsRestrictionInput"] | null;
       prompt_enforcement?: components["schemas"]["PromptEnforcementInput"] | null;
