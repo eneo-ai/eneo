@@ -585,6 +585,143 @@ describe("BuilderReviewScreen plan document", () => {
     expect(await within(changes).findByText("Skriv om texten fritt.")).toBeTruthy();
   });
 
+  it("reads one list of what an edit changes, removed steps included", async () => {
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+      state: {
+        session: makeSession({ status: "awaiting_approval", latest_plan_id: "plan-1" }),
+        currentPlan: makePlan({
+          proposal: makeProposal({
+            spec: {
+              flow_name: "Mötesrapport",
+              flow_description: "Skriver en kort rapport.",
+              form_fields: [],
+              steps: [
+                makeTranscribeStep({ existing_step_ref: "existing_step_1" }),
+                makeRenderStep({
+                  existing_step_ref: "existing_step_2",
+                  name: "Strukturera transkriberingen"
+                }),
+                makeRenderStep({ plan_step_ref: "step_c", name: "Sammanfatta" })
+              ]
+            },
+            edit: {
+              base_flow_revision: 3,
+              removed_existing_step_refs: ["existing_step_3"],
+              scoped_target_existing_step_ref: null,
+              scoped_target_plan_step_ref: null,
+              diff: {
+                step_changes: [
+                  {
+                    kind: "unchanged",
+                    step_name: "Transkribera ljud",
+                    step_ref: "existing_step_1"
+                  },
+                  {
+                    kind: "modified",
+                    step_name: "Strukturera transkriberingen",
+                    step_ref: "existing_step_2",
+                    field_changes: [
+                      { field: "output_type", previous: "text", current: "json" },
+                      { field: "instructions", previous: "Fritt.", current: "Källnära." }
+                    ]
+                  },
+                  { kind: "added", step_name: "Sammanfatta", step_ref: null },
+                  { kind: "removed", step_name: "Skicka e-post", step_ref: "existing_step_3" }
+                ],
+                flow_property_changes: {
+                  flow_description: ["Skriver en rapport.", "Skriver en kort rapport."]
+                }
+              },
+              warnings: [],
+              advisories: [],
+              risk_flags: [],
+              confidence: "ready"
+            }
+          })
+        })
+      }
+    });
+
+    const list = screen.getByTestId("edit-change-list");
+    const rows = within(list)
+      .getAllByRole("listitem")
+      .map((li) => li.textContent?.replace(/\s+/g, " ").trim());
+    // "Utdata och instruktioner ändras": the field labels the details view
+    // uses, read as one sentence.
+    const fieldsSentence = m.ai_builder_change_list_fields_changed({
+      fields: `${m.ai_builder_step_change_field_output_type().toLowerCase()} ${m.ai_builder_review_suggestion_steps_join()} ${m.ai_builder_step_instructions().toLowerCase()}`
+    });
+    expect(rows).toEqual([
+      `${m.ai_builder_change_list_description()} ${m.ai_builder_change_list_description_what()}`,
+      `${m.ai_builder_change_request_scope({ step: 2, name: "Strukturera transkriberingen" })} ${fieldsSentence.charAt(0).toUpperCase()}${fieldsSentence.slice(1)}`,
+      `${m.ai_builder_change_request_scope({ step: 3, name: "Sammanfatta" })} ${m.ai_builder_change_list_new_step()}`,
+      `Skicka e-post ${m.ai_builder_change_list_removed()}`
+    ]);
+    // The list is the only place a removed step is read.
+    expect(screen.getAllByText("Skicka e-post")).toHaveLength(1);
+
+    // An entry opens its step in the details view.
+    await fireEvent.click(
+      within(list).getByRole("button", {
+        name: `${m.ai_builder_change_request_scope({ step: 3, name: "Sammanfatta" })} ${m.ai_builder_change_list_new_step()}`
+      })
+    );
+    const trigger = await screen.findByRole("button", {
+      name: `${m.ai_builder_step_label({ step: 3 })}: Sammanfatta`
+    });
+    await waitFor(() => expect(trigger.getAttribute("aria-expanded")).toBe("true"));
+    // The handoff lands on the step, not back at the top of the document.
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+
+  it("says honestly when the proposal changes nothing", () => {
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+      state: {
+        session: makeSession({ status: "awaiting_approval", latest_plan_id: "plan-1" }),
+        currentPlan: makePlan({
+          proposal: makeProposal({
+            spec: {
+              flow_name: "Mötesrapport",
+              flow_description: "Skriver en rapport.",
+              form_fields: [],
+              steps: [
+                makeTranscribeStep({ existing_step_ref: "existing_step_1" }),
+                makeRenderStep({ existing_step_ref: "existing_step_2" })
+              ]
+            },
+            edit: {
+              base_flow_revision: 3,
+              removed_existing_step_refs: [],
+              scoped_target_existing_step_ref: null,
+              scoped_target_plan_step_ref: null,
+              diff: {
+                step_changes: [
+                  {
+                    kind: "unchanged",
+                    step_name: "Transkribera ljud",
+                    step_ref: "existing_step_1"
+                  },
+                  { kind: "unchanged", step_name: "Skriv rapport", step_ref: "existing_step_2" }
+                ],
+                flow_property_changes: {}
+              },
+              warnings: [],
+              advisories: [],
+              risk_flags: [],
+              confidence: "ready"
+            }
+          })
+        })
+      }
+    });
+
+    const list = screen.getByTestId("edit-change-list");
+    expect(within(list).getByText(m.ai_builder_change_list_none())).toBeTruthy();
+    expect(within(list).queryAllByRole("listitem")).toHaveLength(0);
+  });
+
   it("keeps an expanded step expanded across Diagram↔Detaljer switches", async () => {
     render(BuilderReviewScreenHarness, {
       currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),

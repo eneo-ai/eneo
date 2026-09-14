@@ -226,10 +226,25 @@
     if (open) openStepRefs.add(step.plan_step_ref);
     else openStepRefs.delete(step.plan_step_ref);
   }
-  function revealStep(step: StepSpec): void {
+  // Revealing a step is a handoff: the details view opens with that step
+  // expanded, and focus and the reading position move to its heading.
+  let detailsListEl = $state<HTMLOListElement | undefined>();
+  async function revealStep(step: StepSpec): Promise<void> {
     const planId = plan?.plan_id;
     if (planId) stepsViewPreference = { planId, view: "details" };
     openStepRefs.add(step.plan_step_ref);
+    await tick();
+    const trigger = detailsListEl?.querySelector<HTMLElement>(
+      `[data-plan-step-ref="${step.plan_step_ref}"] button`
+    );
+    trigger?.focus({ preventScroll: true });
+    // Steps above it may still be animating open; scroll once the layout has settled.
+    await Promise.all(
+      (detailsListEl?.getAnimations?.({ subtree: true }) ?? []).map((animation) =>
+        animation.finished.catch(() => undefined)
+      )
+    );
+    trigger?.scrollIntoView?.({ block: "start" });
   }
 
   // ---- Step presentation ---------------------------------------------------
@@ -429,6 +444,64 @@
     return { previous: String(change[0] ?? ""), proposed: String(change[1] ?? "") };
   });
   const removedStepChanges = $derived(getRemovedStepChanges(plan?.proposal.edit?.diff ?? null));
+
+  // One list of what the proposal changes, read before any step is: the
+  // description, then each added or changed step in flow order, then the
+  // steps the proposal drops (they are not in the spec, so they have no row
+  // elsewhere). Everything comes from the server's diff; an empty list is the
+  // honest "nothing changes".
+  interface ChangeEntry {
+    key: string;
+    subject: string;
+    what: string;
+    /** The proposed step to reveal in the details view; null for a removed step or the description. */
+    step: StepSpec | null;
+  }
+  function fieldsChangedSentence(labels: string[]): string {
+    const locale = getLocale();
+    const fields = new Intl.ListFormat(locale, { type: "conjunction" }).format(
+      labels.map((label) => label.charAt(0).toLocaleLowerCase(locale) + label.slice(1))
+    );
+    const sentence = m.ai_builder_change_list_fields_changed({ fields });
+    return sentence.charAt(0).toLocaleUpperCase(locale) + sentence.slice(1);
+  }
+  const changeList = $derived.by<ChangeEntry[] | null>(() => {
+    if (isCreateMode || !plan?.proposal.edit) return null;
+    const entries: ChangeEntry[] = [];
+    if (descriptionDiff) {
+      entries.push({
+        key: "flow_description",
+        subject: m.ai_builder_change_list_description(),
+        what: m.ai_builder_change_list_description_what(),
+        step: null
+      });
+    }
+    for (const { step, index } of indexedSteps) {
+      const badge = changeBadge(step);
+      if (badge === null) continue;
+      const labels = stepFieldChanges(step).map((change) => change.label);
+      entries.push({
+        key: step.plan_step_ref,
+        subject: m.ai_builder_change_request_scope({ step: index + 1, name: step.name }),
+        what:
+          badge === "new"
+            ? m.ai_builder_change_list_new_step()
+            : labels.length > 0
+              ? fieldsChangedSentence(labels)
+              : m.ai_builder_change_list_updated(),
+        step
+      });
+    }
+    for (const change of removedStepChanges) {
+      entries.push({
+        key: `removed:${change.step_ref ?? change.step_name}`,
+        subject: change.step_name,
+        what: m.ai_builder_change_list_removed(),
+        step: null
+      });
+    }
+    return entries;
+  });
   const planLintWarnings = $derived(plan?.proposal.lint_warnings ?? []);
 
   // ---- Errors, conflicts, prerequisites ------------------------------------
@@ -942,6 +1015,51 @@
             {/if}
           </header>
 
+          {#if changeList}
+            <section
+              class="border-dimmer border-t px-[1.375rem] py-4 max-sm:px-3.5"
+              aria-labelledby="builder-change-list-heading"
+              data-testid="edit-change-list"
+            >
+              <h3 id="builder-change-list-heading" class="text-primary text-[0.84375rem] font-bold">
+                {m.ai_builder_change_list_title()}
+              </h3>
+              {#if changeList.length === 0}
+                <p class="text-secondary mt-2 max-w-[72ch] text-[0.8125rem] leading-relaxed">
+                  {m.ai_builder_change_list_none()}
+                </p>
+              {:else}
+                <ol class="m-0 mt-1 flex list-none flex-col p-0">
+                  {#each changeList as entry (entry.key)}
+                    <li class="border-dimmer border-t text-[0.8125rem] first:border-t-0">
+                      {#if entry.step}
+                        {@const step = entry.step}
+                        <!-- The row opens its step in the details view. -->
+                        <button
+                          type="button"
+                          class="hover:bg-secondary focus-visible:ring-accent-stronger -mx-2 flex min-h-11 w-[calc(100%+1rem)] flex-wrap content-center items-baseline gap-x-3 gap-y-0.5 rounded-md px-2 py-2 text-left focus-visible:ring-2 focus-visible:outline-none"
+                          onclick={() => void revealStep(step)}
+                        >
+                          <span class="text-primary font-semibold">{entry.subject}</span>
+                          <span class="text-secondary min-w-0 flex-1 text-pretty">{entry.what}</span
+                          >
+                        </button>
+                      {:else}
+                        <div
+                          class="flex min-h-11 flex-wrap content-center items-baseline gap-x-3 gap-y-0.5 py-2"
+                        >
+                          <span class="text-primary font-semibold">{entry.subject}</span>
+                          <span class="text-secondary min-w-0 flex-1 text-pretty">{entry.what}</span
+                          >
+                        </div>
+                      {/if}
+                    </li>
+                  {/each}
+                </ol>
+              {/if}
+            </section>
+          {/if}
+
           {#if descriptionDiff || hasDescriptionAdvisory}
             <section
               class="border-dimmer border-t px-[1.375rem] py-4 max-sm:px-3.5"
@@ -1232,7 +1350,7 @@
                     <button
                       type="button"
                       class="bg-warning-default/20 text-warning-stronger focus-visible:ring-warning-stronger rounded-full px-2 py-0.5 text-[0.6875rem] font-semibold focus-visible:ring-2 focus-visible:outline-none"
-                      onclick={() => revealStep(step)}
+                      onclick={() => void revealStep(step)}
                     >
                       {m.ai_builder_step_label({ step: index + 1 })}
                     </button>
@@ -1296,9 +1414,9 @@
             </Tabs.Content>
 
             <Tabs.Content value="details" class="px-[1.375rem] pt-3 pb-[1.375rem] max-sm:px-3.5">
-              <ol class="my-0 flex list-none flex-col gap-2 p-0">
+              <ol bind:this={detailsListEl} class="my-0 flex list-none flex-col gap-2 p-0">
                 {#each detailSteps as { step, index } (step.plan_step_ref)}
-                  <li>
+                  <li data-plan-step-ref={step.plan_step_ref}>
                     <BuilderStepDetails
                       {step}
                       stepNumber={index + 1}
@@ -1335,28 +1453,6 @@
               </ol>
             </Tabs.Content>
           </Tabs.Root>
-
-          {#if removedStepChanges.length > 0}
-            <section class="border-dimmer border-t px-[1.375rem] py-4 max-sm:px-3.5">
-              <h3 class="text-primary mb-2 text-[0.84375rem] font-bold">
-                {m.ai_builder_removed_steps_title()}
-              </h3>
-              <ul class="flex list-none flex-col gap-1 p-0">
-                {#each removedStepChanges as change (`${change.step_ref ?? change.step_name}-${change.kind}`)}
-                  <li class="flex items-center gap-2 py-1 text-[0.8125rem]">
-                    <span
-                      class="bg-warning-dimmer text-warning-stronger inline-flex h-5 shrink-0 items-center rounded-full px-2 text-[0.6875rem] font-semibold uppercase"
-                    >
-                      {m.ai_builder_badge_removed()}
-                    </span>
-                    <span class="text-secondary decoration-stronger truncate line-through">
-                      {change.step_name}
-                    </span>
-                  </li>
-                {/each}
-              </ul>
-            </section>
-          {/if}
         </article>
 
         <!-- Ask for a change, in place -->
