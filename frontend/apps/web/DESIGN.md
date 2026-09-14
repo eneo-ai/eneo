@@ -68,10 +68,10 @@ typography:
     letterSpacing: "normal"
   pill:
     fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif"
-    fontSize: "0.65625rem"
-    fontWeight: 700
-    lineHeight: 1
-    letterSpacing: "0.03em"
+    fontSize: "0.8rem"
+    fontWeight: 600
+    lineHeight: 1.25
+    letterSpacing: "normal"
 rounded:
   sm: "0.375rem"
   md: "0.5rem"
@@ -362,7 +362,7 @@ only left rule is the 2px neutral quote rule on "Du bad om".
   to 60%.
 - **Field chip:** 1.625rem pill, linen fill, ink label, type in 70% ink;
   required fields swap to the blue wash with deep blue text.
-- **Count badge:** 1.125rem pill, linen-deep fill, bold 0.6875rem.
+- **Count badge:** 1.125rem pill, linen-deep fill, bold 0.8rem.
 
 ### Cards / Containers
 
