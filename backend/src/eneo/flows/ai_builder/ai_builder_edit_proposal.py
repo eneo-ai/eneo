@@ -418,12 +418,15 @@ async def process_edit_arguments(
             if plan_edit_context is not None
             else None
         )
+        # The feedback is server-authored text naming the offending step; it
+        # carries no prompt, model output or credential.
         logger.info(
             "ai_builder_scoped_plan_edit_rejected session_id=%s target_step_ref=%s "
-            "reason=%s",
+            "reason=%s feedback=%s",
             turn.session_id,
             target_step_ref,
             scoped_rejection.reason,
+            scoped_rejection.feedback,
         )
         return CorrectableFailure(feedback=scoped_rejection.feedback, kind="quality")
 
