@@ -321,6 +321,7 @@ def validate_scoped_edit_proposal(
     *,
     context: ResolvedAIBuilderEditContext | None,
     proposal: "OrderedEditProposal",
+    current_step_refs: list[str],
     saved_step_revision: bool = False,
 ) -> str | None:
     """Reject model-authored changes outside a selected saved Flow step."""
@@ -345,12 +346,32 @@ def validate_scoped_edit_proposal(
         )
 
     identity_fields = {"kind", "existing_step_ref"}
+    current_refs = set(current_step_refs)
+    submitted_refs: set[str] = set()
     for step in proposal.steps:
         if step.kind == "add":
             return (
                 "A selected-step edit must not add steps. Use a whole-flow edit "
                 "when the requested change alters the flow structure."
             )
+        if saved_step_revision:
+            if step.existing_step_ref not in current_refs:
+                return (
+                    f"Unknown saved step `{step.existing_step_ref}`. Submit only "
+                    f"modifications to the selected step `{target_ref}`."
+                )
+            if step.existing_step_ref in submitted_refs:
+                return (
+                    f"Submit step `{step.existing_step_ref}` only once, with all "
+                    "its changes in one modification."
+                )
+            submitted_refs.add(step.existing_step_ref)
+            if step.existing_step_ref != target_ref:
+                return (
+                    f"Step `{step.existing_step_ref}` is outside the selected "
+                    f"scope. Submit only modifications to `{target_ref}`; "
+                    "omit unchanged steps."
+                )
         if step.existing_step_ref == target_ref:
             continue
         authored_fields = sorted(step.model_fields_set - identity_fields)

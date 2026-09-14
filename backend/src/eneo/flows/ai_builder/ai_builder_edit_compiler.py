@@ -67,6 +67,9 @@ from eneo.flows.application.flow_authoring_description_semantics import (
     FlowSemanticSignature,
 )
 from eneo.flows.application.flow_authoring_snapshot import current_flow_authoring_spec
+from eneo.flows.application.flow_draft_materialization import (
+    validate_existing_step_ref_coverage,
+)
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshots
 from eneo.flows.domain.canonical_json_hash import canonical_json_bytes
 from eneo.flows.domain.flow import FlowStep
@@ -174,21 +177,6 @@ def compile_edit_proposal(
         requested_primary_runtime_input_type
         or _primary_runtime_input_type_from_steps(current_steps)
     )
-    materialized_proposal = materialize_ordered_edit_proposal(
-        proposal,
-        primary_runtime_input_type=primary_runtime_input_type,
-        primary_runtime_required=(
-            _primary_runtime_required_from_steps(current_steps)
-            if requested_primary_runtime_input_type is not None
-            else False
-        ),
-    )
-    prepared = _prepare_ordered_edit_proposal(
-        proposal=materialized_proposal,
-        current_steps=current_steps,
-        current_metadata_json=current_metadata_json,
-        primary_runtime_input_type=primary_runtime_input_type,
-    )
     base_form_fields = extract_form_fields_from_metadata(current_metadata_json)
     base_spec = current_flow_authoring_spec(
         current_steps=current_steps,
@@ -206,6 +194,23 @@ def compile_edit_proposal(
         step.existing_step_ref for step in revision_spec.steps
     ] != [step.existing_step_ref for step in base_spec.steps]:
         raise BadRequestException("The revision must preserve the saved step sequence.")
+    if revision_spec is not None:
+        proposal = _expand_saved_step_proposal(proposal, revision_spec=revision_spec)
+    materialized_proposal = materialize_ordered_edit_proposal(
+        proposal,
+        primary_runtime_input_type=primary_runtime_input_type,
+        primary_runtime_required=(
+            _primary_runtime_required_from_steps(current_steps)
+            if requested_primary_runtime_input_type is not None
+            else False
+        ),
+    )
+    prepared = _prepare_ordered_edit_proposal(
+        proposal=materialized_proposal,
+        current_steps=current_steps,
+        current_metadata_json=current_metadata_json,
+        primary_runtime_input_type=primary_runtime_input_type,
+    )
     compiled_spec = compile_ordered_edit_proposal(
         base_spec=revision_spec if revision_spec is not None else base_spec,
         proposal=prepared.proposal,
@@ -344,6 +349,44 @@ def compile_edit_proposal(
             confidence=confidence,
         ),
         base_spec=base_spec,
+    )
+
+
+def _expand_saved_step_proposal(
+    proposal: OrderedEditProposal,
+    *,
+    revision_spec: FlowDraftSpecCore,
+) -> OrderedEditProposal:
+    modifications: list[ModifyExistingStep] = []
+    for step in proposal.steps:
+        if not isinstance(step, ModifyExistingStep):
+            raise BadRequestException("A selected-step edit must not add steps.")
+        modifications.append(step)
+    current_refs = [
+        step.existing_step_ref
+        for step in revision_spec.steps
+        if step.existing_step_ref is not None
+    ]
+    submitted_refs = [step.existing_step_ref for step in modifications]
+    submitted_ref_set = set(submitted_refs)
+    validate_existing_step_ref_coverage(
+        current_refs=set(current_refs),
+        preserved_refs=[
+            *submitted_refs,
+            *(ref for ref in current_refs if ref not in submitted_ref_set),
+        ],
+        removed_existing_step_refs=proposal.removed_existing_step_refs,
+    )
+    by_ref = {step.existing_step_ref: step for step in modifications}
+    return proposal.model_copy(
+        update={
+            "steps": [
+                by_ref[ref]
+                if ref in by_ref
+                else ModifyExistingStep(existing_step_ref=ref)
+                for ref in current_refs
+            ]
+        }
     )
 
 

@@ -5835,9 +5835,10 @@ async def test_saved_step_provider_request_contains_focused_data_and_permissions
         "form_fields",
         "removed_existing_step_refs",
     }.intersection(props)
-    branches = props["steps"]["items"]["anyOf"]
-    assert [b["properties"]["kind"]["enum"] for b in branches] == [["modify"], ["keep"]]
-    assert branches[0]["properties"]["existing_step_ref"]["enum"] == ["existing_step_4"]
+    item = props["steps"]["items"]
+    assert "anyOf" not in item
+    assert item["properties"]["kind"]["enum"] == ["modify"]
+    assert item["properties"]["existing_step_ref"]["enum"] == ["existing_step_4"]
 
 
 def test_saved_step_context_is_required_before_request_budget_admission():

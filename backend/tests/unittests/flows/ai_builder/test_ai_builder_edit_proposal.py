@@ -24,7 +24,10 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     TargetKind,
 )
 from eneo.flows.ai_builder.ai_builder_edit_admission import lower_edit_tool_arguments
-from eneo.flows.ai_builder.ai_builder_edit_compiler import _step_field_changes
+from eneo.flows.ai_builder.ai_builder_edit_compiler import (
+    _step_field_changes,
+    compile_edit_proposal,
+)
 from eneo.flows.ai_builder.ai_builder_edit_proposal import process_edit_arguments
 from eneo.flows.ai_builder.ai_builder_edit_tool_schema import (
     build_edit_flow_tool_schema,
@@ -80,6 +83,7 @@ from eneo.flows.assistant_authoring_snapshot import (
     AssistantAuthoringResourceRef,
     AssistantAuthoringSnapshot,
 )
+from eneo.flows.domain.canonical_json_hash import canonical_json_bytes
 from eneo.flows.domain.flow import FlowStep
 from eneo.flows.enums import FlowOutputMode
 from eneo.flows.flow_authoring_spec import (
@@ -94,6 +98,7 @@ from eneo.flows.flow_authoring_spec import (
 from eneo.flows.input_binding_contract_rules import (
     derive_structured_projection_contract,
 )
+from eneo.main.exceptions import BadRequestException
 from tests.unittests.flows.ai_builder.proposal_turn_builders import _make_turn
 
 
@@ -2647,6 +2652,204 @@ def _flow(*steps: FlowStep, metadata_json: dict | None = None) -> SimpleNamespac
     )
 
 
+def _saved_step_large_flow_fixture(step_count: int):
+    flow = _flow(
+        *(
+            _flow_step(
+                step_order=order,
+                user_description=f"Step {order}",
+                input_source="flow_input" if order == 1 else "previous_step",
+            )
+            for order in range(1, step_count + 1)
+        )
+    )
+    snapshots = {
+        step.assistant_id: AssistantAuthoringSnapshot(
+            instructions=f"Saved instructions for step {step.step_order}."
+        )
+        for step in flow.steps
+    }
+    catalog = build_ai_builder_resource_catalog(
+        available_models=None, available_kbs=None
+    )
+    context = ResolvedAIBuilderEditContext(
+        request=AIBuilderSavedFlowStepEditContext(flow_step_id=flow.steps[3].id),
+        scope="step",
+        target_existing_step_ref="existing_step_4",
+    )
+    prior = _prior_spec_for_revision(
+        context=context,
+        prior_plan=None,
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=catalog,
+    )
+    assert prior is not None
+    return flow, snapshots, catalog, context, prior
+
+
+@pytest.mark.parametrize("step_count", [10, 40])
+async def test_saved_step_fragment_expands_without_changing_untouched_steps(step_count):
+    flow, snapshots, catalog, context, prior = _saved_step_large_flow_fixture(
+        step_count
+    )
+    before = [
+        canonical_json_bytes(step.model_dump(mode="json")) for step in prior.steps
+    ]
+    result = await _process(
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=catalog,
+        plan_edit_context=context,
+        prior_spec_for_revision=prior,
+        arguments={
+            "plan_rationale": "Clarify the selected instructions.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_4",
+                    "assistant_spec": {"instructions": "Explain the evidence clearly."},
+                }
+            ],
+        },
+    )
+    assert isinstance(result, ProposalReady), result
+    compiled = result.compiled.content.spec
+    assert len(compiled.steps) == step_count
+    assert [step.existing_step_ref for step in compiled.steps] == [
+        step.existing_step_ref for step in prior.steps
+    ]
+    assert (
+        compiled.steps[3].assistant_spec.instructions == "Explain the evidence clearly."
+    )
+    for index, step in enumerate(compiled.steps):
+        if index != 3:
+            assert canonical_json_bytes(step.model_dump(mode="json")) == before[index]
+    assert [
+        canonical_json_bytes(step.model_dump(mode="json")) for step in prior.steps
+    ] == before
+
+
+@pytest.mark.parametrize(
+    ("submitted_refs", "feedback"),
+    [
+        (["existing_step_99"], "unknown"),
+        (["existing_step_5"], "selected"),
+        (["existing_step_4", "existing_step_4"], "once"),
+    ],
+)
+async def test_saved_step_fragment_rejects_invalid_refs_even_without_changes(
+    submitted_refs, feedback
+):
+    flow, snapshots, catalog, context, prior = _saved_step_large_flow_fixture(10)
+    result = await _process(
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=catalog,
+        plan_edit_context=context,
+        prior_spec_for_revision=prior,
+        arguments={
+            "plan_rationale": "Clarify the selected instructions.",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": ref} for ref in submitted_refs
+            ],
+        },
+    )
+    assert isinstance(result, CorrectableFailure), result
+    assert feedback in result.feedback.lower()
+    assert submitted_refs[0] in result.feedback
+
+
+def test_saved_step_revision_sequence_is_checked_before_fragment_expansion():
+    flow, snapshots, catalog, _, prior = _saved_step_large_flow_fixture(10)
+    stale_sequence = prior.model_copy(update={"steps": list(reversed(prior.steps))})
+    proposal = OrderedEditProposal.model_validate(
+        {
+            "plan_rationale": "Clarify the selected instructions.",
+            "steps": [{"kind": "modify", "existing_step_ref": "existing_step_99"}],
+        }
+    )
+    with pytest.raises(
+        BadRequestException, match="revision must preserve the saved step sequence"
+    ):
+        compile_edit_proposal(
+            proposal,
+            current_steps=flow.steps,
+            base_flow_revision=flow.draft_revision,
+            assistant_snapshots=snapshots,
+            resource_catalog=catalog,
+            revision_spec=stale_sequence,
+        )
+
+
+async def test_saved_step_repair_replays_fragment_and_names_target():
+    import json
+
+    from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
+        ProposalCompleted,
+        flatten_proposal_message_groups,
+    )
+    from tests.unittests.flows.ai_builder.test_ai_builder_proposal_retry import (
+        _collect,
+        _make_self_correction_request,
+        _original_tool_call,
+        _tool_response,
+    )
+
+    flow, snapshots, catalog, context, prior = _saved_step_large_flow_fixture(40)
+    arguments = {
+        "plan_rationale": "Clarify the selected instructions.",
+        "steps": [{"kind": "modify", "existing_step_ref": "existing_step_4"}],
+    }
+
+    async def process(arguments):
+        return await _process(
+            flow=flow,
+            assistant_snapshots=snapshots,
+            resource_catalog=catalog,
+            plan_edit_context=context,
+            prior_spec_for_revision=prior,
+            arguments=arguments,
+        )
+
+    failure = await process(arguments)
+    assert isinstance(failure, CorrectableFailure), failure
+    assert "existing_step_4" in failure.feedback
+    corrected = {
+        **arguments,
+        "steps": [
+            {
+                **arguments["steps"][0],
+                "assistant_spec": {"instructions": "Explain the evidence clearly."},
+            }
+        ],
+    }
+    repair = AsyncMock(return_value=_tool_response(arguments=corrected))
+    compiled = []
+
+    async def process_invocation(invocation):
+        outcome = await process(invocation.arguments)
+        assert isinstance(outcome, ProposalReady), outcome
+        compiled.append(outcome.compiled.content.spec)
+        return ProposalCompleted(events=())
+
+    await _collect(
+        _make_self_correction_request(
+            failure=failure,
+            tool_call=_original_tool_call(json.dumps(arguments)),
+            repair_completion=repair,
+            process_tool_invocation=process_invocation,
+        )
+    )
+    repair.assert_awaited_once()
+    messages = flatten_proposal_message_groups(repair.call_args.args[0].message_groups)
+    replay = json.loads(messages[-2]["tool_calls"][0]["function"]["arguments"])
+    assert replay == arguments
+    assert len(replay["steps"]) == 1
+    assert "existing_step_4" in messages[-1]["content"]
+    assert len(compiled) == 1 and len(compiled[0].steps) == 40
+
+
 def _flow_step(
     *,
     step_order: int,
@@ -3913,9 +4116,6 @@ async def test_saved_step_partial_revision_requires_current_saved_revision(
             instructions="Saved instructions"
         )
     }
-    keep_steps = [
-        {"kind": "keep", "existing_step_ref": f"existing_step_{n}"} for n in (2, 3)
-    ]
     catalog = build_ai_builder_resource_catalog(
         available_models=None, available_kbs=None
     )
@@ -3947,7 +4147,6 @@ async def test_saved_step_partial_revision_requires_current_saved_revision(
                     "existing_step_ref": "existing_step_1",
                     "assistant_spec": {"instructions": "Improved instructions"},
                 },
-                *keep_steps,
             ],
         },
     )
@@ -4076,7 +4275,6 @@ async def test_saved_step_partial_revision_requires_current_saved_revision(
                     ],
                     **patch_fields,
                 },
-                *keep_steps,
             ],
         },
     )
@@ -4158,7 +4356,6 @@ async def test_saved_step_preserves_consumer_with_numeric_runtime_aliases() -> N
                     "existing_step_ref": "existing_step_1",
                     "assistant_spec": {"instructions": "Improved analysis"},
                 },
-                {"kind": "keep", "existing_step_ref": "existing_step_2"},
             ],
         },
     )
@@ -4460,7 +4657,6 @@ async def test_saved_step_incompatible_consumer_returns_repair(
                     "existing_step_ref": "existing_step_1",
                     **target_patch,
                 },
-                {"kind": "keep", "existing_step_ref": "existing_step_2"},
             ],
         },
     )
@@ -4524,7 +4720,6 @@ async def test_saved_step_preserves_contract_used_by_template_bindings(remove_co
                     "existing_step_ref": "existing_step_1",
                     **target_patch,
                 },
-                {"kind": "keep", "existing_step_ref": "existing_step_2"},
             ],
         },
     )
@@ -4561,7 +4756,6 @@ async def test_saved_step_unchanged_composer_is_not_judged_as_model_change():
                     "existing_step_ref": "existing_step_1",
                     "assistant_spec": {"instructions": "Improved analysis"},
                 },
-                {"kind": "keep", "existing_step_ref": "existing_step_2"},
             ],
         },
     )
@@ -4604,7 +4798,11 @@ async def test_keep_composer_mode_change_at_approval_boundary(scoped):
                     "existing_step_ref": "existing_step_1",
                     "assistant_spec": {"instructions": "Improved analysis"},
                 },
-                {"kind": "keep", "existing_step_ref": "existing_step_2"},
+                *(
+                    []
+                    if scoped
+                    else [{"kind": "keep", "existing_step_ref": "existing_step_2"}]
+                ),
             ],
         },
     )
@@ -4662,7 +4860,6 @@ async def test_saved_step_implicit_json_consumer_contract_is_preserved(field_nam
                         }
                     ],
                 },
-                {"kind": "keep", "existing_step_ref": "existing_step_2"},
             ],
         },
     )

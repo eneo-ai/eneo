@@ -211,6 +211,7 @@ async def process_edit_arguments(
     scoped_proposal_feedback = validate_scoped_edit_proposal(
         context=plan_edit_context,
         proposal=authored_proposal,
+        current_step_refs=current_step_refs,
         saved_step_revision=saved_step_revision,
     )
     if scoped_proposal_feedback is not None:

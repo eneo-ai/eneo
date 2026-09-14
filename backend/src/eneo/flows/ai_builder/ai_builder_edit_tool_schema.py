@@ -42,9 +42,10 @@ def build_edit_flow_tool_schema(
     review_scope: "ReviewEditScope | None" = None,
     permissions: "EditOperationPermissions | None" = None,
 ) -> dict[str, Any]:
-    """Offer the complete ordered edit within the turn's operation permissions."""
+    """Offer saved-step modifications or an ordered edit within the turn's scope."""
     if review_scope is not None and permissions is not None:
         raise ValueError("Supply either review_scope or permissions, not both.")
+    saved_step_edit = permissions is not None
     permissions = permissions if permissions is not None else review_scope
 
     valid_refs = [existing_step_ref_for_order(s.step_order) for s in current_steps]
@@ -119,6 +120,16 @@ def build_edit_flow_tool_schema(
                 ]
             },
         }
+    elif saved_step_edit:
+        properties["steps"] = {
+            "type": "array",
+            "description": (
+                "Only modifications to the permitted steps, keyed by "
+                "existing_step_ref. Give only the fields that change. Omit "
+                "unchanged steps; the server preserves their identity and order."
+            ),
+            "items": modify_step_schema,
+        }
     else:
         step_branches: list[dict[str, Any]] = [
             modify_step_schema,
@@ -141,7 +152,7 @@ def build_edit_flow_tool_schema(
             ),
             "items": {"anyOf": step_branches},
         }
-    if removable_refs:
+    if removable_refs and not saved_step_edit:
         properties["removed_existing_step_refs"] = {
             "type": "array",
             "items": {"type": "string", "enum": removable_refs},
@@ -183,6 +194,12 @@ def build_edit_flow_tool_schema(
             "flow's name, description and form fields are not part of this turn."
         )
     )
+    if saved_step_edit:
+        description = (
+            "Edit the selected saved steps by returning only their modifications. "
+            "Do not add, remove, or reorder steps. Null keeps a current step field. "
+            "The flow's name, description and form fields are not part of this turn."
+        )
     return {
         "type": "function",
         "function": {

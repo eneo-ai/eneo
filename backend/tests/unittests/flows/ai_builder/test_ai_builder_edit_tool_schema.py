@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from uuid import uuid4
 
 import jsonschema
@@ -17,6 +18,9 @@ from eneo.flows.ai_builder.ai_builder_flow_schema_values import (
     builder_output_type_values,
     document_delivery_mode_values,
 )
+from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
+    saved_step_operation_permissions,
+)
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     AddStep,
     OrderedEditProposal,
@@ -28,7 +32,12 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     build_ai_builder_resource_catalog,
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
+from eneo.flows.ai_builder.ai_builder_tools import build_native_strict_tool_schema
 from eneo.flows.domain.flow import FlowStep
+from eneo.tokens.token_utils import count_message_tokens, count_tool_tokens
+from tests.unittests.flows.ai_builder.test_ai_builder_edit_proposal import (
+    _saved_step_large_flow_fixture,
+)
 
 
 def _make_step(step_order: int) -> FlowStep:
@@ -573,3 +582,85 @@ class TestReviewScopedEditSchema:
         }
         assert "add" not in kinds(self._scoped())
         assert "add" in kinds(self._scoped(may_add=True))
+
+
+@pytest.mark.parametrize("strict", [False, True])
+def test_saved_step_schema_and_call_cost_are_flat_not_the_whole_request(strict):
+    schemas = []
+    calls = []
+    for step_count in (10, 40):
+        flow, _, catalog, context, prior = _saved_step_large_flow_fixture(step_count)
+        permissions = saved_step_operation_permissions(
+            context=context,
+            prior_spec=prior,
+            current_step_refs=[step.existing_step_ref for step in prior.steps],
+        )
+        assert permissions is not None
+        schema = build_edit_flow_tool_schema(
+            flow.steps,
+            resource_catalog=catalog,
+            tool_name=PROPOSE_FLOW_TOOL_NAME,
+            permissions=permissions,
+        )
+        params = schema["function"]["parameters"]
+        assert set(params["properties"]) == {"plan_rationale", "steps", "assumptions"}
+        item = params["properties"]["steps"]["items"]
+        assert "anyOf" not in item
+        assert item["properties"]["kind"]["enum"] == ["modify"]
+        assert item["properties"]["existing_step_ref"]["enum"] == ["existing_step_4"]
+        assert all(
+            step.existing_step_ref not in json.dumps(schema)
+            for step in prior.steps
+            if step.existing_step_ref != "existing_step_4"
+        )
+        assert "kind=keep" not in json.dumps(schema)
+        if strict:
+            schema = build_native_strict_tool_schema(schema)
+        arguments = {
+            "plan_rationale": "Clarify the selected instructions.",
+            "assumptions": [],
+            "steps": [
+                {
+                    **({name: None for name in item["properties"]} if strict else {}),
+                    "kind": "modify",
+                    "existing_step_ref": context.target_existing_step_ref,
+                    "assistant_spec": {
+                        "instructions": "Explain the evidence clearly.",
+                        **({"knowledge_refs": None} if strict else {}),
+                    },
+                }
+            ],
+        }
+        jsonschema.validate(arguments, schema["function"]["parameters"])
+        for invalid_ref in ("existing_step_5", "existing_step_99", "step_4"):
+            invalid_arguments = {
+                **arguments,
+                "steps": [{**arguments["steps"][0], "existing_step_ref": invalid_ref}],
+            }
+            with pytest.raises(jsonschema.ValidationError):
+                jsonschema.validate(invalid_arguments, schema["function"]["parameters"])
+        schemas.append(schema)
+        calls.append(
+            [
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": "edit",
+                            "type": "function",
+                            "function": {
+                                "name": PROPOSE_FLOW_TOOL_NAME,
+                                "arguments": json.dumps(arguments),
+                            },
+                        }
+                    ],
+                }
+            ]
+        )
+    assert schemas[0] == schemas[1]
+    assert count_tool_tokens([schemas[0]], "gpt-4o-mini") == count_tool_tokens(
+        [schemas[1]], "gpt-4o-mini"
+    )
+    assert count_message_tokens(calls[0], "gpt-4o-mini") == count_message_tokens(
+        calls[1], "gpt-4o-mini"
+    )
