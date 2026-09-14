@@ -1,0 +1,218 @@
+{
+  "stack": "candidate :8144",
+  "git_commit": "4c5fee24d4fd",
+  "flow_id": "38d59091-0054-47a0-9bf6-e8b0a27e23a1",
+  "space_id": "6f18b073-ea64-4a5e-8236-778a25e72d8f",
+  "plans": [
+    {
+      "session_id": "2b759746-2ac9-4acf-bb91-af729af33679",
+      "plan_id": "62b48551-9624-4478-a08b-438c330581df",
+      "plan_status": "proposed",
+      "planner_request_count": 1,
+      "repair_attempts_total": 0,
+      "prompt_tokens_total": 11107,
+      "total_tokens_total": 12190,
+      "wall_clock_ms_total": 11049,
+      "model": "openai/gpt-5.6-luna",
+      "scoped_target_existing_step_ref": "existing_step_1",
+      "step_changes": [
+        {
+          "kind": "modified",
+          "step_ref": "existing_step_1",
+          "fields": [
+            "instructions"
+          ]
+        },
+        {
+          "kind": "unchanged",
+          "step_ref": "existing_step_2",
+          "fields": []
+        },
+        {
+          "kind": "unchanged",
+          "step_ref": "existing_step_3",
+          "fields": []
+        },
+        {
+          "kind": "unchanged",
+          "step_ref": "existing_step_4",
+          "fields": []
+        }
+      ],
+      "untouched_step_names": [
+        "Bedöm ansökan mot reglerna",
+        "Skriv beslutsdokument",
+        "Rendera PDF"
+      ],
+      "advisories": []
+    },
+    {
+      "session_id": "616021ae-9c83-4bf9-ac8f-a5a733e027e6",
+      "plan_id": "62a754d5-4623-43b5-91cb-762d51587ac6",
+      "plan_status": "proposed",
+      "planner_request_count": 1,
+      "repair_attempts_total": 0,
+      "prompt_tokens_total": 10979,
+      "total_tokens_total": 11736,
+      "wall_clock_ms_total": 7254,
+      "model": "openai/gpt-5.6-luna",
+      "scoped_target_existing_step_ref": "existing_step_1",
+      "step_changes": [
+        {
+          "kind": "modified",
+          "step_ref": "existing_step_1",
+          "fields": [
+            "instructions"
+          ]
+        },
+        {
+          "kind": "unchanged",
+          "step_ref": "existing_step_2",
+          "fields": []
+        },
+        {
+          "kind": "unchanged",
+          "step_ref": "existing_step_3",
+          "fields": []
+        },
+        {
+          "kind": "unchanged",
+          "step_ref": "existing_step_4",
+          "fields": []
+        }
+      ],
+      "untouched_step_names": [
+        "Bedöm ansökan mot reglerna",
+        "Skriv beslutsdokument",
+        "Rendera PDF"
+      ],
+      "advisories": []
+    },
+    {
+      "session_id": "7a6f81ce-7d9c-4f0d-8251-cb5a503bda81",
+      "plan_id": "87b02e25-8099-49bd-841e-12d5ca120080",
+      "plan_status": "proposed",
+      "planner_request_count": 1,
+      "repair_attempts_total": 0,
+      "prompt_tokens_total": 10985,
+      "total_tokens_total": 11765,
+      "wall_clock_ms_total": 8460,
+      "model": "openai/gpt-5.6-luna",
+      "scoped_target_existing_step_ref": "existing_step_1",
+      "step_changes": [
+        {
+          "kind": "modified",
+          "step_ref": "existing_step_1",
+          "fields": [
+            "instructions"
+          ]
+        },
+        {
+          "kind": "unchanged",
+          "step_ref": "existing_step_2",
+          "fields": []
+        },
+        {
+          "kind": "unchanged",
+          "step_ref": "existing_step_3",
+          "fields": []
+        },
+        {
+          "kind": "unchanged",
+          "step_ref": "existing_step_4",
+          "fields": []
+        }
+      ],
+      "untouched_step_names": [
+        "Bedöm ansökan mot reglerna",
+        "Skriv beslutsdokument",
+        "Rendera PDF"
+      ],
+      "advisories": []
+    },
+    {
+      "session_id": "85326a4c-6532-4993-b014-c54fc218d8cb",
+      "plan_id": "19f030be-7115-4a32-a5c0-087409bef925",
+      "plan_status": "proposed",
+      "planner_request_count": 1,
+      "repair_attempts_total": 0,
+      "prompt_tokens_total": 11015,
+      "total_tokens_total": 11808,
+      "wall_clock_ms_total": 8221,
+      "model": "openai/gpt-5.6-luna",
+      "scoped_target_existing_step_ref": "existing_step_1",
+      "step_changes": [
+        {
+          "kind": "modified",
+          "step_ref": "existing_step_1",
+          "fields": [
+            "instructions"
+          ]
+        },
+        {
+          "kind": "unchanged",
+          "step_ref": "existing_step_2",
+          "fields": []
+        },
+        {
+          "kind": "unchanged",
+          "step_ref": "existing_step_3",
+          "fields": []
+        },
+        {
+          "kind": "unchanged",
+          "step_ref": "existing_step_4",
+          "fields": []
+        }
+      ],
+      "untouched_step_names": [
+        "Bedöm ansökan mot reglerna",
+        "Skriv beslutsdokument",
+        "Rendera PDF"
+      ],
+      "advisories": []
+    },
+    {
+      "session_id": "db059026-a3c0-45b7-98ca-d1c41395958d",
+      "plan_id": "97dbbe7c-ea80-49fe-ac5b-1887768be61e",
+      "plan_status": "proposed",
+      "planner_request_count": 1,
+      "repair_attempts_total": 0,
+      "prompt_tokens_total": 10979,
+      "total_tokens_total": 11754,
+      "wall_clock_ms_total": 7857,
+      "model": "openai/gpt-5.6-luna",
+      "scoped_target_existing_step_ref": "existing_step_1",
+      "step_changes": [
+        {
+          "kind": "modified",
+          "step_ref": "existing_step_1",
+          "fields": [
+            "instructions"
+          ]
+        },
+        {
+          "kind": "unchanged",
+          "step_ref": "existing_step_2",
+          "fields": []
+        },
+        {
+          "kind": "unchanged",
+          "step_ref": "existing_step_3",
+          "fields": []
+        },
+        {
+          "kind": "unchanged",
+          "step_ref": "existing_step_4",
+          "fields": []
+        }
+      ],
+      "untouched_step_names": [
+        "Bedöm ansökan mot reglerna",
+        "Skriv beslutsdokument",
+        "Rendera PDF"
+      ],
+      "advisories": []
+    }
+  ]
+}
