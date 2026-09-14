@@ -51,7 +51,7 @@
             <Skeleton class="bg-tertiary h-[0.5625rem] w-[44%] rounded" />
           </div>
         {:else if assistantText}
-          <p class="text-secondary text-[0.72rem] font-semibold">
+          <p class="text-secondary text-xs font-semibold">
             {m.ai_builder_reply_from_eneo()}
           </p>
           <div class="text-primary mt-1.5 text-[0.9375rem] leading-relaxed">

@@ -57,7 +57,7 @@
       </span>
       {#if pausesForReview}
         <span
-          class="bg-warning-dimmer text-warning-stronger inline-flex h-[1.3125rem] items-center rounded-full px-2 text-[0.6875rem] font-semibold whitespace-nowrap"
+          class="bg-warning-dimmer text-warning-stronger inline-flex h-[1.3125rem] items-center rounded-full px-2 text-xs font-semibold whitespace-nowrap"
           title={m.ai_builder_node_review_checkpoint_hint()}
         >
           {m.ai_builder_node_review_checkpoint()}
@@ -65,7 +65,7 @@
       {/if}
       {#if perFile}
         <span
-          class="bg-secondary text-secondary inline-flex h-[1.3125rem] items-center rounded-full px-2 text-[0.6875rem] font-medium whitespace-nowrap"
+          class="bg-secondary text-secondary inline-flex h-[1.3125rem] items-center rounded-full px-2 text-xs font-medium whitespace-nowrap"
           title={m.ai_builder_node_per_file_hint()}
         >
           {m.ai_builder_node_per_file()}
@@ -73,7 +73,7 @@
       {/if}
       {#if changeBadge}
         <span
-          class="inline-flex h-[1.3125rem] items-center rounded-full px-2 text-[0.6875rem] font-semibold whitespace-nowrap
+          class="inline-flex h-[1.3125rem] items-center rounded-full px-2 text-xs font-semibold whitespace-nowrap
             {changeBadge === 'new'
             ? 'bg-positive-dimmer text-positive-stronger'
             : changeBadge === 'updated'
@@ -92,7 +92,7 @@
       <span>{ioLabel}</span>
       {#if artifactLabel}
         <span
-          class="border-default text-primary inline-flex h-[1.1875rem] items-center rounded-[5px] border px-1.5 text-[0.65625rem] font-semibold"
+          class="border-default text-primary inline-flex h-[1.1875rem] items-center rounded-[5px] border px-1.5 text-xs font-semibold"
         >
           {artifactLabel}
         </span>
@@ -100,7 +100,7 @@
     </div>
   </div>
   <span
-    class="text-secondary inline-flex max-w-[14rem] shrink-0 items-center truncate text-[0.71875rem] font-medium max-lg:max-w-[5.5rem] max-sm:hidden"
+    class="text-secondary inline-flex max-w-[14rem] shrink-0 items-center truncate text-xs font-medium max-lg:max-w-[5.5rem] max-sm:hidden"
     title={modelLabel}
   >
     {modelLabel}

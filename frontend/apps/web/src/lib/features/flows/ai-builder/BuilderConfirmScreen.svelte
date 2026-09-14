@@ -441,7 +441,7 @@
           <Button
             variant="outline"
             size="sm"
-            class="h-[1.875rem] max-w-full gap-1.5 rounded-full px-[0.6875rem] text-[0.78125rem] font-normal {editingQuestion
+            class="h-[1.875rem] max-w-full gap-1.5 rounded-full px-[0.6875rem] text-xs font-normal {editingQuestion
               ?.question?.question_id === item.questionId
               ? 'opacity-60'
               : ''}"
@@ -459,7 +459,7 @@
             {/if}
             <span class="text-primary truncate font-semibold">{item.answerLabel}</span>
             {#if item.delegated}
-              <span class="text-secondary shrink-0 text-[0.6875rem]">
+              <span class="text-secondary shrink-0 text-xs">
                 {m.ai_builder_question_delegated_badge()}
               </span>
             {/if}
@@ -695,9 +695,7 @@
                                 · {m.ai_builder_attachment_placeholders({
                                   count: String(row.placeholders.length)
                                 })}:
-                                <span class="font-mono text-[0.78rem]"
-                                  >{row.placeholders.join(", ")}</span
-                                >
+                                <span class="font-mono text-xs">{row.placeholders.join(", ")}</span>
                               </span>
                             {:else}
                               <!-- A long list opens with keyboard or touch; a tooltip is not
@@ -710,9 +708,7 @@
                                     count: String(row.placeholders.length)
                                   })}
                                 </summary>
-                                <span class="font-mono text-[0.78rem]"
-                                  >{row.placeholders.join(", ")}</span
-                                >
+                                <span class="font-mono text-xs">{row.placeholders.join(", ")}</span>
                               </details>
                             {/if}
                           {/if}
@@ -860,7 +856,7 @@
                         <ul class="mt-1 flex list-none flex-wrap gap-1.5 p-0">
                           {#each field.options as option, optionIndex (optionIndex)}
                             <li
-                              class="border-default text-secondary inline-flex h-[1.375rem] items-center rounded border px-1.5 text-[0.6875rem]"
+                              class="border-default text-secondary inline-flex h-[1.375rem] items-center rounded border px-1.5 text-xs"
                             >
                               {option}
                             </li>
@@ -875,7 +871,7 @@
               <ul class="mt-2 flex list-none flex-wrap gap-1.5 p-0">
                 {#each shownRuntimeFields as field, fieldIndex (fieldIndex)}
                   <li
-                    class="border-default inline-flex h-[1.625rem] items-center gap-1.5 rounded-full border px-2.5 text-[0.78125rem]"
+                    class="border-default inline-flex h-[1.625rem] items-center gap-1.5 rounded-full border px-2.5 text-xs"
                     class:bg-secondary={!field.required}
                     class:text-primary={!field.required}
                     class:bg-accent-dimmer={field.required}
@@ -895,7 +891,7 @@
                     <Button
                       variant="link"
                       size="xs"
-                      class="text-accent-stronger h-[1.625rem] p-0 text-[0.78125rem] font-semibold"
+                      class="text-accent-stronger h-[1.625rem] p-0 text-xs font-semibold"
                       onclick={() => (allRuntimeFieldsShown = true)}
                     >
                       {m.ai_builder_requirements_show_all_fields({
@@ -922,11 +918,11 @@
             {#snippet contentFieldChip(field: (typeof namedContentFields)[number])}
               {@const cascade = descendantsOf(field).length}
               <li
-                class="border-default bg-secondary text-primary inline-flex h-[1.625rem] items-center gap-1 rounded-full border py-0 pr-1 pl-2.5 text-[0.78125rem]"
+                class="border-default bg-secondary text-primary inline-flex h-[1.625rem] items-center gap-1 rounded-full border py-0 pr-1 pl-2.5 text-xs"
               >
                 {field.label}
                 {#if field.origin === "card_edit"}
-                  <span class="text-secondary text-[0.6875rem]">
+                  <span class="text-secondary text-xs">
                     {m.ai_builder_requirements_field_added_by_you()}
                   </span>
                 {/if}
@@ -979,7 +975,7 @@
 
             {#each contentFieldGroups as group (group.key)}
               {#if group.path.length > 0 || group.unplaced}
-                <p class="text-secondary mt-2 mb-1 text-[0.6875rem] font-medium">
+                <p class="text-secondary mt-2 mb-1 text-xs font-medium">
                   {#if group.unplaced}
                     {m.ai_builder_requirements_group_unplaced()}
                   {:else}
@@ -1002,7 +998,7 @@
                     <Button
                       variant="link"
                       size="xs"
-                      class="text-accent-stronger h-[1.625rem] p-0 text-[0.78125rem] font-semibold"
+                      class="text-accent-stronger h-[1.625rem] p-0 text-xs font-semibold"
                       onclick={() => (allContentFieldsShown = true)}
                     >
                       {m.ai_builder_requirements_group_show_more({
@@ -1034,7 +1030,7 @@
                     >
                       <!-- svelte-ignore a11y_autofocus -->
                       <input
-                        class="border-default bg-primary h-[1.625rem] w-40 rounded-full border px-2.5 text-[0.78125rem]"
+                        class="border-default bg-primary h-[1.625rem] w-40 rounded-full border px-2.5 text-xs"
                         bind:value={newContentField}
                         aria-label={m.ai_builder_requirements_field_add()}
                         placeholder={m.ai_builder_requirements_field_add_placeholder()}
@@ -1049,7 +1045,7 @@
                       {#if placementTargets.length > 0}
                         <DropdownMenu.Root>
                           <DropdownMenu.Trigger
-                            class="border-default text-secondary hover:text-primary inline-flex h-[1.625rem] max-w-40 items-center gap-1 truncate rounded-full border px-2.5 text-[0.78125rem]"
+                            class="border-default text-secondary hover:text-primary inline-flex h-[1.625rem] max-w-40 items-center gap-1 truncate rounded-full border px-2.5 text-xs"
                             aria-label={m.ai_builder_requirements_place_label()}
                             title={m.ai_builder_requirements_place_label()}
                             {disabled}
@@ -1094,7 +1090,7 @@
                     <Button
                       variant="outline"
                       size="sm"
-                      class="h-[1.625rem] rounded-full border-dashed px-2.5 text-[0.78125rem] font-normal"
+                      class="h-[1.625rem] rounded-full border-dashed px-2.5 text-xs font-normal"
                       bind:ref={addContentFieldButton}
                       {disabled}
                       onclick={() => (addingContentField = true)}

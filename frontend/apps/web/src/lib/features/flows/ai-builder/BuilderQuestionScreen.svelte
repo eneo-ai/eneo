@@ -90,7 +90,7 @@
             {/if}
             <span class="text-primary truncate font-semibold">{item.answerLabel}</span>
             {#if item.delegated}
-              <span class="text-secondary shrink-0 text-[0.6875rem]">
+              <span class="text-secondary shrink-0 text-xs">
                 {m.ai_builder_question_delegated_badge()}
               </span>
             {/if}

@@ -1365,7 +1365,7 @@
                   <li
                     class="border-dimmer bg-secondary flex items-center gap-2.5 rounded-[9px] border px-3 py-2.5"
                   >
-                    <span class="text-secondary text-[0.6875rem] font-bold tracking-[0.04em]">
+                    <span class="text-secondary text-xs font-bold tracking-[0.04em]">
                       {m.ai_builder_flow_in()}
                     </span>
                     <span class="text-primary text-[0.8125rem] font-semibold">
@@ -1403,7 +1403,7 @@
                     <div
                       class="border-dimmer bg-secondary flex items-center gap-2.5 rounded-[9px] border px-3 py-2.5"
                     >
-                      <span class="text-secondary text-[0.6875rem] font-bold tracking-[0.04em]">
+                      <span class="text-secondary text-xs font-bold tracking-[0.04em]">
                         {m.ai_builder_flow_out()}
                       </span>
                       <span class="text-primary text-[0.8125rem] font-semibold">

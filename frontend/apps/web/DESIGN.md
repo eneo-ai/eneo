@@ -278,8 +278,9 @@ headings are tracked slightly tight, body stays at normal tracking.
   uppgiften"); the same size as secondary text, bolder.
 - **Secondary** (400, 0.8125rem, 1.6): row labels, captions, footnotes.
 - **Label** (500, 0.8rem or 0.875rem): button labels, chip text, form labels.
-- **Pill** (700, 0.65625rem, +0.03em, uppercase only on draft/change pills):
-  status pills and recommendation tags.
+- **Pill** (600, 0.8rem, sentence case): the draft/change status pill on the
+  review screen; step chips and recommendation tags sit on the same 0.8rem
+  floor at 500 to 700.
 
 ### Named Rules
 

@@ -767,7 +767,7 @@
     display: flex;
     align-items: center;
     gap: 0.25rem;
-    font-size: 0.6875rem;
+    font-size: 0.8rem;
     line-height: 1.2;
     color: var(--text-secondary);
     font-variant-numeric: tabular-nums;
@@ -851,7 +851,7 @@
     border: 0;
     background: transparent;
     color: var(--text-muted);
-    font-size: 0.75rem;
+    font-size: 0.8rem;
     font-weight: 600;
     cursor: pointer;
     padding: 0.125rem 0.25rem;
@@ -915,21 +915,21 @@
   .composer-hint {
     margin: 0;
     color: var(--text-muted);
-    font-size: 0.75rem;
+    font-size: 0.8rem;
     line-height: 1.4;
   }
 
   .composer-counter {
     flex-shrink: 0;
     color: var(--text-secondary);
-    font-size: 0.75rem;
+    font-size: 0.8rem;
     font-variant-numeric: tabular-nums;
   }
 
   .composer-error {
     margin: 0;
     color: var(--negative-stronger);
-    font-size: 0.75rem;
+    font-size: 0.8rem;
     line-height: 1.4;
     font-weight: 500;
   }
@@ -1123,7 +1123,7 @@
   }
 
   .composer-drop-hint {
-    font-size: 0.75rem;
+    font-size: 0.8rem;
     line-height: 1.3;
     color: var(--text-secondary);
     max-width: 36ch;

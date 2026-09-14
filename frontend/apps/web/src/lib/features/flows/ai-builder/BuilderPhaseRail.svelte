@@ -159,7 +159,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 0.6875rem;
+    font-size: 0.8rem;
     font-weight: 700;
     background: var(--background-primary);
     border: 1.5px solid var(--border-stronger);

@@ -168,21 +168,21 @@
           </span>
           {#if pausesForReview}
             <span
-              class="bg-warning-dimmer text-warning-stronger inline-flex h-[1.3125rem] items-center rounded-full px-2 text-[0.6875rem] font-semibold"
+              class="bg-warning-dimmer text-warning-stronger inline-flex h-[1.3125rem] items-center rounded-full px-2 text-xs font-semibold"
             >
               {m.ai_builder_node_review_checkpoint()}
             </span>
           {/if}
           {#if perFile}
             <span
-              class="bg-secondary text-secondary inline-flex h-[1.3125rem] items-center rounded-full px-2 text-[0.6875rem] font-medium"
+              class="bg-secondary text-secondary inline-flex h-[1.3125rem] items-center rounded-full px-2 text-xs font-medium"
             >
               {m.ai_builder_node_per_file()}
             </span>
           {/if}
           {#if changeBadge}
             <span
-              class="inline-flex h-[1.3125rem] items-center rounded-full px-2 text-[0.6875rem] font-semibold
+              class="inline-flex h-[1.3125rem] items-center rounded-full px-2 text-xs font-semibold
                 {changeBadge === 'new'
                 ? 'bg-positive-dimmer text-positive-stronger'
                 : 'bg-accent-dimmer text-accent-stronger'}"
@@ -251,20 +251,20 @@
                           data-testid="step-field-change-detail"
                         >
                           <div>
-                            <div class="text-secondary mb-1 text-[0.6875rem] font-bold">
+                            <div class="text-secondary mb-1 text-xs font-bold">
                               {m.ai_builder_step_change_previous_label()}
                             </div>
                             <pre
-                              class="bg-tertiary text-secondary m-0 max-h-64 overflow-auto rounded-md p-2 font-mono text-[0.6875rem] leading-snug break-all whitespace-pre-wrap">{change.previousDetail
+                              class="bg-tertiary text-secondary m-0 max-h-64 overflow-auto rounded-md p-2 font-mono text-xs leading-snug break-all whitespace-pre-wrap">{change.previousDetail
                                 ? prettyDetail(change.previousDetail)
                                 : m.ai_builder_step_change_none()}</pre>
                           </div>
                           <div>
-                            <div class="text-secondary mb-1 text-[0.6875rem] font-bold">
+                            <div class="text-secondary mb-1 text-xs font-bold">
                               {m.ai_builder_step_change_current_label()}
                             </div>
                             <pre
-                              class="bg-tertiary text-primary m-0 max-h-64 overflow-auto rounded-md p-2 font-mono text-[0.6875rem] leading-snug break-all whitespace-pre-wrap">{change.currentDetail
+                              class="bg-tertiary text-primary m-0 max-h-64 overflow-auto rounded-md p-2 font-mono text-xs leading-snug break-all whitespace-pre-wrap">{change.currentDetail
                                 ? prettyDetail(change.currentDetail)
                                 : m.ai_builder_step_change_none()}</pre>
                           </div>
@@ -332,7 +332,7 @@
             <h4 class="text-secondary mb-0.5 text-xs font-bold">{m.ai_builder_step_model()}</h4>
             <div class="text-primary text-[0.8125rem] font-semibold">{modelLabel}</div>
             {#if modelIsFixedHere}
-              <div class="text-secondary text-[0.6875rem]">
+              <div class="text-secondary text-xs">
                 {m.ai_builder_step_model_changed_elsewhere()}
               </div>
             {/if}
@@ -412,7 +412,7 @@
                     <div class="text-primary text-[0.8125rem] font-semibold text-pretty">
                       {fieldLabel(name, schema)}
                     </div>
-                    <div class="text-secondary truncate font-mono text-[0.6875rem]">{name}</div>
+                    <div class="text-secondary truncate font-mono text-xs">{name}</div>
                   </div>
                   {#if schema.description}
                     <div class="text-secondary text-xs leading-relaxed text-pretty">
@@ -441,7 +441,7 @@
                     <div class="text-primary text-[0.8125rem] font-semibold text-pretty">
                       {fieldLabel(name, schema)}
                     </div>
-                    <div class="text-secondary truncate font-mono text-[0.6875rem]">{name}</div>
+                    <div class="text-secondary truncate font-mono text-xs">{name}</div>
                   </div>
                   {#if schema.description}
                     <div class="text-secondary text-xs leading-relaxed text-pretty">

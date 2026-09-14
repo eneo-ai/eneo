@@ -979,7 +979,7 @@
   }
 
   .question-kicker {
-    @apply text-[0.72rem] font-semibold;
+    @apply text-xs font-semibold;
     color: var(--text-secondary);
   }
 
@@ -1062,7 +1062,7 @@
   }
 
   .option-example {
-    @apply text-[0.78125rem];
+    @apply text-xs;
     color: var(--text-secondary);
     opacity: 0.85;
   }
@@ -1074,14 +1074,14 @@
   }
 
   .option-current {
-    @apply inline-flex h-5 shrink-0 items-center rounded-full px-2 text-[0.65625rem] font-bold;
+    @apply inline-flex h-5 shrink-0 items-center rounded-full px-2 text-xs font-bold;
     letter-spacing: 0.03em;
     color: var(--positive-stronger);
     background: var(--positive-dimmer);
   }
 
   .option-recommendation {
-    @apply inline-flex h-5 shrink-0 items-center rounded-full px-2 text-[0.65625rem] font-bold;
+    @apply inline-flex h-5 shrink-0 items-center rounded-full px-2 text-xs font-bold;
     letter-spacing: 0.03em;
     color: var(--accent-stronger);
     background: var(--accent-dimmer);
@@ -1214,12 +1214,12 @@
   }
 
   .field-summary-name {
-    @apply truncate text-[0.6875rem];
+    @apply truncate text-xs;
     font-family: var(--font-mono, ui-monospace, monospace);
   }
 
   .field-summary-required {
-    @apply rounded px-1.5 py-0.5 text-[0.6875rem] font-semibold;
+    @apply rounded px-1.5 py-0.5 text-xs font-semibold;
     background: var(--accent-dimmer);
     color: var(--accent-stronger);
   }
@@ -1252,7 +1252,7 @@
   }
 
   .field-name-token {
-    @apply inline-flex h-[1.375rem] w-fit items-center rounded-md border px-2 text-[0.6875rem];
+    @apply inline-flex h-[1.375rem] w-fit items-center rounded-md border px-2 text-xs;
     font-family: var(--font-mono, ui-monospace, monospace);
     border-color: var(--border-default);
     background: var(--background-primary);
@@ -1264,7 +1264,7 @@
   }
 
   .field-name-auto {
-    @apply text-[0.6875rem] font-normal;
+    @apply text-xs font-normal;
     color: var(--text-secondary);
   }
 
@@ -1274,7 +1274,7 @@
   }
 
   .field-name-issue {
-    @apply text-[0.6875rem] font-semibold;
+    @apply text-xs font-semibold;
     color: var(--text-warning-stronger, var(--text-secondary));
   }
 
@@ -1431,12 +1431,12 @@
     }
 
     .field-summary-name {
-      @apply truncate text-[0.6875rem];
+      @apply truncate text-xs;
       font-family: var(--font-mono, ui-monospace, monospace);
     }
 
     .field-summary-required {
-      @apply rounded px-1.5 py-0.5 text-[0.6875rem] font-semibold;
+      @apply rounded px-1.5 py-0.5 text-xs font-semibold;
       background: var(--accent-dimmer);
       color: var(--accent-stronger);
     }
