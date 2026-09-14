@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
@@ -27,6 +28,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from eneo.flows.ai_builder.ai_builder_provider_call import (
     ProviderCallCeilingExpired,
+    ProviderRejection,
+    ProviderRejectionSource,
     ProviderSilenceExpired,
     ProviderStreamIncomplete,
     provider_error_fields,
@@ -103,23 +106,7 @@ _MAX_PROVIDER_FACT_LENGTH = 64
 # The one gateway status that states a timeout; 502 and 503 say an upstream
 # failed or is unavailable, which is not the same fact.
 _UPSTREAM_GATEWAY_STATUS_CODES = frozenset({504})
-# Provider messages can echo prompts, schemas, and credentials. Only protocol
-# identifiers from these closed sets may enter the shared failure event.
-_PROVIDER_ERROR_CODES = frozenset(
-    {
-        "invalid_request_error",
-        "invalid_json_schema",
-        "unsupported_parameter",
-        "unsupported_value",
-        "context_length_exceeded",
-        "content_filter",
-        "content_policy_violation",
-        "DeploymentNotFound",
-        "model_not_found",
-        "InvalidApiVersionParameter",
-        "OperationNotSupported",
-    }
-)
+# Parameter suffixes can contain user-controlled schema names.
 _PROVIDER_ERROR_PARAMETERS = frozenset(
     {
         "model",
@@ -130,6 +117,7 @@ _PROVIDER_ERROR_PARAMETERS = frozenset(
         "response_format",
         "temperature",
         "top_p",
+        "top_k",
         "reasoning_effort",
         "max_tokens",
         "max_completion_tokens",
@@ -142,7 +130,7 @@ _PROVIDER_ERROR_PARAMETERS = frozenset(
 )
 AI_BUILDER_PROVIDER_INCIDENT_EVIDENCE_LOG_KEY = "ai_builder_provider_incident_evidence"
 AI_BUILDER_PROVIDER_INCIDENT_EVIDENCE_SCHEMA_VERSION = (
-    "ai-builder-provider-incident-evidence.v1"
+    "ai-builder-provider-incident-evidence.v2"
 )
 _KNOWN_PROVIDER_REJECTION_ERRORS = (
     AuthenticationError,
@@ -317,6 +305,7 @@ class AIBuilderProviderFailure:
     status_class: AIBuilderProviderStatusClass | None
     exception_class: AIBuilderProviderExceptionClass
     parameter: str | None
+    rejection: ProviderRejection
     fingerprint: str
     turn_state: AIBuilderProviderTurnState
     public_error: AIBuilderPublicError
@@ -336,17 +325,17 @@ class AIBuilderProviderFailure:
 
 @dataclass(frozen=True, slots=True)
 class AIBuilderProviderRequestEvidence:
-    """Allowlisted request-shape facts captured at the provider boundary."""
+    """Allowlisted SDK input facts captured before LiteLLM transforms the request."""
 
     route: CompletionRouteEvidence
-    outgoing_fields: tuple[CompletionEvidenceField, ...]
-    unclassified_outgoing_field_count: int
+    sdk_input_fields: tuple[CompletionEvidenceField, ...]
+    unclassified_sdk_input_field_count: int
 
     def to_log_value(
         self,
         failure: AIBuilderProviderFailure,
     ) -> dict[str, object]:
-        outgoing_names = frozenset(field.name for field in self.outgoing_fields)
+        outgoing_names = frozenset(field.name for field in self.sdk_input_fields)
         parameter = failure.parameter if failure.parameter in outgoing_names else None
         rejection_class: AIBuilderProviderRejectionClass
         if failure.kind != "rejected":
@@ -369,12 +358,13 @@ class AIBuilderProviderRequestEvidence:
         return {
             "schema_version": (AI_BUILDER_PROVIDER_INCIDENT_EVIDENCE_SCHEMA_VERSION),
             "route": self.route.to_log_value(),
-            "outgoing_fields": [field.to_log_value() for field in self.outgoing_fields],
-            "unclassified_outgoing_field_count": (
-                self.unclassified_outgoing_field_count
+            "sdk_input_fields": [
+                field.to_log_value() for field in self.sdk_input_fields
+            ],
+            "unclassified_sdk_input_field_count": (
+                self.unclassified_sdk_input_field_count
             ),
             "failure": failure_value,
-            "provider_expectation": {"source": "unavailable"},
         }
 
 
@@ -428,13 +418,21 @@ def classify_ai_builder_provider_failure(
     retry_scope: AIBuilderProviderRetryScope = (
         "new_turn" if known_rejection else "acknowledged_same_turn"
     )
+    rejection = (
+        provider_error_fields(error)
+        if isinstance(
+            error, (*_KNOWN_PROVIDER_REJECTION_ERRORS, *_AMBIGUOUS_PROVIDER_ERRORS)
+        )
+        else ProviderRejection()
+    )
     return AIBuilderProviderFailure(
         kind=kind,
         stage=stage,
         status_code=status_code,
         status_class=_provider_status_class(status_code),
         exception_class=exception_class,
-        parameter=_provider_parameter(error),
+        parameter=rejection.parameter,
+        rejection=rejection,
         fingerprint=make_failure_fingerprint(
             "ai_builder_provider",
             stage,
@@ -474,15 +472,23 @@ def record_ai_builder_provider_failure(
     )
     if usage_tracker is not None:
         usage_tracker.record_attempt_failure(failure_kind="provider_error")
-    safe_detail: dict[str, object] = {}
+    rejection = failure.rejection
+    safe_detail: dict[str, object] = {
+        "provider_extraction_source": rejection.source,
+        "provider_extraction_status": rejection.status,
+    }
+    if rejection.parameter_source is not None:
+        safe_detail["provider_parameter_source"] = rejection.parameter_source
+    if rejection.correlation_id is not None:
+        safe_detail["provider_correlation_id"] = rejection.correlation_id
+        safe_detail["provider_correlation_source"] = rejection.correlation_source
     if failure.status_code is not None and failure.status_class is not None:
-        safe_detail = {
-            "provider_status_code": failure.status_code,
-            "provider_status_class": failure.status_class,
-        }
-        error_code = _provider_error_fields(error).get("code")
-        if isinstance(error_code, str) and error_code in _PROVIDER_ERROR_CODES:
-            safe_detail["provider_error_code"] = error_code
+        safe_detail.update(
+            provider_status_code=failure.status_code,
+            provider_status_class=failure.status_class,
+        )
+        if rejection.code is not None:
+            safe_detail["provider_error_code"] = rejection.code
         if failure.parameter in _PROVIDER_ERROR_PARAMETERS:
             safe_detail["provider_parameter"] = failure.parameter
     if request_budget is not None:
@@ -589,31 +595,43 @@ def _provider_exception_class(
     return "unknown"
 
 
-def _provider_parameter(error: Exception) -> str | None:
-    if not isinstance(
-        error,
-        (
-            *_KNOWN_PROVIDER_REJECTION_ERRORS,
-            *_AMBIGUOUS_PROVIDER_ERRORS,
-        ),
-    ):
+def safe_provider_error_code(
+    value: object, *, source: ProviderRejectionSource
+) -> str | None:
+    if source not in {"body", "body.error", "response", "response.error"}:
         return None
-    value = getattr(error, "param", None)
-    if value is None:
-        value = _provider_error_fields(error).get("param")
     if not isinstance(value, str) or not 1 <= len(value) <= _MAX_PROVIDER_FACT_LENGTH:
         return None
-    if not all(character.isalnum() or character in "._:-" for character in value):
+    return value if re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", value, re.ASCII) else None
+
+
+def safe_provider_parameter(value: object) -> str | None:
+    if not isinstance(value, str) or not 1 <= len(value) <= _MAX_DETAILS_STRING_LENGTH:
         return None
-    return value
+    if value in _PROVIDER_ERROR_PARAMETERS:
+        return value
+    # Only protocol-owned paths are normalized; schema property names are not.
+    match = re.fullmatch(
+        r"(?P<root>tools)(?:\[[0-9]+\]|\.[0-9]+)(?:\.type|\.function(?:\.(?:name|description|parameters|strict))?)?"
+        r"|(?P<messages>messages)(?:\[[0-9]+\]|\.[0-9]+)(?:\.(?:role|content|name|tool_calls|tool_call_id))?"
+        r"|(?P<format>response_format)\.(?:type|json_schema(?:\.(?:name|description|schema|strict))?)"
+        r"|(?P<choice>tool_choice)\.(?:type|function(?:\.name)?)",
+        value,
+        re.ASCII,
+    )
+    return (
+        next((root for root in match.groups() if root is not None), None)
+        if match
+        else None
+    )
 
 
-def _provider_error_fields(error: Exception) -> Mapping[str, object]:
-    if not isinstance(
-        error, (*_KNOWN_PROVIDER_REJECTION_ERRORS, *_AMBIGUOUS_PROVIDER_ERRORS)
-    ):
-        return {}
-    return provider_error_fields(error)
+def safe_provider_correlation_id(value: object) -> str | None:
+    if not isinstance(value, str) or not 1 <= len(value) <= _MAX_REQUEST_ID_LENGTH:
+        return None
+    return (
+        value if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]*", value, re.ASCII) else None
+    )
 
 
 def _bounded_provider_status(value: object) -> int | None:

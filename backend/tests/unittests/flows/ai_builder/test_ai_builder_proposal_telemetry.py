@@ -677,6 +677,8 @@ def test_provider_failure_event_is_one_bounded_content_free_row() -> None:
         "safe_detail": {
             "provider_status_code": 429,
             "provider_status_class": "4xx",
+            "provider_extraction_source": "response",
+            "provider_extraction_status": "absent",
         },
     }
     attempts = telemetry.build_planner_telemetry()["proposal_attempts"]
@@ -697,14 +699,14 @@ def test_provider_incident_evidence_drops_untrusted_failure_facts() -> None:
             unclassified_configuration_field_count=0,
             model_kwargs_capabilities=(),
         ),
-        outgoing_fields=(
+        sdk_input_fields=(
             CompletionEvidenceField(
                 name="temperature",
                 json_type="number",
                 domain="model_control",
             ),
         ),
-        unclassified_outgoing_field_count=0,
+        unclassified_sdk_input_field_count=0,
     )
 
     record_ai_builder_provider_failure(
@@ -756,7 +758,9 @@ def test_provider_incident_evidence_drops_untrusted_failure_facts() -> None:
         assert forbidden not in encoded
 
 
-@pytest.mark.parametrize("source", ["body", "nested_body", "response"])
+@pytest.mark.parametrize(
+    "source", ["body", "nested_body", "response", "empty_body", "message_only_body"]
+)
 def test_classifier_failure_logs_provider_rejection_fields(source: str) -> None:
     provider_error = {
         "code": "unsupported_value",
@@ -777,6 +781,10 @@ def test_classifier_failure_logs_provider_rejection_fields(source: str) -> None:
             if source == "body"
             else {"error": provider_error}
             if source == "nested_body"
+            else {}
+            if source == "empty_body"
+            else {"message": "private prompt and provider credentials"}
+            if source == "message_only_body"
             else None
         ),
         response=response,
@@ -793,19 +801,29 @@ def test_classifier_failure_logs_provider_rejection_fields(source: str) -> None:
         "provider_status_class": "4xx",
         "provider_error_code": "unsupported_value",
         "provider_parameter": "temperature",
+        "provider_extraction_source": (
+            "body"
+            if source == "body"
+            else "body.error"
+            if source == "nested_body"
+            else "response.error"
+        ),
+        "provider_extraction_status": "found",
     }
     assert failure.parameter == "temperature"
     assert "private" not in json.dumps(payload)
 
 
-def test_provider_failure_drops_unrecognized_error_fields() -> None:
+def test_provider_failure_retains_unknown_code_and_reports_suppressed_parameter() -> (
+    None
+):
     event_logger = MagicMock()
     record_ai_builder_provider_failure(
         BadRequestError(
             "private-message",
             model="private-model",
             llm_provider="azure",
-            body={"error": {"code": "private-code", "param": "private-param"}},
+            body={"error": {"code": "future_code", "param": "private-param"}},
         ),
         stage="slot_classification",
         event_logger=event_logger,
@@ -815,8 +833,92 @@ def test_provider_failure_drops_unrecognized_error_fields() -> None:
     assert payload["safe_detail"] == {
         "provider_status_code": 400,
         "provider_status_class": "4xx",
+        "provider_error_code": "future_code",
+        "provider_extraction_source": "body.error",
+        "provider_extraction_status": "suppressed",
     }
     assert "private" not in json.dumps(payload)
+
+
+@pytest.mark.parametrize(
+    ("body", "status", "code", "parameter"),
+    [
+        ({"message": "private prose"}, "absent", None, None),
+        ({"error": []}, "malformed", None, None),
+        ({"code": "future_code_2"}, "found", "future_code_2", None),
+        ({"code": "x" * 64}, "found", "x" * 64, None),
+        ({"code": "x" * 65}, "suppressed", None, None),
+        ({"code": "private prose"}, "suppressed", None, None),
+        ({"code": "cödé"}, "suppressed", None, None),
+        ({"code": ["unsupported_value"]}, "suppressed", None, None),
+        ({"param": "temperature"}, "found", None, "temperature"),
+        ({"param": "tools[0].function.parameters"}, "found", None, "tools"),
+        ({"param": "messages.0.content"}, "found", None, "messages"),
+        (
+            {"param": "response_format.json_schema.schema"},
+            "found",
+            None,
+            "response_format",
+        ),
+        (
+            {"param": "tools[0].function.parameters.properties.private_schema_name"},
+            "suppressed",
+            None,
+            None,
+        ),
+        ({"param": "temperature.private_suffix"}, "suppressed", None, None),
+    ],
+)
+def test_provider_rejection_extraction_status(
+    body: dict[str, object], status: str, code: str | None, parameter: str | None
+) -> None:
+    event_logger = MagicMock()
+    error = BadRequestError(
+        "private prose",
+        model="test",
+        llm_provider="azure",
+        body=body,
+        response=httpx.Response(
+            400, json={}, request=httpx.Request("POST", "https://provider.example")
+        ),
+    )
+
+    failure = record_ai_builder_provider_failure(
+        error, stage="slot_classification", event_logger=event_logger
+    )
+
+    detail = event_logger.info.call_args.kwargs["extra"]["safe_detail"]
+    assert detail["provider_extraction_status"] == status
+    assert detail.get("provider_error_code") == code
+    assert detail.get("provider_parameter") == parameter
+    assert failure.parameter == parameter
+    assert "private" not in json.dumps(detail)
+
+
+@pytest.mark.parametrize("header", ["x-request-id", "apim-request-id"])
+def test_message_only_rejection_retains_provider_correlation_id(header: str) -> None:
+    event_logger = MagicMock()
+    error = BadRequestError(
+        "private prose",
+        model="test",
+        llm_provider="azure",
+        body={"message": "private prose"},
+        response=httpx.Response(
+            400,
+            json={},
+            headers={header: "req-1234"},
+            request=httpx.Request("POST", "https://provider.example"),
+        ),
+    )
+
+    record_ai_builder_provider_failure(
+        error, stage="slot_classification", event_logger=event_logger
+    )
+
+    detail = event_logger.info.call_args.kwargs["extra"]["safe_detail"]
+    assert detail["provider_extraction_status"] == "absent"
+    assert detail["provider_correlation_id"] == "req-1234"
+    assert "private" not in json.dumps(detail)
 
 
 @pytest.mark.parametrize(

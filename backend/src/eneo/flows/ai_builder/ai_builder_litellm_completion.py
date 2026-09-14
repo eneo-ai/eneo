@@ -10,6 +10,7 @@ from typing import Any, cast
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.completion_models.infrastructure.completion_service import (
     CompletionEvidenceField,
+    CompletionEvidenceFieldDomain,
     completion_evidence_field_domain,
     completion_evidence_json_type,
 )
@@ -108,14 +109,7 @@ async def call_proposal_completion(
     dropped_response_format = provider_kwargs.pop("response_format", None)
     if dropped_response_format is not None:
         logger.debug("ai_builder_proposal_completion_dropped_response_format")
-    incident_evidence = _proposal_request_evidence(
-        request=request,
-        max_tokens=request_budget.provider_output_cap_tokens,
-        timeout_seconds=request_budget.timeout_seconds,
-        messages=messages,
-        tool_schemas=tool_schemas,
-        provider_kwargs=provider_kwargs,
-    )
+    incident_evidence: AIBuilderProviderRequestEvidence | None = None
     if before_provider_call is not None:
         await before_provider_call()
     if usage_tracker is not None:
@@ -126,11 +120,15 @@ async def call_proposal_completion(
         )
     provider_started_at = time.perf_counter()
 
-    def admit_request_without_refused_control(control: str, error: Exception) -> bool:
-        # One more request costs one call of the turn's budget and is its own
-        # call record; the refused one is recorded as failed. The incident
-        # evidence describes the request actually sent, so it loses the control.
+    def observe_sdk_input(sdk_input: Mapping[str, Any]) -> None:
         nonlocal incident_evidence
+        incident_evidence = _proposal_request_evidence(
+            request=request, sdk_input=sdk_input
+        )
+
+    def admit_request_without_refused_control(_control: str, error: Exception) -> bool:
+        # One more request costs one call of the turn's budget and is its own
+        # call record; the refused one is recorded as failed.
         if not request.call_budget.try_start_call():
             return False
         if usage_tracker is not None:
@@ -141,15 +139,6 @@ async def call_proposal_completion(
                     request_id=usage_tracker.request_id,
                 )
             )
-        provider_kwargs.pop(control, None)
-        incident_evidence = _proposal_request_evidence(
-            request=request,
-            max_tokens=request_budget.provider_output_cap_tokens,
-            timeout_seconds=request_budget.timeout_seconds,
-            messages=messages,
-            tool_schemas=tool_schemas,
-            provider_kwargs=provider_kwargs,
-        )
         return True
 
     try:
@@ -168,6 +157,7 @@ async def call_proposal_completion(
                 **provider_kwargs,
             },
             retry_without_refused_control=admit_request_without_refused_control,
+            observe_sdk_input=observe_sdk_input,
         )
     except Exception as error:
         failure = record_ai_builder_provider_failure(
@@ -209,66 +199,27 @@ def _outbound_proposal_tool_schemas(
 def _proposal_request_evidence(
     *,
     request: ProposalCompletionRequest,
-    max_tokens: int,
-    timeout_seconds: float,
-    messages: Sequence[Mapping[str, Any]],
-    tool_schemas: list[dict[str, Any]],
-    provider_kwargs: Mapping[str, object],
+    sdk_input: Mapping[str, Any],
 ) -> AIBuilderProviderRequestEvidence:
-    outgoing_fields = [
-        CompletionEvidenceField(
-            name="model",
-            json_type=completion_evidence_json_type(request.route.litellm_model),
-            domain="route",
-        ),
-        CompletionEvidenceField(
-            name="messages",
-            json_type=completion_evidence_json_type(messages),
-            domain="conversation",
-        ),
-        CompletionEvidenceField(
-            name="tools",
-            json_type=completion_evidence_json_type(tool_schemas),
-            domain="tool_contract",
-        ),
-        CompletionEvidenceField(
-            name="tool_choice",
-            json_type=completion_evidence_json_type(request.tool_choice),
-            domain="tool_selection",
-        ),
-        CompletionEvidenceField(
-            name="parallel_tool_calls",
-            json_type="boolean",
-            domain="transport_control",
-        ),
-        CompletionEvidenceField(
-            name="stream",
-            json_type="boolean",
-            domain="transport_control",
-        ),
-        CompletionEvidenceField(
-            name="drop_params",
-            json_type="boolean",
-            domain="transport_control",
-        ),
-        CompletionEvidenceField(
-            name="max_tokens",
-            json_type=completion_evidence_json_type(max_tokens),
-            domain="output_limit",
-        ),
-        CompletionEvidenceField(
-            name="timeout",
-            json_type=completion_evidence_json_type(timeout_seconds),
-            domain="transport_control",
-        ),
-    ]
-    unclassified_outgoing_field_count = 0
-    for name, value in provider_kwargs.items():
-        domain = completion_evidence_field_domain(name)
+    domains: dict[str, CompletionEvidenceFieldDomain] = {
+        "model": "route",
+        "messages": "conversation",
+        "tools": "tool_contract",
+        "tool_choice": "tool_selection",
+        "parallel_tool_calls": "transport_control",
+        "stream": "transport_control",
+        "stream_options": "transport_control",
+        "max_tokens": "output_limit",
+        "timeout": "transport_control",
+    }
+    sdk_input_fields: list[CompletionEvidenceField] = []
+    unclassified_sdk_input_field_count = 0
+    for name, value in sdk_input.items():
+        domain = domains.get(name) or completion_evidence_field_domain(name)
         if domain is None:
-            unclassified_outgoing_field_count += 1
+            unclassified_sdk_input_field_count += 1
             continue
-        outgoing_fields.append(
+        sdk_input_fields.append(
             CompletionEvidenceField(
                 name=name,
                 json_type=completion_evidence_json_type(value),
@@ -277,8 +228,8 @@ def _proposal_request_evidence(
         )
     return AIBuilderProviderRequestEvidence(
         route=request.route.incident_evidence(),
-        outgoing_fields=tuple(sorted(outgoing_fields, key=lambda field: field.name)),
-        unclassified_outgoing_field_count=unclassified_outgoing_field_count,
+        sdk_input_fields=tuple(sorted(sdk_input_fields, key=lambda field: field.name)),
+        unclassified_sdk_input_field_count=unclassified_sdk_input_field_count,
     )
 
 

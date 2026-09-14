@@ -1015,12 +1015,11 @@ async def test_proposal_failure_emits_one_allowlisted_incident_evidence() -> Non
     assert set(evidence) == {
         "schema_version",
         "route",
-        "outgoing_fields",
-        "unclassified_outgoing_field_count",
+        "sdk_input_fields",
+        "unclassified_sdk_input_field_count",
         "failure",
-        "provider_expectation",
     }
-    assert evidence["schema_version"] == "ai-builder-provider-incident-evidence.v1"
+    assert evidence["schema_version"] == "ai-builder-provider-incident-evidence.v2"
     assert evidence["route"]["source"] == "resolved_completion_model_route"
     assert evidence["route"]["capability_posture"] == "trusted_effective"
     assert evidence["route"]["unclassified_configuration_field_count"] == 0
@@ -1037,7 +1036,13 @@ async def test_proposal_failure_emits_one_allowlisted_incident_evidence() -> Non
         "json_type": "number",
         "constraint": "range",
     }
-    outgoing_by_name = {field["name"]: field for field in evidence["outgoing_fields"]}
+    outgoing_by_name = {field["name"]: field for field in evidence["sdk_input_fields"]}
+    assert set(outgoing_by_name) == set(litellm_client.acompletion.call_args.kwargs)
+    assert outgoing_by_name["stream_options"] == {
+        "name": "stream_options",
+        "json_type": "object",
+        "domain": "transport_control",
+    }
     assert outgoing_by_name["temperature"] == {
         "name": "temperature",
         "json_type": "number",
@@ -1055,7 +1060,7 @@ async def test_proposal_failure_emits_one_allowlisted_incident_evidence() -> Non
         "json_type": "string",
         "domain": "credential",
     }
-    assert evidence["unclassified_outgoing_field_count"] == 0
+    assert evidence["unclassified_sdk_input_field_count"] == 0
     assert evidence["failure"] == {
         "kind": "rejected",
         "stage": "proposal_completion",
@@ -1065,7 +1070,7 @@ async def test_proposal_failure_emits_one_allowlisted_incident_evidence() -> Non
         "parameter": "temperature",
         "rejection_class": "outgoing_parameter",
     }
-    assert evidence["provider_expectation"] == {"source": "unavailable"}
+    assert "provider_expectation" not in evidence
     encoded = json.dumps(evidence)
     for forbidden in (
         "test-only",
@@ -1992,21 +1997,28 @@ def test_completion_keeps_the_prepared_allocation_and_only_a_repair_plans_again(
         )
 
 
-def _refusal_of_temperature() -> BadRequestError:
+def _refusal_of_temperature(*, buffered: bool = False) -> BadRequestError:
+    body = {"error": {"param": "temperature", "code": "unsupported_value"}}
     return BadRequestError(
         message="temperature",
         model="gpt-test",
         llm_provider="azure",
-        body={"error": {"param": "temperature", "code": "unsupported_value"}},
+        body={} if buffered else body,
+        response=httpx.Response(
+            400, json=body, request=httpx.Request("POST", "https://provider.example")
+        )
+        if buffered
+        else None,
     )
 
 
 @pytest.mark.asyncio
-async def test_a_one_call_budget_admits_no_request_without_the_refused_control() -> (
-    None
-):
+@pytest.mark.parametrize("buffered", [False, True])
+async def test_a_one_call_budget_admits_no_request_without_the_refused_control(
+    buffered: bool,
+) -> None:
     client = SimpleNamespace(
-        acompletion=AsyncMock(side_effect=_refusal_of_temperature())
+        acompletion=AsyncMock(side_effect=_refusal_of_temperature(buffered=buffered))
     )
 
     with pytest.raises(AIBuilderKnownProviderRejectionException):
@@ -2026,11 +2038,14 @@ async def test_a_one_call_budget_admits_no_request_without_the_refused_control()
 
 
 @pytest.mark.asyncio
-async def test_an_admitted_request_without_the_control_is_its_own_call() -> None:
+@pytest.mark.parametrize("buffered", [False, True])
+async def test_an_admitted_request_without_the_control_is_its_own_call(
+    buffered: bool,
+) -> None:
     client = SimpleNamespace(
         acompletion=AsyncMock(
             side_effect=[
-                _refusal_of_temperature(),
+                _refusal_of_temperature(buffered=buffered),
                 _make_response_with_text("{}"),
             ]
         )
@@ -2094,6 +2109,44 @@ async def test_failure_evidence_after_recovery_describes_the_request_sent() -> N
         if call.args and call.args[0] == "ai_builder_provider_incident_evidence"
     ]
     assert len(evidence) == 1
-    outgoing = [field["name"] for field in evidence[0]["outgoing_fields"]]
+    outgoing = [field["name"] for field in evidence[0]["sdk_input_fields"]]
+    assert set(outgoing) == set(client.acompletion.call_args.kwargs)
     assert "temperature" not in outgoing
     assert "max_tokens" in outgoing
+
+
+@pytest.mark.asyncio
+async def test_sdk_inventory_counts_unknown_fields_without_publishing_their_names() -> (
+    None
+):
+    client = SimpleNamespace(
+        acompletion=AsyncMock(side_effect=_unprocessable_entity_error())
+    )
+    with (
+        patch.object(error_contract_module.logger, "info") as event_log,
+        pytest.raises(AIBuilderKnownProviderRejectionException),
+    ):
+        await call_proposal_completion(
+            litellm_client=client,
+            request=_completion_request(
+                messages=[{"role": "user", "content": "Build a flow"}],
+                tool_schemas=[],
+                route=_route(kwargs={"private_field_name": "private_value"}),
+                max_output_tokens=100,
+                temperature=0.0,
+            ),
+        )
+
+    evidence = next(
+        call.kwargs["extra"][
+            error_contract_module.AI_BUILDER_PROVIDER_INCIDENT_EVIDENCE_LOG_KEY
+        ]
+        for call in event_log.call_args_list
+        if call.args == ("ai_builder_provider_incident_evidence",)
+    )
+    assert "private_field_name" in client.acompletion.call_args.kwargs
+    assert evidence["unclassified_sdk_input_field_count"] == 1
+    assert len(evidence["sdk_input_fields"]) + 1 == len(
+        client.acompletion.call_args.kwargs
+    )
+    assert "private" not in json.dumps(evidence)

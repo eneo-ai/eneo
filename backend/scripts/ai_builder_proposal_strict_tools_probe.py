@@ -521,9 +521,11 @@ def _request_evidence_shape(
 ) -> dict[str, object]:
     return {
         "route": evidence.route.to_log_value(),
-        "outgoing_fields": [field.to_log_value() for field in evidence.outgoing_fields],
+        "outgoing_fields": [
+            field.to_log_value() for field in evidence.sdk_input_fields
+        ],
         "unclassified_outgoing_field_count": (
-            evidence.unclassified_outgoing_field_count
+            evidence.unclassified_sdk_input_field_count
         ),
     }
 
@@ -579,20 +581,6 @@ def _request_controls_are_exact(
     )
 
 
-_PROBE_LITELLM_FIXED_KEYS = frozenset(
-    {
-        "model",
-        "messages",
-        "tools",
-        "tool_choice",
-        "stream",
-        "drop_params",
-        "max_tokens",
-        "timeout",
-    }
-)
-
-
 class _RecordingLiteLLMClient:
     def __init__(
         self,
@@ -613,18 +601,9 @@ class _RecordingLiteLLMClient:
 
     async def acompletion(self, **kwargs: object) -> object:
         self.call_count += 1
-        provider_kwargs = {
-            name: value
-            for name, value in kwargs.items()
-            if name not in _PROBE_LITELLM_FIXED_KEYS
-        }
         evidence = _proposal_request_evidence(
             request=self._proposal_request,
-            max_tokens=cast(int, kwargs["max_tokens"]),
-            timeout_seconds=cast(float, kwargs["timeout"]),
-            messages=cast(list[dict[str, Any]], kwargs["messages"]),
-            tool_schemas=cast(list[dict[str, Any]], kwargs["tools"]),
-            provider_kwargs=provider_kwargs,
+            sdk_input=kwargs,
         )
         safe_request = _effective_values_identity(
             content_free_shape=_request_evidence_shape(evidence),

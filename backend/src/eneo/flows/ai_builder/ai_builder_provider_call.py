@@ -37,7 +37,8 @@ import inspect
 import math
 import unittest.mock
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
-from typing import Any, Protocol, cast
+from dataclasses import dataclass, replace
+from typing import Any, Literal, Protocol, cast
 
 import httpx
 import litellm
@@ -55,6 +56,26 @@ _UNSUPPORTED_PARAMETER_CODES = frozenset({"unsupported_parameter", "unsupported_
 # Whether the caller admits one more request without the refused control;
 # the caller charges it to its own call budget and telemetry.
 RetryAdmission = Callable[[str, Exception], bool]
+
+
+ProviderRejectionSource = Literal[
+    "unavailable", "body", "body.error", "response", "response.error", "exception.param"
+]
+ProviderExtractionStatus = Literal["found", "absent", "malformed", "suppressed"]
+ProviderCorrelationSource = Literal[
+    "request_id", "response.headers", "litellm_response_headers"
+]
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderRejection:
+    code: str | None = None
+    parameter: str | None = None
+    source: ProviderRejectionSource = "unavailable"
+    status: ProviderExtractionStatus = "absent"
+    correlation_id: str | None = None
+    correlation_source: ProviderCorrelationSource | None = None
+    parameter_source: ProviderRejectionSource | None = None
 
 
 class CompletionClient(Protocol):
@@ -84,6 +105,7 @@ async def complete_with_silence_deadline(
     ceiling_seconds: float,
     request: Mapping[str, Any],
     retry_without_refused_control: RetryAdmission | None = None,
+    observe_sdk_input: Callable[[Mapping[str, Any]], None] | None = None,
 ) -> Any:
     """The provider's complete answer, streamed under a silence deadline.
 
@@ -120,11 +142,14 @@ async def complete_with_silence_deadline(
     try:
         async with ceiling:
             try:
+                if observe_sdk_input is not None:
+                    observe_sdk_input(outbound)
                 response = await _under_silence(
                     litellm_client.acompletion(**outbound), silence_deadline_seconds
                 )
             except BadRequestError as error:
-                parameter = rejected_sampling_parameter(error)
+                rejection = provider_error_fields(error)
+                parameter = rejected_sampling_parameter(rejection)
                 if (
                     parameter is None
                     or parameter not in outbound
@@ -137,12 +162,18 @@ async def complete_with_silence_deadline(
                     extra={
                         "parameter": parameter,
                         "model": outbound.get("model"),
-                        "provider_error_code": provider_error_fields(error).get("code"),
+                        "provider_error_code": rejection.code,
+                        "provider_extraction_source": rejection.source,
+                        "provider_extraction_status": rejection.status,
+                        "provider_correlation_id": rejection.correlation_id,
+                        "provider_correlation_source": rejection.correlation_source,
                     },
                 )
                 outbound = {
                     key: value for key, value in outbound.items() if key != parameter
                 }
+                if observe_sdk_input is not None:
+                    observe_sdk_input(outbound)
                 response = await _under_silence(
                     litellm_client.acompletion(**outbound), silence_deadline_seconds
                 )
@@ -186,19 +217,13 @@ async def complete_with_silence_deadline(
     return built
 
 
-def rejected_sampling_parameter(error: BaseException) -> str | None:
+def rejected_sampling_parameter(rejection: ProviderRejection) -> str | None:
     """The optional sampling control a 400 refused by name, or None."""
 
-    if not isinstance(error, BadRequestError):
+    if rejection.code not in _UNSUPPORTED_PARAMETER_CODES:
         return None
-    fields = provider_error_fields(error)
-    code = fields.get("code")
-    if not isinstance(code, str) or code not in _UNSUPPORTED_PARAMETER_CODES:
-        return None
-    parameter = getattr(error, "param", None)
-    if parameter is None:
-        parameter = fields.get("param")
-    if isinstance(parameter, str) and parameter in _sampling_controls():
+    parameter = rejection.parameter
+    if parameter in _sampling_controls():
         return parameter
     return None
 
@@ -217,32 +242,151 @@ def _sampling_controls() -> frozenset[str]:
     return frozenset(SupportedModelKwargs.model_fields)
 
 
-def provider_error_fields(error: BaseException) -> Mapping[str, object]:
-    """The ``code`` and ``param`` a provider error body names, if any.
+def provider_error_fields(error: BaseException) -> ProviderRejection:
+    """Recover structured rejection facts without reading a response stream.
 
-    Some LiteLLM adapters retain only the HTTP response; already buffered
-    content is inspected, never a stream, and no I/O happens during recovery.
+    Try the nested and flat SDK body, then the buffered HTTP body. An envelope
+    wins only when it supplies a safe fact; otherwise preserve the strongest
+    extraction failure. Publication policy belongs to the error contract.
     """
 
+    from eneo.flows.ai_builder.ai_builder_error_contract import (
+        safe_provider_correlation_id,
+        safe_provider_parameter,
+    )
+
     body = getattr(error, "body", None)
-    if not isinstance(body, Mapping):
-        response = getattr(error, "response", None)
-        if not isinstance(response, httpx.Response) or not response.is_stream_consumed:
-            return {}
+    result = _rejection_envelope_fields(body, "body", "body.error")
+    response = getattr(error, "response", None)
+    if (
+        result.code is None
+        and result.parameter is None
+        and isinstance(response, httpx.Response)
+        and response.is_stream_consumed
+    ):
         try:
             if len(response.content) > _MAX_PROVIDER_ERROR_BODY_BYTES:
-                return {}
-            body = response.json()
-        except (ValueError, httpx.ResponseNotRead):
-            return {}
+                fallback = ProviderRejection(source="response", status="suppressed")
+            elif not response.content:
+                fallback = ProviderRejection(source="response")
+            else:
+                fallback = _rejection_envelope_fields(
+                    response.json(), "response", "response.error"
+                )
+        except (ValueError, RecursionError, httpx.ResponseNotRead):
+            fallback = ProviderRejection(source="response", status="malformed")
+        result = _select_rejection(result, fallback)
+
+    raw_parameter = getattr(error, "param", None)
+    if result.parameter is None and raw_parameter is not None:
+        parameter = safe_provider_parameter(raw_parameter)
+        result = replace(
+            result,
+            parameter=parameter,
+            parameter_source="exception.param" if parameter is not None else None,
+            source="exception.param"
+            if result.source == "unavailable"
+            else result.source,
+            status=(
+                "suppressed"
+                if parameter is None or result.status == "suppressed"
+                else "found"
+            ),
+        )
+    correlation_id = safe_provider_correlation_id(getattr(error, "request_id", None))
+    correlation_source: ProviderCorrelationSource | None = (
+        "request_id" if correlation_id is not None else None
+    )
+    header_sources: tuple[tuple[object, ProviderCorrelationSource], ...] = (
+        (
+            response.headers if isinstance(response, httpx.Response) else None,
+            "response.headers",
+        ),
+        (getattr(error, "litellm_response_headers", None), "litellm_response_headers"),
+    )
+    for headers, source in header_sources:
+        if correlation_id is not None:
+            break
+        if not isinstance(headers, Mapping):
+            continue
+        response_headers = cast(Mapping[object, object], headers)
+        for header in ("x-request-id", "apim-request-id", "request-id"):
+            correlation_id = safe_provider_correlation_id(response_headers.get(header))
+            if correlation_id is not None:
+                correlation_source = source
+                break
+    return replace(
+        result, correlation_id=correlation_id, correlation_source=correlation_source
+    )
+
+
+def _rejection_envelope_fields(
+    body: object,
+    source: ProviderRejectionSource,
+    nested_source: ProviderRejectionSource,
+) -> ProviderRejection:
+    from eneo.flows.ai_builder.ai_builder_error_contract import (
+        safe_provider_error_code,
+        safe_provider_parameter,
+    )
+
+    if body is None:
+        return ProviderRejection()
     if not isinstance(body, Mapping):
-        return {}
+        return ProviderRejection(source=source, status="malformed")
     body_fields = cast(Mapping[object, object], body)
-    fields = body_fields.get("error", body_fields)
-    if not isinstance(fields, Mapping):
-        return {}
-    error_fields = cast(Mapping[object, object], fields)
-    return {"code": error_fields.get("code"), "param": error_fields.get("param")}
+    result = ProviderRejection(source=source)
+    candidates: tuple[tuple[object, ProviderRejectionSource], ...] = (
+        (body_fields.get("error"), nested_source),
+        (body_fields, source),
+    )
+    for fields, envelope_source in candidates:
+        if fields is None:
+            continue
+        if not isinstance(fields, Mapping):
+            candidate = ProviderRejection(source=envelope_source, status="malformed")
+        else:
+            error_fields = cast(Mapping[object, object], fields)
+            raw_code, raw_parameter = (
+                error_fields.get("code"),
+                error_fields.get("param"),
+            )
+            code = safe_provider_error_code(raw_code, source=envelope_source)
+            parameter = safe_provider_parameter(raw_parameter)
+            suppressed = (
+                raw_code is not None
+                and code is None
+                or raw_parameter is not None
+                and parameter is None
+            )
+            candidate = ProviderRejection(
+                code=code,
+                parameter=parameter,
+                source=envelope_source,
+                status="suppressed"
+                if suppressed
+                else "found"
+                if code is not None or parameter is not None
+                else "absent",
+            )
+        result = _select_rejection(result, candidate)
+        if result.code is not None or result.parameter is not None:
+            break
+    return result
+
+
+def _select_rejection(
+    current: ProviderRejection, candidate: ProviderRejection
+) -> ProviderRejection:
+    if candidate.code is not None or candidate.parameter is not None:
+        return candidate
+    severity = {"absent": 0, "malformed": 1, "suppressed": 2, "found": 3}
+    if (
+        current.source == "unavailable"
+        or severity[candidate.status] > severity[current.status]
+    ):
+        return candidate
+    return current
 
 
 def _provider_finished(response: object, chunks: list[Any]) -> bool:

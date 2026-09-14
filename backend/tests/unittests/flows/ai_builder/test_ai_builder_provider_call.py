@@ -4,22 +4,167 @@ import asyncio
 import subprocess
 import sys
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import litellm
 import pytest
 from litellm.exceptions import BadRequestError
 from litellm.types import utils as litellm_types
+from openai import AsyncAzureOpenAI
 
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    record_ai_builder_provider_failure,
+)
 from eneo.flows.ai_builder.ai_builder_provider_call import (
     ProviderCallCeilingExpired,
     ProviderSilenceExpired,
     ProviderStreamIncomplete,
     complete_with_silence_deadline,
+    provider_error_fields,
 )
 
 _MESSAGES = [{"role": "user", "content": "Propose a flow."}]
 _REQUEST = {"model": "gpt-test", "messages": _MESSAGES}
+
+
+@pytest.mark.parametrize("buffered", [True, False])
+def test_error_recovery_never_reads_or_decodes_an_unavailable_body(
+    buffered: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    response = httpx.Response(
+        400,
+        request=httpx.Request("POST", "https://provider.example"),
+        **(
+            {"content": b"x" * 65_537}
+            if buffered
+            else {"stream": httpx.ByteStream(b"unread")}
+        ),
+    )
+    read = MagicMock(side_effect=AssertionError("Recovery must not read"))
+    decode = MagicMock(side_effect=AssertionError("Recovery must not decode"))
+    monkeypatch.setattr(response, "read", read)
+    monkeypatch.setattr(response, "json", decode)
+    error = BadRequestError(
+        "private prose", model="test", llm_provider="azure", body={}, response=response
+    )
+
+    rejection = provider_error_fields(error)
+
+    assert rejection.code is None
+    assert rejection.parameter is None
+    assert rejection.status == ("suppressed" if buffered else "absent")
+    read.assert_not_called()
+    decode.assert_not_called()
+
+
+@pytest.mark.parametrize("correlation_id", ["private prose", "x" * 129, "réquest"])
+def test_invalid_correlation_ids_are_not_retained(correlation_id: str) -> None:
+    error = BadRequestError(
+        "private prose", model="test", llm_provider="azure", body={}
+    )
+    error.request_id = correlation_id
+
+    assert provider_error_fields(error).correlation_id is None
+
+
+@pytest.mark.parametrize(
+    ("headers", "expected_id"),
+    [
+        (
+            {
+                "x-request-id": "sdk-123",
+                "code": "unsupported_value",
+                "param": "temperature",
+            },
+            "sdk-123",
+        ),
+        ({"x-request-id": "private prose", "unlisted-id": "sdk-123"}, None),
+        (["sdk-123"], None),
+    ],
+)
+def test_retained_headers_only_contribute_a_valid_correlation_id(
+    headers: object, expected_id: str | None
+) -> None:
+    error = BadRequestError(
+        "private prose", model="test", llm_provider="azure", body={}
+    )
+    error.litellm_response_headers = headers
+
+    rejection = provider_error_fields(error)
+
+    assert rejection.correlation_id == expected_id
+    assert rejection.correlation_source == (
+        "litellm_response_headers" if expected_id is not None else None
+    )
+    assert rejection.code is None
+    assert rejection.parameter is None
+    assert rejection.status == "absent"
+
+
+@pytest.mark.parametrize("request_id", [None, "sdk-first"])
+def test_retained_headers_do_not_override_existing_correlation_sources(
+    request_id: str | None,
+) -> None:
+    error = BadRequestError(
+        "private prose",
+        model="test",
+        llm_provider="azure",
+        body={},
+        response=httpx.Response(
+            400,
+            request=httpx.Request("POST", "https://provider.example"),
+            headers={"apim-request-id": "response-first"},
+        ),
+    )
+    error.request_id = request_id
+    error.litellm_response_headers = {"x-request-id": "retained-last"}
+
+    rejection = provider_error_fields(error)
+
+    assert rejection.correlation_id == (request_id or "response-first")
+    assert rejection.correlation_source == (
+        "request_id" if request_id is not None else "response.headers"
+    )
+
+
+def test_exception_parameter_keeps_its_own_source() -> None:
+    error = BadRequestError(
+        "private prose",
+        model="test",
+        llm_provider="azure",
+        body={"code": "unsupported_value"},
+    )
+    error.param = "temperature"
+
+    rejection = provider_error_fields(error)
+
+    assert rejection.code == "unsupported_value"
+    assert rejection.parameter == "temperature"
+    assert rejection.source == "body"
+    assert rejection.parameter_source == "exception.param"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"error": {}, "code": "unsupported_value", "param": "temperature"},
+        {"error": [], "code": "unsupported_value", "param": "temperature"},
+    ],
+)
+def test_uninformative_nested_envelope_falls_back_to_flat_body(
+    body: dict[str, object],
+) -> None:
+    error = BadRequestError(
+        "private prose", model="test", llm_provider="azure", body=body
+    )
+
+    rejection = provider_error_fields(error)
+
+    assert rejection.code == "unsupported_value"
+    assert rejection.parameter == "temperature"
+    assert rejection.source == "body"
+    assert rejection.status == "found"
 
 
 def _tool_chunk(arguments: str, *, first: bool, finish: str | None) -> object:
@@ -294,7 +439,6 @@ def test_the_silence_deadline_must_be_positive() -> None:
 import json  # noqa: E402
 import math  # noqa: E402
 
-import httpx  # noqa: E402
 from litellm.caching.llm_caching_handler import LLMClientCache  # noqa: E402
 from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler  # noqa: E402
 
@@ -306,6 +450,69 @@ _WRAPPED_REQUEST = {
     "num_retries": 0,
     "max_retries": 0,
 }
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("header", ["x-request-id", "apim-request-id", "request-id"])
+@pytest.mark.asyncio
+async def test_azure_adapter_rejection_retains_correlation_id(
+    stream: bool,
+    header: str,
+) -> None:
+    sent: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(json.loads(request.content))
+        return httpx.Response(
+            400,
+            json={"error": {"message": "private provider prose"}},
+            headers={header: "sdk-123"},
+        )
+
+    async with AsyncAzureOpenAI(
+        api_key="test-key",
+        azure_endpoint="https://azure.invalid",
+        api_version="2024-02-15-preview",
+        max_retries=0,
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    ) as client:
+        with pytest.raises(BadRequestError) as caught:
+            await litellm.acompletion(
+                model="azure/gpt-test",
+                messages=_MESSAGES,
+                client=client,
+                stream=stream,
+                num_retries=0,
+                max_retries=0,
+                api_base="https://azure.invalid",
+            )
+
+    error = caught.value
+    assert len(sent) == 1
+    assert sent[0]["stream"] is stream
+    assert getattr(error, "litellm_response_headers", {}).get(header) == "sdk-123", (
+        type(error)
+    )
+    if stream:
+        assert error.request_id is None
+        assert error.response.headers.get(header) is None
+
+    event_logger = MagicMock()
+    failure = record_ai_builder_provider_failure(
+        error, stage="proposal_completion", event_logger=event_logger
+    )
+    assert failure.rejection.correlation_id == "sdk-123"
+    assert failure.rejection.correlation_source == (
+        "litellm_response_headers"
+        if stream
+        else "request_id"
+        if header == "x-request-id"
+        else "response.headers"
+    )
+    detail = event_logger.info.call_args.kwargs["extra"]["safe_detail"]
+    assert detail["provider_correlation_id"] == "sdk-123"
+    assert detail["provider_correlation_source"] == failure.rejection.correlation_source
+    assert "private" not in json.dumps(detail)
 
 
 def _sse(events: list[dict[str, object]], *, done: bool = True) -> bytes:
