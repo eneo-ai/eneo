@@ -2,7 +2,7 @@
   import { prefersReducedMotion } from "$lib/core/prefersReducedMotion";
   import { Page } from "$lib/components/layout";
   import { browser } from "$app/environment";
-  import { replaceState } from "$app/navigation";
+  import { beforeNavigate, replaceState } from "$app/navigation";
   import { page } from "$app/state";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getAppContext } from "$lib/core/AppContext";
@@ -235,6 +235,22 @@
       $validationErrors.size === 0 &&
       !hasStepJsonValidationErrors
   );
+
+  // Unsaved work (including a recorded instruction draft) holds navigation:
+  // anything that unloads the document is refused while work is unsaved (a
+  // direct exit shows the browser's own prompt); an in-app navigation waits
+  // for the save and then continues with a full load, or stays here with the
+  // error so the draft and its retry surface are not lost.
+  beforeNavigate((navigation) => {
+    if ($saveStatus === "saved") return;
+    navigation.cancel();
+    if (navigation.willUnload || !navigation.to) return;
+    const target = navigation.to.url.href;
+    void flowEditor
+      .flushSaves()
+      .then(() => window.location.assign(target))
+      .catch(() => toast.error(m.flow_step_save_failed()));
+  });
 
   $effect(() => {
     return () => {

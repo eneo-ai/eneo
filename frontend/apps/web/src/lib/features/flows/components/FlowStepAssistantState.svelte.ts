@@ -116,7 +116,12 @@ export class FlowStepAssistantState {
     this.updateFields({ [field]: value });
   }
 
-  updateFields(changes: Record<string, unknown>, opts?: { immediate?: boolean }) {
+  /**
+   * `defer: true` records the change as pending at the save owner without
+   * scheduling a write: a prompt draft stays dirty (status, flush and the
+   * step-switch flush cover it) and is written once when the editor commits.
+   */
+  updateFields(changes: Record<string, unknown>, opts?: { immediate?: boolean; defer?: boolean }) {
     const activeStep = this.#getActiveStep();
     if (!activeStep?.assistant_id) return;
     const loadedAssistantId =
@@ -138,6 +143,10 @@ export class FlowStepAssistantState {
     if (Object.keys(acceptedChanges).length === 0) return;
     if (this.assistant) {
       this.assistant = { ...this.assistant, ...acceptedChanges };
+    }
+    if (opts?.defer) {
+      this.#flowEditor.recordAssistantDraft(activeStep.assistant_id, acceptedChanges);
+      return;
     }
     if (opts?.immediate) {
       void this.#flowEditor.updateAssistantImmediately(activeStep.assistant_id, acceptedChanges);

@@ -375,6 +375,10 @@ function createFlowEditor(data: FlowEditorInitData) {
     await assistantSaveManager.saveImmediately(assistantId, changes);
   }
 
+  function recordAssistantDraft(assistantId: string, changes: Record<string, unknown>): void {
+    assistantSaveManager.record(assistantId, changes);
+  }
+
   async function saveAssistant(assistantId: string, changes: Record<string, unknown>) {
     await assistantSaveManager.save(assistantId, changes);
   }
@@ -1014,6 +1018,7 @@ function createFlowEditor(data: FlowEditorInitData) {
     assistantReloadRevision,
     loadAssistant,
     saveAssistant,
+    recordAssistantDraft,
     updateAssistantImmediately,
     listAssistantPrompts,
     selectStep,

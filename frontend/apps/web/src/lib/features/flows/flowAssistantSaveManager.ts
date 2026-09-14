@@ -22,6 +22,8 @@ export class AssistantSaveManager<TAssistant extends object> {
   private readonly cache = new Map<string, TAssistant>();
   private readonly cacheGenerations = new Map<string, number>();
   private readonly pendingChanges = new Map<string, Record<string, unknown>>();
+  /** Drafts recorded for a later commit or flush; never scheduled on their own. */
+  private readonly deferredChanges = new Map<string, Record<string, unknown>>();
   private readonly saveTimers = new Map<string, TimerHandle>();
   private readonly inFlight = new Set<string>();
   private readonly savePromises = new Map<string, Promise<void>>();
@@ -79,6 +81,7 @@ export class AssistantSaveManager<TAssistant extends object> {
   async save(assistantId: string, changes: Record<string, unknown>): Promise<void> {
     if (!assistantId || this.options.isDisabled()) return;
 
+    this.supersedeDeferred(assistantId, changes);
     const merged = {
       ...(this.pendingChanges.get(assistantId) ?? {}),
       ...changes
@@ -99,8 +102,48 @@ export class AssistantSaveManager<TAssistant extends object> {
     this.queue(assistantId, this.options.delayMs ?? 500);
   }
 
+  /**
+   * Record changes as pending without scheduling a write. A prompt draft is
+   * typed through here: status turns pending, `flush()` and the step-switch
+   * flush persist it, and the editor's commit saves it immediately, so a
+   * long prompt is not sent to the server after every pause.
+   */
+  record(assistantId: string, changes: Record<string, unknown>): void {
+    if (!assistantId || this.options.isDisabled()) return;
+    this.deferredChanges.set(assistantId, {
+      ...(this.deferredChanges.get(assistantId) ?? {}),
+      ...changes
+    });
+    this.options.onValidationError(assistantId, null);
+    this.refreshStatus();
+  }
+
+  /** A newer scheduled or committed change wins over an older draft of the same fields. */
+  private supersedeDeferred(assistantId: string, changes: Record<string, unknown>): void {
+    const deferred = this.deferredChanges.get(assistantId);
+    if (!deferred) return;
+    const kept = Object.fromEntries(
+      Object.entries(deferred).filter(([field]) => !(field in changes))
+    );
+    if (Object.keys(kept).length === 0) this.deferredChanges.delete(assistantId);
+    else this.deferredChanges.set(assistantId, kept);
+  }
+
+  /** Move a recorded draft into the changes the next write carries. */
+  private promoteDeferred(assistantId: string): void {
+    const deferred = this.deferredChanges.get(assistantId);
+    if (!deferred) return;
+    this.deferredChanges.delete(assistantId);
+    this.pendingChanges.set(assistantId, {
+      ...(this.pendingChanges.get(assistantId) ?? {}),
+      ...deferred
+    });
+  }
+
   async saveImmediately(assistantId: string, changes: Record<string, unknown>): Promise<void> {
     if (!assistantId || this.options.isDisabled()) return;
+    this.supersedeDeferred(assistantId, changes);
+    this.promoteDeferred(assistantId);
     const merged = {
       ...(this.pendingChanges.get(assistantId) ?? {}),
       ...changes
@@ -118,6 +161,7 @@ export class AssistantSaveManager<TAssistant extends object> {
       const ids = new Set<string>([
         ...this.saveTimers.keys(),
         ...this.pendingChanges.keys(),
+        ...this.deferredChanges.keys(),
         ...this.savePromises.keys()
       ]);
       if (ids.size === 0) {
@@ -126,6 +170,7 @@ export class AssistantSaveManager<TAssistant extends object> {
       }
       for (const assistantId of ids) {
         this.clearTimer(assistantId);
+        this.promoteDeferred(assistantId);
       }
       const results = await Promise.allSettled(
         [...ids].map((assistantId) => this.runSaveNow(assistantId))
@@ -146,10 +191,12 @@ export class AssistantSaveManager<TAssistant extends object> {
 
   private mergeWithPending(assistantId: string, base: TAssistant): TAssistant {
     const pending = this.pendingChanges.get(assistantId);
-    if (!pending) return base;
+    const deferred = this.deferredChanges.get(assistantId);
+    if (!pending && !deferred) return base;
     return {
       ...base,
-      ...pending
+      ...(pending ?? {}),
+      ...(deferred ?? {})
     } as TAssistant;
   }
 
@@ -181,7 +228,7 @@ export class AssistantSaveManager<TAssistant extends object> {
       this.status.set("saving");
       return;
     }
-    if (this.saveTimers.size > 0 || this.pendingChanges.size > 0) {
+    if (this.saveTimers.size > 0 || this.pendingChanges.size > 0 || this.deferredChanges.size > 0) {
       this.status.set("pending");
       return;
     }

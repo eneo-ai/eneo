@@ -95,6 +95,67 @@ describe("AssistantSaveManager", () => {
     expect(manager.getStatus()).toBe("idle");
   });
 
+  it("records a draft as pending and writes it only on flush or commit", async () => {
+    const { manager, saveRemote } = createManager();
+
+    manager.record("assistant-1", { prompt: { text: "Utkast" } });
+    manager.record("assistant-1", { prompt: { text: "Utkast två" } });
+
+    expect(manager.getStatus()).toBe("pending");
+    await new Promise((resolve) => setTimeout(resolve, 550));
+    expect(saveRemote).not.toHaveBeenCalled();
+
+    await manager.flush();
+
+    expect(saveRemote).toHaveBeenCalledTimes(1);
+    expect(saveRemote).toHaveBeenCalledWith("assistant-1", { prompt: { text: "Utkast två" } });
+    expect(manager.getStatus()).toBe("idle");
+  });
+
+  it("keeps a recorded draft out of scheduled and in-flight saves", async () => {
+    const { manager, saveRemote } = createManager();
+
+    await manager.save("assistant-1", { name: "Nytt namn" });
+    manager.record("assistant-1", { prompt: { text: "Utkast" } });
+    await new Promise((resolve) => setTimeout(resolve, 550));
+
+    // The field's own debounce still ran, without the draft.
+    expect(saveRemote).toHaveBeenCalledTimes(1);
+    expect(saveRemote).toHaveBeenCalledWith("assistant-1", { name: "Nytt namn" });
+    expect(manager.getStatus()).toBe("pending");
+
+    // A draft recorded while a commit is in flight is not written by the
+    // commit's continuation; it waits for the next commit or flush.
+    const commit = manager.saveImmediately("assistant-1", { prompt: { text: "Utkast" } });
+    manager.record("assistant-1", { prompt: { text: "Utkast igen" } });
+    await commit;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(saveRemote).toHaveBeenCalledTimes(2);
+    expect(manager.getStatus()).toBe("pending");
+
+    await manager.flush();
+    expect(saveRemote).toHaveBeenCalledTimes(3);
+    expect(saveRemote).toHaveBeenLastCalledWith("assistant-1", { prompt: { text: "Utkast igen" } });
+    expect(manager.getStatus()).toBe("idle");
+  });
+
+  it("lets a newer scheduled save supersede an older draft of the same field", async () => {
+    const { manager, saveRemote } = createManager();
+
+    manager.record("assistant-1", { prompt: { text: "Gammalt utkast" }, name: "Utkastnamn" });
+    await manager.save("assistant-1", { prompt: { text: "Återställd version" } });
+    await new Promise((resolve) => setTimeout(resolve, 550));
+
+    expect(saveRemote).toHaveBeenCalledWith("assistant-1", {
+      prompt: { text: "Återställd version" }
+    });
+
+    await manager.flush();
+
+    expect(saveRemote).toHaveBeenLastCalledWith("assistant-1", { name: "Utkastnamn" });
+    expect(manager.getStatus()).toBe("idle");
+  });
+
   it("overlays pending unsaved changes when loading an assistant", async () => {
     const { manager } = createManager();
 

@@ -398,11 +398,15 @@
     await flowEditor.updateAssistantImmediately(activeStep.assistant_id, { prompt: nextPrompt });
   }
 
+  // A draft is recorded as pending while the person types and written once
+  // when the editor commits (blur, leaving the step, teardown) or a flush
+  // runs. Saving every pause sent the whole prompt each time, created a
+  // prompt version per pause and chained saves that made a long prompt
+  // uneditable.
   function queueInstructionDraft(value: string) {
     if (!activeStep?.assistant_id || !assistantState.assistant) return;
     const nextPrompt = buildNextFlowPrompt(assistantState.assistant.prompt, value);
-    assistantState.updateField("prompt", nextPrompt);
-    void flowEditor.saveAssistant(activeStep.assistant_id, { prompt: nextPrompt }).catch(() => {});
+    assistantState.updateFields({ prompt: nextPrompt }, { defer: true });
   }
 
   function updateInputTemplate(value: string) {

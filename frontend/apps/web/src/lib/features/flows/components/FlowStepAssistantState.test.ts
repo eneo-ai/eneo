@@ -23,6 +23,7 @@ function makeState(activeStep: { current: FlowStep | null }) {
     loadAssistant: vi.fn(async (assistantId: string) => ({ id: assistantId, name: assistantId })),
     saveAssistant: vi.fn(),
     updateAssistantImmediately: vi.fn(),
+    recordAssistantDraft: vi.fn(),
     flushAssistantSaves: vi.fn(async () => {})
   };
   const availability = vi.fn(async () => ({
@@ -65,6 +66,27 @@ describe("FlowStepAssistantState", () => {
     state.assistant = { id: "assistant-1", name: "assistant-1" } as unknown as LoadedAssistant;
     state.updateField("completion_model_kwargs", { reasoning_effort: "high" });
 
+    expect(flowEditor.saveAssistant).not.toHaveBeenCalled();
+    expect(flowEditor.updateAssistantImmediately).not.toHaveBeenCalled();
+  });
+
+  it("records a prompt draft as pending without scheduling a save", () => {
+    const activeStep = { current: makeStep("assistant-1") };
+    const { state, flowEditor } = makeState(activeStep);
+    state.assistant = {
+      id: "assistant-1",
+      name: "assistant-1",
+      prompt: { text: "Gammal" }
+    } as unknown as LoadedAssistant;
+
+    state.updateFields({ prompt: { text: "Ny text" } }, { defer: true });
+
+    expect((state.assistant as unknown as { prompt: { text: string } }).prompt.text).toBe(
+      "Ny text"
+    );
+    expect(flowEditor.recordAssistantDraft).toHaveBeenCalledWith("assistant-1", {
+      prompt: { text: "Ny text" }
+    });
     expect(flowEditor.saveAssistant).not.toHaveBeenCalled();
     expect(flowEditor.updateAssistantImmediately).not.toHaveBeenCalled();
   });
