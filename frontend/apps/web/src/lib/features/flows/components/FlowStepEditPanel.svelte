@@ -966,7 +966,10 @@
               </h2>
             {/if}
           </div>
-          {#if onEditStepWithAI && activeStep.id && !isPublished}
+          <!-- A published flow can be changed here too: the Builder proposes, and
+               approving unpublishes the flow until it is published again. Hiding
+               this hid the feature from the people whose flows are published. -->
+          {#if onEditStepWithAI && activeStep.id}
             <Button variant="outline" size="sm" onclick={() => onEditStepWithAI?.(activeStep)}>
               {m.flow_step_change_with_ai()}
             </Button>
