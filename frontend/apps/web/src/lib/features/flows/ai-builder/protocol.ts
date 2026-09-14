@@ -316,7 +316,14 @@ const stepSpecSchema = z.object({
   input_source: z.enum(["flow_input", "previous_step", "all_previous_steps"]),
   input_type: z.enum(["text", "json", "audio", "document", "file", "any"]).optional(),
   output_mode: z
-    .enum(["pass_through", "compose_text", "transcribe_only", "template_fill", "render_verbatim"])
+    .enum([
+      "pass_through",
+      "compose_text",
+      "transcribe_only",
+      "template_fill",
+      "render_verbatim",
+      "speaker_mapping"
+    ])
     .optional(),
   output_type: z.enum(["text", "json", "pdf", "docx"]).optional(),
   input_bindings: nullableJsonRecordSchema,
