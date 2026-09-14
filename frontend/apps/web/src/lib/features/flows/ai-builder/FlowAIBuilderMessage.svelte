@@ -148,9 +148,9 @@
 
   .user-bubble {
     max-width: min(72%, 34rem);
-    border-radius: 1rem 1rem 0.375rem 1rem;
+    border-radius: 0.75rem 0.75rem 0.375rem 0.75rem;
     padding: 0.625rem 0.9375rem;
-    background: var(--bg-secondary);
+    background: var(--background-secondary);
     border: 1px solid oklch(from var(--border-default) l c h / 0.6);
     color: var(--text-primary);
   }
@@ -208,8 +208,8 @@
   .assistant-prose :global(code) {
     font-size: 0.85em;
     padding: 0.05em 0.3em;
-    border-radius: 0.25rem;
-    background: var(--bg-secondary);
+    border-radius: 0.375rem;
+    background: var(--background-secondary);
   }
 
   .message-enter.is-user {

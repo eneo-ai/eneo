@@ -1488,20 +1488,20 @@
     gap: 0.25rem;
     margin-bottom: 1rem;
     padding: 0.75rem 0.875rem;
-    border: 1px solid var(--border-dimmer, #e5e7eb);
+    border: 1px solid var(--border-dimmer);
     border-radius: 0.5rem;
   }
   .understanding-title {
     font-size: 0.8125rem;
     font-weight: 600;
-    color: var(--text-secondary, #6b7280);
+    color: var(--text-secondary);
   }
   .understanding-sentence {
     font-size: 0.9rem;
-    color: var(--text-primary, #111827);
+    color: var(--text-primary);
   }
   .understanding-open {
     font-size: 0.8125rem;
-    color: var(--text-secondary, #6b7280);
+    color: var(--text-secondary);
   }
 </style>

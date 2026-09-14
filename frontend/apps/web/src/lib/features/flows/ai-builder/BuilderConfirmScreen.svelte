@@ -1112,7 +1112,7 @@
           <section class="border-default mt-4 border-t pt-3.5">
             <button
               type="button"
-              class="text-primary flex min-h-[2.75rem] w-full items-center gap-1.5 text-left text-[0.8125rem] font-bold"
+              class="text-primary focus-visible:ring-accent-stronger flex min-h-[2.75rem] w-full items-center gap-1.5 rounded-sm text-left text-[0.8125rem] font-bold focus-visible:ring-2 focus-visible:outline-none"
               aria-expanded={assumptionsOpen}
               onclick={() => (assumptionsOpen = !assumptionsOpen)}
             >

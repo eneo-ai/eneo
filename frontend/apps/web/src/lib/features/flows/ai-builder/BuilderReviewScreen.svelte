@@ -967,7 +967,7 @@
             <div class="flex items-start justify-between gap-3">
               <div class="flex flex-wrap items-center gap-2">
                 <span
-                  class="bg-accent-dimmer text-accent-stronger inline-flex items-center rounded-full px-2.5 py-0.5 text-[0.65625rem] font-bold tracking-[0.03em] uppercase"
+                  class="bg-accent-dimmer text-accent-stronger inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold"
                 >
                   {isCreateMode ? m.ai_builder_draft_pill() : m.ai_builder_change_pill()}
                 </span>
@@ -1322,13 +1322,15 @@
                   {/each}
                 </ul>
                 {#if stepChangeCounts.unchanged > 0 && (stepChangeCounts.added > 0 || stepChangeCounts.modified > 0)}
-                  <label class="text-secondary flex cursor-pointer items-center gap-1.5 text-xs">
-                    <Checkbox bind:checked={onlyChanges} class="size-3.5" />
+                  <label
+                    class="text-secondary flex min-h-7 cursor-pointer items-center gap-1.5 text-xs"
+                  >
+                    <Checkbox bind:checked={onlyChanges} />
                     {m.ai_builder_diff_only_changes()}
                   </label>
                 {/if}
               {/if}
-              <Tabs.List class="ml-auto h-8">
+              <Tabs.List class="ml-auto h-9">
                 <Tabs.Trigger value="diagram" class="px-3 py-1 text-xs">
                   {m.ai_builder_canvas_tab_diagram()}
                 </Tabs.Trigger>
@@ -1349,7 +1351,7 @@
                   {#each reviewCheckpointSteps as { step, index } (step.plan_step_ref)}
                     <button
                       type="button"
-                      class="bg-warning-default/20 text-warning-stronger focus-visible:ring-warning-stronger rounded-full px-2 py-0.5 text-[0.6875rem] font-semibold focus-visible:ring-2 focus-visible:outline-none"
+                      class="bg-warning-default/20 text-warning-stronger focus-visible:ring-warning-stronger inline-flex min-h-7 items-center rounded-full px-2 text-xs font-semibold focus-visible:ring-2 focus-visible:outline-none"
                       onclick={() => void revealStep(step)}
                     >
                       {m.ai_builder_step_label({ step: index + 1 })}
