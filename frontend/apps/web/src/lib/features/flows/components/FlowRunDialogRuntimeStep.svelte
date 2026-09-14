@@ -174,10 +174,12 @@
 
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div class="min-w-0">
+        <!-- The card is visibly an upload: it carries the field name, its
+             description and its limits, and the line above already says which
+             step the material belongs to. A label repeating that is the fourth
+             statement of the same fact on one screen. The badges stay: they
+             carry information the rest of the card does not. -->
         <div class="flex flex-wrap items-center gap-2">
-          <p class="text-muted text-xs font-medium">
-            {labels.runtimeStepUploadTitle}
-          </p>
           {#if step.required}
             <span
               class="border-default bg-secondary/15 text-secondary rounded-full border px-2 py-0.5 text-xs font-medium"
@@ -231,7 +233,7 @@
     <div
       class="{fileCount > 0
         ? 'mt-4 py-3.5'
-        : 'mt-6 min-h-[132px] py-6 sm:min-h-[100px]'} flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 text-center transition-all duration-150 {dragging
+        : 'mt-6 min-h-[132px] py-6 sm:min-h-[100px]'} flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 text-center transition-[background-color,border-color,transform,min-height,padding,margin] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] {dragging
         ? 'border-accent-default bg-accent-dimmer scale-[1.02]'
         : fileCount > 0
           ? 'border-positive-default/30 bg-positive-dimmer/10'
@@ -442,7 +444,7 @@
       <div class="mt-3 mb-2 flex flex-col gap-1.5">
         {#each files as file (file.id)}
           <div
-            class="group bg-hover-dimmer hover:bg-hover-default flex min-h-[44px] items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors duration-100"
+            class="group bg-hover-dimmer hover:bg-hover-default flex min-h-[44px] items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors duration-150"
           >
             <div class="flex min-w-0 flex-col">
               <span class="min-w-0 truncate">{file.name ?? file.id}</span>

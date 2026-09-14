@@ -511,12 +511,12 @@
             <Table.Row class="border-default hover:bg-transparent">
               <Table.Head
                 aria-sort={showAdvancedControls ? ariaSortFor("status") : undefined}
-                class="text-muted h-11 px-0 text-xs font-medium tracking-wide uppercase"
+                class="text-muted h-11 px-0 text-xs font-medium"
               >
                 {#if showAdvancedControls}
                   <button
                     type="button"
-                    class="text-muted hover:text-primary focus-visible:ring-accent-default/30 inline-flex h-11 w-full items-center gap-1 px-4 text-left text-xs font-medium tracking-wide uppercase transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset"
+                    class="text-muted hover:text-primary focus-visible:ring-accent-default/30 inline-flex h-11 w-full items-center gap-1 px-4 text-left text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset"
                     onclick={() => toggleSort("status")}
                   >
                     {m.status()}
@@ -533,19 +533,17 @@
                   <span class="block px-4">{m.status()}</span>
                 {/if}
               </Table.Head>
-              <Table.Head
-                class="text-muted hidden h-11 px-4 text-xs font-medium tracking-wide uppercase lg:table-cell"
-              >
+              <Table.Head class="text-muted hidden h-11 px-4 text-xs font-medium lg:table-cell">
                 {m.version()}
               </Table.Head>
               <Table.Head
                 aria-sort={showAdvancedControls ? ariaSortFor("started") : undefined}
-                class="text-muted h-11 px-0 text-xs font-medium tracking-wide uppercase"
+                class="text-muted h-11 px-0 text-xs font-medium"
               >
                 {#if showAdvancedControls}
                   <button
                     type="button"
-                    class="text-muted hover:text-primary focus-visible:ring-accent-default/30 inline-flex h-11 w-full items-center gap-1 px-4 text-left text-xs font-medium tracking-wide uppercase transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset"
+                    class="text-muted hover:text-primary focus-visible:ring-accent-default/30 inline-flex h-11 w-full items-center gap-1 px-4 text-left text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset"
                     onclick={() => toggleSort("started")}
                   >
                     {m.flow_run_started()}
@@ -564,12 +562,12 @@
               </Table.Head>
               <Table.Head
                 aria-sort={showAdvancedControls ? ariaSortFor("duration") : undefined}
-                class="text-muted hidden h-11 px-0 text-xs font-medium tracking-wide uppercase lg:table-cell"
+                class="text-muted hidden h-11 px-0 text-xs font-medium lg:table-cell"
               >
                 {#if showAdvancedControls}
                   <button
                     type="button"
-                    class="text-muted hover:text-primary focus-visible:ring-accent-default/30 inline-flex h-11 w-full items-center gap-1 px-4 text-left text-xs font-medium tracking-wide uppercase transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset"
+                    class="text-muted hover:text-primary focus-visible:ring-accent-default/30 inline-flex h-11 w-full items-center gap-1 px-4 text-left text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset"
                     onclick={() => toggleSort("duration")}
                   >
                     {m.duration()}
@@ -586,9 +584,7 @@
                   <span class="block px-4">{m.duration()}</span>
                 {/if}
               </Table.Head>
-              <Table.Head
-                class="text-muted h-11 px-4 text-right text-xs font-medium tracking-wide uppercase"
-              >
+              <Table.Head class="text-muted h-11 px-4 text-right text-xs font-medium">
                 <span class="sr-only">{m.actions()}</span>
               </Table.Head>
             </Table.Row>

@@ -36,11 +36,18 @@
       <Tooltip.Provider delayDuration={150}>
         <Tooltip.Root>
           <Tooltip.Trigger>
+            <!-- The full identifier is support material, not something a
+                 municipal user reads: a 36-character UUID dominated a row of
+                 human facts. The short form identifies the run at a glance and
+                 the tooltip carries the whole value. -->
             <Badge variant="outline" class="font-mono text-xs">
-              {m.flow_run_evidence_trace_id()}: {traceId}
+              {m.flow_run_evidence_trace_id()}: {traceId.slice(0, 8)}…
             </Badge>
           </Tooltip.Trigger>
-          <Tooltip.Content>{m.flow_run_evidence_trace_id_tooltip()}</Tooltip.Content>
+          <Tooltip.Content class="max-w-xs">
+            <span class="block">{m.flow_run_evidence_trace_id_tooltip()}</span>
+            <span class="mt-1 block font-mono break-all">{traceId}</span>
+          </Tooltip.Content>
         </Tooltip.Root>
       </Tooltip.Provider>
     {/if}
