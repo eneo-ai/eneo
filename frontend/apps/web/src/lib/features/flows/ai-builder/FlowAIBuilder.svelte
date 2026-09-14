@@ -431,9 +431,17 @@
     const root = builderRootEl;
     if (!root) return;
     if (change.closedEditing !== null) {
-      const origin = [...root.querySelectorAll<HTMLElement>("[data-edit-question]")].find(
-        (candidate) => candidate.dataset.editQuestion === change.closedEditing
-      );
+      // The control that opened the editor, when it is still on screen; a
+      // question can have more than one (an answer chip and the runtime-fields
+      // button), so the first match is only the fallback.
+      const opened = editOrigin;
+      editOrigin = null;
+      const origin =
+        opened?.isConnected && opened.dataset.editQuestion === change.closedEditing
+          ? opened
+          : [...root.querySelectorAll<HTMLElement>("[data-edit-question]")].find(
+              (candidate) => candidate.dataset.editQuestion === change.closedEditing
+            );
       if (origin) {
         // The row keeps its place on screen whether or not it can take focus
         // yet: a sent answer disables it while the turn runs.
@@ -550,7 +558,11 @@
     await conversationRef?.focusComposer();
   }
 
+  let editOrigin: HTMLElement | null = null;
   function handleEditAnswer(questionId: string) {
+    const active = document.activeElement;
+    editOrigin =
+      active instanceof HTMLElement && active.dataset.editQuestion === questionId ? active : null;
     editingQuestionId = questionId;
     peekPhase = 0;
     service.closeConversation();

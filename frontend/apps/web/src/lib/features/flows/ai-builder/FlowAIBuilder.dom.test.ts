@@ -1964,6 +1964,65 @@ describe("FlowAIBuilder confirm, build and review", () => {
     expect((label as HTMLInputElement).value).toBe("Ort");
   });
 
+  it("returns focus to the runtime-fields button that opened the editor, not the answer chip", async () => {
+    const fieldQuestion = question(
+      "runtime_metadata_field_details",
+      "Vad ska den som kör flödet fylla i?",
+      [{ id: "interpret_input", label: "Använd för att förstå indata" }],
+      { input_field_collection: true }
+    );
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          conversation: [
+            userMessage("u1", "Sammanfatta rapporter"),
+            assistantMessage("a1", "", { question: fieldQuestion }),
+            userMessage("u2", "Ort (ort)", {
+              question_answer: {
+                kind: "structured_question_answer",
+                question_id: "runtime_metadata_field_details",
+                input_fields: [
+                  {
+                    value: {
+                      name: "ort",
+                      label: "Ort",
+                      type: "text",
+                      required: false,
+                      options: []
+                    },
+                    purpose: "interpret_input"
+                  }
+                ]
+              }
+            }),
+            assistantMessage("a2", "", {
+              requirements_summary: {
+                ...SUMMARY,
+                runtime_input_fields: [{ key: "ort", label: "Ort", type: "text", required: false }]
+              }
+            })
+          ]
+        })
+      ]
+    });
+    renderShell({ fetch, stream: makeStream().stream, resumeSessionId: "s-1" });
+    await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
+
+    // Both controls reopen the same question; the lower one is the origin here.
+    const origins = document.querySelectorAll(
+      '[data-edit-question="runtime_metadata_field_details"]'
+    );
+    expect(origins.length).toBeGreaterThan(1);
+    const runtimeButton = button(m.ai_builder_requirements_runtime_fields_change());
+    runtimeButton.focus();
+    await fireEvent.click(runtimeButton);
+    await screen.findByLabelText(m.ai_builder_question_field_label());
+
+    await fireEvent.click(button(m.cancel()));
+    await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
+    await waitFor(() => expect(document.activeElement).toBe(runtimeButton));
+  });
+
   it("edits the content list against the version on screen", async () => {
     const summary = {
       ...SUMMARY,
