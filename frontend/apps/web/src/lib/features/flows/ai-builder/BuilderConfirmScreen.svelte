@@ -97,7 +97,8 @@
       fieldNames: string[],
       addedFieldPlacements?: Record<string, string>
     ) => void;
-    oneditanswer: (questionId: string) => void;
+    /** `origin` is the control that asked, so focus can return to it. */
+    oneditanswer: (questionId: string, origin?: HTMLElement | null) => void;
     /** Reopen an assumption Eneo made: the server answers with its question. */
     onreopenassumption?: (questionId: string) => void;
   }
@@ -186,12 +187,12 @@
     void changeRequestRef?.focusInput();
   }
 
-  function reopenQuestion(questionId: string) {
+  function reopenQuestion(questionId: string, origin: EventTarget | null) {
     changeDrafts.set(changeTopic, changeDraft);
     changeOpen = false;
     changeTopic = null;
     changeDraft = "";
-    oneditanswer(questionId);
+    oneditanswer(questionId, origin instanceof HTMLElement ? origin : null);
   }
 
   // Swedish and English both break on "1 obligatoriska" / "1 fields", and the
@@ -451,7 +452,7 @@
               answer: item.answerLabel
             })}
             data-edit-question={item.questionId}
-            onclick={() => reopenQuestion(item.questionId)}
+            onclick={(event) => reopenQuestion(item.questionId, event.currentTarget)}
             {disabled}
           >
             {#if item.topic}
@@ -625,8 +626,10 @@
                       aria-label={m.ai_builder_confirm_change_row_aria({ topic: decision.topic })}
                       data-edit-question={settledBy ?? undefined}
                       {disabled}
-                      onclick={() =>
-                        settledBy ? reopenQuestion(settledBy) : openChange(decision.topic)}
+                      onclick={(event) =>
+                        settledBy
+                          ? reopenQuestion(settledBy, event.currentTarget)
+                          : openChange(decision.topic)}
                     >
                       {m.ai_builder_question_change()}
                     </Button>
@@ -815,7 +818,7 @@
                   class="ml-auto"
                   data-edit-question={runtimeFieldsQuestionId}
                   {disabled}
-                  onclick={() => reopenQuestion(runtimeFieldsQuestionId)}
+                  onclick={(event) => reopenQuestion(runtimeFieldsQuestionId, event.currentTarget)}
                 >
                   {m.ai_builder_requirements_runtime_fields_change()}
                 </Button>

@@ -2013,8 +2013,10 @@ describe("FlowAIBuilder confirm, build and review", () => {
       '[data-edit-question="runtime_metadata_field_details"]'
     );
     expect(origins.length).toBeGreaterThan(1);
+    // A pointer click: not every browser focuses a button on click, so the
+    // origin must travel with the callback rather than be read from focus.
     const runtimeButton = button(m.ai_builder_requirements_runtime_fields_change());
-    runtimeButton.focus();
+    expect(document.activeElement).not.toBe(runtimeButton);
     await fireEvent.click(runtimeButton);
     await screen.findByLabelText(m.ai_builder_question_field_label());
 

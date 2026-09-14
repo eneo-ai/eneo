@@ -558,11 +558,15 @@
     await conversationRef?.focusComposer();
   }
 
+  // The control that opened the editor. Passed by the screen, since a pointer
+  // click does not focus a button in every browser; the focused element is
+  // the fallback for callers that cannot pass it (the conversation).
   let editOrigin: HTMLElement | null = null;
-  function handleEditAnswer(questionId: string) {
+  function handleEditAnswer(questionId: string, origin?: HTMLElement | null) {
     const active = document.activeElement;
     editOrigin =
-      active instanceof HTMLElement && active.dataset.editQuestion === questionId ? active : null;
+      origin ??
+      (active instanceof HTMLElement && active.dataset.editQuestion === questionId ? active : null);
     editingQuestionId = questionId;
     peekPhase = 0;
     service.closeConversation();
