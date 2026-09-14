@@ -345,7 +345,6 @@ def validate_scoped_edit_proposal(
             "when the requested change alters the flow structure."
         )
 
-    identity_fields = {"kind", "existing_step_ref"}
     current_refs = set(current_step_refs)
     submitted_refs: set[str] = set()
     for step in proposal.steps:
@@ -374,7 +373,7 @@ def validate_scoped_edit_proposal(
                 )
         if step.existing_step_ref == target_ref:
             continue
-        authored_fields = sorted(step.model_fields_set - identity_fields)
+        authored_fields = sorted(step.authored_fields)
         if authored_fields:
             return (
                 f"Step `{step.existing_step_ref}` changed even though the user "
@@ -384,16 +383,14 @@ def validate_scoped_edit_proposal(
     if saved_step_revision and any(
         step.kind == "modify"
         and step.existing_step_ref == target_ref
-        and not step.model_fields_set - identity_fields
+        and not step.authored_fields
         for step in proposal.steps
     ):
-        # An identity-only target would compile as the saved step and then be
-        # normalized: whatever the normalizers changed would read as the
-        # model's edit. Only an authored change is one.
+        # Cheap syntactic refusal; the compiler still judges whether the
+        # authored fields change anything (a repeated saved value does not).
         return (
             f"The selected step `{target_ref}` was submitted without changes. "
-            "Give the fields of that step that change, or say in plan_rationale "
-            "why nothing should change."
+            "Give the fields of that step that change."
         )
     return None
 

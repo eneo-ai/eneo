@@ -5150,6 +5150,61 @@ async def test_saved_step_identity_only_target_is_refused_before_normalization()
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "echo",
+    [
+        {"name": "Skriv beslutsdokument"},
+        {
+            "assistant_spec": {
+                "instructions": (
+                    "Skriv det kompletta beslutsdokumentet som ska renderas till PDF."
+                )
+            }
+        },
+    ],
+    ids=["same_name", "same_instructions"],
+)
+async def test_saved_step_target_echoing_its_saved_value_is_not_a_change(echo):
+    """A field the model sends with the saved value is presence, not
+    authorship. The compiler protects the target when its compiled form equals
+    the saved one, so the artifact normalizer cannot rename and prefix it into
+    an approvable edit; the guard then reports the target unchanged."""
+
+    flow, snapshots, catalog = _pdf_body_saved_flow()
+    context = ResolvedAIBuilderEditContext(
+        request=AIBuilderSavedFlowStepEditContext(flow_step_id=flow.steps[2].id),
+        scope="step",
+        target_existing_step_ref="existing_step_3",
+    )
+    prior = _prior_spec_for_revision(
+        context=context,
+        prior_plan=None,
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=catalog,
+    )
+    assert prior is not None
+
+    result = await _process(
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=catalog,
+        plan_edit_context=context,
+        prior_spec_for_revision=prior,
+        arguments={
+            "plan_rationale": "Samma som förut.",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": "existing_step_3", **echo}
+            ],
+        },
+    )
+
+    assert isinstance(result, CorrectableFailure), result
+    assert "was unchanged" in result.feedback
+    assert "Förbered" not in result.feedback
+
+
+@pytest.mark.asyncio
 async def test_saved_step_fragment_keeps_an_untouched_speaker_mapping_step():
     """speaker_mapping is the other persisted mode no derivation produces.
 

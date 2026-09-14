@@ -550,7 +550,7 @@ def _validate_saved_step_consumers(
     if not any(
         step.kind == "modify"
         and step.existing_step_ref == target_ref
-        and step.model_fields_set - {"kind", "existing_step_ref"}
+        and step.authored_fields
         for step in proposal.steps
     ):
         return None

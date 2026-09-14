@@ -622,6 +622,18 @@ class ModifyExistingStep(BaseModel):
 
     kind: Literal["modify"] = "modify"
     existing_step_ref: str
+
+    @property
+    def authored_fields(self) -> frozenset[str]:
+        """The fields the model set beyond the step's identity.
+
+        Empty for a keep entry or a saved step a fragment left out. Presence
+        of a field is authorship of the payload, not proof of a change: the
+        edit compiler decides whether the compiled step differs.
+        """
+
+        return frozenset(self.model_fields_set - {"kind", "existing_step_ref"})
+
     name: str | None = None
     assistant_spec: AssistantSpecPatch | None = None
     input_source: InputSource | None = None

@@ -638,7 +638,6 @@ def validate_review_edit_proposal(
                 "stay."
             )
 
-    identity_fields = {"kind", "existing_step_ref"}
     for step in proposal.steps:
         if step.kind == "add":
             if not scope.may_add:
@@ -647,7 +646,7 @@ def validate_review_edit_proposal(
                     "the selected steps instead."
                 )
             continue
-        authored = sorted(step.model_fields_set - identity_fields)
+        authored = sorted(step.authored_fields)
         if authored and step.existing_step_ref not in scope.step_refs:
             return (
                 f"Step `{step.existing_step_ref}` changed even though the "

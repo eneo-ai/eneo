@@ -276,9 +276,6 @@ def apply_existing_step_patch(
     return strip_inapplicable_completion_model(existing.model_copy(update=updates))
 
 
-_MODIFY_IDENTITY_FIELDS = frozenset({"kind", "existing_step_ref"})
-
-
 def _compile_existing_step_modification(
     existing: StepSpec,
     patch: ModifyExistingStep,
@@ -286,7 +283,7 @@ def _compile_existing_step_modification(
     prior_steps: list[StepSpec],
     ui_language: str | None,
 ) -> StepSpec:
-    fields = patch.model_fields_set - _MODIFY_IDENTITY_FIELDS
+    fields = patch.authored_fields
     if not fields:
         # A keep entry, or a saved step the fragment left out: nothing is
         # authored, so nothing is derived. The step stays as the base holds it.

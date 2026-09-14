@@ -123,9 +123,31 @@ class EditMutationScope:
     """
 
     protected_steps: Mapping[str, StepSpec]
+    # Every saved step by ref, the baseline a compiled step is judged against.
+    saved_steps: Mapping[str, StepSpec]
 
     def is_protected(self, step: StepSpec) -> bool:
         return step.existing_step_ref in self.protected_steps
+
+    def protecting_unchanged(self, compiled_steps: list[StepSpec]) -> EditMutationScope:
+        """Also protect every authored step whose compiled form equals the
+        saved one: a repeated saved value is not a change, and the
+        normalizers must not turn it into one."""
+
+        unchanged = {
+            step.existing_step_ref: prior
+            for step in compiled_steps
+            if step.existing_step_ref is not None
+            and not self.is_protected(step)
+            and (prior := self.saved_steps.get(step.existing_step_ref)) is not None
+            and _authoring_payload(step) == _authoring_payload(prior)
+        }
+        if not unchanged:
+            return self
+        return EditMutationScope(
+            protected_steps={**self.protected_steps, **unchanged},
+            saved_steps=self.saved_steps,
+        )
 
     def restore(self, spec: FlowDraftSpecCore) -> FlowDraftSpecCore:
         steps = [
@@ -259,6 +281,8 @@ def compile_edit_proposal(
     compiled_steps = compiled_spec.steps
 
     compiled_steps = _canonicalize_existing_runtime_aliases(compiled_steps)
+    if mutation_scope is not None:
+        mutation_scope = mutation_scope.protecting_unchanged(compiled_steps)
     inherited_template_bindings = _inherited_template_bindings(
         current_steps,
         existing_order_to_plan_ref=_existing_order_to_plan_ref(compiled_steps),
@@ -400,9 +424,6 @@ def compile_edit_proposal(
     )
 
 
-_MODIFY_IDENTITY_FIELDS = frozenset({"kind", "existing_step_ref"})
-
-
 def _expand_saved_step_proposal(
     proposal: OrderedEditProposal,
     *,
@@ -443,18 +464,23 @@ def _expand_saved_step_proposal(
         }
     )
     authored_refs = {
-        step.existing_step_ref
-        for step in modifications
-        if step.model_fields_set - _MODIFY_IDENTITY_FIELDS
+        step.existing_step_ref for step in modifications if step.authored_fields
+    }
+    saved_steps = {
+        step.existing_step_ref: step
+        for step in revision_spec.steps
+        if step.existing_step_ref is not None
     }
     return expanded, EditMutationScope(
         protected_steps={
-            step.existing_step_ref: step
-            for step in revision_spec.steps
-            if step.existing_step_ref is not None
-            and step.existing_step_ref not in authored_refs
-        }
+            ref: step for ref, step in saved_steps.items() if ref not in authored_refs
+        },
+        saved_steps=saved_steps,
     )
+
+
+def _authoring_payload(step: StepSpec) -> dict[str, Any]:
+    return step.model_dump(mode="json", exclude={"plan_step_ref"})
 
 
 def _prepare_ordered_edit_proposal(

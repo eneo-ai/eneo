@@ -12,8 +12,8 @@ The exact flow behind eneo-qmo: `38d59091-0054-47a0-9bf6-e8b0a27e23a1` in space
 third step "Skriv beslutsdokument" writes the document the PDF step renders. Five saved-step
 edit sessions, each a new session on the same flow with `edit_context {kind: saved_flow_step}`
 on step 1 and the same Swedish message asking the step to always list the missing information
-as a bullet list. Script stdout: `live-edit-38d59091-4c5fee24d.log`; per-plan facts and telemetry in
-`sessions-4c5fee24d.json` (the `d5e70b830` run: `live-edit-38d59091-d5e70b830.log`, `sessions.json`).
+as a bullet list. Per-plan facts and telemetry in `sessions-4c5fee24d.json` (the `d5e70b830` run: `sessions.json`);
+the probe's stdout is not tracked.
 
 ## Before
 
