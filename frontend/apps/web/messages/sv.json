@@ -4525,7 +4525,7 @@
   "ai_builder_requirements_change_message": "Jag vill ändra: {feedback}",
   "ai_builder_requirements_change_message_scoped": "För {topic} vill jag ändra följande: {feedback}",
   "ai_builder_requirements_change_message_empty": "Jag vill justera kraven.",
-  "ai_builder_requirements_decisions_derived": "Val som Eneo har gjort åt dig",
+  "ai_builder_requirements_decisions_derived": "Vad som är bestämt",
   "ai_builder_requirements_answered": "Ditt svar",
   "ai_builder_confirm_change_row_aria": "Ändra {topic}",
   "ai_builder_question_evidence": "Du skrev ”{quote}”.",

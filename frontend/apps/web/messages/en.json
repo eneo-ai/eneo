@@ -4525,7 +4525,7 @@
   "ai_builder_requirements_change_message": "I want to change: {feedback}",
   "ai_builder_requirements_change_message_scoped": "For {topic} I want to change the following: {feedback}",
   "ai_builder_requirements_change_message_empty": "I want to revise the requirements.",
-  "ai_builder_requirements_decisions_derived": "Choices Eneo made for you",
+  "ai_builder_requirements_decisions_derived": "What has been decided",
   "ai_builder_requirements_answered": "Your answer",
   "ai_builder_confirm_change_row_aria": "Change {topic}",
   "ai_builder_question_evidence": "You wrote “{quote}”.",
