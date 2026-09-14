@@ -28,6 +28,7 @@ from eneo.flows.ai_builder.ai_builder_flow_review import (
     resolve_suggestion_evidence,
 )
 from eneo.flows.domain.flow import FlowStep
+from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
 
 
 def _step(*, flow_id: UUID, tenant_id: UUID, assistant_id: UUID, text: str) -> FlowStep:
@@ -128,6 +129,24 @@ async def test_an_identical_republish_keeps_the_cohort_and_a_changed_one_exclude
         assert [f.finding_id for f in again.facts] == [
             f.finding_id for f in first.facts
         ]
+        # The lookup answers only for the candidate versions it is handed,
+        # so its work is bounded by the runs in hand, not by publish history.
+        versions = FlowVersionRepository(session)
+        assert await versions.versions_with_checksum(
+            flow_id=flow_id,
+            tenant_id=admin_user.tenant_id,
+            definition_checksum=again.definition_checksum,
+            versions={1},
+        ) == {1}
+        assert (
+            await versions.versions_with_checksum(
+                flow_id=flow_id,
+                tenant_id=admin_user.tenant_id,
+                definition_checksum=again.definition_checksum,
+                versions=set(),
+            )
+            == frozenset()
+        )
 
         # An investigation of a suggestion judged before the republish still
         # resolves, and its pinned run is read as a run of this definition

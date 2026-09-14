@@ -419,9 +419,13 @@ async def test_packet_reads_only_viewable_runs_of_the_published_definition_and_r
     assert (packet.flow_version, packet.definition_checksum) == (3, "sum-3")
     assert [step.label for step in packet.steps] == ["Sammanfatta"]
     assert [fact.kind for fact in packet.facts] == ["evidence_completeness"]
-    # Content identity is one bounded read of version numbers, never per run.
+    # Content identity is one read keyed by the window's own version numbers,
+    # never per run and never over the flow's whole publish history.
     service.flow_version_repo.versions_with_checksum.assert_awaited_once_with(
-        flow_id=flow_id, tenant_id=user.tenant_id, definition_checksum="sum-3"
+        flow_id=flow_id,
+        tenant_id=user.tenant_id,
+        definition_checksum="sum-3",
+        versions={3, 2, 1},
     )
     # Only the runs the packet read are fetched, and only their metadata.
     flow_run_repo.list_step_result_metrics.assert_awaited_once_with(
@@ -1184,7 +1188,10 @@ async def test_sample_run_levels_skip_runs_that_are_gone_or_not_viewable(user):
     )
     assert levels == {viewable: 2, republished: 2}
     service.flow_version_repo.versions_with_checksum.assert_awaited_once_with(
-        flow_id=flow_id, tenant_id=user.tenant_id, definition_checksum="sum-3"
+        flow_id=flow_id,
+        tenant_id=user.tenant_id,
+        definition_checksum="sum-3",
+        versions={3, 1},
     )
     # A run of another definition is not quietly left out: it is refused.
     with pytest.raises(AIBuilderBadRequestException) as refused:
@@ -1296,6 +1303,54 @@ async def test_an_explicit_suggestion_reference_is_refused_when_stale_but_an_inh
     )
     assert evidence is not None and len(evidence.suggestions) == 1
     assert evidence.evidence_classification_level == 2
+
+
+@pytest.mark.asyncio
+async def test_a_changed_definition_drops_an_inherited_suggestion_before_any_run_is_read(
+    user,
+):
+    """With the audit hook present the turn would read the pinned runs, and
+    the reader refuses a run of another definition. An inherited reference
+    is decided on the packet first, so the conversation continues without
+    that evidence and no run of the old definition is audited or read; an
+    explicit reference is refused as the changed definition it is."""
+    from eneo.flows.ai_builder.ai_builder_flow_review import (
+        AIBuilderSuggestionContext,
+        FlowReviewSuggestionFocus,
+    )
+
+    service, review = _builder_service(user, _packet(version=3, checksum="new"))
+    review.build_review_sample = AsyncMock(
+        side_effect=AssertionError("no run of another definition may be read")
+    )
+    audit = AsyncMock()
+    changed = AIBuilderSuggestionContext(
+        flow_version=2,
+        definition_checksum="old",
+        sample_run_ids=[uuid4()],
+        suggestions=[
+            FlowReviewSuggestionFocus(
+                suggestion_kind="duplicated_work", step_orders=[1]
+            )
+        ],
+    )
+    assert (
+        await service._resolve_review_evidence(
+            session=_edit_session(user, review_metadata=changed.to_metadata()),
+            review_context=None,
+            audit=audit,
+        )
+        is None
+    )
+    with pytest.raises(AIBuilderBadRequestException) as refused:
+        await service._resolve_review_evidence(
+            session=_edit_session(user, review_metadata=None),
+            review_context=changed,
+            audit=audit,
+        )
+    assert refused.value.code == AIBuilderErrorCode.REVIEW_STALE
+    assert refused.value.context == {"reviewed_version": 2, "published_version": 3}
+    assert review.build_review_sample.await_count == 0 and audit.await_count == 0
 
 
 def test_a_turn_stored_in_an_older_shape_loads_without_an_offer_to_retry_it():
@@ -1597,7 +1652,7 @@ async def test_an_investigation_reads_the_named_runs_again_under_the_audit(user)
     read_calls: list[dict[str, object]] = []
 
     async def _build_review_sample(
-        *, flow_id, space_id, audit, run_ids=None, step_orders=None
+        *, flow_id, space_id, audit, run_ids=None, step_orders=None, packet=None
     ):
         read_calls.append(
             {"run_ids": list(run_ids or []), "audit": audit, "step_orders": step_orders}

@@ -75,6 +75,7 @@ from eneo.flows.ai_builder.ai_builder_flow_review import (
     AIBuilderSuggestionContext,
     FlowReviewEvidence,
     ReviewSampleAudit,
+    require_same_definition,
     resolve_review_evidence,
     resolve_suggestion_evidence,
 )
@@ -566,10 +567,12 @@ class AIBuilderService:
     ) -> FlowReviewEvidence | None:
         """The findings this turn acts on, rebuilt from the runs.
 
-        A turn that names findings is held to them: a republished flow or an
-        unknown id is a typed refusal. A later turn in the same review inherits
-        the last named findings; if the flow moved on since, the turn simply
-        proceeds without evidence rather than failing a conversation mid-way.
+        A turn that names findings is held to them: a changed definition or
+        an unknown id is a typed refusal. A later turn in the same review
+        inherits the last named findings; if the definition changed since, the
+        turn simply proceeds without evidence, and without reading any run of
+        the old definition, rather than failing a conversation mid-way. An
+        identical republish is neither: the review carries on.
         A suggestion reference is held to the runs it was judged on, and
         those runs are read again now, through ``audit``, so the turn tests
         the suggestions against what the runs say rather than repeating what
@@ -583,6 +586,30 @@ class AIBuilderService:
             return None
         if self.flow_review_service is None:
             raise RuntimeError("AIBuilderFlowReviewService is required for reviews.")
+        packet = await self.flow_review_service.build_packet(
+            flow_id=session.flow_id, space_id=session.space_id
+        )
+
+        def _dropped(refusal: AIBuilderBadRequestException) -> None:
+            if explicit:
+                raise refusal
+            logger.info(
+                "ai_builder.review_evidence_dropped session_id=%s reviewed_version=%s published_version=%s code=%s",
+                session.id,
+                review_context.flow_version,
+                packet.flow_version,
+                refusal.code,
+            )
+
+        # Decided before any run is read: a changed definition refuses an
+        # explicit reference and drops an inherited one. Reading the sample
+        # stays outside the handling below, so an audit or reader failure is
+        # never mistaken for evidence that moved on.
+        try:
+            require_same_definition(packet, review_context)
+        except AIBuilderBadRequestException as refusal:
+            _dropped(refusal)
+            return None
         sample: FlowReviewSample | None = None
         if isinstance(review_context, AIBuilderSuggestionContext) and audit is not None:
             sample = await self.flow_review_service.build_review_sample(
@@ -595,11 +622,7 @@ class AIBuilderService:
                     for focus in review_context.suggestions
                     for step_order in focus.step_orders
                 },
-            )
-            packet = sample.packet
-        else:
-            packet = await self.flow_review_service.build_packet(
-                flow_id=session.flow_id, space_id=session.space_id
+                packet=packet,
             )
         try:
             if isinstance(review_context, AIBuilderSuggestionContext):
@@ -619,15 +642,8 @@ class AIBuilderService:
                     packet, review_context, sample_run_levels=levels, sample=sample
                 )
             return resolve_review_evidence(packet, review_context)
-        except AIBuilderBadRequestException:
-            if explicit:
-                raise
-            logger.info(
-                "ai_builder.review_evidence_dropped session_id=%s reviewed_version=%s published_version=%s",
-                session.id,
-                review_context.flow_version,
-                packet.flow_version,
-            )
+        except AIBuilderBadRequestException as refusal:
+            _dropped(refusal)
             return None
 
     async def send_message(

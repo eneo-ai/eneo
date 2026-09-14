@@ -6922,7 +6922,7 @@
   "ai_builder_review_load_failed": "The runs could not be read right now.",
   "ai_builder_review_unpublished_title": "The flow is not published",
   "ai_builder_review_unpublished_body": "Publish the flow and run it a few times, and there will be runs to review.",
-  "ai_builder_review_no_runs": "The published flow definition has no runs to read yet. Run the flow a few times and come back.",
+  "ai_builder_review_no_runs": "No readable runs of the published flow definition were found among the recent runs. Run the flow a few times and come back.",
   "ai_builder_review_nothing_found": "No anomalies in time, tokens or errors.",
   "ai_builder_review_all_hidden": "All findings are hidden.",
   "ai_builder_review_show_hidden": "Show {count} hidden",

@@ -4082,7 +4082,7 @@ export interface paths {
     put?: never;
     /**
      * Let the planner model judge a published flow's recent runs
-     * @description Reads a bounded sample of recorded prompts, inputs and outputs from a few admitted runs of the published version, together with the review packet, and asks the space's planner model for suggestions it can source in that sample. Every sampled run is audited as an evidence view before it is read; the model must clear the sample's evidence classification level. Nothing is stored.
+     * @description Reads a bounded sample of recorded prompts, inputs and outputs from a few admitted runs of the published definition, together with the review packet, and asks the space's planner model for suggestions it can source in that sample. Every sampled run is audited as an evidence view before it is read; the model must clear the sample's evidence classification level. Nothing is stored.
      */
     post: operations["post_ai_builder_flow_review_suggestions"];
     delete?: never;
@@ -10659,9 +10659,11 @@ export interface components {
     };
     /**
      * AIBuilderReviewContext
-     * @description What a turn says about the review it acts on: the exact reviewed
-     *     version and the findings it names. Ids only; the facts are rebuilt from
-     *     the runs on every turn, so run data never lives in the conversation.
+     * @description What a turn says about the review it acts on: the reviewed definition
+     *     (by checksum, with the version number as provenance) and the findings it
+     *     names. Ids only; the facts are rebuilt from the runs on every turn, so run
+     *     data never lives in the conversation. An identical republish keeps the
+     *     review; a changed definition is refused as review_stale.
      */
     AIBuilderReviewContext: {
       /** Definition Checksum */
@@ -10723,7 +10725,7 @@ export interface components {
     /**
      * AIBuilderSuggestionContext
      * @description What a turn says when it acts on model suggestions: the reviewed
-     *     version, the runs they were judged on, and each suggestion's kind and
+     *     definition, the runs they were judged on, and each suggestion's kind and
      *     steps. No model prose; the runs decide the floor, so a cohort that has
      *     since turned over cannot lower it.
      *
@@ -29847,7 +29849,7 @@ export interface components {
       reasoning_effort?: string | null;
       /**
        * Review Context
-       * @description The flow review this turn acts on: either the reviewed published version with the finding ids it names, or the model suggestions by kind and steps with the runs they were judged on. The facts are rebuilt from the runs on the server; a republished flow is refused as review_stale. For a suggestion the server writes the message text itself; the client's message is not used.
+       * @description The flow review this turn acts on: either the reviewed published definition (its checksum, with the version number as provenance) and the finding ids it names, or the model suggestions by kind and steps with the runs they were judged on. The facts are rebuilt from the runs on the server; a changed definition is refused as review_stale, while an identical republish under a new version number keeps the review. For a suggestion the server writes the message text itself; the client's message is not used.
        */
       review_context?:
         | (

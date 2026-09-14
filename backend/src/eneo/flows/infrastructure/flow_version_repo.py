@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -242,18 +242,28 @@ class FlowVersionRepository:
         return versions_by_ref
 
     async def versions_with_checksum(
-        self, *, flow_id: UUID, tenant_id: UUID, definition_checksum: str
+        self,
+        *,
+        flow_id: UUID,
+        tenant_id: UUID,
+        definition_checksum: str,
+        versions: Collection[int],
     ) -> frozenset[int]:
-        """The flow's version numbers whose persisted definition has this checksum.
+        """Which of ``versions`` persisted a definition with this checksum.
 
-        One read over the flow's own version rows (the primary key leads with
-        flow_id), returning version numbers alone: no historical
-        definition_json is ever loaded to decide content identity.
+        One primary-key read of the named version rows, returning version
+        numbers alone: bounded by the candidates the caller holds rather than
+        by the flow's publish history, and no historical definition_json is
+        ever loaded to decide content identity.
         """
+        candidates = sorted(set(versions))
+        if not candidates:
+            return frozenset()
         stmt = (
             sa.select(FlowVersions.version)
             .where(FlowVersions.flow_id == flow_id)
             .where(FlowVersions.tenant_id == tenant_id)
+            .where(FlowVersions.version.in_(candidates))
             .where(FlowVersions.definition_checksum == definition_checksum)
         )
         return frozenset((await self.session.execute(stmt)).scalars().all())

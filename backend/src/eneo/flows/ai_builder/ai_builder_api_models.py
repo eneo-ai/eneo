@@ -568,11 +568,13 @@ class SendMessageRequest(BaseModel):
         default=None,
         description=(
             "The flow review this turn acts on: either the reviewed published "
-            "version with the finding ids it names, or the model suggestions "
-            "by kind and steps with the runs they were judged on. The facts are "
-            "rebuilt from the runs on the server; a republished flow is refused "
-            "as review_stale. For a suggestion the server writes the message "
-            "text itself; the client's message is not used."
+            "definition (its checksum, with the version number as provenance) "
+            "and the finding ids it names, or the model suggestions by kind "
+            "and steps with the runs they were judged on. The facts are "
+            "rebuilt from the runs on the server; a changed definition is "
+            "refused as review_stale, while an identical republish under a new "
+            "version number keeps the review. For a suggestion the server "
+            "writes the message text itself; the client's message is not used."
         ),
     )
     ui_language: str | None = Field(default=None, max_length=16)

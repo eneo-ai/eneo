@@ -189,9 +189,11 @@ FlowReviewSample.model_rebuild(_types_namespace={"FlowReviewPacket": FlowReviewP
 
 
 class AIBuilderReviewContext(BaseModel):
-    """What a turn says about the review it acts on: the exact reviewed
-    version and the findings it names. Ids only; the facts are rebuilt from
-    the runs on every turn, so run data never lives in the conversation."""
+    """What a turn says about the review it acts on: the reviewed definition
+    (by checksum, with the version number as provenance) and the findings it
+    names. Ids only; the facts are rebuilt from the runs on every turn, so run
+    data never lives in the conversation. An identical republish keeps the
+    review; a changed definition is refused as review_stale."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -246,7 +248,7 @@ class FlowReviewSuggestionFocus(BaseModel):
 
 class AIBuilderSuggestionContext(BaseModel):
     """What a turn says when it acts on model suggestions: the reviewed
-    version, the runs they were judged on, and each suggestion's kind and
+    definition, the runs they were judged on, and each suggestion's kind and
     steps. No model prose; the runs decide the floor, so a cohort that has
     since turned over cannot lower it.
 
@@ -385,7 +387,7 @@ def investigation_message(
     return "Investigate the following based on the runs: " + "; ".join(named) + "."
 
 
-def _require_same_definition(
+def require_same_definition(
     packet: FlowReviewPacket, context: AIBuilderReviewReference
 ) -> None:
     """A review is held to the flow's content, never to its version number.
@@ -439,7 +441,7 @@ def resolve_suggestion_evidence(
     tests the hypotheses against them rather than restating them.
     """
 
-    _require_same_definition(packet, context)
+    require_same_definition(packet, context)
     missing = [
         run_id for run_id in context.sample_run_ids if run_id not in sample_run_levels
     ]
@@ -494,7 +496,7 @@ def resolve_review_evidence(
     The ids are keyed by definition, so an identical republish keeps them; a
     finding absent from the freshly rebuilt evidence is unknown either way.
     """
-    _require_same_definition(packet, context)
+    require_same_definition(packet, context)
     # Completeness describes the evidence; it is never something to act on.
     by_id = {
         fact.finding_id: fact
@@ -1112,7 +1114,12 @@ class FlowReviewVersionRepository(Protocol):
     ) -> FlowVersion: ...
 
     async def versions_with_checksum(
-        self, *, flow_id: UUID, tenant_id: UUID, definition_checksum: str
+        self,
+        *,
+        flow_id: UUID,
+        tenant_id: UUID,
+        definition_checksum: str,
+        versions: Collection[int],
     ) -> frozenset[int]: ...
 
 
@@ -1213,34 +1220,28 @@ class AIBuilderFlowReviewService:
         steps = parse_published_runtime_steps(
             version.definition_json, flow_version=packet.flow_version
         )
-        # The cohort's own selection was admitted by the packet; only named
-        # runs need their definition checked, with the same single read.
-        compatible_versions = (
-            await self._versions_of_definition(
-                flow_id=flow_id, definition_checksum=packet.definition_checksum
-            )
-            if run_ids is not None
-            else None
-        )
         level = packet.evidence_classification_level
         runs: list[ReviewSampleRun] = []
         excerpts: list[ReviewSampleExcerpt] = []
         try:
             async with asyncio.timeout(READ_DEADLINE_SECONDS):
-                selected = (
-                    list(dict.fromkeys(run_ids))
-                    if run_ids is not None
-                    else select_sample_run_ids(packet)
+                selected = await self._viewable_runs(
+                    flow_id=flow_id,
+                    run_ids=(
+                        run_ids
+                        if run_ids is not None
+                        else select_sample_run_ids(packet)
+                    ),
                 )
-                for run_id in selected:
-                    try:
-                        run = await self.evidence_service.get_run(
-                            run_id=run_id, flow_id=flow_id, access_kind="evidence_view"
-                        )
-                    except (NotFoundException, UnauthorizedException):
-                        continue
-                    if compatible_versions is not None:
-                        _require_run_of_definition(run, compatible_versions)
+                # The cohort's own selection was admitted by the packet; only
+                # named runs need their definition checked, before any audit.
+                if run_ids is not None:
+                    await self._require_runs_of_definition(
+                        flow_id=flow_id,
+                        runs=selected,
+                        definition_checksum=packet.definition_checksum,
+                    )
+                for run in selected:
                     if run.evidence_classification_level is None:
                         raise AIBuilderBadRequestException(
                             "A sampled run no longer carries an evidence level.",
@@ -1248,7 +1249,7 @@ class AIBuilderFlowReviewService:
                         )
                     await audit(run)
                     bundle = await self.evidence_service.get_redacted_evidence_bundle(
-                        run_id=run_id, run=run
+                        run_id=run.id, run=run
                     )
                     level = max(level, run.evidence_classification_level)
                     runs.append(
@@ -1296,33 +1297,60 @@ class AIBuilderFlowReviewService:
         `build_review_sample` refuses it.
         """
 
-        compatible_versions = await self._versions_of_definition(
-            flow_id=flow_id, definition_checksum=definition_checksum
+        runs = await self._viewable_runs(flow_id=flow_id, run_ids=run_ids)
+        await self._require_runs_of_definition(
+            flow_id=flow_id, runs=runs, definition_checksum=definition_checksum
         )
-        levels: dict[UUID, int] = {}
-        for run_id in dict.fromkeys(run_ids):
-            try:
-                run = await self.evidence_service.get_run(
-                    run_id=run_id, flow_id=flow_id, access_kind="evidence_view"
-                )
-            except (NotFoundException, UnauthorizedException):
-                continue
-            _require_run_of_definition(run, compatible_versions)
-            if run.evidence_classification_level is None:
-                continue
-            levels[run_id] = run.evidence_classification_level
-        return levels
+        return {
+            run.id: run.evidence_classification_level
+            for run in runs
+            if run.evidence_classification_level is not None
+        }
 
     async def _versions_of_definition(
-        self, *, flow_id: UUID, definition_checksum: str
+        self, *, flow_id: UUID, definition_checksum: str, versions: Collection[int]
     ) -> frozenset[int]:
-        """Every version of the flow that persisted this exact definition: one
-        bounded read of version numbers, never a lookup per run."""
+        """Which of the candidate runs' versions persisted this exact
+        definition: one read keyed by those version numbers, so the work is
+        bounded by the runs in hand, never by the flow's publish history."""
         return await self.flow_version_repo.versions_with_checksum(
             flow_id=flow_id,
             tenant_id=self.user.tenant_id,
             definition_checksum=definition_checksum,
+            versions=versions,
         )
+
+    async def _viewable_runs(
+        self, *, flow_id: UUID, run_ids: Sequence[UUID]
+    ) -> list[FlowRun]:
+        """The named runs the caller may view, in order; a run that is gone
+        or not viewable is left out and never named."""
+        runs: list[FlowRun] = []
+        for run_id in dict.fromkeys(run_ids):
+            try:
+                runs.append(
+                    await self.evidence_service.get_run(
+                        run_id=run_id, flow_id=flow_id, access_kind="evidence_view"
+                    )
+                )
+            except (NotFoundException, UnauthorizedException):
+                continue
+        return runs
+
+    async def _require_runs_of_definition(
+        self, *, flow_id: UUID, runs: Sequence[FlowRun], definition_checksum: str
+    ) -> None:
+        """Every named run must have run the reviewed definition; one lookup
+        over the runs' own versions decides it before any is audited or read."""
+        if not runs:
+            return
+        compatible_versions = await self._versions_of_definition(
+            flow_id=flow_id,
+            definition_checksum=definition_checksum,
+            versions={run.flow_version for run in runs},
+        )
+        for run in runs:
+            _require_run_of_definition(run, compatible_versions)
 
     async def _published(
         self, *, flow_id: UUID, space_id: UUID
@@ -1371,7 +1399,9 @@ class AIBuilderFlowReviewService:
         # exact definition is a run of this flow. The window stays the newest
         # terminal runs; matching history inside it counts.
         compatible_versions = await self._versions_of_definition(
-            flow_id=flow_id, definition_checksum=definition_checksum
+            flow_id=flow_id,
+            definition_checksum=definition_checksum,
+            versions={run.flow_version for run in snapshots},
         )
         completed: list[UUID] = []
         failed: list[UUID] = []

@@ -6922,7 +6922,7 @@
   "ai_builder_review_load_failed": "Körningarna kunde inte läsas just nu.",
   "ai_builder_review_unpublished_title": "Flödet är inte publicerat",
   "ai_builder_review_unpublished_body": "Publicera flödet och kör det några gånger, så finns det körningar att granska.",
-  "ai_builder_review_no_runs": "Den publicerade flödesdefinitionen har inga körningar att läsa ännu. Kör flödet några gånger och kom tillbaka.",
+  "ai_builder_review_no_runs": "Inga läsbara körningar av den publicerade flödesdefinitionen hittades bland de senaste körningarna. Kör flödet några gånger och kom tillbaka.",
   "ai_builder_review_nothing_found": "Inga avvikelser i tid, tokens eller fel.",
   "ai_builder_review_all_hidden": "Alla punkter är dolda.",
   "ai_builder_review_show_hidden": "Visa {count} dolda",
