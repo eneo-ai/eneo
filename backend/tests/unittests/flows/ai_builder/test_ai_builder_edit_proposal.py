@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import (
+    AsyncMock,
+    patch,
+)
 from uuid import uuid4
 
 import jsonschema
@@ -13,7 +16,13 @@ from eneo.flows.ai_builder.ai_builder_architecture_commit import (
 from eneo.flows.ai_builder.ai_builder_create_compile_context import (
     create_compile_context_from_planning_state,
 )
-from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
+from eneo.flows.ai_builder.ai_builder_domain_models import (
+    BuilderPlan,
+    BuilderSession,
+    ConversationMessage,
+    FlowBuilderProposal,
+    TargetKind,
+)
 from eneo.flows.ai_builder.ai_builder_edit_admission import lower_edit_tool_arguments
 from eneo.flows.ai_builder.ai_builder_edit_compiler import _step_field_changes
 from eneo.flows.ai_builder.ai_builder_edit_proposal import process_edit_arguments
@@ -29,6 +38,10 @@ from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
     AIBuilderSavedFlowStepEditContext,
     ResolvedAIBuilderEditContext,
+    resolve_plan_edit_context,
+)
+from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
+    _prior_spec_for_revision,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_capture import (
     REJECTED_PROPOSAL_CAPTURE_DIR_ENV,
@@ -68,6 +81,7 @@ from eneo.flows.assistant_authoring_snapshot import (
     AssistantAuthoringSnapshot,
 )
 from eneo.flows.domain.flow import FlowStep
+from eneo.flows.enums import FlowOutputMode
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FormFieldSpec,
@@ -3857,6 +3871,311 @@ async def test_edit_ignores_an_old_mapping_the_replacement_template_no_longer_ha
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("keep_null", [False, True])
+@pytest.mark.parametrize("concurrent_save", [None, "content", "reorder"])
+@pytest.mark.parametrize("ui_language", ["sv", "en"])
+async def test_saved_step_partial_revision_requires_current_saved_revision(
+    keep_null,
+    concurrent_save,
+    ui_language,
+    monkeypatch,
+    send_lock_release,
+) -> None:
+    flow = _flow(
+        _flow_step(
+            step_order=1,
+            user_description="Analyze source",
+            output_type="json",
+            output_contract={
+                "type": "object",
+                "properties": {"summary": {"type": "string"}},
+            },
+        ),
+        _flow_step(
+            step_order=2, user_description="Review result", input_source="previous_step"
+        ),
+        _flow_step(
+            step_order=3,
+            user_description="Deliver result",
+            input_source="previous_step",
+        ),
+    )
+    flow.id = uuid4()
+    session = BuilderSession(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        space_id=uuid4(),
+        target_kind=TargetKind.EDIT,
+        flow_id=flow.id,
+    )
+    snapshots = {
+        flow.steps[0].assistant_id: AssistantAuthoringSnapshot(
+            instructions="Saved instructions"
+        )
+    }
+    keep_steps = [
+        {"kind": "keep", "existing_step_ref": f"existing_step_{n}"} for n in (2, 3)
+    ]
+    catalog = build_ai_builder_resource_catalog(
+        available_models=None, available_kbs=None
+    )
+    context, _ = await resolve_plan_edit_context(
+        repo=SimpleNamespace(),
+        tenant_id=session.tenant_id,
+        session=session,
+        flow=flow,
+        context=AIBuilderSavedFlowStepEditContext(flow_step_id=flow.steps[0].id),
+    )
+    prior = _prior_spec_for_revision(
+        context=context,
+        prior_plan=None,
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=catalog,
+    )
+    first = await _process(
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=catalog,
+        plan_edit_context=context,
+        prior_spec_for_revision=prior,
+        arguments={
+            "plan_rationale": "Improve the selected step.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "assistant_spec": {"instructions": "Improved instructions"},
+                },
+                *keep_steps,
+            ],
+        },
+    )
+    assert isinstance(first, ProposalReady), first
+    plan = BuilderPlan(
+        id=uuid4(),
+        session_id=session.id,
+        tenant_id=session.tenant_id,
+        proposal=FlowBuilderProposal(content=first.compiled.content),
+    )
+    assert plan.proposal.content.edit is not None
+    assert plan.proposal.content.edit.base_flow_revision == 7
+    session.latest_plan_id = plan.id
+    if concurrent_save:
+        from eneo.flows.ai_builder.ai_builder_domain_models import SessionStatus
+        from tests.unittests.flows.ai_builder.test_ai_builder_planner import (
+            _budget_policy,
+            _make_planner,
+            _route,
+        )
+
+        flow.draft_revision = 8
+        if concurrent_save == "reorder":
+            flow.steps[0].step_order, flow.steps[1].step_order = 2, 1
+            flow.steps.sort(key=lambda step: step.step_order)
+            assert flow.steps[0].user_description == "Review result"
+        else:
+            flow.steps[1].user_description = "New saved review"
+        saved_steps = [step.model_dump(mode="json") for step in flow.steps]
+        retained_proposal = plan.model_dump(mode="json")
+        planner = _make_planner()
+        planner.user.tenant_id = session.tenant_id
+        planner.repo.get_session.return_value = session
+        planner.repo.get_plan.return_value = plan
+        planner.repo.load_planning_state.return_value = PlanningState.empty()
+        session.status = SessionStatus.AWAITING_APPROVAL
+        prepare = AsyncMock(
+            side_effect=AssertionError("Stale revision reached request preparation")
+        )
+        monkeypatch.setattr(
+            "eneo.flows.ai_builder.ai_builder_planner.prepare_planner_request", prepare
+        )
+        expected = (
+            "Flödet har ändrats sedan det här förslaget skapades. Välj steget igen i det aktuella flödet för att fortsätta."
+            if ui_language == "sv"
+            else "The flow has changed since this proposal was created. Select the step again in the current flow to continue."
+        )
+        for _ in range(2):
+            client_turn_id = uuid4()
+            events = [
+                event
+                async for event in planner.send_message(
+                    session_id=session.id,
+                    client_turn_id=client_turn_id,
+                    request_fingerprint="a" * 64,
+                    request_snapshot={
+                        "client_turn_id": str(client_turn_id),
+                        "message": "Improve the output fields",
+                    },
+                    message="Improve the output fields",
+                    edit_context=AIBuilderPlanEditContext(
+                        scope="step", plan_id=plan.id, target_plan_step_ref="step_a"
+                    ),
+                    ui_language=ui_language,
+                    completion_model_route=_route(),
+                    flow=flow,
+                    assistant_snapshots=snapshots,
+                    max_input_tokens=100_000,
+                    max_output_tokens=4096,
+                    budget_policy=_budget_policy(),
+                )
+            ]
+            assert [event.data.text for event in events if event.event == "text"] == [
+                expected
+            ]
+            assert events[-1].event == "done"
+        prepare.assert_not_awaited()
+        assert planner.litellm_client.mock_calls == []
+        assert (
+            planner.repo.restore_awaiting_approval_after_answered_turn.await_count == 2
+        )
+        assert planner.repo.complete_session_turn.await_count == 2
+        assert len(send_lock_release.released_leases) == 2
+        committed = planner.repo.commit_turn.await_args.kwargs["new_messages"]
+        assert committed[-1].content == expected
+        assert committed[-1].tool_calls is None
+        assert session.latest_plan_id == plan.id
+        assert plan.model_dump(mode="json") == retained_proposal
+        assert [step.model_dump(mode="json") for step in flow.steps] == saved_steps
+        return
+    context, prior_plan = await resolve_plan_edit_context(
+        repo=SimpleNamespace(get_plan=AsyncMock(return_value=plan)),
+        tenant_id=session.tenant_id,
+        session=session,
+        flow=flow,
+        context=AIBuilderPlanEditContext(
+            scope="step", plan_id=plan.id, target_plan_step_ref="step_a"
+        ),
+    )
+    prior = _prior_spec_for_revision(
+        context=context,
+        prior_plan=prior_plan,
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=catalog,
+    )
+    patch_fields = {"assistant_spec": None} if keep_null else {}
+    second = await _process(
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=catalog,
+        plan_edit_context=context,
+        prior_spec_for_revision=prior,
+        arguments={
+            "plan_rationale": "Improve the selected step.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "output_fields": [
+                        {
+                            "name": "summary",
+                            "field_type": "string",
+                            "description": "Grounded summary",
+                        }
+                    ],
+                    **patch_fields,
+                },
+                *keep_steps,
+            ],
+        },
+    )
+    assert isinstance(second, ProposalReady), second
+    assert (
+        second.compiled.content.spec.steps[1:] == first.compiled.content.spec.steps[1:]
+    )
+    assert (
+        second.compiled.content.spec.steps[0].assistant_spec.instructions
+        == "Improved instructions"
+    )
+    assert second.compiled.content.spec.steps[0].output_contract is not None
+    assert second.compiled.content.edit is not None
+    assert second.compiled.content.edit.base_flow_revision == 7
+    changes = second.compiled.content.edit.diff.step_changes[0].model_dump(mode="json")
+    assert "instructions" in str(changes)
+    assert "output_contract" in str(changes)
+
+
+@pytest.mark.asyncio
+async def test_saved_step_preserves_consumer_with_numeric_runtime_aliases() -> None:
+    contract = {"type": "object", "properties": {"summary": {"type": "string"}}}
+    flow = _flow(
+        _flow_step(
+            step_order=1,
+            user_description="Analyze",
+            output_type="json",
+            output_contract=contract,
+        ),
+        _flow_step(
+            step_order=2,
+            user_description="Write",
+            input_source="previous_step",
+            input_bindings={
+                "source_refs": [
+                    {
+                        "step_ref": "step_1",
+                        "output": "structured",
+                        "field_path": "summary",
+                    }
+                ]
+            },
+        ),
+    )
+    snapshots = {
+        flow.steps[0].assistant_id: AssistantAuthoringSnapshot(
+            instructions="Saved analysis"
+        ),
+        flow.steps[1].assistant_id: AssistantAuthoringSnapshot(
+            instructions="Write {{ step_1.output.structured.summary }}"
+        ),
+    }
+    context = ResolvedAIBuilderEditContext(
+        request=AIBuilderSavedFlowStepEditContext(flow_step_id=flow.steps[0].id),
+        scope="step",
+        target_existing_step_ref="existing_step_1",
+    )
+    catalog = build_ai_builder_resource_catalog(
+        available_models=None, available_kbs=None
+    )
+    prior = _prior_spec_for_revision(
+        context=context,
+        prior_plan=None,
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=catalog,
+    )
+    result = await _process(
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=catalog,
+        plan_edit_context=context,
+        prior_spec_for_revision=prior,
+        arguments={
+            "plan_rationale": "Clarify analysis.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "assistant_spec": {"instructions": "Improved analysis"},
+                },
+                {"kind": "keep", "existing_step_ref": "existing_step_2"},
+            ],
+        },
+    )
+    assert isinstance(result, ProposalReady), result
+    consumer = result.compiled.content.spec.steps[1]
+    assert (
+        consumer.assistant_spec.instructions
+        == "Write {{ step_a.output.structured.summary }}"
+    )
+    assert consumer.input_bindings == {
+        "source_refs": [
+            {"step_ref": "step_a", "output": "structured", "field_path": "summary"}
+        ]
+    }
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "authored",
     [
@@ -4151,53 +4470,6 @@ async def test_saved_step_incompatible_consumer_returns_repair(
     assert prior.steps[1].model_dump(mode="json") == before
 
 
-@pytest.mark.parametrize("field_name", ["summary", "different"])
-@pytest.mark.asyncio
-async def test_saved_step_implicit_json_consumer_contract_is_preserved(field_name):
-    from eneo.flows.ai_builder.ai_builder_validator import validate_spec
-
-    flow, snapshots, catalog, context, prior = _saved_step_consumer_fixture("implicit")
-    assert prior is not None
-    assert validate_spec(prior).valid
-    proposed = prior.model_copy(deep=True)
-    proposed.steps[0].output_contract = {
-        "type": "object",
-        "properties": {field_name: {"type": "string"}},
-        "required": [field_name],
-    }
-    validation = validate_spec(proposed)
-    assert validation.valid is (field_name == "summary"), validation.errors
-    result = await _process(
-        flow=flow,
-        assistant_snapshots=snapshots,
-        resource_catalog=catalog,
-        plan_edit_context=context,
-        prior_spec_for_revision=prior,
-        arguments={
-            "plan_rationale": "Revise the result schema.",
-            "steps": [
-                {
-                    "kind": "modify",
-                    "existing_step_ref": "existing_step_1",
-                    "output_fields": [
-                        {
-                            "name": field_name,
-                            "field_type": "string",
-                            "description": "Result summary",
-                        }
-                    ],
-                },
-                {"kind": "keep", "existing_step_ref": "existing_step_2"},
-            ],
-        },
-    )
-    if field_name == "summary":
-        assert isinstance(result, ProposalReady), result
-    else:
-        assert isinstance(result, CorrectableFailure), result
-        assert "input_contract_type_mismatch" in result.codes
-
-
 @pytest.mark.parametrize("consumer_kind", ["instructions", "output_config"])
 def test_reference_validator_skips_missing_contract_for_prose_only_consumer(
     consumer_kind,
@@ -4352,3 +4624,50 @@ async def test_keep_composer_mode_change_at_approval_boundary(scoped):
             and field.current == "pass_through"
             for field in fields
         )
+
+
+@pytest.mark.parametrize("field_name", ["summary", "different"])
+@pytest.mark.asyncio
+async def test_saved_step_implicit_json_consumer_contract_is_preserved(field_name):
+    from eneo.flows.ai_builder.ai_builder_validator import validate_spec
+
+    flow, snapshots, catalog, context, prior = _saved_step_consumer_fixture("implicit")
+    assert prior is not None
+    assert validate_spec(prior).valid
+    proposed = prior.model_copy(deep=True)
+    proposed.steps[0].output_contract = {
+        "type": "object",
+        "properties": {field_name: {"type": "string"}},
+        "required": [field_name],
+    }
+    validation = validate_spec(proposed)
+    assert validation.valid is (field_name == "summary"), validation.errors
+    result = await _process(
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=catalog,
+        plan_edit_context=context,
+        prior_spec_for_revision=prior,
+        arguments={
+            "plan_rationale": "Revise the result schema.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "output_fields": [
+                        {
+                            "name": field_name,
+                            "field_type": "string",
+                            "description": "Result summary",
+                        }
+                    ],
+                },
+                {"kind": "keep", "existing_step_ref": "existing_step_2"},
+            ],
+        },
+    )
+    if field_name == "summary":
+        assert isinstance(result, ProposalReady), result
+    else:
+        assert isinstance(result, CorrectableFailure), result
+        assert "input_contract_type_mismatch" in result.codes
