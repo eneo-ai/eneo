@@ -317,6 +317,83 @@ describe("describeFailure", () => {
     ).toBe("retry_same_turn_acknowledged");
   });
 
+  it("puts a named template problem and its one fix in front of the user", () => {
+    const refused = error({
+      code: "architecture_materialization_failed",
+      category: "bad_request",
+      phase: "proposal",
+      details: {
+        failure_code: "template_attachment_selection_invalid",
+        architecture_repair_disposition: "user_action"
+      }
+    });
+    const shown = present({
+      error: refused,
+      latestTurn: null,
+      capabilities: committed,
+      context: generation
+    });
+    expect(shown.kind).toBe("other");
+    expect(shown.consequence).toContain(
+      m.ai_builder_failure_problem_template_attachment_selection_invalid()
+    );
+    expect(shown.consequence).not.toContain(refused.message);
+    expect(shown.primary).toEqual({
+      kind: "clarify",
+      label: m.ai_builder_failure_problem_action_select_docx_template(),
+      records: "conversation_opened"
+    });
+    expect(shown.secondary).toBeNull();
+
+    const unresolved = present({
+      error: error({
+        code: "architecture_materialization_failed",
+        details: {
+          failure_code: "template_placeholder_unresolved",
+          unresolved_placeholders: "diarienummer, handläggare"
+        }
+      }),
+      latestTurn: null,
+      capabilities: committed,
+      context: generation
+    });
+    expect(unresolved.consequence).toContain("diarienummer, handläggare");
+    expect(unresolved.primary?.label).toBe(
+      m.ai_builder_failure_problem_action_describe_template_fields()
+    );
+  });
+
+  it("keeps the named problem's words on the chat surface but only that surface's action", () => {
+    const shown = present({
+      error: error({
+        code: "architecture_materialization_failed",
+        details: { failure_code: "template_attachment_unreadable" }
+      }),
+      latestTurn: null,
+      capabilities: committed,
+      context: chat
+    });
+    expect(shown.consequence).toContain(
+      m.ai_builder_failure_problem_template_attachment_unreadable()
+    );
+    expect(shown.primary?.kind).toBe("dismiss");
+  });
+
+  it("falls back to the generic words when the reason is not one the user can act on", () => {
+    const shown = present({
+      error: error({
+        code: "architecture_materialization_failed",
+        message: "Servern kunde inte bygga flödet.",
+        details: { failure_code: "scoped_edit_preservation_failed" }
+      }),
+      latestTurn: null,
+      capabilities: committed,
+      context: generation
+    });
+    expect(shown.consequence).toContain("Servern kunde inte bygga flödet.");
+    expect(shown.primary?.kind).toBe("retry_new_turn");
+  });
+
   it("keeps the question refusals and the standing start-over offer in the user's terms", () => {
     const refusal = present({
       error: error({

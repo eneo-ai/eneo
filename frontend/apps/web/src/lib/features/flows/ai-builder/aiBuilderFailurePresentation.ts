@@ -77,6 +77,60 @@ const INVALID_PROPOSAL_CODES: ReadonlySet<string> = new Set([
   "self_correction_quality_failure"
 ]);
 
+/** A refusal whose details name the problem the user can act on: the server's
+ *  typed reason (`details.failure_code`, set by the architecture producer at
+ *  the raise site) selects the words and the one matching next step. Display
+ *  text is never parsed. Absent a known reason the generic copy stands. */
+interface ActionableProblem {
+  cause: string;
+  actionLabel: string;
+}
+
+function actionableProblem(error: AIBuilderError): ActionableProblem | null {
+  const reason = error.details.failure_code;
+  if (typeof reason !== "string") return null;
+  switch (reason) {
+    case "template_attachment_selection_invalid":
+      return {
+        cause: m.ai_builder_failure_problem_template_attachment_selection_invalid(),
+        actionLabel: m.ai_builder_failure_problem_action_select_docx_template()
+      };
+    case "template_attachment_unreadable":
+    case "template_placeholder_path_invalid":
+      return {
+        cause:
+          reason === "template_attachment_unreadable"
+            ? m.ai_builder_failure_problem_template_attachment_unreadable()
+            : m.ai_builder_failure_problem_template_placeholder_path_invalid(),
+        actionLabel: m.ai_builder_failure_problem_action_replace_docx_template()
+      };
+    case "template_placeholder_unresolved": {
+      const placeholders = error.details.unresolved_placeholders;
+      return {
+        cause:
+          typeof placeholders === "string" && placeholders.trim()
+            ? m.ai_builder_failure_problem_template_placeholder_unresolved_named({
+                placeholders
+              })
+            : m.ai_builder_failure_problem_template_placeholder_unresolved(),
+        actionLabel: m.ai_builder_failure_problem_action_describe_template_fields()
+      };
+    }
+    case "template_binding_dependency_broken":
+      return {
+        cause: m.ai_builder_failure_problem_template_binding_dependency_broken(),
+        actionLabel: m.ai_builder_failure_problem_action_clarify_change()
+      };
+    case "template_fill_position_invalid":
+      return {
+        cause: m.ai_builder_failure_problem_template_fill_position_invalid(),
+        actionLabel: m.ai_builder_failure_action_clarify()
+      };
+    default:
+      return null;
+  }
+}
+
 /** Which public failure the user is looking at, in the closed vocabulary the
  *  observation persists. The turn state outranks the payload: only the
  *  server knows whether an outcome is still unknown or whether a model was
@@ -233,6 +287,13 @@ const action = {
       : m.ai_builder_failure_action_clarify(),
     records: "conversation_opened"
   }),
+  // The named problem is fixed in the conversation (a template is attached
+  // there, a field is described there); the label says which fix.
+  fixProblem: (problem: ActionableProblem): FailureAction => ({
+    kind: "clarify",
+    label: problem.actionLabel,
+    records: "conversation_opened"
+  }),
   refresh: (): FailureAction => ({
     kind: "refresh",
     label: m.ai_builder_failure_action_refresh(),
@@ -256,7 +317,8 @@ function actionsFor(
   kind: FailureKind,
   special: boolean,
   capabilities: FailureRecoveryCapabilities,
-  context: FailurePresentationContext
+  context: FailurePresentationContext,
+  problem: ActionableProblem | null = null
 ): Actions {
   const chat = context.surface === "chat";
   if (context.offersStartFresh) return { primary: action.startFresh(), secondary: null };
@@ -282,6 +344,8 @@ function actionsFor(
   // no reword of the plan there, only the way to acknowledge the message.
   if (chat) return { primary: action.dismiss(), secondary: null };
   if (!capabilities.canResend) return { primary: action.clarify(kind), secondary: null };
+  // A named problem has one fix; sending the same request again cannot be it.
+  if (problem) return { primary: action.fixProblem(problem), secondary: null };
   // A committed generation failure: the same request again is pointless when
   // it was too big, worth one more try when the answer was merely cut off or
   // malformed, and the first thing to do when the service did not deliver.
@@ -316,9 +380,10 @@ export function describeFailure({
   if (error === null && capabilities.replay === null) return null;
   const kind: FailureKind = error ? classifyFailure(error, latestTurn) : capabilities.replay!;
   const special = error ? specialCase(error) : null;
+  const problem = error && special === null ? actionableProblem(error) : null;
   const words = special ?? {
     heading: heading(kind, context.surface),
-    cause: cause(kind, error, capabilities, context.surface)
+    cause: problem?.cause ?? cause(kind, error, capabilities, context.surface)
   };
   // The preservation claim belongs to the operation that failed: a plan that
   // never arrived created nothing. Other surfaces make no such promise.
@@ -334,7 +399,7 @@ export function describeFailure({
     kind,
     heading: words.heading,
     consequence: `${words.cause}${preserved}`,
-    ...actionsFor(kind, special !== null, capabilities, context),
+    ...actionsFor(kind, special !== null, capabilities, context, problem),
     technical: error ? { code: error.code, requestId: error.request_id } : null
   };
 }
