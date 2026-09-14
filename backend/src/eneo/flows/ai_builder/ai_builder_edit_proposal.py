@@ -419,9 +419,11 @@ async def process_edit_arguments(
             else None
         )
         logger.info(
-            "ai_builder_scoped_plan_edit_rejected session_id=%s target_step_ref=%s",
+            "ai_builder_scoped_plan_edit_rejected session_id=%s target_step_ref=%s "
+            "reason=%s",
             turn.session_id,
             target_step_ref,
+            scoped_rejection.reason,
         )
         return CorrectableFailure(feedback=scoped_rejection.feedback, kind="quality")
 
