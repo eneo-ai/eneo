@@ -282,6 +282,11 @@ def _normalize_pre_terminal_artifact_body_step(
                 ),
             }
         )
+        if normalized_body == step:
+            # Already prepared on an earlier pass: the same spec normalizes
+            # to itself, so an edit of a saved flow reports no change here.
+            normalized_steps.append(step)
+            continue
         normalized_steps.append(normalized_body)
         changes.append(
             (
@@ -351,6 +356,8 @@ def _artifact_body_step_assistant(
         ui_language=ui_language,
     )
     instructions = step.assistant_spec.instructions.strip()
+    if instructions.startswith(prefix):
+        return step.assistant_spec
     return step.assistant_spec.model_copy(
         update={
             "instructions": (f"{prefix}\n\n{instructions}" if instructions else prefix)

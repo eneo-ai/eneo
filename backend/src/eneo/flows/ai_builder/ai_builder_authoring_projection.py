@@ -38,6 +38,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_intent import (
 from eneo.flows.application.flow_draft_materialization import (
     validate_existing_step_ref_coverage,
 )
+from eneo.flows.enums import FlowInputType, FlowOutputMode
 from eneo.flows.flow_authoring_runtime_input import resolve_runtime_input_config
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -49,6 +50,7 @@ from eneo.flows.flow_authoring_spec import (
     StepSpec,
     strip_inapplicable_completion_model,
 )
+from eneo.flows.flow_capability_manifest import supports_step_io_tuple
 
 
 class MaterializedAddStep(BaseModel):
@@ -274,20 +276,7 @@ def apply_existing_step_patch(
     return strip_inapplicable_completion_model(existing.model_copy(update=updates))
 
 
-# Persisted modes that derive_output_mode can never produce: an authored
-# choice, not a function of the step's types. They survive an edit that does
-# not touch a mode-determining field.
-_NON_DERIVABLE_MODES = frozenset({OutputMode.COMPOSE_TEXT, OutputMode.SPEAKER_MAPPING})
-_MODE_DETERMINING_FIELDS = frozenset(
-    {
-        "input_source",
-        "input_type",
-        "uses_previous_fields",
-        "uses_form_fields",
-        "output_type",
-        "document_delivery_mode",
-    }
-)
+_MODIFY_IDENTITY_FIELDS = frozenset({"kind", "existing_step_ref"})
 
 
 def _compile_existing_step_modification(
@@ -297,8 +286,12 @@ def _compile_existing_step_modification(
     prior_steps: list[StepSpec],
     ui_language: str | None,
 ) -> StepSpec:
+    fields = patch.model_fields_set - _MODIFY_IDENTITY_FIELDS
+    if not fields:
+        # A keep entry, or a saved step the fragment left out: nothing is
+        # authored, so nothing is derived. The step stays as the base holds it.
+        return existing
     step = apply_existing_step_patch(existing, patch)
-    fields = patch.model_fields_set
 
     if fields & {
         "input_source",
@@ -350,13 +343,17 @@ def _compile_existing_step_modification(
         if input_config != step.input_config:
             step = step.model_copy(update={"input_config": input_config})
 
-    # Rederiving the mode normalises a persisted shape whose mode contradicts
-    # its types (the audio repair and review housekeeping rely on it). It must
-    # not touch a non-derivable mode: an untouched composer or speaker-mapping
-    # step, or one whose instructions alone changed, keeps its mode.
-    if (
-        step.output_mode not in _NON_DERIVABLE_MODES
-        or fields & _MODE_DETERMINING_FIELDS
+    # The persisted mode is the author's choice; derive_output_mode cannot
+    # even produce compose_text or speaker_mapping. It is rederived only when
+    # the patch names the delivery mode, the one field that asks for a mode,
+    # or when the patched types make the persisted mode illegal by engine
+    # truth (the audio repair rewires a transcribe_only step to text input;
+    # a text step turned PDF cannot stay pass_through). A same-IO change,
+    # such as new bindings on a text composer, keeps the mode.
+    if "document_delivery_mode" in fields or not supports_step_io_tuple(
+        input_type=FlowInputType(step.input_type.value),
+        output_type=step.output_type,
+        output_mode=FlowOutputMode(step.output_mode.value),
     ):
         output_mode = _derive_existing_step_output_mode(
             step,

@@ -1365,34 +1365,60 @@ def test_edit_overlay_modify_step_uses_document_delivery_mode_derivation() -> No
 
 
 @pytest.mark.parametrize("mode", [OutputMode.COMPOSE_TEXT, OutputMode.SPEAKER_MAPPING])
-def test_edit_overlay_keeps_a_non_derivable_mode_when_no_determining_field_changes(
+def test_edit_overlay_keeps_an_authored_mode_while_the_step_io_stays_legal(
     mode: OutputMode,
 ) -> None:
-    """compose_text and speaker_mapping are authored choices, never derived.
-
-    An identity-only entry (what a keep lowers to, and what a saved-step
-    fragment expands untouched steps into) and an instructions-only patch
-    both leave the persisted mode alone.
+    """compose_text and speaker_mapping are authored choices no derivation
+    produces. An identity-only entry (a keep, or a saved step the fragment
+    left out) compiles to the base step itself; an instructions-only patch
+    and a same-IO binding edit keep the mode, because the engine still
+    accepts the (input, output, mode) tuple.
     """
 
-    base = _base_spec(_step("step_a", "existing_step_1", "Authored", output_mode=mode))
+    base = _base_spec(
+        _step(
+            "step_a",
+            "existing_step_1",
+            "Authored",
+            output_mode=mode,
+            input_type=InputType.TEXT
+            if mode is OutputMode.COMPOSE_TEXT
+            else InputType.TEXT,
+            output_type=(
+                OutputType.JSON
+                if mode is OutputMode.SPEAKER_MAPPING
+                else OutputType.TEXT
+            ),
+        )
+    )
+    identity_only = compile_ordered_edit_proposal(
+        base_spec=base,
+        proposal=_edit_proposal(
+            steps=[ModifyExistingStep(existing_step_ref="existing_step_1")]
+        ),
+    )
+    assert identity_only.steps[0].model_dump(exclude={"plan_step_ref"}) == base.steps[
+        0
+    ].model_dump(exclude={"plan_step_ref"})
     for patch in (
-        ModifyExistingStep(existing_step_ref="existing_step_1"),
         ModifyExistingStep.model_validate(
             {
                 "existing_step_ref": "existing_step_1",
                 "assistant_spec": {"instructions": "Tydligare instruktion."},
             }
         ),
+        ModifyExistingStep.model_validate(
+            {"existing_step_ref": "existing_step_1", "uses_form_fields": []}
+        ),
     ):
         result = compile_ordered_edit_proposal(
             base_spec=base, proposal=_edit_proposal(steps=[patch])
         )
-        assert result.steps[0].output_mode == mode
+        assert result.steps[0].output_mode == mode, patch.model_fields_set
 
 
 @pytest.mark.parametrize("mode", [OutputMode.COMPOSE_TEXT, OutputMode.SPEAKER_MAPPING])
-def test_edit_overlay_rederives_a_non_derivable_mode_when_a_determining_field_changes(
+def test_edit_overlay_rederives_an_authored_mode_when_the_types_make_it_illegal(
     mode: OutputMode,
 ) -> None:
     result = compile_ordered_edit_proposal(
@@ -1413,6 +1439,32 @@ def test_edit_overlay_rederives_a_non_derivable_mode_when_a_determining_field_ch
     )
 
     assert result.steps[0].output_mode == OutputMode.RENDER_VERBATIM
+
+
+def test_edit_overlay_rederives_speaker_mapping_when_its_output_leaves_json() -> None:
+    """speaker_mapping is legal only for text -> json; a speaker-mapping step
+    retyped to text output falls back to the derived pass_through mode."""
+
+    result = compile_ordered_edit_proposal(
+        base_spec=_base_spec(
+            _step(
+                "step_a",
+                "existing_step_1",
+                "Authored",
+                output_mode=OutputMode.SPEAKER_MAPPING,
+                output_type=OutputType.JSON,
+            )
+        ),
+        proposal=_edit_proposal(
+            steps=[
+                ModifyExistingStep.model_validate(
+                    {"existing_step_ref": "existing_step_1", "output_type": "text"}
+                )
+            ],
+        ),
+    )
+
+    assert result.steps[0].output_mode == OutputMode.PASS_THROUGH
 
 
 def test_edit_overlay_drops_document_body_writer_ref_when_writer_step_is_removed() -> (

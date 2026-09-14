@@ -32,6 +32,7 @@ from eneo.flows.ai_builder.ai_builder_edit_proposal import process_edit_argument
 from eneo.flows.ai_builder.ai_builder_edit_tool_schema import (
     build_edit_flow_tool_schema,
 )
+from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
 from eneo.flows.ai_builder.ai_builder_flow_review import (
     ReviewEditScope,
     validate_review_edit_effect,
@@ -41,6 +42,7 @@ from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderPlanEditContext,
     AIBuilderSavedFlowStepEditContext,
     ResolvedAIBuilderEditContext,
+    ScopedRevisionRejection,
     resolve_plan_edit_context,
 )
 from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
@@ -3103,6 +3105,7 @@ def _audio_document_flow(
             user_description="Skapa PDF",
             input_source="previous_step",
             input_type="text",
+            output_mode="render_verbatim",
             output_type="pdf",
         ),
     )
@@ -3205,13 +3208,13 @@ async def test_a_review_turn_may_not_change_a_step_the_findings_do_not_name():
 
 @pytest.mark.asyncio
 async def test_a_review_turn_is_not_blamed_for_the_compilers_housekeeping():
-    """The compiler normalises a persisted shape on every edit.
+    """The compiler repairs a persisted shape on every whole-flow edit.
 
-    A transcription step ahead of a bare audio input and a document step's
-    output mode are the compiler's doing, not the model reaching past the
-    findings; held against them the bounded turn could never be admitted and
-    the model could not undo them. The scope is held to the model's own
-    changes, and the plan the user approves still shows all of them.
+    A transcription step ahead of a bare audio input is the compiler's doing,
+    not the model reaching past the findings; held against it the bounded
+    turn could never be admitted and the model could not undo it. The scope
+    is held to the model's own changes, the kept steps stay as saved, and the
+    plan the user approves still shows all of it.
     """
     flow = _audio_document_flow()
     conversation = _review_command_conversation()
@@ -3253,8 +3256,12 @@ async def test_a_review_turn_is_not_blamed_for_the_compilers_housekeeping():
         for kind in ("added", "modified", "unchanged")
     }
     assert by_kind["added"] == ["Transkribera ljud"]
-    assert by_kind["modified"] == ["existing_step_1", "existing_step_4"]
-    assert by_kind["unchanged"] == ["existing_step_2", "existing_step_3"]
+    assert by_kind["modified"] == ["existing_step_1"]
+    assert by_kind["unchanged"] == [
+        "existing_step_2",
+        "existing_step_3",
+        "existing_step_4",
+    ]
 
 
 @pytest.mark.asyncio
@@ -4803,6 +4810,359 @@ async def test_untouched_composer_step_keeps_its_mode(scoped):
         for field in change.field_changes
         if field.field == "output_mode"
     ]
+
+
+@pytest.mark.asyncio
+async def test_saved_step_edit_leaves_the_untouched_pdf_body_step_byte_identical():
+    """The live eneo-qmo shape: editing step 1 of a flow whose step 3 writes the
+    document a PDF step renders.
+
+    Spec normalisation renames such a step ("Förbered PDF-innehåll") and prefixes
+    its instructions; on a saved flow that carries the undecorated step, the
+    scoped guard then saw an unrelated step change on every repair round. A step
+    the model did not touch must come out exactly as saved.
+    """
+
+    contract = {
+        "type": "object",
+        "required": ["documents"],
+        "properties": {"documents": {"type": "array", "items": {"type": "string"}}},
+    }
+    flow = _flow(
+        _flow_step(
+            step_order=1,
+            user_description="Extrahera källfält",
+            input_source="flow_input",
+            input_type="document",
+            output_type="json",
+            output_contract=contract,
+        ),
+        _flow_step(
+            step_order=2,
+            user_description="Bedöm ansökan mot reglerna",
+            input_source="previous_step",
+            input_type="json",
+            input_contract=contract,
+            output_type="json",
+            output_contract=contract,
+        ),
+        _flow_step(
+            step_order=3,
+            user_description="Skriv beslutsdokument",
+            input_source="previous_step",
+            input_bindings={
+                "source_refs": [
+                    {
+                        "label": "documents",
+                        "output": "structured",
+                        "step_ref": "step_1",
+                        "field_path": "documents",
+                    }
+                ]
+            },
+        ),
+        _flow_step(
+            step_order=4,
+            user_description="Rendera PDF",
+            input_source="previous_step",
+            output_mode="render_verbatim",
+            output_type="pdf",
+        ),
+    )
+    snapshots = {
+        step.assistant_id: AssistantAuthoringSnapshot(
+            instructions=(
+                "Skriv det kompletta beslutsdokumentet som ska renderas till PDF."
+                if step.step_order == 3
+                else f"Saved instructions {step.step_order}."
+            )
+        )
+        for step in flow.steps
+    }
+    catalog = build_ai_builder_resource_catalog(
+        available_models=None, available_kbs=None
+    )
+    context = ResolvedAIBuilderEditContext(
+        request=AIBuilderSavedFlowStepEditContext(flow_step_id=flow.steps[0].id),
+        scope="step",
+        target_existing_step_ref="existing_step_1",
+    )
+    prior = _prior_spec_for_revision(
+        context=context,
+        prior_plan=None,
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=catalog,
+    )
+    assert prior is not None
+    saved_untouched = [
+        canonical_json_bytes(step.model_dump(mode="json", exclude={"plan_step_ref"}))
+        for step in prior.steps[1:]
+    ]
+
+    result = await _process(
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=catalog,
+        plan_edit_context=context,
+        prior_spec_for_revision=prior,
+        arguments={
+            "plan_rationale": "Lista saknade uppgifter.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "assistant_spec": {
+                        "instructions": "Lista alltid vilka uppgifter som saknas."
+                    },
+                }
+            ],
+        },
+    )
+
+    assert isinstance(result, ProposalReady), result
+    compiled = result.compiled.content.spec
+    assert compiled.steps[2].name == "Skriv beslutsdokument"
+    assert [
+        canonical_json_bytes(step.model_dump(mode="json", exclude={"plan_step_ref"}))
+        for step in compiled.steps[1:]
+    ] == saved_untouched
+
+
+def _two_step_saved_flow_with_context():
+    flow = _flow(
+        _flow_step(step_order=1, user_description="Sammanfatta"),
+        _flow_step(
+            step_order=2,
+            user_description="Granska",
+            input_source="previous_step",
+        ),
+    )
+    snapshots = {
+        step.assistant_id: AssistantAuthoringSnapshot(
+            instructions=f"Saved instructions {step.step_order}."
+        )
+        for step in flow.steps
+    }
+    catalog = build_ai_builder_resource_catalog(
+        available_models=None, available_kbs=None
+    )
+    context = ResolvedAIBuilderEditContext(
+        request=AIBuilderSavedFlowStepEditContext(flow_step_id=flow.steps[0].id),
+        scope="step",
+        target_existing_step_ref="existing_step_1",
+    )
+    prior = _prior_spec_for_revision(
+        context=context,
+        prior_plan=None,
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=catalog,
+    )
+    assert prior is not None
+    return flow, snapshots, catalog, context, prior
+
+
+_TARGET_ONLY_FRAGMENT = {
+    "plan_rationale": "Förtydliga.",
+    "steps": [
+        {
+            "kind": "modify",
+            "existing_step_ref": "existing_step_1",
+            "assistant_spec": {"instructions": "Sammanfatta i tre punkter."},
+        }
+    ],
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("reason", "outcome"),
+    [
+        ("unrelated_compiled_step_changed", TerminalFailure),
+        ("step_sequence_changed", TerminalFailure),
+        ("runtime_form_fields_changed", TerminalFailure),
+        ("flow_metadata_changed", TerminalFailure),
+        ("target_step_unchanged", CorrectableFailure),
+        ("target_step_model_changed", CorrectableFailure),
+    ],
+)
+async def test_saved_step_drift_outside_the_selected_step_is_a_server_defect(
+    monkeypatch: pytest.MonkeyPatch, reason: str, outcome: type
+):
+    """Admission refuses every model-authored change outside the selected
+    step, so a preserved-step, sequence, form-field or metadata rejection of
+    a saved-step revision can only be the server's own drift: it ends the
+    turn as a typed server defect instead of asking the model to repair what
+    it never wrote. Target-step rejections stay repair feedback.
+    """
+
+    flow, snapshots, catalog, context, prior = _two_step_saved_flow_with_context()
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_edit_proposal.validate_scoped_plan_revision",
+        lambda **_kwargs: ScopedRevisionRejection(reason, f"rejected: {reason}"),
+    )
+
+    result = await _process(
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=catalog,
+        plan_edit_context=context,
+        prior_spec_for_revision=prior,
+        arguments=_TARGET_ONLY_FRAGMENT,
+    )
+
+    assert isinstance(result, outcome), result
+    if isinstance(result, TerminalFailure):
+        assert result.code == AIBuilderErrorCode.ARCHITECTURE_MATERIALIZATION_FAILED
+        assert result.details["failure_code"] == "scoped_edit_preservation_failed"
+        assert result.details["reason"] == reason
+        assert result.details["architecture_repair_disposition"] == "server_defect"
+    else:
+        assert result.feedback == f"rejected: {reason}"
+
+
+@pytest.mark.asyncio
+async def test_saved_step_revision_leaves_a_bad_leading_audio_step_as_saved():
+    """The whole-flow audio repair inserts a transcription step ahead of a
+    saved audio step that emits structured output. A saved-step revision keeps
+    the saved sequence, so the repair does not run; the saved flow's own
+    chain error ends the turn with a whole-flow pointer instead of repair
+    rounds the fragment could never satisfy."""
+
+    flow = _flow(
+        _flow_step(
+            step_order=1,
+            user_description="Analysera samtalet",
+            input_source="flow_input",
+            input_type="audio",
+            output_type="json",
+            output_contract={
+                "type": "object",
+                "required": ["summary"],
+                "properties": {"summary": {"type": "string"}},
+            },
+        ),
+        _flow_step(
+            step_order=2,
+            user_description="Skriv rapport",
+            input_source="previous_step",
+            input_type="json",
+        ),
+        _flow_step(
+            step_order=3,
+            user_description="Rendera PDF",
+            input_source="previous_step",
+            output_mode="render_verbatim",
+            output_type="pdf",
+        ),
+    )
+    snapshots = {
+        step.assistant_id: AssistantAuthoringSnapshot(
+            instructions=f"Saved instructions {step.step_order}."
+        )
+        for step in flow.steps
+    }
+    catalog = build_ai_builder_resource_catalog(
+        available_models=None, available_kbs=None
+    )
+    context = ResolvedAIBuilderEditContext(
+        request=AIBuilderSavedFlowStepEditContext(flow_step_id=flow.steps[1].id),
+        scope="step",
+        target_existing_step_ref="existing_step_2",
+    )
+    prior = _prior_spec_for_revision(
+        context=context,
+        prior_plan=None,
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=catalog,
+    )
+    assert prior is not None
+
+    result = await _process(
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=catalog,
+        plan_edit_context=context,
+        prior_spec_for_revision=prior,
+        arguments={
+            "plan_rationale": "Kortare rapport.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_2",
+                    "assistant_spec": {"instructions": "Skriv en kort rapport."},
+                }
+            ],
+        },
+    )
+
+    assert isinstance(result, TerminalFailure), result
+    assert result.code == AIBuilderErrorCode.BAD_REQUEST
+    assert result.details["reason"] == "saved_flow_invalid"
+    assert "audio_document_transcript_chain_invalid" in result.codes
+    assert "Edit the whole flow" in result.message
+
+
+@pytest.mark.asyncio
+async def test_saved_step_revision_names_a_saved_flow_defect_it_cannot_fix():
+    """A saved flow that fails validation in a step the edit may not touch is
+    reported once, naming that step, and sent to a whole-flow edit: a repair
+    call could only resubmit the same fragment."""
+
+    flow = _flow(
+        _flow_step(step_order=1, user_description="Sammanfatta"),
+        _flow_step(
+            step_order=2,
+            user_description="Strukturera",
+            input_source="all_previous_steps",
+            input_type="json",
+            output_type="json",
+            output_contract={
+                "type": "object",
+                "required": ["summary"],
+                "properties": {"summary": {"type": "string"}},
+            },
+        ),
+    )
+    snapshots = {
+        step.assistant_id: AssistantAuthoringSnapshot(
+            instructions=f"Saved instructions {step.step_order}."
+        )
+        for step in flow.steps
+    }
+    catalog = build_ai_builder_resource_catalog(
+        available_models=None, available_kbs=None
+    )
+    context = ResolvedAIBuilderEditContext(
+        request=AIBuilderSavedFlowStepEditContext(flow_step_id=flow.steps[0].id),
+        scope="step",
+        target_existing_step_ref="existing_step_1",
+    )
+    prior = _prior_spec_for_revision(
+        context=context,
+        prior_plan=None,
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=catalog,
+    )
+    assert prior is not None
+
+    result = await _process(
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=catalog,
+        plan_edit_context=context,
+        prior_spec_for_revision=prior,
+        arguments=_TARGET_ONLY_FRAGMENT,
+    )
+
+    assert isinstance(result, TerminalFailure), result
+    assert result.code == AIBuilderErrorCode.BAD_REQUEST
+    assert result.details["reason"] == "saved_flow_invalid"
+    assert result.details["invalid_existing_step_refs"] == "existing_step_2"
+    assert "Edit the whole flow" in result.message
 
 
 @pytest.mark.asyncio

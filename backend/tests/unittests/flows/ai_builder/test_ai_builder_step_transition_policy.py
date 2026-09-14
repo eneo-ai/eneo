@@ -691,6 +691,45 @@ def test_normalize_ai_builder_spec_renames_pre_terminal_docx_body_step() -> None
     ] == ["pre_terminal_artifact_body_step_renamed"]
 
 
+def test_normalize_ai_builder_spec_artifact_body_rename_is_idempotent() -> None:
+    """A spec the normalizer already prepared normalizes to itself: a saved
+    flow's body step must not gain a second prefix or a renamed name on the
+    next edit."""
+
+    spec = FlowDraftSpecCore(
+        flow_name="PDF",
+        steps=[
+            _step(
+                ref="step_a",
+                name="Skriv beslutsdokument",
+                instructions="Skapa det kompletta beslutsdokumentet som renderas till PDF.",
+                input_source=InputSource.FLOW_INPUT,
+            ),
+            _step(
+                ref="step_b",
+                name="Rendera PDF",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.PDF,
+                output_mode=OutputMode.RENDER_VERBATIM,
+            ),
+        ],
+    )
+
+    once, first_changes = normalize_ai_builder_spec(
+        spec, terminal_output_type=OutputType.PDF
+    )
+    twice, second_changes = normalize_ai_builder_spec(
+        once, terminal_output_type=OutputType.PDF
+    )
+
+    assert once.steps[0].name == "Förbered PDF-innehåll"
+    assert [c.code for _s, c in first_changes] == [
+        "pre_terminal_artifact_body_step_renamed"
+    ]
+    assert twice == once
+    assert second_changes == []
+
+
 def test_normalize_ai_builder_spec_uses_ui_language_for_artifact_body_copy() -> None:
     spec = FlowDraftSpecCore(
         flow_name="Audio DOCX",

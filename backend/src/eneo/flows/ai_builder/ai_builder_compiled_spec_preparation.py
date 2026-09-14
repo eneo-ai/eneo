@@ -8,6 +8,7 @@ from eneo.flows.ai_builder.ai_builder_architecture_errors import (
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     TargetKind,
 )
+from eneo.flows.ai_builder.ai_builder_edit_compiler import EditMutationScope
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
     canonicalize_flow_spec_resources,
@@ -45,6 +46,7 @@ def prepare_compiled_spec_for_session(
     resource_catalog: AIBuilderResourceCatalog | None,
     terminal_output_type: OutputType | None = None,
     ui_language: str | None = None,
+    mutation_scope: EditMutationScope | None = None,
 ) -> PreparedCompiledSpecResult:
     prepared_spec = spec
     if target_kind == TargetKind.EDIT:
@@ -67,6 +69,8 @@ def prepare_compiled_spec_for_session(
                 validation=None,
                 failure_feedback=format_resource_resolution_feedback(resolution_issues),
             )
+    if mutation_scope is not None:
+        prepared_spec = mutation_scope.restore(prepared_spec)
 
     validation = validate_spec(
         prepared_spec,

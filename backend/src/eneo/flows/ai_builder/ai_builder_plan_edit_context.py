@@ -437,7 +437,9 @@ def build_plan_revision_prompt_block(
                 "- Scope: one selected step.",
                 f"- Target step: {target_label}.",
                 "- The target step must change in the revised plan. Do not satisfy this by only changing the flow title, description, or an unrelated step.",
-                "- Preserve every other step unchanged. Use a whole-plan edit if the requested change also requires dataflow or downstream-step changes.",
+                "- Submit only the target step's changed fields and omit every other step; the server keeps them exactly as saved. Use a whole-plan edit if the requested change also requires dataflow or downstream-step changes."
+                if saved_step_revision
+                else "- Preserve every other step unchanged. Use a whole-plan edit if the requested change also requires dataflow or downstream-step changes.",
                 "- Do not add, remove, or reorder steps. Use a whole-plan edit when the requested change alters the flow structure.",
                 "- Do not change runtime form fields or the flow name or description. Use a whole-plan edit when the requested change requires those changes."
                 if saved_step_revision

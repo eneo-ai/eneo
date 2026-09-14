@@ -8,7 +8,7 @@ that every existing step is either represented in order or explicitly removed.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, cast
 from uuid import UUID
@@ -108,6 +108,40 @@ class _PreparedOrderedEditProposal:
 
 
 @dataclass(frozen=True, slots=True)
+class EditMutationScope:
+    """The saved steps a step-scoped edit leaves exactly as saved.
+
+    A saved-step revision may change the selected step and nothing else.
+    Every other step is protected: it leaves compilation and session
+    preparation as the saved revision holds it, `plan_step_ref` excepted
+    (positional, stamped by the compiler). The normalizers, the template
+    contract and resource canonicalization run over the whole spec and know
+    nothing of the scope; this one owner re-imposes it after each of them,
+    and the scoped revision guard checks the outcome after final
+    preparation. A normalization change on a protected step is therefore
+    never reported: it did not happen.
+    """
+
+    protected_steps: Mapping[str, StepSpec]
+
+    def is_protected(self, step: StepSpec) -> bool:
+        return step.existing_step_ref in self.protected_steps
+
+    def restore(self, spec: FlowDraftSpecCore) -> FlowDraftSpecCore:
+        steps = [
+            self.protected_steps[step.existing_step_ref].model_copy(
+                update={"plan_step_ref": step.plan_step_ref}
+            )
+            if step.existing_step_ref is not None and self.is_protected(step)
+            else step
+            for step in spec.steps
+        ]
+        if steps == spec.steps:
+            return spec
+        return spec.model_copy(update={"steps": steps})
+
+
+@dataclass(frozen=True, slots=True)
 class EditCompilationResult:
     spec: FlowDraftSpecCore
     # The approval of what the model authored, read before session
@@ -116,6 +150,8 @@ class EditCompilationResult:
     authored_approval: FlowBuilderEditApproval
     # The published flow both approvals' diffs read against.
     base_spec: FlowDraftSpecCore
+    # Set for a saved-step revision; session preparation applies it too.
+    mutation_scope: EditMutationScope | None = None
 
     def approval_for_prepared_spec(
         self, prepared_spec: FlowDraftSpecCore
@@ -194,8 +230,11 @@ def compile_edit_proposal(
         step.existing_step_ref for step in revision_spec.steps
     ] != [step.existing_step_ref for step in base_spec.steps]:
         raise BadRequestException("The revision must preserve the saved step sequence.")
+    mutation_scope: EditMutationScope | None = None
     if revision_spec is not None:
-        proposal = _expand_saved_step_proposal(proposal, revision_spec=revision_spec)
+        proposal, mutation_scope = _expand_saved_step_proposal(
+            proposal, revision_spec=revision_spec
+        )
     materialized_proposal = materialize_ordered_edit_proposal(
         proposal,
         primary_runtime_input_type=primary_runtime_input_type,
@@ -210,6 +249,7 @@ def compile_edit_proposal(
         current_steps=current_steps,
         current_metadata_json=current_metadata_json,
         primary_runtime_input_type=primary_runtime_input_type,
+        may_restructure=mutation_scope is None,
     )
     compiled_spec = compile_ordered_edit_proposal(
         base_spec=revision_spec if revision_spec is not None else base_spec,
@@ -245,6 +285,13 @@ def compile_edit_proposal(
             existing_bindings=inherited_template_bindings,
             inherited_template_asset_id=inherited_template_asset_id,
         )
+    if mutation_scope is not None:
+        normalization_changes = [
+            (step, change)
+            for step, change in normalization_changes
+            if not mutation_scope.is_protected(step)
+        ]
+        normalized_spec = mutation_scope.restore(normalized_spec)
     compiled_steps = normalized_spec.steps
     final_name = normalized_spec.flow_name
     final_description = normalized_spec.flow_description
@@ -349,6 +396,7 @@ def compile_edit_proposal(
             confidence=confidence,
         ),
         base_spec=base_spec,
+        mutation_scope=mutation_scope,
     )
 
 
@@ -356,7 +404,9 @@ def _expand_saved_step_proposal(
     proposal: OrderedEditProposal,
     *,
     revision_spec: FlowDraftSpecCore,
-) -> OrderedEditProposal:
+) -> tuple[OrderedEditProposal, EditMutationScope]:
+    """Fill the saved steps the fragment left out and protect them."""
+
     modifications: list[ModifyExistingStep] = []
     for step in proposal.steps:
         if not isinstance(step, ModifyExistingStep):
@@ -378,7 +428,7 @@ def _expand_saved_step_proposal(
         removed_existing_step_refs=proposal.removed_existing_step_refs,
     )
     by_ref = {step.existing_step_ref: step for step in modifications}
-    return proposal.model_copy(
+    expanded = proposal.model_copy(
         update={
             "steps": [
                 by_ref[ref]
@@ -386,6 +436,14 @@ def _expand_saved_step_proposal(
                 else ModifyExistingStep(existing_step_ref=ref)
                 for ref in current_refs
             ]
+        }
+    )
+    return expanded, EditMutationScope(
+        protected_steps={
+            step.existing_step_ref: step
+            for step in revision_spec.steps
+            if step.existing_step_ref is not None
+            and step.existing_step_ref not in submitted_ref_set
         }
     )
 
@@ -396,6 +454,7 @@ def _prepare_ordered_edit_proposal(
     current_steps: list[FlowStep],
     current_metadata_json: dict[str, Any] | None,
     primary_runtime_input_type: InputType | None,
+    may_restructure: bool,
 ) -> _PreparedOrderedEditProposal:
     warnings: list[str] = []
     prepared, dropped_step_field_names = _sanitize_shadowed_primary_inputs(
@@ -407,11 +466,14 @@ def _prepare_ordered_edit_proposal(
         base_form_fields=extract_form_fields_from_metadata(current_metadata_json),
         primary_runtime_input_type=primary_runtime_input_type,
     )
-    prepared = _repair_leading_audio_shape(
-        proposal=prepared,
-        current_steps=current_steps,
-        warnings=warnings,
-    )
+    if may_restructure:
+        # A saved-step revision keeps the saved step sequence; inserting a
+        # transcription step is a whole-flow edit.
+        prepared = _repair_leading_audio_shape(
+            proposal=prepared,
+            current_steps=current_steps,
+            warnings=warnings,
+        )
     return _PreparedOrderedEditProposal(
         proposal=prepared,
         warnings=warnings,
