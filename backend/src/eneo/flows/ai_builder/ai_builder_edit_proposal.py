@@ -78,7 +78,6 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
 )
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
 from eneo.flows.ai_builder.ai_builder_validation_common import (
-    SpecValidationError,
     SpecValidationResult,
 )
 from eneo.flows.ai_builder.ai_builder_validation_references import (
@@ -365,15 +364,6 @@ async def process_edit_arguments(
         if consumer_failure is not None:
             return consumer_failure
     if validation.errors:
-        if saved_step_revision:
-            assert plan_edit_context is not None and prior_spec_for_revision is not None
-            saved_flow_failure = _saved_flow_already_invalid(
-                errors=validation.errors,
-                prior_spec=prior_spec_for_revision,
-                target_ref=plan_edit_context.target_existing_step_ref,
-            )
-            if saved_flow_failure is not None:
-                return saved_flow_failure
         error_messages = [err.message for err in validation.errors]
         return CorrectableFailure(
             feedback=(
@@ -548,57 +538,6 @@ _SAVED_STEP_SERVER_OWNED_REJECTIONS: frozenset[ScopedRevisionRejectionReason] = 
         }
     )
 )
-
-
-def _saved_flow_already_invalid(
-    *,
-    errors: list[SpecValidationError],
-    prior_spec: FlowDraftSpecCore,
-    target_ref: str | None,
-) -> TerminalFailure | None:
-    """The saved flow fails validation on its own, before any change.
-
-    Every step but the selected one leaves preparation exactly as saved, and
-    the fragment cannot add, remove or rewire steps, so an error the saved
-    flow already carries is not the proposal's: a repair call could only
-    resubmit the same fragment. The user is told which errors and sent to a
-    whole-flow edit. Errors the change introduced stay repair feedback.
-    """
-
-    saved_errors = set(validate_spec(prior_spec).errors)
-    inherited = [error for error in errors if error in saved_errors]
-    if not inherited:
-        return None
-    existing_ref_by_plan_ref = {
-        step.plan_step_ref: step.existing_step_ref for step in prior_spec.steps
-    }
-    invalid_refs: list[str] = []
-    for error in inherited:
-        existing_ref = (
-            existing_ref_by_plan_ref.get(error.step_ref)
-            if error.step_ref is not None
-            else None
-        )
-        if existing_ref is not None and existing_ref not in invalid_refs:
-            invalid_refs.append(existing_ref)
-    details: dict[str, object] = {
-        "reason": "saved_flow_invalid",
-        "scoped_target_existing_step_ref": target_ref,
-    }
-    if invalid_refs:
-        details["invalid_existing_step_refs"] = ", ".join(invalid_refs)
-    return TerminalFailure(
-        kind="validation",
-        message=(
-            "The saved flow has a problem that a selected-step edit cannot fix ("
-            + "; ".join(error.message for error in inherited)
-            + "). Edit the whole flow to correct it."
-        ),
-        code=AIBuilderErrorCode.BAD_REQUEST,
-        phase=AIBuilderErrorPhase.PROPOSAL,
-        details=details,
-        codes=frozenset(error.code for error in inherited),
-    )
 
 
 def _validate_saved_step_consumers(

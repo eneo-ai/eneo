@@ -4812,16 +4812,8 @@ async def test_untouched_composer_step_keeps_its_mode(scoped):
     ]
 
 
-@pytest.mark.asyncio
-async def test_saved_step_edit_leaves_the_untouched_pdf_body_step_byte_identical():
-    """The live eneo-qmo shape: editing step 1 of a flow whose step 3 writes the
-    document a PDF step renders.
-
-    Spec normalisation renames such a step ("Förbered PDF-innehåll") and prefixes
-    its instructions; on a saved flow that carries the undecorated step, the
-    scoped guard then saw an unrelated step change on every repair round. A step
-    the model did not touch must come out exactly as saved.
-    """
+def _pdf_body_saved_flow():
+    """The live eneo-qmo flow shape: step 3 writes the document step 4 renders."""
 
     contract = {
         "type": "object",
@@ -4882,6 +4874,21 @@ async def test_saved_step_edit_leaves_the_untouched_pdf_body_step_byte_identical
     catalog = build_ai_builder_resource_catalog(
         available_models=None, available_kbs=None
     )
+    return flow, snapshots, catalog
+
+
+@pytest.mark.asyncio
+async def test_saved_step_edit_leaves_the_untouched_pdf_body_step_byte_identical():
+    """The live eneo-qmo shape: editing step 1 of a flow whose step 3 writes the
+    document a PDF step renders.
+
+    Spec normalisation renames such a step ("Förbered PDF-innehåll") and prefixes
+    its instructions; on a saved flow that carries the undecorated step, the
+    scoped guard then saw an unrelated step change on every repair round. A step
+    the model did not touch must come out exactly as saved.
+    """
+
+    flow, snapshots, catalog = _pdf_body_saved_flow()
     context = ResolvedAIBuilderEditContext(
         request=AIBuilderSavedFlowStepEditContext(flow_step_id=flow.steps[0].id),
         scope="step",
@@ -5026,9 +5033,8 @@ async def test_saved_step_drift_outside_the_selected_step_is_a_server_defect(
 async def test_saved_step_revision_leaves_a_bad_leading_audio_step_as_saved():
     """The whole-flow audio repair inserts a transcription step ahead of a
     saved audio step that emits structured output. A saved-step revision keeps
-    the saved sequence, so the repair does not run; the saved flow's own
-    chain error ends the turn with a whole-flow pointer instead of repair
-    rounds the fragment could never satisfy."""
+    the saved sequence, so the repair does not run and the saved flow's chain
+    error reaches the model as ordinary validation feedback."""
 
     flow = _flow(
         _flow_step(
@@ -5098,47 +5104,25 @@ async def test_saved_step_revision_leaves_a_bad_leading_audio_step_as_saved():
         },
     )
 
-    assert isinstance(result, TerminalFailure), result
-    assert result.code == AIBuilderErrorCode.BAD_REQUEST
-    assert result.details["reason"] == "saved_flow_invalid"
+    # The saved flow's own chain error is repair feedback through the bounded
+    # loop, not a transcription step the fragment never asked for.
+    assert isinstance(result, CorrectableFailure), result
+    assert result.kind == "validation"
     assert "audio_document_transcript_chain_invalid" in result.codes
-    assert "Edit the whole flow" in result.message
+    assert "Transkribera" not in result.feedback
 
 
 @pytest.mark.asyncio
-async def test_saved_step_revision_names_a_saved_flow_defect_it_cannot_fix():
-    """A saved flow that fails validation in a step the edit may not touch is
-    reported once, naming that step, and sent to a whole-flow edit: a repair
-    call could only resubmit the same fragment."""
+async def test_saved_step_identity_only_target_is_refused_before_normalization():
+    """Selecting the undecorated PDF-body step and submitting only its identity
+    must not compile: the artifact normalizer would rename and prefix it and
+    the plan would present the server's decoration as the model's edit."""
 
-    flow = _flow(
-        _flow_step(step_order=1, user_description="Sammanfatta"),
-        _flow_step(
-            step_order=2,
-            user_description="Strukturera",
-            input_source="all_previous_steps",
-            input_type="json",
-            output_type="json",
-            output_contract={
-                "type": "object",
-                "required": ["summary"],
-                "properties": {"summary": {"type": "string"}},
-            },
-        ),
-    )
-    snapshots = {
-        step.assistant_id: AssistantAuthoringSnapshot(
-            instructions=f"Saved instructions {step.step_order}."
-        )
-        for step in flow.steps
-    }
-    catalog = build_ai_builder_resource_catalog(
-        available_models=None, available_kbs=None
-    )
+    flow, snapshots, catalog = _pdf_body_saved_flow()
     context = ResolvedAIBuilderEditContext(
-        request=AIBuilderSavedFlowStepEditContext(flow_step_id=flow.steps[0].id),
+        request=AIBuilderSavedFlowStepEditContext(flow_step_id=flow.steps[2].id),
         scope="step",
-        target_existing_step_ref="existing_step_1",
+        target_existing_step_ref="existing_step_3",
     )
     prior = _prior_spec_for_revision(
         context=context,
@@ -5155,14 +5139,14 @@ async def test_saved_step_revision_names_a_saved_flow_defect_it_cannot_fix():
         resource_catalog=catalog,
         plan_edit_context=context,
         prior_spec_for_revision=prior,
-        arguments=_TARGET_ONLY_FRAGMENT,
+        arguments={
+            "plan_rationale": "Inget att ändra.",
+            "steps": [{"kind": "modify", "existing_step_ref": "existing_step_3"}],
+        },
     )
 
-    assert isinstance(result, TerminalFailure), result
-    assert result.code == AIBuilderErrorCode.BAD_REQUEST
-    assert result.details["reason"] == "saved_flow_invalid"
-    assert result.details["invalid_existing_step_refs"] == "existing_step_2"
-    assert "Edit the whole flow" in result.message
+    assert isinstance(result, CorrectableFailure), result
+    assert "submitted without changes" in result.feedback
 
 
 @pytest.mark.asyncio

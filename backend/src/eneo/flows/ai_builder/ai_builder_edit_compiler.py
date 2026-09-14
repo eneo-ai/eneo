@@ -400,12 +400,16 @@ def compile_edit_proposal(
     )
 
 
+_MODIFY_IDENTITY_FIELDS = frozenset({"kind", "existing_step_ref"})
+
+
 def _expand_saved_step_proposal(
     proposal: OrderedEditProposal,
     *,
     revision_spec: FlowDraftSpecCore,
 ) -> tuple[OrderedEditProposal, EditMutationScope]:
-    """Fill the saved steps the fragment left out and protect them."""
+    """Fill the saved steps the fragment left out and protect every step the
+    model did not author a change on (an identity-only entry included)."""
 
     modifications: list[ModifyExistingStep] = []
     for step in proposal.steps:
@@ -438,12 +442,17 @@ def _expand_saved_step_proposal(
             ]
         }
     )
+    authored_refs = {
+        step.existing_step_ref
+        for step in modifications
+        if step.model_fields_set - _MODIFY_IDENTITY_FIELDS
+    }
     return expanded, EditMutationScope(
         protected_steps={
             step.existing_step_ref: step
             for step in revision_spec.steps
             if step.existing_step_ref is not None
-            and step.existing_step_ref not in submitted_ref_set
+            and step.existing_step_ref not in authored_refs
         }
     )
 

@@ -381,6 +381,19 @@ def validate_scoped_edit_proposal(
                 f"selected `{target_ref}`. Only the selected step may contain "
                 "model-authored changes."
             )
+    if saved_step_revision and any(
+        step.existing_step_ref == target_ref
+        and not step.model_fields_set - identity_fields
+        for step in proposal.steps
+    ):
+        # An identity-only target would compile as the saved step and then be
+        # normalized: whatever the normalizers changed would read as the
+        # model's edit. Only an authored change is one.
+        return (
+            f"The selected step `{target_ref}` was submitted without changes. "
+            "Give the fields of that step that change, or say in plan_rationale "
+            "why nothing should change."
+        )
     return None
 
 
