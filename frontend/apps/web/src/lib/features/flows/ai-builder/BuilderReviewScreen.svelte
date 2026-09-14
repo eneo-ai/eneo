@@ -446,10 +446,10 @@
   const removedStepChanges = $derived(getRemovedStepChanges(plan?.proposal.edit?.diff ?? null));
 
   // One list of what the proposal changes, read before any step is: the
-  // description, then each added or changed step in flow order, then the
-  // steps the proposal drops (they are not in the spec, so they have no row
-  // elsewhere). Everything comes from the server's diff; an empty list is the
-  // honest "nothing changes".
+  // flow's name and description, each added or changed step in flow order,
+  // the steps the proposal drops (they are not in the spec, so they have no
+  // row elsewhere) and the runtime form fields. Everything comes from the
+  // server's diff; an empty list is the honest "nothing changes".
   interface ChangeEntry {
     key: string;
     subject: string;
@@ -468,6 +468,15 @@
   const changeList = $derived.by<ChangeEntry[] | null>(() => {
     if (isCreateMode || !plan?.proposal.edit) return null;
     const entries: ChangeEntry[] = [];
+    const nameChange = plan.proposal.edit.diff?.flow_property_changes?.["flow_name"];
+    if (nameChange) {
+      entries.push({
+        key: "flow_name",
+        subject: m.ai_builder_change_list_name(),
+        what: m.ai_builder_change_list_name_what({ name: String(nameChange[1] ?? "") }),
+        step: null
+      });
+    }
     if (descriptionDiff) {
       entries.push({
         key: "flow_description",
@@ -497,6 +506,28 @@
         key: `removed:${change.step_ref ?? change.step_name}`,
         subject: change.step_name,
         what: m.ai_builder_change_list_removed(),
+        step: null
+      });
+    }
+    const formChanges = plan.proposal.edit.diff?.form_changes ?? [];
+    if (formChanges.length > 0) {
+      const count = (kind: (typeof formChanges)[number]["kind"]) =>
+        String(formChanges.filter((change) => change.kind === kind).length);
+      const parts = [
+        formChanges.some((c) => c.kind === "added")
+          ? m.ai_builder_change_list_form_added({ count: count("added") })
+          : null,
+        formChanges.some((c) => c.kind === "modified")
+          ? m.ai_builder_change_list_form_modified({ count: count("modified") })
+          : null,
+        formChanges.some((c) => c.kind === "removed")
+          ? m.ai_builder_change_list_form_removed({ count: count("removed") })
+          : null
+      ].filter((part) => part !== null);
+      entries.push({
+        key: "form_fields",
+        subject: m.ai_builder_form_fields_title(),
+        what: new Intl.ListFormat(getLocale(), { type: "conjunction" }).format(parts.map(String)),
         step: null
       });
     }
@@ -1649,8 +1680,8 @@
           </div>
         {:else}
           <div class="flex flex-col max-sm:w-full">
-            <!-- An edit of a published flow changes nothing until approved and
-                 keeps the published version running; only a new flow is created. -->
+            <!-- An edit changes nothing until approved; applying it unpublishes a
+                 published flow first (the backend rejects apply while published). -->
             <span class="text-secondary text-xs">
               {isCreateMode
                 ? m.ai_builder_footer_steps_nothing_created({ count: stepCount })
@@ -1659,7 +1690,7 @@
             <span class="text-secondary text-xs text-pretty max-sm:hidden">
               {isCreateMode
                 ? m.ai_builder_footer_draft_not_running()
-                : m.ai_builder_footer_edit_published_unchanged()}
+                : m.ai_builder_footer_edit_unpublishes()}
             </span>
             {#if service.isRevisingPlan}
               <span

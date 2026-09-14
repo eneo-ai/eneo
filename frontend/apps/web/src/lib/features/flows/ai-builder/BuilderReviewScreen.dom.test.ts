@@ -250,7 +250,7 @@ describe("BuilderReviewScreen approval", () => {
     expect(screen.queryByRole("button", { name: m.ai_builder_apply() })).toBeNull();
     expect(screen.queryByRole("button", { name: m.ai_builder_approve_create() })).toBeNull();
     // An edit changes nothing until approved; no flow is "created" here.
-    expect(screen.getByText(m.ai_builder_footer_edit_published_unchanged())).toBeTruthy();
+    expect(screen.getByText(m.ai_builder_footer_edit_unpublishes())).toBeTruthy();
     expect(screen.queryByText(m.ai_builder_footer_draft_not_running())).toBeNull();
     cleanup();
 
@@ -633,8 +633,14 @@ describe("BuilderReviewScreen plan document", () => {
                   { kind: "removed", step_name: "Skicka e-post", step_ref: "existing_step_3" }
                 ],
                 flow_property_changes: {
+                  flow_name: ["Möte", "Mötesrapport"],
                   flow_description: ["Skriver en rapport.", "Skriver en kort rapport."]
-                }
+                },
+                form_changes: [
+                  { kind: "added", field_name: "diarienummer", details: null },
+                  { kind: "removed", field_name: "ort", details: null },
+                  { kind: "removed", field_name: "datum", details: null }
+                ]
               },
               warnings: [],
               advisories: [],
@@ -656,10 +662,12 @@ describe("BuilderReviewScreen plan document", () => {
       fields: `${m.ai_builder_step_change_field_output_type().toLowerCase()} ${m.ai_builder_review_suggestion_steps_join()} ${m.ai_builder_step_instructions().toLowerCase()}`
     });
     expect(rows).toEqual([
+      `${m.ai_builder_change_list_name()} ${m.ai_builder_change_list_name_what({ name: "Mötesrapport" })}`,
       `${m.ai_builder_change_list_description()} ${m.ai_builder_change_list_description_what()}`,
       `${m.ai_builder_change_request_scope({ step: 2, name: "Strukturera transkriberingen" })} ${fieldsSentence.charAt(0).toUpperCase()}${fieldsSentence.slice(1)}`,
       `${m.ai_builder_change_request_scope({ step: 3, name: "Sammanfatta" })} ${m.ai_builder_change_list_new_step()}`,
-      `Skicka e-post ${m.ai_builder_change_list_removed()}`
+      `Skicka e-post ${m.ai_builder_change_list_removed()}`,
+      `${m.ai_builder_form_fields_title()} ${m.ai_builder_change_list_form_added({ count: "1" })} ${m.ai_builder_review_suggestion_steps_join()} ${m.ai_builder_change_list_form_removed({ count: "2" })}`
     ]);
     // The list is the only place a removed step is read.
     expect(screen.getAllByText("Skicka e-post")).toHaveLength(1);
