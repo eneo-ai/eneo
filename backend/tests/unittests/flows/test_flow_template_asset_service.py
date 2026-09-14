@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import io
 from datetime import datetime, timezone
@@ -292,7 +293,17 @@ async def test_upload_asset_persists_docx_template_bytes_and_body_placeholder(
     )
 
     file_service.prepare_document_upload.assert_called_once_with(upload)
-    file_service.save_prepared_file.assert_awaited_once_with(prepared)
+    # The saver must receive the inspected bytes again: inspection drained the
+    # one-pass original stream, so the persisted original re-serves them.
+    file_service.save_prepared_file.assert_awaited_once()
+    persisted = file_service.save_prepared_file.await_args.args[0]
+    assert dataclasses.replace(persisted, contents=()) == dataclasses.replace(
+        prepared, contents=()
+    )
+    (persisted_original,) = persisted.contents
+    assert persisted_original.variant == prepared.contents[0].variant
+    persisted_bytes = b"".join([chunk async for chunk in persisted_original.chunks])
+    assert persisted_bytes == template_bytes
     template_asset_repo.create.assert_awaited_once()
     assert template_asset_repo.create.await_args.kwargs["file_id"] == saved_file.id
     assert template_asset_repo.create.await_args.kwargs["checksum"] == (

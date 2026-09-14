@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
+from dataclasses import replace
 from typing import Any
 from uuid import UUID
 
@@ -30,6 +32,10 @@ from eneo.object_content.content import (
     ObjectContentUnavailableError,
 )
 from eneo.users.user import UserInDB
+
+
+async def _single_chunk(payload: bytes) -> AsyncGenerator[bytes]:
+    yield payload
 
 
 class AttachedTemplateFileUnavailableError(Exception):
@@ -87,7 +93,14 @@ class FlowTemplateAssetService:
                 document_bytes,
                 filename=prepared.name,
             )
-            saved_file = await self.file_service.save_prepared_file(prepared)
+            # The prepared original streams once and inspection just read it;
+            # persist the bytes that were inspected, not the drained stream.
+            saved_file = await self.file_service.save_prepared_file(
+                replace(
+                    prepared,
+                    contents=(replace(original, chunks=_single_chunk(document_bytes)),),
+                )
+            )
         asset = await self.template_asset_repo.create(
             flow_id=persisted_flow_id,
             space_id=flow.space_id,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import io
 from collections.abc import AsyncIterator
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
@@ -179,6 +179,98 @@ async def _delete_file(
         if lock_timeout:
             await session.execute(sa.text("SET LOCAL lock_timeout = '100ms'"))
         await session.execute(sa.delete(Files).where(Files.id == file_id))
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_template_upload_route_persists_the_uploaded_bytes(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+) -> None:
+    # The route inspects the upload for placeholders and then persists it;
+    # both must read the same bytes, or the stored asset is empty and every
+    # later read (inspect, publish, run) fails as an invalid archive.
+    _ = patch_auth_service_jwt
+    async with db_container() as setup_container:
+        user, _space, flow, _file = await _create_flow_and_file(
+            setup_container,
+            placeholder="case_id",
+        )
+        token = setup_container.auth_service().create_access_token_for_user(user)
+    content = _template_bytes("case_id")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    upload = await client.post(
+        f"/api/v1/flows/{flow.id}/template-files/",
+        files={"upload_file": ("mall.docx", content, DOCX_MIME)},
+        headers=headers,
+    )
+    assert upload.status_code == 201, upload.text
+    asset_id = upload.json()["id"]
+    assert upload.json()["placeholders"] == ["case_id"]
+
+    inspect = await client.get(
+        f"/api/v1/flows/{flow.id}/template-inspect/",
+        params={"file_id": asset_id},
+        headers=headers,
+    )
+    assert inspect.status_code == 200, inspect.text
+
+    async with db_container(user=user) as container:
+        (
+            _asset,
+            stored,
+        ) = await container.flow_template_asset_service().get_asset_with_file(
+            flow_id=flow.id,
+            asset_id=UUID(asset_id),
+        )
+    assert stored.blob == content
+
+    # A flow bound to the stored asset publishes: publication re-reads the
+    # asset bytes to check every placeholder has a binding.
+    assistant = await client.post(
+        f"/api/v1/flows/{flow.id}/assistants/",
+        json={"name": "Prepare"},
+        headers=headers,
+    )
+    assert assistant.status_code == 201, assistant.text
+    bound = await client.patch(
+        f"/api/v1/flows/{flow.id}/",
+        json={
+            "name": flow.name,
+            "description": "",
+            "steps": [
+                {
+                    "assistant_id": assistant.json()["id"],
+                    "step_order": 1,
+                    "user_description": "Prepare content",
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "output_mode": "pass_through",
+                    "output_type": "text",
+                },
+                {
+                    "assistant_id": assistant.json()["id"],
+                    "step_order": 2,
+                    "user_description": "Fill template",
+                    "input_source": "previous_step",
+                    "input_type": "text",
+                    "output_mode": "template_fill",
+                    "output_type": "docx",
+                    "output_config": {
+                        "template_asset_id": asset_id,
+                        "bindings": {"case_id": "{{ föregående_steg }}"},
+                    },
+                },
+            ],
+        },
+        headers=headers,
+    )
+    assert bound.status_code == 200, bound.text
+    published = await client.post(f"/api/v1/flows/{flow.id}/publish/", headers=headers)
+    assert published.status_code == 200, published.text
+    assert published.json()["published_version"] == 1
 
 
 @pytest.mark.integration
