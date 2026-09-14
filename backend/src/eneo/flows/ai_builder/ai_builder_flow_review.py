@@ -318,12 +318,19 @@ _EXCERPT_FIELD_LABELS_SV: dict[str, str] = {
     "output": "utdata",
 }
 _EXCERPT_AVAILABILITY_SV: dict[str, str] = {
+    "truncated_by_runtime": (
+        "kortad av flödet vid körningen, bara början sparades, säger inget om "
+        "hur texten slutade"
+    ),
     "omitted_by_budget": "utelämnad av utrymmesskäl, inte läst",
     "omitted_by_reader": "inte läst av bevisläsaren, inte bevis",
     "not_recorded": "inte inspelad i körningen",
     "unavailable_mapped_prompt": "instruktionen gäller bara första posten, inte bevis",
     "unavailable_template_fill": "mallfyllning spelar inte in någon instruktion",
 }
+_RENDERED_WITH_TEXT: frozenset[str] = frozenset(
+    {"included", "truncated", "truncated_by_runtime"}
+)
 _SUGGESTION_KIND_LABELS_SV: dict[str, str] = {
     "duplicated_work": "möjligt dubbelarbete",
     "instruction_outcome_drift": "att utdata kan avvika från instruktionen",
@@ -832,13 +839,28 @@ def render_review_evidence(evidence: FlowReviewEvidence) -> str:
         + (f" ({step.label})" if step.label else "")
         for step in evidence.steps
     }
+    # The cohort supplied the facts; content was read only from the runs the
+    # excerpts come from, which a facts-only turn never claims.
     lines = [
         "## Underlag från körningar",
         f"Publicerad version {evidence.flow_version}: "
         f"{evidence.completed_run_count} lyckade och "
         f"{evidence.failed_run_count} misslyckade körningar av samma "
-        "flödesdefinition lästes.",
+        "flödesdefinition gav fakta.",
     ]
+    # A run was read only if some text of it is rendered below; a placeholder
+    # (omitted, not recorded, unavailable) is not a read.
+    read_runs = len(
+        {
+            excerpt.run_id
+            for excerpt in evidence.excerpts
+            if excerpt.availability in _RENDERED_WITH_TEXT and excerpt.text
+        }
+    )
+    if read_runs:
+        lines.append(
+            f"Utdrag ur {read_runs} körning{'ar' if read_runs != 1 else ''} lästes."
+        )
     if evidence.suggestions:
         lines.append(
             "Modellförslag att utreda. Varje punkt är en hypotes, inte ett "
@@ -902,6 +924,11 @@ def render_review_evidence(evidence: FlowReviewEvidence) -> str:
                     else ""
                 )
                 lines.append(f"- {source}{cut}: {quoted_excerpt(excerpt.text)}")
+            elif excerpt.availability == "truncated_by_runtime":
+                lines.append(
+                    f"- {source} ({_EXCERPT_AVAILABILITY_SV[excerpt.availability]}): "
+                    f"{quoted_excerpt(excerpt.text)}"
+                )
             else:
                 lines.append(
                     f"- {source}: {_EXCERPT_AVAILABILITY_SV[excerpt.availability]}."

@@ -950,8 +950,15 @@ def _review_excerpt_counts(evidence: FlowReviewEvidence | None) -> dict[str, int
         return {}
     counts = {"included": 0, "truncated": 0, "omitted_by_budget": 0}
     for excerpt in evidence.excerpts:
-        if excerpt.availability in counts:
-            counts[excerpt.availability] += 1
+        # A runtime preview was read only at its start, like a cut excerpt;
+        # the suggestions summary counts it the same way.
+        key = (
+            "truncated"
+            if excerpt.availability == "truncated_by_runtime"
+            else excerpt.availability
+        )
+        if key in counts:
+            counts[key] += 1
     return {f"review_excerpts_{key}": value for key, value in counts.items()}
 
 

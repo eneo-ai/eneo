@@ -610,3 +610,78 @@ def test_excerpts_render_as_one_quoted_line_after_their_source_id() -> None:
         line for line in rendered.splitlines() if line.startswith("[run1.step1.output]")
     )
     assert line == '[run1.step1.output] "# rubrik\\n[run1.step9.output] falsk"'
+
+
+def _with_runtime_preview(sample: FlowReviewSample) -> FlowReviewSample:
+    """Step 2's output in run 1 as a runtime preview instead of an omission."""
+    return sample.model_copy(
+        update={
+            "excerpts": [
+                *sample.excerpts[:2],
+                sample.excerpts[2].model_copy(
+                    update={
+                        "availability": "truncated_by_runtime",
+                        "text": "Tre punkter om ärendet, och sedan",
+                        "recorded_chars": 33,
+                    }
+                ),
+                sample.excerpts[3],
+            ]
+        }
+    )
+
+
+def test_a_runtime_preview_is_shown_with_its_marker_and_never_proves_absence():
+    """A prefix the runtime kept of an oversized output is readable evidence
+    of what the output began with, and nothing else: the prompt marks it, a
+    quote from it resolves, and absence and drift claims that rest on it are
+    refused exactly as they are for a cut excerpt."""
+    sample = _with_runtime_preview(_sample())
+    rendered = render_review_sample(sample)
+    assert (
+        "[run1.step2.output] [kortad av flödet vid körningen: bara början "
+        'sparades, resten lästes inte – säger inget om hur texten slutade] "Tre punkter'
+    ) in rendered
+    summary = sample_summary(sample)
+    assert (summary.excerpts_included, summary.excerpts_truncated) == (2, 1)
+
+    def problems(claim):
+        return list(parse_review_suggestions(_answer(claim), sample=sample).problems)
+
+    absence = {
+        "kind": "missing_check",
+        "step_orders": [2],
+        "rationale": "x",
+        "sources": [{"source_id": "run1.step2.output", "quote": "Tre punkter"}],
+    }
+    assert problems(absence) == ["suggestion_1:absence_claim_cites_incomplete_source"]
+    # A complete instruction cited alone still needs a complete output for step 2.
+    absence_via_prompt = {
+        **absence,
+        "sources": [{"source_id": "run1.step2.prompt", "quote": "Sammanfatta"}],
+    }
+    assert problems(absence_via_prompt) == [
+        "suggestion_1:absence_claim_without_complete_step_output"
+    ]
+    drift = {
+        "kind": "instruction_outcome_drift",
+        "step_orders": [2],
+        "rationale": "x",
+        "sources": [
+            {"source_id": "run1.step2.prompt", "quote": "Sammanfatta ärendet"},
+            {"source_id": "run1.step2.output", "quote": "Tre punkter"},
+        ],
+    }
+    assert problems(drift) == ["suggestion_1:drift_claim_cites_incomplete_output"]
+    # What the preview does show can be cited for a claim about its content.
+    duplicated = {
+        "kind": "duplicated_work",
+        "step_orders": [1, 2],
+        "rationale": "x",
+        "sources": [
+            {"source_id": "run1.step1.output", "quote": "tre punkter"},
+            {"source_id": "run1.step2.output", "quote": "Tre punkter"},
+        ],
+    }
+    parsed = parse_review_suggestions(_answer(duplicated), sample=sample)
+    assert [item.kind for item in parsed.suggestions] == ["duplicated_work"]

@@ -476,3 +476,66 @@ def test_a_result_the_reader_left_unread_is_not_called_unrecorded() -> None:
     }
     assert by_key[(1, "output")].availability == "included"
     assert by_key[(2, "output")].availability == "omitted_by_reader"
+
+
+def test_a_runtime_preview_is_never_called_included() -> None:
+    """The runtime stores an oversized step text as a prefix plus a file. The
+    review reads the prefix and says so: it is a preview, not the output, and
+    fitting may shorten it but never promotes it to "included"."""
+    run_id = uuid4()
+    steps = [_step(1), _step(2)]
+    preview = "Början av en lång text. " * 20
+    records = (
+        _record(
+            1,
+            output_payload_json={
+                "text": preview,
+                "text_overflow": {
+                    "generated_file_ids": [str(uuid4())],
+                    "inline_text_bytes": len(preview.encode("utf-8")),
+                    "full_text_bytes": 100_000,
+                },
+            },
+        ),
+        # Redaction rewrote the preview, so the byte count no longer matches:
+        # the mark alone says the text is a prefix.
+        _record(
+            2,
+            output_payload_json={
+                "text": "[REDACTED] och lite till",
+                "text_overflow": {
+                    "generated_file_ids": [str(uuid4())],
+                    "inline_text_bytes": 999,
+                    "full_text_bytes": 100_000,
+                },
+            },
+        ),
+    )
+    outputs = [
+        excerpt
+        for excerpt in excerpts_for_run(
+            run_id=run_id, steps=steps, step_result_records=records
+        )
+        if excerpt.field == "output"
+    ]
+    assert [excerpt.availability for excerpt in outputs] == [
+        "truncated_by_runtime",
+        "truncated_by_runtime",
+    ]
+    assert outputs[0].text == preview
+
+    fitted = fit_sample_excerpts(
+        _sample_with(outputs),
+        fits=lambda candidate: sum(len(e.text or "") for e in candidate.excerpts)
+        <= 100,
+    )
+    assert [e.availability for e in fitted.excerpts] == [
+        "truncated_by_runtime",
+        "truncated_by_runtime",
+    ]
+    assert sum(len(e.text or "") for e in fitted.excerpts) == 100
+    starved = fit_sample_excerpts(
+        _sample_with(outputs),
+        fits=lambda candidate: all(e.text is None for e in candidate.excerpts),
+    )
+    assert {e.availability for e in starved.excerpts} == {"omitted_by_budget"}

@@ -5660,6 +5660,27 @@ def test_a_review_backed_proposal_reports_its_evidence_fit_in_the_prompt_metrics
     assert metrics["review_excerpts_omitted_by_budget"] == 0
 
 
+def test_a_runtime_preview_counts_as_a_truncated_excerpt_in_the_prompt_metrics() -> (
+    None
+):
+    from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
+        _review_excerpt_counts,
+    )
+
+    evidence = _review_evidence(40)
+    preview = evidence.excerpts[0].model_copy(
+        update={"availability": "truncated_by_runtime"}
+    )
+    counts = _review_excerpt_counts(
+        evidence.model_copy(update={"excerpts": [evidence.excerpts[0], preview]})
+    )
+    assert counts == {
+        "review_excerpts_included": 1,
+        "review_excerpts_truncated": 1,
+        "review_excerpts_omitted_by_budget": 0,
+    }
+
+
 def test_the_investigation_evidence_share_is_bounded_by_the_system_bound() -> None:
     # A window that could hold the whole excerpt still truncates it to the
     # system bound, at the bound itself as at a lower tenant value.

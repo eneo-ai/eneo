@@ -28,6 +28,12 @@ from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
 )
 from eneo.flows.ai_builder.ai_builder_text_fitting import fit_text_allocations
 from eneo.flows.domain.runtime import RuntimeStep
+from eneo.flows.domain.step_output import (
+    OUTPUT_TEXT_OVERFLOW_KEY,
+    FileBackedStepText,
+    StepOutputMetadataError,
+    interpret_step_text,
+)
 from eneo.flows.input_binding_contract_rules import describe_input_bindings
 
 if TYPE_CHECKING:
@@ -45,6 +51,9 @@ ExcerptField = Literal["prompt", "input", "output"]
 ExcerptAvailability = Literal[
     "included",
     "truncated",
+    # The runtime stored only a prefix of a step text and moved the whole to a
+    # file the review never reads: the prefix is a preview, not the output.
+    "truncated_by_runtime",
     "omitted_by_budget",
     "omitted_by_reader",
     "not_recorded",
@@ -181,8 +190,10 @@ def excerpts_for_run(
     Availability is decided here: a mapped step records only its first
     item's prompt and a template fill records none; a field a run never
     recorded is "not_recorded"; a result the reader left unread under its
-    own limits is "omitted_by_reader". "truncated" and "omitted_by_budget"
-    are set later by `fit_sample_excerpts`, against a real request.
+    own limits is "omitted_by_reader"; a text the runtime persisted as a
+    prefix plus a file is "truncated_by_runtime". "truncated" and
+    "omitted_by_budget" are set later by `fit_sample_excerpts`, against a
+    real request.
     ``step_orders`` keeps only the named steps' excerpts: the bundle is still
     read and audited whole, the prompt allocation is what stays bounded.
     """
@@ -242,14 +253,15 @@ def _excerpt(
             return unavailable("unavailable_mapped_prompt")
     if record is None:
         return unavailable(missing_record_availability)
-    text = _recorded_text(record, field)
-    if text is None:
+    recorded = _recorded_text(record, field)
+    if recorded is None:
         return unavailable("not_recorded")
+    text, availability = recorded
     return ReviewSampleExcerpt(
         run_id=run_id,
         step_order=step.step_order,
         field=field,
-        availability="included",
+        availability=availability,
         text=text,
         recorded_chars=len(text),
     )
@@ -268,21 +280,24 @@ def fit_excerpts(
 
     ``render`` rebuilds the carrier (a sample, an evidence packet) around a
     candidate excerpt list; ``fits`` measures it the way the request will be
-    measured. Included excerpts share the room fairly; one cut short is
-    "truncated" and one left without room is "omitted_by_budget", so the model
-    and the reader of its answer are told what was not read.
+    measured. Readable excerpts share the room fairly; an included one cut
+    short is "truncated" and one left without room is "omitted_by_budget",
+    so the model and the reader of its answer are told what was not read. A
+    runtime preview shares the room too (it can be as long as any inline
+    text) and stays "truncated_by_runtime" however short it gets: cutting a
+    prefix leaves a prefix.
     """
 
     readable = [
         (index, excerpt.text)
         for index, excerpt in enumerate(excerpts)
-        if excerpt.availability == "included" and excerpt.text
+        if excerpt.availability in _FITTED and excerpt.text
     ]
 
     def render_allocations(allocations: Mapping[int, int]) -> T:
         fitted: list[ReviewSampleExcerpt] = []
         for index, excerpt in enumerate(excerpts):
-            if excerpt.availability != "included" or not excerpt.text:
+            if excerpt.availability not in _FITTED or not excerpt.text:
                 fitted.append(excerpt)
                 continue
             allowed = min(allocations.get(index, 0), len(excerpt.text))
@@ -292,7 +307,11 @@ def fit_excerpts(
                 fitted.append(
                     excerpt.model_copy(
                         update={
-                            "availability": "truncated",
+                            "availability": (
+                                "truncated"
+                                if excerpt.availability == "included"
+                                else excerpt.availability
+                            ),
                             "text": excerpt.text[:allowed],
                         }
                     )
@@ -306,6 +325,9 @@ def fit_excerpts(
         return render(fitted)
 
     return fit_text_allocations(readable, render=render_allocations, fits=fits)
+
+
+_FITTED: frozenset[str] = frozenset({"included", "truncated_by_runtime"})
 
 
 def fit_sample_excerpts(
@@ -346,10 +368,14 @@ def _is_mapped_output(payload: object) -> bool:
     return mapping.get("item_map_execution_mode") == "per_item"
 
 
-def _recorded_text(record: dict[str, Any], field: ExcerptField) -> str | None:
+def _recorded_text(
+    record: dict[str, Any], field: ExcerptField
+) -> tuple[str, ExcerptAvailability] | None:
+    """The recorded text and whether it is the whole of what the step recorded."""
+
     if field == "prompt":
         prompt = record.get("effective_prompt")
-        return prompt if isinstance(prompt, str) and prompt else None
+        return (prompt, "included") if isinstance(prompt, str) and prompt else None
     payload: object = record.get(
         "input_payload_json" if field == "input" else "output_payload_json"
     )
@@ -359,8 +385,30 @@ def _recorded_text(record: dict[str, Any], field: ExcerptField) -> str | None:
         mapping = cast(dict[str, object], payload)
         text = mapping.get("text")
         if isinstance(text, str):
-            return text or None
-        return json.dumps(mapping, ensure_ascii=False, sort_keys=True)
+            return (text, _text_availability(mapping)) if text else None
+        return json.dumps(mapping, ensure_ascii=False, sort_keys=True), "included"
     if isinstance(payload, str):
-        return payload or None
-    return json.dumps(payload, ensure_ascii=False)
+        return (payload, "included") if payload else None
+    return json.dumps(payload, ensure_ascii=False), "included"
+
+
+def _text_availability(payload: Mapping[str, object]) -> ExcerptAvailability:
+    """Whether the payload's text is the step's whole text or a runtime preview.
+
+    The runtime marks a text it stored as a prefix plus a file; the domain
+    interpreter owns that shape. Evidence reads are redacted, which can
+    rewrite the preview and fail the interpreter's byte check: the mark alone
+    still says the text is a prefix, and a prefix is never called included.
+    """
+
+    if OUTPUT_TEXT_OVERFLOW_KEY not in payload:
+        return "included"
+    try:
+        step_text = interpret_step_text(payload)
+    except StepOutputMetadataError:
+        return "truncated_by_runtime"
+    return (
+        "truncated_by_runtime"
+        if isinstance(step_text, FileBackedStepText)
+        else "included"
+    )

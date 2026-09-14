@@ -138,6 +138,10 @@ def sample_summary(sample: FlowReviewSample) -> FlowReviewSuggestionSampleSummar
     }
     for excerpt in sample.excerpts:
         key = excerpt.availability if excerpt.availability in counts else "unavailable"
+        # A runtime preview was read only at its start, like a cut excerpt;
+        # the screen says exactly that of the truncated count.
+        if excerpt.availability == "truncated_by_runtime":
+            key = "truncated"
         counts[key] += 1
     return FlowReviewSuggestionSampleSummary(
         run_ids=sample.run_ids,
@@ -216,6 +220,11 @@ def render_review_sample(sample: FlowReviewSample) -> str:
                     else ""
                 )
                 lines.append(f"[{source_id}]{marker} {quoted_excerpt(excerpt.text)}")
+            elif excerpt.availability == "truncated_by_runtime":
+                lines.append(
+                    f"[{source_id}] [{_AVAILABILITY_SV[excerpt.availability]}] "
+                    f"{quoted_excerpt(excerpt.text)}"
+                )
             else:
                 lines.append(
                     f"[{source_id}] ({_AVAILABILITY_SV[excerpt.availability]})"
@@ -227,6 +236,10 @@ def render_review_sample(sample: FlowReviewSample) -> str:
 _AVAILABILITY_SV = {
     "included": "ingår",
     "truncated": "avklippt",
+    "truncated_by_runtime": (
+        "kortad av flödet vid körningen: bara början sparades, resten lästes "
+        "inte – säger inget om hur texten slutade"
+    ),
     "omitted_by_budget": "utelämnad av budgetskäl – inte läst",
     "omitted_by_reader": "inte läst av bevisläsaren – inte bevis",
     "not_recorded": "inte inspelad i körningen",
@@ -509,6 +522,12 @@ def _collapse_whitespace(text: str) -> str:
     return _WHITESPACE.sub(" ", text).strip()
 
 
+# What a quote may come from. A runtime preview is readable like a cut
+# excerpt and, like one, is never "included": absence and drift claims that
+# cite it are refused by the checks above without a rule of their own.
+_CITABLE: frozenset[str] = frozenset({"included", "truncated", "truncated_by_runtime"})
+
+
 def _parse_source(
     raw_source: object, *, index: _SampleIndex
 ) -> tuple[FlowReviewSuggestionSource, str] | str:
@@ -522,7 +541,7 @@ def _parse_source(
     excerpt = index.excerpts_by_source_id.get(source_id.strip())
     if excerpt is None:
         return "unknown_source"
-    if excerpt.availability not in ("included", "truncated") or not excerpt.text:
+    if excerpt.availability not in _CITABLE or not excerpt.text:
         return "source_not_readable"
     quote = _collapse_whitespace(quote)
     if not quote or len(quote) > MAX_QUOTE_CHARS:

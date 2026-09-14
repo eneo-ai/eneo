@@ -2171,3 +2171,158 @@ def test_fit_review_evidence_keeps_facts_and_marks_what_did_not_fit() -> None:
     assert len(fitted.excerpts[1].text or "") == 70
     rendered = render_review_evidence(fitted)
     assert "avklippt efter 70 av 3000 tecken" in rendered
+
+
+def test_investigation_evidence_treats_a_runtime_preview_as_unread():
+    """A prefix the runtime kept of an oversized output travels into the
+    planner's evidence with its text and its mark: fitting never promotes it,
+    and the rendering names it as a preview that says nothing about the end."""
+    from eneo.flows.ai_builder.ai_builder_flow_review import (
+        FlowReviewEvidence,
+        fit_review_evidence,
+        render_review_evidence,
+    )
+    from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
+        ReviewSampleExcerpt,
+        ReviewSampleRun,
+    )
+
+    run_id = uuid4()
+    evidence = FlowReviewEvidence(
+        flow_version=2,
+        definition_checksum="sum",
+        evidence_classification_level=1,
+        completed_run_count=1,
+        failed_run_count=0,
+        steps=[],
+        facts=[],
+        sample_runs=[
+            ReviewSampleRun(
+                run_id=run_id, status="completed", evidence_classification_level=1
+            )
+        ],
+        excerpts=[
+            ReviewSampleExcerpt(
+                run_id=run_id,
+                step_order=2,
+                field="output",
+                availability="truncated_by_runtime",
+                text="Början av utdata",
+                recorded_chars=16,
+            )
+        ],
+    )
+    fitted = fit_review_evidence(evidence, fits=lambda _candidate: True)
+    assert fitted.excerpts[0].availability == "truncated_by_runtime"
+    assert fitted.excerpts[0].text == "Början av utdata"
+    rendered = render_review_evidence(fitted)
+    assert (
+        "- körning 1, steg 2, utdata (kortad av flödet vid körningen, bara "
+        'början sparades, säger inget om hur texten slutade): "Början av utdata"'
+    ) in rendered
+
+
+def test_the_evidence_header_claims_reads_only_of_runs_whose_content_travels():
+    """The cohort supplied the facts; content was read from the sampled runs
+    alone. A facts-only turn says the cohort gave facts and claims no read; a
+    turn with excerpts says how many runs the excerpts come from."""
+    from eneo.flows.ai_builder.ai_builder_flow_review import (
+        FlowReviewEvidence,
+        render_review_evidence,
+    )
+    from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
+        ReviewSampleExcerpt,
+        ReviewSampleRun,
+    )
+
+    facts_only = FlowReviewEvidence(
+        flow_version=2,
+        definition_checksum="sum",
+        evidence_classification_level=1,
+        completed_run_count=20,
+        failed_run_count=3,
+        steps=[],
+        facts=[],
+    )
+    rendered = render_review_evidence(facts_only)
+    assert (
+        "Publicerad version 2: 20 lyckade och 3 misslyckade körningar av samma "
+        "flödesdefinition gav fakta."
+    ) in rendered
+    assert "lästes" not in rendered
+
+    run_a, run_b = uuid4(), uuid4()
+    with_excerpts = facts_only.model_copy(
+        update={
+            "sample_runs": [
+                ReviewSampleRun(
+                    run_id=run_id, status="completed", evidence_classification_level=1
+                )
+                for run_id in (run_a, run_b)
+            ],
+            "excerpts": [
+                ReviewSampleExcerpt(
+                    run_id=run_id,
+                    step_order=1,
+                    field="output",
+                    availability="included",
+                    text="Ut",
+                    recorded_chars=2,
+                )
+                for run_id in (run_a, run_b, run_a)
+            ],
+        }
+    )
+    rendered = render_review_evidence(with_excerpts)
+    assert "gav fakta.\nUtdrag ur 2 körningar lästes." in rendered
+    one_run = with_excerpts.model_copy(update={"excerpts": with_excerpts.excerpts[:1]})
+    assert "Utdrag ur 1 körning lästes." in render_review_evidence(one_run)
+
+    # A placeholder is not a read: a run whose content was left unread by the
+    # reader, or cut away entirely by the budget, is not counted, and when no
+    # run has rendered text the read line is not written at all.
+    def placeholder(run_id, availability):
+        return ReviewSampleExcerpt(
+            run_id=run_id, step_order=1, field="output", availability=availability
+        )
+
+    def read_lines(candidate):
+        return [
+            line
+            for line in render_review_evidence(candidate).splitlines()
+            if line.startswith("Utdrag ur ") and line.endswith(" lästes.")
+        ]
+
+    all_unread = with_excerpts.model_copy(
+        update={"excerpts": [placeholder(run_a, "omitted_by_reader")]}
+    )
+    assert read_lines(all_unread) == []
+    all_starved = with_excerpts.model_copy(
+        update={
+            "excerpts": [
+                placeholder(run_a, "omitted_by_budget"),
+                placeholder(run_a, "not_recorded"),
+            ]
+        }
+    )
+    assert read_lines(all_starved) == []
+    one_read_one_unread = with_excerpts.model_copy(
+        update={
+            "excerpts": [
+                with_excerpts.excerpts[0],
+                placeholder(run_b, "omitted_by_reader"),
+                placeholder(run_b, "unavailable_template_fill"),
+            ]
+        }
+    )
+    assert read_lines(one_read_one_unread) == ["Utdrag ur 1 körning lästes."]
+    preview_only = with_excerpts.model_copy(
+        update={
+            "excerpts": [
+                with_excerpts.excerpts[0].model_copy(
+                    update={"availability": "truncated_by_runtime"}
+                )
+            ]
+        }
+    )
+    assert read_lines(preview_only) == ["Utdrag ur 1 körning lästes."]
