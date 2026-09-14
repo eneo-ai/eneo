@@ -95,6 +95,7 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
+from eneo.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
 from eneo.flows.input_binding_contract_rules import (
     derive_structured_projection_contract,
 )
@@ -4805,19 +4806,43 @@ async def test_untouched_composer_step_keeps_its_mode(scoped):
 
 
 @pytest.mark.asyncio
-async def test_saved_step_fragment_keeps_untouched_composer_mode():
-    """The fragment expansion preserves the modes of the steps it fills in."""
+async def test_saved_step_fragment_keeps_an_untouched_speaker_mapping_step():
+    """speaker_mapping is the other persisted mode no derivation produces.
+
+    The Builder never proposes it, but edits must carry it through: the
+    fragment expansion fills the untouched transcription and speaker-mapping
+    steps in with their saved modes.
+    """
 
     flow = _flow(
-        _flow_step(step_order=1, user_description="Analys", input_source="flow_input"),
         _flow_step(
-            step_order=2,
-            user_description="Sätt ihop texten",
-            input_source="previous_step",
-            output_mode="compose_text",
+            step_order=1,
+            user_description="Transkribera",
+            input_source="flow_input",
+            input_type="audio",
+            output_mode="transcribe_only",
+            output_type="text",
         ),
         _flow_step(
-            step_order=3, user_description="Granska", input_source="previous_step"
+            step_order=2,
+            user_description="Namnge talare",
+            input_source="previous_step",
+            output_mode="speaker_mapping",
+            output_type="json",
+            output_config={
+                "speaker_mapping": {
+                    "participants_field": "deltagare",
+                    "infer_names": True,
+                }
+            },
+        ).model_copy(
+            update={"review_policy": FlowStepReviewPolicy(mode=FlowStepReviewMode.EDIT)}
+        ),
+        _flow_step(
+            step_order=3,
+            user_description="Sammanfatta",
+            input_source="previous_step",
+            input_type="json",
         ),
     )
     snapshots = {
@@ -4830,9 +4855,9 @@ async def test_saved_step_fragment_keeps_untouched_composer_mode():
         available_models=None, available_kbs=None
     )
     context = ResolvedAIBuilderEditContext(
-        request=AIBuilderSavedFlowStepEditContext(flow_step_id=flow.steps[0].id),
+        request=AIBuilderSavedFlowStepEditContext(flow_step_id=flow.steps[2].id),
         scope="step",
-        target_existing_step_ref="existing_step_1",
+        target_existing_step_ref="existing_step_3",
     )
     prior = _prior_spec_for_revision(
         context=context,
@@ -4842,6 +4867,11 @@ async def test_saved_step_fragment_keeps_untouched_composer_mode():
         resource_catalog=catalog,
     )
     assert prior is not None
+    assert [step.output_mode for step in prior.steps] == [
+        OutputMode.TRANSCRIBE_ONLY,
+        OutputMode.SPEAKER_MAPPING,
+        OutputMode.PASS_THROUGH,
+    ]
     result = await _process(
         flow=flow,
         assistant_snapshots=snapshots,
@@ -4849,20 +4879,20 @@ async def test_saved_step_fragment_keeps_untouched_composer_mode():
         plan_edit_context=context,
         prior_spec_for_revision=prior,
         arguments={
-            "plan_rationale": "Förtydliga analysen.",
+            "plan_rationale": "Förtydliga sammanfattningen.",
             "steps": [
                 {
                     "kind": "modify",
-                    "existing_step_ref": "existing_step_1",
-                    "assistant_spec": {"instructions": "Förklara evidensen tydligt."},
+                    "existing_step_ref": "existing_step_3",
+                    "assistant_spec": {"instructions": "Sammanfatta per talare."},
                 }
             ],
         },
     )
     assert isinstance(result, ProposalReady), result
     assert [step.output_mode for step in result.compiled.content.spec.steps] == [
-        OutputMode.PASS_THROUGH,
-        OutputMode.COMPOSE_TEXT,
+        OutputMode.TRANSCRIBE_ONLY,
+        OutputMode.SPEAKER_MAPPING,
         OutputMode.PASS_THROUGH,
     ]
 

@@ -1364,6 +1364,57 @@ def test_edit_overlay_modify_step_uses_document_delivery_mode_derivation() -> No
     assert result.steps[0].output_mode == OutputMode.RENDER_VERBATIM
 
 
+@pytest.mark.parametrize("mode", [OutputMode.COMPOSE_TEXT, OutputMode.SPEAKER_MAPPING])
+def test_edit_overlay_keeps_a_non_derivable_mode_when_no_determining_field_changes(
+    mode: OutputMode,
+) -> None:
+    """compose_text and speaker_mapping are authored choices, never derived.
+
+    An identity-only entry (what a keep lowers to, and what a saved-step
+    fragment expands untouched steps into) and an instructions-only patch
+    both leave the persisted mode alone.
+    """
+
+    base = _base_spec(_step("step_a", "existing_step_1", "Authored", output_mode=mode))
+    for patch in (
+        ModifyExistingStep(existing_step_ref="existing_step_1"),
+        ModifyExistingStep.model_validate(
+            {
+                "existing_step_ref": "existing_step_1",
+                "assistant_spec": {"instructions": "Tydligare instruktion."},
+            }
+        ),
+    ):
+        result = compile_ordered_edit_proposal(
+            base_spec=base, proposal=_edit_proposal(steps=[patch])
+        )
+        assert result.steps[0].output_mode == mode
+
+
+@pytest.mark.parametrize("mode", [OutputMode.COMPOSE_TEXT, OutputMode.SPEAKER_MAPPING])
+def test_edit_overlay_rederives_a_non_derivable_mode_when_a_determining_field_changes(
+    mode: OutputMode,
+) -> None:
+    result = compile_ordered_edit_proposal(
+        base_spec=_base_spec(
+            _step("step_a", "existing_step_1", "Authored", output_mode=mode)
+        ),
+        proposal=_edit_proposal(
+            steps=[
+                ModifyExistingStep.model_validate(
+                    {
+                        "existing_step_ref": "existing_step_1",
+                        "output_type": "pdf",
+                        "document_delivery_mode": "generated",
+                    }
+                )
+            ],
+        ),
+    )
+
+    assert result.steps[0].output_mode == OutputMode.RENDER_VERBATIM
+
+
 def test_edit_overlay_drops_document_body_writer_ref_when_writer_step_is_removed() -> (
     None
 ):

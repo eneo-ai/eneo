@@ -274,6 +274,10 @@ def apply_existing_step_patch(
     return strip_inapplicable_completion_model(existing.model_copy(update=updates))
 
 
+# Persisted modes that derive_output_mode can never produce: an authored
+# choice, not a function of the step's types. They survive an edit that does
+# not touch a mode-determining field.
+_NON_DERIVABLE_MODES = frozenset({OutputMode.COMPOSE_TEXT, OutputMode.SPEAKER_MAPPING})
 _MODE_DETERMINING_FIELDS = frozenset(
     {
         "input_source",
@@ -348,9 +352,12 @@ def _compile_existing_step_modification(
 
     # Rederiving the mode normalises a persisted shape whose mode contradicts
     # its types (the audio repair and review housekeeping rely on it). It must
-    # not touch compose_text, which no derivation can produce: an untouched
-    # composer step, or one whose instructions alone changed, keeps its mode.
-    if step.output_mode != OutputMode.COMPOSE_TEXT or fields & _MODE_DETERMINING_FIELDS:
+    # not touch a non-derivable mode: an untouched composer or speaker-mapping
+    # step, or one whose instructions alone changed, keeps its mode.
+    if (
+        step.output_mode not in _NON_DERIVABLE_MODES
+        or fields & _MODE_DETERMINING_FIELDS
+    ):
         output_mode = _derive_existing_step_output_mode(
             step,
             document_delivery_mode=patch.document_delivery_mode,
