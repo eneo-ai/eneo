@@ -180,11 +180,14 @@ def _iter_step_template_expressions(step: StepSpec) -> list[str]:
 
 
 def _has_supported_step_output_path(reference: TemplateReference) -> bool:
-    return (
-        reference.tail == "output.text"
-        or reference.tail == "output.structured"
-        or reference.tail.startswith("output.structured.")
-    )
+    # The same step paths publication accepts: a step's text, its declared
+    # structured output, its status, and its error message.
+    return reference.tail in {
+        "output.text",
+        "output.structured",
+        "status",
+        "error_message",
+    } or reference.tail.startswith("output.structured.")
 
 
 def _uses_structured_output(reference: TemplateReference) -> bool:

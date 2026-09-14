@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from typing import TypeGuard, cast
@@ -25,6 +24,7 @@ from eneo.flows.ai_builder.planning_state import (
     NAMED_RESULT_FIELD_NAME_MAX_LENGTH,
 )
 from eneo.flows.domain.flow import FlowPersistedJsonObject, clone_json_object
+from eneo.flows.domain.flow_step_validation import FlowStepValidationError
 from eneo.flows.domain.runtime_input import build_runtime_input_config
 from eneo.flows.flow_authoring_runtime_input import resolve_runtime_input_config
 from eneo.flows.flow_authoring_spec import (
@@ -37,6 +37,7 @@ from eneo.flows.flow_authoring_spec import (
     StepSpec,
 )
 from eneo.flows.flow_run_input_envelope import FLOW_INPUT_TRANSCRIPTION_KEY
+from eneo.flows.flow_validators import validate_template_binding_scalar
 from eneo.flows.flow_variable_definitions import (
     PREVIOUS_STEP_TEXT_ALIAS,
     form_field_reference_expression,
@@ -55,7 +56,6 @@ _LOCAL_TEMPLATE_CONFIG_KEYS = frozenset(
     }
 )
 _MAX_DIAGNOSTIC_PLACEHOLDER_LENGTH = 80
-_EXACT_TEMPLATE_EXPRESSION = re.compile(r"^\s*\{\{\s*([^{}]+?)\s*\}\}\s*$")
 MAX_TEMPLATE_PREPARATION_STAGES = 5
 MAX_TEMPLATE_MATERIALIZED_PATHS = NAMED_RESULT_EVIDENCE_MAX_ITEMS
 _TRANSCRIPTION_PLACEHOLDERS = frozenset(
@@ -153,26 +153,17 @@ def apply_template_attachment_contract(
     for placeholder in normalized_placeholders:
         if placeholder in existing_bindings:
             existing = existing_bindings[placeholder]
-            kept = _validated_existing_binding(
+            if not _existing_binding_resolves(
                 existing,
+                placeholder=placeholder,
                 spec=spec,
                 form_fields=form_fields,
-            )
-            if kept is None:
-                raise _architecture_error(
-                    failure_code="template_binding_dependency_broken",
-                    repair_disposition="model_correctable",
-                    detail=(
-                        f"The flow's DOCX template maps placeholder "
-                        f"'{placeholder[:_MAX_DIAGNOSTIC_PLACEHOLDER_LENGTH]}' to "
-                        f"{existing[:_MAX_DIAGNOSTIC_PLACEHOLDER_LENGTH]}, which this "
-                        "edit breaks. Keep the step and output that mapping reads, "
-                        "or remove that dependency deliberately."
-                    ),
-                    placeholder=placeholder[:_MAX_DIAGNOSTIC_PLACEHOLDER_LENGTH],
-                    binding=existing[:_MAX_DIAGNOSTIC_PLACEHOLDER_LENGTH],
+            ):
+                raise template_binding_dependency_broken_error(
+                    placeholder=placeholder,
+                    binding=existing,
                 )
-            bindings[placeholder] = kept
+            bindings[placeholder] = existing
             continue
 
         field_name = template_placeholder_form_field_name(placeholder)
@@ -324,40 +315,63 @@ def _require_transcription_input_when_referenced(
     return spec.model_copy(update={"steps": [updated_root_step, *spec.steps[1:]]})
 
 
-def _validated_existing_binding(
+def _existing_binding_resolves(
     binding: str,
     *,
+    placeholder: str,
     spec: FlowDraftSpecCore,
     form_fields: list[FormFieldSpec],
-) -> str | None:
-    """The existing mapping in canonical form when it still resolves, else None.
+) -> bool:
+    """Whether a kept mapping still names a known scalar in the edited flow.
 
-    Step references arrive already rewritten to plan refs by the edit
-    compiler; the same rules that derive a new mapping decide whether a kept
-    one still points at an earlier step's declared output, the runtime date,
-    the transcript, the previous step's text, or a declared Flow input field.
-    An explicit blank stays blank.
+    Judged by the rule publication applies to persisted bindings, not by
+    whether the Builder would derive the mapping itself: step references
+    arrive rewritten to plan refs, and the compiled positions stand in for
+    step orders.
     """
 
-    if not binding.strip():
-        return ""
-    match = _EXACT_TEMPLATE_EXPRESSION.match(binding)
-    if match is None:
-        return None
-    expression = match.group(1)
-    explicit = _explicit_runtime_binding(placeholder=expression, spec=spec)
-    if explicit is not None:
-        return explicit
-    if not expression.casefold().startswith(("flow_input.", "flow.input.")):
-        return None
-    field_name = template_placeholder_form_field_name(expression)
-    if field_name is None:
-        return None
-    requested_key = field_name.casefold()
-    for field in form_fields:
-        if field.name.casefold() == requested_key:
-            return form_field_reference_expression(field.name)
-    return None
+    terminal_order = len(spec.steps)
+    try:
+        validate_template_binding_scalar(
+            binding,
+            placeholder=placeholder,
+            step_order=terminal_order,
+            output_contracts_by_order={
+                order: step.output_contract
+                for order, step in enumerate(spec.steps[:-1], start=1)
+            },
+            form_field_types={field.name: field.type for field in form_fields},
+            step_ref_mapping={
+                step.plan_step_ref: order
+                for order, step in enumerate(spec.steps, start=1)
+                if step.plan_step_ref
+            },
+        )
+    except FlowStepValidationError:
+        return False
+    return True
+
+
+def template_binding_dependency_broken_error(
+    *,
+    placeholder: str,
+    binding: str,
+) -> AIBuilderArchitectureError:
+    """An edit broke a mapping the flow's template carries; never re-derive it."""
+
+    return _architecture_error(
+        failure_code="template_binding_dependency_broken",
+        repair_disposition="model_correctable",
+        detail=(
+            f"The flow's DOCX template maps placeholder "
+            f"'{placeholder[:_MAX_DIAGNOSTIC_PLACEHOLDER_LENGTH]}' to "
+            f"{binding[:_MAX_DIAGNOSTIC_PLACEHOLDER_LENGTH]}, which this "
+            "edit breaks. Keep the step and output that mapping reads, "
+            "or remove that dependency deliberately."
+        ),
+        placeholder=placeholder[:_MAX_DIAGNOSTIC_PLACEHOLDER_LENGTH],
+        binding=binding[:_MAX_DIAGNOSTIC_PLACEHOLDER_LENGTH],
+    )
 
 
 def _declared_form_field_name(
@@ -830,5 +844,6 @@ __all__ = [
     "apply_template_attachment_contract",
     "selected_template_is_readable",
     "template_attachment_selection_is_valid",
+    "template_binding_dependency_broken_error",
     "template_preparation_stage_limit_exceeded",
 ]

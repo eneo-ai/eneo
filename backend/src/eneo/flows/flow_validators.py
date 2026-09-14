@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from enum import Enum
 from typing import Any, cast
@@ -901,59 +901,98 @@ def _validate_template_fill_config(
     # The syntax validator above establishes an object of exact expressions or
     # explicit empty values. Publishing additionally requires a known scalar.
     bindings = cast(dict[str, str], (step.output_config or {})["bindings"])
+    output_contracts_by_order = {
+        order: source.output_contract for order, source in steps_by_order.items()
+    }
     for placeholder, binding in bindings.items():
-        if not binding.strip():
-            continue
-        reference = analyze_template(
+        validate_template_binding_scalar(
             binding,
-            step_refs=step_ref_mapping,
-            form_field_names=set(form_field_types),
-        )[0]
-        scalar = False
-        if reference.kind is TemplateReferenceKind.STEP:
-            source = steps_by_order.get(reference.step_order or 0)
-            if source is not None and source.step_order < step.step_order:
-                scalar = reference.tail in {"output.text", "status", "error_message"}
-                if reference.structured_path and source.output_contract is not None:
-                    schema = _source_ref_schema(
-                        contract=source.output_contract,
-                        field_path=reference.structured_path,
-                        current_step_order=step.step_order,
-                        path_label=f"template binding '{placeholder}'",
-                        context={
-                            "field": "output_config.bindings",
-                            "placeholder": placeholder,
-                        },
-                        error_code=None,
-                    )
-                    scalar = _schema_is_scalar(schema)
-        elif reference.kind is TemplateReferenceKind.FORM_FIELD:
-            scalar = (
-                not reference.tail
-                and form_field_types.get(reference.head) in _SCALAR_FORM_FIELD_TYPES
-            )
-        elif reference.kind is TemplateReferenceKind.RUNTIME:
-            if not reference.tail:
-                scalar = runtime_variable_shape(reference.head) is VariableShape.SCALAR
-            elif reference.head in {"flow_input", "flow"}:
-                field_name = reference.tail
-                if reference.head == "flow":
-                    field_name = (
-                        field_name.removeprefix("input.")
-                        if field_name.startswith("input.")
-                        else ""
-                    )
-                scalar = (
-                    form_field_types.get(field_name) in _SCALAR_FORM_FIELD_TYPES
-                    or flow_input_key_shape(field_name) is VariableShape.SCALAR
+            placeholder=placeholder,
+            step_order=step.step_order,
+            output_contracts_by_order=output_contracts_by_order,
+            form_field_types=form_field_types,
+            step_ref_mapping=step_ref_mapping,
+        )
+
+
+def validate_template_binding_scalar(
+    binding: str,
+    *,
+    placeholder: str,
+    step_order: int,
+    output_contracts_by_order: Mapping[int, FlowPersistedJsonObject | None],
+    form_field_types: Mapping[str, str],
+    step_ref_mapping: Mapping[str, int],
+) -> None:
+    """Require one template binding to name a known scalar, or raise.
+
+    The one rule for what a DOCX placeholder may read: an earlier step's text,
+    status or error message, a scalar field of an earlier step's declared
+    contract, a scalar Flow input field, or a scalar runtime variable. An
+    explicit blank is allowed. Publication applies it to persisted steps; the
+    Builder applies the same rule to mappings an edit keeps.
+    """
+
+    if not binding.strip():
+        return
+    references = analyze_template(
+        binding,
+        step_refs=dict(step_ref_mapping),
+        form_field_names=set(form_field_types),
+    )
+    reference = references[0] if len(references) == 1 else None
+    scalar = False
+    if reference is None:
+        pass
+    elif reference.kind is TemplateReferenceKind.STEP:
+        source_order = reference.step_order
+        if (
+            source_order is not None
+            and source_order in output_contracts_by_order
+            and source_order < step_order
+        ):
+            scalar = reference.tail in {"output.text", "status", "error_message"}
+            source_contract = output_contracts_by_order[source_order]
+            if reference.structured_path and source_contract is not None:
+                schema = _source_ref_schema(
+                    contract=source_contract,
+                    field_path=reference.structured_path,
+                    current_step_order=step_order,
+                    path_label=f"template binding '{placeholder}'",
+                    context={
+                        "field": "output_config.bindings",
+                        "placeholder": placeholder,
+                    },
+                    error_code=None,
                 )
-        if not scalar or reference.path_error_code is not None:
-            raise FlowStepValidationError(
-                f"Step {step.step_order}: template binding '{placeholder}' must resolve "
-                "to a scalar value; select a text output or a scalar field from a declared contract.",
-                context={"field": "output_config.bindings", "placeholder": placeholder},
-                step_order=step.step_order,
+                scalar = _schema_is_scalar(schema)
+    elif reference.kind is TemplateReferenceKind.FORM_FIELD:
+        scalar = (
+            not reference.tail
+            and form_field_types.get(reference.head) in _SCALAR_FORM_FIELD_TYPES
+        )
+    elif reference.kind is TemplateReferenceKind.RUNTIME:
+        if not reference.tail:
+            scalar = runtime_variable_shape(reference.head) is VariableShape.SCALAR
+        elif reference.head in {"flow_input", "flow"}:
+            field_name = reference.tail
+            if reference.head == "flow":
+                field_name = (
+                    field_name.removeprefix("input.")
+                    if field_name.startswith("input.")
+                    else ""
+                )
+            scalar = (
+                form_field_types.get(field_name) in _SCALAR_FORM_FIELD_TYPES
+                or flow_input_key_shape(field_name) is VariableShape.SCALAR
             )
+    if not scalar or (reference is not None and reference.path_error_code is not None):
+        raise FlowStepValidationError(
+            f"Step {step_order}: template binding '{placeholder}' must resolve "
+            "to a scalar value; select a text output or a scalar field from a declared contract.",
+            context={"field": "output_config.bindings", "placeholder": placeholder},
+            step_order=step_order,
+        )
 
 
 def _schema_is_scalar(schema: FlowPersistedJsonObject) -> bool:

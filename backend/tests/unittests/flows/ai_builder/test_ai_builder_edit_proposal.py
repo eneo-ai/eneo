@@ -3612,3 +3612,136 @@ async def test_edit_binds_the_flows_template_to_a_moved_terminal_step() -> None:
     assert terminal.output_config is not None
     assert terminal.output_config["template_asset_id"] == str(template_asset_id)
     assert terminal.output_config["bindings"] == {"rapport": "{{ föregående_steg }}"}
+
+
+@pytest.mark.asyncio
+async def test_edit_reports_a_removed_producer_instead_of_rebinding_by_position() -> (
+    None
+):
+    # Removing step 2 leaves a text-producing step 3 at position 2 in the new
+    # plan; the persisted "step_2" alias names the removed producer, never
+    # whatever now sits at that position.
+    template_asset_id = uuid4()
+    flow = _flow(
+        _flow_step(
+            step_order=1,
+            user_description="Läs underlaget",
+            input_type="document",
+            output_type="text",
+        ),
+        _flow_step(
+            step_order=2,
+            user_description="Skriv rapporten",
+            input_source="previous_step",
+            input_type="text",
+            output_type="text",
+        ),
+        _flow_step(
+            step_order=3,
+            user_description="Skriv sammanfattningen",
+            input_source="previous_step",
+            input_type="text",
+            output_type="text",
+        ),
+        _flow_step(
+            step_order=4,
+            user_description="Fyll i mallen",
+            input_source="previous_step",
+            input_type="text",
+            output_mode="template_fill",
+            output_type="docx",
+            output_config={
+                "template_asset_id": str(template_asset_id),
+                "bindings": {"rapport": "{{ step_2.output.text }}"},
+            },
+        ),
+    )
+
+    result = await _process(
+        flow=flow,
+        planning_state=_inherited_planning_state(template_asset_id, ["rapport"]),
+        arguments={
+            "plan_rationale": "Tar bort rapportsteget.",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+                {"kind": "modify", "existing_step_ref": "existing_step_3"},
+                {"kind": "modify", "existing_step_ref": "existing_step_4"},
+            ],
+            "removed_existing_step_refs": ["existing_step_2"],
+        },
+    )
+
+    assert isinstance(result, CorrectableFailure), result
+    assert "template_binding_dependency_broken" in result.codes
+    assert "rapport" in result.feedback
+
+
+@pytest.mark.asyncio
+async def test_edit_keeps_every_mapping_publication_accepts() -> None:
+    # A bare Flow input field, a step's status and its error message are all
+    # valid published mappings the Builder would never derive itself.
+    template_asset_id = uuid4()
+    bindings = {
+        "diarienummer": "{{ diarienummer }}",
+        "status": "{{ step_1.status }}",
+        "fel": "{{ step_1.error_message }}",
+    }
+    flow = _flow(
+        _flow_step(
+            step_order=1,
+            user_description="Läs underlaget",
+            input_type="document",
+            output_type="text",
+        ),
+        _flow_step(
+            step_order=2,
+            user_description="Fyll i mallen",
+            input_source="previous_step",
+            input_type="text",
+            output_mode="template_fill",
+            output_type="docx",
+            output_config={
+                "template_asset_id": str(template_asset_id),
+                "bindings": bindings,
+            },
+        ),
+        metadata_json=_form_metadata(
+            {
+                "name": "diarienummer",
+                "type": "text",
+                "label": "Diarienummer",
+                "required": True,
+            }
+        ),
+    )
+
+    result = await _process(
+        flow=flow,
+        planning_state=_inherited_planning_state(
+            template_asset_id, ["diarienummer", "status", "fel"]
+        ),
+        arguments={
+            "plan_rationale": "Byter bara namn på första steget.",
+            "steps": [
+                {
+                    "kind": "modify",
+                    "existing_step_ref": "existing_step_1",
+                    "name": "Läs ärendet",
+                },
+                {"kind": "modify", "existing_step_ref": "existing_step_2"},
+            ],
+        },
+    )
+
+    assert isinstance(result, ProposalReady), result
+    spec = result.compiled.content.spec
+    reader_ref = spec.steps[0].plan_step_ref
+    assert spec.steps[-1].output_config == {
+        "template_asset_id": str(template_asset_id),
+        "bindings": {
+            "diarienummer": "{{ diarienummer }}",
+            "status": "{{ " + reader_ref + ".status }}",
+            "fel": "{{ " + reader_ref + ".error_message }}",
+        },
+    }
+    assert [field.name for field in spec.form_fields or ()] == ["diarienummer"]
