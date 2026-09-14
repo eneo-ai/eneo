@@ -207,11 +207,18 @@ describe("FlowRunsTable search and pagination", () => {
       // history card list, not the desktop table row.
       const mobileList = await screen.findByRole("list", { name: m.flow_history() });
       const toggle = await waitFor(() => {
-        const candidate = mobileList.querySelector('button[aria-controls="flow-run-evidence-aaa"]');
+        const candidate = mobileList.querySelector(
+          'button[data-testid="flow-run-evidence-toggle-mobile-aaa"]'
+        );
         expect(candidate).toBeTruthy();
         return candidate as HTMLElement;
       });
+      // Collapsed, the panel does not exist, so the button controls nothing.
+      expect(toggle.getAttribute("aria-controls")).toBeNull();
       await fireEvent.click(toggle);
+      await waitFor(() =>
+        expect(toggle.getAttribute("aria-controls")).toBe("flow-run-evidence-aaa")
+      );
 
       // Exactly one detail mount and exactly one evidence request.
       await waitFor(() => expect(evidenceCalls).toHaveLength(1));

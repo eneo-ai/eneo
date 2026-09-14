@@ -642,7 +642,7 @@
                       size="sm"
                       data-testid={`flow-run-evidence-toggle-${run.id}`}
                       aria-expanded={isExpanded}
-                      aria-controls={getEvidenceRowId(run.id)}
+                      aria-controls={isExpanded ? getEvidenceRowId(run.id) : undefined}
                       onclick={() => toggleRunDetails(run.id)}
                     >
                       {m.flow_run_evidence()}
@@ -683,7 +683,9 @@
                     colspan={historyTableColumnCount}
                     class="bg-muted/30 px-3 py-4"
                   >
-                    {@render stepRunDetail(run)}
+                    <div class="t-evidence-reveal">
+                      {@render stepRunDetail(run)}
+                    </div>
                   </Table.Cell>
                 </Table.Row>
               {/if}
@@ -699,9 +701,10 @@
           <li class="border-default bg-primary rounded-xl border">
             <button
               type="button"
+              data-testid={`flow-run-evidence-toggle-mobile-${run.id}`}
               class="focus-visible:ring-ring/40 flex w-full flex-col gap-2 rounded-xl px-4 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset"
               aria-expanded={isExpanded}
-              aria-controls={getEvidenceRowId(run.id)}
+              aria-controls={isExpanded ? getEvidenceRowId(run.id) : undefined}
               onclick={() => toggleRunDetails(run.id)}
             >
               <div class="flex items-center justify-between gap-2">
@@ -831,3 +834,28 @@
     </AlertDialog.Footer>
   </AlertDialog.Content>
 </AlertDialog.Root>
+
+<style lang="postcss">
+  /* transitions-dev: a short rise so the evidence reads as opening out of its
+     row rather than appearing from nowhere. Tokens live in app.css; the global
+     reduced-motion guard in app.css neutralises the duration, and the rule below
+     removes the offset so nothing starts displaced. */
+  .t-evidence-reveal {
+    animation: evidence-reveal var(--duration-fast) var(--ease-smooth-out) both;
+  }
+  @keyframes evidence-reveal {
+    from {
+      opacity: 0;
+      transform: translateY(calc(var(--distance-base) * -1));
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .t-evidence-reveal {
+      animation: none;
+    }
+  }
+</style>

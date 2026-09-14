@@ -5386,6 +5386,8 @@
   "flow_run_evidence_redacted_tooltip": "Sensitive values such as API keys and bearer tokens are redacted before export.",
   "flow_run_evidence_trace_id": "Trace ID",
   "flow_run_evidence_trace_id_tooltip": "Unique ID for tracing this run.",
+  "flow_run_evidence_trace_id_copy": "Copy the full trace ID",
+  "flow_run_evidence_trace_id_copied": "Trace ID copied",
   "flow_run_files": "Files",
   "flow_run_files_count": "{current} of {limit} files",
   "flow_run_copy_input": "Copy input",

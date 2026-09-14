@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { toast } from "svelte-sonner";
   import type { FlowRunSummary, FlowRunTokenUsage, FlowRunTranscriptionUsage } from "@eneo/eneo-js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { m } from "$lib/paraglide/messages";
@@ -21,6 +22,22 @@
     tokenUsage?: FlowRunTokenUsage | null;
     transcriptionUsage?: FlowRunTranscriptionUsage | null;
   } = $props();
+
+  let traceCopied = $state(false);
+  let traceCopiedTimer: ReturnType<typeof setTimeout> | null = null;
+
+  async function copyTraceId() {
+    if (!traceId) return;
+    try {
+      await navigator.clipboard.writeText(traceId);
+      traceCopied = true;
+      if (traceCopiedTimer) clearTimeout(traceCopiedTimer);
+      traceCopiedTimer = setTimeout(() => (traceCopied = false), 1600);
+    } catch (error) {
+      console.error("Could not copy the trace id", error);
+      toast.error(m.could_not_copy_link());
+    }
+  }
 </script>
 
 <Card.Root>
@@ -35,18 +52,25 @@
     {#if traceId}
       <Tooltip.Provider delayDuration={150}>
         <Tooltip.Root>
-          <Tooltip.Trigger>
-            <!-- The full identifier is support material, not something a
-                 municipal user reads: a 36-character UUID dominated a row of
-                 human facts. The short form identifies the run at a glance and
-                 the tooltip carries the whole value. -->
+          <!-- The full identifier is support material, not something a municipal
+               user reads: a 36-character UUID dominated a row of human facts. The
+               badge shows the short form and copies the whole value, so a touch
+               user who never sees a tooltip can still hand it to support. -->
+          <Tooltip.Trigger
+            onclick={copyTraceId}
+            aria-label={m.flow_run_evidence_trace_id_copy()}
+            class="focus-visible:ring-accent-default/40 rounded-full focus-visible:ring-2 focus-visible:outline-none"
+          >
             <Badge variant="outline" class="font-mono text-xs">
-              {m.flow_run_evidence_trace_id()}: {traceId.slice(0, 8)}…
+              {traceCopied
+                ? m.flow_run_evidence_trace_id_copied()
+                : `${m.flow_run_evidence_trace_id()}: ${traceId.slice(0, 8)}…`}
             </Badge>
           </Tooltip.Trigger>
           <Tooltip.Content class="max-w-xs">
             <span class="block">{m.flow_run_evidence_trace_id_tooltip()}</span>
             <span class="mt-1 block font-mono break-all">{traceId}</span>
+            <span class="text-muted mt-1 block">{m.flow_run_evidence_trace_id_copy()}</span>
           </Tooltip.Content>
         </Tooltip.Root>
       </Tooltip.Provider>

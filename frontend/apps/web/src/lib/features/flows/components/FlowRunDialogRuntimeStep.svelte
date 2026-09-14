@@ -233,7 +233,7 @@
     <div
       class="{fileCount > 0
         ? 'mt-4 py-3.5'
-        : 'mt-6 min-h-[132px] py-6 sm:min-h-[100px]'} flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 text-center transition-[background-color,border-color,transform,min-height,padding,margin] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] {dragging
+        : 'mt-6 min-h-[132px] py-6 sm:min-h-[100px]'} flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 text-center transition-[background-color,border-color,scale,min-height,padding,margin] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] {dragging
         ? 'border-accent-default bg-accent-dimmer scale-[1.02]'
         : fileCount > 0
           ? 'border-positive-default/30 bg-positive-dimmer/10'

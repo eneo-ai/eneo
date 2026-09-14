@@ -5386,6 +5386,8 @@
   "flow_run_evidence_redacted_tooltip": "Känsliga värden som API-nycklar och bearer-tokens tas bort före export.",
   "flow_run_evidence_trace_id": "Spår-ID",
   "flow_run_evidence_trace_id_tooltip": "Unikt ID för att spåra körningen.",
+  "flow_run_evidence_trace_id_copy": "Kopiera hela spår-ID:t",
+  "flow_run_evidence_trace_id_copied": "Spår-ID kopierat",
   "flow_run_files": "Filer",
   "flow_run_files_count": "{current} av {limit} filer",
   "flow_run_copy_input": "Kopiera indata",
