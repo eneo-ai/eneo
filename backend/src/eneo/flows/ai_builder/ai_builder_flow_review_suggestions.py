@@ -41,9 +41,12 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
 from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
     ExcerptField,
     FlowReviewSample,
+    ReviewPromptGroups,
     ReviewSampleExcerpt,
     fit_sample_excerpts,
     quoted_excerpt,
+    readable_prompt_groups,
+    review_prompt_groups,
 )
 from eneo.flows.ai_builder.ai_builder_provider_call import (
     complete_with_silence_deadline,
@@ -162,7 +165,10 @@ def excerpt_source_id(excerpt: ReviewSampleExcerpt, *, run_index: int) -> str:
 
 
 def build_review_suggestions_messages(
-    sample: FlowReviewSample, *, ui_language: str | None
+    sample: FlowReviewSample,
+    *,
+    ui_language: str | None,
+    prompt_groups: ReviewPromptGroups | None = None,
 ) -> list[dict[str, Any]]:
     """One system + one user message. Swedish unless the UI asked otherwise."""
 
@@ -170,11 +176,16 @@ def build_review_suggestions_messages(
     system = _SYSTEM_SV if swedish else _SYSTEM_EN
     return [
         {"role": "system", "content": system},
-        {"role": "user", "content": render_review_sample(sample)},
+        {
+            "role": "user",
+            "content": render_review_sample(sample, prompt_groups=prompt_groups),
+        },
     ]
 
 
-def render_review_sample(sample: FlowReviewSample) -> str:
+def render_review_sample(
+    sample: FlowReviewSample, *, prompt_groups: ReviewPromptGroups | None = None
+) -> str:
     lines: list[str] = [
         f"## Flöde version {sample.packet.flow_version} (checksum {sample.packet.definition_checksum})",
         "",
@@ -202,35 +213,61 @@ def render_review_sample(sample: FlowReviewSample) -> str:
     else:
         lines.append("- inga")
     lines.append("")
-    lines.append("### Körningar")
     run_index_by_id = {run.run_id: index + 1 for index, run in enumerate(sample.runs)}
+    groups = tuple(
+        indices
+        for indices in readable_prompt_groups(sample.excerpts, prompt_groups)
+        if all(sample.excerpts[index].run_id in run_index_by_id for index in indices)
+    )
+    shared_indices = {index for indices in groups for index in indices}
+    if groups:
+        lines.extend(
+            [
+                "### Gemensamma inspelade instruktioner",
+                "Flera käll-id före samma instruktion anger identisk inspelad text; "
+                "citera det id som hör till körningen du bedömer.",
+            ]
+        )
+        for indices in groups:
+            sources = " ".join(
+                f"[{excerpt_source_id(sample.excerpts[index], run_index=run_index_by_id[sample.excerpts[index].run_id])}]"
+                for index in sorted(
+                    indices,
+                    key=lambda index: run_index_by_id[sample.excerpts[index].run_id],
+                )
+            )
+            lines.append(_render_sample_excerpt(sample.excerpts[indices[0]], sources))
+        lines.append("")
+    lines.append("### Körningar")
     for run in sample.runs:
         lines.append(f"#### run{run_index_by_id[run.run_id]} ({run.status})")
-        for excerpt in sample.excerpts:
-            if excerpt.run_id != run.run_id:
+        for index, excerpt in enumerate(sample.excerpts):
+            if index in shared_indices or excerpt.run_id != run.run_id:
                 continue
             source_id = excerpt_source_id(
                 excerpt, run_index=run_index_by_id[excerpt.run_id]
             )
-            if excerpt.availability in ("included", "truncated"):
-                marker = (
-                    f" [avklippt efter {len(excerpt.text or '')} av "
-                    f"{excerpt.recorded_chars} tecken]"
-                    if excerpt.availability == "truncated"
-                    else ""
-                )
-                lines.append(f"[{source_id}]{marker} {quoted_excerpt(excerpt.text)}")
-            elif excerpt.availability == "truncated_by_runtime":
-                lines.append(
-                    f"[{source_id}] [{_AVAILABILITY_SV[excerpt.availability]}] "
-                    f"{quoted_excerpt(excerpt.text)}"
-                )
-            else:
-                lines.append(
-                    f"[{source_id}] ({_AVAILABILITY_SV[excerpt.availability]})"
-                )
+            lines.append(_render_sample_excerpt(excerpt, f"[{source_id}]"))
         lines.append("")
     return "\n".join(lines)
+
+
+def _render_sample_excerpt(excerpt: ReviewSampleExcerpt, source_ids: str) -> str:
+    if excerpt.availability in ("included", "truncated"):
+        marker = (
+            f" [avklippt efter {len(excerpt.text or '')} av "
+            f"{excerpt.recorded_chars} tecken]"
+            if excerpt.availability == "truncated"
+            else ""
+        )
+        return f"{source_ids}{marker} {quoted_excerpt(excerpt.text)}"
+    elif excerpt.availability == "truncated_by_runtime":
+        return (
+            f"{source_ids} [{_AVAILABILITY_SV[excerpt.availability]}] "
+            f"{quoted_excerpt(excerpt.text)}"
+        )
+    else:
+        return f"{source_ids} ({_AVAILABILITY_SV[excerpt.availability]})"
 
 
 _AVAILABILITY_SV = {
@@ -630,8 +667,12 @@ async def generate_review_suggestions(
         model_output_ceiling_tokens=max_output_tokens,
     )
 
+    prompt_groups = review_prompt_groups(sample.excerpts)
+
     def request_tokens_for(candidate: FlowReviewSample) -> int:
-        messages = build_review_suggestions_messages(candidate, ui_language=ui_language)
+        messages = build_review_suggestions_messages(
+            candidate, ui_language=ui_language, prompt_groups=prompt_groups
+        )
         return (
             measure_provider_input_reserve(messages, [], litellm_model).tokens
             + response_format_tokens
@@ -656,9 +697,11 @@ async def generate_review_suggestions(
         )
 
     fit_started = time.monotonic()
-    sample = fit_sample_excerpts(sample, fits=fits)
+    sample = fit_sample_excerpts(sample, fits=fits, prompt_groups=prompt_groups)
     fit_ms = int((time.monotonic() - fit_started) * 1000)
-    messages = build_review_suggestions_messages(sample, ui_language=ui_language)
+    messages = build_review_suggestions_messages(
+        sample, ui_language=ui_language, prompt_groups=prompt_groups
+    )
     request_tokens = request_tokens_for(sample)
     resolved_budget = planned_budget.resolve(input_tokens=request_tokens)
     if resolved_budget is None:

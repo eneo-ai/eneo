@@ -40,11 +40,13 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
 from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
     READ_DEADLINE_SECONDS,
     FlowReviewSample,
+    ReviewPromptGroups,
     ReviewSampleExcerpt,
     ReviewSampleRun,
     excerpts_for_run,
     fit_excerpts,
     quoted_excerpt,
+    readable_prompt_groups,
     reader_omitted_step_results,
     select_sample_run_ids,
     structural_steps,
@@ -818,6 +820,7 @@ def fit_review_evidence(
     evidence: FlowReviewEvidence,
     *,
     fits: Callable[[FlowReviewEvidence], bool],
+    prompt_groups: ReviewPromptGroups | None = None,
 ) -> FlowReviewEvidence:
     """The evidence with as much excerpt text as the prompt can carry.
 
@@ -829,10 +832,13 @@ def fit_review_evidence(
         evidence.excerpts,
         render=lambda excerpts: evidence.model_copy(update={"excerpts": excerpts}),
         fits=fits,
+        prompt_groups=prompt_groups,
     )
 
 
-def render_review_evidence(evidence: FlowReviewEvidence) -> str:
+def render_review_evidence(
+    evidence: FlowReviewEvidence, *, prompt_groups: ReviewPromptGroups | None = None
+) -> str:
     """The findings as prompt lines for the planner, in the product's language."""
     labels = {
         step.step_id: f"steg {step.step_order}"
@@ -910,29 +916,42 @@ def render_review_evidence(evidence: FlowReviewEvidence) -> str:
             "sträng på en rad. Ett utdrag som saknas eller är avklippt bevisar "
             "ingenting: det säger bara att texten inte lästes."
         )
-        for excerpt in evidence.excerpts:
+        groups = tuple(
+            indices
+            for indices in readable_prompt_groups(evidence.excerpts, prompt_groups)
+            if all(evidence.excerpts[index].run_id in run_number for index in indices)
+        )
+        shared_indices = {index for indices in groups for index in indices}
+        if groups:
+            lines.extend(
+                [
+                    "#### Gemensamma inspelade instruktioner",
+                    "Flera körningsreferenser före samma instruktion anger identisk "
+                    "inspelad text i de angivna körningarna.",
+                ]
+            )
+            for indices in groups:
+                sources = "; ".join(
+                    f"körning {run_number[evidence.excerpts[index].run_id]}, "
+                    f"steg {evidence.excerpts[index].step_order}, instruktion"
+                    for index in sorted(
+                        indices,
+                        key=lambda index: run_number[evidence.excerpts[index].run_id],
+                    )
+                )
+                lines.append(
+                    _render_evidence_excerpt(evidence.excerpts[indices[0]], sources)
+                )
+            lines.append("")
+        for index, excerpt in enumerate(evidence.excerpts):
+            if index in shared_indices:
+                continue
             source = (
                 f"körning {run_number.get(excerpt.run_id, '?')}, "
                 f"steg {excerpt.step_order}, "
                 f"{_EXCERPT_FIELD_LABELS_SV[excerpt.field]}"
             )
-            if excerpt.availability in ("included", "truncated"):
-                cut = (
-                    f" (avklippt efter {len(excerpt.text or '')} av "
-                    f"{excerpt.recorded_chars} tecken)"
-                    if excerpt.availability == "truncated"
-                    else ""
-                )
-                lines.append(f"- {source}{cut}: {quoted_excerpt(excerpt.text)}")
-            elif excerpt.availability == "truncated_by_runtime":
-                lines.append(
-                    f"- {source} ({_EXCERPT_AVAILABILITY_SV[excerpt.availability]}): "
-                    f"{quoted_excerpt(excerpt.text)}"
-                )
-            else:
-                lines.append(
-                    f"- {source}: {_EXCERPT_AVAILABILITY_SV[excerpt.availability]}."
-                )
+            lines.append(_render_evidence_excerpt(excerpt, source))
         lines.append("### Slut på utdrag")
         lines.append("")
     lines.append(
@@ -943,6 +962,24 @@ def render_review_evidence(evidence: FlowReviewEvidence) -> str:
         "och ändra inget som underlaget inte motiverar."
     )
     return "\n".join(lines)
+
+
+def _render_evidence_excerpt(excerpt: ReviewSampleExcerpt, source: str) -> str:
+    if excerpt.availability in ("included", "truncated"):
+        cut = (
+            f" (avklippt efter {len(excerpt.text or '')} av "
+            f"{excerpt.recorded_chars} tecken)"
+            if excerpt.availability == "truncated"
+            else ""
+        )
+        return f"- {source}{cut}: {quoted_excerpt(excerpt.text)}"
+    elif excerpt.availability == "truncated_by_runtime":
+        return (
+            f"- {source} ({_EXCERPT_AVAILABILITY_SV[excerpt.availability]}): "
+            f"{quoted_excerpt(excerpt.text)}"
+        )
+    else:
+        return f"- {source}: {_EXCERPT_AVAILABILITY_SV[excerpt.availability]}."
 
 
 def finding_id(

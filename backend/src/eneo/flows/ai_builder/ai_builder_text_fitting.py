@@ -59,6 +59,10 @@ def fit_text_allocations(
     """
 
     total_available_chars = sum(len(text) for _, text in items)
+    if total_available_chars:
+        complete = render({key: len(text) for key, text in items})
+        if fits(complete):
+            return complete
     empty = render({})
     if total_available_chars == 0 or not fits(empty):
         return empty

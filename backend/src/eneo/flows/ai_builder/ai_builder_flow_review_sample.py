@@ -270,11 +270,67 @@ def _excerpt(
 # ---- fitting and quoting -------------------------------------------------------
 
 
+ReviewPromptGroups = tuple[tuple[int, ...], ...]
+
+
+def review_prompt_groups(excerpts: Sequence[ReviewSampleExcerpt]) -> ReviewPromptGroups:
+    """Freeze equality of complete instructions before fitting can hide differences."""
+    by_instruction: dict[tuple[int, str, int | None], list[int]] = {}
+    for index, excerpt in enumerate(excerpts):
+        if (
+            excerpt.field == "prompt"
+            and excerpt.availability == "included"
+            and excerpt.text
+        ):
+            key = (excerpt.step_order, excerpt.text, excerpt.recorded_chars)
+            by_instruction.setdefault(key, []).append(index)
+    return tuple(
+        tuple(indices)
+        for indices in by_instruction.values()
+        if len(indices) > 1
+        and len({excerpts[index].run_id for index in indices}) == len(indices)
+    )
+
+
+def readable_prompt_groups(
+    excerpts: Sequence[ReviewSampleExcerpt],
+    prompt_groups: ReviewPromptGroups | None,
+) -> ReviewPromptGroups:
+    """Only share matching readable members of the original instruction groups.
+
+    Pass frozen groups to preserve sharing after truncation; None recomputes
+    groups from complete excerpts only.
+    """
+    groups = review_prompt_groups(excerpts) if prompt_groups is None else prompt_groups
+    readable: list[tuple[int, ...]] = []
+    for indices in groups:
+        if len(indices) < 2 or any(
+            index < 0 or index >= len(excerpts) for index in indices
+        ):
+            continue
+        first = excerpts[indices[0]]
+        if not first.text or first.availability not in ("included", "truncated"):
+            continue
+        if len({excerpts[index].run_id for index in indices}) != len(indices):
+            continue
+        if all(
+            excerpts[index].field == "prompt"
+            and excerpts[index].step_order == first.step_order
+            and excerpts[index].text == first.text
+            and excerpts[index].availability == first.availability
+            and excerpts[index].recorded_chars == first.recorded_chars
+            for index in indices
+        ):
+            readable.append(indices)
+    return tuple(readable)
+
+
 def fit_excerpts(
     excerpts: Sequence[ReviewSampleExcerpt],
     *,
     render: Callable[[list[ReviewSampleExcerpt]], T],
     fits: Callable[[T], bool],
+    prompt_groups: ReviewPromptGroups | None = None,
 ) -> T:
     """The carrier with as much excerpt text as ``fits`` allows.
 
@@ -288,10 +344,17 @@ def fit_excerpts(
     prefix leaves a prefix.
     """
 
+    allocation_owner = {
+        index: indices[0]
+        for indices in readable_prompt_groups(excerpts, prompt_groups)
+        for index in indices
+    }
     readable = [
         (index, excerpt.text)
         for index, excerpt in enumerate(excerpts)
-        if excerpt.availability in _FITTED and excerpt.text
+        if excerpt.availability in _FITTED
+        and excerpt.text
+        and allocation_owner.get(index, index) == index
     ]
 
     def render_allocations(allocations: Mapping[int, int]) -> T:
@@ -300,7 +363,8 @@ def fit_excerpts(
             if excerpt.availability not in _FITTED or not excerpt.text:
                 fitted.append(excerpt)
                 continue
-            allowed = min(allocations.get(index, 0), len(excerpt.text))
+            owner = allocation_owner.get(index, index)
+            allowed = min(allocations.get(owner, 0), len(excerpt.text))
             if allowed == len(excerpt.text):
                 fitted.append(excerpt)
             elif allowed > 0:
@@ -334,6 +398,7 @@ def fit_sample_excerpts(
     sample: FlowReviewSample,
     *,
     fits: Callable[[FlowReviewSample], bool],
+    prompt_groups: ReviewPromptGroups | None = None,
 ) -> FlowReviewSample:
     """The sample with as much excerpt text as the request can carry."""
 
@@ -341,6 +406,7 @@ def fit_sample_excerpts(
         sample.excerpts,
         render=lambda excerpts: sample.model_copy(update={"excerpts": excerpts}),
         fits=fits,
+        prompt_groups=prompt_groups,
     )
 
 

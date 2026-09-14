@@ -4,17 +4,23 @@ import json
 from datetime import datetime, timezone
 from uuid import uuid4
 
+import pytest
+
 from eneo.flows.ai_builder.ai_builder_flow_review import (
     FlowReviewCohort,
+    FlowReviewEvidence,
     FlowReviewOmittedRuns,
     FlowReviewPacket,
     StepShareFact,
+    render_review_evidence,
 )
 from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
     FlowReviewSample,
     ReviewSampleExcerpt,
     ReviewSampleRun,
     ReviewSampleStep,
+    quoted_excerpt,
+    review_prompt_groups,
 )
 from eneo.flows.ai_builder.ai_builder_flow_review_suggestions import (
     MAX_SUGGESTION_STEPS,
@@ -23,6 +29,7 @@ from eneo.flows.ai_builder.ai_builder_flow_review_suggestions import (
     render_review_sample,
     sample_summary,
 )
+from eneo.tokens.token_utils import measure_provider_input_reserve
 
 
 def _sample() -> FlowReviewSample:
@@ -685,3 +692,286 @@ def test_a_runtime_preview_is_shown_with_its_marker_and_never_proves_absence():
     }
     parsed = parse_review_suggestions(_answer(duplicated), sample=sample)
     assert [item.kind for item in parsed.suggestions] == ["duplicated_work"]
+
+
+def _repeated_instruction_sample() -> FlowReviewSample:
+    base = _sample()
+    runs = [
+        base.runs[0],
+        base.runs[0].model_copy(update={"run_id": uuid4()}),
+        base.runs[1],
+    ]
+    steps = [
+        base.steps[0 if order == 1 else 1].model_copy(
+            update={"step_order": order, "label": f"Steg {order}"}
+        )
+        for order in range(1, 7)
+    ]
+    excerpts = []
+    for index, run in enumerate(runs, 1):
+        for step in steps:
+            for field, text in (
+                ("prompt", f"Steg {step.step_order}. " + "Sammanfatta ärendet. " * 40),
+                ("input", f"Underlag {index}/{step.step_order}"),
+                ("output", f"Resultat {index}/{step.step_order}"),
+            ):
+                excerpts.append(
+                    ReviewSampleExcerpt(
+                        run_id=run.run_id,
+                        step_order=step.step_order,
+                        field=field,
+                        availability="included",
+                        text=text,
+                        recorded_chars=len(text),
+                    )
+                )
+    return base.model_copy(update={"runs": runs, "steps": steps, "excerpts": excerpts})
+
+
+def _instruction_evidence(sample: FlowReviewSample) -> FlowReviewEvidence:
+    return FlowReviewEvidence(
+        flow_version=sample.packet.flow_version,
+        definition_checksum=sample.packet.definition_checksum,
+        evidence_classification_level=sample.evidence_classification_level,
+        completed_run_count=2,
+        failed_run_count=1,
+        steps=sample.packet.steps,
+        facts=sample.packet.facts,
+        sample_runs=sample.runs,
+        excerpts=sample.excerpts,
+    )
+
+
+def _render_instructions(sample, investigation, **kwargs):
+    if investigation:
+        return render_review_evidence(_instruction_evidence(sample), **kwargs)
+    return render_review_sample(sample, **kwargs)
+
+
+def _source_reference(sample, excerpt, investigation):
+    index = sample.run_ids.index(excerpt.run_id) + 1
+    if investigation:
+        field = {"prompt": "instruktion", "input": "indata", "output": "utdata"}[
+            excerpt.field
+        ]
+        return f"körning {index}, steg {excerpt.step_order}, {field}"
+    return f"[run{index}.step{excerpt.step_order}.{excerpt.field}]"
+
+
+@pytest.mark.parametrize("investigation", [False, True])
+def test_identical_recorded_instructions_share_a_body_with_every_run_reference(
+    investigation,
+):
+    sample = _repeated_instruction_sample()
+    rendered = _render_instructions(sample, investigation)
+    for excerpt in sample.excerpts:
+        if excerpt.field == "prompt":
+            assert rendered.count(quoted_excerpt(excerpt.text)) == 1
+        reference = _source_reference(sample, excerpt, investigation)
+        lines = [line for line in rendered.splitlines() if reference in line]
+        assert len(lines) == 1
+        assert json.loads(lines[0][lines[0].index('"') :]) == excerpt.text
+    # Supplying no shared groups is the same evidence in its original per-run form.
+    ungrouped = _render_instructions(sample, investigation, prompt_groups=())
+    assert len(rendered.encode()) < len(ungrouped.encode())
+    for excerpt in sample.excerpts:
+        if excerpt.field != "prompt":
+            reference = _source_reference(sample, excerpt, investigation)
+            assert next(
+                line for line in rendered.splitlines() if reference in line
+            ) == next(line for line in ungrouped.splitlines() if reference in line)
+
+
+@pytest.mark.parametrize("investigation", [False, True])
+def test_a_differing_recorded_instruction_keeps_its_own_run_row(investigation):
+    sample = _repeated_instruction_sample()
+    changed = sample.excerpts[36].model_copy(
+        update={"text": "Kontrollera tidslinjen.", "recorded_chars": 22}
+    )
+    sample = sample.model_copy(
+        update={"excerpts": [*sample.excerpts[:36], changed, *sample.excerpts[37:]]}
+    )
+    rendered = _render_instructions(sample, investigation)
+    original = quoted_excerpt(sample.excerpts[0].text)
+    assert rendered.count(original) == 1
+    shared = next(line for line in rendered.splitlines() if original in line)
+    assert _source_reference(sample, sample.excerpts[0], investigation) in shared
+    assert _source_reference(sample, sample.excerpts[18], investigation) in shared
+    assert _source_reference(sample, changed, investigation) not in shared
+    ungrouped = _render_instructions(sample, investigation, prompt_groups=())
+    reference = _source_reference(sample, changed, investigation)
+    assert next(line for line in rendered.splitlines() if reference in line) == next(
+        line for line in ungrouped.splitlines() if reference in line
+    )
+
+
+def test_shared_recorded_instructions_keep_per_run_citation_grounding():
+    sample = _repeated_instruction_sample()
+    prompt = 'Citera "ärendet".\nNästa rad\u2028slut'
+    sample = sample.model_copy(
+        update={
+            "excerpts": [
+                e.model_copy(update={"text": prompt, "recorded_chars": len(prompt)})
+                if e.field == "prompt" and e.step_order == 1
+                else e
+                for e in sample.excerpts
+            ]
+        }
+    )
+    rendered = render_review_sample(sample)
+    assert rendered.count(quoted_excerpt(prompt)) == 1
+    for index, run in enumerate(sample.runs, 1):
+        source_id = f"run{index}.step1.prompt"
+        row = next(line for line in rendered.splitlines() if f"[{source_id}]" in line)
+        assert json.loads(row[row.index('"') :]) == prompt
+        claim = dict(
+            kind="instruction_outcome_drift",
+            step_orders=[1],
+            rationale="Avvikelse.",
+            sources=[
+                {"source_id": source_id, "quote": 'Citera "ärendet".'},
+                {
+                    "source_id": f"run{index}.step1.output",
+                    "quote": f"Resultat {index}/1",
+                },
+            ],
+        )
+        parsed = parse_review_suggestions(_answer(claim), sample=sample)
+        assert parsed.problems == ()
+        assert parsed.suggestions[0].sources[0].run_id == run.run_id
+    claim["sources"][0]["source_id"] = "run1.step1.prompt"
+    assert parse_review_suggestions(_answer(claim), sample=sample).problems == (
+        "suggestion_1:drift_claim_cites_several_runs",
+    )
+    distinct = sample.model_copy(
+        update={
+            "excerpts": [
+                e.model_copy(update={"text": "Annan instruktion."})
+                if e.run_id == sample.runs[0].run_id and e.field == "prompt"
+                else e
+                for e in sample.excerpts
+            ]
+        }
+    )
+    assert parse_review_suggestions(_answer(claim), sample=distinct).problems == (
+        "suggestion_1:source_1:quote_not_in_excerpt",
+    )
+
+
+def _prepare_instruction_evidence(evidence: FlowReviewEvidence | None, cap: int = 4000):
+    from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
+    from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
+        build_proposal_prepared,
+    )
+    from eneo.flows.ai_builder.ai_builder_requirements_state import RequirementsState
+    from eneo.flows.ai_builder.ai_builder_resource_catalog import (
+        build_ai_builder_resource_catalog,
+    )
+    from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
+    from eneo.flows.ai_builder.planning_state import PlanningState
+
+    return build_proposal_prepared(
+        requirements_state=RequirementsState(),
+        ui_language="sv",
+        slot_classification_metadata=None,
+        conversation=[
+            ConversationMessage(role="user", content="Undersök körningarna.")
+        ],
+        planning_state=PlanningState.empty(),
+        attachment_context=None,
+        flow_context=None,
+        review_evidence=evidence,
+        is_edit_mode=True,
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=[], available_kbs=[], prior_bindings=()
+        ),
+        flow=None,
+        assistant_snapshots=None,
+        plan_edit_context=None,
+        prior_plan_for_revision=None,
+        litellm_model="openai/gpt-test",
+        max_input_tokens=20000,
+        max_output_tokens=1024,
+        budget_policy=AIBuilderBudgetPolicy(
+            conversation_safety_buffer_tokens=128,
+            minimum_conversation_budget_tokens=256,
+            review_investigation_evidence_max_tokens=cap,
+        ),
+        attachment_file_count=0,
+        current_turn_start=0,
+    )
+
+
+def test_the_proposal_request_retains_shared_instruction_groups_after_fitting():
+    sample = _repeated_instruction_sample()
+    evidence = _instruction_evidence(sample).model_copy(
+        update={
+            "excerpts": [
+                e.model_copy(update={"text": "ord " * 10000, "recorded_chars": 40000})
+                for e in sample.excerpts
+                if e.field == "prompt" and e.step_order == 1
+            ]
+        }
+    )
+    prepared = _prepare_instruction_evidence(evidence)
+    content = prepared.llm_messages[0]["content"]
+    rows = [line for line in content.splitlines() if line.startswith("- körning")]
+    assert len(rows) == 1
+    assert all(
+        f"körning {index}, steg 1, instruktion" in rows[0] for index in (1, 2, 3)
+    )
+    assert "avklippt efter" in rows[0]
+
+
+def test_complete_shared_instructions_fit_the_measured_investigation_cap():
+    sample = _repeated_instruction_sample()
+    instruction = "Sammanfatta ärendet."
+    evidence = _instruction_evidence(sample).model_copy(
+        update={
+            "excerpts": [
+                excerpt.model_copy(
+                    update={"text": instruction, "recorded_chars": len(instruction)}
+                )
+                for excerpt in sample.excerpts
+                if excerpt.field == "prompt" and excerpt.step_order == 1
+            ]
+        }
+    )
+    full = _prepare_instruction_evidence(evidence)
+    scaffold = _prepare_instruction_evidence(None)
+
+    def prompt_tokens(content):
+        return measure_provider_input_reserve(
+            [{"role": "system", "content": content}], [], "openai/gpt-test"
+        ).tokens
+
+    full_prompt = full.llm_messages[0]["content"]
+    scaffold_tokens = prompt_tokens(scaffold.llm_messages[0]["content"])
+    cap = prompt_tokens(full_prompt) - scaffold_tokens
+    prefix_evidence = evidence.model_copy(
+        update={
+            "excerpts": [
+                excerpt.model_copy(
+                    update={"text": instruction[:1], "availability": "truncated"}
+                )
+                for excerpt in evidence.excerpts
+            ]
+        }
+    )
+    prefix_prompt = full_prompt.replace(
+        render_review_evidence(evidence),
+        render_review_evidence(
+            prefix_evidence, prompt_groups=review_prompt_groups(evidence.excerpts)
+        ),
+    )
+    assert prompt_tokens(prefix_prompt) - scaffold_tokens > cap
+    prepared = _prepare_instruction_evidence(evidence, cap=cap)
+    assert prepared.llm_messages == full.llm_messages
+    content = prepared.llm_messages[0]["content"]
+    rows = [line for line in content.splitlines() if line.startswith("- körning")]
+    assert len(rows) == 1
+    assert all(
+        f"körning {index}, steg 1, instruktion" in rows[0] for index in (1, 2, 3)
+    )
+    assert rows[0].endswith(quoted_excerpt(instruction))
+    assert prompt_tokens(content) - scaffold_tokens == cap

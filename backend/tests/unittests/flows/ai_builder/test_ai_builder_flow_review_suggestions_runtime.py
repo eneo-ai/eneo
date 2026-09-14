@@ -25,14 +25,17 @@ from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
     ReviewSampleExcerpt,
     ReviewSampleRun,
     ReviewSampleStep,
+    review_prompt_groups,
 )
 from eneo.flows.ai_builder.ai_builder_flow_review_suggestions import (
+    build_review_suggestions_messages,
     generate_review_suggestions,
 )
 from eneo.flows.ai_builder.ai_builder_settings import (
     AIBuilderBudgetPolicy,
     resolve_ai_builder_budget_policy,
 )
+from eneo.tokens.token_utils import measure_provider_input_reserve
 
 
 def _sample() -> FlowReviewSample:
@@ -389,3 +392,114 @@ async def test_review_input_cap_can_equal_the_full_model_output_ceiling():
     (call,) = client.calls
     assert call["max_tokens"] == 128_000
     assert result.sample.excerpts_truncated == 1
+
+
+@pytest.mark.asyncio
+async def test_the_provider_request_retains_shared_instruction_groups_after_fitting():
+    sample = _sample()
+    runs = [sample.runs[0].model_copy(update={"run_id": uuid4()}) for _ in range(3)]
+    sample = sample.model_copy(
+        update={
+            "runs": runs,
+            "excerpts": [
+                sample.excerpts[0].model_copy(
+                    update={
+                        "run_id": run.run_id,
+                        "field": "prompt",
+                        "text": "ord " * 10000,
+                        "recorded_chars": 40000,
+                    }
+                )
+                for run in runs
+            ],
+        }
+    )
+    client = _Client(content=json.dumps({"suggestions": []}))
+    result = await _generate(client, max_input_tokens=12000, sample=sample)
+    content = client.calls[0]["messages"][1]["content"]
+    rows = [line for line in content.splitlines() if line.startswith("[run")]
+    assert len(rows) == 1
+    assert all(f"[run{index}.step1.prompt]" in rows[0] for index in (1, 2, 3))
+    assert "avklippt efter" in rows[0]
+    assert result.sample.excerpts_truncated == 3
+
+
+@pytest.mark.asyncio
+async def test_complete_shared_instructions_fit_the_measured_suggestions_cap():
+    sample = _sample()
+    instruction = "Sammanfatta ärendet."
+    runs = [sample.runs[0].model_copy(update={"run_id": uuid4()}) for _ in range(3)]
+    sample = sample.model_copy(
+        update={
+            "runs": runs,
+            "excerpts": [
+                sample.excerpts[0].model_copy(
+                    update={
+                        "run_id": run.run_id,
+                        "field": "prompt",
+                        "text": instruction,
+                        "recorded_chars": len(instruction),
+                    }
+                )
+                for run in runs
+            ],
+        }
+    )
+    baseline = _Client(content=json.dumps({"suggestions": []}))
+    await _generate(baseline, sample=sample)
+    full_request = baseline.calls[0]
+    schema_tokens = measure_provider_input_reserve(
+        [
+            {
+                "role": "system",
+                "content": json.dumps(
+                    full_request["response_format"],
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ),
+            }
+        ],
+        [],
+        _route().litellm_model,
+    ).tokens
+
+    def request_tokens(messages):
+        return (
+            measure_provider_input_reserve(messages, [], _route().litellm_model).tokens
+            + schema_tokens
+        )
+
+    full_messages = build_review_suggestions_messages(sample, ui_language="sv")
+    cap = request_tokens(full_messages)
+    prefix_sample = sample.model_copy(
+        update={
+            "excerpts": [
+                excerpt.model_copy(
+                    update={"text": instruction[:1], "availability": "truncated"}
+                )
+                for excerpt in sample.excerpts
+            ]
+        }
+    )
+    assert (
+        request_tokens(
+            build_review_suggestions_messages(
+                prefix_sample,
+                ui_language="sv",
+                prompt_groups=review_prompt_groups(sample.excerpts),
+            )
+        )
+        > cap
+    )
+    client = _Client(content=json.dumps({"suggestions": []}))
+    result = await _generate(
+        client,
+        sample=sample,
+        budget_policy=resolve_ai_builder_budget_policy(
+            {"ai_builder": {"review_evidence_max_input_tokens": cap}}
+        ),
+    )
+    assert result.sample.excerpts_included == 3
+    assert result.sample.excerpts_omitted_by_budget == 0
+    assert client.calls[0]["messages"] == full_messages
+    assert request_tokens(client.calls[0]["messages"]) == cap

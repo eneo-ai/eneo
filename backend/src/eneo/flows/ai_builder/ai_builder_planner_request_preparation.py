@@ -63,6 +63,10 @@ from eneo.flows.ai_builder.ai_builder_flow_review import (
     fit_review_evidence,
     render_review_evidence,
 )
+from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
+    ReviewPromptGroups,
+    review_prompt_groups,
+)
 from eneo.flows.ai_builder.ai_builder_form_fields import (
     extract_form_fields_from_metadata,
 )
@@ -684,6 +688,12 @@ def build_proposal_prepared(
             },
         )
 
+    prompt_groups = (
+        review_prompt_groups(review_evidence.excerpts)
+        if review_evidence is not None
+        else ()
+    )
+
     def build_proposal_prompt(
         attachment_text: str | None,
         replayed_requirements: RequirementsSummaryPayload | None,
@@ -693,7 +703,9 @@ def build_proposal_prepared(
             planning_state=planning_state,
             confirmed_requirements=replayed_requirements,
             attachment_context=attachment_text,
-            flow_context=_flow_context_with_evidence(flow_context, review_evidence),
+            flow_context=_flow_context_with_evidence(
+                flow_context, review_evidence, prompt_groups=prompt_groups
+            ),
             is_edit_mode=is_edit_mode,
             is_pure_audio_transcription=is_pure_audio_transcription,
             resource_catalog=resource_catalog,
@@ -817,7 +829,7 @@ def build_proposal_prepared(
     if review_evidence is not None:
         fit_started = time.monotonic()
         fitted_review_evidence = fit_review_evidence(
-            review_evidence, fits=evidence_fits
+            review_evidence, fits=evidence_fits, prompt_groups=prompt_groups
         )
         review_evidence_fit_ms = int((time.monotonic() - fit_started) * 1000)
         if not evidence_fits(fitted_review_evidence):
@@ -1131,11 +1143,14 @@ def _build_flow_context_if_needed(
 
 
 def _flow_context_with_evidence(
-    flow_context: str | None, review_evidence: FlowReviewEvidence | None
+    flow_context: str | None,
+    review_evidence: FlowReviewEvidence | None,
+    *,
+    prompt_groups: ReviewPromptGroups | None = None,
 ) -> str | None:
     if review_evidence is None:
         return flow_context
-    rendered = render_review_evidence(review_evidence)
+    rendered = render_review_evidence(review_evidence, prompt_groups=prompt_groups)
     return rendered if flow_context is None else f"{flow_context}\n\n{rendered}"
 
 

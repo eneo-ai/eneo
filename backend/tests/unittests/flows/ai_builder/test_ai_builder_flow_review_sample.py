@@ -539,3 +539,151 @@ def test_a_runtime_preview_is_never_called_included() -> None:
         fits=lambda candidate: all(e.text is None for e in candidate.excerpts),
     )
     assert {e.availability for e in starved.excerpts} == {"omitted_by_budget"}
+
+
+@pytest.mark.parametrize("investigation", [False, True])
+def test_shared_instruction_fitting_charges_one_body_and_keeps_every_source(
+    investigation,
+):
+    from eneo.flows.ai_builder.ai_builder_flow_review import (
+        FlowReviewEvidence,
+        fit_review_evidence,
+        render_review_evidence,
+    )
+    from eneo.flows.ai_builder.ai_builder_flow_review_sample import review_prompt_groups
+    from eneo.flows.ai_builder.ai_builder_flow_review_suggestions import (
+        render_review_sample,
+    )
+
+    excerpts = [
+        ReviewSampleExcerpt(
+            run_id=uuid4(),
+            step_order=1,
+            field="prompt",
+            availability="included",
+            text="abcdefghij",
+            recorded_chars=10,
+        )
+        for _ in range(3)
+    ]
+    excerpts.append(
+        excerpts[0].model_copy(update={"field": "output", "text": "0123456789"})
+    )
+    sample = _sample_with(excerpts)
+    groups = review_prompt_groups(excerpts)
+    evidence = FlowReviewEvidence(
+        flow_version=1,
+        definition_checksum="sum",
+        evidence_classification_level=0,
+        completed_run_count=3,
+        failed_run_count=0,
+        steps=[],
+        facts=[],
+        sample_runs=sample.runs,
+        excerpts=excerpts,
+    )
+
+    def render(candidate):
+        renderer = render_review_evidence if investigation else render_review_sample
+        return renderer(candidate, prompt_groups=groups)
+
+    def readable_chars(candidate):
+        return sum(
+            len(json.loads(line[line.index('"') :]))
+            for line in render(candidate).splitlines()
+            if line.startswith(("[run", "- körning")) and '"' in line
+        )
+
+    fitter = fit_review_evidence if investigation else fit_sample_excerpts
+    carrier = evidence if investigation else sample
+    fitted = fitter(carrier, fits=lambda candidate: readable_chars(candidate) <= 5)
+    assert [len(e.text or "") for e in fitted.excerpts] == [3, 3, 3, 2]
+    assert readable_chars(fitted) == 5
+    assert all(
+        e.availability == "truncated" and e.recorded_chars == 10
+        for e in fitted.excerpts
+    )
+    assert [(e.run_id, e.step_order, e.field) for e in fitted.excerpts] == [
+        (e.run_id, e.step_order, e.field) for e in excerpts
+    ]
+    assert render(fitted).count(quoted_excerpt("abc")) == 1
+    assert "3 av 10 tecken" in render(fitted)
+    omitted = fitter(carrier, fits=lambda candidate: readable_chars(candidate) == 0)
+    assert all(
+        e.availability == "omitted_by_budget" and e.text is None
+        for e in omitted.excerpts
+    )
+    assert "Gemensamma inspelade" not in render(omitted)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"step_order": 2},
+        {"text": "instruction "},
+        {"recorded_chars": 99},
+        {"availability": "truncated"},
+        {"availability": "omitted_by_reader", "text": None},
+        {"field": "output"},
+    ],
+)
+def test_instruction_grouping_requires_the_same_complete_recorded_source(change):
+    from eneo.flows.ai_builder.ai_builder_flow_review_sample import review_prompt_groups
+
+    first = ReviewSampleExcerpt(
+        run_id=uuid4(),
+        step_order=1,
+        field="prompt",
+        availability="included",
+        text="instruction",
+        recorded_chars=11,
+    )
+    second = first.model_copy(update={"run_id": uuid4(), **change})
+    assert review_prompt_groups([first, second]) == ()
+    assert review_prompt_groups([first, first]) == ()
+
+
+def test_differing_full_instructions_do_not_merge_when_their_fitted_prefixes_match():
+    from eneo.flows.ai_builder.ai_builder_flow_review_sample import review_prompt_groups
+    from eneo.flows.ai_builder.ai_builder_flow_review_suggestions import (
+        render_review_sample,
+    )
+
+    first = ReviewSampleExcerpt(
+        run_id=uuid4(),
+        step_order=1,
+        field="prompt",
+        availability="included",
+        text="abcdefghij",
+        recorded_chars=10,
+    )
+    sample = _sample_with(
+        [
+            first,
+            first.model_copy(update={"run_id": uuid4()}),
+            first.model_copy(update={"run_id": uuid4(), "text": "abcdefghiZ"}),
+        ]
+    )
+    groups = review_prompt_groups(sample.excerpts)
+
+    def render(candidate):
+        return render_review_sample(candidate, prompt_groups=groups)
+
+    def fits(candidate):
+        return (
+            sum(
+                len(json.loads(line[line.index('"') :]))
+                for line in render(candidate).splitlines()
+                if line.startswith("[run") and '"' in line
+            )
+            <= 4
+        )
+
+    fitted = fit_sample_excerpts(sample, fits=fits, prompt_groups=groups)
+    assert [e.text for e in fitted.excerpts] == ["ab", "ab", "ab"]
+    rows = [line for line in render(fitted).splitlines() if line.startswith("[run")]
+    assert len(rows) == 2
+    assert sorted(line.count(".prompt]") for line in rows) == [1, 2]
+    assert render_review_sample(
+        sample.model_copy(update={"excerpts": []}), prompt_groups=groups
+    ) == render_review_sample(sample.model_copy(update={"excerpts": []}))
