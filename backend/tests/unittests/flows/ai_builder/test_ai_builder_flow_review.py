@@ -42,6 +42,7 @@ from eneo.flows.ai_builder.ai_builder_flow_review import (
     OutputNotObservedConsumedFact,
     RepeatedErrorCodeFact,
     StepShareFact,
+    finding_id,
     fit_review_evidence,
     render_review_evidence,
     resolve_review_evidence,
@@ -72,9 +73,11 @@ from eneo.main.exceptions import UnauthorizedException
 _T0 = datetime(2026, 9, 4, 12, 0, tzinfo=timezone.utc)
 
 
-def _step(order: int, *, input_source: str = "previous_step") -> RuntimeStep:
+def _step(
+    order: int, *, input_source: str = "previous_step", step_id: UUID | None = None
+) -> RuntimeStep:
     return RuntimeStep(
-        step_id=uuid4(),
+        step_id=step_id or uuid4(),
         step_order=order,
         assistant_id=uuid4(),
         user_description=f"Steg {order}",
@@ -133,7 +136,7 @@ def _lineage(run_id: UUID, step: RuntimeStep, *sources: RuntimeStep) -> FlowStep
 
 
 def _facts(**overrides: Any):
-    keys = dict(flow_id=uuid4(), flow_version=3, definition_checksum="abc", **overrides)
+    keys = dict(flow_id=uuid4(), definition_checksum="abc", **overrides)
     return review_facts(**keys)
 
 
@@ -201,7 +204,9 @@ def test_facts_name_the_unconsumed_output_the_repeated_error_and_the_dominant_st
     ) == (2, 2, 2)
 
 
-def test_finding_ids_are_stable_for_a_version_and_change_with_it():
+def test_finding_ids_are_stable_for_a_definition_and_change_with_it():
+    """An identical republish allocates a new version number but the same
+    definition; the ids a screen already showed must still resolve."""
     s1, s2 = _step(1), _step(2)
     flow_id = uuid4()
     run_id = uuid4()
@@ -212,17 +217,14 @@ def test_finding_ids_are_stable_for_a_version_and_change_with_it():
         metrics=[_metric(run_id, s1), _metric(run_id, s2)],
         lineage=[],
     )
-    first = review_facts(
-        flow_id=flow_id, flow_version=1, definition_checksum="a", **kwargs
-    )
-    again = review_facts(
-        flow_id=flow_id, flow_version=1, definition_checksum="a", **kwargs
-    )
-    other = review_facts(
-        flow_id=flow_id, flow_version=2, definition_checksum="b", **kwargs
-    )
+    first = review_facts(flow_id=flow_id, definition_checksum="a", **kwargs)
+    again = review_facts(flow_id=flow_id, definition_checksum="a", **kwargs)
+    other = review_facts(flow_id=flow_id, definition_checksum="b", **kwargs)
     assert [f.finding_id for f in first] == [f.finding_id for f in again]
     assert {f.finding_id for f in first}.isdisjoint({f.finding_id for f in other})
+    assert finding_id(flow_id=flow_id, definition_checksum="a", kind="k") != (
+        finding_id(flow_id=uuid4(), definition_checksum="a", kind="k")
+    )
 
 
 def test_missing_lineage_or_metrics_yield_no_affirmative_fact():
@@ -296,7 +298,19 @@ def _snapshot(
     )
 
 
-def _service(user, *, flow, version, snapshots, denied: set[UUID], evidence=None):
+def _service(
+    user,
+    *,
+    flow,
+    version,
+    snapshots,
+    denied: set[UUID],
+    evidence=None,
+    compatible_versions: set[int] | None = None,
+):
+    """``compatible_versions`` is what the one checksum lookup answers: the
+    versions whose definition equals the published one (itself by default)."""
+
     async def _ensure(run, *, access_kind):
         assert access_kind == "evidence_view"
         if run.id in denied:
@@ -312,7 +326,16 @@ def _service(user, *, flow, version, snapshots, denied: set[UUID], evidence=None
             user=user,
             flow_repo=SimpleNamespace(get=AsyncMock(return_value=flow)),
             flow_run_repo=flow_run_repo,
-            flow_version_repo=SimpleNamespace(get=AsyncMock(return_value=version)),
+            flow_version_repo=SimpleNamespace(
+                get=AsyncMock(return_value=version),
+                versions_with_checksum=AsyncMock(
+                    return_value=frozenset(
+                        compatible_versions
+                        if compatible_versions is not None
+                        else {flow.published_version}
+                    )
+                ),
+            ),
             access_policy=SimpleNamespace(ensure_can_access_run=_ensure),
             evidence_service=evidence
             or SimpleNamespace(
@@ -346,11 +369,14 @@ def _published(flow_id: UUID, *, version: int):
 
 
 @pytest.mark.asyncio
-async def test_packet_reads_only_viewable_runs_of_the_published_version_and_records_their_level(
+async def test_packet_reads_only_viewable_runs_of_the_published_definition_and_records_their_level(
     user,
 ):
+    """Version 3 is an identical republish of version 2: runs of both are the
+    same flow's runs. Version 1 persisted another definition and is only
+    counted."""
     flow_id, space_id = uuid4(), uuid4()
-    flow = SimpleNamespace(id=flow_id, space_id=space_id, published_version=2)
+    flow = SimpleNamespace(id=flow_id, space_id=space_id, published_version=3)
     mk = lambda version, status, level, minute: _snapshot(  # noqa: E731
         flow_id=flow_id,
         tenant_id=user.tenant_id,
@@ -359,20 +385,29 @@ async def test_packet_reads_only_viewable_runs_of_the_published_version_and_reco
         level=level,
         created_at=_T0 + timedelta(minutes=minute),
     )
-    newest_ok = mk(2, FlowRunStatus.COMPLETED, 3, 5)
-    denied = mk(2, FlowRunStatus.COMPLETED, 3, 4)
-    legacy = mk(2, FlowRunStatus.FAILED, None, 3)
+    newest_ok = mk(3, FlowRunStatus.COMPLETED, 3, 5)
+    denied = mk(3, FlowRunStatus.COMPLETED, 3, 4)
+    legacy = mk(3, FlowRunStatus.FAILED, None, 3)
     older_version = mk(1, FlowRunStatus.COMPLETED, 1, 2)
-    failed_ok = mk(2, FlowRunStatus.FAILED, 1, 1)
+    same_definition = mk(2, FlowRunStatus.COMPLETED, 1, 1)
+    failed_ok = mk(3, FlowRunStatus.FAILED, 1, 0)
     service, flow_run_repo = _service(
         user,
         flow=flow,
-        version=_published(flow_id, version=2),
-        snapshots=[newest_ok, denied, legacy, older_version, failed_ok],
+        version=_published(flow_id, version=3),
+        snapshots=[
+            newest_ok,
+            denied,
+            legacy,
+            older_version,
+            same_definition,
+            failed_ok,
+        ],
         denied={denied.id},
+        compatible_versions={3, 2},
     )
     packet = await service.build_packet(flow_id=flow_id, space_id=space_id)
-    assert packet.cohort.completed_run_ids == [newest_ok.id]
+    assert packet.cohort.completed_run_ids == [newest_ok.id, same_definition.id]
     assert packet.cohort.failed_run_ids == [failed_ok.id]
     assert packet.cohort.omitted.model_dump() == {
         "other_version": 1,
@@ -381,12 +416,17 @@ async def test_packet_reads_only_viewable_runs_of_the_published_version_and_reco
         "overflow": 0,
     }
     assert packet.evidence_classification_level == 3
-    assert (packet.flow_version, packet.definition_checksum) == (2, "sum-2")
+    assert (packet.flow_version, packet.definition_checksum) == (3, "sum-3")
     assert [step.label for step in packet.steps] == ["Sammanfatta"]
     assert [fact.kind for fact in packet.facts] == ["evidence_completeness"]
+    # Content identity is one bounded read of version numbers, never per run.
+    service.flow_version_repo.versions_with_checksum.assert_awaited_once_with(
+        flow_id=flow_id, tenant_id=user.tenant_id, definition_checksum="sum-3"
+    )
     # Only the runs the packet read are fetched, and only their metadata.
     flow_run_repo.list_step_result_metrics.assert_awaited_once_with(
-        tenant_id=user.tenant_id, run_ids=[newest_ok.id, failed_ok.id]
+        tenant_id=user.tenant_id,
+        run_ids=[newest_ok.id, same_definition.id, failed_ok.id],
     )
 
 
@@ -438,12 +478,17 @@ async def test_packet_refuses_an_unpublished_flow_and_a_flow_outside_the_space(u
     assert mismatch.value.code == AIBuilderErrorCode.FLOW_SPACE_MISMATCH
 
 
+# Fixed identities, so two packets of the same definition share finding ids
+# the way two builds of one flow do.
+_PACKET_FLOW_ID = uuid4()
+_PACKET_STEP_IDS = {1: uuid4(), 2: uuid4()}
+
+
 def _packet(*, version: int = 2, checksum: str = "sum") -> FlowReviewPacket:
-    s1, s2 = _step(1), _step(2)
+    s1, s2 = (_step(order, step_id=_PACKET_STEP_IDS[order]) for order in (1, 2))
     run_id = uuid4()
     facts = review_facts(
-        flow_id=uuid4(),
-        flow_version=version,
+        flow_id=_PACKET_FLOW_ID,
         definition_checksum=checksum,
         steps=[s1, s2],
         completed_run_ids=[run_id],
@@ -452,7 +497,7 @@ def _packet(*, version: int = 2, checksum: str = "sum") -> FlowReviewPacket:
         lineage=[_lineage(run_id, s1), _lineage(run_id, s2)],
     )
     return FlowReviewPacket(
-        flow_id=uuid4(),
+        flow_id=_PACKET_FLOW_ID,
         flow_version=version,
         definition_checksum=checksum,
         generated_at=_T0,
@@ -499,7 +544,7 @@ def test_a_turn_gets_exactly_the_findings_it_names_rendered_in_swedish():
     assert "ta inte bort ett sådant steg utan att fråga" in text
 
 
-def test_a_turn_naming_a_republished_review_or_an_unknown_finding_is_refused():
+def test_a_turn_naming_a_changed_review_or_an_unknown_finding_is_refused():
     packet = _packet()
     known = packet.facts[0].finding_id
     completeness = next(f for f in packet.facts if f.kind == "evidence_completeness")
@@ -514,6 +559,16 @@ def test_a_turn_naming_a_republished_review_or_an_unknown_finding_is_refused():
             ),
         )
     assert diagnostic.value.code == AIBuilderErrorCode.REVIEW_FINDING_UNKNOWN
+    # An identical republish (new version number, same definition) keeps the
+    # review: the ids the screen showed still resolve against the new packet.
+    republished = resolve_review_evidence(
+        _packet(version=3, checksum="sum"),
+        AIBuilderReviewContext(
+            flow_version=2, definition_checksum="sum", finding_ids=[known]
+        ),
+    )
+    assert [f.finding_id for f in republished.facts] == [known]
+    assert republished.flow_version == 3
     with pytest.raises(AIBuilderBadRequestException) as stale:
         resolve_review_evidence(
             packet,
@@ -522,6 +577,7 @@ def test_a_turn_naming_a_republished_review_or_an_unknown_finding_is_refused():
             ),
         )
     assert stale.value.code == AIBuilderErrorCode.REVIEW_STALE
+    assert stale.value.context == {"reviewed_version": 1, "published_version": 2}
     with pytest.raises(AIBuilderBadRequestException) as unknown:
         resolve_review_evidence(
             packet,
@@ -926,7 +982,8 @@ def test_a_suggestion_reference_is_held_to_its_runs_and_keeps_their_floor():
     assert "- möjligt dubbelarbete i steg 2." in rendered
     assert "hypotes" in rendered
 
-    # A republished flow or a run that is no longer readable is stale.
+    # A changed definition or a run that is no longer readable is stale; an
+    # identical republish under a new version number is not.
     with pytest.raises(AIBuilderBadRequestException) as stale:
         resolve_suggestion_evidence(
             _packet(version=3, checksum="new"),
@@ -934,6 +991,12 @@ def test_a_suggestion_reference_is_held_to_its_runs_and_keeps_their_floor():
             sample_run_levels={run_a: 1, run_b: 3},
         )
     assert stale.value.code == AIBuilderErrorCode.REVIEW_STALE
+    republished = resolve_suggestion_evidence(
+        _packet(version=3, checksum="sum"),
+        context,
+        sample_run_levels={run_a: 1, run_b: 3},
+    )
+    assert republished.flow_version == 3 and len(republished.suggestions) == 1
     with pytest.raises(AIBuilderBadRequestException) as gone:
         resolve_suggestion_evidence(packet, context, sample_run_levels={run_a: 1})
     assert gone.value.code == AIBuilderErrorCode.REVIEW_STALE
@@ -1087,6 +1150,7 @@ async def test_sample_run_levels_skip_runs_that_are_gone_or_not_viewable(user):
 
     flow_id = uuid4()
     viewable, gone, denied, unlevelled = uuid4(), uuid4(), uuid4(), uuid4()
+    republished, other_definition = uuid4(), uuid4()
 
     async def _get_run(*, run_id, flow_id, access_kind):
         assert access_kind == "evidence_view"
@@ -1096,23 +1160,99 @@ async def test_sample_run_levels_skip_runs_that_are_gone_or_not_viewable(user):
             raise UnauthorizedException("no")
         return SimpleNamespace(
             id=run_id,
+            # The viewable run ran the published version; the republished
+            # one ran an older version of the same definition.
+            flow_version={republished: 1, other_definition: 0}.get(run_id, 3),
             evidence_classification_level=None if run_id == unlevelled else 2,
         )
 
     service, _ = _service(
         user,
-        flow=SimpleNamespace(id=flow_id, space_id=uuid4(), published_version=1),
+        flow=SimpleNamespace(id=flow_id, space_id=uuid4(), published_version=3),
         version=None,
         snapshots=[],
         denied=set(),
         evidence=SimpleNamespace(
             get_run=_get_run, get_redacted_evidence_bundle=AsyncMock()
         ),
+        compatible_versions={3, 1},
     )
     levels = await service.resolve_sample_run_levels(
-        flow_id=flow_id, run_ids=[viewable, gone, denied, unlevelled, viewable]
+        flow_id=flow_id,
+        run_ids=[viewable, gone, denied, unlevelled, viewable, republished],
+        definition_checksum="sum-3",
     )
-    assert levels == {viewable: 2}
+    assert levels == {viewable: 2, republished: 2}
+    service.flow_version_repo.versions_with_checksum.assert_awaited_once_with(
+        flow_id=flow_id, tenant_id=user.tenant_id, definition_checksum="sum-3"
+    )
+    # A run of another definition is not quietly left out: it is refused.
+    with pytest.raises(AIBuilderBadRequestException) as refused:
+        await service.resolve_sample_run_levels(
+            flow_id=flow_id,
+            run_ids=[viewable, other_definition],
+            definition_checksum="sum-3",
+        )
+    assert refused.value.code == AIBuilderErrorCode.REVIEW_STALE
+    assert refused.value.context == {"run_version": 0}
+
+
+@pytest.mark.asyncio
+async def test_an_investigation_refuses_a_pinned_run_of_another_definition_before_auditing_it(
+    user,
+):
+    """A named run outside the cohort window is read when it ran the same
+    definition; one that ran another definition stops the read before any
+    audit or content, so nothing about a different flow reaches a provider."""
+    flow_id, space_id = uuid4(), uuid4()
+    flow = SimpleNamespace(id=flow_id, space_id=space_id, published_version=3)
+    compatible = _snapshot(
+        flow_id=flow_id,
+        tenant_id=user.tenant_id,
+        version=1,
+        status=FlowRunStatus.COMPLETED,
+        level=1,
+        created_at=_T0,
+    )
+    incompatible = compatible.model_copy(update={"id": uuid4(), "flow_version": 2})
+    runs = {compatible.id: compatible, incompatible.id: incompatible}
+    audited: list[UUID] = []
+    bundle = AsyncMock(
+        return_value=SimpleNamespace(
+            step_results=(), debug_export={"run": {"summary": {"omissions": []}}}
+        )
+    )
+
+    async def _get_run(*, run_id, flow_id, access_kind):
+        return runs[run_id]
+
+    async def _audit(run):
+        audited.append(run.id)
+
+    # The cohort window holds none of the named runs.
+    service, _ = _service(
+        user,
+        flow=flow,
+        version=_published(flow_id, version=3),
+        snapshots=[],
+        denied=set(),
+        evidence=SimpleNamespace(get_run=_get_run, get_redacted_evidence_bundle=bundle),
+        compatible_versions={3, 1},
+    )
+    sample = await service.build_review_sample(
+        flow_id=flow_id, space_id=space_id, audit=_audit, run_ids=[compatible.id]
+    )
+    assert sample.run_ids == [compatible.id] and audited == [compatible.id]
+
+    with pytest.raises(AIBuilderBadRequestException) as refused:
+        await service.build_review_sample(
+            flow_id=flow_id,
+            space_id=space_id,
+            audit=_audit,
+            run_ids=[incompatible.id],
+        )
+    assert refused.value.code == AIBuilderErrorCode.REVIEW_STALE
+    assert audited == [compatible.id] and bundle.await_count == 1
 
 
 @pytest.mark.asyncio

@@ -610,7 +610,9 @@ class AIBuilderService:
                     }
                     if sample is not None
                     else await self.flow_review_service.resolve_sample_run_levels(
-                        flow_id=session.flow_id, run_ids=review_context.sample_run_ids
+                        flow_id=session.flow_id,
+                        run_ids=review_context.sample_run_ids,
+                        definition_checksum=packet.definition_checksum,
                     )
                 )
                 return resolve_suggestion_evidence(

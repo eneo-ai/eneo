@@ -5,8 +5,14 @@ proposes an edit. The packet is deterministic and built from what runs already
 persist, never from step inputs or outputs: which step outputs were observed
 being consumed, which error codes repeat, which step carries the run's tokens
 or time, and how complete the evidence is. Every fact carries a stable id keyed
-by the exact published version and checksum it was computed for, so a later
-turn can name a finding without copying run data into the conversation.
+by the definition checksum it was computed for, so a later turn can name a
+finding without copying run data into the conversation.
+
+A run is evidence about the flow's content, not about a version number: a run
+is admitted when the definition its version persisted has the same checksum as
+the published one, so unpublishing and publishing an unchanged flow keeps its
+runs, and a run keeps its own flow_version as provenance. Runs of a different
+definition are only counted.
 
 Authorization is per run: a run the caller may not view is left out and only
 counted, never named. A run recorded before the evidence classification level
@@ -71,8 +77,9 @@ if TYPE_CHECKING:
         OrderedEditProposal,
     )
 
-# Newest runs examined for the exact published version; a flow with a long
-# history at an older version still yields a bounded read.
+# Newest terminal runs examined; those of the published definition are admitted
+# from inside this window, so a flow with a long history at another definition
+# still yields a bounded read.
 COHORT_SCAN_LIMIT = 100
 COHORT_COMPLETED_LIMIT = 20
 COHORT_FAILED_LIMIT = 10
@@ -100,6 +107,8 @@ class FlowReviewOmittedRuns(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    # Runs whose version persisted a different definition than the published
+    # one. A version with the same checksum is the same flow and is admitted.
     other_version: int = 0
     not_viewable: int = 0
     level_unknown: int = 0
@@ -376,6 +385,41 @@ def investigation_message(
     return "Investigate the following based on the runs: " + "; ".join(named) + "."
 
 
+def _require_same_definition(
+    packet: FlowReviewPacket, context: AIBuilderReviewReference
+) -> None:
+    """A review is held to the flow's content, never to its version number.
+
+    A republished identical definition is the same review; a changed one gets
+    a new packet with new ids, and a turn still naming the old ones is told so
+    rather than handed facts about a different flow. The versions travel in
+    the refusal as provenance only.
+    """
+    if packet.definition_checksum != context.definition_checksum:
+        raise AIBuilderBadRequestException(
+            "The flow's definition changed after this review; review it anew.",
+            code=AIBuilderErrorCode.REVIEW_STALE,
+            context={
+                "reviewed_version": context.flow_version,
+                "published_version": packet.flow_version,
+            },
+        )
+
+
+def _require_run_of_definition(
+    run: FlowRunStatusSnapshot, compatible_versions: Collection[int]
+) -> None:
+    """A named run must have run the reviewed definition; a run of another
+    definition is refused explicitly, never quietly left out."""
+    if run.flow_version not in compatible_versions:
+        raise AIBuilderBadRequestException(
+            "A run this suggestion was judged on ran another definition of the "
+            "flow; review it anew.",
+            code=AIBuilderErrorCode.REVIEW_STALE,
+            context={"run_version": run.flow_version},
+        )
+
+
 def resolve_suggestion_evidence(
     packet: FlowReviewPacket,
     context: AIBuilderSuggestionContext,
@@ -387,7 +431,7 @@ def resolve_suggestion_evidence(
 
     The floor is the packet's raised to the sampled runs' persisted levels:
     the runs the model read decide it, whether or not they are still in the
-    cohort. A republished flow is refused like any other stale review.
+    cohort. A changed definition is refused like any other stale review.
 
     ``sample`` is the fresh read of those same runs. The suggestions were
     judged on an earlier read, so this one is what the turn actually holds:
@@ -395,18 +439,7 @@ def resolve_suggestion_evidence(
     tests the hypotheses against them rather than restating them.
     """
 
-    if (
-        packet.flow_version != context.flow_version
-        or packet.definition_checksum != context.definition_checksum
-    ):
-        raise AIBuilderBadRequestException(
-            "The flow was published again after this review; review it anew.",
-            code=AIBuilderErrorCode.REVIEW_STALE,
-            context={
-                "reviewed_version": context.flow_version,
-                "published_version": packet.flow_version,
-            },
-        )
+    _require_same_definition(packet, context)
     missing = [
         run_id for run_id in context.sample_run_ids if run_id not in sample_run_levels
     ]
@@ -458,21 +491,10 @@ def resolve_review_evidence(
 ) -> FlowReviewEvidence:
     """The facts a turn names, or a typed refusal when they no longer exist.
 
-    A republished flow gets a new packet with new ids; a turn still naming the
-    old ones is told so rather than handed facts about a different version.
+    The ids are keyed by definition, so an identical republish keeps them; a
+    finding absent from the freshly rebuilt evidence is unknown either way.
     """
-    if (
-        packet.flow_version != context.flow_version
-        or packet.definition_checksum != context.definition_checksum
-    ):
-        raise AIBuilderBadRequestException(
-            "The flow was published again after this review; review it anew.",
-            code=AIBuilderErrorCode.REVIEW_STALE,
-            context={
-                "reviewed_version": context.flow_version,
-                "published_version": packet.flow_version,
-            },
-        )
+    _require_same_definition(packet, context)
     # Completeness describes the evidence; it is never something to act on.
     by_id = {
         fact.finding_id: fact
@@ -812,7 +834,8 @@ def render_review_evidence(evidence: FlowReviewEvidence) -> str:
         "## Underlag från körningar",
         f"Publicerad version {evidence.flow_version}: "
         f"{evidence.completed_run_count} lyckade och "
-        f"{evidence.failed_run_count} misslyckade körningar lästes.",
+        f"{evidence.failed_run_count} misslyckade körningar av samma "
+        "flödesdefinition lästes.",
     ]
     if evidence.suggestions:
         lines.append(
@@ -896,21 +919,20 @@ def render_review_evidence(evidence: FlowReviewEvidence) -> str:
 def finding_id(
     *,
     flow_id: UUID,
-    flow_version: int,
     definition_checksum: str,
     kind: str,
     step_id: UUID | None = None,
     error_code: str | None = None,
 ) -> str:
-    """Stable across packets of the same published version; changes with it."""
-    key = f"{flow_id}:{flow_version}:{definition_checksum}:{kind}:{step_id or ''}:{error_code or ''}"
+    """Stable across packets of the same definition, whatever its version
+    number; changes with the definition."""
+    key = f"{flow_id}:{definition_checksum}:{kind}:{step_id or ''}:{error_code or ''}"
     return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
 
 
 def review_facts(
     *,
     flow_id: UUID,
-    flow_version: int,
     definition_checksum: str,
     steps: Sequence[RuntimeStep],
     completed_run_ids: Sequence[UUID],
@@ -934,7 +956,6 @@ def review_facts(
     ) -> str:
         return finding_id(
             flow_id=flow_id,
-            flow_version=flow_version,
             definition_checksum=definition_checksum,
             kind=kind,
             step_id=step_id,
@@ -1090,6 +1111,10 @@ class FlowReviewVersionRepository(Protocol):
         self, flow_id: UUID, version: int, tenant_id: UUID
     ) -> FlowVersion: ...
 
+    async def versions_with_checksum(
+        self, *, flow_id: UUID, tenant_id: UUID, definition_checksum: str
+    ) -> frozenset[int]: ...
+
 
 class FlowReviewRunRepository(Protocol):
     async def list_statuses(
@@ -1172,8 +1197,11 @@ class AIBuilderFlowReviewService:
         selection, for a turn that investigates suggestions judged on runs
         the cohort may since have turned over. A run that is gone or no
         longer viewable is left out and never named, exactly as the packet
-        leaves one out; the caller decides what its absence means.
-        ``step_orders`` reads only the named steps' content.
+        leaves one out; the caller decides what its absence means. A named
+        run that ran another definition of the flow is refused outright: it
+        is evidence about a different flow, and outside the window is the
+        only place a compatible one may be. ``step_orders`` reads only the
+        named steps' content.
 
         Excerpts are read whole here; the request that carries them fits them
         to its model's window (`fit_sample_excerpts`).
@@ -1184,6 +1212,15 @@ class AIBuilderFlowReviewService:
         _, version = await self._published(flow_id=flow_id, space_id=space_id)
         steps = parse_published_runtime_steps(
             version.definition_json, flow_version=packet.flow_version
+        )
+        # The cohort's own selection was admitted by the packet; only named
+        # runs need their definition checked, with the same single read.
+        compatible_versions = (
+            await self._versions_of_definition(
+                flow_id=flow_id, definition_checksum=packet.definition_checksum
+            )
+            if run_ids is not None
+            else None
         )
         level = packet.evidence_classification_level
         runs: list[ReviewSampleRun] = []
@@ -1202,6 +1239,8 @@ class AIBuilderFlowReviewService:
                         )
                     except (NotFoundException, UnauthorizedException):
                         continue
+                    if compatible_versions is not None:
+                        _require_run_of_definition(run, compatible_versions)
                     if run.evidence_classification_level is None:
                         raise AIBuilderBadRequestException(
                             "A sampled run no longer carries an evidence level.",
@@ -1247,14 +1286,19 @@ class AIBuilderFlowReviewService:
         )
 
     async def resolve_sample_run_levels(
-        self, *, flow_id: UUID, run_ids: Sequence[UUID]
+        self, *, flow_id: UUID, run_ids: Sequence[UUID], definition_checksum: str
     ) -> dict[UUID, int]:
         """The persisted evidence level of each run the caller may still view.
 
         A run that is gone, no longer viewable, or without a level is left
-        out; the caller decides whether that makes its reference stale.
+        out; the caller decides whether that makes its reference stale. A run
+        of another definition than ``definition_checksum`` is refused, as
+        `build_review_sample` refuses it.
         """
 
+        compatible_versions = await self._versions_of_definition(
+            flow_id=flow_id, definition_checksum=definition_checksum
+        )
         levels: dict[UUID, int] = {}
         for run_id in dict.fromkeys(run_ids):
             try:
@@ -1263,10 +1307,22 @@ class AIBuilderFlowReviewService:
                 )
             except (NotFoundException, UnauthorizedException):
                 continue
+            _require_run_of_definition(run, compatible_versions)
             if run.evidence_classification_level is None:
                 continue
             levels[run_id] = run.evidence_classification_level
         return levels
+
+    async def _versions_of_definition(
+        self, *, flow_id: UUID, definition_checksum: str
+    ) -> frozenset[int]:
+        """Every version of the flow that persisted this exact definition: one
+        bounded read of version numbers, never a lookup per run."""
+        return await self.flow_version_repo.versions_with_checksum(
+            flow_id=flow_id,
+            tenant_id=self.user.tenant_id,
+            definition_checksum=definition_checksum,
+        )
 
     async def _published(
         self, *, flow_id: UUID, space_id: UUID
@@ -1311,6 +1367,12 @@ class AIBuilderFlowReviewService:
             statuses=[FlowRunStatus.COMPLETED, FlowRunStatus.FAILED],
             limit=COHORT_SCAN_LIMIT,
         )
+        # Admission is by content: a run of any version that persisted this
+        # exact definition is a run of this flow. The window stays the newest
+        # terminal runs; matching history inside it counts.
+        compatible_versions = await self._versions_of_definition(
+            flow_id=flow_id, definition_checksum=definition_checksum
+        )
         completed: list[UUID] = []
         failed: list[UUID] = []
         omitted = {
@@ -1321,7 +1383,7 @@ class AIBuilderFlowReviewService:
         }
         level = 0
         for run in snapshots:
-            if run.flow_version != published_version:
+            if run.flow_version not in compatible_versions:
                 omitted["other_version"] += 1
                 continue
             bucket = completed if run.status == FlowRunStatus.COMPLETED else failed
@@ -1355,7 +1417,6 @@ class AIBuilderFlowReviewService:
         )
         facts = review_facts(
             flow_id=flow_id,
-            flow_version=published_version,
             definition_checksum=definition_checksum,
             steps=steps,
             completed_run_ids=completed,

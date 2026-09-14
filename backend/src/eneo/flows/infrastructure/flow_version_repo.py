@@ -241,6 +241,23 @@ class FlowVersionRepository:
             raise NotFoundException("Flow version not found.")
         return versions_by_ref
 
+    async def versions_with_checksum(
+        self, *, flow_id: UUID, tenant_id: UUID, definition_checksum: str
+    ) -> frozenset[int]:
+        """The flow's version numbers whose persisted definition has this checksum.
+
+        One read over the flow's own version rows (the primary key leads with
+        flow_id), returning version numbers alone: no historical
+        definition_json is ever loaded to decide content identity.
+        """
+        stmt = (
+            sa.select(FlowVersions.version)
+            .where(FlowVersions.flow_id == flow_id)
+            .where(FlowVersions.tenant_id == tenant_id)
+            .where(FlowVersions.definition_checksum == definition_checksum)
+        )
+        return frozenset((await self.session.execute(stmt)).scalars().all())
+
     async def get_latest(self, flow_id: UUID, tenant_id: UUID) -> FlowVersion | None:
         stmt = (
             sa.select(FlowVersions)

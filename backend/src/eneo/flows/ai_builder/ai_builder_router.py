@@ -1001,7 +1001,7 @@ async def get_flow_review_packet(
     summary="Let the planner model judge a published flow's recent runs",
     description=(
         "Reads a bounded sample of recorded prompts, inputs and outputs from a "
-        "few admitted runs of the published version, together with the review "
+        "few admitted runs of the published definition, together with the review "
         "packet, and asks the space's planner model for suggestions it can "
         "source in that sample. Every sampled run is audited as an evidence "
         "view before it is read; the model must clear the sample's evidence "

@@ -357,7 +357,8 @@ def _service_with_runs(user, *, levels: list[int], bundle_delay: float = 0.0):
             list_current_attempt_lineage=AsyncMock(return_value=[]),
         ),
         flow_version_repo=SimpleNamespace(
-            get=AsyncMock(return_value=_published(flow_id))
+            get=AsyncMock(return_value=_published(flow_id)),
+            versions_with_checksum=AsyncMock(return_value=frozenset({1})),
         ),
         access_policy=SimpleNamespace(ensure_can_access_run=_ensure),
         evidence_service=SimpleNamespace(
