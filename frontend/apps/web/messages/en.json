@@ -6674,6 +6674,8 @@
   "ai_builder_plan_meta_steps_nothing_created": "{count} steps · nothing has been created yet",
   "ai_builder_footer_steps_nothing_created": "{count} steps · nothing is created until you approve.",
   "ai_builder_footer_draft_not_running": "The flow is created as a draft and stays idle until you publish it.",
+  "ai_builder_footer_steps_nothing_changed": "{count} steps · nothing changes until you approve.",
+  "ai_builder_footer_edit_published_unchanged": "The changes are saved as a draft. The published version keeps running unchanged until you publish.",
   "ai_builder_footer_locked_while_revising": "The plan is being rewritten. Approval is locked until it is ready.",
   "ai_builder_footer_plan_needs_update": "The last change did not go through, so the plan cannot be approved yet. Send the change again or describe it differently.",
   "ai_builder_revising_overlay": "Eneo is rewriting the plan. Approval is locked meanwhile.",

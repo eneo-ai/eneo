@@ -1649,11 +1649,17 @@
           </div>
         {:else}
           <div class="flex flex-col max-sm:w-full">
+            <!-- An edit of a published flow changes nothing until approved and
+                 keeps the published version running; only a new flow is created. -->
             <span class="text-secondary text-xs">
-              {m.ai_builder_footer_steps_nothing_created({ count: stepCount })}
+              {isCreateMode
+                ? m.ai_builder_footer_steps_nothing_created({ count: stepCount })
+                : m.ai_builder_footer_steps_nothing_changed({ count: stepCount })}
             </span>
             <span class="text-secondary text-xs text-pretty max-sm:hidden">
-              {m.ai_builder_footer_draft_not_running()}
+              {isCreateMode
+                ? m.ai_builder_footer_draft_not_running()
+                : m.ai_builder_footer_edit_published_unchanged()}
             </span>
             {#if service.isRevisingPlan}
               <span

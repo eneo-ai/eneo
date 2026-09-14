@@ -249,6 +249,9 @@ describe("BuilderReviewScreen approval", () => {
     expect(screen.getByRole("button", { name: m.ai_builder_approve() })).toBeTruthy();
     expect(screen.queryByRole("button", { name: m.ai_builder_apply() })).toBeNull();
     expect(screen.queryByRole("button", { name: m.ai_builder_approve_create() })).toBeNull();
+    // An edit changes nothing until approved; no flow is "created" here.
+    expect(screen.getByText(m.ai_builder_footer_edit_published_unchanged())).toBeTruthy();
+    expect(screen.queryByText(m.ai_builder_footer_draft_not_running())).toBeNull();
     cleanup();
 
     const applyPlan = vi.fn().mockResolvedValue({
