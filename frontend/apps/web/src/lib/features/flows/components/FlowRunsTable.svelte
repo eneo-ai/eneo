@@ -340,15 +340,16 @@
 {/snippet}
 
 <section class="mx-auto flex w-full max-w-[1400px] flex-col gap-4 px-3 py-4 sm:px-6 sm:py-6">
-  <header class="flex flex-wrap items-start justify-between gap-3">
+  <header class="flex flex-wrap items-center justify-between gap-3">
     <div class="min-w-0">
-      <h2 class="text-primary text-base font-semibold tracking-tight sm:text-lg">
-        {m.flow_history()}
-      </h2>
+      <!-- The selected tab already says "Historik" a few pixels above, so the
+           heading is kept for heading navigation and not repeated on screen.
+           The Builder panel opens the same way, with its summary line first. -->
+      <h2 class="sr-only">{m.flow_history()}</h2>
       <!-- The mode explainer describes what the list shows; with no runs there
            is nothing to explain and the empty state carries the next step. -->
       {#if displayRuns.length > 0}
-        <p class="text-secondary mt-1 max-w-2xl text-sm leading-relaxed">
+        <p class="text-secondary max-w-2xl text-sm leading-relaxed">
           {historyModeDescription}
         </p>
       {/if}

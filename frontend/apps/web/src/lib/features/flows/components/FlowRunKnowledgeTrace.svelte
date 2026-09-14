@@ -115,8 +115,19 @@
         return m.flow_run_knowledge_status_skipped_no_input();
       case "skipped_no_service":
         return m.flow_run_knowledge_status_skipped_no_service();
+      case "skipped_transcribe_only":
+        return m.flow_run_knowledge_status_skipped_transcribe_only();
+      case "no_chunks":
+        return m.flow_run_knowledge_status_no_chunks();
+      // A speaker-mapping step never searches knowledge, and its handler
+      // records this bare status rather than a RagRetrievalStatus member.
+      case "skipped":
+        return m.flow_run_knowledge_status_skipped();
       default:
-        return status ?? m.unknown();
+        // The runtime is not bounded by RagRetrievalStatus, so a handler can
+        // still record a status nobody localized. The reader gets a word, not
+        // the identifier; the raw value stays in the run export for operators.
+        return m.unknown();
     }
   }
 

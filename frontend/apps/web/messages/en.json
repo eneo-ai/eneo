@@ -7077,5 +7077,8 @@
   "attachments_open_files_example": "A user attaches six large Excel files and asks what they contain. With the setting on, the assistant opens them one at a time and reads a section at a time, instead of all their content being placed in the conversation at once.",
   "attachments_open_files_storage_hint": "For the assistant to open files itself, file storage must be connected. Connect file storage to enable this setting.",
   "governance_files_summary_open_files": "Files opened when needed · managed by organisation",
-  "governance_files_summary_inline": "File content placed directly · managed by organisation"
+  "governance_files_summary_inline": "File content placed directly · managed by organisation",
+  "flow_run_knowledge_status_no_chunks": "No matches in the knowledge base",
+  "flow_run_knowledge_status_skipped_transcribe_only": "Skipped — this step only transcribes",
+  "flow_run_knowledge_status_skipped": "Skipped — this step does not search knowledge"
 }
