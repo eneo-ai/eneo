@@ -35,10 +35,11 @@ from eneo.files.attachment_budget import (
     attachment_token_ceiling,
 )
 from eneo.files.file_models import File, FileType
-from eneo.files.file_reference import url_only_file_ids
+from eneo.files.file_reference import inline_file_text_for_model, url_only_file_ids
 from eneo.files.file_service import FileService
 from eneo.governance_policy.domain.policy_resolver import (
     select_effective_completion_model,
+    select_effective_inline_file_text,
     select_effective_reasoning_effort,
 )
 from eneo.help_assistants.application.ask_guard import assert_not_helper_assistant
@@ -1866,29 +1867,6 @@ class AssistantService:
 
         return assistant, permissions, effective_config
 
-    async def get_effective_completion_model(
-        self, assistant_id: UUID
-    ) -> "CompletionModel | None":
-        """The model that will actually answer for this assistant, honoring a
-        personal-assistant models policy.
-
-        Mirrors the resolution `ask()` applies so read-time preflight and
-        ask-time enforcement never disagree about which model a request uses.
-        """
-        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
-        assistant = space.get_assistant(assistant_id=assistant_id)
-        # Preflight is reachable with an arbitrary assistant_id; enforce the same
-        # read authorization get_assistant() applies so it can't probe assistants
-        # the caller cannot access.
-        self._authorize_read_assistant(space=space, assistant=assistant)
-        effective_config = await self._resolve_effective_config(
-            space=space, assistant=assistant
-        )
-        return select_effective_completion_model(
-            current_model=assistant.completion_model,
-            effective_config=effective_config,
-        )
-
     async def get_preflight_baseline(
         self,
         assistant_id: UUID,
@@ -1900,8 +1878,8 @@ class AssistantService:
 
         Preflight uses this so the meter can show the baseline, not just the
         per-message delta. Applies the same read authorization as
-        get_effective_completion_model (including the personal-default carve-out)
-        so it can't probe assistants the caller cannot access.
+        get_assistant_with_effective_config (including the personal-default
+        carve-out) so it can't probe assistants the caller cannot access.
         """
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
         assistant = space.get_assistant(assistant_id=assistant_id)
@@ -2951,6 +2929,15 @@ class AssistantService:
             ):
                 prompt_override = effective_config.enforced_prompt_text
 
+            # The file policy replaces the entity's own flag for this request
+            # only (nothing below persists the assistant). Every downstream
+            # reader — the fit gate, derived-image pruning, the files tool
+            # gate and the completion call — takes it from the entity, so one
+            # assignment here keeps them all consistent with preflight.
+            assistant_to_ask.inline_file_text = select_effective_inline_file_text(
+                assistant_to_ask.inline_file_text, effective_config
+            )
+
             if effective_config.reasoning_policy_configured:
                 selected_model = (
                     completion_model_override or assistant_to_ask.completion_model
@@ -2986,6 +2973,11 @@ class AssistantService:
             raise BadRequestException(
                 "No completion model configured for this conversation.",
             )
+        # Request-scoped like the policy override above: a model that cannot
+        # call tools cannot open a file reference, so inline the text instead.
+        assistant_to_ask.inline_file_text = inline_file_text_for_model(
+            assistant_to_ask.inline_file_text, effective_completion_model
+        )
 
         skill_plan = await self._create_skill_turn_plan(
             assistant=assistant_to_ask,

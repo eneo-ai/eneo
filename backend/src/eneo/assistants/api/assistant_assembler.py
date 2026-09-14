@@ -20,6 +20,9 @@ from eneo.files.file_models import (
     Limit,
 )
 from eneo.files.text import TextMimeTypes
+from eneo.governance_policy.domain.policy_resolver import (
+    select_effective_inline_file_text,
+)
 from eneo.integration.presentation.assemblers.integration_knowledge_assembler import (
     IntegrationKnowledgeAssembler,
 )
@@ -238,7 +241,10 @@ class AssistantAssembler:
             permissions=permissions,
             description=assistant.description,
             insight_enabled=assistant.insight_enabled,
-            inline_file_text=assistant.inline_file_text,
+            # Governed value so the chat surfaces the mode the ask will use.
+            inline_file_text=select_effective_inline_file_text(
+                assistant.inline_file_text, effective_config
+            ),
             knowledge_mode=assistant.knowledge_mode,
             type=assistant.type,
             data_retention_days=assistant.data_retention_days,
