@@ -382,7 +382,8 @@ def validate_scoped_edit_proposal(
                 "model-authored changes."
             )
     if saved_step_revision and any(
-        step.existing_step_ref == target_ref
+        step.kind == "modify"
+        and step.existing_step_ref == target_ref
         and not step.model_fields_set - identity_fields
         for step in proposal.steps
     ):
