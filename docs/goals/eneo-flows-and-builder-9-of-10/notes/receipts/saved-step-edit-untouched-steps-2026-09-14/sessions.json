@@ -1,0 +1,189 @@
+{
+  "stack": "candidate :8144",
+  "git_commit": "d5e70b830c0c",
+  "flow_id": "38d59091-0054-47a0-9bf6-e8b0a27e23a1",
+  "space_id": "6f18b073-ea64-4a5e-8236-778a25e72d8f",
+  "model": "openai/gpt-5.6-luna",
+  "plans": [
+    {
+      "session_id": "3e4db91c-1db0-471e-aa09-68819fd2068e",
+      "plan_id": "0f682e0c-fce9-41bf-a81c-e0971b3feefc",
+      "plan_status": "proposed",
+      "scoped_target_existing_step_ref": "existing_step_1",
+      "step_changes": [
+        {
+          "kind": "modified",
+          "step_ref": "existing_step_1",
+          "fields": [
+            "instructions"
+          ]
+        },
+        {
+          "kind": "unchanged",
+          "step_ref": "existing_step_2",
+          "fields": []
+        },
+        {
+          "kind": "unchanged",
+          "step_ref": "existing_step_3",
+          "fields": []
+        },
+        {
+          "kind": "unchanged",
+          "step_ref": "existing_step_4",
+          "fields": []
+        }
+      ],
+      "untouched_step_names": [
+        "Bedöm ansökan mot reglerna",
+        "Skriv beslutsdokument",
+        "Rendera PDF"
+      ],
+      "advisories": []
+    },
+    {
+      "session_id": "a791cc36-af62-45bd-9bbd-8a1dda5e6505",
+      "plan_id": "484b8a23-461b-4c68-8d9e-268d4576d6f1",
+      "plan_status": "proposed",
+      "scoped_target_existing_step_ref": "existing_step_1",
+      "step_changes": [
+        {
+          "kind": "modified",
+          "step_ref": "existing_step_1",
+          "fields": [
+            "instructions"
+          ]
+        },
+        {
+          "kind": "unchanged",
+          "step_ref": "existing_step_2",
+          "fields": []
+        },
+        {
+          "kind": "unchanged",
+          "step_ref": "existing_step_3",
+          "fields": []
+        },
+        {
+          "kind": "unchanged",
+          "step_ref": "existing_step_4",
+          "fields": []
+        }
+      ],
+      "untouched_step_names": [
+        "Bedöm ansökan mot reglerna",
+        "Skriv beslutsdokument",
+        "Rendera PDF"
+      ],
+      "advisories": []
+    },
+    {
+      "session_id": "aa243053-5b0f-4ec0-b9b2-adc3e6ebaffa",
+      "plan_id": "5ce0517d-8768-4359-bea8-1f5a534cce78",
+      "plan_status": "proposed",
+      "scoped_target_existing_step_ref": "existing_step_1",
+      "step_changes": [
+        {
+          "kind": "modified",
+          "step_ref": "existing_step_1",
+          "fields": [
+            "instructions"
+          ]
+        },
+        {
+          "kind": "unchanged",
+          "step_ref": "existing_step_2",
+          "fields": []
+        },
+        {
+          "kind": "unchanged",
+          "step_ref": "existing_step_3",
+          "fields": []
+        },
+        {
+          "kind": "unchanged",
+          "step_ref": "existing_step_4",
+          "fields": []
+        }
+      ],
+      "untouched_step_names": [
+        "Bedöm ansökan mot reglerna",
+        "Skriv beslutsdokument",
+        "Rendera PDF"
+      ],
+      "advisories": []
+    },
+    {
+      "session_id": "b535a0d3-c0d6-4ba6-a4ae-615dac40412a",
+      "plan_id": "9515dc88-ec8f-4400-9a43-d0c1cff4023c",
+      "plan_status": "proposed",
+      "scoped_target_existing_step_ref": "existing_step_1",
+      "step_changes": [
+        {
+          "kind": "modified",
+          "step_ref": "existing_step_1",
+          "fields": [
+            "instructions"
+          ]
+        },
+        {
+          "kind": "unchanged",
+          "step_ref": "existing_step_2",
+          "fields": []
+        },
+        {
+          "kind": "unchanged",
+          "step_ref": "existing_step_3",
+          "fields": []
+        },
+        {
+          "kind": "unchanged",
+          "step_ref": "existing_step_4",
+          "fields": []
+        }
+      ],
+      "untouched_step_names": [
+        "Bedöm ansökan mot reglerna",
+        "Skriv beslutsdokument",
+        "Rendera PDF"
+      ],
+      "advisories": []
+    },
+    {
+      "session_id": "cc716baa-c23a-4e9a-bbff-b6fef769c3be",
+      "plan_id": "87ea1d35-841e-49f1-81a6-b24f0d3b69f7",
+      "plan_status": "proposed",
+      "scoped_target_existing_step_ref": "existing_step_1",
+      "step_changes": [
+        {
+          "kind": "modified",
+          "step_ref": "existing_step_1",
+          "fields": [
+            "instructions"
+          ]
+        },
+        {
+          "kind": "unchanged",
+          "step_ref": "existing_step_2",
+          "fields": []
+        },
+        {
+          "kind": "unchanged",
+          "step_ref": "existing_step_3",
+          "fields": []
+        },
+        {
+          "kind": "unchanged",
+          "step_ref": "existing_step_4",
+          "fields": []
+        }
+      ],
+      "untouched_step_names": [
+        "Bedöm ansökan mot reglerna",
+        "Skriv beslutsdokument",
+        "Rendera PDF"
+      ],
+      "advisories": []
+    }
+  ]
+}
