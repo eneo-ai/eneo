@@ -60,7 +60,6 @@ from eneo.flows.ai_builder.ai_builder_step_transition_policy import (
 from eneo.flows.ai_builder.ai_builder_template_attachment_contract import (
     MAX_TEMPLATE_PREPARATION_STAGES,
     apply_template_attachment_contract,
-    template_binding_dependency_broken_error,
     template_preparation_stage_limit_exceeded,
 )
 from eneo.flows.application.flow_authoring_description_semantics import (
@@ -93,9 +92,6 @@ from eneo.flows.step_lineage import (
 
 _RUNTIME_STEP_ALIAS_PATTERN = re.compile(r"\{\{\s*step_(\d+)(\.[^{}]+?)\s*\}\}")
 _RUNTIME_STEP_REF_PATTERN = re.compile(r"^step_(\d+)$")
-_RUNTIME_STEP_REF_IN_TEMPLATE_PATTERN = re.compile(
-    r"\{\{\s*step_(\d+)(?:\.[^{}]*)?\s*\}\}"
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1053,17 +1049,10 @@ def _inherited_template_bindings(
         for key, value in cast(dict[str, Any], raw).items()
         if isinstance(value, str)
     }
-    # A persisted alias names its producer by the step order it had; only a
-    # step still in the plan can be rewritten to a plan ref. A reference to a
-    # removed producer is a broken dependency here, by identity, before any
-    # number could be mistaken for a position in the new plan.
-    for placeholder, binding in bindings.items():
-        for match in _RUNTIME_STEP_REF_IN_TEMPLATE_PATTERN.finditer(binding):
-            if int(match.group(1)) not in existing_order_to_plan_ref:
-                raise template_binding_dependency_broken_error(
-                    placeholder=placeholder,
-                    binding=binding,
-                )
+    # A persisted alias names its producer by the step order it had. Only a
+    # step still in the plan is rewritten to a plan ref; an alias left in
+    # "step_N" form names a removed producer, and the template contract
+    # rejects it if the placeholder is retained, never by position.
     return cast(
         dict[str, str],
         _rewrite_runtime_alias_value(bindings, existing_order_to_plan_ref),

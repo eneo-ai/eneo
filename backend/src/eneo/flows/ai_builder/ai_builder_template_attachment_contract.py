@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from typing import TypeGuard, cast
@@ -56,6 +57,7 @@ _LOCAL_TEMPLATE_CONFIG_KEYS = frozenset(
     }
 )
 _MAX_DIAGNOSTIC_PLACEHOLDER_LENGTH = 80
+_REMOVED_PRODUCER_ALIAS = re.compile(r"\{\{\s*step_\d+(?:\.[^{}]*)?\s*\}\}")
 MAX_TEMPLATE_PREPARATION_STAGES = 5
 MAX_TEMPLATE_MATERIALIZED_PATHS = NAMED_RESULT_EVIDENCE_MAX_ITEMS
 _TRANSCRIPTION_PLACEHOLDERS = frozenset(
@@ -327,9 +329,16 @@ def _existing_binding_resolves(
     Judged by the rule publication applies to persisted bindings, not by
     whether the Builder would derive the mapping itself: step references
     arrive rewritten to plan refs, and the compiled positions stand in for
-    step orders.
+    step orders. Only a retained placeholder is judged at all: the caller
+    loops over the selected template's placeholders, so a mapping the new
+    template no longer needs, or a plan without a template step, never fails
+    on a producer that left.
     """
 
+    if _REMOVED_PRODUCER_ALIAS.search(binding):
+        # The edit compiler rewrote every surviving producer to its plan ref;
+        # a runtime "step_N" alias still present names a removed step.
+        return False
     terminal_order = len(spec.steps)
     try:
         validate_template_binding_scalar(

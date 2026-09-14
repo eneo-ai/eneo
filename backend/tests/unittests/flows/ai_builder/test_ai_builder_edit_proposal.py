@@ -57,6 +57,7 @@ from eneo.flows.ai_builder.ai_builder_tools import (
 from eneo.flows.ai_builder.planning_state import (
     ArchitectureCommitDraft,
     ConfirmedRuntimeMetadataField,
+    FileRoleEvidence,
     InheritedTemplateBinding,
     PlanningState,
     ResolvedSlot,
@@ -3745,3 +3746,111 @@ async def test_edit_keeps_every_mapping_publication_accepts() -> None:
         },
     }
     assert [field.name for field in spec.form_fields or ()] == ["diarienummer"]
+
+
+def _four_step_bound_flow(template_asset_id) -> SimpleNamespace:
+    return _flow(
+        _flow_step(
+            step_order=1,
+            user_description="Läs underlaget",
+            input_type="document",
+            output_type="text",
+        ),
+        _flow_step(
+            step_order=2,
+            user_description="Skriv rapporten",
+            input_source="previous_step",
+            input_type="text",
+            output_type="text",
+        ),
+        _flow_step(
+            step_order=3,
+            user_description="Skriv sammanfattningen",
+            input_source="previous_step",
+            input_type="text",
+            output_type="text",
+        ),
+        _flow_step(
+            step_order=4,
+            user_description="Fyll i mallen",
+            input_source="previous_step",
+            input_type="text",
+            output_mode="template_fill",
+            output_type="docx",
+            output_config={
+                "template_asset_id": str(template_asset_id),
+                "bindings": {
+                    "rapport": "{{ step_2.output.text }}",
+                    "datum": "{{ datum }}",
+                },
+            },
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_edit_removing_the_template_step_ignores_its_old_mappings() -> None:
+    # No template step remains, so no mapping is retained: the removed
+    # producer of "rapport" is not a dependency of anything.
+    template_asset_id = uuid4()
+    result = await _process(
+        flow=_four_step_bound_flow(template_asset_id),
+        planning_state=_inherited_planning_state(
+            template_asset_id, ["rapport", "datum"]
+        ),
+        arguments={
+            "plan_rationale": "Tar bort rapportsteget och mallsteget.",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+                {"kind": "modify", "existing_step_ref": "existing_step_3"},
+            ],
+            "removed_existing_step_refs": ["existing_step_2", "existing_step_4"],
+        },
+    )
+
+    assert isinstance(result, ProposalReady), result
+    assert (
+        result.compiled.content.spec.steps[-1].output_mode
+        is not OutputMode.TEMPLATE_FILL
+    )
+
+
+@pytest.mark.asyncio
+async def test_edit_ignores_an_old_mapping_the_replacement_template_no_longer_has() -> (
+    None
+):
+    # The replacement template only has "datum"; the old "rapport" mapping
+    # is not retained, so its removed producer is no dependency.
+    template_asset_id = uuid4()
+    planning_state = _inherited_planning_state(template_asset_id, ["rapport", "datum"])
+    planning_state.file_roles = [
+        FileRoleEvidence(
+            file_id=uuid4(),
+            filename="ny-mall.docx",
+            file_type="document",
+            has_readable_text=True,
+            coverage="fully_seen",
+            role="template",
+            source="heuristic",
+            confidence="high",
+            template_placeholders=["datum"],
+        )
+    ]
+    result = await _process(
+        flow=_four_step_bound_flow(template_asset_id),
+        planning_state=planning_state,
+        arguments={
+            "plan_rationale": "Byter mall och tar bort rapportsteget.",
+            "steps": [
+                {"kind": "modify", "existing_step_ref": "existing_step_1"},
+                {"kind": "modify", "existing_step_ref": "existing_step_3"},
+                {"kind": "modify", "existing_step_ref": "existing_step_4"},
+            ],
+            "removed_existing_step_refs": ["existing_step_2"],
+        },
+    )
+
+    assert isinstance(result, ProposalReady), result
+    terminal = result.compiled.content.spec.steps[-1]
+    assert terminal.output_mode is OutputMode.TEMPLATE_FILL
+    assert terminal.output_config == {"bindings": {"datum": "{{ datum }}"}}
