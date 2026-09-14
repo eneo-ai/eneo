@@ -1459,6 +1459,25 @@ describe("FlowAIBuilder discovery screens", () => {
     });
   });
 
+  it("returns focus to the chip when a reopened answer is left unchanged", async () => {
+    const { fetch } = makeFetch({ sessions: [answeredThenPendingSession()] });
+    const { stream } = makeStream();
+    renderShell({ fetch, stream, resumeSessionId: "s-1" });
+
+    await screen.findByRole("heading", { name: SOURCES_QUESTION.question });
+    const chip = screen.getByText("Som PDF").closest("button")!;
+    await fireEvent.click(chip);
+
+    // Opening hands the caret to the question being changed.
+    const reopened = await screen.findByRole("heading", { name: FORMAT_QUESTION.question });
+    await waitFor(() => expect(document.activeElement).toBe(reopened));
+
+    // Cancelling hands it back to the chip, not to the top of the next screen.
+    await fireEvent.click(button(m.cancel()));
+    await screen.findByRole("heading", { name: SOURCES_QUESTION.question });
+    await waitFor(() => expect(document.activeElement).toBe(chip));
+  });
+
   it("announces the screen that replaces the answered question", async () => {
     const { fetch } = makeFetch({ sessions: [questionSession()] });
     const { stream } = makeStream(() => [questionEvent(SOURCES_QUESTION)]);
@@ -1584,6 +1603,52 @@ describe("FlowAIBuilder confirm, build and review", () => {
     expect(calls[0]!.body).toMatchObject({
       question_answer: { question_id: "output_format", selected_option_ids: ["text"] }
     });
+  });
+
+  it("hands focus to the reopened question and back to its chip when the edit closes", async () => {
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          conversation: [
+            userMessage("u1", "Sammanfatta rapporter till en PDF"),
+            assistantMessage("a1", "Jag behöver veta formatet.", { question: FORMAT_QUESTION }),
+            userMessage("u2", "Som PDF", {
+              question_answer: {
+                kind: "structured_question_answer",
+                question_id: "output_format",
+                selected_option_ids: ["pdf"]
+              }
+            }),
+            assistantMessage("a2", "", { requirements_summary: SUMMARY })
+          ]
+        })
+      ]
+    });
+    const { stream, calls } = makeStream(() => "hold");
+    renderShell({ fetch, stream, resumeSessionId: "s-1" });
+
+    const cardHeading = await screen.findByRole("heading", {
+      name: m.ai_builder_requirements_title()
+    });
+    const chip = screen.getByText("Som PDF").closest("button")!;
+    await fireEvent.click(chip);
+
+    // The question opens above the card and takes the caret with it.
+    const reopened = await screen.findByRole("heading", { name: FORMAT_QUESTION.question });
+    await waitFor(() => expect(document.activeElement).toBe(reopened));
+
+    // Cancelling returns to the chip, where the reader was.
+    await fireEvent.click(button(m.cancel()));
+    await waitFor(() => expect(document.activeElement).toBe(chip));
+
+    // Answering locks the chip while the turn runs, so the card heading holds
+    // the caret; the chip is still brought into view, never the top of the page.
+    await fireEvent.click(chip);
+    await fireEvent.click(await screen.findByRole("radio", { name: "Som text" }));
+    await fireEvent.click(button(m.ai_builder_question_confirm()));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    await waitFor(() => expect(document.activeElement).toBe(cardHeading));
+    expect(chip.scrollIntoView).toHaveBeenLastCalledWith({ block: "nearest" });
   });
 
   it("reopens the question that settled a decision, and lists the named content", async () => {

@@ -186,18 +186,6 @@
     void changeRequestRef?.focusInput();
   }
 
-  let editorRef = $state<HTMLElement | null>(null);
-  // The editor opens above the card, which on a long card is off-screen: from
-  // where the user clicked, nothing appeared to happen at all.
-  $effect(() => {
-    if (editingQuestion?.question && editorRef) {
-      editorRef.scrollIntoView({
-        block: "center",
-        behavior: reducedMotion ? "auto" : "smooth"
-      });
-    }
-  });
-
   function reopenQuestion(questionId: string) {
     changeDrafts.set(changeTopic, changeDraft);
     changeOpen = false;
@@ -462,6 +450,7 @@
               question: item.question,
               answer: item.answerLabel
             })}
+            data-edit-question={item.questionId}
             onclick={() => reopenQuestion(item.questionId)}
             {disabled}
           >
@@ -483,7 +472,9 @@
     {/if}
 
     {#if editingQuestion?.question}
-      <div class="mb-4" bind:this={editorRef}>
+      <!-- The host hands focus to the question when it opens and back to the
+           row or chip that opened it when it closes. -->
+      <div class="mb-4" data-builder-answer-editor>
         <p class="text-secondary mb-2 flex items-center gap-2 text-xs">
           {m.ai_builder_question_editing_note()}
           <Button
@@ -632,6 +623,7 @@
                       size="sm"
                       class="justify-self-start sm:justify-self-end"
                       aria-label={m.ai_builder_confirm_change_row_aria({ topic: decision.topic })}
+                      data-edit-question={settledBy ?? undefined}
                       {disabled}
                       onclick={() =>
                         settledBy ? reopenQuestion(settledBy) : openChange(decision.topic)}
@@ -825,6 +817,7 @@
                   variant="outline"
                   size="sm"
                   class="ml-auto"
+                  data-edit-question={runtimeFieldsQuestionId}
                   {disabled}
                   onclick={() => reopenQuestion(runtimeFieldsQuestionId)}
                 >

@@ -3,6 +3,7 @@
   import { getLocale } from "$lib/paraglide/runtime";
   import { resolve } from "$app/paths";
   import { onMount, tick } from "svelte";
+  import { prefersReducedMotion } from "$lib/core/prefersReducedMotion";
   import { SvelteSet } from "svelte/reactivity";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -106,7 +107,7 @@
   $effect(() => {
     if (lastPhaseIndex !== null && phaseIndex !== lastPhaseIndex) {
       peekPhase = null;
-      editingQuestionId = null;
+      dropAnswerEdit();
     }
     lastPhaseIndex = phaseIndex;
   });
@@ -337,6 +338,10 @@
   // ---- Screen change: announce it, then hand focus to the new heading -------
   // A screen swap is a navigation for anyone not watching the viewport, so it
   // is spoken once and the caret lands on the heading of what just appeared.
+  // Changing an earlier answer is the one move that is not a navigation: the
+  // question opens in place, so focus goes to it, and when it closes focus
+  // returns to the chip or row it was opened from, with the page left where
+  // the reader was.
 
   // A second question is a new screen even though `screen` stays "question".
   const screenKey = $derived(
@@ -374,26 +379,46 @@
   let screenAnnouncementText = $state("");
   let builderRootEl = $state<HTMLElement | null>(null);
   let screenScrollEl = $state<HTMLElement | null>(null);
+  const reducedMotion = prefersReducedMotion();
   let announcedScreenKey: string | null = null;
+  let settledEditingQuestionId: string | null = null;
   $effect(() => {
     const key = screenKey;
     const text = screenAnnouncement;
+    const editing = editingQuestionId;
     // Bootstrap and resume settle on a screen without the user doing anything.
     if (!service.hasSession || service.isInitializing) {
       announcedScreenKey = null;
+      settledEditingQuestionId = null;
       return;
     }
-    if (announcedScreenKey === null || key === announcedScreenKey) {
+    if (announcedScreenKey === null) {
       announcedScreenKey = key;
+      settledEditingQuestionId = editing;
       return;
     }
+    const screenChanged = key !== announcedScreenKey;
+    const openedEditing = editing !== null && editing !== settledEditingQuestionId;
+    const closedEditing = editing === null ? settledEditingQuestionId : null;
     announcedScreenKey = key;
-    if (!text) return;
-    screenAnnouncementText = text;
-    void focusScreenHeading();
+    settledEditingQuestionId = editing;
+    if (!screenChanged && !openedEditing && closedEditing === null) return;
+    if (screenChanged && text) screenAnnouncementText = text;
+    void settleFocus({ screenChanged, openedEditing, closedEditing });
   });
 
-  async function focusScreenHeading() {
+  /** Leave an answer edit without a hand-back: the rail or a phase change
+   *  already moves the reader somewhere new. */
+  function dropAnswerEdit() {
+    editingQuestionId = null;
+    settledEditingQuestionId = null;
+  }
+
+  async function settleFocus(change: {
+    screenChanged: boolean;
+    openedEditing: boolean;
+    closedEditing: string | null;
+  }) {
     await tick();
     const active = document.activeElement;
     // Never yank the caret out of a composer mid-sentence.
@@ -403,17 +428,43 @@
     ) {
       return;
     }
+    const root = builderRootEl;
+    if (!root) return;
+    if (change.closedEditing !== null) {
+      const origin = [...root.querySelectorAll<HTMLElement>("[data-edit-question]")].find(
+        (candidate) => candidate.dataset.editQuestion === change.closedEditing
+      );
+      if (origin) {
+        // The row keeps its place on screen whether or not it can take focus
+        // yet: a sent answer disables it while the turn runs.
+        origin.scrollIntoView({ block: "nearest" });
+        if (!origin.matches(":disabled")) {
+          origin.focus({ preventScroll: true });
+          return;
+        }
+        root
+          .querySelector<HTMLElement>("[data-builder-screen-heading]")
+          ?.focus({ preventScroll: true });
+        return;
+      }
+    }
     // Focus alone, never a scroll: a browser may scroll the nearest scrollable
     // ancestor to reveal the heading, which drags a horizontally scrollable row
     // (the answer chips on a phone) out of place.
-    builderRootEl
-      ?.querySelector<HTMLElement>("[data-builder-screen-heading]")
+    const editor = change.openedEditing
+      ? root.querySelector<HTMLElement>("[data-builder-answer-editor]")
+      : null;
+    (editor ?? root)
+      .querySelector<HTMLElement>("[data-builder-screen-heading]")
       ?.focus({ preventScroll: true });
     // A new screen starts at its top: the previous screen may have been
     // scrolled to its foot, and the reader would otherwise land mid-card. The
     // screen column owns the vertical scroll, so reset it there; a horizontally
     // scrollable row inside it is never moved.
-    if (screenScrollEl) screenScrollEl.scrollTop = 0;
+    if (change.screenChanged && screenScrollEl) screenScrollEl.scrollTop = 0;
+    // The reopened question sits above the card, which on a long card is off
+    // screen: from where the user clicked, nothing would appear to happen.
+    editor?.scrollIntoView({ block: "nearest", behavior: reducedMotion ? "auto" : "smooth" });
   }
 
   // ---- Error ownership ------------------------------------------------------
@@ -538,7 +589,7 @@
   function handleRailSelect(phase: BuilderPhaseIndex) {
     // The build phase has nothing to revisit once it is done.
     if (phase === 1 && phaseIndex !== 1) return;
-    editingQuestionId = null;
+    dropAnswerEdit();
     peekPhase = phase === phaseIndex ? null : phase;
   }
 

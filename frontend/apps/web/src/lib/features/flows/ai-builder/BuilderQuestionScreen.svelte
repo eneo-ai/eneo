@@ -81,6 +81,7 @@
               question: item.question,
               answer: item.answerLabel
             })}
+            data-edit-question={item.questionId}
             onclick={() => onedit(item.questionId)}
             {disabled}
           >
@@ -117,7 +118,7 @@
 
     <!-- The card comes last on a phone so its pinned action bar ends flush with
          the bottom of the screen; the reassurance moves above it. -->
-    <div class="max-sm:order-last">
+    <div class="max-sm:order-last" data-builder-answer-editor={editingQuestionId ? "" : undefined}>
       {#key question.question_id}
         <FlowAIBuilderQuestion
           {question}
