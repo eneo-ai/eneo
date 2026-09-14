@@ -1,9 +1,9 @@
 # Saved-step edits leave untouched steps as saved, 2026-09-14
 
-Source measured: `4c5fee24d` on `fix/ai-builder-saved-step-keep-expansion` (base tidy `5b61b8e43`),
-served by the candidate stack `:8144` at `GIT_COMMIT=4c5fee24d4fd` (worktree
+Source measured: `ecf9e908f` on `fix/ai-builder-saved-step-keep-expansion` (base tidy `5b61b8e43`),
+served by the candidate stack `:8144` at `GIT_COMMIT=ecf9e908fd2f` (worktree
 `/Users/ccimen/eneo/eneo-ai-builder-c2-measure`, DB `eneo_ai_builder_simplify`). The same run on
-the earlier candidate `d5e70b830` (before gate pass 2's two corrections) is kept below it.
+the earlier candidates `4c5fee24d` and `d5e70b830` (before gate passes 3 and 2) is kept below it.
 
 ## What was measured
 
@@ -12,8 +12,8 @@ The exact flow behind eneo-qmo: `38d59091-0054-47a0-9bf6-e8b0a27e23a1` in space
 third step "Skriv beslutsdokument" writes the document the PDF step renders. Five saved-step
 edit sessions, each a new session on the same flow with `edit_context {kind: saved_flow_step}`
 on step 1 and the same Swedish message asking the step to always list the missing information
-as a bullet list. Per-plan facts and telemetry in `sessions-4c5fee24d.json` (the `d5e70b830` run: `sessions.json`);
-the probe's stdout is not tracked.
+as a bullet list. Per-plan facts and telemetry in `sessions-ecf9e908f.json` (earlier runs: `sessions-4c5fee24d.json`,
+`sessions.json`); the probe's stdout is not tracked.
 
 ## Before
 
@@ -25,7 +25,25 @@ artifact-body normalizer renamed the untouched step to "Förbered PDF-innehåll"
 instructions on every pass, so the guard saw a model change the model never made (bead comments
 17:32, 17:59 UTC).
 
-## After (4c5fee24d)
+## After (ecf9e908f)
+
+| Session | Outcome | Planner requests | Repair attempts | Prompt tokens | Total tokens | Seconds |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 072bdeec | awaiting_approval, plan 14fa6c4a | 1 | 0 | 10,985 | 11,772 | 8.3 |
+| 1928af6f | awaiting_approval, plan dcf983e1 | 1 | 0 | 11,013 | 11,796 | 94.1 |
+| 496a10ca | awaiting_approval, plan 084d6fa5 | 1 | 0 | 10,983 | 11,771 | 8.4 |
+| 11368097 | awaiting_approval, plan 1e5ce524 | 1 | 0 | 11,015 | 11,802 | 7.6 |
+| dcd446d0 | awaiting_approval, plan c4d01552 | 1 | 0 | 11,013 | 11,783 | 6.6 |
+
+Model `openai/gpt-5.6-luna` on every turn. The 94 s turn is one provider call (one planner
+request, no repair, same token count as its neighbours): the time sits between credential
+resolution and the first-attempt event, so it is provider latency, not Builder work. Every plan's
+diff is `modified existing_step_1 [instructions]` and `unchanged` for steps 2, 3 and 4; step 3
+keeps its saved name "Skriv beslutsdokument"; no advisories. The API log for the window holds five
+`ai_builder_proposal_first_attempt` events and no scoped-edit rejection, no
+`scoped_edit_preservation_failed`, no unchanged-target refusal.
+
+## Earlier candidate (4c5fee24d)
 
 | Session | Outcome | Planner requests | Repair attempts | Prompt tokens | Total tokens | Seconds |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
