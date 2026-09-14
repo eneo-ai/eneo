@@ -438,6 +438,20 @@
   const otherAdvisories = $derived(
     advisories.filter((a) => a.code !== "flow_description_update_required")
   );
+  // The server writes advisory prose in English. The stable part of the contract
+  // is the code, so a code we know is read in the reader's language and the
+  // server's sentence is only the fallback for one we do not know yet.
+  function advisoryText(advisory: EditAdvisory): string {
+    switch (advisory.code) {
+      case "flow_description_update_required":
+        return m.ai_builder_advisory_flow_description_update_required();
+      case "mapped_file_limit_exceeds_policy":
+        return m.ai_builder_advisory_mapped_file_limit_exceeds_policy();
+      default:
+        return advisory.message;
+    }
+  }
+
   const descriptionDiff = $derived.by(() => {
     const change = plan?.proposal.edit?.diff?.flow_property_changes?.["flow_description"];
     if (!change) return null;
@@ -1003,9 +1017,14 @@
                   {isCreateMode ? m.ai_builder_draft_pill() : m.ai_builder_change_pill()}
                 </span>
                 <span class="text-secondary text-xs">
+                  <!-- An edit said "the published version keeps running unchanged",
+                       which is false for a draft that was never published. The pill
+                       already says this is an unpublished proposal, the diff chips
+                       say what changed, and the footer says nothing changes until
+                       approval, so the header carries only the scale. -->
                   {isCreateMode
                     ? m.ai_builder_plan_meta_steps_nothing_created({ count: stepCount })
-                    : m.ai_builder_plan_meta_steps_not_published({ count: stepCount })}
+                    : m.ai_builder_plan_meta_steps_only({ count: stepCount })}
                 </span>
               </div>
               {#if tokenUsage}
@@ -1114,7 +1133,7 @@
                 </p>
               {:else}
                 <p class="text-secondary text-[0.8125rem] leading-relaxed">
-                  {advisories.find((a) => a.code === "flow_description_update_required")?.message}
+                  {m.ai_builder_advisory_flow_description_update_required()}
                 </p>
                 <Button
                   variant="outline"
@@ -1251,7 +1270,7 @@
                         ? 'bg-negative-dimmer text-negative-default'
                         : 'bg-secondary text-secondary'}"
                   >
-                    {advisory.message}
+                    {advisoryText(advisory)}
                   </li>
                 {/each}
               </ul>

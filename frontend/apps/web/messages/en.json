@@ -4420,7 +4420,6 @@
   "ai_builder_draft_updated_at": "Updated {value}",
   "ai_builder_draft_pill": "AI draft",
   "ai_builder_change_pill": "Proposal · not published",
-  "ai_builder_plan_meta_steps_not_published": "{count} steps · the published version keeps running unchanged",
   "ai_builder_empty_state_cta": "Build with AI",
   "ai_builder_form_field_optional": "Optional",
   "ai_builder_form_field_required": "Required",
@@ -7080,5 +7079,8 @@
   "governance_files_summary_inline": "File content placed directly · managed by organisation",
   "flow_run_knowledge_status_no_chunks": "No matches in the knowledge base",
   "flow_run_knowledge_status_skipped_transcribe_only": "Skipped — this step only transcribes",
-  "flow_run_knowledge_status_skipped": "Skipped — this step does not search knowledge"
+  "flow_run_knowledge_status_skipped": "Skipped — this step does not search knowledge",
+  "ai_builder_advisory_flow_description_update_required": "The flow's input or result changed, but the description still says what it said before. Update it so it matches what the flow does now.",
+  "ai_builder_advisory_mapped_file_limit_exceeds_policy": "The file-per-run ceiling set here is higher than the organisation's current policy. It is kept in the plan, but needs explicit review: a run that exceeds the organisation's ceiling is still stopped.",
+  "ai_builder_plan_meta_steps_only": "{count} steps"
 }

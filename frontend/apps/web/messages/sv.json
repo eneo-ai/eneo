@@ -4415,7 +4415,6 @@
   "ai_builder_replace_edit_title": "Ersätta den pågående AI-ändringen?",
   "ai_builder_draft_pill": "AI-utkast",
   "ai_builder_change_pill": "Förslag · ej publicerat",
-  "ai_builder_plan_meta_steps_not_published": "{count} steg · den publicerade versionen körs oförändrad",
   "ai_builder_draft_status_applying": "Tillämpar ändringar",
   "ai_builder_draft_status_awaiting_approval": "Väntar på godkännande",
   "ai_builder_draft_status_chatting": "Pågår",
@@ -7080,5 +7079,8 @@
   "governance_files_summary_inline": "Filinnehåll läggs in direkt · styrs av organisationen",
   "flow_run_knowledge_status_no_chunks": "Inga träffar i kunskapsbasen",
   "flow_run_knowledge_status_skipped_transcribe_only": "Hoppades över – steget transkriberar bara",
-  "flow_run_knowledge_status_skipped": "Hoppades över – steget söker inte kunskap"
+  "flow_run_knowledge_status_skipped": "Hoppades över – steget söker inte kunskap",
+  "ai_builder_advisory_flow_description_update_required": "Flödets indata eller resultat har ändrats, men beskrivningen är kvar som den var. Uppdatera den så att den stämmer med vad flödet gör nu.",
+  "ai_builder_advisory_mapped_file_limit_exceeds_policy": "Det angivna taket för antal filer per körning är högre än organisationens nuvarande policy. Taket behålls i planen, men behöver granskas uttryckligen: en körning som överskrider organisationens tak stoppas ändå.",
+  "ai_builder_plan_meta_steps_only": "{count} steg"
 }
