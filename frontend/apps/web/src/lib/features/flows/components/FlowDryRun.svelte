@@ -195,7 +195,7 @@
 <style>
   @media (prefers-reduced-motion: no-preference) {
     .dry-run-row {
-      animation: dry-run-row-in 260ms cubic-bezier(0.22, 1, 0.36, 1);
+      animation: dry-run-row-in var(--duration-fast) cubic-bezier(0.22, 1, 0.36, 1);
     }
   }
 

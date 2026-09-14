@@ -361,7 +361,7 @@
 <style>
   @media (prefers-reduced-motion: no-preference) {
     .step-card-row {
-      animation: step-card-in 280ms cubic-bezier(0.22, 1, 0.36, 1);
+      animation: step-card-in var(--duration-fast) var(--ease-smooth-out);
     }
   }
 

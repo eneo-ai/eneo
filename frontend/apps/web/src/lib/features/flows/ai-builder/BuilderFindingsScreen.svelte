@@ -544,7 +544,7 @@
 
 <style>
   .findings-screen {
-    animation: builder-screen-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+    animation: builder-screen-in var(--duration-fast) var(--ease-smooth-out);
   }
   @keyframes builder-screen-in {
     from {

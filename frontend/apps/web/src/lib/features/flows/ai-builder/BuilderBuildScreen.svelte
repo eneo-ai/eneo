@@ -122,7 +122,7 @@
 <style lang="postcss">
   .narration-step {
     display: inline-block;
-    animation: narration-in 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+    animation: narration-in var(--duration-fast) var(--ease-smooth-out);
   }
   @keyframes narration-in {
     from {

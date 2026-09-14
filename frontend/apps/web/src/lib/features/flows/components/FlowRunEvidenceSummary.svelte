@@ -35,7 +35,7 @@
       traceCopiedTimer = setTimeout(() => (traceCopied = false), 1600);
     } catch (error) {
       console.error("Could not copy the trace id", error);
-      toast.error(m.could_not_copy_link());
+      toast.error(m.flow_run_copy_failed());
     }
   }
 </script>
@@ -50,6 +50,11 @@
       <FlowRunTranscriptionUsageBadge {transcriptionUsage} />
     {/if}
     {#if traceId}
+      <!-- The badge's own text changing is invisible to a screen reader: the live
+           region announces the same confirmation. -->
+      <span class="sr-only" role="status" aria-live="polite">
+        {traceCopied ? m.flow_run_evidence_trace_id_copied() : ""}
+      </span>
       <Tooltip.Provider delayDuration={150}>
         <Tooltip.Root>
           <!-- The full identifier is support material, not something a municipal

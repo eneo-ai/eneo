@@ -123,7 +123,7 @@
             {isExpanded ? m.flow_validation_hide_details() : m.flow_validation_show_details()}
           </span>
           <svg
-            class="text-negative-stronger/60 size-4 shrink-0 transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] {isExpanded
+            class="text-negative-stronger/60 size-4 shrink-0 transition-transform duration-200 ease-out {isExpanded
               ? 'rotate-180'
               : ''}"
             aria-hidden="true"

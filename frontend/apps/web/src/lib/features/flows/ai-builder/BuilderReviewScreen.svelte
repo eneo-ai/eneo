@@ -1918,7 +1918,7 @@
   .success-tick {
     stroke-dasharray: 64;
     stroke-dashoffset: 64;
-    animation: success-draw 0.42s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    animation: success-draw 0.42s var(--ease-smooth-out) forwards;
   }
   .success-tick {
     stroke-dasharray: 16;

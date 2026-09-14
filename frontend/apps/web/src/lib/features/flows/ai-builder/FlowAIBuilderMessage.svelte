@@ -213,11 +213,11 @@
   }
 
   .message-enter.is-user {
-    animation: user-enter 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    animation: user-enter var(--duration-fast) var(--ease-smooth-out) forwards;
   }
 
   .message-enter.is-assistant {
-    animation: assistant-enter 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    animation: assistant-enter var(--duration-fast) var(--ease-smooth-out) forwards;
   }
 
   @keyframes user-enter {
