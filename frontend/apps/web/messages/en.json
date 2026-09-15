@@ -5380,6 +5380,7 @@
   "flow_run_progress_counter": "Step {current} of {total}",
   "flow_run_progress_elapsed": "{elapsed} elapsed",
   "flow_run_progress_active_step_hint": "Showing the step that is running now.",
+  "flow_run_progress_details_stale": "The step finished after its details were read. Press Refresh now to load its output.",
   "flow_run_progress_empty_output": "No output generated for this step.",
   "flow_run_progress_expand_hint": "Click to view output",
   "flow_run_progress_manual_refresh": "Step statuses follow the run automatically. Step outputs load when you open or refresh them; each such access is recorded in the audit log.",

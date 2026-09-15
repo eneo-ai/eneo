@@ -35,6 +35,7 @@ from eneo.flows.domain.flow import (
     FlowStep,
     FlowStepAttempt,
     FlowStepResult,
+    FlowStepResultAnnotation,
 )
 from eneo.flows.domain.flow import (
     FlowVersion as FlowVersionModel,
@@ -2952,9 +2953,11 @@ async def test_get_run_versioned_view_loads_run_definition_and_results(user):
     assert flow.id is not None
     run = _run(user=user, flow_id=flow.id)
     version = _runtime_version(user=user, flow=flow, version=run.flow_version)
-    step_result = _step_result_record(run, step_order=1)
+    step_result = FlowStepResultAnnotation.model_validate(
+        _step_result_record(run, step_order=1)
+    )
     flow_run_repo.get.return_value = run
-    flow_run_repo.list_step_results.return_value = [step_result]
+    flow_run_repo.list_step_result_annotations.return_value = [step_result]
     flow_version_repo.get.return_value = version
     service = _flow_run_service(
         user=user,
@@ -2984,7 +2987,7 @@ async def test_get_run_versioned_view_loads_run_definition_and_results(user):
         version=run.flow_version,
         tenant_id=run.tenant_id,
     )
-    flow_run_repo.list_step_results.assert_awaited_once_with(
+    flow_run_repo.list_step_result_annotations.assert_awaited_once_with(
         run_id=run.id,
         tenant_id=user.tenant_id,
     )

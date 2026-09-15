@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel
@@ -15,7 +14,7 @@ from eneo.flows.api.flow_graph import (
     build_graph_response,
     enrich_nodes_with_run_results,
 )
-from eneo.flows.domain.flow import FlowStep, FlowStepResult
+from eneo.flows.domain.flow import FlowStep, FlowStepResultAnnotation
 from eneo.flows.enums import FlowOutputType, FlowStepResultStatus
 from eneo.flows.flow_validators import validate_steps
 
@@ -293,21 +292,14 @@ def _golden_graph_steps() -> list[dict[str, object]]:
     ]
 
 
-def _golden_step_result() -> FlowStepResult:
-    now = datetime(2026, 3, 17, 10, 5, 30, tzinfo=timezone.utc)
-    return FlowStepResult(
-        id=_GOLDEN_RESULT_ID,
-        flow_run_id=_GOLDEN_RUN_ID,
-        flow_id=_GOLDEN_FLOW_ID,
-        tenant_id=_GOLDEN_TENANT_ID,
+def _golden_step_result() -> FlowStepResultAnnotation:
+    return FlowStepResultAnnotation(
         step_id=_GOLDEN_STEP_4_ID,
         step_order=4,
         num_tokens_input=11,
         num_tokens_output=17,
         status=FlowStepResultStatus.COMPLETED,
         error_message=None,
-        created_at=now,
-        updated_at=now,
     )
 
 
@@ -350,29 +342,19 @@ def test_graph_builders_return_typed_models_without_changing_serialized_response
 
 
 def test_enrich_nodes_with_run_results_uses_typed_step_result_fields() -> None:
-    now = datetime.now(timezone.utc)
-    flow_run_id = uuid4()
-    flow_id = uuid4()
-    tenant_id = uuid4()
     step_id = uuid4()
     nodes = [
         GraphNode(id="input", label="Input", type="input"),
         GraphNode(id=str(step_id), label="Step", type="llm", step_order=1),
     ]
     step_results = [
-        FlowStepResult(
-            id=uuid4(),
-            flow_run_id=flow_run_id,
-            flow_id=flow_id,
-            tenant_id=tenant_id,
+        FlowStepResultAnnotation(
             step_id=step_id,
             step_order=1,
             num_tokens_input=11,
             num_tokens_output=17,
             status=FlowStepResultStatus.COMPLETED,
             error_message=None,
-            created_at=now,
-            updated_at=now,
         )
     ]
 

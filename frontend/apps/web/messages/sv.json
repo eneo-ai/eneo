@@ -5380,6 +5380,7 @@
   "flow_run_progress_counter": "Steg {current} av {total}",
   "flow_run_progress_elapsed": "{elapsed} förflutet",
   "flow_run_progress_active_step_hint": "Visar steget som körs just nu.",
+  "flow_run_progress_details_stale": "Steget blev klart efter att detaljerna lästes in. Tryck på Uppdatera nu för att hämta utdata.",
   "flow_run_progress_empty_output": "Inget resultat genererat för detta steg.",
   "flow_run_progress_expand_hint": "Klicka för att visa resultat",
   "flow_run_progress_manual_refresh": "Stegens status följer körningen automatiskt. Stegens utdata läses in när du öppnar eller uppdaterar dem; varje sådan åtkomst registreras i granskningsloggen.",

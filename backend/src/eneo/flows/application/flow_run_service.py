@@ -25,6 +25,7 @@ from eneo.flows.domain.flow import (
     FlowRunTokenUsage,
     FlowRunTranscriptionUsage,
     FlowStepResult,
+    FlowStepResultAnnotation,
 )
 from eneo.flows.domain.flow_run_exceptions import (
     FlowRunConcurrencyLimitReachedError,
@@ -125,7 +126,7 @@ class FlowRuntimeCapacity:
 @dataclass(frozen=True, slots=True)
 class FlowRunVersionedView:
     published_definition: PublishedFlowDefinition
-    step_results: Sequence[FlowStepResult]
+    step_results: Sequence[FlowStepResultAnnotation]
 
 
 def _token_usage(usage: FlowRunUsage | None) -> FlowRunTokenUsage | None:
@@ -701,7 +702,9 @@ class FlowRunService:
             version=run.flow_version,
             tenant_id=run.tenant_id,
         )
-        step_results = await self.flow_run_repo.list_step_results(
+        # Annotations only: the graph is polled while a run is active and must
+        # not materialize the run's evidence on every read.
+        step_results = await self.flow_run_repo.list_step_result_annotations(
             run_id=run.id,
             tenant_id=self.user.tenant_id,
         )

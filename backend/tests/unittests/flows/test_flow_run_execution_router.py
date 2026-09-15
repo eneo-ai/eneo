@@ -57,7 +57,7 @@ from eneo.flows.application.flow_run_service import (
 )
 from eneo.flows.domain.flow import (
     FlowRunStatus,
-    FlowStepResult,
+    FlowStepResultAnnotation,
 )
 from eneo.flows.domain.runtime_invariant_exceptions import (
     FlowPublishedDefinitionWithoutExecutableStepsError,
@@ -153,19 +153,13 @@ async def test_get_flow_graph_keeps_run_version_snapshot_visible_after_unpublish
             flow_version=run.flow_version,
         ),
         step_results=(
-            FlowStepResult(
-                id=uuid4(),
-                flow_run_id=run.id,
-                flow_id=flow_id,
-                tenant_id=run.tenant_id,
+            FlowStepResultAnnotation(
                 step_id=snapshot_step_id,
                 step_order=1,
                 num_tokens_input=5,
                 num_tokens_output=9,
                 status=FlowStepResultStatus.COMPLETED,
                 error_message=None,
-                created_at=datetime.now(timezone.utc),
-                updated_at=datetime.now(timezone.utc),
             ),
         ),
     )

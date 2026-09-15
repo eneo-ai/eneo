@@ -111,7 +111,13 @@ export function makeTestFlow(): Flow {
  * generated contract (the body constant is typed against the list return).
  */
 export function makeRunsListEneo(
-  handler: (url: URL) => { items: FlowRunSummary[]; has_more: boolean }
+  handler: (url: URL) => { items: FlowRunSummary[]; has_more: boolean },
+  detail: {
+    /** Graph for the n-th graph read (1-based); default: no nodes. */
+    graph?: (call: number) => FlowGraph;
+    /** Step list for the n-th audited step read (1-based); default: none. */
+    steps?: (call: number) => FlowRunStep[];
+  } = {}
 ) {
   const calls: Array<{ limit: number; offset: number }> = [];
   const evidenceCalls: string[] = [];
@@ -154,7 +160,7 @@ export function makeRunsListEneo(
       }
       if (/\/graph\/$/.test(url.pathname)) {
         graphCalls.push(url.pathname);
-        const body: FlowGraph = { nodes: [], edges: [] };
+        const body: FlowGraph = detail.graph?.(graphCalls.length) ?? { nodes: [], edges: [] };
         return new Response(JSON.stringify(body), {
           status: 200,
           headers: { "Content-Type": "application/json" }
@@ -162,7 +168,7 @@ export function makeRunsListEneo(
       }
       if (/\/steps\/$/.test(url.pathname)) {
         stepCalls.push(url.pathname);
-        const body: FlowRunStep[] = [];
+        const body: FlowRunStep[] = detail.steps?.(stepCalls.length) ?? [];
         return new Response(JSON.stringify(body), {
           status: 200,
           headers: { "Content-Type": "application/json" }

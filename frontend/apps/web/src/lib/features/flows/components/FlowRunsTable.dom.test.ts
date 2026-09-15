@@ -94,6 +94,74 @@ describe("FlowRunsTable search and pagination", () => {
     }
   });
 
+  it("moves a step to completed on the poll, marks its unread output stale, then shows evidence", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let listCalls = 0;
+      const { eneo, calls, graphCalls, stepCalls, evidenceCalls } = makeRunsListEneo(
+        () => {
+          listCalls += 1;
+          return {
+            items: [makeFlowRun({ id: "aaa", status: listCalls >= 4 ? "completed" : "running" })],
+            has_more: false
+          };
+        },
+        {
+          graph: (call) => ({
+            nodes: [
+              {
+                id: "step-1",
+                label: "Summarize",
+                type: "llm",
+                step_order: 1,
+                run_status: call === 1 ? "running" : "completed",
+                num_tokens_input: call === 1 ? null : 12,
+                num_tokens_output: call === 1 ? null : 34
+              }
+            ],
+            edges: []
+          }),
+          steps: () => [
+            {
+              flow_run_id: "aaa",
+              flow_id: "flow-1",
+              tenant_id: "tenant-1",
+              step_id: "step-1",
+              step_order: 1,
+              status: "running",
+              error_message: null,
+              created_at: "2026-08-25T09:00:00Z",
+              updated_at: "2026-08-25T09:00:01Z"
+            }
+          ]
+        }
+      );
+      renderTable(eneo);
+      await waitFor(() => expect(calls).toHaveLength(1));
+
+      await fireEvent.click(await screen.findByTestId("flow-run-evidence-toggle-aaa"));
+      await waitFor(() => expect(stepCalls).toHaveLength(1));
+      const panel = () => document.getElementById("flow-run-progress-step-1")!;
+      await waitFor(() => expect(panel().textContent).toContain(m.flow_run_status_running()));
+
+      // Next poll: the graph says completed; the audited step list is not re-read.
+      await vi.advanceTimersByTimeAsync(5_000);
+      await waitFor(() => expect(graphCalls.length).toBeGreaterThanOrEqual(2));
+      await waitFor(() => expect(panel().textContent).toContain(m.flow_run_status_completed()));
+      expect(panel().textContent).toContain(m.flow_run_progress_details_stale());
+      expect(panel().textContent).not.toContain(m.flow_run_progress_empty_output());
+      expect(panel().textContent).toContain(m.flow_run_tokens_in({ count: "12" }));
+      expect(stepCalls).toHaveLength(1);
+
+      // The run itself completes: the row flips and the audited evidence view takes over.
+      await vi.advanceTimersByTimeAsync(10_000);
+      await waitFor(() => expect(evidenceCalls).toHaveLength(1));
+      expect(stepCalls).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps history visible and offers retry when background refresh fails", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {

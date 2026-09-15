@@ -6,7 +6,7 @@ from typing import cast
 from pydantic import BaseModel, ConfigDict
 from pydantic.config import JsonDict
 
-from eneo.flows.domain.flow import FlowPersistedJsonObject, FlowStepResult
+from eneo.flows.domain.flow import FlowPersistedJsonObject, FlowStepResultAnnotation
 from eneo.flows.input_binding_contract_rules import effective_question_binding
 from eneo.flows.step_lineage import (
     build_step_ref_mapping,
@@ -264,7 +264,7 @@ def _binding_upstream_orders(
 
 def enrich_nodes_with_run_results(
     nodes: Sequence[GraphNode],
-    step_results: Sequence[FlowStepResult],
+    step_results: Sequence[FlowStepResultAnnotation],
 ) -> list[GraphNode]:
     by_step_id = {str(item.step_id): item for item in step_results}
 
@@ -320,7 +320,7 @@ def annotate_speaker_identification(
 
 def build_graph_response(
     steps: Sequence[FlowPersistedJsonObject],
-    step_results: Sequence[FlowStepResult] = (),
+    step_results: Sequence[FlowStepResultAnnotation] = (),
     *,
     wizard_metadata: FlowPersistedJsonObject | None = None,
     speaker_identification_available: bool = False,

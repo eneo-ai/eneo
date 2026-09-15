@@ -44,25 +44,41 @@
     return await eneo.flows.runs.steps({ flowId, runId });
   }
 
-  function applySnapshot({ graph, steps }: { graph: FlowGraph | null; steps: FlowRunStep[] }) {
+  // Every read is numbered when it starts; a response is applied only if no
+  // later read has been applied already, so a slow background read cannot
+  // roll a fresher status (or a manual refresh) back.
+  let issuedReads = 0;
+  let appliedRead = 0;
+
+  function applySnapshot(
+    read: number,
+    { graph, steps }: { graph: FlowGraph | null; steps: FlowRunStep[] }
+  ): boolean {
+    if (read <= appliedRead) return false;
+    appliedRead = read;
     graphSnapshot = graph;
     stepSnapshot = steps;
     snapshot = buildFlowRunProgressSnapshot(graphSnapshot, steps);
     onSnapshotUpdate?.(snapshot);
+    return true;
   }
 
   // Step statuses ride the run-pinned graph, which is not an audited content
   // read, so they can follow the list poll. Outputs (the audited step list)
-  // stay on demand: initial open and "Uppdatera nu".
+  // stay on demand: initial open and "Uppdatera nu". A status that moved on
+  // since the outputs were read leaves that step's details marked stale.
   let refreshingStatuses = false;
   async function refreshStepStatusesFromGraph() {
     if (refreshingStatuses || loading) return;
     refreshingStatuses = true;
+    const read = ++issuedReads;
     try {
       const graph = await fetchGraphSnapshot();
-      applySnapshot({ graph, steps: stepSnapshot });
+      if (applySnapshot(read, { graph, steps: stepSnapshot })) refreshFailed = false;
     } catch (error) {
       console.error("Failed to refresh run step statuses", error);
+      // The snapshot stays; the panel says it may be behind the row.
+      refreshFailed = true;
     } finally {
       refreshingStatuses = false;
     }
@@ -76,9 +92,10 @@
   async function loadInitial() {
     loading = snapshot.steps.length === 0;
     loadError = null;
+    const read = ++issuedReads;
     try {
       const [graph, steps] = await Promise.all([fetchGraphSnapshot(), fetchStepStatuses()]);
-      applySnapshot({ graph, steps });
+      applySnapshot(read, { graph, steps });
     } catch (error) {
       console.error("Failed to load live run progress", error);
       loadError = m.flow_run_progress_load_failed();
@@ -90,10 +107,10 @@
   async function refreshStepStatuses() {
     if (refreshing) return;
     refreshing = true;
-    refreshFailed = false;
+    const read = ++issuedReads;
     try {
       const [graph, steps] = await Promise.all([fetchGraphSnapshot(), fetchStepStatuses()]);
-      applySnapshot({ graph, steps });
+      if (applySnapshot(read, { graph, steps })) refreshFailed = false;
     } catch (error) {
       console.error("Failed to refresh live run progress", error);
       refreshFailed = true;

@@ -210,6 +210,10 @@
               ></div>
             </div>
           </div>
+        {:else if isCompleted && step.detailsStale}
+          <div class="text-muted text-xs italic">
+            {m.flow_run_progress_details_stale()}
+          </div>
         {:else if isCompleted}
           <div class="text-muted text-xs italic">
             {m.flow_run_progress_empty_output()}

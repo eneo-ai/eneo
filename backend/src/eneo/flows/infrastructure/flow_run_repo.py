@@ -37,6 +37,7 @@ from eneo.flows.domain.flow import (
     FlowStepAttempt,
     FlowStepAttemptStatus,
     FlowStepResult,
+    FlowStepResultAnnotation,
     FlowStepResultStatus,
 )
 from eneo.flows.domain.flow_run_exceptions import (
@@ -169,6 +170,27 @@ def _step_result_evidence_logical_bytes() -> Any:
         FlowStepResults.error_code,
         FlowStepResults.error_message,
         FlowStepResults.flow_step_execution_hash,
+    )
+
+
+def step_result_annotation_select(*, run_id: UUID, tenant_id: UUID) -> sa.Select[Any]:
+    """The columns a run-pinned graph annotates nodes with: status facts only.
+
+    Polled while a run is active, so it must never select the content columns
+    (prompts, input and output payloads, model parameters).
+    """
+    return (
+        sa.select(
+            FlowStepResults.step_id,
+            FlowStepResults.step_order,
+            FlowStepResults.status,
+            FlowStepResults.num_tokens_input,
+            FlowStepResults.num_tokens_output,
+            FlowStepResults.error_message,
+        )
+        .where(FlowStepResults.flow_run_id == run_id)
+        .where(FlowStepResults.tenant_id == tenant_id)
+        .order_by(FlowStepResults.step_order.asc())
     )
 
 
@@ -1229,6 +1251,20 @@ class FlowRunRepository:
             stmt = stmt.limit(limit)
         rows = (await self.session.execute(stmt)).scalars().all()
         return [FlowStepResult.model_validate(row) for row in rows]
+
+    async def list_step_result_annotations(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+    ) -> list[FlowStepResultAnnotation]:
+        """Status, token counts and error per step, never the content columns."""
+        rows = (
+            await self.session.execute(
+                step_result_annotation_select(run_id=run_id, tenant_id=tenant_id)
+            )
+        ).all()
+        return [FlowStepResultAnnotation.model_validate(row) for row in rows]
 
     async def list_step_results_by_orders(
         self,

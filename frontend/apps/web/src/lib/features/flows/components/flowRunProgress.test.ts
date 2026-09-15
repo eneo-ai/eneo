@@ -13,6 +13,42 @@ describe("flowRunProgress helpers", () => {
     expect(formatFlowRunDuration(61_000)).toBe("1m 1s");
   });
 
+  test("withholds a step's outputs and end time when the graph status moved past the step list", () => {
+    const snapshot = buildFlowRunProgressSnapshot(
+      {
+        nodes: [
+          { id: "step-1", label: "Summarize", type: "llm", step_order: 1, run_status: "completed" }
+        ],
+        edges: []
+      },
+      [
+        {
+          flow_run_id: "run-1",
+          flow_id: "flow-1",
+          tenant_id: "tenant-1",
+          step_id: "step-1",
+          step_order: 1,
+          status: "running",
+          error_message: null,
+          output_payload_json: { text: "partial" },
+          started_at: "2026-01-01T00:00:00Z",
+          finished_at: "2026-01-01T00:00:09Z",
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:09Z"
+        }
+      ]
+    );
+
+    expect(snapshot.steps[0]).toMatchObject({
+      status: "completed",
+      detailsStale: true,
+      outputPayload: null,
+      finishedAt: null,
+      updatedAt: null,
+      startedAt: "2026-01-01T00:00:00Z"
+    });
+  });
+
   test("takes the status and token counts from the re-polled graph over the older step list", () => {
     const snapshot = buildFlowRunProgressSnapshot(
       {

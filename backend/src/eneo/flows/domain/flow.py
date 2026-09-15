@@ -467,6 +467,24 @@ class FlowStepResult(BaseModel):
     updated_at: datetime
 
 
+class FlowStepResultAnnotation(BaseModel):
+    """The status facts of a step result, without its content.
+
+    What a run-pinned graph shows per node and what a progress poll needs:
+    read without the prompts, inputs and outputs the full step result carries,
+    so polling a run does not materialize its evidence.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    step_id: UUID
+    step_order: int
+    status: FlowStepResultStatus
+    num_tokens_input: Optional[int] = None
+    num_tokens_output: Optional[int] = None
+    error_message: Optional[str] = None
+
+
 class FlowStepAttempt(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

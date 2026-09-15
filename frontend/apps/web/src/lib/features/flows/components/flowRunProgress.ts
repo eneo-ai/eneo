@@ -26,6 +26,9 @@ export type FlowRunProgressStep = {
   finishedAt?: string | null;
   createdAt?: string | null;
   updatedAt?: string | null;
+  /** The status moved on since the step's outputs were read (audited read on
+   *  demand); outputs, files and end time are withheld until re-read. */
+  detailsStale?: boolean;
 };
 
 export type FlowRunProgressSnapshot = {
@@ -59,27 +62,34 @@ export function buildFlowRunProgressSnapshot(
   for (const node of graphNodes) {
     knownOrders.add(node.step_order);
     const live = stepsByOrder.get(node.step_order);
+    // The graph is re-read on every poll while the run is active; the step
+    // list only on demand (audited). The graph annotation is the fresher
+    // status, and when it has moved past the step list's status the list's
+    // content for that step describes an earlier state.
+    const detailsStale =
+      live !== undefined && node.run_status != null && live.status !== node.run_status;
     viewSteps.push({
       stepOrder: node.step_order,
       label: node.label || `Step ${node.step_order}`,
-      // The graph is re-read on every poll while the run is active; the step
-      // list only on demand (audited). The graph annotation is the fresher status.
       status: node.run_status ?? live?.status ?? "pending",
       inputSource: typeof node.input_source === "string" ? node.input_source : undefined,
       outputMode: typeof node.output_mode === "string" ? node.output_mode : undefined,
       outputType: typeof node.output_type === "string" ? node.output_type : undefined,
       speakerIdentification: node.speaker_identification === true ? true : undefined,
-      errorMessage: live?.error_message ?? node.error_message ?? null,
-      errorCode: live?.error_code ?? null,
+      errorMessage: detailsStale
+        ? (node.error_message ?? null)
+        : (live?.error_message ?? node.error_message ?? null),
+      errorCode: detailsStale ? null : (live?.error_code ?? null),
       numTokensInput: node.num_tokens_input ?? live?.num_tokens_input ?? null,
       numTokensOutput: node.num_tokens_output ?? live?.num_tokens_output ?? null,
       inputPayload: live?.input_payload_json ?? null,
-      outputPayload: live?.output_payload_json ?? null,
-      resultFiles: live?.result_files ?? [],
+      outputPayload: detailsStale ? null : (live?.output_payload_json ?? null),
+      resultFiles: detailsStale ? [] : (live?.result_files ?? []),
       startedAt: live?.started_at ?? null,
-      finishedAt: live?.finished_at ?? null,
+      finishedAt: detailsStale ? null : (live?.finished_at ?? null),
       createdAt: live?.created_at ?? null,
-      updatedAt: live?.updated_at ?? null
+      updatedAt: detailsStale ? null : (live?.updated_at ?? null),
+      ...(detailsStale ? { detailsStale: true } : {})
     });
   }
 
