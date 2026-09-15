@@ -24,12 +24,12 @@ export function splitPendingInref(buffer: string): [ready: string, pending: stri
 
 /**
  * True while the fragment is a prefix of a citation tag. The renderer only
- * accepts `<inref` followed by whitespace or `/`, so `<inreference prose`
- * can never become a citation and is released at once instead of being
- * withheld until the next `>`.
+ * accepts `<inref` followed by whitespace, so `<inreference prose` or
+ * `<inref/x` can never become a citation and is released at once instead of
+ * being withheld until the next `>`.
  */
 function couldBecomeTag(tail: string): boolean {
   if (tail.length <= TAG.length) return TAG.startsWith(tail);
   if (!tail.startsWith(TAG)) return false;
-  return /^[\s/]/.test(tail.charAt(TAG.length));
+  return /^\s/.test(tail.charAt(TAG.length));
 }
