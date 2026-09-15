@@ -99,6 +99,7 @@
       <pre class="">{user.email}</pre>
     </div>
     <div
+      data-tour="account-password"
       class="border-dimmer hover:bg-hover-dimmer flex flex-col items-start gap-4 border-b py-4 pr-4 pl-2 sm:flex-row sm:items-center"
     >
       <div class="min-w-0 flex-1">
