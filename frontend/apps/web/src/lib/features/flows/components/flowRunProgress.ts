@@ -62,15 +62,17 @@ export function buildFlowRunProgressSnapshot(
     viewSteps.push({
       stepOrder: node.step_order,
       label: node.label || `Step ${node.step_order}`,
-      status: live?.status ?? node.run_status ?? "pending",
+      // The graph is re-read on every poll while the run is active; the step
+      // list only on demand (audited). The graph annotation is the fresher status.
+      status: node.run_status ?? live?.status ?? "pending",
       inputSource: typeof node.input_source === "string" ? node.input_source : undefined,
       outputMode: typeof node.output_mode === "string" ? node.output_mode : undefined,
       outputType: typeof node.output_type === "string" ? node.output_type : undefined,
       speakerIdentification: node.speaker_identification === true ? true : undefined,
       errorMessage: live?.error_message ?? node.error_message ?? null,
       errorCode: live?.error_code ?? null,
-      numTokensInput: live?.num_tokens_input ?? node.num_tokens_input ?? null,
-      numTokensOutput: live?.num_tokens_output ?? node.num_tokens_output ?? null,
+      numTokensInput: node.num_tokens_input ?? live?.num_tokens_input ?? null,
+      numTokensOutput: node.num_tokens_output ?? live?.num_tokens_output ?? null,
       inputPayload: live?.input_payload_json ?? null,
       outputPayload: live?.output_payload_json ?? null,
       resultFiles: live?.result_files ?? [],
@@ -155,8 +157,9 @@ export function formatFlowRunStepDuration(step: FlowRunProgressStep): string | n
 export function formatFlowRunDuration(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)}ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  const minutes = Math.floor(ms / 60_000);
-  const seconds = Math.round((ms % 60_000) / 1000);
+  const totalSeconds = Math.round(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
   if (seconds === 0) return `${minutes}m`;
   return `${minutes}m ${seconds}s`;
 }

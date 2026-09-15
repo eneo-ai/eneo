@@ -1,8 +1,7 @@
 <script lang="ts">
-  import { fly, fade } from "svelte/transition";
+  import { fly } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import { browser } from "$app/environment";
-  import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { serializeEvidencePayload } from "./flowRunEvidenceActions";
@@ -19,12 +18,10 @@
 
   let {
     snapshot,
-    loadingTerminalDetails = false,
     runStartedAt = null,
     onDownloadArtifact
   }: {
     snapshot: FlowRunProgressSnapshot;
-    loadingTerminalDetails?: boolean;
     runStartedAt?: string | null;
     onDownloadArtifact?: (fileId: string) => Promise<void>;
   } = $props();
@@ -178,16 +175,6 @@
           style:transform="scaleX({Math.max(0, Math.min(1, progressPercent / 100))})"
         ></div>
       </div>
-    </div>
-  {/if}
-
-  {#if loadingTerminalDetails}
-    <div
-      class="text-secondary flex items-center gap-2 text-xs"
-      in:fade={{ duration: prefersReducedMotion ? 0 : 200 }}
-    >
-      <IconLoadingSpinner class="size-3.5 animate-spin" />
-      {m.flow_run_progress_loading_terminal()}
     </div>
   {/if}
 

@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/svelte";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import { writable } from "svelte/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -80,6 +80,25 @@ function eneoReturning(evidence: FlowRunEvidenceWithTypedSteps): Eneo {
 }
 
 describe("FlowRunEvidence", () => {
+  it("offers a retry when the evidence request fails, and loads on retry", async () => {
+    const evidence = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("gateway timeout"))
+      .mockResolvedValueOnce(evidenceWithBoundedSections());
+    render(FlowRunEvidence, {
+      runId: "run-1",
+      flowId: "flow-1",
+      eneo: { flows: { runs: { evidence } } } as unknown as Eneo,
+      runStatus: "completed"
+    });
+
+    expect(await screen.findByText(m.flow_run_evidence_error())).toBeTruthy();
+    await fireEvent.click(screen.getByRole("button", { name: m.flow_retry() }));
+    await waitFor(() => expect(evidence).toHaveBeenCalledTimes(2));
+    expect(await screen.findByTestId("evidence-view-omissions")).toBeTruthy();
+    expect(screen.queryByText(m.flow_run_evidence_error())).toBeNull();
+  });
+
   it("marks every attempt-derived count as a lower bound when truncated", async () => {
     render(FlowRunEvidence, {
       runId: "run-1",

@@ -58,7 +58,7 @@ afterEach(() => {
 });
 
 describe("FlowRunsTable search and pagination", () => {
-  it("loads audited step details only after an explicit user action", async () => {
+  it("follows step statuses on the poll but loads audited step outputs only on demand", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       const { eneo, calls, graphCalls, stepCalls } = makeRunsListEneo(() => ({
@@ -79,13 +79,16 @@ describe("FlowRunsTable search and pagination", () => {
       await waitFor(() => expect(graphCalls).toHaveLength(1));
       await waitFor(() => expect(stepCalls).toHaveLength(1));
 
+      // Each run-list poll (5 s) re-reads the run-pinned graph so the step
+      // statuses move with the row; the audited step list is not re-read.
       await vi.advanceTimersByTimeAsync(30_000);
-      expect(graphCalls).toHaveLength(1);
+      await waitFor(() => expect(graphCalls.length).toBeGreaterThanOrEqual(4));
       expect(stepCalls).toHaveLength(1);
 
+      const graphCallsBeforeRefresh = graphCalls.length;
       await fireEvent.click(screen.getByRole("button", { name: m.flow_run_progress_refresh() }));
       await waitFor(() => expect(stepCalls).toHaveLength(2));
-      expect(graphCalls).toHaveLength(1);
+      expect(graphCalls.length).toBeGreaterThanOrEqual(graphCallsBeforeRefresh + 1);
     } finally {
       vi.useRealTimers();
     }

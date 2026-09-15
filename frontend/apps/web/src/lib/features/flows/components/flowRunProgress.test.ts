@@ -1,8 +1,56 @@
 import { describe, expect, test } from "vitest";
 
-import { buildFlowRunProgressSnapshot, getFlowRunFocusedStepOrder } from "./flowRunProgress";
+import {
+  buildFlowRunProgressSnapshot,
+  formatFlowRunDuration,
+  getFlowRunFocusedStepOrder
+} from "./flowRunProgress";
 
 describe("flowRunProgress helpers", () => {
+  test("rounds a duration to whole seconds before splitting minutes", () => {
+    expect(formatFlowRunDuration(4 * 60_000 + 59_600)).toBe("5m");
+    expect(formatFlowRunDuration(4 * 60_000 + 59_400)).toBe("4m 59s");
+    expect(formatFlowRunDuration(61_000)).toBe("1m 1s");
+  });
+
+  test("takes the status and token counts from the re-polled graph over the older step list", () => {
+    const snapshot = buildFlowRunProgressSnapshot(
+      {
+        nodes: [
+          {
+            id: "step-1",
+            label: "Summarize",
+            type: "llm",
+            step_order: 1,
+            run_status: "completed",
+            num_tokens_input: 12,
+            num_tokens_output: 34
+          }
+        ],
+        edges: []
+      },
+      [
+        {
+          flow_run_id: "run-1",
+          flow_id: "flow-1",
+          tenant_id: "tenant-1",
+          step_id: "step-1",
+          step_order: 1,
+          status: "running",
+          error_message: null,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:01Z"
+        }
+      ]
+    );
+
+    expect(snapshot.steps[0]).toMatchObject({
+      status: "completed",
+      numTokensInput: 12,
+      numTokensOutput: 34
+    });
+  });
+
   test("prefers version-pinned graph labels and overlays live step status", () => {
     const snapshot = buildFlowRunProgressSnapshot(
       {

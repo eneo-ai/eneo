@@ -23,7 +23,7 @@
     getTemplateProvenanceSummary
   } from "$lib/features/flows/flowEvidenceProvenance";
   import * as Alert from "$lib/components/ui/alert/index.js";
-  import FlowRunProgressView from "./FlowRunProgressView.svelte";
+  import { Button } from "$lib/components/ui/button/index.js";
   import FlowRunEvidenceToolbar from "./FlowRunEvidenceToolbar.svelte";
   import FlowRunEvidenceSummary from "./FlowRunEvidenceSummary.svelte";
   import FlowRunEvidenceStepCard, {
@@ -40,7 +40,6 @@
     createTranscriptCorrectionsController,
     type TranscriptCorrectionsController
   } from "$lib/features/flows/transcriptCorrectionsController.svelte";
-  import type { FlowRunProgressSnapshot } from "./flowRunProgress";
   import { getReviewPolicyErrorStepsFromDefinitionSnapshot } from "$lib/features/flows/flowRuntimeErrorMapping";
 
   let {
@@ -48,15 +47,13 @@
     flowId,
     sensitiveCareDataFlow = false,
     eneo,
-    runStatus,
-    fallbackSnapshot = null
+    runStatus
   }: {
     runId: string;
     flowId: string;
     sensitiveCareDataFlow?: boolean;
     eneo: Eneo;
     runStatus: FlowRunSummary["status"];
-    fallbackSnapshot?: FlowRunProgressSnapshot | null;
   } = $props();
 
   type EvidencePayload = FlowRunEvidenceWithTypedSteps;
@@ -110,7 +107,9 @@
     );
   });
 
-  onMount(async () => {
+  async function loadEvidence() {
+    loading = true;
+    loadError = false;
     try {
       evidence = await eneo.flows.runs.evidence({ id: runId, flowId });
     } catch (e) {
@@ -120,6 +119,10 @@
     loading = false;
     await loadTranscriptWords();
     setupCorrectionsController();
+  }
+
+  onMount(() => {
+    void loadEvidence();
   });
 
   // Word timings are optional evidence: a step that stored none answers 404
@@ -410,17 +413,16 @@
 </script>
 
 {#if loading}
-  {#if fallbackSnapshot}
-    <FlowRunProgressView snapshot={fallbackSnapshot} loadingTerminalDetails />
-  {:else}
-    <div class="text-muted flex items-center justify-center gap-2 py-6 text-sm" aria-busy="true">
-      <IconLoadingSpinner class="size-4 animate-spin" />
-      {m.flow_run_evidence_loading()}
-    </div>
-  {/if}
+  <div class="text-muted flex items-center justify-center gap-2 py-6 text-sm" aria-busy="true">
+    <IconLoadingSpinner class="size-4 animate-spin" />
+    {m.flow_run_evidence_loading()}
+  </div>
 {:else if loadError || evidence === null}
-  <Alert.Root variant="destructive">
-    <Alert.Description>{m.flow_run_evidence_error()}</Alert.Description>
+  <Alert.Root variant="destructive" class="flex items-center gap-3 px-5 py-4">
+    <Alert.Description class="flex-1 text-sm">{m.flow_run_evidence_error()}</Alert.Description>
+    <Button variant="outline" size="sm" onclick={() => void loadEvidence()} class="text-xs">
+      {m.flow_retry()}
+    </Button>
   </Alert.Root>
 {:else}
   <!-- The panel renders inside a table cell that keeps its own text on one

@@ -67,7 +67,8 @@
   );
   const hasOutput = $derived(hasStructuredOutput || hasResultFiles || hasTextOutput);
   const hasInput = $derived(step.inputPayload != null);
-  const hasTokens = $derived(step.numTokensInput != null || step.numTokensOutput != null);
+  // Steps without a model call (transcription, template fill) report 0/0.
+  const hasTokens = $derived((step.numTokensInput ?? 0) + (step.numTokensOutput ?? 0) > 0);
 </script>
 
 <Card.Root
@@ -216,11 +217,10 @@
         {/if}
 
         {#if hasInput}
-          <Collapsible.Root open={inputExpanded}>
+          <Collapsible.Root open={inputExpanded} onOpenChange={() => onToggleInput(step.stepOrder)}>
             <div class="flex items-center justify-between">
               <Collapsible.Trigger
                 class="text-muted hover:text-secondary focus-visible:ring-accent-default -ml-1 flex items-center gap-1.5 rounded-md px-1 py-0.5 text-xs font-semibold transition-colors focus-visible:ring-2 focus-visible:outline-none"
-                onclick={() => onToggleInput(step.stepOrder)}
               >
                 <IconChevronDown
                   class="size-3 transition-transform duration-200 {inputExpanded

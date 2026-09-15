@@ -541,7 +541,7 @@
           </div>
         {/if}
 
-        {#if result.num_tokens_input != null || result.num_tokens_output != null}
+        {#if (result.num_tokens_input ?? 0) + (result.num_tokens_output ?? 0) > 0}
           <div class="border-default text-muted flex items-center gap-2 border-t pt-3 text-xs">
             <span class="tabular-nums">{m.flow_run_tokens()}</span>
             <span class="text-dimmer">&middot;</span>

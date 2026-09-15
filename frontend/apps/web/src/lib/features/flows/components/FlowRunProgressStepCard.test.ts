@@ -42,4 +42,36 @@ describe("FlowRunProgressStepCard", () => {
     expect(body).not.toContain(m.flow_run_error_desc());
     expect(body).toContain("Step 1 failed.");
   });
+
+  it("shows the token row only when the step used model tokens", () => {
+    vi.stubGlobal("window", {
+      location: { href: "https://app.example.test/sv/flows/run" },
+      matchMedia: () => ({ matches: false })
+    });
+    const renderWithTokens = (numTokensInput: number, numTokensOutput: number) =>
+      render(FlowRunProgressStepCard, {
+        props: {
+          step: {
+            stepOrder: 1,
+            label: "Transcribe",
+            status: "completed",
+            numTokensInput,
+            numTokensOutput,
+            outputPayload: { text: "done" },
+            resultFiles: []
+          },
+          expanded: true,
+          inputExpanded: false,
+          copiedKey: null,
+          panelId: "step-1-panel",
+          onToggle: () => undefined,
+          onToggleInput: () => undefined,
+          onCopyPayload: async () => undefined,
+          onDownloadArtifact: async () => undefined
+        }
+      }).body;
+
+    expect(renderWithTokens(0, 0)).not.toContain(m.flow_run_tokens());
+    expect(renderWithTokens(0, 7)).toContain(m.flow_run_tokens_out({ count: "7" }));
+  });
 });

@@ -174,6 +174,9 @@
   let showCancelConfirm = $state(false);
   let pendingCancelRunId: string | null = $state(null);
   let progressSnapshotsByRunId = $state<Record<string, FlowRunProgressSnapshot>>({});
+  // Counts completed run-list reads; the expanded progress panel re-reads
+  // step statuses on each one so it moves with the row.
+  let runListRefreshTick = $state(0);
 
   async function loadRuns(mode: "refresh" | "more" = "refresh") {
     const result = await loadFlowRunHistory(history, {
@@ -194,6 +197,7 @@
     });
 
     if (result.kind === "loaded") {
+      runListRefreshTick += 1;
       const nextRuns = result.runs;
       const confirmedOptimisticRunIds = getConfirmedOptimisticFlowRunIds(nextRuns, optimisticRuns);
       if (confirmedOptimisticRunIds.length > 0) {
@@ -318,6 +322,7 @@
       {eneo}
       runStartedAt={run.started_at ?? run.created_at}
       initialSnapshot={progressSnapshotsByRunId[run.id] ?? null}
+      refreshTick={runListRefreshTick}
       onSnapshotUpdate={(snapshot) => updateProgressSnapshot(run.id, snapshot)}
     />
   {:else if isFlowRunAwaitingReview(run.status)}
@@ -334,7 +339,6 @@
       sensitiveCareDataFlow={careDataPolicy?.sensitive === true}
       {eneo}
       runStatus={run.status}
-      fallbackSnapshot={progressSnapshotsByRunId[run.id] ?? null}
     />
   {/if}
 {/snippet}

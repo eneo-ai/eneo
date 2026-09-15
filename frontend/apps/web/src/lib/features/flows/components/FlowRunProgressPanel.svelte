@@ -15,6 +15,7 @@
     eneo,
     runStartedAt = null,
     initialSnapshot = null,
+    refreshTick = 0,
     onSnapshotUpdate
   }: {
     runId: string;
@@ -22,6 +23,8 @@
     eneo: Eneo;
     runStartedAt?: string | null;
     initialSnapshot?: FlowRunProgressSnapshot | null;
+    /** Bumped by the owner on every run-list poll; each bump re-reads step statuses. */
+    refreshTick?: number;
     onSnapshotUpdate?: (snapshot: FlowRunProgressSnapshot) => void;
   } = $props();
 
@@ -30,6 +33,7 @@
   let refreshFailed = $state(false);
   let refreshing = $state(false);
   let graphSnapshot: FlowGraph | null = $state(null);
+  let stepSnapshot: FlowRunStep[] = $state([]);
   let snapshot: FlowRunProgressSnapshot = $state(untrack(() => initialSnapshot ?? { steps: [] }));
 
   async function fetchGraphSnapshot() {
@@ -42,9 +46,32 @@
 
   function applySnapshot({ graph, steps }: { graph: FlowGraph | null; steps: FlowRunStep[] }) {
     graphSnapshot = graph;
+    stepSnapshot = steps;
     snapshot = buildFlowRunProgressSnapshot(graphSnapshot, steps);
     onSnapshotUpdate?.(snapshot);
   }
+
+  // Step statuses ride the run-pinned graph, which is not an audited content
+  // read, so they can follow the list poll. Outputs (the audited step list)
+  // stay on demand: initial open and "Uppdatera nu".
+  let refreshingStatuses = false;
+  async function refreshStepStatusesFromGraph() {
+    if (refreshingStatuses || loading) return;
+    refreshingStatuses = true;
+    try {
+      const graph = await fetchGraphSnapshot();
+      applySnapshot({ graph, steps: stepSnapshot });
+    } catch (error) {
+      console.error("Failed to refresh run step statuses", error);
+    } finally {
+      refreshingStatuses = false;
+    }
+  }
+
+  $effect(() => {
+    if (refreshTick === 0) return;
+    untrack(() => void refreshStepStatusesFromGraph());
+  });
 
   async function loadInitial() {
     loading = snapshot.steps.length === 0;
@@ -65,8 +92,8 @@
     refreshing = true;
     refreshFailed = false;
     try {
-      const steps = await fetchStepStatuses();
-      applySnapshot({ graph: graphSnapshot, steps });
+      const [graph, steps] = await Promise.all([fetchGraphSnapshot(), fetchStepStatuses()]);
+      applySnapshot({ graph, steps });
     } catch (error) {
       console.error("Failed to refresh live run progress", error);
       refreshFailed = true;
