@@ -112,7 +112,8 @@ class SearchFilters:
 
     email: str | None = None
     name: str | None = None
-    state_filter: str | None = None  # "active" (includes invited) or "inactive"
+    state_filter: Literal["active", "inactive"] | None = None
+    role_id: UUID | None = None
 
     def has_filters(self) -> bool:
         """Check if any search filters are active"""
@@ -120,6 +121,7 @@ class SearchFilters:
             self.email is not None
             or self.name is not None
             or self.state_filter is not None
+            or self.role_id is not None
         )
 
 
@@ -167,10 +169,13 @@ class PaginatedResult(Generic[T]):
 
     @property
     def total_pages(self) -> int:
-        """Calculate total number of pages"""
+        """Calculate reachable pages, respecting the pagination depth limit."""
         if self.total_count == 0:
             return 0
-        return (self.total_count + self.page_size - 1) // self.page_size
+        return min(
+            (self.total_count + self.page_size - 1) // self.page_size,
+            PaginationParams.MAX_PAGE,
+        )
 
     @property
     def has_next(self) -> bool:

@@ -244,11 +244,6 @@
       "count": 3
     }
   },
-  "src/routes/(app)/admin/users/+page.svelte": {
-    "eneo/no-raw-color": {
-      "count": 2
-    }
-  },
   "src/routes/(app)/dashboard/+page.svelte": {
     "eneo/no-raw-color": {
       "count": 2
