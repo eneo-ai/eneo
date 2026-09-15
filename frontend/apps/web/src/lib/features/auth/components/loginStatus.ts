@@ -20,6 +20,10 @@ export function resolveLoginStatus(message: string | null): LoginStatus | null {
       return null;
     case "logout":
       return { tone: "success", description: m.logout_success() };
+    case "password_changed":
+      return { tone: "success", description: m.password_changed_login_again() };
+    case "password_changed_sessions_remain":
+      return { tone: "warning", description: m.password_changed_sessions_remain() };
     case "expired":
       return { tone: "warning", description: m.session_expired_please_login_again() };
     case "mobilityguard_login_error":

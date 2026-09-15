@@ -196,19 +196,19 @@ async def test_user_cannot_access_other_tenant_space_via_id_manipulation(
         super_admin_token,
         tenant_a["id"],
         f"alice@tenant-a-{uuid4().hex[:4]}.example.com",
-        "PasswordA123!",
+        "TenantAPassword123!",
     )
     user_b = await _create_user(
         client,
         super_admin_token,
         tenant_b["id"],
         f"bob@tenant-b-{uuid4().hex[:4]}.example.com",
-        "PasswordB123!",
+        "TenantBPassword123!",
     )
 
     # Login both users
-    token_a = await _login_user(client, user_a["email"], "PasswordA123!")
-    token_b = await _login_user(client, user_b["email"], "PasswordB123!")
+    token_a = await _login_user(client, user_a["email"], "TenantAPassword123!")
+    token_b = await _login_user(client, user_b["email"], "TenantBPassword123!")
 
     # User A creates a space
     space_a = await _create_space(client, token_a, f"space-a-{uuid4().hex[:6]}")
@@ -254,7 +254,7 @@ async def test_insights_logging_never_hydrates_another_tenants_message(
         super_admin_token,
         tenant_a["id"],
         f"logging-a-{uuid4().hex[:6]}@example.com",
-        "PasswordA123!",
+        "TenantAPassword123!",
         is_admin=True,
     )
     user_b = await _create_user(
@@ -262,11 +262,11 @@ async def test_insights_logging_never_hydrates_another_tenants_message(
         super_admin_token,
         tenant_b["id"],
         f"logging-b-{uuid4().hex[:6]}@example.com",
-        "PasswordB123!",
+        "TenantBPassword123!",
         is_admin=True,
     )
-    token_a = await _login_user(client, user_a["email"], "PasswordA123!")
-    token_b = await _login_user(client, user_b["email"], "PasswordB123!")
+    token_a = await _login_user(client, user_a["email"], "TenantAPassword123!")
+    token_b = await _login_user(client, user_b["email"], "TenantBPassword123!")
     space_b = await _create_space(client, token_b, f"logging-space-{uuid4().hex[:6]}")
     assistant_b = await _create_assistant(client, token_b, space_b["id"])
 
@@ -459,7 +459,7 @@ async def test_user_login_rejects_wrong_tenant_credentials(
 
     # Create user in Tenant A
     user_a_email = f"alice@tenant-a-{uuid4().hex[:4]}.example.com"
-    user_a_password = "AlicePass123!"
+    user_a_password = "AlicePassword123!"
     await _create_user(
         client,
         super_admin_token,
@@ -623,7 +623,7 @@ async def test_space_deletion_rejects_cross_tenant_operation(
         super_admin_token,
         tenant_a["id"],
         f"owner@tenant-a-{uuid4().hex[:4]}.example.com",
-        "OwnerPass123!",
+        "OwnerPassword123!",
     )
     user_b = await _create_user(
         client,
@@ -634,7 +634,7 @@ async def test_space_deletion_rejects_cross_tenant_operation(
     )
 
     # Login both users
-    token_a = await _login_user(client, user_a["email"], "OwnerPass123!")
+    token_a = await _login_user(client, user_a["email"], "OwnerPassword123!")
     token_b = await _login_user(client, user_b["email"], "AttackerPass123!")
 
     # User A creates a space
@@ -698,19 +698,19 @@ async def test_list_spaces_endpoint_filters_by_tenant(
         super_admin_token,
         tenant_a["id"],
         f"user-a@tenant-a-{uuid4().hex[:4]}.example.com",
-        "UserAPass123!",
+        "UserAPassword123!",
     )
     user_b = await _create_user(
         client,
         super_admin_token,
         tenant_b["id"],
         f"user-b@tenant-b-{uuid4().hex[:4]}.example.com",
-        "UserBPass123!",
+        "UserBPassword123!",
     )
 
     # Login both users
-    token_a = await _login_user(client, user_a["email"], "UserAPass123!")
-    token_b = await _login_user(client, user_b["email"], "UserBPass123!")
+    token_a = await _login_user(client, user_a["email"], "UserAPassword123!")
+    token_b = await _login_user(client, user_b["email"], "UserBPassword123!")
 
     # User A creates 3 spaces
     spaces_a = []
@@ -796,18 +796,18 @@ async def test_tenant_isolation_under_concurrent_cross_tenant_requests(
         super_admin_token,
         tenant_a["id"],
         f"user-a@concurrent-{uuid4().hex[:4]}.example.com",
-        "UserAPass123!",
+        "UserAPassword123!",
     )
     user_b = await _create_user(
         client,
         super_admin_token,
         tenant_b["id"],
         f"user-b@concurrent-{uuid4().hex[:4]}.example.com",
-        "UserBPass123!",
+        "UserBPassword123!",
     )
 
-    token_a = await _login_user(client, user_a["email"], "UserAPass123!")
-    token_b = await _login_user(client, user_b["email"], "UserBPass123!")
+    token_a = await _login_user(client, user_a["email"], "UserAPassword123!")
+    token_b = await _login_user(client, user_b["email"], "UserBPassword123!")
 
     # Track results
     results_a = []

@@ -22,6 +22,20 @@ describe("resolveLoginStatus", () => {
     });
   });
 
+  test("confirms a password change and prompts the user to log in again", () => {
+    expect(resolveLoginStatus("password_changed")).toEqual({
+      tone: "success",
+      description: "password_changed_login_again"
+    });
+  });
+
+  test("warns when sessions remain after a password change", () => {
+    expect(resolveLoginStatus("password_changed_sessions_remain")).toEqual({
+      tone: "warning",
+      description: "password_changed_sessions_remain"
+    });
+  });
+
   test("keeps the legacy IdP reasons list", () => {
     expect(resolveLoginStatus("mobilityguard_login_error")).toMatchObject({
       tone: "error",

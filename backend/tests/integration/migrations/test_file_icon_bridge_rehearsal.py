@@ -32,8 +32,9 @@ from sqlalchemy.engine import make_url
 from testcontainers.postgres import PostgresContainer
 
 from alembic import command
+from alembic.script import ScriptDirectory
 from eneo.database.database import DatabaseSessionManager, sessionmanager
-from eneo.main.config import set_settings
+from eneo.main.config import get_settings, set_settings
 from eneo.object_content.configuration import ObjectContentCoreSettings
 from eneo.object_content.content_service import ObjectContentService
 from eneo.object_content.file_icon_backfill import (
@@ -331,6 +332,7 @@ async def setup_database(test_settings, postgres_container, database_measurement
         "postgres_memory_limit_bytes": 2 * 1024 * _MIB,
         "source_revision": _RELEASED_REVISION,
         "bridge_revision": _BRIDGE_REVISION,
+        "application_revision": ScriptDirectory.from_config(config).get_current_head(),
         "preflight_seconds": time.perf_counter() - preflight_started,
         "preflight": asdict(preflight),
         "replicas": "not deployed in this isolated profile",
@@ -349,6 +351,14 @@ async def setup_database(test_settings, postgres_container, database_measurement
         upgrade_started = time.perf_counter()
         command.upgrade(config, _BRIDGE_REVISION)
         report["expand_inventory_seconds"] = time.perf_counter() - upgrade_started
+        assert _source_facts(url) == expected_sources
+        # The historical bridge is tested above; current ORM models and API
+        # routes require the complete schema shipped with this application.
+        application_upgrade_started = time.perf_counter()
+        command.upgrade(config, "head")
+        report["application_upgrade_seconds"] = (
+            time.perf_counter() - application_upgrade_started
+        )
         assert _source_facts(url) == expected_sources
         sessionmanager.init(test_settings.database_url)
         try:
@@ -418,6 +428,9 @@ async def test_released_upgrade_recovers_from_process_death_and_backup_restore(
     report = state["report"]
     path = state["path"]
     killed = worker = None
+    # The restore steps below install copies pointing at restored databases;
+    # reinstall the session's settings object once the application is done.
+    original_settings = get_settings()
     try:
         with _connect(url) as connection, connection.cursor() as cursor:
             cursor.execute(
@@ -530,11 +543,11 @@ async def test_released_upgrade_recovers_from_process_death_and_backup_restore(
                 assert response.status_code == 200 and response.content == expected
         # The same installed build must work after an operator chooses cleanup.
         # Stop pools/runtime just as the maintenance procedure requires.
-        from eneo.object_content.file_icon_cleanup import (
-            cleanup_file_icon_legacy_storage,
-        )
         from eneo.object_content.file_icon_backfill import (
             read_file_icon_backfill_status,
+        )
+        from eneo.object_content.file_icon_cleanup import (
+            cleanup_file_icon_legacy_storage,
         )
 
         await object_content_runtime.stop()
@@ -640,6 +653,7 @@ async def test_released_upgrade_recovers_from_process_death_and_backup_restore(
                 if process.poll() is None:
                     process.kill()
                 process.communicate(timeout=5)
+        set_settings(original_settings)
 
 
 async def _worker_main():

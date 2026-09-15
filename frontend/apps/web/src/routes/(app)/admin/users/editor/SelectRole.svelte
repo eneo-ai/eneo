@@ -6,68 +6,59 @@
 
 <script lang="ts">
   import type { Role } from "@eneo/eneo-js";
-  import { Select } from "@eneo/ui";
-  import { writable } from "svelte/store";
+  import * as Select from "$lib/components/ui/select";
+  import * as Field from "$lib/components/ui/field";
   import { m } from "$lib/paraglide/messages";
 
-  // Array of all currently selected roles
-  export let value: Role[];
+  let {
+    value = $bindable(),
+    roles,
+    disabled = false
+  }: {
+    value: Role[];
+    roles: Role[];
+    disabled?: boolean;
+  } = $props();
 
-  // Array of all available roles
-  export let roles: Role[];
-
-  function getStoreValue() {
-    const selectedIds = value.map((role) => role.id);
-    const selectedRoles = roles.filter((role) => selectedIds.includes(role.id));
-    return selectedRoles.map((role) => {
-      return {
-        value: role,
-        label: role.name
-      };
-    });
-  }
-
-  let roleSelectStore = writable(getStoreValue());
-
-  function setValue(currentlySelected: { value: Role }[]) {
-    value = currentlySelected.map((item) => item.value);
-  }
-
-  $: setValue($roleSelectStore);
-
-  $: defaultRoles = roles.filter((r) => "predefined_source" in r && r.predefined_source);
-  $: customRoles = roles.filter((r) => !("predefined_source" in r && r.predefined_source));
+  const id = $props.id();
+  const selectedIds = $derived(value.map((role) => role.id));
+  const selectedLabel = $derived(value.map((role) => role.name).join(", "));
+  const defaultRoles = $derived(roles.filter((role) => role.predefined_source));
+  const customRoles = $derived(roles.filter((role) => !role.predefined_source));
 </script>
 
 {#if roles.length > 0}
-  <Select.Root
-    multiple
-    customStore={roleSelectStore}
-    class="border-default hover:bg-hover-dimmer border-b px-4 py-4"
-  >
-    <Select.Label>{m.roles_permissions()}</Select.Label>
-    <Select.Trigger placeholder={m.select_ellipsis()}></Select.Trigger>
-    <Select.Options>
-      {#if defaultRoles.length > 0}
-        <Select.OptionGroup label={m.default_roles()}>
-          {#each defaultRoles as role (role.id)}
-            <Select.Item value={role} label={role.name}>
-              <div class="flex w-full items-center justify-between py-1">
-                <span>
-                  {role.name}
-                </span>
-              </div>
-            </Select.Item>
-          {/each}
-        </Select.OptionGroup>
-      {/if}
-      {#if customRoles.length > 0}
-        <Select.OptionGroup label={m.custom_roles()}>
-          {#each customRoles as role (role.id)}
-            <Select.Item value={role} label={role.name}></Select.Item>
-          {/each}
-        </Select.OptionGroup>
-      {/if}
-    </Select.Options>
-  </Select.Root>
+  <Field.Field>
+    <Field.Label for={id}>{m.roles_permissions()}</Field.Label>
+    <Select.Root
+      type="multiple"
+      value={selectedIds}
+      {disabled}
+      onValueChange={(ids) => {
+        value = roles.filter((role) => ids.includes(role.id));
+      }}
+    >
+      <Select.Trigger {id} class="w-full">
+        <span class="truncate">{selectedLabel || m.select_ellipsis()}</span>
+      </Select.Trigger>
+      <Select.Content>
+        {#if defaultRoles.length > 0}
+          <Select.Group>
+            <Select.GroupHeading>{m.default_roles()}</Select.GroupHeading>
+            {#each defaultRoles as role (role.id)}
+              <Select.Item value={role.id} label={role.name} />
+            {/each}
+          </Select.Group>
+        {/if}
+        {#if customRoles.length > 0}
+          <Select.Group>
+            <Select.GroupHeading>{m.custom_roles()}</Select.GroupHeading>
+            {#each customRoles as role (role.id)}
+              <Select.Item value={role.id} label={role.name} />
+            {/each}
+          </Select.Group>
+        {/if}
+      </Select.Content>
+    </Select.Root>
+  </Field.Field>
 {/if}

@@ -9,6 +9,15 @@
 export function initUser(client) {
   return {
     /**
+     * Get the backend policy for passwords stored in Eneo, regardless of the caller's login provider.
+     * @returns {Promise<import('../types/schema').components["schemas"]["LocalPasswordPolicy"]>}
+     * @throws {EneoError}
+     */
+    passwordPolicy: async () => {
+      return await client.fetch("/api/v1/users/password-policy/", { method: "get" });
+    },
+
+    /**
      * Get info about the currently logged in user.
      * @returns {Promise<import('../types/schema').components["schemas"]["UserPublic"]>}
      * @throws {EneoError}

@@ -423,3 +423,43 @@ describe("ChatService independent capabilities", () => {
     });
   });
 });
+
+describe("ChatService citation withholding", () => {
+  it("shows a finished citation at once and holds only the unfinished one", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test double for the stream callbacks
+    let activeCallbacks: any;
+    let finishStream: () => void = () => {};
+    const ask = vi.fn().mockImplementationOnce(
+      ({ callbacks }) =>
+        new Promise<void>((resolve) => {
+          activeCallbacks = callbacks;
+          callbacks.onFirstChunk({
+            id: "message-1",
+            session_id: "session-1",
+            answer: "",
+            references: []
+          });
+          finishStream = resolve;
+        })
+    );
+    const chat = chatService(vi.fn(), { ask });
+    const request = chat.askQuestion("Hello");
+    await vi.waitFor(() => expect(activeCallbacks).toBeDefined());
+    const answer = () => chat.currentConversation.messages.at(-1)?.answer;
+
+    // One provider chunk carries a complete citation and the start of the next.
+    activeCallbacks.onText({
+      session_id: "session-1",
+      answer: 'Se <inref id="aaaaaaaa"/> och <inref id="bbbb',
+      references: []
+    });
+    expect(answer()).toBe('Se <inref id="aaaaaaaa"/> och ');
+
+    activeCallbacks.onText({ session_id: "session-1", answer: 'bbbb"/> för mer.', references: [] });
+    expect(answer()).toBe('Se <inref id="aaaaaaaa"/> och <inref id="bbbbbbbb"/> för mer.');
+
+    finishStream();
+    await request;
+    expect(answer()).toBe('Se <inref id="aaaaaaaa"/> och <inref id="bbbbbbbb"/> för mer.');
+  });
+});
