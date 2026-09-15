@@ -56,7 +56,8 @@
     "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
     "requested_in_previous": false,
     "requested_in_current": true
-   }
+   },
+   "bundle_path": "parent-luna/ai-builder-api-battle-test-20260915T081804-edit_chain_10_instruction.json"
   },
   {
    "lane": "parent",
@@ -81,7 +82,12 @@
    "source": "07eb1c172",
    "target_field_changes": [
     {
-     "current": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Under rubriken Saknade uppgifter och kompletteringar ska du alltid lista vilka uppgifter som saknas eller är oklara i ansökan som en tydlig punktlista. Om inga uppgifter saknas eller är oklara ska punktlistan ändå finnas och innehålla en uttrycklig uppgift om att inga saknade eller oklara uppgifter har identifierats i det tillgängliga underlaget. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF.",
+     "current": "Förbered PDF-innehåll",
+     "field": "name",
+     "previous": "Skriv beslutsdokument"
+    },
+    {
+     "current": "Förbered textinnehållet som terminalsteget ska rendera till PDF. Terminalsteget skapar själva PDF-filen.\n\nSkriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Under rubriken Saknade uppgifter och kompletteringar ska du alltid lista varje uppgift som saknas eller är oklar i ansökan som en tydlig punktlista. För varje punkt ska du ange vilken uppgift som saknas eller är oklar och, när det framgår av underlaget, varför den behövs för bedömningen. Om inga uppgifter saknas eller är oklara ska detta anges uttryckligen. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF.",
      "field": "instructions",
      "previous": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF."
     }
@@ -90,7 +96,8 @@
     "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
     "requested_in_previous": false,
     "requested_in_current": true
-   }
+   },
+   "bundle_path": "parent-luna/ai-builder-api-battle-test-20260915T081855-edit_chain_30_instruction.json"
   },
   {
    "lane": "parent",
@@ -130,7 +137,8 @@
     "name_after": "Förbered PDF-innehåll",
     "exact": false,
     "only_name_changed": false
-   }
+   },
+   "bundle_path": "parent-luna/ai-builder-api-battle-test-20260915T081920-edit_chain_10_reference.json"
   },
   {
    "lane": "parent",
@@ -169,7 +177,8 @@
     "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
     "requested_in_previous": false,
     "requested_in_current": true
-   }
+   },
+   "bundle_path": "parent-luna/ai-builder-api-battle-test-20260915T081940-edit_chain_10_instruction.json"
   },
   {
    "lane": "parent",
@@ -194,7 +203,12 @@
    "source": "07eb1c172",
    "target_field_changes": [
     {
-     "current": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Under rubriken Saknade uppgifter och kompletteringar ska du alltid lista samtliga uppgifter som saknas eller är oklara i ansökan som en tydlig punktlista. Om inga uppgifter saknas eller är oklara ska du uttryckligen ange det. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF.",
+     "current": "Förbered PDF-innehåll",
+     "field": "name",
+     "previous": "Skriv beslutsdokument"
+    },
+    {
+     "current": "Förbered textinnehållet som terminalsteget ska rendera till PDF. Terminalsteget skapar själva PDF-filen.\n\nSkriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Under rubriken Saknade uppgifter och kompletteringar ska du alltid lista alla uppgifter som saknas eller är oklara i ansökan som en punktlista. Om inga uppgifter saknas ska du uttryckligen ange det. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF.",
      "field": "instructions",
      "previous": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF."
     }
@@ -203,7 +217,8 @@
     "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
     "requested_in_previous": false,
     "requested_in_current": true
-   }
+   },
+   "bundle_path": "parent-luna/ai-builder-api-battle-test-20260915T082029-edit_chain_30_instruction.json"
   },
   {
    "lane": "parent",
@@ -243,7 +258,8 @@
     "name_after": "Förbered PDF-innehåll",
     "exact": false,
     "only_name_changed": false
-   }
+   },
+   "bundle_path": "parent-luna/ai-builder-api-battle-test-20260915T082054-edit_chain_10_reference.json"
   },
   {
    "lane": "parent",
@@ -282,7 +298,8 @@
     "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
     "requested_in_previous": false,
     "requested_in_current": true
-   }
+   },
+   "bundle_path": "parent-luna/ai-builder-api-battle-test-20260915T082116-edit_chain_10_instruction.json"
   },
   {
    "lane": "parent",
@@ -321,7 +338,8 @@
     "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
     "requested_in_previous": false,
     "requested_in_current": true
-   }
+   },
+   "bundle_path": "parent-luna/ai-builder-api-battle-test-20260915T082208-edit_chain_30_instruction.json"
   },
   {
    "lane": "parent",
@@ -361,7 +379,8 @@
     "name_after": "Förbered PDF-innehåll",
     "exact": false,
     "only_name_changed": false
-   }
+   },
+   "bundle_path": "parent-luna/ai-builder-api-battle-test-20260915T082230-edit_chain_10_reference.json"
   },
   {
    "lane": "parent",
@@ -400,7 +419,8 @@
     "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
     "requested_in_previous": false,
     "requested_in_current": true
-   }
+   },
+   "bundle_path": "parent-gemma/ai-builder-api-battle-test-20260915T082253-edit_chain_10_instruction.json"
   },
   {
    "lane": "parent",
@@ -439,7 +459,8 @@
     "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
     "requested_in_previous": false,
     "requested_in_current": true
-   }
+   },
+   "bundle_path": "parent-gemma/ai-builder-api-battle-test-20260915T082345-edit_chain_30_instruction.json"
   },
   {
    "lane": "parent",
@@ -479,7 +500,8 @@
     "name_after": "Förbered PDF-innehåll",
     "exact": false,
     "only_name_changed": false
-   }
+   },
+   "bundle_path": "parent-gemma/ai-builder-api-battle-test-20260915T082409-edit_chain_10_reference.json"
   },
   {
    "lane": "parent",
@@ -518,7 +540,8 @@
     "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
     "requested_in_previous": false,
     "requested_in_current": true
-   }
+   },
+   "bundle_path": "parent-gemma/ai-builder-api-battle-test-20260915T082429-edit_chain_10_instruction.json"
   },
   {
    "lane": "parent",
@@ -557,7 +580,8 @@
     "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
     "requested_in_previous": false,
     "requested_in_current": true
-   }
+   },
+   "bundle_path": "parent-gemma/ai-builder-api-battle-test-20260915T082516-edit_chain_30_instruction.json"
   },
   {
    "lane": "parent",
@@ -597,7 +621,8 @@
     "name_after": "Förbered PDF-innehåll",
     "exact": false,
     "only_name_changed": false
-   }
+   },
+   "bundle_path": "parent-gemma/ai-builder-api-battle-test-20260915T082539-edit_chain_10_reference.json"
   },
   {
    "lane": "parent",
@@ -636,7 +661,8 @@
     "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
     "requested_in_previous": false,
     "requested_in_current": true
-   }
+   },
+   "bundle_path": "parent-gemma/ai-builder-api-battle-test-20260915T082558-edit_chain_10_instruction.json"
   },
   {
    "lane": "parent",
@@ -675,7 +701,8 @@
     "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
     "requested_in_previous": false,
     "requested_in_current": true
-   }
+   },
+   "bundle_path": "parent-gemma/ai-builder-api-battle-test-20260915T082643-edit_chain_30_instruction.json"
   },
   {
    "lane": "parent",
@@ -715,7 +742,8 @@
     "name_after": "Förbered PDF-innehåll",
     "exact": false,
     "only_name_changed": false
-   }
+   },
+   "bundle_path": "parent-gemma/ai-builder-api-battle-test-20260915T082708-edit_chain_10_reference.json"
   },
   {
    "lane": "candidate",
@@ -748,7 +776,8 @@
     "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
     "requested_in_previous": false,
     "requested_in_current": true
-   }
+   },
+   "bundle_path": "candidate-luna/ai-builder-api-battle-test-20260915T081805-edit_chain_10_instruction.json"
   },
   {
    "lane": "candidate",
@@ -781,7 +810,8 @@
     "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
     "requested_in_previous": false,
     "requested_in_current": true
-   }
+   },
+   "bundle_path": "candidate-luna/ai-builder-api-battle-test-20260915T081855-edit_chain_30_instruction.json"
   },
   {
    "lane": "candidate",
@@ -815,7 +845,8 @@
     "name_after": "Extrahera källfält - kontroll",
     "exact": true,
     "only_name_changed": true
-   }
+   },
+   "bundle_path": "candidate-luna/ai-builder-api-battle-test-20260915T081919-edit_chain_10_reference.json"
   },
   {
    "lane": "candidate",
@@ -848,7 +879,8 @@
     "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
     "requested_in_previous": false,
     "requested_in_current": true
-   }
+   },
+   "bundle_path": "candidate-luna/ai-builder-api-battle-test-20260915T081941-edit_chain_10_instruction.json"
   },
   {
    "lane": "candidate",
@@ -881,7 +913,8 @@
     "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
     "requested_in_previous": false,
     "requested_in_current": true
-   }
+   },
+   "bundle_path": "candidate-luna/ai-builder-api-battle-test-20260915T082029-edit_chain_30_instruction.json"
   },
   {
    "lane": "candidate",
@@ -914,7 +947,8 @@
     "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
     "requested_in_previous": false,
     "requested_in_current": true
-   }
+   },
+   "bundle_path": "candidate-luna/ai-builder-api-battle-test-20260915T082126-edit_chain_30_instruction.json"
   },
   {
    "lane": "candidate",
@@ -947,7 +981,8 @@
     "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
     "requested_in_previous": false,
     "requested_in_current": true
-   }
+   },
+   "bundle_path": "candidate-luna/ai-builder-api-battle-test-20260915T082907-edit_chain_10_instruction.json"
   },
   {
    "lane": "candidate",
@@ -981,7 +1016,8 @@
     "name_after": "Extrahera källfält - kontroll",
     "exact": true,
     "only_name_changed": true
-   }
+   },
+   "bundle_path": "candidate-luna/ai-builder-api-battle-test-20260915T082928-edit_chain_10_reference.json"
   },
   {
    "lane": "candidate",
@@ -1015,7 +1051,8 @@
     "name_after": "Extrahera källfält - kontroll",
     "exact": true,
     "only_name_changed": true
-   }
+   },
+   "bundle_path": "candidate-luna/ai-builder-api-battle-test-20260915T082948-edit_chain_10_reference.json"
   },
   {
    "lane": "candidate",
@@ -1048,7 +1085,8 @@
     "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
     "requested_in_previous": false,
     "requested_in_current": true
-   }
+   },
+   "bundle_path": "candidate-gemma/ai-builder-api-battle-test-20260915T082223-edit_chain_30_instruction.json"
   },
   {
    "lane": "candidate",
@@ -1081,7 +1119,8 @@
     "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
     "requested_in_previous": false,
     "requested_in_current": true
-   }
+   },
+   "bundle_path": "candidate-gemma/ai-builder-api-battle-test-20260915T082355-edit_chain_30_instruction.json"
   },
   {
    "lane": "candidate",
@@ -1114,7 +1153,8 @@
     "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
     "requested_in_previous": false,
     "requested_in_current": true
-   }
+   },
+   "bundle_path": "candidate-gemma/ai-builder-api-battle-test-20260915T083007-edit_chain_10_instruction.json"
   },
   {
    "lane": "candidate",
@@ -1147,7 +1187,8 @@
     "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
     "requested_in_previous": false,
     "requested_in_current": true
-   }
+   },
+   "bundle_path": "candidate-gemma/ai-builder-api-battle-test-20260915T083032-edit_chain_10_instruction.json"
   },
   {
    "lane": "candidate",
@@ -1180,7 +1221,8 @@
     "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
     "requested_in_previous": false,
     "requested_in_current": true
-   }
+   },
+   "bundle_path": "candidate-gemma/ai-builder-api-battle-test-20260915T083056-edit_chain_10_instruction.json"
   },
   {
    "lane": "candidate",
@@ -1213,7 +1255,8 @@
     "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
     "requested_in_previous": false,
     "requested_in_current": true
-   }
+   },
+   "bundle_path": "candidate-gemma/ai-builder-api-battle-test-20260915T083144-edit_chain_30_instruction.json"
   },
   {
    "lane": "candidate",
@@ -1247,7 +1290,8 @@
     "name_after": "Extrahera källfält - kontroll",
     "exact": true,
     "only_name_changed": true
-   }
+   },
+   "bundle_path": "candidate-gemma/ai-builder-api-battle-test-20260915T083208-edit_chain_10_reference.json"
   },
   {
    "lane": "candidate",
@@ -1281,7 +1325,8 @@
     "name_after": "Extrahera källfält - kontroll",
     "exact": true,
     "only_name_changed": true
-   }
+   },
+   "bundle_path": "candidate-gemma/ai-builder-api-battle-test-20260915T083226-edit_chain_10_reference.json"
   },
   {
    "lane": "candidate",
@@ -1315,7 +1360,8 @@
     "name_after": "Extrahera källfält - kontroll",
     "exact": true,
     "only_name_changed": true
-   }
+   },
+   "bundle_path": "candidate-gemma/ai-builder-api-battle-test-20260915T083243-edit_chain_10_reference.json"
   }
  ],
  "acquisition_failures": [
@@ -1390,5 +1436,6 @@
    "bundle": "ai-builder-api-battle-test-20260915T082410-failure.json"
   }
  ],
- "population_note": "Tracked seedings: round 1 (2026-09-15-saved-step-context-bounded) 24 attempts with 2 primary failures (404 on PATCH assistants); round 2 (this file) 46 attempts with 2 primary failures (one 403 on POST assistants, one 404 on PATCH assistants) and 8 consequent 500s caused by the orphaned flow of the 403. Combined: 70 attempts, 4 primary failures. Smoke runs outside the receipts are not counted."
+ "population_note": "Tracked seedings: round 1 (2026-09-15-saved-step-context-bounded) 24 attempts with 2 primary failures (404 on PATCH assistants); round 2 (this file) 46 attempts with 2 primary failures (one 403 on POST assistants, one 404 on PATCH assistants) and 8 consequent 500s caused by the orphaned flow of the 403. Combined: 70 attempts, 4 primary failures. Smoke runs outside the receipts are not counted.",
+ "extraction_note": "Bundles resolved by lane-qualified path (bundle_path); session_id and plan_id of each bundle verified against the row; summary fields (changed, new_name) verified against target_field_changes before writing. Earlier revision keyed by basename and collided across lanes for two parent rows."
 }

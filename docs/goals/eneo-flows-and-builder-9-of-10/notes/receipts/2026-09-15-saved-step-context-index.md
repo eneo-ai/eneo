@@ -116,5 +116,24 @@ and 8 consequent 500s; smoke runs outside the receipts are not counted.
 ## Suite results on the branch
 
 `backend/tests/unittests/flows/ai_builder`: 4533 passed. `backend/tests/integration/flows` on
-`8f7f931d6`: 468 passed, 1 failed (`test_hard_exited_worker_stale_recovery_converges`, the
-known worker-startup timing test), which passed on re-run alone on an idle host (2 passed, exit 0).
+`8f7f931d6`: 468 passed, 1 failed: `test_hard_exited_worker_stale_recovery_converges`. The failure
+is the fixture's worker-startup guard, before the test's own assertions
+(`tests/integration/flows/conftest.py:340`):
+
+```
+AssertionError: Disposable Flow worker did not report its exact owned queue within 30s. Worker log tail:
+WARNING:root:OIDC_REDIRECT_GRACE_PERIOD_SECONDS (900) exceeds state TTL (600). ...
+```
+
+The disposable worker the test boots did not announce its queue inside the fixture's 30 s budget; the
+run's first assertion (`create_response.status_code == 201`) was never reached. The suite ran while
+both lane stacks were acquiring and an Astra gate was running on the same host. The file re-run alone
+on the idle host passed (2 passed). This is the same startup-budget failure the program has on record
+as its one known integration flake; nothing in this branch touches worker startup, dispatch or
+reconciliation.
+
+Ledger provenance: `observations.json` was re-extracted with lane-qualified bundle paths after a
+basename collision (both lanes ran in parallel and produced identically timestamped bundle names)
+had copied two candidate payloads into two parent rows. Every row's session and plan id and its
+summary fields were verified against its bundle before writing (`extraction_note`,
+`bundle_path`).
