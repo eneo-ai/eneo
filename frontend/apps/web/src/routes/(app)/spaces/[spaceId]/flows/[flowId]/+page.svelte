@@ -81,7 +81,7 @@
     if (hasStepJsonValidationErrors) {
       document
         .getElementById("flow-step-json-errors")
-        ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        ?.scrollIntoView({ block: "nearest", behavior: reducedMotion ? "auto" : "smooth" });
     }
   }
 

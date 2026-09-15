@@ -56,6 +56,26 @@ describe("computeStepConfigValidationIssues", () => {
     expect([...complete.keys()]).toEqual([]);
   });
 
+  it("does not judge mappings without a placeholder inventory (Builder-made drafts)", () => {
+    // The Builder materializes the asset and bindings without a placeholder
+    // list; publication inspects the DOCX itself. Unknown is not invalid.
+    const issues = computeStepConfigValidationIssues(
+      [
+        makeStep({
+          output_mode: "template_fill",
+          output_type: "docx",
+          step_order: 2,
+          output_config: {
+            template_asset_id: "asset-1",
+            bindings: { namn: "{{ flow_input.namn }}" }
+          }
+        })
+      ],
+      PREFIX
+    );
+    expect([...issues.keys()]).toEqual([]);
+  });
+
   it("passes a plain step with no config requirements", () => {
     expect(computeStepConfigValidationIssues([makeStep({})], PREFIX).size).toBe(0);
   });

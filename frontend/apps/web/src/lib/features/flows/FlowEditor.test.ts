@@ -1413,11 +1413,16 @@ describe("FlowEditor server validation routing", () => {
     failMode = "generic";
     editor.setName("Failing");
     await expect(editor.checkDraft()).rejects.toBeInstanceOf(FlowSaveFailedError);
+  });
 
-    // Nothing pending: the check completes without a request.
-    failMode = null;
-    flowUpdate.mockClear();
+  it("checkDraft completes without a request when nothing is pending", async () => {
+    const flow = makeFlow();
+    const flowUpdate = vi.fn(async () => flow);
+    const editor = createFlowEditor({ flow, eneo: makeEneo({ flowUpdate }) });
+
     await expect(editor.checkDraft()).resolves.toBeUndefined();
+
+    expect(flowUpdate).not.toHaveBeenCalled();
   });
 
   it("classifies a flush queued behind a failing autosave by its own outcome", async () => {

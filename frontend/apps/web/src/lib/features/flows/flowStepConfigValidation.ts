@@ -35,23 +35,27 @@ export function computeStepConfigValidationIssues(
           "template_fill_no_template"
         ]);
       } else {
-        // A placeholder is mapped when it has an entry, even an explicit
-        // empty one (a deliberate leave-empty choice); a placeholder without
-        // an entry, or an entry for a placeholder the template no longer
-        // has, is a known problem the publish check will reject.
-        const placeholders = config.placeholders ?? [];
-        const bindings = config.bindings ?? {};
-        const mapped = (placeholder: string) =>
-          Object.prototype.hasOwnProperty.call(bindings, placeholder);
-        if (placeholders.some((placeholder) => !mapped(placeholder))) {
-          entries.set(`${prefix}template_fill_missing_mappings:${step.step_order}`, [
-            "template_fill_missing_mappings"
-          ]);
-        }
-        if (Object.keys(bindings).some((name) => !placeholders.includes(name))) {
-          entries.set(`${prefix}template_fill_orphaned_mappings:${step.step_order}`, [
-            "template_fill_orphaned_mappings"
-          ]);
+        // The placeholder inventory is optional draft metadata: the Builder
+        // omits it and publication inspects the DOCX itself. Diagnostics are
+        // only possible against a known inventory. A placeholder is mapped
+        // when it has an entry, even an explicit empty one (a deliberate
+        // leave-empty choice); a placeholder without an entry, or an entry
+        // for a placeholder the template no longer has, is a known problem.
+        const placeholders = config.placeholders;
+        if (Array.isArray(placeholders)) {
+          const bindings = config.bindings ?? {};
+          const mapped = (placeholder: string) =>
+            Object.prototype.hasOwnProperty.call(bindings, placeholder);
+          if (placeholders.some((placeholder) => !mapped(placeholder))) {
+            entries.set(`${prefix}template_fill_missing_mappings:${step.step_order}`, [
+              "template_fill_missing_mappings"
+            ]);
+          }
+          if (Object.keys(bindings).some((name) => !placeholders.includes(name))) {
+            entries.set(`${prefix}template_fill_orphaned_mappings:${step.step_order}`, [
+              "template_fill_orphaned_mappings"
+            ]);
+          }
         }
       }
     }
