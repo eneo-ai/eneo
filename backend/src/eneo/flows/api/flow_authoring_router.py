@@ -42,6 +42,13 @@ from eneo.server.dependencies.container import get_container
 
 router = APIRouter()
 
+# Mutations commit before the response is sent. With the default request scope
+# the transaction closes after the body has gone out, so a client that creates
+# a flow and immediately addresses it (the editor, the AI Builder harness) can
+# be told the flow does not exist: 3 of 42 seedings on 2026-09-15 failed with
+# 404/403 within 20 ms of a 201.
+_MUTATING_CONTAINER = get_container(with_user=True, transaction_scope="function")
+
 _FLOW_AUTHORING_FORBIDDEN_DESCRIPTION = (
     "Forbidden. Machine-readable codes include `insufficient_scope` when the API key "
     "space scope does not match the flow, `insufficient_space_permission` when the "
@@ -124,7 +131,7 @@ def _classification_override_step_orders(
 async def create_flow(
     request: Request,
     flow_in: FlowCreateRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = Depends(_MUTATING_CONTAINER),
 ):
     access_context = await flow_access_context.resolve_space_access_context(
         request,
@@ -442,7 +449,7 @@ async def update_flow(
     ],
     request: Request,
     flow_in: FlowUpdateRequest,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = Depends(_MUTATING_CONTAINER),
 ):
     await require_flow_edit_access(request, container, flow_id=id)
 
@@ -522,7 +529,7 @@ async def delete_flow(
         UUID, Path(description="Identifier of the draft flow definition to delete.")
     ],
     request: Request,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = Depends(_MUTATING_CONTAINER),
 ):
     access_context = await require_flow_delete_access(request, container, flow_id=id)
 
@@ -576,7 +583,7 @@ async def publish_flow(
         UUID, Path(description="Identifier of the draft flow definition to publish.")
     ],
     request: Request,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = Depends(_MUTATING_CONTAINER),
 ):
     await require_flow_publish_access(request, container, flow_id=id)
 
@@ -632,7 +639,7 @@ async def unpublish_flow(
         Path(description="Identifier of the published flow definition to unpublish."),
     ],
     request: Request,
-    container: Container = Depends(get_container(with_user=True)),
+    container: Container = Depends(_MUTATING_CONTAINER),
 ):
     await require_flow_unpublish_access(request, container, flow_id=id)
 
