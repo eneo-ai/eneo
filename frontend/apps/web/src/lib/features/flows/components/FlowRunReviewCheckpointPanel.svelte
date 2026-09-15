@@ -1,5 +1,10 @@
 <script lang="ts">
-  import type { FlowRunReviewCheckpoint, Eneo } from "@eneo/eneo-js";
+  import type {
+    FlowRunReviewCheckpoint,
+    FlowRunReviewCheckpointEdit,
+    FlowRunReviewCheckpointEditPage,
+    Eneo
+  } from "@eneo/eneo-js";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import { onMount } from "svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
@@ -58,6 +63,13 @@
   let actionError: string | null = $state(null);
   let draftValueText = $state("");
   let speakerRows = $state<SpeakerMappingRow[]>([]);
+  // Every saved change to the checkpoint's output, oldest first, with the
+  // baseline the first page's items are compared against. Loaded per
+  // checkpoint and again after each of this panel's own mutations.
+  let history = $state<FlowRunReviewCheckpointEditPage | null>(null);
+  let historyLoading = $state(false);
+  let historyError: string | null = $state(null);
+  let selectedHistoryRevision = $state<number | null>(null);
   // The transcription step's stored segments and audio, loaded once per
   // checkpoint so the reviewer can listen while naming speakers.
   let storedSegments = $state<TranscriptSegment[] | null>(null);
@@ -186,7 +198,54 @@
         nextCheckpoint.output_type
       );
       speakerRows = buildSpeakerRows(nextCheckpoint.current_payload_json);
+      selectedHistoryRevision = null;
+      void loadHistory(nextCheckpoint);
+    } else {
+      history = null;
     }
+  }
+
+  async function loadHistory(target: FlowRunReviewCheckpoint, afterRevision: number | null = null) {
+    historyLoading = true;
+    historyError = null;
+    try {
+      const page = await eneo.flows.runs.reviewCheckpoints.edits({
+        flowId,
+        runId,
+        checkpointId: target.id,
+        afterRevision
+      });
+      const previous = history;
+      history =
+        afterRevision === null || previous === null
+          ? page
+          : { ...page, baseline: previous.baseline, items: [...previous.items, ...page.items] };
+    } catch (error) {
+      console.error("Failed to load review checkpoint history", error);
+      historyError = getFlowRuntimeErrorMessage(error, m.flow_run_review_history_load_failed());
+    } finally {
+      historyLoading = false;
+    }
+  }
+
+  // The payload each history item changed: the page baseline for the first
+  // item (the original output on the first page), otherwise the item before.
+  function historyPredecessor(index: number): Record<string, unknown> | null {
+    if (!history) return null;
+    return index === 0 ? history.baseline.payload_json : history.items[index - 1].payload_json;
+  }
+
+  function historyCauseLabel(cause: FlowRunReviewCheckpointEdit["cause"]): string {
+    return cause === "corrections_folded"
+      ? m.flow_run_review_history_cause_corrections_folded()
+      : m.flow_run_review_history_cause_reviewer_edit();
+  }
+
+  function historyEditorLabel(item: FlowRunReviewCheckpointEdit): string | null {
+    const service = item.edited_by_service_principal;
+    return service
+      ? m.flow_run_review_history_editor_service({ name: service.display_name })
+      : null;
   }
 
   async function loadTranscriptContext(payload: Record<string, unknown> | null | undefined) {
@@ -610,6 +669,92 @@
         </Field.Field>
       {/if}
     </Field.Group>
+
+    <section
+      class="border-default bg-primary rounded-lg border p-3"
+      aria-labelledby="flow-review-history-title"
+    >
+      <div class="flex items-center justify-between gap-2">
+        <h3 id="flow-review-history-title" class="text-primary text-xs font-medium">
+          {m.flow_run_review_history_title()}
+        </h3>
+        {#if historyLoading}
+          <IconLoadingSpinner class="size-4 animate-spin" />
+        {/if}
+      </div>
+      <Field.Description class="mt-1 text-xs">{m.flow_run_review_history_help()}</Field.Description>
+      {#if historyError}
+        <Alert.Root variant="destructive" class="mt-2">
+          <Alert.Description>{historyError}</Alert.Description>
+        </Alert.Root>
+      {:else if history && history.items.length === 0}
+        <Field.Description class="mt-2 text-xs"
+          >{m.flow_run_review_history_empty()}</Field.Description
+        >
+      {:else if history}
+        <ol class="mt-2 flex flex-col gap-1">
+          {#each history.items as item, index (item.id)}
+            {@const editor = historyEditorLabel(item)}
+            {@const selected = selectedHistoryRevision === item.revision}
+            <li>
+              <button
+                type="button"
+                class="border-default hover:bg-hover-dimmer flex w-full flex-wrap items-baseline gap-x-3 gap-y-1 rounded-md border px-3 py-2 text-left text-xs"
+                aria-expanded={selected}
+                onclick={() => (selectedHistoryRevision = selected ? null : item.revision)}
+              >
+                <span class="text-primary font-medium"
+                  >{m.flow_run_review_history_revision({ revision: item.revision })}</span
+                >
+                <span>{historyCauseLabel(item.cause)}</span>
+                {#if editor}
+                  <span>{editor}</span>
+                {/if}
+                <span class="ml-auto">{formatReviewDeadline(item.created_at)}</span>
+              </button>
+              {#if selected}
+                <div class="mt-2 grid gap-3 lg:grid-cols-2">
+                  <div>
+                    <Field.Label class="text-primary text-xs font-medium">
+                      {index === 0 && !history.baseline.revision
+                        ? m.flow_run_review_history_original()
+                        : m.flow_run_review_history_before()}
+                    </Field.Label>
+                    <pre
+                      class="border-default bg-hover-dimmer mt-1 max-h-80 overflow-auto rounded-lg border p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap">{renderEditableValue(
+                        historyPredecessor(index),
+                        checkpoint.output_type
+                      )}</pre>
+                  </div>
+                  <div>
+                    <Field.Label class="text-primary text-xs font-medium">
+                      {m.flow_run_review_history_after()}
+                    </Field.Label>
+                    <pre
+                      class="border-default bg-hover-dimmer mt-1 max-h-80 overflow-auto rounded-lg border p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap">{renderEditableValue(
+                        item.payload_json,
+                        checkpoint.output_type
+                      )}</pre>
+                  </div>
+                </div>
+              {/if}
+            </li>
+          {/each}
+        </ol>
+        {#if history.truncated && history.next_after_revision !== null}
+          <Button
+            variant="ghost"
+            size="sm"
+            class="mt-2"
+            disabled={historyLoading}
+            onclick={() =>
+              checkpoint && void loadHistory(checkpoint, history?.next_after_revision ?? null)}
+          >
+            {m.flow_run_review_history_load_more()}
+          </Button>
+        {/if}
+      {/if}
+    </section>
 
     <Field.Field data-invalid={reviewDecisionExpired ? "true" : undefined}>
       <Field.Label class="text-primary text-xs font-medium" for="flow-review-reject-reason">

@@ -1,6 +1,12 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { EneoError, type FlowRunReviewCheckpoint, type FlowRun, type Eneo } from "@eneo/eneo-js";
+import {
+  EneoError,
+  type FlowRunReviewCheckpoint,
+  type FlowRunReviewCheckpointEditPage,
+  type FlowRun,
+  type Eneo
+} from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
 
 import FlowRunReviewCheckpointPanel from "./FlowRunReviewCheckpointPanel.svelte";
@@ -83,11 +89,19 @@ function buildRun(status: FlowRun["status"]): FlowRun {
   };
 }
 
+const emptyHistory: FlowRunReviewCheckpointEditPage = {
+  baseline: { revision: 1, payload_json: null, payload_sha256: "0".repeat(64) },
+  items: [],
+  next_after_revision: null,
+  truncated: false
+};
+
 function buildEneo({
   activeCheckpoint,
   steps,
   inputFileSignedUrl,
   active,
+  edits,
   edit = vi.fn(),
   approve = vi.fn(),
   reject = vi.fn(),
@@ -95,6 +109,7 @@ function buildEneo({
 }: {
   activeCheckpoint: FlowRunReviewCheckpoint | null;
   active?: ReturnType<typeof vi.fn>;
+  edits?: ReturnType<typeof vi.fn>;
   edit?: ReturnType<typeof vi.fn>;
   approve?: ReturnType<typeof vi.fn>;
   reject?: ReturnType<typeof vi.fn>;
@@ -111,6 +126,7 @@ function buildEneo({
           vi.fn(async () => ({ url: "https://app.test/f", expires_at: 4102444800 })),
         reviewCheckpoints: {
           active: active ?? vi.fn(async () => activeCheckpoint),
+          edits: edits ?? vi.fn(async () => emptyHistory),
           edit,
           approve,
           reject,
@@ -130,6 +146,91 @@ describe("FlowRunReviewCheckpointPanel", () => {
     });
 
     await screen.findByText(m.flow_run_review_no_active_checkpoint());
+  });
+
+  it("lists the checkpoint's saved changes and shows what a selected one changed", async () => {
+    const checkpoint = buildCheckpoint("edited", 3);
+    const edits = vi.fn(async () => ({
+      baseline: {
+        revision: 1,
+        payload_json: checkpoint.original_payload_json,
+        payload_sha256: "a".repeat(64)
+      },
+      items: [
+        {
+          id: "edit-2",
+          tenant_id: "tenant-1",
+          flow_id: "flow-1",
+          flow_run_id: "run-1",
+          checkpoint_id: "checkpoint-1",
+          revision: 2,
+          cause: "reviewer_edit",
+          corrections_revision_id: null,
+          payload_json: {
+            text: '{"answer": "First pass."}',
+            structured: { answer: "First pass." }
+          },
+          payload_sha256_before: "a".repeat(64),
+          payload_sha256_after: "b".repeat(64),
+          edited_by_user_id: "user-1",
+          edited_by_service_id: null,
+          edited_by_principal_type: "user",
+          edited_by_service_principal: null,
+          created_at: "2026-03-17T10:06:00Z",
+          updated_at: "2026-03-17T10:06:00Z"
+        },
+        {
+          id: "edit-3",
+          tenant_id: "tenant-1",
+          flow_id: "flow-1",
+          flow_run_id: "run-1",
+          checkpoint_id: "checkpoint-1",
+          revision: 3,
+          cause: "corrections_folded",
+          corrections_revision_id: "rev-1",
+          payload_json: checkpoint.current_payload_json,
+          payload_sha256_before: "b".repeat(64),
+          payload_sha256_after: "c".repeat(64),
+          edited_by_user_id: null,
+          edited_by_service_id: "service-1",
+          edited_by_principal_type: "service_key",
+          edited_by_service_principal: { id: "service-1", display_name: "Kommunroboten" },
+          created_at: "2026-03-17T10:07:00Z",
+          updated_at: "2026-03-17T10:07:00Z"
+        }
+      ],
+      next_after_revision: null,
+      truncated: false
+    }));
+    const eneo = buildEneo({ activeCheckpoint: checkpoint, edits });
+
+    render(FlowRunReviewCheckpointPanel, {
+      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
+    });
+
+    await screen.findByText(m.flow_run_review_history_revision({ revision: 2 }));
+    expect(edits).toHaveBeenCalledWith({
+      flowId: "flow-1",
+      runId: "run-1",
+      checkpointId: "checkpoint-1",
+      afterRevision: null
+    });
+    expect(screen.getByText(m.flow_run_review_history_cause_corrections_folded())).toBeTruthy();
+    expect(
+      screen.getByText(m.flow_run_review_history_editor_service({ name: "Kommunroboten" }))
+    ).toBeTruthy();
+
+    await fireEvent.click(
+      screen.getByRole("button", {
+        name: new RegExp(m.flow_run_review_history_revision({ revision: 3 }))
+      })
+    );
+
+    // Revision 3 is explained against revision 2, not against the original.
+    expect(screen.getByText(m.flow_run_review_history_before())).toBeTruthy();
+    const panes = screen.getAllByText(/First pass\.|Reviewed answer\./);
+    expect(panes.some((node) => node.textContent?.includes("First pass."))).toBe(true);
+    expect(panes.some((node) => node.textContent?.includes("Reviewed answer."))).toBe(true);
   });
 
   it("renders the citation summary attached to the active checkpoint", async () => {

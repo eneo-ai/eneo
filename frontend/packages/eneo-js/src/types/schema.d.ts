@@ -5080,6 +5080,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/edits": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List review checkpoint edits */
+    get: operations["list_flow_run_review_checkpoint_edits"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/reject/": {
     parameters: {
       query?: never;
@@ -5310,6 +5327,23 @@ export interface paths {
      *     be committed, the endpoint returns 503 and exposes no transcript corrections.
      */
     get: operations["list_flow_run_transcript_corrections"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/runs/{run_id}/transcript-corrections/{step_id}/revisions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List transcript correction revisions */
+    get: operations["list_flow_run_transcript_correction_revisions"];
     put?: never;
     post?: never;
     delete?: never;
@@ -15733,6 +15767,11 @@ export interface components {
       active_checkpoint_conflict: boolean;
       /** Active Checkpoint Id */
       active_checkpoint_id?: string | null;
+      /**
+       * Any Corrections Edited
+       * @default false
+       */
+      any_corrections_edited?: boolean;
       /** Any Edited */
       any_edited: boolean;
       /** Any Resumed */
@@ -15841,6 +15880,11 @@ export interface components {
       attempt_no: number;
       /** Checkpoint Id */
       checkpoint_id: string;
+      /**
+       * Corrections Edited
+       * @default false
+       */
+      corrections_edited?: boolean;
       /** Decision */
       decision?: ("approved" | "rejected" | "cancelled") | null;
       /** Edited */
@@ -15858,6 +15902,11 @@ export interface components {
     };
     /** EvidenceStepReviewImpact */
     EvidenceStepReviewImpact: {
+      /**
+       * Any Corrections Edited
+       * @default false
+       */
+      any_corrections_edited?: boolean;
       /** Any Edited */
       any_edited: boolean;
       /** Any Output Changed */
@@ -16256,6 +16305,7 @@ export interface components {
      */
     FlowApiErrorCode:
       | "flow_not_published"
+      | "flow_review_history_too_large"
       | "flow_deleted"
       | "flow_owner_required"
       | "flow_service_key_admin_required"
@@ -16840,6 +16890,8 @@ export interface components {
         | "result_files"
         | "runtime_input_files"
         | "review_checkpoints"
+        | "review_checkpoint_edits"
+        | "transcript_correction_revisions"
         | "webhook_deliveries"
         | "provider_calls"
         | "whole_bundle";
@@ -20432,6 +20484,8 @@ export interface components {
       step_attempts: components["schemas"]["FlowStepAttemptPublic"][];
       /** Step Results */
       step_results: components["schemas"]["FlowRunStepPublic"][];
+      /** Transcript Correction Revisions */
+      transcript_correction_revisions?: components["schemas"]["FlowTranscriptCorrectionRevisionPublic"][];
       /** Webhook Deliveries */
       webhook_deliveries: components["schemas"]["FlowRunWebhookDeliveryPublic"][];
     };
@@ -21039,6 +21093,88 @@ export interface components {
        */
       expected_checkpoint_revision: number;
     };
+    /** FlowRunReviewCheckpointEditBaselinePublic */
+    FlowRunReviewCheckpointEditBaselinePublic: {
+      /** Payload Json */
+      payload_json: {
+        [key: string]: unknown;
+      } | null;
+      /** Payload Sha256 */
+      payload_sha256: string;
+      /** Revision */
+      revision: number;
+    };
+    /**
+     * FlowRunReviewCheckpointEditCause
+     * @enum {string}
+     */
+    FlowRunReviewCheckpointEditCause: "reviewer_edit" | "corrections_folded";
+    /** FlowRunReviewCheckpointEditPagePublic */
+    FlowRunReviewCheckpointEditPagePublic: {
+      baseline: components["schemas"]["FlowRunReviewCheckpointEditBaselinePublic"];
+      /** Items */
+      items: components["schemas"]["FlowRunReviewCheckpointEditPublic"][];
+      /** Next After Revision */
+      next_after_revision: number | null;
+      /** Truncated */
+      truncated: boolean;
+    };
+    /** FlowRunReviewCheckpointEditPublic */
+    FlowRunReviewCheckpointEditPublic: {
+      cause: components["schemas"]["FlowRunReviewCheckpointEditCause"];
+      /**
+       * Checkpoint Id
+       * Format: uuid
+       */
+      checkpoint_id: string;
+      /** Correction Set Id */
+      correction_set_id?: string | null;
+      /** Corrections Revision */
+      corrections_revision?: number | null;
+      /** Corrections Revision Id */
+      corrections_revision_id: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      edited_by_principal_type: components["schemas"]["PrincipalType"];
+      /** Edited By Service Id */
+      edited_by_service_id: string | null;
+      edited_by_service_principal?: components["schemas"]["FlowServicePrincipalActorPublic"] | null;
+      /** Edited By User Id */
+      edited_by_user_id: string | null;
+      /**
+       * Flow Id
+       * Format: uuid
+       */
+      flow_id: string;
+      /**
+       * Flow Run Id
+       * Format: uuid
+       */
+      flow_run_id: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Payload Json */
+      payload_json: {
+        [key: string]: unknown;
+      };
+      /** Payload Sha256 After */
+      payload_sha256_after: string;
+      /** Payload Sha256 Before */
+      payload_sha256_before: string;
+      /** Revision */
+      revision: number;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+    };
     /**
      * FlowRunReviewCheckpointEditRequest
      * @example {
@@ -21141,6 +21277,8 @@ export interface components {
       decision?: ("approved" | "rejected" | "cancelled") | null;
       /** Edited At */
       edited_at?: string | null;
+      /** Edits */
+      edits?: components["schemas"]["FlowRunReviewCheckpointEditPublic"][];
       /** Expired At */
       expired_at?: string | null;
       /** Expires At */
@@ -23323,6 +23461,85 @@ export interface components {
       template_file_id?: string | null;
       /** Template Name */
       template_name?: string | null;
+    };
+    /** FlowTranscriptCorrectionRevisionBaselinePublic */
+    FlowTranscriptCorrectionRevisionBaselinePublic: {
+      /** Occurrences Json */
+      occurrences_json: {
+        [key: string]: unknown;
+      }[];
+      /** Revision */
+      revision: number;
+      /** Speaker Edits Json */
+      speaker_edits_json: {
+        [key: string]: unknown;
+      }[];
+    };
+    /** FlowTranscriptCorrectionRevisionPagePublic */
+    FlowTranscriptCorrectionRevisionPagePublic: {
+      baseline: components["schemas"]["FlowTranscriptCorrectionRevisionBaselinePublic"];
+      /** Items */
+      items: components["schemas"]["FlowTranscriptCorrectionRevisionPublic"][];
+      /** Next After Revision */
+      next_after_revision: number | null;
+      /** Truncated */
+      truncated: boolean;
+    };
+    /** FlowTranscriptCorrectionRevisionPublic */
+    FlowTranscriptCorrectionRevisionPublic: {
+      /**
+       * Correction Set Id
+       * Format: uuid
+       */
+      correction_set_id: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      edited_by_principal_type: components["schemas"]["PrincipalType"];
+      /** Edited By Service Id */
+      edited_by_service_id: string | null;
+      edited_by_service_principal?: components["schemas"]["FlowServicePrincipalActorPublic"] | null;
+      /** Edited By User Id */
+      edited_by_user_id: string | null;
+      /**
+       * Flow Id
+       * Format: uuid
+       */
+      flow_id: string;
+      /**
+       * Flow Run Id
+       * Format: uuid
+       */
+      flow_run_id: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Occurrences Json */
+      occurrences_json: {
+        [key: string]: unknown;
+      }[];
+      /** Revision */
+      revision: number;
+      /** Segments Hash */
+      segments_hash: string;
+      /** Speaker Edits Json */
+      speaker_edits_json: {
+        [key: string]: unknown;
+      }[];
+      /**
+       * Step Id
+       * Format: uuid
+       */
+      step_id: string;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
     };
     /**
      * FlowTranscriptCorrectionsEditRequest
@@ -29353,6 +29570,8 @@ export interface components {
         | "result_files"
         | "runtime_input_files"
         | "review_checkpoints"
+        | "review_checkpoint_edits"
+        | "transcript_correction_revisions"
         | "webhook_deliveries"
         | "provider_calls"
         | "whole_bundle";
@@ -29383,6 +29602,8 @@ export interface components {
         | "result_files"
         | "runtime_input_files"
         | "review_checkpoints"
+        | "review_checkpoint_edits"
+        | "transcript_correction_revisions"
         | "webhook_deliveries"
         | "provider_calls"
         | "whole_bundle";
@@ -29413,6 +29634,8 @@ export interface components {
         | "result_files"
         | "runtime_input_files"
         | "review_checkpoints"
+        | "review_checkpoint_edits"
+        | "transcript_correction_revisions"
         | "webhook_deliveries"
         | "provider_calls"
         | "whole_bundle";
@@ -53756,6 +53979,115 @@ export interface operations {
       };
     };
   };
+  list_flow_run_review_checkpoint_edits: {
+    parameters: {
+      query?: {
+        limit?: number;
+        after_revision?: number | null;
+      };
+      header?: never;
+      path: {
+        id: string;
+        run_id: string;
+        checkpoint_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunReviewCheckpointEditPagePublic"];
+        };
+      };
+      /** @description Forbidden. Caller scope, tenant or space permission, and run visibility are evaluated before returning Flow runtime data. Machine-readable codes include `insufficient_scope`, `flow_run_access_denied`, and `flow_service_key_principal_not_supported`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       },
+           *       "eneo_error_code": 9001,
+           *       "message": "API key space scope does not match requested flow."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Run or history baseline not found for this flow and tenant. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "History not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The baseline and first remaining revision exceed the history page byte limit. */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_review_history_too_large",
+           *       "context": {
+           *         "revision": 2
+           *       },
+           *       "eneo_error_code": 9015,
+           *       "message": "Review history comparison exceeds the page size limit."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Required access audit logging is unavailable; no history was returned. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_evidence_audit_logging_failed",
+           *       "context": {
+           *         "audit_required": true
+           *       },
+           *       "eneo_error_code": 9024,
+           *       "message": "Evidence audit logging is unavailable."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   reject_flow_run_review_checkpoint: {
     parameters: {
       query?: never;
@@ -54446,6 +54778,115 @@ export interface operations {
         };
       };
       /** @description Required access audit logging is unavailable; no transcript corrections were returned. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_evidence_audit_logging_failed",
+           *       "context": {
+           *         "audit_required": true
+           *       },
+           *       "eneo_error_code": 9024,
+           *       "message": "Evidence audit logging is unavailable."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  list_flow_run_transcript_correction_revisions: {
+    parameters: {
+      query?: {
+        limit?: number;
+        after_revision?: number | null;
+      };
+      header?: never;
+      path: {
+        id: string;
+        run_id: string;
+        step_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowTranscriptCorrectionRevisionPagePublic"];
+        };
+      };
+      /** @description Forbidden. Caller scope, tenant or space permission, and run visibility are evaluated before returning Flow runtime data. Machine-readable codes include `insufficient_scope`, `flow_run_access_denied`, and `flow_service_key_principal_not_supported`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       },
+           *       "eneo_error_code": 9001,
+           *       "message": "API key space scope does not match requested flow."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Run or history baseline not found for this flow and tenant. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "History not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The baseline and first remaining revision exceed the history page byte limit. */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_review_history_too_large",
+           *       "context": {
+           *         "revision": 2
+           *       },
+           *       "eneo_error_code": 9015,
+           *       "message": "Review history comparison exceeds the page size limit."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Required access audit logging is unavailable; no history was returned. */
       503: {
         headers: {
           [name: string]: unknown;

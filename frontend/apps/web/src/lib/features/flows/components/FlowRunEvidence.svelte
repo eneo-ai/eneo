@@ -389,6 +389,10 @@
         return m.flow_run_evidence_section_runtime_input_files();
       case "review_checkpoints":
         return m.flow_run_evidence_section_review_checkpoints();
+      case "review_checkpoint_edits":
+        return m.flow_run_evidence_section_review_checkpoint_edits();
+      case "transcript_correction_revisions":
+        return m.flow_run_evidence_section_transcript_correction_revisions();
       case "webhook_deliveries":
         return m.flow_run_evidence_section_webhook_deliveries();
       case "provider_calls":

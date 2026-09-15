@@ -928,6 +928,33 @@ export function initFlows(client) {
         },
 
         /**
+         * Page through the committed changes of one review checkpoint, in
+         * revision order. `baseline` is what the first item changed (the
+         * original output, or the revision named by `afterRevision`), so a
+         * reader can explain every item against its predecessor. A page
+         * whose baseline and first item exceed the page byte limit fails with
+         * `flow_review_history_too_large` instead of skipping a revision.
+         *
+         * @param {{flowId: string, runId: string, checkpointId: string, limit?: number, afterRevision?: number | null}} params
+         * @returns {Promise<import('../types/resources').FlowRunReviewCheckpointEditPage>}
+         */
+        edits: async ({ flowId, runId, checkpointId, limit = 50, afterRevision = null }) => {
+          return _fetch(
+            "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/edits",
+            {
+              method: "get",
+              params: {
+                path: { id: flowId, run_id: runId, checkpoint_id: checkpointId },
+                query: {
+                  limit,
+                  ...(afterRevision === null ? {} : { after_revision: afterRevision })
+                }
+              }
+            }
+          );
+        },
+
+        /**
          * @param {{flowId: string, runId: string, checkpointId: string, expectedCheckpointRevision: number, idempotencyKey: string}} params
          * @returns {Promise<import('../types/resources').FlowRunReviewCheckpointResumeResponse>}
          */
@@ -971,6 +998,31 @@ export function initFlows(client) {
             method: "get",
             params: { path: { id: flowId, run_id: runId } }
           });
+        },
+
+        /**
+         * Page through the committed revisions of one transcription step's
+         * correction set, in revision order. `baseline` is the preceding
+         * revision (an empty set before the first save), so a revert can be
+         * explained against what it removed.
+         *
+         * @param {{flowId: string, runId: string, stepId: string, limit?: number, afterRevision?: number | null}} params
+         * @returns {Promise<import('../types/resources').FlowTranscriptCorrectionRevisionPage>}
+         */
+        revisions: async ({ flowId, runId, stepId, limit = 50, afterRevision = null }) => {
+          return _fetch(
+            "/api/v1/flows/{id}/runs/{run_id}/transcript-corrections/{step_id}/revisions",
+            {
+              method: "get",
+              params: {
+                path: { id: flowId, run_id: runId, step_id: stepId },
+                query: {
+                  limit,
+                  ...(afterRevision === null ? {} : { after_revision: afterRevision })
+                }
+              }
+            }
+          );
         },
 
         /**

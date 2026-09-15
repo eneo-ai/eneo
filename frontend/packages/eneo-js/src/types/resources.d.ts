@@ -325,10 +325,18 @@ export type FlowRunRerunInvalidatedStep =
 export type FlowCitationSummary = components["schemas"]["FlowCitationSummaryPublic"];
 export type FlowCitationSource = components["schemas"]["FlowCitationSourcePublic"];
 export type FlowRunReviewCheckpoint = components["schemas"]["FlowRunReviewCheckpointPublic"];
+export type FlowRunReviewCheckpointEdit =
+  components["schemas"]["FlowRunReviewCheckpointEditPublic"];
+export type FlowRunReviewCheckpointEditPage =
+  components["schemas"]["FlowRunReviewCheckpointEditPagePublic"];
 export type FlowRunReviewCheckpointState = components["schemas"]["FlowRunReviewCheckpointState"];
 export type FlowRunReviewCheckpointResumeResponse =
   components["schemas"]["FlowRunReviewCheckpointResumeResponse"];
 export type FlowRunTranscriptCorrections = components["schemas"]["FlowTranscriptCorrectionsPublic"];
+export type FlowTranscriptCorrectionRevision =
+  components["schemas"]["FlowTranscriptCorrectionRevisionPublic"];
+export type FlowTranscriptCorrectionRevisionPage =
+  components["schemas"]["FlowTranscriptCorrectionRevisionPagePublic"];
 export type FlowTranscriptCorrectionOccurrence =
   components["schemas"]["TranscriptCorrectionOccurrencePublic"];
 export type FlowTranscriptSpeakerEdit = components["schemas"]["TranscriptSpeakerEditPublic"];
