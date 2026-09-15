@@ -21,7 +21,10 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/stores";
   import { m } from "$lib/paraglide/messages";
-  import { SvelteURLSearchParams } from "svelte/reactivity";
+  import { resolve } from "$app/paths";
+  import { Button } from "$lib/components/ui/button";
+  import { Input as SearchInput } from "$lib/components/ui/input";
+  import { readUserUsageQuery, userUsageUrl } from "./usage-query";
 
   type Props = { costRates: CostRateMap };
   const { costRates }: Props = $props();
@@ -31,16 +34,8 @@
   let error = $state<string | null>(null);
   let fetchId = 0;
 
-  // Reactive pagination state derived from URL search parameters
-  const paginationState = $derived.by(() => {
-    const searchParams = $page.url.searchParams;
-    return {
-      page: parseInt(searchParams.get("page") || "1"),
-      perPage: 25, // Fixed value
-      sortBy: (searchParams.get("sortBy") as UserSortBy) || "total_tokens",
-      sortOrder: (searchParams.get("sortOrder") as "asc" | "desc") || "desc"
-    };
-  });
+  const paginationState = $derived(readUserUsageQuery($page.url));
+  let searchDraft = $derived(paginationState.search);
 
   const eneo = getEneo();
 
@@ -75,7 +70,8 @@
     page: number,
     perPage: number,
     sortBy: UserSortBy,
-    sortOrder: string
+    sortOrder: "asc" | "desc",
+    search: string
   ) {
     const id = ++fetchId;
     isLoading = true;
@@ -88,7 +84,8 @@
         page: page,
         perPage: perPage,
         sortBy: sortBy,
-        sortOrder: sortOrder
+        sortOrder: sortOrder,
+        search: search || undefined
       });
       if (id !== fetchId) return; // Stale response, discard
       userStats = result;
@@ -116,45 +113,27 @@
 
   // Single effect handles all data fetching — triggered by dateRange or pagination changes
   $effect(() => {
-    const { page, perPage, sortBy, sortOrder } = paginationState;
+    const { page, perPage, sortBy, sortOrder, search } = paginationState;
     if (dateRange.start && dateRange.end) {
-      updateUserStats(dateRange, page, perPage, sortBy, sortOrder);
+      updateUserStats(dateRange, page, perPage, sortBy, sortOrder, search);
     }
   });
 
   function onUserClick(user: UserTokenUsage) {
-    // Preserve current URL state by including pagination parameters
-    const currentUrl = new URL($page.url);
-    const params = new SvelteURLSearchParams();
-
-    // Preserve pagination parameters for the back navigation
-    if (currentUrl.searchParams.get("page"))
-      params.set("page", currentUrl.searchParams.get("page")!);
-    if (currentUrl.searchParams.get("sortBy"))
-      params.set("sortBy", currentUrl.searchParams.get("sortBy")!);
-    if (currentUrl.searchParams.get("sortOrder"))
-      params.set("sortOrder", currentUrl.searchParams.get("sortOrder")!);
-
-    const userDetailUrl = `/admin/usage/users/${user.user_id}${params.toString() ? "?" + params.toString() : ""}`;
-    // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic path with user id and query
-    goto(userDetailUrl);
+    const query = $page.url.search;
+    goto(resolve(`/admin/usage/users/${user.user_id}${query}`));
   }
 
-  function onPageChange(newPage: number) {
-    const url = new URL($page.url);
-    url.searchParams.set("page", newPage.toString());
-    // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic URL built from current page
-    goto(url, { replaceState: true });
+  function navigate(change: Parameters<typeof userUsageUrl>[1]) {
+    // eslint-disable-next-line svelte/no-navigation-without-resolve -- same-route URL retaining current filters
+    goto(userUsageUrl($page.url, change), { noScroll: true, keepFocus: true });
   }
 
-  function onSortChange(newSortBy: UserSortBy, newSortOrder: "asc" | "desc") {
-    const url = new URL($page.url);
-    url.searchParams.set("sortBy", newSortBy);
-    url.searchParams.set("sortOrder", newSortOrder);
-    // Reset to page 1 when sorting changes
-    url.searchParams.set("page", "1");
-    // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic URL built from current page
-    goto(url, { replaceState: true });
+  function onPageChange(page: number) {
+    navigate({ page });
+  }
+  function onSortChange(sortBy: UserSortBy, sortOrder: "asc" | "desc") {
+    navigate({ sortBy, sortOrder });
   }
 </script>
 
@@ -164,13 +143,40 @@
       <Input.DateRange bind:value={dateRange} onValueCommit={handleDateChange}></Input.DateRange>
     </div>
 
+    <form
+      class="mb-4 flex flex-wrap items-center gap-2"
+      role="search"
+      aria-label={m.usage_by_user()}
+      onsubmit={(event) => {
+        event.preventDefault();
+        navigate({ search: searchDraft });
+      }}
+    >
+      <SearchInput
+        type="search"
+        class="min-w-48 flex-1"
+        bind:value={searchDraft}
+        maxlength={200}
+        placeholder={m.usage_user_search()}
+        aria-label={m.usage_user_search()}
+      />
+      <Button type="submit">{m.search()}</Button>
+      <Button
+        variant="outline"
+        onclick={() => {
+          searchDraft = "";
+          navigate({ search: "" });
+        }}>{m.admin_users_clear_filters()}</Button
+      >
+    </form>
+
     {#if isLoading}
       <div class="flex justify-center p-8">
-        <div class="text-gray-500">{m.loading_user_token_usage()}</div>
+        <div class="text-muted-foreground">{m.loading_user_token_usage()}</div>
       </div>
     {:else if error}
       <div class="flex justify-center p-8">
-        <div class="text-red-500">{error}</div>
+        <div class="text-negative-stronger">{error}</div>
       </div>
     {:else if userStats && userStats.users.length > 0}
       <UserOverviewBar
@@ -178,7 +184,14 @@
         highThreshold={thresholds.high}
         mediumThreshold={thresholds.medium}
       ></UserOverviewBar>
-      <div class="mt-4">
+      <p class="text-muted-foreground mt-4 text-sm" role="status">
+        {m.pagination_showing_range({
+          start: (paginationState.page - 1) * paginationState.perPage + 1,
+          end: Math.min(paginationState.page * paginationState.perPage, userStats.total_users),
+          total: userStats.total_users
+        })}
+      </p>
+      <div class="mt-3">
         <UserTokenTable
           users={userStats.users}
           totalUsers={userStats.total_users}
@@ -196,7 +209,7 @@
       </div>
     {:else}
       <div class="flex justify-center p-8">
-        <div class="text-gray-500">{m.no_user_token_usage_data()}</div>
+        <div class="text-muted-foreground">{m.no_user_token_usage_data()}</div>
       </div>
     {/if}
   </Settings.Row>

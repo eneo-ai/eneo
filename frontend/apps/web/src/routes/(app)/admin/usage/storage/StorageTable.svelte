@@ -17,9 +17,7 @@
 
   let showAllSpaces = false;
 
-  $: visibleSpaces = showAllSpaces ? spaces : spaces.slice(0, 10);
-
-  const table = Table.createWithResource(visibleSpaces);
+  const table = Table.createWithResource(spaces, 10);
 
   const viewModel = table.createViewModel([
     table.columnPrimary({
@@ -54,7 +52,8 @@
     })
   ]);
 
-  $: table.update(visibleSpaces);
+  $: table.update(spaces);
+  $: viewModel.pluginStates.page.pageSize.set(showAllSpaces ? Math.max(spaces.length, 10) : 10);
 </script>
 
 <Table.Root {viewModel} resourceName={m.resource_spaces()} displayAs="list"></Table.Root>

@@ -39743,7 +39743,9 @@ export interface operations {
         /** @description Field to sort by. */
         sort_by?: components["schemas"]["UserSortBy"];
         /** @description Sort order (asc or desc). */
-        sort_order?: string;
+        sort_order?: "asc" | "desc";
+        /** @description Search username or email across all users before pagination. */
+        search?: string | null;
       };
       header?: never;
       path?: never;

@@ -234,11 +234,6 @@
       "count": 18
     }
   },
-  "src/routes/(app)/admin/usage/users/UserTokenSummary.svelte": {
-    "eneo/no-raw-color": {
-      "count": 3
-    }
-  },
   "src/routes/(app)/admin/usage/users/[userId]/+page.svelte": {
     "eneo/no-raw-color": {
       "count": 3

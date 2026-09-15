@@ -4771,5 +4771,6 @@
   "admin_users_refine_search": "Listan visar högst 100 sidor. Filtrera på roll, e-post eller användarnamn för att hitta användare i hela organisationen.",
   "admin_users_pagination": "Sidor i användarlistan",
   "admin_users_previous_page": "Föregående sida",
-  "admin_users_next_page": "Nästa sida"
+  "admin_users_next_page": "Nästa sida",
+  "usage_user_search": "Sök användarnamn eller e-post i alla användares användning"
 }

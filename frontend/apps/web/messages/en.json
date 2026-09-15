@@ -4771,5 +4771,6 @@
   "admin_users_refine_search": "Browsing is limited to 100 pages. Filter by role, email or username to find users across the entire organization.",
   "admin_users_pagination": "User list pages",
   "admin_users_previous_page": "Previous page",
-  "admin_users_next_page": "Next page"
+  "admin_users_next_page": "Next page",
+  "usage_user_search": "Search username or email across all user usage"
 }
