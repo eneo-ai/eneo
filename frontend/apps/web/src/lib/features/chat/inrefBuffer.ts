@@ -18,7 +18,18 @@ export function splitPendingInref(buffer: string): [ready: string, pending: stri
   const start = buffer.lastIndexOf("<");
   if (start === -1) return [buffer, ""];
   const tail = buffer.slice(start);
-  const couldBeTag = tail.length <= TAG.length ? TAG.startsWith(tail) : tail.startsWith(TAG);
-  if (!couldBeTag || tail.includes(">")) return [buffer, ""];
+  if (!couldBecomeTag(tail) || tail.includes(">")) return [buffer, ""];
   return [buffer.slice(0, start), tail];
+}
+
+/**
+ * True while the fragment is a prefix of a citation tag. The renderer only
+ * accepts `<inref` followed by whitespace or `/`, so `<inreference prose`
+ * can never become a citation and is released at once instead of being
+ * withheld until the next `>`.
+ */
+function couldBecomeTag(tail: string): boolean {
+  if (tail.length <= TAG.length) return TAG.startsWith(tail);
+  if (!tail.startsWith(TAG)) return false;
+  return /^[\s/]/.test(tail.charAt(TAG.length));
 }
