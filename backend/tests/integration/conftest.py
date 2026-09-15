@@ -341,6 +341,24 @@ async def _force_gc_before_loop_closes():
     gc.collect()
 
 
+@pytest.fixture(autouse=True)
+def settings_singleton_restored(test_settings: Settings):
+    """Fail the test that leaves a replaced Settings object installed.
+
+    Tests may swap the singleton with set_settings(model_copy(...)) as long as
+    they reinstall the original object afterwards. Leaving a copy behind makes
+    every later test in this worker that mutates ``test_settings`` silently
+    ineffective, which surfaced as an order-dependent federation failure.
+    """
+    from eneo.main.config import get_settings
+
+    yield
+    assert get_settings() is test_settings, (
+        "This test replaced the settings singleton and did not reinstall the "
+        "original object; restore it with set_settings(<original>)."
+    )
+
+
 @pytest.fixture(scope="session", autouse=True)
 def override_settings_for_session(test_settings: Settings):
     """
