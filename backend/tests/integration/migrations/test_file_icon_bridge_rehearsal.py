@@ -34,7 +34,7 @@ from testcontainers.postgres import PostgresContainer
 from alembic import command
 from alembic.script import ScriptDirectory
 from eneo.database.database import DatabaseSessionManager, sessionmanager
-from eneo.main.config import set_settings
+from eneo.main.config import get_settings, set_settings
 from eneo.object_content.configuration import ObjectContentCoreSettings
 from eneo.object_content.content_service import ObjectContentService
 from eneo.object_content.file_icon_backfill import (
@@ -428,6 +428,9 @@ async def test_released_upgrade_recovers_from_process_death_and_backup_restore(
     report = state["report"]
     path = state["path"]
     killed = worker = None
+    # The restore steps below install copies pointing at restored databases;
+    # reinstall the session's settings object once the application is done.
+    original_settings = get_settings()
     try:
         with _connect(url) as connection, connection.cursor() as cursor:
             cursor.execute(
@@ -650,6 +653,7 @@ async def test_released_upgrade_recovers_from_process_death_and_backup_restore(
                 if process.poll() is None:
                     process.kill()
                 process.communicate(timeout=5)
+        set_settings(original_settings)
 
 
 async def _worker_main():
