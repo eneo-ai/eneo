@@ -10,6 +10,9 @@ where that stops, so a later change cannot widen it unnoticed:
 * a user group from another tenant cannot grant membership
 * assistant-scoped user keys never enter the fallback
 * the original-file path follows the same rule as the text preview
+* the rule is space visibility, not chat permission: a linked personal-space
+  owner with no tenant permissions reads organization knowledge even though
+  personal chat and assistants are denied to them
 """
 
 from dataclasses import dataclass
@@ -337,5 +340,46 @@ async def test_original_file_access_follows_the_preview_rule(db_container, bound
 
     async with db_container(user=boundary.reader) as container:
         # Authorised: the check passes and only the missing stored original stops it.
+        with pytest.raises(InfoBlobOriginalUnavailableError):
+            await container.info_blob_service().ensure_original_available(blob_id)
+
+
+async def test_linked_personal_space_reads_without_chat_permissions(
+    db_container, boundary
+):
+    """The contract is space visibility plus space role, not chat permission.
+
+    A user whose personal space is linked to the organization sees the
+    organization's knowledge in that space, so they may preview it and fetch
+    its original, even when their tenant role grants neither personal chat
+    nor assistants. Pinned so that widening or narrowing this is a deliberate
+    change rather than a side effect.
+    """
+    from eneo.info_blobs.info_blob_service import InfoBlobOriginalUnavailableError
+
+    assert not boundary.reader.permissions
+    async with db_container() as container:
+        session = container.session()
+        await session.execute(
+            sa.update(Spaces)
+            .where(Spaces.id == boundary.reader_space_id)
+            .values(tenant_space_id=boundary.org_id)
+        )
+        _, blob_id = await _make_blob(
+            session,
+            space_id=boundary.org_id,
+            tenant_id=boundary.tenant_id,
+            admin_id=boundary.admin_id,
+            model_id=boundary.model_id,
+        )
+        await session.flush()
+
+    async with db_container(user=boundary.reader) as container:
+        personal = await container.space_service().get_space(boundary.reader_space_id)
+        actor = container.actor_manager().get_space_actor_from_space(personal)
+        assert not actor.can_read_default_assistant()
+        assert not actor.can_read_assistants()
+
+        assert (await container.info_blob_service().get_by_id(blob_id)).text
         with pytest.raises(InfoBlobOriginalUnavailableError):
             await container.info_blob_service().ensure_original_available(blob_id)

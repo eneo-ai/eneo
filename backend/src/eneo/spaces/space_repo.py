@@ -142,6 +142,12 @@ class KnowledgeSource:
     space (``effective_space_ids_for``). ``visible_to`` and ``spaces_seeing``
     are the two directions of that one rule, so what a space loads as knowledge
     and what a user may preview from a citation cannot drift apart.
+
+    Read access to a blob therefore follows space visibility and the reader's
+    space role, not their chat or assistant permissions: a member of any space
+    that sees the source may preview it and fetch its original even if chat is
+    disabled for them. Chat and assistants keep their own tenant-permission
+    gates in ``SpaceActor``.
     """
 
     table: type[CollectionsTable] | type[WebsitesTable] | type[IntegrationKnowledge]
