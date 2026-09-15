@@ -667,6 +667,7 @@ export class FlowAIBuilderDriver {
       sessionGeneration,
       abortController: this.#abortController
     };
+    this.#reviewEvidenceLevel = 0;
     void this.#fetchModels(owner);
     return owner;
   }
@@ -788,9 +789,12 @@ export class FlowAIBuilderDriver {
       method: "get",
       params: { path: { flow_id: this.#flowId }, query: { space_id: this.#spaceId } }
     })) as AIBuilderFlowReviewPacket;
-    // Every judgement and turn over this packet is held to its evidence level.
+    // Every judgement and turn over this packet is held to its evidence
+    // level; the review is ready only once the list at that level is, so no
+    // action sends a choice the floor refuses.
+    this.#reviewEvidenceLevel = packet.evidence_classification_level;
     const owner = this.#currentSessionOwner();
-    if (owner) void this.#fetchModels(owner, packet.evidence_classification_level);
+    if (owner) await this.#fetchModels(owner);
     return packet;
   }
 
@@ -1718,13 +1722,32 @@ export class FlowAIBuilderDriver {
 
   // Model names are display data for the plan; the read belongs to the
   // session, not to any message stream, so a send in flight cannot discard it.
-  // `evidenceLevel` is the level of run evidence the next call will read (a
-  // review packet's); the server lists at the higher of it and what the
-  // conversation has already read, so the composer shows the model the turn
-  // will actually run on.
-  async #fetchModels(owner: SessionOperationOwner, evidenceLevel = 0): Promise<void> {
+  /** The level of run evidence the open review reads (its packet's), or 0
+   *  when no review is open. Every model listing is read at the higher of it
+   *  and what the conversation has already read, so the composer shows the
+   *  model a judgement or turn will actually run on. The review's lifetime
+   *  owns it: opening sets it, closing clears it. */
+  #reviewEvidenceLevel = 0;
+  /** Which listing request is current. Listings overlap (session adoption,
+   *  a review opening, a retry); only the newest may install its result or
+   *  its failure, or a late conversation-only list would replace the review's. */
+  #modelListingSequence = 0;
+
+  /** The review's evidence floor is gone with it: list for the conversation
+   *  alone again, so the default shown is the one an ordinary turn resolves. */
+  async closeReviewListing(): Promise<void> {
+    if (this.#reviewEvidenceLevel === 0) return;
+    this.#reviewEvidenceLevel = 0;
+    const owner = this.#currentSessionOwner();
+    if (owner) await this.#fetchModels(owner);
+  }
+
+  async #fetchModels(owner: SessionOperationOwner): Promise<void> {
     if (!this.#state.session) return;
     if (!this.#ownsSessionIdentity(owner)) return;
+    const sequence = ++this.#modelListingSequence;
+    const evidenceLevel = this.#reviewEvidenceLevel;
+    const modelBefore = this.effectiveModel?.id ?? null;
 
     try {
       const result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.sessionModels, {
@@ -1734,7 +1757,7 @@ export class FlowAIBuilderDriver {
           query: evidenceLevel > 0 ? { evidence_level: evidenceLevel } : undefined
         }
       })) as AIBuilderModelsResponse;
-      if (!this.#ownsSessionIdentity(owner)) return;
+      if (!this.#ownsSessionIdentity(owner) || sequence !== this.#modelListingSequence) return;
       this.#state.availableModels = result.models;
       // A choice the floor no longer lists would be refused on send; the
       // composer falls back to the default the server now advertises.
@@ -1743,17 +1766,21 @@ export class FlowAIBuilderDriver {
         !result.models.some((model) => model.id === this.#state.selectedModelId)
       ) {
         this.#state.selectedModelId = null;
-        this.#state.selectedReasoningEffort = null;
       }
       this.#state.defaultModelId = result.models.some(
         (model) => model.id === result.default_model_id
       )
         ? (result.default_model_id ?? null)
         : null;
+      // An effort belongs to the model it was chosen for, explicit or default;
+      // carried to another model it is refused on send or silently wrong.
+      if ((this.effectiveModel?.id ?? null) !== modelBefore) {
+        this.#state.selectedReasoningEffort = null;
+      }
       this.#state.modelLoadStatus = "loaded";
       this.#notify();
     } catch {
-      if (!this.#ownsSessionIdentity(owner)) return;
+      if (!this.#ownsSessionIdentity(owner) || sequence !== this.#modelListingSequence) return;
       this.#state.availableModels = [];
       this.#state.defaultModelId = null;
       this.#state.selectedModelId = null;

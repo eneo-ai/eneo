@@ -761,42 +761,114 @@ describe("FlowAIBuilderDriver", () => {
     expect(driver.state.currentPlan?.plan_id).toBe("plan-9");
   });
 
-  it("lists the models a review packet's evidence level allows and drops a choice below it", async () => {
-    // The listing at the packet's level is the one the judgement is held to;
-    // a model chosen before the floor rose would be refused on send.
-    const lowModel = makeModel({ id: "model-low", name: "Low" });
+  describe("model listing follows the review's evidence floor", () => {
+    const lowModel = makeModel({
+      id: "model-low",
+      name: "Low",
+      reasoning_effort_options: ["high"]
+    });
     const highModel = makeModel({ id: "model-high", name: "High" });
-    const modelRequests: unknown[] = [];
-    const fetch = vi.fn(async (path: string, init?: { params?: { query?: unknown } }) => {
-      if (path.endsWith("/models")) {
-        modelRequests.push(init?.params?.query);
-        return init?.params?.query
-          ? { models: [highModel], default_model_id: "model-high" }
-          : { models: [lowModel, highModel], default_model_id: "model-low" };
-      }
-      if (path.endsWith("/review-packet")) {
-        return { evidence_classification_level: 2 };
-      }
-      if (path === "/api/v1/flows/ai-builder/sessions") return { sessions: [] };
-      throw new Error(`Unexpected request: ${path}`);
-    });
-    const { driver } = makeDriver({ fetchImpl: fetch });
-    driver.seedState({
-      session: makeSession(),
-      availableModels: [lowModel, highModel],
-      defaultModelId: "model-low",
-      modelLoadStatus: "loaded"
-    });
-    driver.selectModel("model-low");
-    expect(driver.effectiveModel?.id).toBe("model-low");
+    type Listing = { models: AIBuilderModel[]; default_model_id: string | null };
+    const conversationListing: Listing = {
+      models: [lowModel, highModel],
+      default_model_id: "model-low"
+    };
+    const reviewListing: Listing = { models: [highModel], default_model_id: "model-high" };
 
-    await driver.fetchFlowReviewPacket();
-    await vi.waitFor(() => expect(driver.state.modelLoadStatus).toBe("loaded"));
-    await vi.waitFor(() => expect(driver.state.availableModels).toEqual([highModel]));
+    function makeReviewDriver(
+      listings: (query: unknown) => Promise<Listing> | Listing = (query) =>
+        query ? reviewListing : conversationListing
+    ) {
+      const modelQueries: unknown[] = [];
+      const fetch = vi.fn(async (path: string, init?: { params?: { query?: unknown } }) => {
+        if (path.endsWith("/models")) {
+          modelQueries.push(init?.params?.query);
+          return await listings(init?.params?.query);
+        }
+        if (path.endsWith("/review-packet")) return { evidence_classification_level: 2 };
+        throw new Error(`Unexpected request: ${path}`);
+      });
+      const { driver } = makeDriver({ fetchImpl: fetch });
+      driver.seedState({
+        session: makeSession(),
+        availableModels: [lowModel, highModel],
+        defaultModelId: "model-low",
+        modelLoadStatus: "loaded"
+      });
+      return { driver, modelQueries };
+    }
 
-    expect(modelRequests).toEqual([{ evidence_level: 2 }]);
-    expect(driver.state.selectedModelId).toBeNull();
-    expect(driver.effectiveModel?.id).toBe("model-high");
+    it("is ready at the packet's level before the review is, and drops a choice below it", async () => {
+      const { driver, modelQueries } = makeReviewDriver();
+      driver.selectModel("model-low");
+
+      await driver.fetchFlowReviewPacket();
+
+      // Awaited, not eventually: an action taken as soon as the review is
+      // ready already sees the list its judgement is held to.
+      expect(modelQueries).toEqual([{ evidence_level: 2 }]);
+      expect(driver.state.availableModels).toEqual([highModel]);
+      expect(driver.state.selectedModelId).toBeNull();
+      expect(driver.effectiveModel?.id).toBe("model-high");
+    });
+
+    it("lists for the conversation alone again when the review closes", async () => {
+      const { driver, modelQueries } = makeReviewDriver();
+      await driver.fetchFlowReviewPacket();
+
+      await driver.closeReviewListing();
+
+      expect(modelQueries).toEqual([{ evidence_level: 2 }, undefined]);
+      expect(driver.effectiveModel?.id).toBe("model-low");
+    });
+
+    it("clears an effort chosen for the default when the default changes", async () => {
+      const { driver } = makeReviewDriver();
+      driver.selectReasoningEffort("high");
+      expect(driver.state.selectedModelId).toBeNull();
+
+      await driver.fetchFlowReviewPacket();
+
+      expect(driver.effectiveModel?.id).toBe("model-high");
+      expect(driver.state.selectedReasoningEffort).toBeNull();
+    });
+
+    it("ignores a conversation listing that lands after the review's", async () => {
+      let releaseConversationListing!: (listing: Listing) => void;
+      const held = new Promise<Listing>((resolve) => {
+        releaseConversationListing = resolve;
+      });
+      const { driver } = makeReviewDriver((query) => (query ? reviewListing : held));
+      driver.seedState({ modelLoadStatus: "loading" });
+      await driver.retryModelLoad();
+      // The conversation listing is pending when the review opens.
+      await driver.fetchFlowReviewPacket();
+      expect(driver.effectiveModel?.id).toBe("model-high");
+
+      releaseConversationListing(conversationListing);
+      await held;
+      await Promise.resolve();
+
+      expect(driver.state.availableModels).toEqual([highModel]);
+      expect(driver.effectiveModel?.id).toBe("model-high");
+    });
+
+    it("retries a failed review listing at the review's level", async () => {
+      let fail = true;
+      const { driver, modelQueries } = makeReviewDriver((query) => {
+        if (fail) throw new Error("listing down");
+        return query ? reviewListing : conversationListing;
+      });
+
+      await driver.fetchFlowReviewPacket();
+      expect(driver.state.modelLoadStatus).toBe("failed");
+
+      fail = false;
+      await driver.retryModelLoad();
+
+      expect(modelQueries).toEqual([{ evidence_level: 2 }, { evidence_level: 2 }]);
+      expect(driver.effectiveModel?.id).toBe("model-high");
+    });
   });
 
   it("loads draft sessions and keeps them in state", async () => {

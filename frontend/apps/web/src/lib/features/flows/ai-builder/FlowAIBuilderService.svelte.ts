@@ -436,6 +436,7 @@ export class FlowAIBuilderService {
     this.#reviewGeneration += 1;
     this.review = { status: "closed" };
     this.suggestions = { status: "closed" };
+    void this.#driver.closeReviewListing();
   }
 
   /** The model's judgement over the same runs, asked for on demand from the
