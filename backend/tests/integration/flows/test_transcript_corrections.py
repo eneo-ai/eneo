@@ -414,12 +414,14 @@ async def test_saves_and_revert_preserve_correction_revisions(
         assert measurement.logical_json_bytes > 0
 
 
+@pytest.mark.parametrize("baseline", [False, True])
 async def test_correction_revision_page_limits_loaded_payload_bytes(
     db_container,
     completion_model_factory,
     space_factory,
     assistant_factory,
     admin_user,
+    baseline,
 ):
     async with db_container() as container:
         session = container.session()
@@ -450,18 +452,45 @@ async def test_correction_revision_page_limits_loaded_payload_bytes(
             )
         bind = session.sync_session.bind
         assert bind is not None
-        for after, limit, budget, expected, more in (
-            (None, 200, 32, [1], True),
-            (None, 200, 540, [1], True),
-            (None, 200, -1, [1], True),
-            (None, 1, 10_000, [1], True),
-            (None, 200, 10_000, [1, 2, 3], False),
-            (1, 200, 32, [2], True),
-            (2, 200, 32, [3], False),
-            (3, 200, 32, [], False),
+        if baseline:
+            with _capture_queries(bind) as queries:
+                value, obstructing = await repo.get_revision_for_step(
+                    run_id=scenario.flow_run_id,
+                    step_id=scenario.transcription_step_id,
+                    tenant_id=scenario.tenant_id,
+                    revision=2,
+                    logical_byte_budget=32,
+                )
+            assert value is None
+            assert obstructing == (2, 531)
+            assert len(queries) == 1
+            assert "octet_length" in queries[0].sql
+            with _capture_queries(bind) as queries:
+                value, obstructing = await repo.get_revision_for_step(
+                    run_id=scenario.flow_run_id,
+                    step_id=scenario.transcription_step_id,
+                    tenant_id=scenario.tenant_id,
+                    revision=2,
+                    logical_byte_budget=10_000,
+                )
+            assert value is not None
+            assert value.speaker_edits_json == [{"speaker": "é" * 256}]
+            assert obstructing is None
+            assert len(queries) == 2
+            return
+        sizes = {1: 26, 2: 531, 3: 4}
+        for after, limit, budget, expected, more, obstruction_revision in (
+            (None, 200, 32, [1], True, 2),
+            (None, 200, 540, [1], True, 2),
+            (None, 200, -1, [], True, 1),
+            (None, 1, 10_000, [1], True, None),
+            (None, 200, 10_000, [1, 2, 3], False, None),
+            (1, 200, 32, [], True, 2),
+            (2, 200, 32, [3], False, None),
+            (3, 200, 32, [], False, None),
         ):
             with _capture_queries(bind) as queries:
-                rows, has_more = await repo.list_revisions(
+                rows, has_more, obstructing = await repo.list_revisions(
                     run_id=scenario.flow_run_id,
                     step_id=scenario.transcription_step_id,
                     tenant_id=scenario.tenant_id,
@@ -471,7 +500,13 @@ async def test_correction_revision_page_limits_loaded_payload_bytes(
                 )
             assert [row.revision for row in rows] == expected
             assert has_more is more
-            assert len(queries) == 1
+            assert obstructing == (
+                (obstruction_revision, sizes[obstruction_revision])
+                if obstruction_revision is not None
+                else None
+            )
+            assert len(queries) == (2 if rows else 1)
+            assert "octet_length" in queries[0].sql
 
 
 async def test_revision_compare_and_swap(

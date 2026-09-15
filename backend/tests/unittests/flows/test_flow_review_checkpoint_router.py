@@ -480,7 +480,6 @@ def _history_context(monkeypatch, *, corrections=False):
     _disable_flow_scope_filter(monkeypatch)
     repo = AsyncMock()
     corrections_repo = AsyncMock()
-    repo.get_review_checkpoint.return_value = ctx.checkpoint
     actor_id = uuid4()
     common = dict(
         tenant_id=ctx.run.tenant_id,
@@ -525,8 +524,29 @@ def _history_context(monkeypatch, *, corrections=False):
 
     async def list_rows(*, after_revision, limit, **kwargs):
         remaining = [row for row in rows if row.revision > (after_revision or 0)]
-        return remaining[:limit], len(remaining) > limit
+        return remaining[:limit], len(remaining) > limit, None
 
+    async def read_baseline(*, revision, **kwargs):
+        from eneo.flows.domain.canonical_json_hash import canonical_json_hash
+
+        if revision == 1:
+            payload = ctx.checkpoint.original_payload_json
+            digest = canonical_json_hash(payload)
+        else:
+            edit = next((row for row in rows if row.revision == revision), None)
+            if edit is None:
+                return None, None
+            payload = edit.payload_json
+            digest = edit.payload_sha256_after
+        return SimpleNamespace(
+            revision=revision, payload_json=payload, payload_sha256=digest
+        ), None
+
+    async def read_revision(*, revision, **kwargs):
+        return next((row for row in rows if row.revision == revision), None), None
+
+    repo.get_review_checkpoint_history_baseline.side_effect = read_baseline
+    corrections_repo.get_revision_for_step.side_effect = read_revision
     reader.side_effect = list_rows
     service = FlowRunEvidenceService(
         user=container.user(),
@@ -639,7 +659,8 @@ async def test_history_unknown_checkpoint_is_not_found(monkeypatch):
     from eneo.main.exceptions import NotFoundException
 
     container, ctx, repo, rows = _history_context(monkeypatch)
-    repo.get_review_checkpoint.return_value = None
+    repo.get_review_checkpoint_history_baseline.side_effect = None
+    repo.get_review_checkpoint_history_baseline.return_value = (None, None)
     with pytest.raises(NotFoundException):
         await _call_history(container, ctx)
     repo.list_review_checkpoint_edits.assert_not_awaited()
@@ -658,7 +679,7 @@ async def test_history_requires_view_scope_before_reading(monkeypatch, correctio
         await _call_history(container, ctx, corrections=corrections)
     assert enforce.await_args.kwargs["required_access"] == FlowApiAction.VIEW
     assert enforce.await_args.kwargs["allow_service_key_principals"] is True
-    repo.get_review_checkpoint.assert_not_awaited()
+    repo.get_review_checkpoint_history_baseline.assert_not_awaited()
     container.flow_run_evidence_service.return_value.transcript_corrections_repo.list_revisions.assert_not_awaited()
 
 

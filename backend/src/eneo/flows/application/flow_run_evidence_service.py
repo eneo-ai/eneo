@@ -45,7 +45,6 @@ from eneo.flows.application.flow_run_evidence_export_manifest import (
 from eneo.flows.application.flow_run_export_json import render_evidence_json_export
 from eneo.flows.domain.canonical_json_hash import (
     canonical_json_bytes,
-    canonical_json_hash,
 )
 from eneo.flows.domain.flow import (
     FlowPersistedJsonObject,
@@ -308,43 +307,36 @@ class FlowRunEvidenceService:
         limit: int,
     ) -> FlowRunReviewCheckpointEditPagePublic:
         await self.access_policy.ensure_can_access_run(run, access_kind="content")
-        checkpoint = await self.flow_run_review_checkpoint_repo.get_review_checkpoint(
+        (
+            baseline_row,
+            obstructing,
+        ) = await self.flow_run_review_checkpoint_repo.get_review_checkpoint_history_baseline(
             checkpoint_id=checkpoint_id,
             tenant_id=self.user.tenant_id,
             flow_id=run.flow_id,
             flow_run_id=run.id,
+            revision=after_revision or 1,
+            logical_byte_budget=RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES,
         )
-        if checkpoint is None:
-            raise NotFoundException("Review checkpoint not found.", code="not_found")
-        baseline_payload = checkpoint.original_payload_json
-        baseline_hash = canonical_json_hash(baseline_payload)
-        if after_revision is not None and after_revision > 1:
-            (
-                baseline_rows,
-                _,
-            ) = await self.flow_run_review_checkpoint_repo.list_review_checkpoint_edits(
-                checkpoint_id=checkpoint_id,
-                tenant_id=self.user.tenant_id,
-                after_revision=after_revision - 1,
-                limit=1,
-                logical_byte_budget=0,
-            )
-            if not baseline_rows or baseline_rows[0].revision != after_revision:
+        if obstructing is not None:
+            self._raise_history_obstruction(obstructing)
+        if baseline_row is None:
+            if after_revision is not None and after_revision > 1:
                 raise NotFoundException(
                     "Review history revision not found.",
                     code="not_found",
                     context={"revision": after_revision},
                 )
-            baseline_payload = baseline_rows[0].payload_json
-            baseline_hash = baseline_rows[0].payload_sha256_after
+            raise NotFoundException("Review checkpoint not found.", code="not_found")
         baseline = FlowRunReviewCheckpointEditBaselinePublic(
-            revision=after_revision or 1,
-            payload_json=redact_payload(baseline_payload),
-            payload_sha256=baseline_hash,
+            revision=baseline_row.revision,
+            payload_json=redact_payload(baseline_row.payload_json),
+            payload_sha256=baseline_row.payload_sha256,
         )
         (
             rows,
             more,
+            obstructing,
         ) = await self.flow_run_review_checkpoint_repo.list_review_checkpoint_edits(
             checkpoint_id=checkpoint_id,
             tenant_id=self.user.tenant_id,
@@ -353,6 +345,8 @@ class FlowRunEvidenceService:
             logical_byte_budget=RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES
             - len(canonical_json_bytes(baseline.model_dump(mode="json"))),
         )
+        if not rows and obstructing is not None:
+            self._raise_history_obstruction(obstructing)
         return FlowRunReviewCheckpointEditPagePublic(
             baseline=baseline,
             items=[
@@ -382,15 +376,19 @@ class FlowRunEvidenceService:
             speaker_edits_json=[],
         )
         if after_revision is not None:
-            previous, _ = await self.transcript_corrections_repo.list_revisions(
+            (
+                previous,
+                obstructing,
+            ) = await self.transcript_corrections_repo.get_revision_for_step(
                 run_id=run.id,
                 step_id=step_id,
                 tenant_id=self.user.tenant_id,
-                after_revision=after_revision - 1,
-                limit=1,
-                logical_byte_budget=0,
+                revision=after_revision,
+                logical_byte_budget=RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES,
             )
-            if not previous or previous[0].revision != after_revision:
+            if obstructing is not None:
+                self._raise_history_obstruction(obstructing)
+            if previous is None:
                 raise NotFoundException(
                     "Correction revision not found.",
                     code="not_found",
@@ -398,10 +396,10 @@ class FlowRunEvidenceService:
                 )
             baseline = FlowTranscriptCorrectionRevisionBaselinePublic(
                 revision=after_revision,
-                occurrences_json=redact_payload(previous[0].occurrences_json),
-                speaker_edits_json=redact_payload(previous[0].speaker_edits_json),
+                occurrences_json=redact_payload(previous.occurrences_json),
+                speaker_edits_json=redact_payload(previous.speaker_edits_json),
             )
-        rows, more = await self.transcript_corrections_repo.list_revisions(
+        rows, more, obstructing = await self.transcript_corrections_repo.list_revisions(
             run_id=run.id,
             step_id=step_id,
             tenant_id=self.user.tenant_id,
@@ -410,6 +408,8 @@ class FlowRunEvidenceService:
             logical_byte_budget=RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES
             - len(canonical_json_bytes(baseline.model_dump(mode="json"))),
         )
+        if not rows and obstructing is not None:
+            self._raise_history_obstruction(obstructing)
         return FlowTranscriptCorrectionRevisionPagePublic(
             baseline=baseline,
             items=[
@@ -423,6 +423,19 @@ class FlowRunEvidenceService:
             ],
             next_after_revision=rows[-1].revision if more and rows else None,
             truncated=more,
+        )
+
+    @staticmethod
+    def _raise_history_obstruction(obstructing: tuple[int, int]) -> None:
+        revision, logical_bytes = obstructing
+        raise FileTooLargeException(
+            "Review history comparison exceeds the page size limit.",
+            code=FlowApiErrorCode.REVIEW_HISTORY_TOO_LARGE.value,
+            context={
+                "revision": revision,
+                "logical_bytes": logical_bytes,
+                "max_logical_bytes": RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES,
+            },
         )
 
     @staticmethod

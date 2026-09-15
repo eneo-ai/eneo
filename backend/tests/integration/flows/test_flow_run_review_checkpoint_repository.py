@@ -2953,12 +2953,14 @@ async def test_reject_review_checkpoint_does_not_add_cancelled_checkpoint_outbox
     assert terminal_outbox_source == FlowRunLifecycleSource.REVIEW_REJECTED.value
 
 
+@pytest.mark.parametrize("baseline", [False, True])
 async def test_checkpoint_edit_page_limits_loaded_payload_bytes(
     db_container,
     completion_model_factory,
     space_factory,
     assistant_factory,
     admin_user,
+    baseline,
 ):
     async with db_container() as container:
         session = container.session()
@@ -3002,19 +3004,61 @@ async def test_checkpoint_edit_page_limits_loaded_payload_bytes(
             )
         bind = session.sync_session.bind
         assert bind is not None
-        for after, limit, budget, expected, more in (
-            (None, 200, 32, [2], True),
-            (None, 200, 530, [2], True),
-            (None, 200, 541, [2, 3], True),
-            (None, 200, -1, [2], True),
-            (None, 1, 10_000, [2], True),
-            (None, 200, 10_000, [2, 3, 4], False),
-            (2, 200, 32, [3], True),
-            (3, 200, 32, [4], False),
-            (4, 200, 32, [], False),
+        if baseline:
+            for revision, budget in ((1, 0), (3, 32)):
+                with _capture_queries(bind) as queries:
+                    (
+                        value,
+                        obstructing,
+                    ) = await repo.get_review_checkpoint_history_baseline(
+                        checkpoint_id=opened.checkpoint.id,
+                        tenant_id=scenario.tenant_id,
+                        flow_id=scenario.flow_id,
+                        flow_run_id=scenario.flow_run_id,
+                        revision=revision,
+                        logical_byte_budget=budget,
+                    )
+                assert value is None
+                assert obstructing is not None
+                assert obstructing[0] == revision
+                assert obstructing[1] > budget
+                assert len(queries) == 1
+                assert "octet_length" in queries[0].sql
+            for revision, expected_payload in (
+                (1, opened.checkpoint.original_payload_json),
+                (3, {"text": "é" * 256}),
+            ):
+                with _capture_queries(bind) as queries:
+                    (
+                        value,
+                        obstructing,
+                    ) = await repo.get_review_checkpoint_history_baseline(
+                        checkpoint_id=opened.checkpoint.id,
+                        tenant_id=scenario.tenant_id,
+                        flow_id=scenario.flow_id,
+                        flow_run_id=scenario.flow_run_id,
+                        revision=revision,
+                        logical_byte_budget=10_000,
+                    )
+                assert value is not None and value.payload_json == expected_payload
+                assert value.payload_sha256 == canonical_json_hash(expected_payload)
+                assert obstructing is None
+                assert len(queries) == 2
+            return
+        sizes = {2: 17, 3: 524, 4: 16}
+        for after, limit, budget, expected, more, obstruction_revision in (
+            (None, 200, 32, [2], True, 3),
+            (None, 200, 530, [2], True, 3),
+            (None, 200, 541, [2, 3], True, 4),
+            (None, 200, -1, [], True, 2),
+            (None, 1, 10_000, [2], True, None),
+            (None, 200, 10_000, [2, 3, 4], False, None),
+            (2, 200, 32, [], True, 3),
+            (3, 200, 32, [4], False, None),
+            (4, 200, 32, [], False, None),
         ):
             with _capture_queries(bind) as queries:
-                rows, has_more = await repo.list_review_checkpoint_edits(
+                rows, has_more, obstructing = await repo.list_review_checkpoint_edits(
                     checkpoint_id=opened.checkpoint.id,
                     tenant_id=scenario.tenant_id,
                     after_revision=after,
@@ -3023,7 +3067,13 @@ async def test_checkpoint_edit_page_limits_loaded_payload_bytes(
                 )
             assert [row.revision for row in rows] == expected
             assert has_more is more
-            assert len(queries) == 1
+            assert obstructing == (
+                (obstruction_revision, sizes[obstruction_revision])
+                if obstruction_revision is not None
+                else None
+            )
+            assert len(queries) == (2 if rows else 1)
+            assert "octet_length" in queries[0].sql
 
 
 @pytest.mark.parametrize("folded", [False, True])

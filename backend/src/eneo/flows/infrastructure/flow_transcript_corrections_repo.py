@@ -7,6 +7,7 @@ revision so two editing surfaces never silently clobber each other.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 from uuid import UUID
 
@@ -111,6 +112,46 @@ class FlowTranscriptCorrectionsRepository:
         rows = await self.session.scalars(stmt)
         return [FlowTranscriptCorrectionRevision.model_validate(row) for row in rows]
 
+    async def get_revision_for_step(
+        self,
+        *,
+        run_id: UUID,
+        step_id: UUID,
+        tenant_id: UUID,
+        revision: int,
+        logical_byte_budget: int,
+    ) -> tuple[FlowTranscriptCorrectionRevision | None, tuple[int, int] | None]:
+        metadata = (
+            await self.session.execute(
+                sa.select(
+                    FlowTranscriptCorrectionRevisions.id,
+                    sa.func.octet_length(
+                        sa.cast(
+                            FlowTranscriptCorrectionRevisions.occurrences_json, sa.Text
+                        )
+                    )
+                    + sa.func.octet_length(
+                        sa.cast(
+                            FlowTranscriptCorrectionRevisions.speaker_edits_json,
+                            sa.Text,
+                        )
+                    ),
+                ).where(
+                    FlowTranscriptCorrectionRevisions.flow_run_id == run_id,
+                    FlowTranscriptCorrectionRevisions.step_id == step_id,
+                    FlowTranscriptCorrectionRevisions.tenant_id == tenant_id,
+                    FlowTranscriptCorrectionRevisions.revision == revision,
+                )
+            )
+        ).one_or_none()
+        if metadata is None:
+            return None, None
+        if metadata[1] > logical_byte_budget:
+            return None, (revision, int(metadata[1]))
+        return await self.get_revision(
+            revision_id=metadata[0], tenant_id=tenant_id
+        ), None
+
     async def list_revisions(
         self,
         *,
@@ -120,7 +161,7 @@ class FlowTranscriptCorrectionsRepository:
         after_revision: int | None,
         limit: int,
         logical_byte_budget: int,
-    ) -> tuple[list[FlowTranscriptCorrectionRevision], bool]:
+    ) -> tuple[list[FlowTranscriptCorrectionRevision], bool, tuple[int, int] | None]:
         candidates = (
             sa.select(
                 FlowTranscriptCorrectionRevisions.id,
@@ -151,30 +192,49 @@ class FlowTranscriptCorrectionsRepository:
         )
         ranked = sa.select(
             candidates.c.id,
+            candidates.c.revision,
+            candidates.c.logical,
             sa.func.sum(candidates.c.logical)
             .over(order_by=candidates.c.revision)
             .label("cumulative"),
             sa.func.row_number().over(order_by=candidates.c.revision).label("position"),
-            sa.func.count().over().label("candidate_count"),
         ).subquery()
-        rows = (
+        metadata = (
             await self.session.execute(
-                sa.select(FlowTranscriptCorrectionRevisions, ranked.c.candidate_count)
-                .join(ranked, ranked.c.id == FlowTranscriptCorrectionRevisions.id)
+                sa.select(ranked)
                 .where(
-                    ranked.c.position <= limit,
                     sa.or_(
                         ranked.c.position == 1,
-                        ranked.c.cumulative <= logical_byte_budget,
-                    ),
+                        ranked.c.cumulative - ranked.c.logical <= logical_byte_budget,
+                    )
                 )
-                .order_by(FlowTranscriptCorrectionRevisions.revision)
+                .order_by(ranked.c.position)
             )
         ).all()
-        revisions = [
-            FlowTranscriptCorrectionRevision.model_validate(row) for row, _ in rows
+        admitted = [
+            row.id for row in metadata[:limit] if row.cumulative <= logical_byte_budget
         ]
-        return revisions, bool(rows and rows[0].candidate_count > len(revisions))
+        obstructing = None
+        if len(metadata) > len(admitted):
+            next_row = metadata[len(admitted)]
+            if next_row.cumulative > logical_byte_budget:
+                obstructing = (int(next_row.revision), int(next_row.logical))
+        rows: Sequence[FlowTranscriptCorrectionRevisions] = (
+            (
+                await self.session.scalars(
+                    sa.select(FlowTranscriptCorrectionRevisions)
+                    .where(FlowTranscriptCorrectionRevisions.id.in_(admitted))
+                    .order_by(FlowTranscriptCorrectionRevisions.revision)
+                )
+            ).all()
+            if admitted
+            else []
+        )
+        return (
+            [FlowTranscriptCorrectionRevision.model_validate(row) for row in rows],
+            len(metadata) > len(admitted),
+            obstructing,
+        )
 
     async def _insert_revision(self, row: FlowTranscriptCorrections) -> None:
         await self.session.execute(

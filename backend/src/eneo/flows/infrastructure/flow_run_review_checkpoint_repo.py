@@ -81,6 +81,13 @@ from eneo.flows.principal import FlowAuditActorFields, FlowPrincipal
 
 
 @dataclass(frozen=True, slots=True)
+class FlowRunReviewCheckpointHistoryBaseline:
+    revision: int
+    payload_json: FlowPersistedJsonObject | None
+    payload_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
 class FlowRunReviewCheckpointOpenResult:
     checkpoint: FlowRunReviewCheckpoint
     run: FlowRun
@@ -287,6 +294,64 @@ class FlowRunReviewCheckpointRepository:
         )
         return FlowRunReviewCheckpoint.model_validate(row) if row is not None else None
 
+    async def get_review_checkpoint_history_baseline(
+        self,
+        *,
+        checkpoint_id: UUID,
+        tenant_id: UUID,
+        flow_id: UUID,
+        flow_run_id: UUID,
+        revision: int,
+        logical_byte_budget: int,
+    ) -> tuple[FlowRunReviewCheckpointHistoryBaseline | None, tuple[int, int] | None]:
+        if revision == 1:
+            identifier = FlowRunReviewCheckpoints.id
+            payload = FlowRunReviewCheckpoints.original_payload_json
+            payload_stmt = sa.select(payload)
+            metadata_stmt = sa.select(
+                identifier,
+                sa.func.coalesce(sa.func.octet_length(sa.cast(payload, sa.Text)), 0),
+            )
+        else:
+            identifier = FlowRunReviewCheckpointEdits.id
+            payload = FlowRunReviewCheckpointEdits.payload_json
+            payload_stmt = sa.select(
+                payload, FlowRunReviewCheckpointEdits.payload_sha256_after
+            )
+            metadata_stmt = (
+                sa.select(identifier, sa.func.octet_length(sa.cast(payload, sa.Text)))
+                .join(
+                    FlowRunReviewCheckpoints,
+                    FlowRunReviewCheckpoints.id
+                    == FlowRunReviewCheckpointEdits.checkpoint_id,
+                )
+                .where(FlowRunReviewCheckpointEdits.revision == revision)
+            )
+        metadata = (
+            await self.session.execute(
+                metadata_stmt.where(
+                    FlowRunReviewCheckpoints.id == checkpoint_id,
+                    FlowRunReviewCheckpoints.tenant_id == tenant_id,
+                    FlowRunReviewCheckpoints.flow_id == flow_id,
+                    FlowRunReviewCheckpoints.flow_run_id == flow_run_id,
+                )
+            )
+        ).one_or_none()
+        if metadata is None:
+            return None, None
+        if metadata[1] > logical_byte_budget:
+            return None, (revision, int(metadata[1]))
+        row = (
+            await self.session.execute(payload_stmt.where(identifier == metadata[0]))
+        ).one_or_none()
+        if row is None:
+            return None, None
+        return FlowRunReviewCheckpointHistoryBaseline(
+            revision=revision,
+            payload_json=row[0],
+            payload_sha256=canonical_json_hash(row[0]) if revision == 1 else row[1],
+        ), None
+
     async def list_review_checkpoint_edits(
         self,
         *,
@@ -295,7 +360,7 @@ class FlowRunReviewCheckpointRepository:
         after_revision: int | None,
         limit: int,
         logical_byte_budget: int,
-    ) -> tuple[list[FlowRunReviewCheckpointEdit], bool]:
+    ) -> tuple[list[FlowRunReviewCheckpointEdit], bool, tuple[int, int] | None]:
         candidates = (
             sa.select(
                 FlowRunReviewCheckpointEdits.id,
@@ -315,37 +380,43 @@ class FlowRunReviewCheckpointRepository:
         )
         ranked = sa.select(
             candidates.c.id,
+            candidates.c.revision,
+            candidates.c.logical,
             sa.func.sum(candidates.c.logical)
             .over(order_by=candidates.c.revision)
             .label("cumulative"),
             sa.func.row_number().over(order_by=candidates.c.revision).label("position"),
-            sa.func.count().over().label("candidate_count"),
         ).subquery()
-        rows = (
+        metadata = (
             await self.session.execute(
-                self._edit_select()
-                .add_columns(ranked.c.candidate_count)
-                .join(ranked, ranked.c.id == FlowRunReviewCheckpointEdits.id)
+                sa.select(ranked)
                 .where(
-                    ranked.c.position <= limit,
                     sa.or_(
                         ranked.c.position == 1,
-                        ranked.c.cumulative <= logical_byte_budget,
-                    ),
+                        ranked.c.cumulative - ranked.c.logical <= logical_byte_budget,
+                    )
                 )
-                .order_by(FlowRunReviewCheckpointEdits.revision)
+                .order_by(ranked.c.position)
             )
         ).all()
-        edits = [
-            FlowRunReviewCheckpointEdit.model_validate(row).model_copy(
-                update={
-                    "correction_set_id": set_id,
-                    "corrections_revision": revision,
-                }
-            )
-            for row, set_id, revision, _ in rows
+        admitted = [
+            row.id for row in metadata[:limit] if row.cumulative <= logical_byte_budget
         ]
-        return edits, bool(rows and rows[0].candidate_count > len(edits))
+        obstructing = None
+        if len(metadata) > len(admitted):
+            next_row = metadata[len(admitted)]
+            if next_row.cumulative > logical_byte_budget:
+                obstructing = (int(next_row.revision), int(next_row.logical))
+        edits = (
+            await self._read_edits(
+                self._edit_select()
+                .where(FlowRunReviewCheckpointEdits.id.in_(admitted))
+                .order_by(FlowRunReviewCheckpointEdits.revision)
+            )
+            if admitted
+            else []
+        )
+        return edits, len(metadata) > len(admitted), obstructing
 
     async def _insert_edit(
         self,

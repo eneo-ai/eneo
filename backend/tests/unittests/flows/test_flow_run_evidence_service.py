@@ -235,7 +235,7 @@ def _service_for_empty_run(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("corrections", [False, True])
 @pytest.mark.parametrize("after_revision", [None, 2])
-@pytest.mark.parametrize("budget", [1, 1024])
+@pytest.mark.parametrize("budget", [128, 1024])
 async def test_history_page_passes_budget_remaining_after_baseline(
     user, monkeypatch, corrections, after_revision, budget
 ):
@@ -249,6 +249,7 @@ async def test_history_page_passes_budget_remaining_after_baseline(
     step_id = uuid4()
     if corrections:
         reader = service.transcript_corrections_repo.list_revisions
+        baseline_reader = service.transcript_corrections_repo.get_revision_for_step
         previous = SimpleNamespace(
             revision=2,
             occurrences_json=[{"corrected": "é"}],
@@ -256,20 +257,15 @@ async def test_history_page_passes_budget_remaining_after_baseline(
         )
     else:
         repo = service.flow_run_review_checkpoint_repo
-        repo.get_review_checkpoint.return_value = SimpleNamespace(
-            original_payload_json={"text": "original é"},
-        )
+        baseline_reader = repo.get_review_checkpoint_history_baseline
         reader = repo.list_review_checkpoint_edits
         previous = SimpleNamespace(
-            revision=2,
+            revision=after_revision or 1,
             payload_json={"text": "edited é"},
-            payload_sha256_after="a" * 64,
+            payload_sha256="a" * 64,
         )
-    reader.side_effect = (
-        [([previous], True), ([], False)]
-        if after_revision is not None
-        else [([], False)]
-    )
+    baseline_reader.return_value = (previous, None)
+    reader.return_value = ([], False, None)
     if corrections:
         page = await service.list_transcript_correction_revisions(
             run=run, step_id=step_id, after_revision=after_revision, limit=200
@@ -291,9 +287,68 @@ async def test_history_page_passes_budget_remaining_after_baseline(
         logical_byte_budget=budget
         - len(canonical_json_bytes(page.baseline.model_dump(mode="json"))),
     )
-    if after_revision is not None:
-        assert reader.await_args_list[0].kwargs["logical_byte_budget"] == 0
-        assert reader.await_args_list[0].kwargs["limit"] == 1
+    if not corrections or after_revision is not None:
+        assert baseline_reader.await_args.kwargs["logical_byte_budget"] == budget
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "corrections, after_revision, baseline_blocked",
+    [
+        (False, None, True),
+        (False, 2, True),
+        (True, 2, True),
+        (False, None, False),
+        (True, None, False),
+    ],
+)
+async def test_history_page_maps_obstruction_metadata_to_size_error(
+    user, monkeypatch, corrections, after_revision, baseline_blocked
+):
+    service, run = _service_for_empty_run(
+        user=user, provider_call_repo=_provider_call_repo()
+    )
+    monkeypatch.setattr(
+        flow_run_evidence_service, "RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES", 1024
+    )
+    obstruction = (
+        after_revision or (1 if corrections or baseline_blocked else 2),
+        2048,
+    )
+    baseline = SimpleNamespace(
+        revision=after_revision or 1,
+        payload_json={},
+        payload_sha256="a" * 64,
+        occurrences_json=[],
+        speaker_edits_json=[],
+    )
+    if corrections:
+        baseline_reader = service.transcript_corrections_repo.get_revision_for_step
+        reader = service.transcript_corrections_repo.list_revisions
+    else:
+        baseline_reader = service.flow_run_review_checkpoint_repo.get_review_checkpoint_history_baseline
+        reader = service.flow_run_review_checkpoint_repo.list_review_checkpoint_edits
+    baseline_reader.return_value = (
+        (None, obstruction) if baseline_blocked else (baseline, None)
+    )
+    reader.return_value = ([], True, obstruction)
+    with pytest.raises(FileTooLargeException) as exc:
+        if corrections:
+            await service.list_transcript_correction_revisions(
+                run=run, step_id=uuid4(), after_revision=after_revision, limit=200
+            )
+        else:
+            await service.list_review_checkpoint_edits(
+                run=run, checkpoint_id=uuid4(), after_revision=after_revision, limit=200
+            )
+    assert exc.value.code == FlowApiErrorCode.REVIEW_HISTORY_TOO_LARGE.value
+    assert exc.value.context == {
+        "revision": obstruction[0],
+        "logical_bytes": 2048,
+        "max_logical_bytes": 1024,
+    }
+    if baseline_blocked:
+        reader.assert_not_awaited()
 
 
 @pytest.mark.asyncio
