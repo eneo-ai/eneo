@@ -31,7 +31,7 @@ describe("password change server adapter", () => {
       jsonResponse({
         password_change: {
           source: "eneo",
-          policy: { min_length: 15, max_bytes: 72 }
+          policy: { min_length: 12, max_bytes: 72 }
         }
       })
     );
@@ -55,7 +55,7 @@ describe("password change server adapter", () => {
       return jsonResponse({
         password_change: {
           source: "eneo",
-          policy: { min_length: 15, max_bytes: 72 }
+          policy: { min_length: 12, max_bytes: 72 }
         }
       });
     });

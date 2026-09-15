@@ -4,6 +4,7 @@ import {
   firstInvalidPasswordField,
   isCurrentPasswordChangeDialogSubmission,
   validateNewPassword,
+  validateNewPasswordPair,
   validatePasswordChange,
   type PasswordChangeCapability
 } from "./passwordChange";
@@ -13,7 +14,86 @@ const eneoCapability: PasswordChangeCapability = {
   policy: ENEO_PASSWORD_POLICY
 };
 
+describe("administrator password entry", () => {
+  const newPassword = "a sufficiently long new password";
+
+  test.each(["a", "å", "🔑"])("accepts 12 characters and rejects 11 for %s", (character) => {
+    const accepted = character.repeat(12);
+    const rejected = character.repeat(11);
+    expect(
+      validateNewPasswordPair(
+        { newPassword: accepted, confirmPassword: accepted },
+        eneoCapability,
+        false
+      )
+    ).toEqual({});
+    expect(
+      validateNewPasswordPair(
+        { newPassword: rejected, confirmPassword: rejected },
+        eneoCapability,
+        false
+      )
+    ).toEqual({ newPassword: "too_short" });
+  });
+
+  test("allows updating account details without changing the password", () => {
+    expect(
+      validateNewPasswordPair({ newPassword: "", confirmPassword: "" }, eneoCapability, false)
+    ).toEqual({});
+  });
+
+  test("requires a password and confirmation when creating an account", () => {
+    expect(
+      validateNewPasswordPair({ newPassword: "", confirmPassword: "" }, eneoCapability)
+    ).toEqual({ newPassword: "required", confirmPassword: "required" });
+  });
+
+  test("sets a new password without requiring the current password", () => {
+    expect(
+      validateNewPasswordPair({ newPassword, confirmPassword: newPassword }, eneoCapability, false)
+    ).toEqual({});
+  });
+
+  test.each([
+    [{ newPassword, confirmPassword: "" }, { confirmPassword: "required" }],
+    [{ newPassword: "", confirmPassword: newPassword }, { newPassword: "required" }],
+    [
+      { newPassword, confirmPassword: `${newPassword}!` },
+      { confirmPassword: "confirmation_mismatch" }
+    ],
+    [{ newPassword: "short", confirmPassword: "short" }, { newPassword: "too_short" }],
+    [
+      { newPassword: "å".repeat(37), confirmPassword: "å".repeat(37) },
+      { newPassword: "too_long_bytes" }
+    ]
+  ])("rejects invalid password pairs: %j", (values, errors) => {
+    expect(validateNewPasswordPair(values, eneoCapability, false)).toEqual(errors);
+  });
+});
+
 describe("password change validation", () => {
+  test("self-service still requires the current password", () => {
+    expect(
+      validatePasswordChange(
+        {
+          currentPassword: "",
+          newPassword: "a sufficiently long password",
+          confirmPassword: "a sufficiently long password"
+        },
+        eneoCapability
+      )
+    ).toEqual({ currentPassword: "required" });
+  });
+
+  test("self-service still rejects reusing the current password", () => {
+    const password = "a sufficiently long password";
+    expect(
+      validatePasswordChange(
+        { currentPassword: password, newPassword: password, confirmPassword: password },
+        eneoCapability
+      )
+    ).toEqual({ newPassword: "password_unchanged" });
+  });
   test("keeps an empty confirmation as required instead of calling it a mismatch", () => {
     const errors = validatePasswordChange(
       {
@@ -50,8 +130,8 @@ describe("password change validation", () => {
   test("measures the bcrypt boundary in UTF-8 bytes", () => {
     expect(validateNewPassword("å".repeat(36), eneoCapability)).toBeUndefined();
     expect(validateNewPassword("å".repeat(37), eneoCapability)).toBe("too_long_bytes");
-    expect(validateNewPassword("å".repeat(14), eneoCapability)).toBe("too_short");
-    expect(validateNewPassword("å".repeat(15), eneoCapability)).toBeUndefined();
+    expect(validateNewPassword("å".repeat(11), eneoCapability)).toBe("too_short");
+    expect(validateNewPassword("å".repeat(12), eneoCapability)).toBeUndefined();
   });
 
   test.each([
@@ -61,7 +141,7 @@ describe("password change validation", () => {
     expect(
       validateNewPassword(password, {
         source: "zitadel",
-        policy: { ...ENEO_PASSWORD_POLICY, maxBytes: null }
+        policy: { ...ENEO_PASSWORD_POLICY, minLength: 15, maxBytes: null }
       })
     ).toBe(expected);
   });

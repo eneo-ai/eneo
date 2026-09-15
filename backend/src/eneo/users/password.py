@@ -7,7 +7,7 @@ external identity provider) deliberately do not use this policy.
 
 from dataclasses import dataclass
 
-LOCAL_PASSWORD_MIN_LENGTH = 15
+LOCAL_PASSWORD_MIN_LENGTH = 12
 BCRYPT_MAX_PASSWORD_BYTES = 72
 
 

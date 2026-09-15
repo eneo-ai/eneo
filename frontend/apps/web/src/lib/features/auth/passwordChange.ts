@@ -61,7 +61,7 @@ export const UNAVAILABLE_PASSWORD_CHANGE: PasswordChangeCapability = Object.free
 
 // Frontend/admin hint only. Backend enforcement and the self-user capability are canonical.
 export const ENEO_PASSWORD_POLICY = Object.freeze({
-  minLength: 15,
+  minLength: 12,
   maxBytes: 72,
   requiresUppercase: false,
   requiresLowercase: false,
@@ -95,15 +95,31 @@ export function validatePasswordChange(
   values: PasswordChangeValues,
   capability: PasswordChangeCapability
 ): PasswordFieldErrors {
-  const errors: PasswordFieldErrors = {};
+  const errors: PasswordFieldErrors = validateNewPasswordPair(values, capability);
 
   if (!values.currentPassword) errors.currentPassword = "required";
-  if (!values.newPassword) errors.newPassword = "required";
-  if (!values.confirmPassword) errors.confirmPassword = "required";
 
-  if (values.newPassword && values.currentPassword === values.newPassword) {
+  if (values.newPassword && values.currentPassword === values.newPassword && !errors.newPassword) {
     errors.newPassword = "password_unchanged";
   }
+
+  return errors;
+}
+
+export type NewPasswordValues = Pick<PasswordChangeValues, "newPassword" | "confirmPassword">;
+export type NewPasswordFieldErrors = Pick<PasswordFieldErrors, "newPassword" | "confirmPassword">;
+
+/** Admin edits may leave both fields empty; setting a password always requires a matching pair. */
+export function validateNewPasswordPair(
+  values: NewPasswordValues,
+  capability: PasswordChangeCapability,
+  required = true
+): NewPasswordFieldErrors {
+  const errors: NewPasswordFieldErrors = {};
+  if (!required && !values.newPassword && !values.confirmPassword) return errors;
+
+  if (!values.newPassword) errors.newPassword = "required";
+  if (!values.confirmPassword) errors.confirmPassword = "required";
 
   if (
     values.newPassword &&

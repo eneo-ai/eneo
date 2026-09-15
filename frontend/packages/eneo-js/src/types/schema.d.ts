@@ -13878,7 +13878,7 @@ export interface components {
     LocalPasswordPolicyPublic: {
       /**
        * Min Length
-       * @default 15
+       * @default 12
        */
       min_length?: number;
       /**
@@ -20633,7 +20633,7 @@ export interface components {
       username?: string | null;
       /**
        * Password
-       * @description New local password. Must contain at least 15 characters and be at most 72 UTF-8 bytes.
+       * @description New local password. Must contain at least 12 characters and be at most 72 UTF-8 bytes.
        * @example Correct horse battery staple
        */
       password?: string | null;
@@ -20668,7 +20668,7 @@ export interface components {
       username?: string | null;
       /**
        * Password
-       * @description New local password. Must contain at least 15 characters and be at most 72 UTF-8 bytes.
+       * @description New local password. Must contain at least 12 characters and be at most 72 UTF-8 bytes.
        * @example Correct horse battery staple
        */
       password?: string | null;
@@ -21273,7 +21273,7 @@ export interface components {
       username?: string | null;
       /**
        * Password
-       * @description New local password. Must contain at least 15 characters and be at most 72 UTF-8 bytes.
+       * @description New local password. Must contain at least 12 characters and be at most 72 UTF-8 bytes.
        * @example Another correct horse battery staple
        */
       password?: string | null;

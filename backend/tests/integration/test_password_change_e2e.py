@@ -107,7 +107,7 @@ async def test_password_change_rotates_login_and_rejects_prior_session(
     assert current_user.status_code == 200, current_user.text
     assert current_user.json()["password_change"] == {
         "source": "eneo",
-        "policy": {"min_length": 15, "max_bytes": 72},
+        "policy": {"min_length": 12, "max_bytes": 72},
     }
 
 

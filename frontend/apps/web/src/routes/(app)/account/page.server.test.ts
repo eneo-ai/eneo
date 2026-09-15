@@ -32,7 +32,7 @@ import { actions } from "./+page.server";
 const capability = {
   source: "eneo" as const,
   policy: {
-    minLength: 15,
+    minLength: 12,
     maxBytes: 72,
     requiresUppercase: false,
     requiresLowercase: false,

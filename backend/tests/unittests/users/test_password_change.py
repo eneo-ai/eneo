@@ -54,8 +54,8 @@ def local_user(*, version: int = 0, password: str | None = "old-hash"):
 
 def test_local_password_policy_uses_character_minimum_and_utf8_byte_maximum():
     with pytest.raises(PasswordPolicyViolationError) as too_short:
-        validate_new_local_password("short-password")
-    assert too_short.value.details == {"rule": "min_length", "min_length": 15}
+        validate_new_local_password("a" * 11)
+    assert too_short.value.details == {"rule": "min_length", "min_length": 12}
 
     validate_new_local_password("å" * 36)
     with pytest.raises(PasswordPolicyViolationError) as too_large:
@@ -65,6 +65,14 @@ def test_local_password_policy_uses_character_minimum_and_utf8_byte_maximum():
         "max_bytes": 72,
         "actual_bytes": 74,
     }
+
+
+@pytest.mark.parametrize("character", ["a", "å", "🔑"])
+def test_local_password_minimum_is_twelve_unicode_characters(character: str):
+    validate_new_local_password(character * 12)
+    with pytest.raises(PasswordPolicyViolationError) as too_short:
+        validate_new_local_password(character * 11)
+    assert too_short.value.details == {"rule": "min_length", "min_length": 12}
 
 
 async def test_change_local_password_verifies_hashes_and_increments_version(
@@ -245,7 +253,7 @@ async def test_current_user_capability_is_explicit_for_each_password_owner():
     )
 
     assert local.password_change.source == "eneo"
-    assert local.password_change.policy.min_length == 15
+    assert local.password_change.policy.min_length == 12
     assert local.password_change.policy.max_bytes == 72
     assert external.password_change.source == "external"
     assert external.password_change.policy is None

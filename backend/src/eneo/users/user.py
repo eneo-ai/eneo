@@ -367,7 +367,7 @@ class UserAddAdmin(UserBase):
     password: Optional[str] = Field(
         default=None,
         description=(
-            "New local password. Must contain at least 15 characters and be at "
+            "New local password. Must contain at least 12 characters and be at "
             "most 72 UTF-8 bytes."
         ),
         examples=["Correct horse battery staple"],
@@ -413,7 +413,7 @@ class UserUpdatePublic(BaseModel):
     password: Optional[str] = Field(
         default=None,
         description=(
-            "New local password. Must contain at least 15 characters and be at "
+            "New local password. Must contain at least 12 characters and be at "
             "most 72 UTF-8 bytes."
         ),
         examples=["Another correct horse battery staple"],

@@ -469,7 +469,7 @@ SHAREPOINT_CLIENT_SECRET=
 # The default credentials below match the DEPLOYMENT.md guide.
 #
 # IMPORTANT: Change the password after first login!
-# Local passwords require at least 15 characters and at most 72 UTF-8 bytes.
+# Local passwords require at least 12 characters and at most 72 UTF-8 bytes.
 #
 # If tenant/user already exist, init_db.py will skip creation (safe to re-run).
 # ----------------------------------------------------------------------------

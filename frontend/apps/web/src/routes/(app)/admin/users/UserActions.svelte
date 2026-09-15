@@ -56,7 +56,7 @@
   const isInactive = $derived(user.state === "inactive");
 
   let isProcessing = $state(false);
-  let showEditDialog = $state<Dialog.OpenState | undefined>(undefined);
+  let showEditDialog = $state(false);
   let showDeleteDialog = $state<Dialog.OpenState | undefined>(undefined);
 </script>
 
@@ -73,7 +73,7 @@
       is={item}
       padding="icon-leading"
       on:click={() => {
-        $showEditDialog = true;
+        showEditDialog = true;
       }}
     >
       <Edit size={16} />
@@ -118,7 +118,7 @@
 </Dropdown.Root>
 
 <!-- Edit Dialog - hide built-in trigger since we control it from dropdown -->
-<UserEditor {user} mode="update" hideTrigger={true} bind:showDialog={showEditDialog}></UserEditor>
+<UserEditor {user} mode="update" hideTrigger={true} bind:open={showEditDialog}></UserEditor>
 
 <!-- Delete Confirmation Dialog -->
 <Dialog.Root alert bind:isOpen={showDeleteDialog}>
