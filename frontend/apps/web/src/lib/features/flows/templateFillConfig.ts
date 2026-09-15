@@ -373,64 +373,6 @@ export function getTemplateFillTemplateName(
     : null;
 }
 
-export function getTemplateFillDryRunIssues(params: {
-  step: Pick<FlowStep, "step_order" | "output_mode" | "output_type" | "output_config">;
-}): string[] {
-  if (!isTemplateFillStep(params.step)) return [];
-
-  const config = getTemplateFillOutputConfig(params.step);
-  const placeholders = config.placeholders ?? [];
-  const bindings = config.bindings ?? {};
-  const issues: string[] = [];
-
-  if (params.step.output_type !== "docx") {
-    issues.push("Template fill requires Word output.");
-  }
-
-  if (!config.template_asset_id?.trim()) {
-    issues.push("Missing DOCX template.");
-  }
-
-  if (placeholders.length === 0) {
-    issues.push("No placeholders found in the selected DOCX template.");
-  }
-
-  for (const placeholder of placeholders) {
-    if (!Object.prototype.hasOwnProperty.call(bindings, placeholder)) {
-      issues.push(`Missing mapping for template placeholder '${placeholder}'.`);
-      continue;
-    }
-
-    const expression = bindings[placeholder];
-    if (typeof expression !== "string") {
-      issues.push(`Template placeholder '${placeholder}' has an invalid mapping value.`);
-      continue;
-    }
-
-    const matches = [...expression.matchAll(/step_(\d+)/g)];
-    for (const match of matches) {
-      const referencedStepOrder = Number.parseInt(match[1] ?? "", 10);
-      if (Number.isNaN(referencedStepOrder)) continue;
-      if (referencedStepOrder >= params.step.step_order) {
-        issues.push(
-          `Template placeholder '${placeholder}' references step ${referencedStepOrder}, which is not available before step ${params.step.step_order}.`
-        );
-      }
-    }
-  }
-
-  const placeholderSet = new Set(placeholders);
-  for (const placeholderName of Object.keys(bindings)) {
-    if (!placeholderSet.has(placeholderName)) {
-      issues.push(
-        `Template mapping '${placeholderName}' no longer exists in the selected DOCX template.`
-      );
-    }
-  }
-
-  return issues;
-}
-
 export function listTemplateBindingRows(params: {
   inspection: FlowTemplateInspection | null;
   currentConfig: TemplateFillOutputConfig;

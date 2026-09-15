@@ -7,7 +7,6 @@ import {
   buildTemplateBindingSuggestions,
   createTemplateFillDraftConfig,
   getTemplateFillOutputConfig,
-  getTemplateFillDryRunIssues,
   getTemplateFillReadiness,
   groupTemplateBindingSuggestions,
   isTemplateFillStep,
@@ -325,105 +324,6 @@ describe("templateFillConfig", () => {
       matched: 2,
       incomplete: true
     });
-  });
-
-  it("reports template-fill dry-run issues for missing template state and mappings", () => {
-    expect(
-      getTemplateFillDryRunIssues({
-        step: {
-          step_order: 4,
-          output_mode: "template_fill",
-          output_type: "docx",
-          output_config: {
-            placeholders: ["bakgrund", "analys"],
-            bindings: {
-              bakgrund: "{{step_1.output.text}}"
-            }
-          }
-        }
-      })
-    ).toEqual(["Missing DOCX template.", "Missing mapping for template placeholder 'analys'."]);
-  });
-
-  it("reports forward references and orphaned mappings for template-fill dry runs", () => {
-    expect(
-      getTemplateFillDryRunIssues({
-        step: {
-          step_order: 3,
-          output_mode: "template_fill",
-          output_type: "docx",
-          output_config: {
-            template_asset_id: "asset-1",
-            placeholders: ["bakgrund"],
-            bindings: {
-              bakgrund: "{{step_3.output.text}}",
-              borttagen: "{{step_1.output.text}}"
-            }
-          }
-        }
-      })
-    ).toEqual([
-      "Template placeholder 'bakgrund' references step 3, which is not available before step 3.",
-      "Template mapping 'borttagen' no longer exists in the selected DOCX template."
-    ]);
-  });
-
-  it("reports wrong output type and missing placeholders in template-fill dry runs", () => {
-    expect(
-      getTemplateFillDryRunIssues({
-        step: {
-          step_order: 2,
-          output_mode: "template_fill",
-          output_type: "text",
-          output_config: {
-            template_asset_id: "asset-1",
-            bindings: {}
-          }
-        }
-      })
-    ).toEqual([
-      "Template fill requires Word output.",
-      "No placeholders found in the selected DOCX template."
-    ]);
-  });
-
-  it("accepts explicit empty bindings in template-fill dry runs", () => {
-    expect(
-      getTemplateFillDryRunIssues({
-        step: {
-          step_order: 2,
-          output_mode: "template_fill",
-          output_type: "docx",
-          output_config: {
-            template_asset_id: "asset-1",
-            placeholders: ["valfri_del"],
-            bindings: {
-              valfri_del: ""
-            }
-          }
-        }
-      })
-    ).toEqual([]);
-  });
-
-  it("sanitizes malformed template-fill config before dry-run validation", () => {
-    expect(
-      getTemplateFillDryRunIssues({
-        step: {
-          step_order: 2,
-          output_mode: "template_fill",
-          output_type: "docx",
-          output_config: {
-            template_file_id: 7,
-            placeholders: [7, "Body"],
-            bindings: {
-              Body: "{{step_1.output.text}}",
-              Invalid: 9
-            }
-          }
-        }
-      })
-    ).toEqual(["Missing DOCX template."]);
   });
 
   it("builds rows with missing, matched, and orphaned states", () => {

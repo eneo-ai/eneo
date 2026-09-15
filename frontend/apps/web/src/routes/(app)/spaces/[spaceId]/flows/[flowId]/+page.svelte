@@ -45,7 +45,7 @@
   import { tick, untrack } from "svelte";
   import { MediaQuery } from "svelte/reactivity";
   import { slide } from "svelte/transition";
-  import FlowDryRun from "$lib/features/flows/components/FlowDryRun.svelte";
+  import FlowDraftCheck from "$lib/features/flows/components/FlowDraftCheck.svelte";
   import FlowPageHeader from "$lib/features/flows/components/FlowPageHeader.svelte";
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
   import FlowAIBuilderEditHost from "$lib/features/flows/ai-builder/FlowAIBuilderEditHost.svelte";
@@ -75,6 +75,19 @@
    * toast. Returns false when the failure was not a routed rejection so the
    * caller can fall back to its own message.
    */
+  /**
+   * "Kontrollera flödet": flush pending saves so the server validates the
+   * draft. A validation rejection is routed into the banner and counts as a
+   * completed check with issues; only an unroutable save failure rejects.
+   */
+  async function checkDraft(): Promise<void> {
+    try {
+      await flowEditor.flushFlowSaves();
+    } catch (error) {
+      if (!surfaceRoutedSaveRejection(error)) throw error;
+    }
+  }
+
   function surfaceRoutedSaveRejection(error: unknown): boolean {
     if (error instanceof FlowSaveRejectedError || flowEditor.reportServerValidationError(error)) {
       validationBannerExpanded = true;
@@ -1367,7 +1380,7 @@
                       </p>
                     {:else if !$isPublished}
                       <p class="text-secondary mt-1 text-sm leading-relaxed">
-                        {m.flow_dry_run_desc()}
+                        {m.flow_check_flow_desc()}
                       </p>
                     {/if}
                   </div>
@@ -1378,7 +1391,7 @@
                         role="status"
                       >
                         <CheckCircle2 class="size-3" aria-hidden="true" />
-                        {m.flow_publish_status_ready()}
+                        {m.flow_check_no_known_issues()}
                       </span>
                     {:else}
                       <span
@@ -1409,7 +1422,14 @@
                     </div>
                   {:else}
                     <div class="flex flex-wrap items-center gap-2">
-                      <FlowDryRun flow={$resource} />
+                      <FlowDraftCheck
+                        steps={$update.steps}
+                        issueCount={$validationErrors.size + (hasStepJsonValidationErrors ? 1 : 0)}
+                        saveStatus={$saveStatus}
+                        draftRevision={$resource.draft_revision}
+                        onCheck={checkDraft}
+                        onShowIssues={() => (validationBannerExpanded = true)}
+                      />
                       <Button variant="outline" class="h-9" onclick={() => setActiveTab("history")}>
                         {m.flow_show_history()}
                       </Button>
