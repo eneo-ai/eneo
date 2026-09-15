@@ -16,6 +16,8 @@ from sqlalchemy import text
 
 from eneo.database.database import sessionmanager
 
+TEST_PASSWORD = "TemplatePassword123!"
+
 # Helper functions for test setup
 
 
@@ -122,9 +124,9 @@ async def test_feature_flag_disabled_returns_empty_gallery(
     # Create tenant and user
     tenant = await _create_tenant(client, super_admin_token, f"tenant-{uuid4()}")
     user = await _create_user(
-        client, super_admin_token, tenant["id"], "user@test.com", "password123"
+        client, super_admin_token, tenant["id"], "user@test.com", TEST_PASSWORD
     )
-    api_key = await _login_user(client, user["email"], "password123")
+    api_key = await _login_user(client, user["email"], TEST_PASSWORD)
 
     # Feature flag should be disabled by default
     response = await client.get(
@@ -153,10 +155,10 @@ async def test_create_template_requires_feature_flag(
         super_admin_token,
         tenant["id"],
         "admin@test.com",
-        "password123",
+        TEST_PASSWORD,
         is_admin=True,
     )
-    api_key = await _login_user(client, admin["email"], "password123")
+    api_key = await _login_user(client, admin["email"], TEST_PASSWORD)
 
     # Try to create template without feature flag enabled
     template_data = {
@@ -198,7 +200,7 @@ async def test_tenant_isolation_templates_not_visible_across_tenants(
         super_admin_token,
         tenant_a["id"],
         "admin-a@test.com",
-        "password123",
+        TEST_PASSWORD,
         is_admin=True,
     )
     admin_b = await _create_user(
@@ -206,12 +208,12 @@ async def test_tenant_isolation_templates_not_visible_across_tenants(
         super_admin_token,
         tenant_b["id"],
         "admin-b@test.com",
-        "password123",
+        TEST_PASSWORD,
         is_admin=True,
     )
 
-    api_key_a = await _login_user(client, admin_a["email"], "password123")
-    api_key_b = await _login_user(client, admin_b["email"], "password123")
+    api_key_a = await _login_user(client, admin_a["email"], TEST_PASSWORD)
+    api_key_b = await _login_user(client, admin_b["email"], TEST_PASSWORD)
 
     # Enable feature flag for both tenants
     await _enable_templates_feature(client, api_key_a)
@@ -273,10 +275,10 @@ async def test_duplicate_name_within_tenant_rejected(
         super_admin_token,
         tenant["id"],
         "admin@test.com",
-        "password123",
+        TEST_PASSWORD,
         is_admin=True,
     )
-    api_key = await _login_user(client, admin["email"], "password123")
+    api_key = await _login_user(client, admin["email"], TEST_PASSWORD)
     await _enable_templates_feature(client, api_key)
 
     template_data = {
@@ -323,10 +325,10 @@ async def test_soft_delete_hides_template_from_gallery(
         super_admin_token,
         tenant["id"],
         "admin@test.com",
-        "password123",
+        TEST_PASSWORD,
         is_admin=True,
     )
-    api_key = await _login_user(client, admin["email"], "password123")
+    api_key = await _login_user(client, admin["email"], TEST_PASSWORD)
     await _enable_templates_feature(client, api_key)
 
     # Create template
@@ -407,10 +409,10 @@ async def test_rollback_restores_original_state(
         super_admin_token,
         tenant["id"],
         "admin@test.com",
-        "password123",
+        TEST_PASSWORD,
         is_admin=True,
     )
-    api_key = await _login_user(client, admin["email"], "password123")
+    api_key = await _login_user(client, admin["email"], TEST_PASSWORD)
     await _enable_templates_feature(client, api_key)
 
     # Create template with original values
@@ -482,10 +484,10 @@ async def test_delete_template_does_not_affect_existing_assistants(
         super_admin_token,
         tenant["id"],
         "admin@test.com",
-        "password123",
+        TEST_PASSWORD,
         is_admin=True,
     )
-    api_key = await _login_user(client, admin["email"], "password123")
+    api_key = await _login_user(client, admin["email"], TEST_PASSWORD)
     await _enable_templates_feature(client, api_key)
 
     # Create a template
@@ -568,10 +570,10 @@ async def test_app_template_crud_operations(
         super_admin_token,
         tenant["id"],
         "admin@test.com",
-        "password123",
+        TEST_PASSWORD,
         is_admin=True,
     )
-    api_key = await _login_user(client, admin["email"], "password123")
+    api_key = await _login_user(client, admin["email"], TEST_PASSWORD)
     await _enable_templates_feature(client, api_key)
 
     # Create app template
@@ -632,10 +634,10 @@ async def test_restore_soft_deleted_template(
         super_admin_token,
         tenant["id"],
         "admin@test.com",
-        "password123",
+        TEST_PASSWORD,
         is_admin=True,
     )
-    api_key = await _login_user(client, admin["email"], "password123")
+    api_key = await _login_user(client, admin["email"], TEST_PASSWORD)
     await _enable_templates_feature(client, api_key)
 
     # Create template
@@ -718,10 +720,10 @@ async def test_permanent_delete_requires_soft_delete_first(
         super_admin_token,
         tenant["id"],
         "admin@test.com",
-        "password123",
+        TEST_PASSWORD,
         is_admin=True,
     )
-    api_key = await _login_user(client, admin["email"], "password123")
+    api_key = await _login_user(client, admin["email"], TEST_PASSWORD)
     await _enable_templates_feature(client, api_key)
 
     # Create template
@@ -804,7 +806,7 @@ async def test_cross_tenant_access_denied(
         super_admin_token,
         tenant_a["id"],
         "admin-a@test.com",
-        "password123",
+        TEST_PASSWORD,
         is_admin=True,
     )
     admin_b = await _create_user(
@@ -812,12 +814,12 @@ async def test_cross_tenant_access_denied(
         super_admin_token,
         tenant_b["id"],
         "admin-b@test.com",
-        "password123",
+        TEST_PASSWORD,
         is_admin=True,
     )
 
-    api_key_a = await _login_user(client, admin_a["email"], "password123")
-    api_key_b = await _login_user(client, admin_b["email"], "password123")
+    api_key_a = await _login_user(client, admin_a["email"], TEST_PASSWORD)
+    api_key_b = await _login_user(client, admin_b["email"], TEST_PASSWORD)
 
     await _enable_templates_feature(client, api_key_a)
     await _enable_templates_feature(client, api_key_b)
@@ -872,7 +874,7 @@ async def test_gallery_endpoint_accessible_to_regular_users(
         super_admin_token,
         tenant["id"],
         "user@test.com",
-        "password123",
+        TEST_PASSWORD,
         is_admin=False,
     )
 
@@ -882,12 +884,12 @@ async def test_gallery_endpoint_accessible_to_regular_users(
         super_admin_token,
         tenant["id"],
         "admin@test.com",
-        "password123",
+        TEST_PASSWORD,
         is_admin=True,
     )
 
-    user_key = await _login_user(client, regular_user["email"], "password123")
-    admin_key = await _login_user(client, admin["email"], "password123")
+    user_key = await _login_user(client, regular_user["email"], TEST_PASSWORD)
+    admin_key = await _login_user(client, admin["email"], TEST_PASSWORD)
 
     await _enable_templates_feature(client, admin_key)
 

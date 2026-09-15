@@ -251,7 +251,7 @@ jobs:
           uv run pytest -v -m migration_isolation \
             tests/integration/migrations/test_file_icon_preflight.py \
             tests/integration/migrations/test_file_icon_legacy_cleanup.py
-          uv run pytest -v -m migration_isolation \
+          uv run pytest -v -o faulthandler_timeout=180 -m migration_isolation \
             tests/integration/migrations/test_file_icon_bridge_rehearsal.py
         env:
           ENEO_FILE_ICON_REHEARSAL_PROFILE: smoke

@@ -454,7 +454,7 @@ your public URL.
 
 2. **Check default credentials**:
    - Email: `user@example.com`
-   - Password: `Password1!`
+   - Password: `ChangeMePassword1!`
 
 3. **Reset default user**:
    ```bash

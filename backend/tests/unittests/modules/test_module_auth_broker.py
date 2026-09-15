@@ -1,3 +1,4 @@
+import json
 import time
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
@@ -89,6 +90,7 @@ def make_user(**overrides):
     user.email = "user@example.com"
     user.username = "user"
     user.is_active = True
+    user.credential_version = 0
     for key, value in overrides.items():
         setattr(user, key, value)
     return user
@@ -286,6 +288,36 @@ class TestExchangeTicket:
         with pytest.raises(AuthenticationException):
             await broker.exchange_ticket(api_key=make_api_key(), ticket=ticket)
 
+    async def test_ticket_issued_before_credential_change_is_consumed_and_rejected(
+        self,
+    ):
+        broker = make_broker(user=make_user(credential_version=1))
+        ticket = issued_ticket(
+            await issue(broker, user=make_user(credential_version=0))
+        )
+        broker.auth_service.create_access_token_for_user = MagicMock()
+
+        with pytest.raises(AuthenticationException):
+            await broker.exchange_ticket(api_key=make_api_key(), ticket=ticket)
+
+        assert broker.redis_client.store == {}
+        broker.auth_service.create_access_token_for_user.assert_not_called()
+
+        with pytest.raises(AuthenticationException):
+            await broker.exchange_ticket(api_key=make_api_key(), ticket=ticket)
+
+    async def test_legacy_ticket_without_version_uses_version_zero_baseline(self):
+        broker = make_broker(user=make_user(credential_version=0))
+        ticket = issued_ticket(await issue(broker))
+        ticket_key = next(iter(broker.redis_client.store))
+        payload = json.loads(broker.redis_client.store[ticket_key])
+        payload.pop("credential_version")
+        broker.redis_client.store[ticket_key] = json.dumps(payload)
+
+        result = await broker.exchange_ticket(api_key=make_api_key(), ticket=ticket)
+
+        assert result.user.id == USER_ID
+
     async def test_unknown_ticket_rejected(self):
         broker = make_broker()
 
@@ -412,6 +444,24 @@ class TestModuleResourceAuthentication:
     async def test_rejects_token_for_another_module(self):
         broker = make_broker()
         token = await self.module_token(broker, module_name="another-module")
+
+        with pytest.raises(AuthenticationException):
+            await broker.authenticate_resource_request(
+                module_key=MODULE_KEY,
+                access_token=token,
+                api_key=make_api_key(),
+            )
+
+    async def test_rejects_token_minted_before_credential_version_advanced(self):
+        broker = make_broker(user=make_user(credential_version=2))
+        token = broker.auth_service.create_access_token_for_user(
+            make_user(credential_version=1),
+            audience=module_audience(MODULE_KEY),
+            extra_claims={
+                MODULE_USER_ID_CLAIM: str(USER_ID),
+                MODULE_TENANT_ID_CLAIM: str(TENANT_ID),
+            },
+        )
 
         with pytest.raises(AuthenticationException):
             await broker.authenticate_resource_request(

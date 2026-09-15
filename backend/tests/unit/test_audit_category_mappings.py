@@ -263,7 +263,7 @@ class TestCategoryDistribution:
         expected_counts = {
             "admin_actions": 49,
             "user_actions": 48,
-            "security_events": 9,
+            "security_events": 12,
             "file_operations": 5,
             "integration_events": 19,
             "system_actions": 3,
