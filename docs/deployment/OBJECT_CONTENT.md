@@ -1102,20 +1102,31 @@ When the verification period and backup restore test are complete:
 1. Check `status`: the campaign must be `complete`, admission unpaused, and no
    ledger item may be pending, ready, leased, or failed. Keep the configured
    capacity and migration controls for installations still adopting.
-2. Stop every API, worker, and maintenance-worker process, including replicas.
-   Use a one-off container from the **same 2.2 image** to run:
+2. Stop every backend and worker replica (in split deployments, the
+   maintenance worker too) and keep PostgreSQL running. Run the command from
+   the **same 2.2 image** with the deployment's Compose files, profile, and
+   settings:
 
    ```bash
-   python -m eneo.object_content.file_icon_migration cleanup
+   docker compose stop backend worker
+   docker compose run --rm --no-deps -T --entrypoint python worker \
+     -m eneo.object_content.file_icon_migration cleanup
    ```
 
-3. Check the JSON result and exit status. Success reports `legacy_cleaned: true`.
-   Repeating cleanup reports `changed: false`. A failed prerequisite exits 2;
-   a database/lock failure exits 3. A failed transaction preserves the sources.
-   Resolve the reported condition and rerun; do not drop columns manually.
-4. Restart the same image. Check `status` (`legacy_cleaned: true`), representative
-   old downloads, and a new upload. `preflight` reports schema state `cleaned` and
-   no remaining legacy adoption capacity; workers no longer claim legacy work.
+3. Check the JSON result and exit status. Success prints `legacy_cleaned: true`
+   and `changed: true`; a repeat prints `changed: false`. Exit 2 means a
+   prerequisite failed and nothing was changed. Exit 3 means the database was
+   unreachable, the settings were invalid, or a lock could not be taken within
+   five seconds; nothing was changed in the usual case, but if the connection
+   dropped while PostgreSQL confirmed the commit the cleanup is complete without
+   a printed result. After exit 3, an interrupted command, or missing output,
+   run `status` with the same `docker compose run` form: `legacy_cleaned: true`
+   means it committed. Running cleanup again is always safe. Do not drop
+   columns manually.
+4. Start the same image again with `docker compose start backend worker`. Check
+   `status` (`legacy_cleaned: true`), representative old downloads, and a new
+   upload. `preflight` reports schema state `cleaned` and no remaining legacy
+   adoption capacity; the worker stops claiming legacy adoption work.
 
 The command requires READ COMMITTED isolation and waits at most five seconds to
 acquire each required lock. It fences owner, reference, content, and migration
@@ -1125,7 +1136,9 @@ size and SHA-256, including empty values, and hashes inline authoritative bytes.
 For remote authority it checks recorded verification metadata; it does not
 contact the object store under the database fence. Verify remote availability
 and the coordinated backup before the maintenance window. Source verification
-scans retained payloads and needs a measured maintenance window on large data.
+reads and hashes every retained legacy payload and its inline authoritative
+copy, so its duration is not the adoption throughput; measure it on a
+representative restored database and size the maintenance window from that.
 
 Cleanup also removes the legacy-write freeze triggers, while retaining the
 ledger, migration controls, and owner-deletion triggers for this release. The
@@ -1146,14 +1159,18 @@ SELECT pg_size_pretty(pg_total_relation_size('files')) AS files_total,
 Use one tested maintenance method:
 
 - Prefer [`pg_repack`](https://github.com/reorg/pg_repack/blob/master/doc/pg_repack.rst)
-  when minimizing blocking matters. It requires the extension and client,
-  temporary free disk of roughly twice the target tables and indexes, and a
-  short final lock. Validate its version and exact command against a restored
-  production-size database first.
-- For the simpler offline option, stop APIs and workers and run
-  `VACUUM (FULL, ANALYZE) files;` followed by
-  `VACUUM (FULL, ANALYZE) icons;`. Each command rewrites and exclusively locks
-  its table and requires temporary space.
+  when minimizing blocking matters. It keeps the table readable and writable
+  during most of the rewrite but takes an exclusive lock at the start and at
+  the end, and by default it cancels queries that hold up those locks and
+  eventually terminates their connections. Run it with `--no-kill-backend` and
+  a tested `--wait-timeout` if Eneo must stay up, or stop Eneo for the run. It
+  requires the extension on the server and the client, and temporary free disk
+  of roughly twice the target tables and indexes. Validate its version and
+  exact command against a restored production-size database first.
+- For the simpler offline option, stop backend and worker and run
+  `VACUUM (FULL, ANALYZE) files;` and then `VACUUM (FULL, ANALYZE) icons;`, one
+  at a time and outside a transaction block. Each command rewrites and
+  exclusively locks its table and requires temporary space.
 
 Ordinary `VACUUM` generally makes dead space reusable inside PostgreSQL but does
 not return this table storage to the filesystem. Physical reclamation therefore

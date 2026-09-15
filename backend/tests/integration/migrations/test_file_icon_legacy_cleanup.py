@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
+import json
+import os
+import socket
+import subprocess
+import sys
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from hashlib import sha256
 from time import monotonic, sleep
 from uuid import UUID, uuid4
-
-import json
-import os
-import subprocess
-import sys
 
 import psycopg2
 import pytest
@@ -592,6 +592,7 @@ async def test_same_build_metadata_fallback_worker_and_failure_after_cleanup(
     contract_database,
 ):
     from sqlalchemy import select
+
     from eneo.database.database import DatabaseSessionManager
     from eneo.database.tables.file_icon_backfill_table import (
         FileIconBackfillCampaign,
@@ -782,6 +783,49 @@ def test_cleanup_cli_refusal_lock_failure_commit_and_repeat(
     assert code == 0 and result["legacy_cleaned"] and not result["changed"]
     code, result = run("status")
     assert code == 0 and result["legacy_cleaned"] and result["state"] == "complete"
+
+
+def test_cleanup_cli_reports_unreachable_database_and_invalid_configuration(tmp_path):
+    """Expected failures before the transaction keep the JSON/exit-code contract."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        closed_port = probe.getsockname()[1]
+    base = os.environ.copy()
+    base.update(
+        POSTGRES_HOST="127.0.0.1",
+        POSTGRES_USER="eneo",
+        POSTGRES_PASSWORD="unused",
+        POSTGRES_DB="eneo",
+        TESTING="true",
+    )
+
+    def run(**overrides):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "eneo.object_content.file_icon_migration",
+                "cleanup",
+            ],
+            cwd=tmp_path,
+            env={**base, **overrides},
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        return result.returncode, json.loads(result.stdout), result.stderr
+
+    code, result, stderr = run(POSTGRES_PORT=str(closed_port))
+    assert code == 3 and result["outcome"] == "incomplete"
+    assert "run status" in result["detail"]
+    assert "unused" not in result["detail"]
+    assert "Traceback" in stderr
+
+    code, result, _stderr = run(POSTGRES_PORT="not-a-port")
+    assert code == 3 and result["outcome"] == "incomplete"
+    assert "configuration is invalid" in result["detail"]
+    assert "not-a-port" not in result["detail"]
 
 
 async def test_cleanup_marker_is_refreshed_when_a_session_starts_a_new_transaction(

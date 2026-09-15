@@ -243,11 +243,18 @@ jobs:
           DOCKER_HOST: unix:///var/run/docker.sock
 
       - name: Verify File/Icon upgrade and optional cleanup on PostgreSQL 13
+        # Migration tests are opt-in and run outside the parallel suite. The
+        # restore rehearsal needs its own application/database session.
         working-directory: backend
+        timeout-minutes: 10
         run: |
-          uv run pytest -q -m migration_isolation tests/integration/migrations/test_file_icon_preflight.py tests/integration/migrations/test_file_icon_legacy_cleanup.py
-          uv run pytest -q -m migration_isolation tests/integration/migrations/test_file_icon_bridge_rehearsal.py
+          uv run pytest -v -m migration_isolation \
+            tests/integration/migrations/test_file_icon_preflight.py \
+            tests/integration/migrations/test_file_icon_legacy_cleanup.py
+          uv run pytest -v -m migration_isolation \
+            tests/integration/migrations/test_file_icon_bridge_rehearsal.py
         env:
+          ENEO_FILE_ICON_REHEARSAL_PROFILE: smoke
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
 

@@ -8,6 +8,7 @@ import argparse
 import asyncio
 import json
 import sys
+import traceback
 from contextlib import redirect_stdout
 from dataclasses import asdict
 
@@ -127,8 +128,6 @@ def main() -> None:
         if arguments.command == "preflight":
             result, exit_code = asyncio.run(_preflight(arguments.timeout_seconds))
         elif arguments.command == "cleanup":
-            from sqlalchemy.exc import SQLAlchemyError
-
             from eneo.object_content.file_icon_cleanup import FileIconCleanupRefused
 
             try:
@@ -139,11 +138,26 @@ def main() -> None:
                     {"outcome": "blocked", "detail": str(error)}, indent=2
                 )
                 exit_code = 2
-            except SQLAlchemyError:
+            except (ValidationError, ValueError):
                 result = json.dumps(
                     {
                         "outcome": "incomplete",
-                        "detail": "Cleanup could not finish. Check database connectivity, schema, permissions and locks, then run status before retrying. No automatic retry was attempted.",
+                        "detail": "Cleanup configuration is invalid. Check the worker's database and OBJECT_CONTENT settings; values are omitted to protect credentials.",
+                    },
+                    indent=2,
+                )
+                exit_code = 3
+            except Exception:
+                # CLI boundary: stdout carries one JSON result, stderr the
+                # cause. Connection refusals, bad credentials, timeouts and
+                # lock failures all end here; the operator must check status
+                # because a lost connection during commit leaves the outcome
+                # unknown.
+                traceback.print_exc()
+                result = json.dumps(
+                    {
+                        "outcome": "incomplete",
+                        "detail": "Cleanup could not finish. Check database connectivity, credentials, permissions and locks, then run status before retrying: it reports legacy_cleaned if the transaction committed. No automatic retry was attempted.",
                     },
                     indent=2,
                 )
