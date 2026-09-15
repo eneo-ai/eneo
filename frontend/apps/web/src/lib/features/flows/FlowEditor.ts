@@ -43,6 +43,15 @@ export class FlowSaveRejectedError extends Error {
  * reason. The raw failure toast has already fired at the ResourceEditor
  * seam — callers must not present a second toast for the same failure.
  */
+/** The draft cannot be persisted as it stands (a step still waiting for
+ *  its assistant, or a typed IO binding that does not hold). */
+export class FlowSaveIncompleteError extends Error {
+  constructor() {
+    super("flow draft is not ready to be saved");
+    this.name = "FlowSaveIncompleteError";
+  }
+}
+
 export class FlowSaveFailedError extends Error {
   constructor() {
     super("Flow changes could not be saved before continuing.");
@@ -409,20 +418,30 @@ function createFlowEditor(data: FlowEditorInitData) {
     await assistantSaveManager.flush();
   }
 
+  /**
+   * Persist everything before the caller continues (navigation): resolves
+   * only when no save is pending and nothing is dirty, rejects when the
+   * draft cannot be persisted as it stands or the server refused it.
+   */
   async function flushFlowSaves(): Promise<void> {
     clearAutoSaveTimer();
 
     if (get(isPublished)) return;
 
+    // Saves already queued must land first; only then does the dirty state
+    // say what is still unsaved (a field reverted while its save was in
+    // flight is dirty again once that response arrives).
+    await editor.settled();
+
     const { hasUnsavedChanges } = get(editor.state.currentChanges);
     if (!hasUnsavedChanges) {
-      if (get(saveStatus) !== "unsaved") saveStatus.set("saved");
+      settleFlowSaveStatus();
       return;
     }
 
     if (!stepsAreSaveable(get(editor.state.update).steps ?? [])) {
       saveStatus.set("unsaved");
-      return;
+      throw new FlowSaveIncompleteError();
     }
 
     saveStatus.set("saving");
@@ -430,7 +449,7 @@ function createFlowEditor(data: FlowEditorInitData) {
 
     if (!result.saved) {
       saveStatus.set("unsaved");
-      if ("deferred" in result) return;
+      if ("deferred" in result) throw new FlowSaveIncompleteError();
       if (result.handled) {
         // This save's structured rejection already lives in the banner.
         throw new FlowSaveRejectedError();
@@ -441,9 +460,9 @@ function createFlowEditor(data: FlowEditorInitData) {
     // rejections no longer describe it.
     clearServerValidationErrors();
     settleFlowSaveStatus();
-    // An edit made while that save was in flight is newer than its response
-    // and still unsaved; the caller (navigation) waits for it too.
-    if (get(saveStatus) === "unsaved") await flushFlowSaves();
+    // Another save queued behind this one, or an edit made while it was in
+    // flight: not done until those have landed too.
+    if (get(saveStatus) !== "saved") await flushFlowSaves();
   }
 
   /** Steps can be persisted once every step has its assistant and the typed

@@ -90,3 +90,33 @@ def test_missing_non_nullable_and_optional_keys_are_left_alone() -> None:
         "revision": 2,
         "corrections_revision_id": None,
     }
+
+
+def test_a_union_with_several_object_options_is_left_alone() -> None:
+    spec = _spec()
+    spec["components"]["schemas"]["Either"] = {
+        "oneOf": [
+            {
+                "type": "object",
+                "required": ["kind", "note"],
+                "additionalProperties": False,
+                "properties": {
+                    "kind": {"const": "a"},
+                    "note": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+                },
+            },
+            {
+                "type": "object",
+                "required": ["kind"],
+                "additionalProperties": False,
+                "properties": {"kind": {"const": "b"}},
+            },
+        ],
+        "example": {"kind": "b"},
+    }
+
+    _restore_stripped_example_nulls(spec)
+
+    # Which option the example belongs to is not knowable from the schema;
+    # adding the first option's nullable key would break the second.
+    assert spec["components"]["schemas"]["Either"]["example"] == {"kind": "b"}

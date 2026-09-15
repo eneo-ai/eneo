@@ -48,18 +48,18 @@ export function createResourceEditor<T extends Resource, Defs extends Defaults<T
    */
   onSaveError?: (error: unknown) => boolean;
   /**
-   * Called for a field the user edited WHILE a save of it was in flight. The
-   * local value wins (it is newer than the response), but the server may have
-   * assigned identities the local copy lacks (e.g. ids for created items);
-   * return the local value with those folded in. Default: the local value as is.
-   */
-  /**
    * Decides, when a queued save actually runs, whether the current state may
    * be persisted. Validation done when the save was queued can be stale by
    * the time an earlier save lets it run; a false answer defers the save and
    * keeps the state dirty instead of sending what the endpoint would reject.
    */
   canSave?: (update: AppliedDefaults<T, Defs>) => boolean;
+  /**
+   * Called for a field the user edited WHILE a save of it was in flight. The
+   * local value wins (it is newer than the response), but the server may have
+   * assigned identities the local copy lacks (e.g. ids for created items);
+   * return the local value with those folded in. Default: the local value as is.
+   */
   mergeUnsavedField?: (
     field: keyof AppliedDefaults<T, Defs>,
     local: unknown,
@@ -92,6 +92,12 @@ export function createResourceEditor<T extends Resource, Defs extends Defaults<T
   // sees a "changed elsewhere" conflict caused by their own click.
   let saveChain: Promise<unknown> = Promise.resolve();
   let savesPending = 0;
+
+  /** Resolves once every save queued so far has settled (saved, failed or
+   *  deferred). The dirty state is only meaningful after that. */
+  function settled(): Promise<void> {
+    return saveChain.then(() => undefined);
+  }
 
   /** Will save the current changes to this resource and delete removed files */
   function saveChanges(field: keyof T | undefined = undefined): Promise<ResourceSaveResult> {
@@ -218,6 +224,7 @@ export function createResourceEditor<T extends Resource, Defs extends Defaults<T
       isSaving: readonly(isSaving)
     },
     saveChanges,
+    settled,
     discardChanges,
     setResource
   });

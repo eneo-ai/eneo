@@ -5646,6 +5646,7 @@
   "flow_step_edit_transcription_settings": "Change transcription settings",
   "flow_step_rename_rewrite_failed": "Could not update variable references after the rename.",
   "flow_step_save_failed": "Could not save the step's changes.",
+  "flow_save_incomplete": "A step is not ready to be saved yet: its assistant is still being created or a binding is missing. Wait a moment and try again.",
   "flow_step_reorder_failed": "Could not reorder the steps.",
   "flow_step_remove_failed": "Could not remove the step.",
   "flow_run_progress_load_failed": "Could not load the run progress.",

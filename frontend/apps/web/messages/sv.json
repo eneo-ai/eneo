@@ -5646,6 +5646,7 @@
   "flow_step_edit_transcription_settings": "Ändra transkriberingsinställningar",
   "flow_step_rename_rewrite_failed": "Det gick inte att uppdatera variabelreferenser efter namnbytet.",
   "flow_step_save_failed": "Det gick inte att spara stegets ändringar.",
+  "flow_save_incomplete": "Ett steg är inte klart att sparas ännu: assistenten skapas fortfarande eller en koppling saknas. Vänta en stund och försök igen.",
   "flow_step_reorder_failed": "Det gick inte att ändra stegens ordning.",
   "flow_step_remove_failed": "Det gick inte att ta bort steget.",
   "flow_run_progress_load_failed": "Det gick inte att läsa in körningens förlopp.",

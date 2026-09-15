@@ -295,15 +295,30 @@ def _schema_allows_null(schema: dict[str, Any]) -> bool:
 def _object_schema(
     openapi_schema: dict[str, Any], schema: Any, depth: int = 0
 ) -> dict[str, Any]:
-    """The object schema behind a reference or a one-option composition."""
+    """The object schema behind a reference or an unambiguous composition.
+
+    A composition with more than one object option (a discriminated union)
+    is left alone: which option an example belongs to is not knowable from
+    the schema, and a wrong guess would add keys the right option forbids.
+    """
     resolved = _resolve_openapi_schema_ref(openapi_schema, schema)
-    if "properties" in resolved or depth > 8:
-        return resolved if "properties" in resolved else {}
+    if "properties" in resolved:
+        return resolved
+    if depth > 8:
+        return {}
     for key in ("allOf", "anyOf", "oneOf"):
-        for option in cast(list[Any], resolved.get(key) or []):
-            candidate = _object_schema(openapi_schema, option, depth + 1)
-            if candidate:
-                return candidate
+        candidates = [
+            candidate
+            for candidate in (
+                _object_schema(openapi_schema, option, depth + 1)
+                for option in cast(list[Any], resolved.get(key) or [])
+            )
+            if candidate
+        ]
+        if len(candidates) == 1:
+            return candidates[0]
+        if candidates:
+            return {}
     return {}
 
 

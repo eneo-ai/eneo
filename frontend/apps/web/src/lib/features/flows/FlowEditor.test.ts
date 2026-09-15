@@ -10,6 +10,7 @@ import { m } from "$lib/paraglide/messages";
 import {
   createFlowEditor,
   FlowSaveFailedError,
+  FlowSaveIncompleteError,
   FlowSaveRejectedError,
   getUnifiedFlowSaveStatus
 } from "./FlowEditor";
@@ -1656,6 +1657,128 @@ describe("FlowEditor server validation routing", () => {
         [{ update: { steps: FlowStep[] } }]
       ];
       expect(second.steps.map((step) => step.assistant_id)).toEqual(["assistant-1", "assistant-2"]);
+      expect(get(editor.state.saveStatus)).toBe("saved");
+    } finally {
+      vi.useRealTimers();
+      editor.destroy();
+    }
+  });
+
+  it("does not resolve an explicit flush while a queued save is still pending", async () => {
+    vi.useFakeTimers();
+    const pending: Array<(value: Flow) => void> = [];
+    const flowUpdate = vi.fn(
+      () =>
+        new Promise<Flow>((resolve) => {
+          pending.push(resolve);
+        })
+    );
+    const editor = createFlowEditor({ flow: makeFlow(), eneo: makeEneo({ flowUpdate }) });
+    try {
+      editor.state.update.update((flow) => ({ ...flow, name: "First" }));
+      await vi.advanceTimersByTimeAsync(600);
+      editor.state.update.update((flow) => ({ ...flow, description: "Second" }));
+      await vi.advanceTimersByTimeAsync(600);
+      expect(flowUpdate).toHaveBeenCalledTimes(1);
+
+      let flushed = false;
+      const flush = editor.flushSaves().then(() => {
+        flushed = true;
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(flushed).toBe(false);
+
+      pending[0]({ ...makeFlow(null, { name: "First", draft_revision: 1 }) });
+      await vi.advanceTimersByTimeAsync(0);
+      // The queued save is in flight now; the flush still waits.
+      expect(flowUpdate).toHaveBeenCalledTimes(2);
+      expect(flushed).toBe(false);
+
+      pending[1]({
+        ...makeFlow(null, { name: "First", description: "Second", draft_revision: 2 })
+      });
+      await flush;
+      expect(get(editor.state.saveStatus)).toBe("saved");
+      expect(get(editor.state.currentChanges).hasUnsavedChanges).toBe(false);
+    } finally {
+      vi.useRealTimers();
+      editor.destroy();
+    }
+  });
+
+  it("rejects an explicit flush when the draft cannot be persisted yet", async () => {
+    vi.useFakeTimers();
+    const pending: Array<(value: Flow) => void> = [];
+    const flowUpdate = vi.fn(
+      () =>
+        new Promise<Flow>((resolve) => {
+          pending.push(resolve);
+        })
+    );
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [makeStep(1)] }),
+      eneo: makeEneo({ flowUpdate })
+    });
+    try {
+      editor.state.update.update((flow) => ({ ...flow, name: "First" }));
+      await vi.advanceTimersByTimeAsync(600);
+      // A step whose assistant is still being created.
+      editor.state.update.update((flow) => ({
+        ...flow,
+        steps: [
+          ...flow.steps,
+          makeStep(2, { id: "_temp_2", assistant_id: "", input_source: "previous_step" })
+        ]
+      }));
+
+      const flush = editor.flushSaves();
+      pending[0]({ ...makeFlow(null, { name: "First", draft_revision: 1, steps: [makeStep(1)] }) });
+
+      await expect(flush).rejects.toBeInstanceOf(FlowSaveIncompleteError);
+      expect(flowUpdate).toHaveBeenCalledTimes(1);
+      expect(get(editor.state.saveStatus)).toBe("unsaved");
+      expect(get(editor.state.currentChanges).hasUnsavedChanges).toBe(true);
+    } finally {
+      vi.useRealTimers();
+      editor.destroy();
+    }
+  });
+
+  it("persists a field reverted while its save was in flight before an explicit flush resolves", async () => {
+    vi.useFakeTimers();
+    const pending: Array<(value: Flow) => void> = [];
+    const flowUpdate = vi.fn(
+      () =>
+        new Promise<Flow>((resolve) => {
+          pending.push(resolve);
+        })
+    );
+    const editor = createFlowEditor({ flow: makeFlow(), eneo: makeEneo({ flowUpdate }) });
+    try {
+      editor.state.update.update((flow) => ({ ...flow, name: "First" }));
+      await vi.advanceTimersByTimeAsync(600);
+      // Reverted to the persisted value while "First" is being written: locally
+      // clean right now, dirty again the moment the response lands.
+      editor.state.update.update((flow) => ({ ...flow, name: "Flow" }));
+
+      let flushed = false;
+      const flush = editor.flushSaves().then(() => {
+        flushed = true;
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(flushed).toBe(false);
+
+      pending[0]({ ...makeFlow(null, { name: "First", draft_revision: 1 }) });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(flowUpdate).toHaveBeenCalledTimes(2);
+      const [, [{ update: second }]] = flowUpdate.mock.calls as [
+        unknown,
+        [{ update: { name: string; expected_revision: number } }]
+      ];
+      expect(second).toEqual({ name: "Flow", expected_revision: 1 });
+
+      pending[1]({ ...makeFlow(null, { name: "Flow", draft_revision: 2 }) });
+      await flush;
       expect(get(editor.state.saveStatus)).toBe("saved");
     } finally {
       vi.useRealTimers();

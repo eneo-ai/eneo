@@ -37,7 +37,11 @@
   import { EneoError, type FlowRun, type FlowStep, type TranscriptionModel } from "@eneo/eneo-js";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
-  import { FlowSaveFailedError, FlowSaveRejectedError } from "$lib/features/flows/FlowEditor";
+  import {
+    FlowSaveFailedError,
+    FlowSaveIncompleteError,
+    FlowSaveRejectedError
+  } from "$lib/features/flows/FlowEditor";
   import { tick, untrack } from "svelte";
   import { MediaQuery } from "svelte/reactivity";
   import { slide } from "svelte/transition";
@@ -75,6 +79,10 @@
     if (error instanceof FlowSaveRejectedError || flowEditor.reportServerValidationError(error)) {
       validationBannerExpanded = true;
       toast.error(m.flow_validation_save_rejected());
+      return true;
+    }
+    if (error instanceof FlowSaveIncompleteError) {
+      toast.error(m.flow_save_incomplete());
       return true;
     }
     // A generic save failure already fired its raw toast at the
@@ -258,7 +266,9 @@
     void flowEditor
       .flushSaves()
       .then(() => window.location.assign(target))
-      .catch(() => toast.error(m.flow_step_save_failed()));
+      .catch((error) => {
+        if (!surfaceRoutedSaveRejection(error)) toast.error(m.flow_step_save_failed());
+      });
   });
 
   $effect(() => {
