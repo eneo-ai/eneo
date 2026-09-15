@@ -140,6 +140,73 @@ describe("createResourceEditor save result", () => {
     });
   });
 
+  test("keeps an in-place edit made while a save was in flight", async () => {
+    // A bound input (`$update.description = …`) mutates the store's object and
+    // sets it again; the comparison after the response must not see its own
+    // snapshot mutated along with it.
+    type Doc = { id: string; name: string; description: string };
+    let resolveSave!: (value: Doc) => void;
+    const updateResource = vi.fn<(resource: { id: string }, changes: Partial<Doc>) => Promise<Doc>>(
+      () =>
+        new Promise<Doc>((resolve) => {
+          resolveSave = resolve;
+        })
+    );
+    const editor = createResourceEditor({
+      resource: { id: "doc-1", name: "Original", description: "Original description" },
+      defaults: {},
+      editableFields: { name: true, description: true },
+      updateResource,
+      manageAttachements: false,
+      eneo: { files: { delete: vi.fn() } } as unknown as Eneo
+    });
+
+    editor.state.update.update((doc) => ({ ...doc, name: "Renamed" }));
+    const save = editor.saveChanges();
+    await Promise.resolve();
+    const bound = get(editor.state.update);
+    bound.description = "Typed during the save";
+    editor.state.update.set(bound);
+
+    resolveSave({ id: "doc-1", name: "Renamed", description: "Original description" });
+    await expect(save).resolves.toEqual({ saved: true });
+
+    expect(get(editor.state.update).description).toBe("Typed during the save");
+    expect(get(editor.state.currentChanges).diff).toEqual({
+      description: "Typed during the save"
+    });
+  });
+
+  test("defers a queued save that canSave refuses when it runs and keeps the state dirty", async () => {
+    let ready = false;
+    const updateResource = vi.fn(
+      async (resource: { id: string; name: string }, changes: Partial<{ name: string }>) => ({
+        ...resource,
+        ...changes
+      })
+    );
+    const editor = createResourceEditor({
+      resource: { id: "doc-1", name: "Original" },
+      defaults: {},
+      editableFields: { name: true },
+      updateResource,
+      manageAttachements: false,
+      canSave: () => ready,
+      eneo: { files: { delete: vi.fn() } } as unknown as Eneo
+    });
+
+    editor.state.update.update((doc) => ({ ...doc, name: "Renamed" }));
+    await expect(editor.saveChanges()).resolves.toEqual({ saved: false, deferred: true });
+    expect(updateResource).not.toHaveBeenCalled();
+    expect(get(editor.state.isSaving)).toBe(false);
+    expect(get(editor.state.currentChanges).hasUnsavedChanges).toBe(true);
+
+    ready = true;
+    await expect(editor.saveChanges()).resolves.toEqual({ saved: true });
+    expect(updateResource).toHaveBeenCalledTimes(1);
+    expect(get(editor.state.currentChanges).hasUnsavedChanges).toBe(false);
+  });
+
   test("lets the owner fold server-assigned identities into a field edited during the save", async () => {
     type Item = { id?: string; label: string };
     type Doc = { id: string; items: Item[] };

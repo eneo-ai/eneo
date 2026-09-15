@@ -1982,18 +1982,10 @@ class FlowStepAttemptPublic(BaseModel):
 
 
 class FlowRunReviewCheckpointEditPublic(FlowRunReviewCheckpointEdit):
-    # Nullable identities carry a default so the schema example can omit
-    # them: the OpenAPI pipeline drops null example values, and a required
-    # nullable field would then fail example validation.
-    corrections_revision_id: UUID | None = None
-    edited_by_user_id: UUID | None = None
-    edited_by_service_id: UUID | None = None
     edited_by_service_principal: FlowServicePrincipalActorPublic | None = None
 
 
 class FlowTranscriptCorrectionRevisionPublic(FlowTranscriptCorrectionRevision):
-    edited_by_user_id: UUID | None = None
-    edited_by_service_id: UUID | None = None
     edited_by_service_principal: FlowServicePrincipalActorPublic | None = None
 
 
@@ -2011,7 +2003,7 @@ class FlowTranscriptCorrectionRevisionBaselinePublic(BaseModel):
 
 FLOW_RUN_REVIEW_CHECKPOINT_EDIT_PAGE_EXAMPLE: dict[str, Any] = {
     "baseline": {
-        "revision": 0,
+        "revision": 1,
         "payload_json": {"text": '{"answer": "Original answer."}'},
         "payload_sha256": "5c2d1f0e4b6a7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d",
     },
@@ -2022,7 +2014,7 @@ FLOW_RUN_REVIEW_CHECKPOINT_EDIT_PAGE_EXAMPLE: dict[str, Any] = {
             "flow_id": "00000000-0000-0000-0000-000000000001",
             "flow_run_id": "00000000-0000-0000-0000-000000000301",
             "checkpoint_id": "00000000-0000-0000-0000-000000000501",
-            "revision": 1,
+            "revision": 2,
             "cause": "reviewer_edit",
             "corrections_revision_id": None,
             "correction_set_id": None,
@@ -2049,12 +2041,12 @@ class FlowRunReviewCheckpointEditPagePublic(BaseModel):
 
     baseline: FlowRunReviewCheckpointEditBaselinePublic
     items: list[FlowRunReviewCheckpointEditPublic]
-    next_after_revision: int | None = None
+    next_after_revision: int | None
     truncated: bool
 
 
 FLOW_TRANSCRIPT_CORRECTION_REVISION_PAGE_EXAMPLE: dict[str, Any] = {
-    "baseline": {"revision": 0, "occurrences_json": [], "speaker_edits_json": []},
+    "baseline": {"revision": 1, "occurrences_json": [], "speaker_edits_json": []},
     "items": [
         {
             "id": "00000000-0000-0000-0000-000000000911",
@@ -2063,7 +2055,7 @@ FLOW_TRANSCRIPT_CORRECTION_REVISION_PAGE_EXAMPLE: dict[str, Any] = {
             "flow_id": "00000000-0000-0000-0000-000000000001",
             "flow_run_id": "00000000-0000-0000-0000-000000000301",
             "step_id": "00000000-0000-0000-0000-000000000101",
-            "revision": 1,
+            "revision": 2,
             "occurrences_json": [
                 {"segment_index": 3, "start": 12, "end": 17, "replacement": "Sundsvall"}
             ],
@@ -2088,7 +2080,7 @@ class FlowTranscriptCorrectionRevisionPagePublic(BaseModel):
 
     baseline: FlowTranscriptCorrectionRevisionBaselinePublic
     items: list[FlowTranscriptCorrectionRevisionPublic]
-    next_after_revision: int | None = None
+    next_after_revision: int | None
     truncated: bool
 
 

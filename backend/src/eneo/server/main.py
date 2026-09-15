@@ -280,6 +280,107 @@ def _resolve_openapi_schema_ref(
     return _json_obj(schemas.get(component_name))
 
 
+def _schema_allows_null(schema: dict[str, Any]) -> bool:
+    if schema.get("type") == "null":
+        return True
+    options: list[Any] = cast(
+        list[Any], schema.get("anyOf") or schema.get("oneOf") or []
+    )
+    return any(
+        isinstance(option, dict) and cast(dict[str, Any], option).get("type") == "null"
+        for option in options
+    )
+
+
+def _object_schema(
+    openapi_schema: dict[str, Any], schema: Any, depth: int = 0
+) -> dict[str, Any]:
+    """The object schema behind a reference or a one-option composition."""
+    resolved = _resolve_openapi_schema_ref(openapi_schema, schema)
+    if "properties" in resolved or depth > 8:
+        return resolved if "properties" in resolved else {}
+    for key in ("allOf", "anyOf", "oneOf"):
+        for option in cast(list[Any], resolved.get(key) or []):
+            candidate = _object_schema(openapi_schema, option, depth + 1)
+            if candidate:
+                return candidate
+    return {}
+
+
+def _restore_example_nulls(
+    openapi_schema: dict[str, Any], schema: Any, example: Any, depth: int = 0
+) -> None:
+    if depth > 16:
+        return
+    if isinstance(example, list):
+        resolved = _resolve_openapi_schema_ref(openapi_schema, schema)
+        for item in cast(list[Any], example):
+            _restore_example_nulls(
+                openapi_schema, resolved.get("items"), item, depth + 1
+            )
+        return
+    if not isinstance(example, dict):
+        return
+    example_obj = cast(dict[str, Any], example)
+    object_schema = _object_schema(openapi_schema, schema)
+    properties = _json_obj(object_schema.get("properties"))
+    for name in cast(list[Any], object_schema.get("required") or []):
+        if name in example_obj or not isinstance(name, str):
+            continue
+        property_schema = _json_obj(properties.get(name))
+        if _schema_allows_null(property_schema):
+            example_obj[name] = None
+    for name, value in example_obj.items():
+        if name in properties:
+            _restore_example_nulls(openapi_schema, properties[name], value, depth + 1)
+
+
+def _restore_stripped_example_nulls(openapi_schema: dict[str, Any]) -> None:
+    """Put back the nulls FastAPI drops from declared examples.
+
+    `fastapi.openapi.utils.get_openapi` encodes the whole document with
+    `exclude_none=True`, so a `None` in a model or route example vanishes
+    together with its key. A required nullable property then looks absent and
+    the example no longer matches the schema it documents. Restoring `null`
+    for exactly those keys keeps the response contract strict (the field stays
+    required) and the example honest.
+    """
+    components = _json_obj(openapi_schema.get("components"))
+    for schema in _json_obj(components.get("schemas")).values():
+        if not isinstance(schema, dict):
+            continue
+        schema_obj = cast(dict[str, Any], schema)
+        if "example" in schema_obj:
+            _restore_example_nulls(openapi_schema, schema_obj, schema_obj["example"])
+        for example in cast(list[Any], schema_obj.get("examples") or []):
+            _restore_example_nulls(openapi_schema, schema_obj, example)
+
+    for path_item in _json_obj(openapi_schema.get("paths")).values():
+        for operation in _json_obj(path_item).values():
+            if not isinstance(operation, dict):
+                continue
+            operation_obj = cast(dict[str, Any], operation)
+            contents: list[dict[str, Any]] = [
+                _json_obj(_json_obj(operation_obj.get("requestBody")).get("content"))
+            ]
+            for response in _json_obj(operation_obj.get("responses")).values():
+                contents.append(_json_obj(_json_obj(response).get("content")))
+            for content in contents:
+                for media_object in content.values():
+                    if not isinstance(media_object, dict):
+                        continue
+                    media = cast(dict[str, Any], media_object)
+                    schema = media.get("schema")
+                    if "example" in media:
+                        _restore_example_nulls(openapi_schema, schema, media["example"])
+                    for named in _json_obj(media.get("examples")).values():
+                        named_obj = _json_obj(named)
+                        if "value" in named_obj:
+                            _restore_example_nulls(
+                                openapi_schema, schema, named_obj["value"]
+                            )
+
+
 def _normalize_multipart_upload_file_schemas(openapi_schema: dict[str, Any]) -> None:
     """Expose UploadFile fields in the shape most OpenAPI client generators expect."""
     paths = _json_obj(openapi_schema.get("paths"))
@@ -486,6 +587,7 @@ def get_application():
         _normalize_multipart_upload_file_schemas(openapi_schema)
         _retag_flow_ai_builder_operations(openapi_schema)
         _normalize_request_validation_error_responses(openapi_schema)
+        _restore_stripped_example_nulls(openapi_schema)
 
         # Fix only the missing SSE-related schemas that FastAPI doesn't auto-detect
         components = _json_obj(openapi_schema.setdefault("components", {}))

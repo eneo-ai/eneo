@@ -87,11 +87,12 @@ router = APIRouter()
     response_model=FlowRunReviewCheckpointEditPagePublic,
     summary="List review checkpoint edits",
     description=(
-        "Page through the changes a reviewer made at this checkpoint, newest "
-        "first: the edited output before and after each change, or the "
-        "correction set that was folded in. The first page's baseline is the "
-        "step's original output. Reading history is an audited evidence view; "
-        "the same authorization as the run's evidence applies."
+        "Page through the changes a reviewer made at this checkpoint in the "
+        "order they happened (ascending revision, continuing after "
+        "`after_revision`): the edited output before and after each change, or "
+        "the correction set that was folded in. The first page's baseline is "
+        "revision 1, the step's original output. Reading history is an audited "
+        "evidence view; the same authorization as the run's evidence applies."
     ),
     responses={
         403: error_response(

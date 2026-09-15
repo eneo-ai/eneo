@@ -13,7 +13,10 @@ type Resource = Record<string, unknown> & { id: string };
  * can classify this exact request without shared mutable state.
  */
 export type ResourceSaveResult =
-  { saved: true } | { saved: false; error: unknown; handled: boolean };
+  | { saved: true }
+  | { saved: false; error: unknown; handled: boolean }
+  /** `canSave` refused the state when the queued save ran; nothing was sent. */
+  | { saved: false; deferred: true };
 
 /**
  * Create a resource editor for the specified resource. It will create stores for the original data,
@@ -50,6 +53,13 @@ export function createResourceEditor<T extends Resource, Defs extends Defaults<T
    * assigned identities the local copy lacks (e.g. ids for created items);
    * return the local value with those folded in. Default: the local value as is.
    */
+  /**
+   * Decides, when a queued save actually runs, whether the current state may
+   * be persisted. Validation done when the save was queued can be stale by
+   * the time an earlier save lets it run; a false answer defers the save and
+   * keeps the state dirty instead of sending what the endpoint would reject.
+   */
+  canSave?: (update: AppliedDefaults<T, Defs>) => boolean;
   mergeUnsavedField?: (
     field: keyof AppliedDefaults<T, Defs>,
     local: unknown,
@@ -97,6 +107,12 @@ export function createResourceEditor<T extends Resource, Defs extends Defaults<T
       // Get changes to this resource
       const $resource = get(resource);
       const $update = get(update);
+      if (data.canSave && !data.canSave($update)) {
+        return { saved: false, deferred: true };
+      }
+      // Bound inputs edit the store's object in place, so the comparison
+      // after the response needs a copy of what was sent, not a reference.
+      const snapshot: typeof $update = JSON.parse(JSON.stringify($update));
       const changes = field
         ? ({ [field]: $update[field] } as unknown as { [key in keyof T]: T[key] })
         : get(currentChanges).diff;
@@ -123,7 +139,7 @@ export function createResourceEditor<T extends Resource, Defs extends Defaults<T
       // server's copy, which may carry normalised values and assigned ids.
       update.set(
         mergeSavedState<AppliedDefaults<T, Defs>>({
-          snapshot: $update,
+          snapshot,
           current: get(update),
           saved: updated,
           field,

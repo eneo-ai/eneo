@@ -1546,6 +1546,123 @@ describe("FlowEditor server validation routing", () => {
     }
   });
 
+  it("reports saved only when nothing is pending or dirty, not when one request succeeded", async () => {
+    // The navigation guard leaves the page on "saved"; an edit made during a
+    // save, or a save queued behind it, must keep the guard armed.
+    vi.useFakeTimers();
+    const pending: Array<(value: Flow) => void> = [];
+    const flowUpdate = vi.fn(
+      () =>
+        new Promise<Flow>((resolve) => {
+          pending.push(resolve);
+        })
+    );
+    const editor = createFlowEditor({ flow: makeFlow(), eneo: makeEneo({ flowUpdate }) });
+    try {
+      editor.state.update.update((flow) => ({ ...flow, name: "First" }));
+      await vi.advanceTimersByTimeAsync(600);
+      expect(flowUpdate).toHaveBeenCalledTimes(1);
+      expect(get(editor.state.saveStatus)).toBe("saving");
+
+      // Edited while the first save is in flight; its own autosave is not due yet.
+      editor.state.update.update((flow) => ({ ...flow, description: "Typed meanwhile" }));
+      pending[0]({ ...makeFlow(null, { name: "First", draft_revision: 1 }) });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(get(editor.state.saveStatus)).toBe("unsaved");
+
+      await vi.advanceTimersByTimeAsync(600);
+      expect(flowUpdate).toHaveBeenCalledTimes(2);
+      expect(get(editor.state.saveStatus)).toBe("saving");
+
+      // A third edit queues behind the second save; the second finishing is
+      // not "saved" either.
+      editor.state.update.update((flow) => ({ ...flow, name: "Third" }));
+      await vi.advanceTimersByTimeAsync(600);
+      expect(flowUpdate).toHaveBeenCalledTimes(2);
+      pending[1]({
+        ...makeFlow(null, { name: "First", description: "Typed meanwhile", draft_revision: 2 })
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(flowUpdate).toHaveBeenCalledTimes(3);
+      expect(get(editor.state.saveStatus)).toBe("saving");
+
+      pending[2]({
+        ...makeFlow(null, { name: "Third", description: "Typed meanwhile", draft_revision: 3 })
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(get(editor.state.saveStatus)).toBe("saved");
+      expect(get(editor.state.currentChanges).hasUnsavedChanges).toBe(false);
+    } finally {
+      vi.useRealTimers();
+      editor.destroy();
+    }
+  });
+
+  it("does not send a step still waiting for its assistant when a queued save runs", async () => {
+    // The eligibility check ran when the save was queued; by the time an
+    // earlier save lets it run, a step may have been added whose assistant is
+    // still being created. That save is deferred, not sent with an empty id.
+    vi.useFakeTimers();
+    let resolveSave!: (value: Flow) => void;
+    const flowUpdate = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<Flow>((resolve) => {
+            resolveSave = resolve;
+          })
+      )
+      .mockImplementation(async ({ flow, update }) => ({
+        ...(flow as Flow),
+        ...(update as Partial<Flow>)
+      }));
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [makeStep(1)] }),
+      eneo: makeEneo({ flowUpdate })
+    });
+    try {
+      editor.state.update.update((flow) => ({ ...flow, name: "First" }));
+      await vi.advanceTimersByTimeAsync(600);
+      expect(flowUpdate).toHaveBeenCalledTimes(1);
+
+      editor.state.update.update((flow) => ({ ...flow, description: "Queued while valid" }));
+      await vi.advanceTimersByTimeAsync(600);
+      editor.state.update.update((flow) => ({
+        ...flow,
+        steps: [
+          ...flow.steps,
+          makeStep(2, { id: "_temp_2", assistant_id: "", input_source: "previous_step" })
+        ]
+      }));
+
+      resolveSave({
+        ...makeFlow(null, { name: "First", draft_revision: 1, steps: [makeStep(1)] })
+      });
+      await vi.advanceTimersByTimeAsync(600);
+      expect(flowUpdate).toHaveBeenCalledTimes(1);
+      expect(get(editor.state.saveStatus)).toBe("unsaved");
+
+      // The assistant arrives: the next autosave carries the complete step.
+      editor.state.update.update((flow) => ({
+        ...flow,
+        steps: flow.steps.map((step) =>
+          step.id === "_temp_2" ? { ...step, assistant_id: "assistant-2" } : step
+        )
+      }));
+      await vi.advanceTimersByTimeAsync(600);
+      expect(flowUpdate).toHaveBeenCalledTimes(2);
+      const [, [{ update: second }]] = flowUpdate.mock.calls as [
+        unknown,
+        [{ update: { steps: FlowStep[] } }]
+      ];
+      expect(second.steps.map((step) => step.assistant_id)).toEqual(["assistant-1", "assistant-2"]);
+      expect(get(editor.state.saveStatus)).toBe("saved");
+    } finally {
+      vi.useRealTimers();
+      editor.destroy();
+    }
+  });
+
   it("replaces the namespace atomically across successive rejections", () => {
     const editor = createFlowEditor({ flow: makeFlow(), eneo: makeEneo() });
     expect(editor.reportServerValidationError(makeValidationError())).toBe(true);
