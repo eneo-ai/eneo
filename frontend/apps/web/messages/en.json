@@ -1176,7 +1176,6 @@
   "password_managed_externally": "Your password is managed by your identity provider and must be changed there.",
   "password_must_be_different": "The new password must be different from the current password.",
   "password_placeholder": "Password",
-  "password_policy_within_maximum": "Within the allowed maximum length",
   "password_policy_fulfilled": "Met",
   "password_policy_pending": "Not met yet",
   "password_policy_confirmation_matches": "Passwords match",

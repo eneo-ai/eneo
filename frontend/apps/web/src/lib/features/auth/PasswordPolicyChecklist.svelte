@@ -23,7 +23,9 @@
     }
   ]);
 
-  function label(error: PasswordPolicyError | "confirmation_mismatch"): string {
+  function label(
+    error: Exclude<PasswordPolicyError, "too_long_bytes"> | "confirmation_mismatch"
+  ): string {
     switch (error) {
       case "confirmation_mismatch":
         return m.password_policy_confirmation_matches();
@@ -31,8 +33,6 @@
         return m.password_policy_min_length({ min: capability.policy.minLength });
       case "too_short_bytes":
         return m.password_policy_min_bytes({ min: capability.policy.minLength });
-      case "too_long_bytes":
-        return m.password_policy_within_maximum();
       case "uppercase_required":
         return m.password_policy_uppercase();
       case "lowercase_required":
@@ -49,24 +49,26 @@
   <p class="text-default font-medium">{m.password_policy_intro()}</p>
   <ul class="mt-2 space-y-2" aria-live="polite" aria-relevant="text">
     {#each checks as check (check.error)}
-      {@const fulfilled = password.length > 0 && check.satisfied}
-      <li
-        class={fulfilled
-          ? "text-positive-stronger flex items-start gap-2"
-          : "text-secondary flex items-start gap-2"}
-      >
-        {#if fulfilled}
-          <Check class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-        {:else}
-          <Circle class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-        {/if}
-        <span>
-          {label(check.error)}
-          <span class="sr-only">
-            — {fulfilled ? m.password_policy_fulfilled() : m.password_policy_pending()}
+      {#if check.error !== "too_long_bytes"}
+        {@const fulfilled = password.length > 0 && check.satisfied}
+        <li
+          class={fulfilled
+            ? "text-positive-stronger flex items-start gap-2"
+            : "text-secondary flex items-start gap-2"}
+        >
+          {#if fulfilled}
+            <Check class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+          {:else}
+            <Circle class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+          {/if}
+          <span>
+            {label(check.error)}
+            <span class="sr-only">
+              — {fulfilled ? m.password_policy_fulfilled() : m.password_policy_pending()}
+            </span>
           </span>
-        </span>
-      </li>
+        </li>
+      {/if}
     {/each}
   </ul>
 </div>

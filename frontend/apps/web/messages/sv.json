@@ -1175,7 +1175,6 @@
   "password_managed_externally": "Ditt lösenord hanteras av din identitetsleverantör och måste ändras där.",
   "password_must_be_different": "Det nya lösenordet måste skilja sig från det nuvarande lösenordet.",
   "password_placeholder": "Lösenord",
-  "password_policy_within_maximum": "Inom tillåten maxlängd",
   "password_policy_fulfilled": "Uppfyllt",
   "password_policy_pending": "Inte uppfyllt ännu",
   "password_policy_confirmation_matches": "Lösenorden matchar",
