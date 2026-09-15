@@ -16336,7 +16336,7 @@ export interface components {
       total_count: number;
       /**
        * Total Pages
-       * @description Total number of pages (calculated from total_count and page_size)
+       * @description Number of reachable pages (calculated from total_count and page_size, capped at 100)
        * @example 6
        */
       total_pages: number;
@@ -30282,6 +30282,7 @@ export interface operations {
         sort_by?: components["schemas"]["SortField"];
         sort_order?: components["schemas"]["SortOrder"];
         state_filter?: components["schemas"]["StateFilter"] | null;
+        role_id?: string | null;
       };
       header?: never;
       path?: never;
@@ -39742,7 +39743,9 @@ export interface operations {
         /** @description Field to sort by. */
         sort_by?: components["schemas"]["UserSortBy"];
         /** @description Sort order (asc or desc). */
-        sort_order?: string;
+        sort_order?: "asc" | "desc";
+        /** @description Search username or email across all users before pagination. */
+        search?: string | null;
       };
       header?: never;
       path?: never;

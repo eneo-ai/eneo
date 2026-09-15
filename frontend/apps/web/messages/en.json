@@ -4768,5 +4768,14 @@
   "attachments_open_files_example": "A user attaches six large Excel files and asks what they contain. With the setting on, the assistant opens them one at a time and reads a section at a time, instead of all their content being placed in the conversation at once.",
   "attachments_open_files_storage_hint": "For the assistant to open files itself, file storage must be connected. Connect file storage to enable this setting.",
   "governance_files_summary_open_files": "Files opened when needed · managed by organisation",
-  "governance_files_summary_inline": "File content placed directly · managed by organisation"
+  "governance_files_summary_inline": "File content placed directly · managed by organisation",
+  "admin_users_all_roles": "All roles",
+  "admin_users_unknown_role": "Unknown role",
+  "admin_users_clear_filters": "Clear filters",
+  "admin_users_search_hint": "Search the entire user list. Enter at least 3 characters for email or username. All selected filters are combined.",
+  "admin_users_refine_search": "Browsing is limited to 100 pages. Filter by role, email or username to find users across the entire organization.",
+  "admin_users_pagination": "User list pages",
+  "admin_users_previous_page": "Previous page",
+  "admin_users_next_page": "Next page",
+  "usage_user_search": "Search username or email across all user usage"
 }

@@ -131,6 +131,11 @@ class AdminUsersQueryParams(BaseModel):
         examples=["active", "inactive"],
     )
 
+    role_id: UUID | None = Field(
+        default=None,
+        description="Only return users assigned this role, within the current tenant.",
+    )
+
     @field_validator("page")
     @classmethod
     def validate_page(cls, v: int) -> int:
@@ -218,7 +223,7 @@ class PaginationMetadata(BaseModel):
         description="Total number of items across all pages", examples=[543]
     )
     total_pages: int = Field(
-        description="Total number of pages (calculated from total_count and page_size)",
+        description="Number of reachable pages (calculated from total_count and page_size, capped at 100)",
         examples=[6],
     )
     has_next: bool = Field(
