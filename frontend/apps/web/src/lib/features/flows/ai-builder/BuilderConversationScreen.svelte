@@ -24,6 +24,11 @@
     await new Promise((resolve) => requestAnimationFrame(resolve));
     chatRef?.focusInput(intent);
   }
+
+  export async function focusAttachControl() {
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    chatRef?.focusAttachControl();
+  }
 </script>
 
 <div

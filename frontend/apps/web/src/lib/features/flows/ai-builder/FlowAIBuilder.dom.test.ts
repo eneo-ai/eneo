@@ -3020,6 +3020,35 @@ describe("FlowAIBuilder confirm, build and review", () => {
     });
   });
 
+  it("sends the missing-template fix to the attachment control, not the composer", async () => {
+    // The pre-planning refusal: the action policy declines a template-fill
+    // flow with no template chosen, and the code is the whole payload.
+    await driveGenerationFailure(
+      {
+        code: "template_attachment_selection_invalid",
+        category: "bad_request",
+        phase: "proposal",
+        message: "A template fill flow needs exactly one selected DOCX template."
+      },
+      "committed"
+    );
+
+    const fix = await screen.findByRole("button", {
+      name: m.ai_builder_failure_problem_action_select_docx_template()
+    });
+    // Sending the same request again cannot fix a missing file, so the card
+    // offers the one fix and nothing else.
+    const card = fix.closest<HTMLElement>("[role='status']")!;
+    expect(within(card).queryByRole("button", { name: m.ai_builder_turn_retry() })).toBeNull();
+
+    await fireEvent.click(fix);
+
+    // The transcript opened with the caret on the attach control: the card
+    // named a file, so that is where the work is.
+    const attach = await screen.findByRole("button", { name: m.attach_files() });
+    await waitFor(() => expect(document.activeElement).toBe(attach));
+  });
+
   it("keeps recovery responsive when the telemetry endpoint is down", async () => {
     const { reports, calls } = await driveGenerationFailure(
       {

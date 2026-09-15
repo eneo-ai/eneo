@@ -50,6 +50,10 @@
     );
   }
 
+  export function focusAttachControl() {
+    inputRef?.focusAttachControl();
+  }
+
   function clearPendingEditContext() {
     pendingEditContext = null;
   }

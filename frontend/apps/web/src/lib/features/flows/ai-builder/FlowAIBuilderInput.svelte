@@ -70,6 +70,7 @@
   let inputValue = $state("");
   let textareaEl: HTMLTextAreaElement | undefined = $state();
   let fileInputEl: HTMLInputElement | undefined = $state();
+  let attachButtonEl: HTMLButtonElement | undefined = $state();
   // A requested placeholder belongs to the session it was requested in, the
   // way a saved-step scope does: a replacement session never inherits it.
   let activePlaceholder = $state<{ sessionId: string | null; text: string } | null>(null);
@@ -226,6 +227,14 @@
       textareaEl?.focus();
       autosizeTextarea();
     });
+  }
+
+  // A failure whose fix is attaching a file lands the user on that control,
+  // not in the text box: the card named the file, so the caret is not where
+  // the work is. Focus, never click - opening a file dialog the user did not
+  // ask for is the browser's decision to make, not ours.
+  export function focusAttachControl() {
+    requestAnimationFrame(() => attachButtonEl?.focus());
   }
 
   // Dismissing the edit context clears the placeholder that came with it; the
@@ -578,6 +587,7 @@
           disabled={!service.canSendMessage || $isUploading}
         />
         <button
+          bind:this={attachButtonEl}
           type="button"
           class="composer-attach"
           aria-label={m.attach_files()}

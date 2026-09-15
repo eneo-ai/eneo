@@ -317,38 +317,81 @@ describe("describeFailure", () => {
     ).toBe("retry_same_turn_acknowledged");
   });
 
-  it("puts a named template problem and its one fix in front of the user", () => {
-    const refused = error({
-      code: "architecture_materialization_failed",
-      category: "bad_request",
-      phase: "proposal",
-      details: {
-        failure_code: "template_attachment_selection_invalid",
-        architecture_repair_disposition: "user_action"
+  // The server refuses a missing template at two points in the turn, and the
+  // card must read the same in both. Before planning, the action policy
+  // refuses with a top-level code and no details at all
+  // (ai_builder_action_policy.py -> RefuseArchitectureCommit -> dispatch).
+  // During planning, the architecture producer raises a user_action failure
+  // and its log_extra() is published as details (architecture_failure_outcome
+  // -> TerminalFailure.details -> terminal_failure_event).
+  it.each([
+    [
+      "the pre-planning refusal, whose code is the whole payload",
+      {
+        code: "template_attachment_selection_invalid",
+        category: "bad_request" as const,
+        phase: "proposal" as const,
+        details: {}
       }
-    });
+    ],
+    [
+      "the producer's terminal failure, whose reason rides in details",
+      {
+        code: "architecture_materialization_failed",
+        category: "bad_request" as const,
+        phase: "proposal" as const,
+        details: {
+          architecture_error_code: "architecture_materialization_failed",
+          architecture_error_detail: "template fill requires exactly one template",
+          architecture_repair_disposition: "user_action",
+          failure_code: "template_attachment_selection_invalid"
+        }
+      }
+    ]
+  ])("names the missing template and offers the attach control: %s", (_name, payload) => {
+    const refused = error(payload);
     const shown = present({
       error: refused,
       latestTurn: null,
       capabilities: committed,
       context: generation
     });
-    expect(shown.kind).toBe("other");
     expect(shown.consequence).toContain(
       m.ai_builder_failure_problem_template_attachment_selection_invalid()
     );
     expect(shown.consequence).not.toContain(refused.message);
+    // The fix is attaching a file, so the control goes to the attach affordance
+    // and never offers the same request again.
     expect(shown.primary).toEqual({
-      kind: "clarify",
+      kind: "attach_template",
       label: m.ai_builder_failure_problem_action_select_docx_template(),
       records: "conversation_opened"
     });
     expect(shown.secondary).toBeNull();
+  });
+
+  it("sends an unreadable template back to the attach control and unnamed fields to the words", () => {
+    const unreadable = present({
+      error: error({
+        code: "template_attachment_unreadable",
+        category: "bad_request",
+        phase: "proposal",
+        details: {}
+      }),
+      latestTurn: null,
+      capabilities: committed,
+      context: generation
+    });
+    expect(unreadable.primary).toMatchObject({
+      kind: "attach_template",
+      label: m.ai_builder_failure_problem_action_replace_docx_template()
+    });
 
     const unresolved = present({
       error: error({
         code: "architecture_materialization_failed",
         details: {
+          architecture_repair_disposition: "user_action",
           failure_code: "template_placeholder_unresolved",
           unresolved_placeholders: "diarienummer, handläggare"
         }
@@ -358,16 +401,21 @@ describe("describeFailure", () => {
       context: generation
     });
     expect(unresolved.consequence).toContain("diarienummer, handläggare");
-    expect(unresolved.primary?.label).toBe(
-      m.ai_builder_failure_problem_action_describe_template_fields()
-    );
+    // Describing a field is writing, so this one belongs in the composer.
+    expect(unresolved.primary).toMatchObject({
+      kind: "clarify",
+      label: m.ai_builder_failure_problem_action_describe_template_fields()
+    });
   });
 
   it("keeps the named problem's words on the chat surface but only that surface's action", () => {
     const shown = present({
       error: error({
         code: "architecture_materialization_failed",
-        details: { failure_code: "template_attachment_unreadable" }
+        details: {
+          architecture_repair_disposition: "user_action",
+          failure_code: "template_attachment_unreadable"
+        }
       }),
       latestTurn: null,
       capabilities: committed,
@@ -379,12 +427,15 @@ describe("describeFailure", () => {
     expect(shown.primary?.kind).toBe("dismiss");
   });
 
-  it("falls back to the generic words when the reason is not one the user can act on", () => {
+  it("falls back to the generic words when the reason is not one this client knows", () => {
     const shown = present({
       error: error({
         code: "architecture_materialization_failed",
         message: "Servern kunde inte bygga flödet.",
-        details: { failure_code: "scoped_edit_preservation_failed" }
+        details: {
+          architecture_repair_disposition: "user_action",
+          failure_code: "a_reason_this_build_has_never_seen"
+        }
       }),
       latestTurn: null,
       capabilities: committed,
@@ -392,6 +443,32 @@ describe("describeFailure", () => {
     });
     expect(shown.consequence).toContain("Servern kunde inte bygga flödet.");
     expect(shown.primary?.kind).toBe("retry_new_turn");
+  });
+
+  // Exhausted repairs report every code they collected, joined into one
+  // string (_self_correction_error_details). Choosing one actionable problem
+  // out of a set is the server's decision; the card does not split that
+  // string and does not guess. Generic copy stands until such a contract
+  // exists.
+  it("does not mine the plural failure_codes of an exhausted repair round", () => {
+    const shown = present({
+      error: error({
+        code: "self_correction_invalid_plan",
+        category: "bad_request",
+        phase: "self_correction",
+        message: "Planen höll inte måttet den här gången.",
+        details: {
+          failure_codes: "template_attachment_selection_invalid,template_fill_position_invalid"
+        }
+      }),
+      latestTurn: null,
+      capabilities: committed,
+      context: generation
+    });
+    expect(shown.consequence).not.toContain(
+      m.ai_builder_failure_problem_template_attachment_selection_invalid()
+    );
+    expect(shown.primary?.kind).not.toBe("attach_template");
   });
 
   it("keeps the question refusals and the standing start-over offer in the user's terms", () => {

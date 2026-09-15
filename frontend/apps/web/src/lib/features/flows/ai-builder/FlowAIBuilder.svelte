@@ -558,6 +558,14 @@
     await conversationRef?.focusComposer();
   }
 
+  // Same transcript, different destination: a card that asked for a DOCX puts
+  // the user on the attach control instead of the composer.
+  async function handleAttachTemplate() {
+    service.conversationOpen = true;
+    await tick();
+    await conversationRef?.focusAttachControl();
+  }
+
   // The control that opened the editor. Passed by the screen, since a pointer
   // click does not focus a button in every browser; the focused element is
   // the fallback for callers that cannot pass it (the conversation).
@@ -976,6 +984,7 @@
             onapplied={(detail) => onapplied?.(detail)}
             onshowconversation={() => (service.conversationOpen = true)}
             onclarify={handleClarifyTask}
+            onattachtemplate={handleAttachTemplate}
           />
         </div>
       {:else if screen === "build"}
@@ -992,6 +1001,7 @@
             onapplied={(detail) => onapplied?.(detail)}
             onshowconversation={() => (service.conversationOpen = true)}
             onclarify={handleClarifyTask}
+            onattachtemplate={handleAttachTemplate}
           />
         </div>
       {:else}

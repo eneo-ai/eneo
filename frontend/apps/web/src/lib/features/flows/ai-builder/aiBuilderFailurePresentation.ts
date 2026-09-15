@@ -48,6 +48,7 @@ export type FailureActionKind =
   | "retry_same_turn_acknowledged"
   | "retry_new_turn"
   | "clarify"
+  | "attach_template"
   | "refresh"
   | "start_fresh"
   | "dismiss";
@@ -77,23 +78,38 @@ const INVALID_PROPOSAL_CODES: ReadonlySet<string> = new Set([
   "self_correction_quality_failure"
 ]);
 
-/** A refusal whose details name the problem the user can act on: the server's
- *  typed reason (`details.failure_code`, set by the architecture producer at
- *  the raise site) selects the words and the one matching next step. Display
- *  text is never parsed. Absent a known reason the generic copy stands. */
+/** A refusal that names a problem the user can act on: the server's own
+ *  reason selects the words and the one matching next step. Display text is
+ *  never parsed.
+ *
+ *  The reason arrives in one of two shapes, because the same problem is
+ *  refused at two points in the turn. Before planning, the action policy
+ *  refuses with a top-level `AIBuilderErrorCode` — the generated, closed
+ *  vocabulary, and the common path. During planning, an architecture producer
+ *  raises a `user_action` failure whose typed `failure_code` is published in
+ *  `details`. Both are server declarations; neither is inferred here.
+ *
+ *  Producer reasons declared `model_correctable` are deliberately absent: they
+ *  become a repair round, never a terminal error, so mapping them would be
+ *  dead copy. A repair round that exhausts its budget reports its codes under
+ *  the plural `details.failure_codes`, which this never reads — one actionable
+ *  problem out of a set needs a server-side choice, not a client guess. */
 interface ActionableProblem {
   cause: string;
   actionLabel: string;
+  /** Where the fix is made: attaching a template, or describing it in words. */
+  fix: "attach_template" | "clarify";
 }
 
 function actionableProblem(error: AIBuilderError): ActionableProblem | null {
-  const reason = error.details.failure_code;
-  if (typeof reason !== "string") return null;
+  const detailReason = error.details.failure_code;
+  const reason = typeof detailReason === "string" ? detailReason : error.code;
   switch (reason) {
     case "template_attachment_selection_invalid":
       return {
         cause: m.ai_builder_failure_problem_template_attachment_selection_invalid(),
-        actionLabel: m.ai_builder_failure_problem_action_select_docx_template()
+        actionLabel: m.ai_builder_failure_problem_action_select_docx_template(),
+        fix: "attach_template"
       };
     case "template_attachment_unreadable":
     case "template_placeholder_path_invalid":
@@ -102,7 +118,8 @@ function actionableProblem(error: AIBuilderError): ActionableProblem | null {
           reason === "template_attachment_unreadable"
             ? m.ai_builder_failure_problem_template_attachment_unreadable()
             : m.ai_builder_failure_problem_template_placeholder_path_invalid(),
-        actionLabel: m.ai_builder_failure_problem_action_replace_docx_template()
+        actionLabel: m.ai_builder_failure_problem_action_replace_docx_template(),
+        fix: "attach_template"
       };
     case "template_placeholder_unresolved": {
       const placeholders = error.details.unresolved_placeholders;
@@ -113,19 +130,10 @@ function actionableProblem(error: AIBuilderError): ActionableProblem | null {
                 placeholders
               })
             : m.ai_builder_failure_problem_template_placeholder_unresolved(),
-        actionLabel: m.ai_builder_failure_problem_action_describe_template_fields()
+        actionLabel: m.ai_builder_failure_problem_action_describe_template_fields(),
+        fix: "clarify"
       };
     }
-    case "template_binding_dependency_broken":
-      return {
-        cause: m.ai_builder_failure_problem_template_binding_dependency_broken(),
-        actionLabel: m.ai_builder_failure_problem_action_clarify_change()
-      };
-    case "template_fill_position_invalid":
-      return {
-        cause: m.ai_builder_failure_problem_template_fill_position_invalid(),
-        actionLabel: m.ai_builder_failure_action_clarify()
-      };
     default:
       return null;
   }
@@ -287,10 +295,11 @@ const action = {
       : m.ai_builder_failure_action_clarify(),
     records: "conversation_opened"
   }),
-  // The named problem is fixed in the conversation (a template is attached
-  // there, a field is described there); the label says which fix.
+  // The named problem is fixed in the conversation; the kind says which
+  // control the user lands on there, and the label says which fix it is.
+  // Both open the conversation, so both record that it was opened.
   fixProblem: (problem: ActionableProblem): FailureAction => ({
-    kind: "clarify",
+    kind: problem.fix,
     label: problem.actionLabel,
     records: "conversation_opened"
   }),

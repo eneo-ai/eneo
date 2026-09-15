@@ -92,6 +92,7 @@
         return;
       case "retry_new_turn":
       case "clarify":
+      case "attach_template":
         // Never produced for the chat surface.
         return;
     }

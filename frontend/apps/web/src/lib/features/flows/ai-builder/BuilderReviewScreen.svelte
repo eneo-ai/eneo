@@ -58,11 +58,19 @@
     showGenerationFailure?: boolean;
     /** Open the composer, answers kept, so the user can reword the task. */
     onclarify?: () => void;
+    /** The named fix is attaching a file; the conversation opens on that control. */
+    onattachtemplate?: () => void;
     /** Narrow layouts: bring the conversation back into view. */
     onshowconversation?: () => void;
   }
 
-  let { onapplied, showGenerationFailure = false, onshowconversation, onclarify }: Props = $props();
+  let {
+    onapplied,
+    showGenerationFailure = false,
+    onshowconversation,
+    onclarify,
+    onattachtemplate
+  }: Props = $props();
 
   const service = getAIBuilderService();
   const {
@@ -849,6 +857,9 @@
         return;
       case "clarify":
         (onclarify ?? onshowconversation)?.();
+        return;
+      case "attach_template":
+        (onattachtemplate ?? onclarify ?? onshowconversation)?.();
         return;
       case "refresh":
         await service.refreshSession();
