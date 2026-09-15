@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """Validate the user-facing release notes in frontend/packages/whats-new.
 
-The JSON schema next to releases.json documents the shape; this script is the
-CI backstop (stdlib only, no jsonschema dependency) and also enforces what a
-schema cannot express:
+releases.schema.json is the single source for the shape and the closed
+vocabularies (entry types, areas, audiences, locales, id/version patterns);
+this script reads them from there so a vocabulary change is one edit. It is
+the CI backstop (stdlib only, no jsonschema dependency) and also enforces what
+a schema cannot express:
 
   * releases are ordered newest first with unique versions
   * entry ids are unique within a release
   * texts are user-facing: no PR/issue numbers, GitHub URLs, code-like tokens
+  * every showMe href resolves to a page under the web app's (app) routes
   * every showMe anchor exists as data-tour="..." in the web app
 
 Run locally:  python3 scripts/check_whats_new.py
@@ -22,27 +25,32 @@ import sys
 from pathlib import Path
 
 RELEASES_PATH = Path("frontend/packages/whats-new/releases.json")
+SCHEMA_PATH = Path("frontend/packages/whats-new/releases.schema.json")
 WEB_SRC = Path("frontend/apps/web/src")
+APP_ROUTES = WEB_SRC / "routes" / "(app)"
 
-VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$")
-DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-ID_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
-HREF_RE = re.compile(r"^/[^\s]*$")
-
-LOCALES = ("en", "sv")
-TYPES = {"new", "improved", "fixed"}
-AREAS = {
-    "chat",
-    "assistants",
-    "knowledge",
-    "spaces",
-    "skills",
-    "account",
-    "admin",
-    "platform",
-}
-AUDIENCES = {"all", "admin"}
 TITLE_MAX = 60
+
+
+class Vocabulary:
+    """The parts of releases.schema.json this script enforces."""
+
+    def __init__(self, schema: dict) -> None:
+        defs = schema["$defs"]
+        entry = defs["entry"]["properties"]
+        show_me = entry["showMe"]["properties"]
+        self.locales: tuple[str, ...] = tuple(defs["localized"]["required"])
+        self.types: set[str] = set(entry["type"]["enum"])
+        self.areas: set[str] = set(entry["area"]["enum"])
+        self.audiences: set[str] = set(entry["audience"]["enum"])
+        self.entry_keys: set[str] = set(entry)
+        self.release_keys: set[str] = set(defs["release"]["properties"])
+        self.version_re = re.compile(defs["release"]["properties"]["version"]["pattern"])
+        self.date_re = re.compile(defs["release"]["properties"]["date"]["pattern"])
+        self.id_re = re.compile(entry["id"]["pattern"])
+        self.href_re = re.compile(show_me["href"]["pattern"])
+        self.anchor_re = re.compile(show_me["anchor"]["pattern"])
+
 
 # Things that mark a text as written for developers rather than users.
 INTERNAL_TOKENS = [
@@ -59,19 +67,24 @@ class Problem(Exception):
     pass
 
 
-def _semver_key(version: str) -> tuple[int, int, int, int, str]:
-    match = VERSION_RE.match(version)
-    assert match is not None
-    major, minor, patch, pre = match.groups()
-    # A pre-release sorts before its final release.
-    return (int(major), int(minor), int(patch), 0 if pre else 1, pre or "")
+def _semver_key(version: str) -> tuple[int, int, int, int, tuple[tuple[int, object], ...]]:
+    core, _, pre = version.partition("-")
+    major, minor, patch = (int(part) for part in core.split("."))
+    # A pre-release sorts before its final release; numeric identifiers sort
+    # numerically, text ones after them (SemVer §11).
+    identifiers = tuple(
+        (0, int(part)) if part.isdigit() else (1, part) for part in pre.split(".") if part
+    )
+    return (major, minor, patch, 0 if identifiers else 1, identifiers)
 
 
-def _require_localized(value: object, where: str, errors: list[str]) -> None:
+def _require_localized(
+    value: object, where: str, errors: list[str], vocab: Vocabulary
+) -> None:
     if not isinstance(value, dict):
-        errors.append(f"{where}: must be an object with 'en' and 'sv'")
+        errors.append(f"{where}: must be an object with {', '.join(vocab.locales)}")
         return
-    for locale in LOCALES:
+    for locale in vocab.locales:
         text = value.get(locale)
         if not isinstance(text, str) or not text.strip():
             errors.append(f"{where}.{locale}: missing or empty")
@@ -83,38 +96,39 @@ def _require_localized(value: object, where: str, errors: list[str]) -> None:
                     f"{where}.{locale}: contains {label} ({found.group(0)!r}); "
                     "write it the way a user would read it"
                 )
-    extra = set(value) - set(LOCALES)
+    extra = set(value) - set(vocab.locales)
     if extra:
         errors.append(f"{where}: unexpected locales {sorted(extra)}")
 
 
-def _check_entry(entry: object, where: str, errors: list[str]) -> str | None:
+def _check_entry(
+    entry: object, where: str, errors: list[str], vocab: Vocabulary
+) -> str | None:
     if not isinstance(entry, dict):
         errors.append(f"{where}: must be an object")
         return None
 
-    allowed = {"id", "type", "area", "audience", "title", "body", "showMe"}
-    extra = set(entry) - allowed
+    extra = set(entry) - vocab.entry_keys
     if extra:
         errors.append(f"{where}: unexpected keys {sorted(extra)}")
 
     entry_id = entry.get("id")
-    if not isinstance(entry_id, str) or not ID_RE.match(entry_id):
+    if not isinstance(entry_id, str) or not vocab.id_re.match(entry_id):
         errors.append(f"{where}.id: must be kebab-case")
         entry_id = None
 
-    if entry.get("type") not in TYPES:
-        errors.append(f"{where}.type: must be one of {sorted(TYPES)}")
-    if entry.get("area") not in AREAS:
-        errors.append(f"{where}.area: must be one of {sorted(AREAS)}")
-    if "audience" in entry and entry["audience"] not in AUDIENCES:
-        errors.append(f"{where}.audience: must be one of {sorted(AUDIENCES)}")
+    if entry.get("type") not in vocab.types:
+        errors.append(f"{where}.type: must be one of {sorted(vocab.types)}")
+    if entry.get("area") not in vocab.areas:
+        errors.append(f"{where}.area: must be one of {sorted(vocab.areas)}")
+    if "audience" in entry and entry["audience"] not in vocab.audiences:
+        errors.append(f"{where}.audience: must be one of {sorted(vocab.audiences)}")
 
-    _require_localized(entry.get("title"), f"{where}.title", errors)
-    _require_localized(entry.get("body"), f"{where}.body", errors)
+    _require_localized(entry.get("title"), f"{where}.title", errors, vocab)
+    _require_localized(entry.get("body"), f"{where}.body", errors, vocab)
     title = entry.get("title")
     if isinstance(title, dict):
-        for locale in LOCALES:
+        for locale in vocab.locales:
             text = title.get(locale)
             if isinstance(text, str) and len(text) > TITLE_MAX:
                 errors.append(
@@ -126,16 +140,49 @@ def _check_entry(entry: object, where: str, errors: list[str]) -> str | None:
         if not isinstance(show_me, dict) or set(show_me) != {"href", "anchor"}:
             errors.append(f"{where}.showMe: must have exactly 'href' and 'anchor'")
         else:
-            if not isinstance(show_me["href"], str) or not HREF_RE.match(
+            if not isinstance(show_me["href"], str) or not vocab.href_re.match(
                 show_me["href"]
             ):
                 errors.append(f"{where}.showMe.href: must be an app path like /account")
-            if not isinstance(show_me["anchor"], str) or not ID_RE.match(
+            if not isinstance(show_me["anchor"], str) or not vocab.anchor_re.match(
                 show_me["anchor"]
             ):
                 errors.append(f"{where}.showMe.anchor: must be kebab-case")
 
     return entry_id
+
+
+def _route_exists(href: str, app_routes: Path) -> bool:
+    """True when href matches a +page.svelte under routes/(app), honouring
+    [param] and [[optional]] segments and route groups in parentheses."""
+    path = href.split("?", 1)[0].split("#", 1)[0].strip("/")
+    wanted = [segment for segment in path.split("/") if segment]
+    if not app_routes.is_dir():
+        return True
+    for page in app_routes.rglob("+page.svelte"):
+        segments = [
+            part
+            for part in page.parent.relative_to(app_routes).parts
+            if not (part.startswith("(") and part.endswith(")"))
+        ]
+        if _segments_match(segments, wanted):
+            return True
+    return False
+
+
+def _segments_match(pattern: list[str], wanted: list[str]) -> bool:
+    if not pattern:
+        return not wanted
+    head, rest = pattern[0], pattern[1:]
+    if head.startswith("[[") and head.endswith("]]"):
+        return _segments_match(rest, wanted) or (
+            bool(wanted) and _segments_match(rest, wanted[1:])
+        )
+    if not wanted:
+        return False
+    if head.startswith("[") and head.endswith("]"):
+        return _segments_match(rest, wanted[1:])
+    return head == wanted[0] and _segments_match(rest, wanted[1:])
 
 
 def _collect_anchors(web_src: Path) -> set[str]:
@@ -148,7 +195,9 @@ def _collect_anchors(web_src: Path) -> set[str]:
     return anchors
 
 
-def validate(data: object, anchors: set[str]) -> list[str]:
+def validate(
+    data: object, vocab: Vocabulary, anchors: set[str], app_routes: Path
+) -> list[str]:
     errors: list[str] = []
     if not isinstance(data, dict):
         return ["top level must be an object"]
@@ -165,12 +214,12 @@ def validate(data: object, anchors: set[str]) -> list[str]:
         if not isinstance(release, dict):
             errors.append(f"{where}: must be an object")
             continue
-        extra = set(release) - {"version", "date", "entries"}
+        extra = set(release) - vocab.release_keys
         if extra:
             errors.append(f"{where}: unexpected keys {sorted(extra)}")
 
         version = release.get("version")
-        if not isinstance(version, str) or not VERSION_RE.match(version):
+        if not isinstance(version, str) or not vocab.version_re.match(version):
             errors.append(f"{where}.version: must be semver without a leading v")
             version = None
         elif version in seen_versions:
@@ -185,7 +234,9 @@ def validate(data: object, anchors: set[str]) -> list[str]:
             where = f"release {version}"
 
         date = release.get("date")
-        if date is not None and (not isinstance(date, str) or not DATE_RE.match(date)):
+        if date is not None and (
+            not isinstance(date, str) or not vocab.date_re.match(date)
+        ):
             errors.append(f"{where}.date: must be YYYY-MM-DD")
 
         entries = release.get("entries")
@@ -195,7 +246,7 @@ def validate(data: object, anchors: set[str]) -> list[str]:
         ids: set[str] = set()
         for entry_index, entry in enumerate(entries):
             entry_where = f"{where}.entries[{entry_index}]"
-            entry_id = _check_entry(entry, entry_where, errors)
+            entry_id = _check_entry(entry, entry_where, errors, vocab)
             if entry_id is None:
                 continue
             if entry_id in ids:
@@ -203,11 +254,18 @@ def validate(data: object, anchors: set[str]) -> list[str]:
             ids.add(entry_id)
             show_me = entry.get("showMe") if isinstance(entry, dict) else None
             if isinstance(show_me, dict):
+                href = show_me.get("href")
+                if isinstance(href, str) and not _route_exists(href, app_routes):
+                    errors.append(
+                        f"{entry_where}.showMe.href: no page at {href} under "
+                        f"{APP_ROUTES}; remove showMe or point it at a page that exists"
+                    )
                 anchor = show_me.get("anchor")
                 if isinstance(anchor, str) and anchor not in anchors:
                     errors.append(
                         f"{entry_where}.showMe.anchor: no element with "
-                        f'data-tour="{anchor}" in {WEB_SRC}'
+                        f'data-tour="{anchor}" in {WEB_SRC}; remove showMe or '
+                        "restore the attribute"
                     )
     return errors
 
@@ -218,17 +276,24 @@ def main() -> int:
     args = parser.parse_args()
     root: Path = args.repo_root.resolve()
 
-    releases_path = root / RELEASES_PATH
+    loaded: dict[Path, object] = {}
+    for path in (SCHEMA_PATH, RELEASES_PATH):
+        try:
+            loaded[path] = json.loads((root / path).read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            print(f"{path}: not found")
+            return 1
+        except json.JSONDecodeError as error:
+            print(f"{path}: invalid JSON: {error}")
+            return 1
     try:
-        data = json.loads(releases_path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        print(f"{RELEASES_PATH}: not found")
+        vocab = Vocabulary(loaded[SCHEMA_PATH])  # type: ignore[arg-type]
+    except (KeyError, TypeError) as error:
+        print(f"{SCHEMA_PATH}: missing a definition this check relies on: {error}")
         return 1
-    except json.JSONDecodeError as error:
-        print(f"{RELEASES_PATH}: invalid JSON: {error}")
-        return 1
+    data = loaded[RELEASES_PATH]
 
-    errors = validate(data, _collect_anchors(root / WEB_SRC))
+    errors = validate(data, vocab, _collect_anchors(root / WEB_SRC), root / APP_ROUTES)
     if errors:
         print(f"{RELEASES_PATH}: {len(errors)} problem(s)")
         for error in errors:

@@ -17,6 +17,8 @@ const TYPE_CLASS: Record<EntryType, string> = {
   fixed: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200",
 };
 
+// Typed exhaustively against the package; unknown values (a newer schema than
+// this build) fall back to the raw value instead of failing the docs build.
 const AREA_LABEL: Record<ReleaseEntry["area"], string> = {
   chat: "Chat",
   assistants: "Assistants",
@@ -41,11 +43,13 @@ function Entry({ entry }: { entry: ReleaseEntry }) {
       className="rounded-lg border border-gray-200 p-4 dark:border-neutral-800"
     >
       <div className="flex flex-wrap items-center gap-2 text-xs font-medium">
-        <span className={`rounded-full px-2 py-0.5 ${TYPE_CLASS[entry.type]}`}>
-          {TYPE_LABEL[entry.type]}
+        <span
+          className={`rounded-full px-2 py-0.5 ${TYPE_CLASS[entry.type] ?? ""}`}
+        >
+          {TYPE_LABEL[entry.type] ?? entry.type}
         </span>
         <span className="rounded-full border border-gray-300 px-2 py-0.5 dark:border-neutral-700">
-          {AREA_LABEL[entry.area]}
+          {AREA_LABEL[entry.area] ?? entry.area}
         </span>
         {entry.audience === "admin" && (
           <span className="rounded-full bg-gray-100 px-2 py-0.5 dark:bg-neutral-800">

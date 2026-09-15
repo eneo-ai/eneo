@@ -15,7 +15,8 @@
   },
   "scripts": {
     "lint": "prettier --check .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "test": "bun test src"
   },
   "devDependencies": {
     "prettier": "^3.9.4"

@@ -38,11 +38,30 @@ export async function showMe(
         element,
         popover: { title: popover.title, description: popover.description }
       }
-    ]
+    ],
+    // driver.js does not move focus on its own; keyboard and screen-reader
+    // users need to land in the popover and be returned to the feature after.
+    onHighlighted: () => {
+      document.querySelector<HTMLElement>(".eneo-spotlight .driver-popover-next-btn")?.focus();
+    },
+    onDestroyed: () => {
+      focusFeature(element);
+    }
   });
   element.scrollIntoView({ block: "center", behavior: "smooth" });
   tour.drive();
   return true;
+}
+
+function focusFeature(element: HTMLElement) {
+  const target =
+    element.querySelector<HTMLElement>(
+      'button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    ) ?? element;
+  if (target === element && !element.hasAttribute("tabindex")) {
+    element.setAttribute("tabindex", "-1");
+  }
+  target.focus({ preventScroll: true });
 }
 
 function waitForAnchor(anchor: string): Promise<HTMLElement | null> {

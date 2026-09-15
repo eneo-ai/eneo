@@ -34,11 +34,20 @@ export interface Release {
 /** All releases, newest first, exactly as in releases.json. */
 export const releases: Release[];
 
+/** Closed vocabularies, read from releases.schema.json at runtime. */
+export const ENTRY_TYPES: readonly EntryType[];
+export const ENTRY_AREAS: readonly EntryArea[];
+export const ENTRY_AUDIENCES: readonly EntryAudience[];
+export const LOCALES: readonly Locale[];
+
+/** Semver order for release ids; negative when a < b. Pre-releases sort before their final. */
+export function compareVersions(a: string, b: string): number;
+
 /** The newest release, or undefined when releases.json is empty. */
 export function latestRelease(): Release | undefined;
 
 /**
- * Whether the user has a release they have not opened yet.
+ * Whether the newest bundled release is newer than the one the user has seen.
  * `seenVersion` is the value stored by the backend (null before the first visit).
  */
 export function hasUnseenRelease(seenVersion: string | null | undefined): boolean;

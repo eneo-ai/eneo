@@ -85,15 +85,60 @@ Run this when the release branch is cut or the tag is about to be pushed.
 Read it as a user would. Cut, reorder, sharpen. Set `date`. Merge before the
 tag is pushed so the release image ships with its own notes.
 
+## Maintenance
+
+**Single sources.** `releases.schema.json` owns the shape and the closed
+vocabularies (`type`, `area`, `audience`, locales, patterns). Everything
+else derives from it or is checked against it:
+
+| What                        | Where                                            | Guarded by                                                  |
+| --------------------------- | ------------------------------------------------ | ----------------------------------------------------------- |
+| Vocabularies at runtime     | `src/index.js` (`ENTRY_TYPES`, `ENTRY_AREAS`, …) | read from the schema                                        |
+| TypeScript unions           | `src/index.d.ts`                                 | `apps/web/.../labels.test.ts` (label maps == schema enums)  |
+| Labels in the app (sv/en)   | `apps/web/src/lib/features/whats-new/labels.ts`  | typed exhaustively + the same test                          |
+| Labels on docs.eneo.ai (en) | `apps/docs-site/src/components/ReleaseNotes.tsx` | typed exhaustively; unknown values render raw, never crash  |
+| Content rules               | `scripts/check_whats_new.py`                     | CI (frontend job) + `scripts/tests/test_check_whats_new.py` |
+| Backend version pattern     | `backend/src/eneo/whats_new/whats_new_models.py` | mirrors the schema's `version` pattern; unit test           |
+
+**Adding an area or type.** Edit the enum in `releases.schema.json`, add the
+member to the union in `src/index.d.ts`, add a label to `labels.ts` (+ the
+`whats_new_area_*` message in both catalogs) and to `ReleaseNotes.tsx`. The
+web test suite fails until all four agree.
+
+**Removing or moving UI.** If a redesign drops a `data-tour` attribute or a
+route that a `showMe` points at, CI fails with the exact entry. Either
+restore the attribute/route or delete that entry's `showMe` in the same PR.
+Never leave a dead "Show me" button.
+
+**Correcting a published entry.** Edit the text in place. Keep the `id`: it
+is the deep-link target on docs.eneo.ai and may be bookmarked. If a release
+had no user-facing changes, add nothing — the app compares by order, not by
+equality, so users are not re-notified.
+
+**Data.** `whats_new_seen` holds one row per user: `user_id`, the release id
+last opened and `created_at`/`updated_at`. No content, no free text. Rows
+cascade on user deletion. There is nothing to purge on a retention schedule.
+
+**Growth.** All releases stay in `releases.json` and ship in the web bundle
+(roughly 1 kB per entry). Revisit the app page's rendering (paginate or cap
+at the last N releases) when the file passes a few hundred entries; the
+docs page should always show the full history.
+
+**Ownership.** The release owner reviews the entry; the PR author owns the
+`User-facing` section and anchors; anyone changing the schema owns the four
+places listed above.
+
 ## How the app uses this file
 
 - The user's newest **seen** version is stored per user in the backend
   (`GET/PUT /api/v1/whats-new/seen/`). The profile menu shows a dot while
   `releases[0].version` differs from the seen version, and the dot clears
   when the user opens `/whats-new`.
-- No coupling to the deployed version number: whatever `releases[0]` is in
-  the shipped bundle is "current". A hotfix release without user-facing
-  changes therefore needs no entry.
+- "Unseen" means `releases[0].version` is **newer** (semver) than the seen
+  version, so a rollback or an older frontend pod during a rolling deploy
+  does not re-light the dot. No coupling to the deployed version number:
+  whatever `releases[0]` is in the shipped bundle is "current". A hotfix
+  release without user-facing changes therefore needs no entry.
 - **Show me** navigates to `href` and spotlights `[data-tour=anchor]` with a
   single driver.js step. If the anchor is not on the page (permissions,
   feature flags) the button only navigates.

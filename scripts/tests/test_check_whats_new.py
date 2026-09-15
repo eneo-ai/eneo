@@ -10,6 +10,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CHECK = REPO_ROOT / "scripts" / "check_whats_new.py"
+SCHEMA = REPO_ROOT / "frontend" / "packages" / "whats-new" / "releases.schema.json"
 
 ENTRY = {
     "id": "self-service-password",
@@ -26,15 +27,24 @@ VALID = {"releases": [{"version": "2.2.0", "entries": [ENTRY]}]}
 
 
 class CheckWhatsNewTests(unittest.TestCase):
-    def make_repo(self, data: object, anchors: str = "account-password") -> Path:
+    def make_repo(
+        self,
+        data: object,
+        anchors: str = "account-password",
+        routes: str = "account spaces/[spaceId]/knowledge dashboard/[assistantId]/[[sessionId]]",
+    ) -> Path:
         root = Path(tempfile.mkdtemp(prefix="eneo-whats-new-"))
         self.addCleanup(shutil.rmtree, root, ignore_errors=True)
-        releases = root / "frontend" / "packages" / "whats-new" / "releases.json"
-        releases.parent.mkdir(parents=True)
-        releases.write_text(json.dumps(data), encoding="utf-8")
-        page = root / "frontend" / "apps" / "web" / "src" / "routes" / "page.svelte"
-        page.parent.mkdir(parents=True)
-        page.write_text(
+        package = root / "frontend" / "packages" / "whats-new"
+        package.mkdir(parents=True)
+        (package / "releases.json").write_text(json.dumps(data), encoding="utf-8")
+        shutil.copy(SCHEMA, package / "releases.schema.json")
+        app_routes = root / "frontend" / "apps" / "web" / "src" / "routes" / "(app)"
+        for route in routes.split():
+            page = app_routes / route / "+page.svelte"
+            page.parent.mkdir(parents=True, exist_ok=True)
+            page.write_text("<div></div>\n", encoding="utf-8")
+        (app_routes / "account" / "+page.svelte").write_text(
             "".join(f'<div data-tour="{a}"></div>\n' for a in anchors.split()),
             encoding="utf-8",
         )
@@ -101,6 +111,36 @@ class CheckWhatsNewTests(unittest.TestCase):
 
     def test_rejects_unknown_anchor(self) -> None:
         self.assert_rejected(VALID, 'no element with data-tour="account-password"', anchors="other")
+
+    def test_rejects_href_without_a_page(self) -> None:
+        data = copy.deepcopy(VALID)
+        data["releases"][0]["entries"][0]["showMe"]["href"] = "/account/removed"
+        self.assert_rejected(data, "no page at /account/removed")
+
+    def test_href_matches_parameterised_and_optional_segments(self) -> None:
+        for href in [
+            "/spaces/abc-123/knowledge?tab=files",
+            "/dashboard/assistant-1",
+            "/dashboard/assistant-1/session-9",
+            "/account#password",
+        ]:
+            with self.subTest(href=href):
+                data = copy.deepcopy(VALID)
+                data["releases"][0]["entries"][0]["showMe"]["href"] = href
+                result = self.run_check(self.make_repo(data))
+                self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_vocabulary_comes_from_the_schema(self) -> None:
+        data = copy.deepcopy(VALID)
+        data["releases"][0]["entries"][0]["area"] = "reports"
+        root = self.make_repo(data)
+        self.assertEqual(self.run_check(root).returncode, 1)
+
+        schema_path = root / "frontend" / "packages" / "whats-new" / "releases.schema.json"
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        schema["$defs"]["entry"]["properties"]["area"]["enum"].append("reports")
+        schema_path.write_text(json.dumps(schema), encoding="utf-8")
+        self.assertEqual(self.run_check(root).returncode, 0)
 
     def test_rejects_duplicate_ids(self) -> None:
         data = {"releases": [{"version": "2.2.0", "entries": [ENTRY, ENTRY]}]}

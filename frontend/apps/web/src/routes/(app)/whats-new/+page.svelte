@@ -8,35 +8,15 @@
   import { showMe } from "$lib/features/whats-new/spotlight";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
+  import { areaLabel, labelFor, typeClass, typeLabel } from "$lib/features/whats-new/labels";
   import { releases, visibleEntries } from "@eneo/whats-new";
-  import type { EntryArea, EntryType, Localized, ReleaseEntry } from "@eneo/whats-new";
+  import type { Localized, ReleaseEntry } from "@eneo/whats-new";
   import { Sparkles } from "lucide-svelte";
 
   const { user } = getAppContext();
   const { markLatestSeen } = getWhatsNewStore();
   const isAdmin = user.hasPermission("admin");
   const locale = getLocale();
-
-  const typeLabel: Record<EntryType, () => string> = {
-    new: m.whats_new_type_new,
-    improved: m.whats_new_type_improved,
-    fixed: m.whats_new_type_fixed
-  };
-  const typeClass: Record<EntryType, string> = {
-    new: "bg-positive-default/10 text-positive-stronger",
-    improved: "bg-accent-default/10 text-accent-stronger",
-    fixed: "bg-warning-default/10 text-warning-stronger"
-  };
-  const areaLabel: Record<EntryArea, () => string> = {
-    chat: m.whats_new_area_chat,
-    assistants: m.whats_new_area_assistants,
-    knowledge: m.whats_new_area_knowledge,
-    spaces: m.whats_new_area_spaces,
-    skills: m.whats_new_area_skills,
-    account: m.whats_new_area_account,
-    admin: m.whats_new_area_admin,
-    platform: m.whats_new_area_platform
-  };
 
   function text(value: Localized): string {
     return value[locale] ?? value.en;
@@ -112,10 +92,13 @@
                   class="border-default bg-primary flex flex-col gap-2 rounded-lg border p-4"
                 >
                   <div class="flex flex-wrap items-center gap-2">
-                    <Badge variant="outline" class="border-transparent {typeClass[entry.type]}">
-                      {typeLabel[entry.type]()}
+                    <Badge
+                      variant="outline"
+                      class="border-transparent {typeClass[entry.type] ?? ''}"
+                    >
+                      {labelFor(typeLabel, entry.type)}
                     </Badge>
-                    <Badge variant="outline">{areaLabel[entry.area]()}</Badge>
+                    <Badge variant="outline">{labelFor(areaLabel, entry.area)}</Badge>
                     {#if entry.audience === "admin"}
                       <Badge variant="secondary">{m.whats_new_admin_only()}</Badge>
                     {/if}
