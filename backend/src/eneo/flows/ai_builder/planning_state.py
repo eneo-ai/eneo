@@ -63,6 +63,7 @@ from eneo.flows.enums import (
     FlowAuthoringOutputMode,
     FlowOutputType,
 )
+from eneo.flows.flow_authoring_spec import FormFieldSpec
 from eneo.flows.flow_capability_manifest import FCM_VERSION
 from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.json_types import JsonObject
@@ -998,6 +999,12 @@ class PlanningState(_PlanningModel):
     input_fields: list[ConfirmedRuntimeMetadataField] = Field(
         default_factory=list[ConfirmedRuntimeMetadataField],
         max_length=20,
+    )
+    # The form fields the saved flow already has. They are a known baseline
+    # for an edit or review session (the runner fills them in today), not a
+    # confirmed answer: nothing here claims user confirmation or a purpose.
+    saved_input_fields: list[FormFieldSpec] = Field(
+        default_factory=list[FormFieldSpec],
     )
     architecture_commit: ArchitectureCommit | None = None
     mapped_file_limit: MappedFileLimit = Field(default_factory=MappedFileLimit)

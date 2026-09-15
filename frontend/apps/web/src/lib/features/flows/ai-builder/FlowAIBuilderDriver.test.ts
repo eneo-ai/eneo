@@ -183,6 +183,34 @@ function completeStream(handlers: Parameters<AIBuilderClientTransport["stream"]>
 }
 
 describe("FlowAIBuilderDriver", () => {
+  it("sends the composer's model and effort selection with a suggestions request", async () => {
+    const fetch = vi.fn(async () => ({ suggestions: [] }));
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    driver.seedState({
+      availableModels: [makeModel({ id: "model-1", reasoning_effort_options: ["low", "high"] })]
+    });
+    driver.selectModel("model-1");
+    driver.selectReasoningEffort("high");
+
+    await driver.fetchFlowReviewSuggestions();
+
+    const [path, init] = fetch.mock.calls[0] as unknown as [string, { requestBody?: unknown }];
+    expect(path).toBe("/api/v1/flows/ai-builder/flows/{flow_id}/review-suggestions");
+    expect(init.requestBody).toEqual({
+      "application/json": { model_id: "model-1", reasoning_effort: "high" }
+    });
+  });
+
+  it("lets the server pick the model for suggestions when the composer selected none", async () => {
+    const fetch = vi.fn(async () => ({ suggestions: [] }));
+    const { driver } = makeDriver({ fetchImpl: fetch });
+
+    await driver.fetchFlowReviewSuggestions();
+
+    const [, init] = fetch.mock.calls[0] as unknown as [string, { requestBody?: unknown }];
+    expect(init.requestBody).toEqual({ "application/json": {} });
+  });
+
   it("keeps stream event contracts derived from generated types", () => {
     const publicRoles = {
       user: true,

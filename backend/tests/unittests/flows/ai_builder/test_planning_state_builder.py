@@ -7242,3 +7242,43 @@ class TestEditSessionInheritsTheFlowTemplate:
             replaced.origin,
         ) == (1, ("ärende",), attached_file_id, "ny-mall.docx", "replacement")
         assert replaced.template_asset_id is None
+
+
+def test_saved_form_fields_seed_the_planning_baseline_without_confirming_them() -> None:
+    flow = Flow(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        space_id=uuid4(),
+        name="Genomförandeplan",
+        description="Sparat flöde med formulär",
+        steps=[],
+        metadata_json={
+            "form_schema": {
+                "fields": [
+                    {
+                        "name": "brukarens_namn",
+                        "type": "text",
+                        "label": "Brukarens namn",
+                        "required": True,
+                        "order": 1,
+                    },
+                    {
+                        "name": "datum_intervju",
+                        "type": "date",
+                        "label": "Datum",
+                        "order": 2,
+                    },
+                ]
+            }
+        },
+    )
+
+    state = build_planning_state_from_conversation([], flow=flow)
+
+    assert [field.name for field in state.saved_input_fields] == [
+        "brukarens_namn",
+        "datum_intervju",
+    ]
+    # Known, not confirmed: no field claims a user-confirmed purpose.
+    assert state.input_fields == []
+    assert build_planning_state_from_conversation([]).saved_input_fields == []

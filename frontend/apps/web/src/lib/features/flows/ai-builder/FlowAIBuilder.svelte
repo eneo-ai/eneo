@@ -20,6 +20,8 @@
   import BuilderSessionStatus from "./BuilderSessionStatus.svelte";
   import BuilderReviewScreen from "./BuilderReviewScreen.svelte";
   import BuilderFindingsScreen from "./BuilderFindingsScreen.svelte";
+  import FlowAIBuilderModelSelect from "./FlowAIBuilderModelSelect.svelte";
+  import FlowAIBuilderReasoningSelect from "./FlowAIBuilderReasoningSelect.svelte";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
   import { summaryTerm } from "./aiBuilderSummaryText";
   import { buildAnswerLabels } from "./aiBuilderAnswerLabel";
@@ -909,7 +911,12 @@
           onsuggest={() => void service.requestSuggestions()}
           onclose={() => service.closeReview()}
           onretry={() => void service.openReview()}
-        />
+        >
+          {#snippet plannerControls()}
+            <FlowAIBuilderModelSelect />
+            <FlowAIBuilderReasoningSelect />
+          {/snippet}
+        </BuilderFindingsScreen>
       {:else if screen === "task"}
         <BuilderTaskScreen
           bind:this={taskScreenRef}

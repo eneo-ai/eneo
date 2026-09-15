@@ -254,10 +254,14 @@ def resolve_turn_control(
 
 
 def _runtime_input_field_details_required(session_state: PlanningState) -> bool:
+    # A saved flow's fields are known; asking for them again on every edit or
+    # review session made the user re-enter a form the flow already has.
+    # Changes to those fields travel as ordinary edit requests.
     return (
         session_state.commit_grade_slot_value("runtime_metadata_fields")
         in {"basic_runtime_metadata", "detailed_runtime_metadata"}
         and not session_state.input_fields
+        and not session_state.saved_input_fields
     )
 
 

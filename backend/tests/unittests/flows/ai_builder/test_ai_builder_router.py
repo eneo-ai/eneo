@@ -32,6 +32,7 @@ from eneo.flows.ai_builder.ai_builder_api_models import (
     ApplyPlanRequest,
     ApplyResultResponse,
     CreateSessionRequest,
+    FlowReviewSuggestionsRequest,
     PlanResponse,
     RevisePlanRequest,
     SendMessageRequest,
@@ -3550,6 +3551,65 @@ class TestReviewSuggestionsEndpoint:
             )
 
         service.judge_review_sample.assert_not_called()
+
+    @pytest.mark.anyio
+    async def test_the_selected_model_and_effort_reach_the_judgement(self):
+        container = _review_container(session=_SnapshotSession())
+        run = SimpleNamespace(id=uuid4(), flow_id=uuid4())
+        review_service = container.ai_builder_flow_review_service.return_value
+        review_service.build_packet.return_value = SimpleNamespace(
+            evidence_classification_level=1
+        )
+
+        async def _build_review_sample(*, flow_id, space_id, audit, packet=None):
+            await audit(run)
+            return SimpleNamespace(evidence_classification_level=1)
+
+        review_service.build_review_sample = _build_review_sample
+        service = container.ai_builder_service.return_value
+        model_id = uuid4()
+
+        await post_flow_review_suggestions(
+            request=_make_request(),
+            flow_id=run.flow_id,
+            space_id=uuid4(),
+            container=container,
+            body=FlowReviewSuggestionsRequest(
+                model_id=model_id, reasoning_effort="high"
+            ),
+        )
+
+        service.prepare_review_judgement.assert_awaited_once()
+        kwargs = service.prepare_review_judgement.await_args.kwargs
+        assert kwargs["model_id"] == model_id
+        assert kwargs["reasoning_effort"] == "high"
+
+    @pytest.mark.anyio
+    async def test_no_body_keeps_the_server_default_model(self):
+        container = _review_container(session=_SnapshotSession())
+        run = SimpleNamespace(id=uuid4(), flow_id=uuid4())
+        review_service = container.ai_builder_flow_review_service.return_value
+        review_service.build_packet.return_value = SimpleNamespace(
+            evidence_classification_level=1
+        )
+
+        async def _build_review_sample(*, flow_id, space_id, audit, packet=None):
+            await audit(run)
+            return SimpleNamespace(evidence_classification_level=1)
+
+        review_service.build_review_sample = _build_review_sample
+        service = container.ai_builder_service.return_value
+
+        await post_flow_review_suggestions(
+            request=_make_request(),
+            flow_id=run.flow_id,
+            space_id=uuid4(),
+            container=container,
+        )
+
+        kwargs = service.prepare_review_judgement.await_args.kwargs
+        assert kwargs["model_id"] is None
+        assert kwargs["reasoning_effort"] is None
 
     @pytest.mark.anyio
     async def test_a_sample_refusal_after_an_audit_keeps_its_own_code(self):

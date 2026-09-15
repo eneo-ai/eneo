@@ -791,7 +791,8 @@ export class FlowAIBuilderDriver {
   }
 
   /** One bounded model judgement over the flow's recent runs. Nothing is
-   *  stored server-side; the screen holds the answer for the session. */
+   *  stored server-side; the screen holds the answer for the session. The
+   *  composer's model and effort selection applies, as it does to a turn. */
   async fetchFlowReviewSuggestions(): Promise<AIBuilderFlowReviewSuggestions> {
     if (!this.#flowId) {
       throw new Error("A flow review needs an edit session's flow.");
@@ -801,7 +802,8 @@ export class FlowAIBuilderDriver {
       params: {
         path: { flow_id: this.#flowId },
         query: { space_id: this.#spaceId, ui_language: getLocale() }
-      }
+      },
+      requestBody: { "application/json": this.#plannerSelection() }
     })) as AIBuilderFlowReviewSuggestions;
   }
 

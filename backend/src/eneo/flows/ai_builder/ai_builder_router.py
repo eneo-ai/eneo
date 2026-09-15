@@ -38,6 +38,7 @@ from eneo.flows.ai_builder.ai_builder_api_models import (
     ApplyPlanRequest,
     ApplyResultResponse,
     CreateSessionRequest,
+    FlowReviewSuggestionsRequest,
     PlanApprovalResponse,
     PlanResponse,
     ReportClientErrorRequest,
@@ -1031,6 +1032,7 @@ async def post_flow_review_suggestions(
     space_id: UUID,
     container: ContainerWithUserExplicitTransactionDep,
     ui_language: str | None = None,
+    body: FlowReviewSuggestionsRequest | None = None,
 ) -> FlowReviewSuggestions:
     """Audit, read and prepare inside one evidence snapshot; call the provider after it."""
 
@@ -1059,6 +1061,8 @@ async def post_flow_review_suggestions(
             space=space,
             active_provider_ids=active_provider_ids,
             tenant_flow_settings=tenant.flow_settings if tenant else None,
+            model_id=body.model_id if body is not None else None,
+            reasoning_effort=body.reasoning_effort if body is not None else None,
         )
         sample: FlowReviewSample = await review_service.build_review_sample(
             flow_id=flow_id, space_id=space_id, audit=audit, packet=packet

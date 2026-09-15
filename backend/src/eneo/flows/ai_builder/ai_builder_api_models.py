@@ -503,6 +503,50 @@ class CreateSessionRequest(BaseModel):
     )
 
 
+def _validate_reasoning_effort_shape(value: str | None) -> str | None:
+    if value is not None and value != value.strip():
+        raise ValueError("reasoning_effort must not contain surrounding whitespace")
+    return value
+
+
+class FlowReviewSuggestionsRequest(BaseModel):
+    """The planner controls for one suggestions call, as a message turn carries
+    them: omit both to use the server default model."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "model_id": "00000000-0000-0000-0000-000000000010",
+                "reasoning_effort": "medium",
+            }
+        },
+    )
+
+    model_id: UUID | None = Field(
+        default=None,
+        description=(
+            "Completion model that judges the sample and drafts the suggestions. "
+            "Omit it to use the space default; a model below the sample's evidence "
+            "classification is rejected before any run content is read."
+        ),
+    )
+    reasoning_effort: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=AI_BUILDER_REASONING_EFFORT_MAX_LENGTH,
+        description=(
+            "Optional reasoning effort advertised by the selected model. Omit it "
+            "to use provider defaults; unsupported values are rejected before provider work."
+        ),
+    )
+
+    @field_validator("reasoning_effort")
+    @classmethod
+    def validate_reasoning_effort_shape(cls, value: str | None) -> str | None:
+        return _validate_reasoning_effort_shape(value)
+
+
 class SendMessageRequest(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -554,9 +598,7 @@ class SendMessageRequest(BaseModel):
     @field_validator("reasoning_effort")
     @classmethod
     def validate_reasoning_effort_shape(cls, value: str | None) -> str | None:
-        if value is not None and value != value.strip():
-            raise ValueError("reasoning_effort must not contain surrounding whitespace")
-        return value
+        return _validate_reasoning_effort_shape(value)
 
     file_ids: list[UUID] | None = Field(
         default=None,

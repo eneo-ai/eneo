@@ -18473,6 +18473,27 @@ export interface components {
       /** Unverified Count */
       unverified_count: number;
     };
+    /**
+     * FlowReviewSuggestionsRequest
+     * @description The planner controls for one suggestions call, as a message turn carries
+     *     them: omit both to use the server default model.
+     * @example {
+     *       "model_id": "00000000-0000-0000-0000-000000000010",
+     *       "reasoning_effort": "medium"
+     *     }
+     */
+    FlowReviewSuggestionsRequest: {
+      /**
+       * Model Id
+       * @description Completion model that judges the sample and drafts the suggestions. Omit it to use the space default; a model below the sample's evidence classification is rejected before any run content is read.
+       */
+      model_id?: string | null;
+      /**
+       * Reasoning Effort
+       * @description Optional reasoning effort advertised by the selected model. Omit it to use provider defaults; unsupported values are rejected before provider work.
+       */
+      reasoning_effort?: string | null;
+    };
     /** FlowRunArtifactResultPublic */
     FlowRunArtifactResultPublic: {
       /**
@@ -50260,7 +50281,11 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["FlowReviewSuggestionsRequest"] | null;
+      };
+    };
     responses: {
       /** @description Successful Response */
       200: {

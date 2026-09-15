@@ -83,6 +83,7 @@ from eneo.flows.ai_builder.question_catalog import (
     RUNTIME_METADATA_FIELD_PURPOSES,
     render_summary_label,
 )
+from eneo.flows.flow_authoring_spec import FormFieldSpec
 
 
 def _slot(
@@ -296,6 +297,35 @@ def test_server_collects_runtime_field_details_before_requirements_confirmation(
     # repeats the question carries nothing, so it must never be the question.
     assert decision.question.assistant_text != decision.question.question_data.question
     assert "form" in decision.question.assistant_text
+
+
+@pytest.mark.parametrize(
+    "runtime_metadata_state",
+    ["basic_runtime_metadata", "detailed_runtime_metadata"],
+)
+def test_saved_form_fields_are_a_known_baseline_and_are_not_asked_for_again(
+    runtime_metadata_state: str,
+) -> None:
+    # An edit or review session of a saved flow: the runner already fills in
+    # these fields today, so the session must not open with an empty form
+    # asking what they are.
+    state = _state(
+        primary_runtime_input="text",
+        terminal_output="structured_text",
+        runtime_metadata_fields=runtime_metadata_state,
+    )
+    state.saved_input_fields = [
+        FormFieldSpec(name="brukarens_namn", type="text", label="Brukarens namn"),
+        FormFieldSpec(name="datum_intervju", type="date", label="Datum"),
+    ]
+    state.architecture_commit = _finalized_commit_for_state(state)
+
+    decision = _decision(state=state, ui_language="en")
+
+    assert not (
+        isinstance(decision, AskCanonicalQuestion)
+        and decision.slot_name == "runtime_metadata_field_details"
+    )
 
 
 def test_every_purpose_a_field_can_be_stored_with_can_also_be_chosen() -> None:

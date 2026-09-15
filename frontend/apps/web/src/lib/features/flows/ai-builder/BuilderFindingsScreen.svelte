@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Snippet } from "svelte";
   import { m } from "$lib/paraglide/messages";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
@@ -34,6 +35,9 @@
     review: AIBuilderFlowReviewState;
     suggestions?: AIBuilderFlowReviewSuggestionsState;
     disabled?: boolean;
+    /** The composer's model and effort controls, rendered beside the
+     *  suggest action so the same selection judges the sample. */
+    plannerControls?: Snippet;
     onprepare: (detail: { message: string; reviewContext: AIBuilderReviewReference }) => void;
     onsuggest?: () => void;
     onclose: () => void;
@@ -44,6 +48,7 @@
     review,
     suggestions = { status: "closed" },
     disabled = false,
+    plannerControls,
     onprepare,
     onsuggest,
     onclose,
@@ -283,16 +288,19 @@
                 <p class="text-secondary text-[0.8125rem] text-pretty">
                   {m.ai_builder_review_suggestions_hint()}
                 </p>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  class="h-8 w-fit gap-1.5"
-                  disabled={disabled || runCount === 0}
-                  onclick={() => onsuggest?.()}
-                >
-                  <IconSparkles class="size-3.5" aria-hidden="true" />
-                  {m.ai_builder_review_suggest()}
-                </Button>
+                <div class="flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    class="h-8 w-fit gap-1.5"
+                    disabled={disabled || runCount === 0}
+                    onclick={() => onsuggest?.()}
+                  >
+                    <IconSparkles class="size-3.5" aria-hidden="true" />
+                    {m.ai_builder_review_suggest()}
+                  </Button>
+                  {@render plannerControls?.()}
+                </div>
               </div>
             {:else if suggestions.status === "loading"}
               <p class="text-secondary text-[0.8125rem]" aria-busy="true" role="status">

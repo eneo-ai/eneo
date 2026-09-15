@@ -473,28 +473,9 @@ class AIBuilderService:
                 },
             )
 
-        route = await self.completion_service.resolve_model_route(
-            planner_context.model,
+        route = await self._resolve_builder_route(
+            planner_context.model, reasoning_effort=reasoning_effort
         )
-        route = replace(
-            route,
-            litellm_kwargs=_sanitize_ai_builder_litellm_kwargs(route.litellm_kwargs),
-        )
-        if reasoning_effort is not None:
-            capability = route.supported_model_kwargs.reasoning_effort
-            options = selectable_reasoning_effort_options(
-                capability,
-                max_length=AI_BUILDER_REASONING_EFFORT_MAX_LENGTH,
-            )
-            if reasoning_effort not in options:
-                raise AIBuilderBadRequestException(
-                    "Selected reasoning effort is not available for this model.",
-                    code=AIBuilderErrorCode.BAD_REQUEST,
-                )
-            route = replace(
-                route,
-                requested_model_kwargs=ModelKwargs(reasoning_effort=reasoning_effort),
-            )
 
         flow = None
         assistant_snapshots = None
@@ -794,6 +775,40 @@ class AIBuilderService:
             revision_type=revision_type,
         )
 
+    async def _resolve_builder_route(
+        self,
+        model: Any,
+        *,
+        reasoning_effort: str | None,
+    ) -> ResolvedCompletionModelRoute:
+        """The provider route for a Builder call, with the caller's effort applied.
+
+        One owner for every Builder provider call: a message turn and a review
+        judgement resolve credentials, sanitize kwargs and validate the
+        requested effort against what the model advertises the same way.
+        """
+        route = await self.completion_service.resolve_model_route(model)
+        route = replace(
+            route,
+            litellm_kwargs=_sanitize_ai_builder_litellm_kwargs(route.litellm_kwargs),
+        )
+        if reasoning_effort is not None:
+            capability = route.supported_model_kwargs.reasoning_effort
+            options = selectable_reasoning_effort_options(
+                capability,
+                max_length=AI_BUILDER_REASONING_EFFORT_MAX_LENGTH,
+            )
+            if reasoning_effort not in options:
+                raise AIBuilderBadRequestException(
+                    "Selected reasoning effort is not available for this model.",
+                    code=AIBuilderErrorCode.BAD_REQUEST,
+                )
+            route = replace(
+                route,
+                requested_model_kwargs=ModelKwargs(reasoning_effort=reasoning_effort),
+            )
+        return route
+
     async def prepare_review_judgement(
         self,
         *,
@@ -801,6 +816,8 @@ class AIBuilderService:
         space: "Space",
         active_provider_ids: AbstractSet[UUID],
         tenant_flow_settings: dict[str, Any] | None,
+        model_id: UUID | None = None,
+        reasoning_effort: str | None = None,
     ) -> PreparedReviewJudgement:
         """Everything the judgement needs from the database, before any call.
 
@@ -815,15 +832,13 @@ class AIBuilderService:
 
         planner_context = build_planner_context(
             space,
-            model_id=None,
+            model_id=model_id,
             active_provider_ids=active_provider_ids,
             tenant_flow_settings=tenant_flow_settings,
             minimum_level=evidence_classification_level,
         )
-        route = await self.completion_service.resolve_model_route(planner_context.model)
-        route = replace(
-            route,
-            litellm_kwargs=_sanitize_ai_builder_litellm_kwargs(route.litellm_kwargs),
+        route = await self._resolve_builder_route(
+            planner_context.model, reasoning_effort=reasoning_effort
         )
         return PreparedReviewJudgement(
             completion_model_route=route,

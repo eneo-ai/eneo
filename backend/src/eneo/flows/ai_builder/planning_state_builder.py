@@ -46,6 +46,9 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
 )
 from eneo.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
 from eneo.flows.ai_builder.ai_builder_field_identity import fold_result_field_name
+from eneo.flows.ai_builder.ai_builder_form_fields import (
+    extract_form_fields_from_metadata,
+)
 from eneo.flows.ai_builder.ai_builder_form_intake_signals import (
     FORM_INTAKE_NEEDS_FIELDS_SIGNAL,
     FORM_INTAKE_SIGNAL_ID,
@@ -142,6 +145,7 @@ from eneo.flows.domain.mapped_execution_policy import (
     max_mapped_items_per_step,
 )
 from eneo.flows.enums import FlowOutputMode
+from eneo.flows.flow_authoring_spec import FormFieldSpec
 from eneo.json_types import JsonObject
 
 CLASSIFIER_REBUILD_INPUT_CLASSES: frozenset[ClassifierRetentionClass] = frozenset(
@@ -179,6 +183,7 @@ def build_planning_state_from_conversation(
         resolved_slots=resolved_slots,
         file_roles=list(attachment_file_roles or ()),
         input_fields=_confirmed_input_fields(conversation),
+        saved_input_fields=_saved_input_fields(flow),
         mapped_file_limit=_mapped_file_limit(
             conversation,
             mapped_execution_policy=mapped_execution_policy,
@@ -280,6 +285,12 @@ def _mapped_file_limit(
         proposed_value=proposed,
         diagnostic="confirmation_required",
     )
+
+
+def _saved_input_fields(flow: Flow | None) -> list[FormFieldSpec]:
+    if flow is None:
+        return []
+    return extract_form_fields_from_metadata(flow.metadata_json) or []
 
 
 def _confirmed_input_fields(
