@@ -125,6 +125,16 @@ class RealObjectStore:
         self.container.get_wrapped_container().start()
 
 
+# The store's readiness client keeps the production defaults of a 2 s timeout
+# and a single attempt, and binding create/verify calls go through it. CI runs
+# this module on four xdist workers with a throwaway store per worker, so a
+# correct binding round-trip can exceed 2 s on a loaded runner. Only the test
+# fixtures get this headroom; production settings are unchanged. The value is
+# bounded by the settings invariant that the default 30 s binding claim must
+# cover one readiness request budget (2 * timeout + 5 s).
+READINESS_WAIT_SECONDS = 10.0
+
+
 @pytest.fixture(scope="session")
 def object_content_postgres_13() -> Generator[PostgresContainer, None, None]:
     postgres = PostgresContainer(
@@ -282,6 +292,7 @@ async def _real_object_store_process(
                 secret_access_key=secret_key,
                 deployment_id=UUID("a2d539af-fef0-42aa-a7f8-14376947be2c"),
                 allow_insecure_http=True,
+                readiness_timeout_seconds=READINESS_WAIT_SECONDS,
                 io_chunk_bytes=64 * 1024,
                 spool_memory_bytes=1024 * 1024,
                 multipart_part_bytes=5 * 1024 * 1024,
@@ -440,6 +451,7 @@ async def real_tls_object_store(
                 secret_access_key=secret_key,
                 deployment_id=UUID("d2d69d7f-9ef1-443a-91ce-2541d49d14b7"),
                 ca_bundle=ca_path,
+                readiness_timeout_seconds=READINESS_WAIT_SECONDS,
                 io_chunk_bytes=64 * 1024,
                 spool_memory_bytes=1024 * 1024,
                 multipart_part_bytes=5 * 1024 * 1024,
