@@ -32,6 +32,7 @@ from sqlalchemy.engine import make_url
 from testcontainers.postgres import PostgresContainer
 
 from alembic import command
+from alembic.script import ScriptDirectory
 from eneo.database.database import DatabaseSessionManager, sessionmanager
 from eneo.main.config import get_settings, set_settings
 from eneo.object_content.configuration import ObjectContentCoreSettings
@@ -331,6 +332,7 @@ async def setup_database(test_settings, postgres_container, database_measurement
         "postgres_memory_limit_bytes": 2 * 1024 * _MIB,
         "source_revision": _RELEASED_REVISION,
         "bridge_revision": _BRIDGE_REVISION,
+        "application_revision": ScriptDirectory.from_config(config).get_current_head(),
         "preflight_seconds": time.perf_counter() - preflight_started,
         "preflight": asdict(preflight),
         "replicas": "not deployed in this isolated profile",
@@ -349,6 +351,14 @@ async def setup_database(test_settings, postgres_container, database_measurement
         upgrade_started = time.perf_counter()
         command.upgrade(config, _BRIDGE_REVISION)
         report["expand_inventory_seconds"] = time.perf_counter() - upgrade_started
+        assert _source_facts(url) == expected_sources
+        # The historical bridge is tested above; current ORM models and API
+        # routes require the complete schema shipped with this application.
+        application_upgrade_started = time.perf_counter()
+        command.upgrade(config, "head")
+        report["application_upgrade_seconds"] = (
+            time.perf_counter() - application_upgrade_started
+        )
         assert _source_facts(url) == expected_sources
         sessionmanager.init(test_settings.database_url)
         try:

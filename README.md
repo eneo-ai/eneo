@@ -80,7 +80,7 @@ cd eneo && code .
 
 - **Platform**: http://localhost:3000
 - **API Docs**: http://localhost:8123/docs
-- **Default Login**: `user@example.com` / `Password1!`
+- **Default Login**: `user@example.com` / `ChangeMePassword1!`
 
 📖 **[Development Setup Guide →](docs/INSTALLATION.md)**
 
