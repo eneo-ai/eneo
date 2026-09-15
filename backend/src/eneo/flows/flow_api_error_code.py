@@ -8,6 +8,7 @@ class FlowApiErrorCode(str, Enum):
     """Public Flow error codes with generated SDK and localized client messages."""
 
     FLOW_NOT_PUBLISHED = "flow_not_published"
+    REVIEW_HISTORY_TOO_LARGE = "flow_review_history_too_large"
     FLOW_DELETED = "flow_deleted"
     OWNER_REQUIRED = "flow_owner_required"
     SERVICE_KEY_ADMIN_REQUIRED = "flow_service_key_admin_required"

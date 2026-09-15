@@ -737,6 +737,9 @@ class FlowRunReviewCheckpointService:
                 expected_revision=expected_checkpoint_revision,
                 principal=principal,
                 current_payload_json=folded_payload,
+                correction_set=fold.correction_set
+                if fold is not None and folded_payload is not None
+                else None,
             )
         )
         if (

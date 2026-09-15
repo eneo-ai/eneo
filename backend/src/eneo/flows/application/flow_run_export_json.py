@@ -466,7 +466,11 @@ def _build_review_checkpoint_summary(
         count=len(checkpoints),
         by_state=state_counts,
         any_edited=any(
-            checkpoint.get("edited_at") is not None for checkpoint in checkpoints
+            checkpoint.get("edited_at") is not None or bool(checkpoint.get("edits"))
+            for checkpoint in checkpoints
+        ),
+        any_corrections_edited=bool(
+            bundle_payload.get("transcript_correction_revisions")
         ),
         any_resumed=any(
             checkpoint.get("resumed_at") is not None for checkpoint in checkpoints
@@ -675,8 +679,15 @@ def _build_step_overview_payload(
         _result_file_records(bundle_payload)
     )
     review_impacts_by_step_order = build_evidence_step_review_impacts_by_step_order(
-        _review_checkpoint_records(bundle_payload)
+        _review_checkpoint_records(bundle_payload),
+        _as_json_object_list(bundle_payload.get("transcript_correction_revisions")),
     )
+    corrected_step_ids = {
+        item.get("step_id")
+        for item in _as_json_object_list(
+            bundle_payload.get("transcript_correction_revisions")
+        )
+    }
     step_ref_mapping = build_step_ref_mapping(raw_steps)
     step_labels_by_order: dict[int, str] = {}
     for step in raw_steps:
@@ -719,6 +730,8 @@ def _build_step_overview_payload(
         review_impact = review_impacts_by_step_order.get(
             step_order, empty_evidence_step_review_impact()
         )
+        if step.get("step_id") in corrected_step_ids:
+            review_impact.any_corrections_edited = True
         knowledge_retrieval = _build_step_knowledge_retrieval_summary(attempts, result)
         input_lineage = _build_input_lineage(
             step=step,

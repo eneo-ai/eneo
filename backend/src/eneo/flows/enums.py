@@ -307,6 +307,11 @@ class FlowRunLifecycleSource(str, Enum):
     REVIEW_CHECKPOINT_EXPIRED = "review_checkpoint_expired"
 
 
+class FlowRunReviewCheckpointEditCause(str, Enum):
+    REVIEWER_EDIT = "reviewer_edit"
+    CORRECTIONS_FOLDED = "corrections_folded"
+
+
 class FlowRunReviewCheckpointState(str, Enum):
     AWAITING_REVIEW = FlowRunStatus.AWAITING_REVIEW.value
     EDITED = "edited"

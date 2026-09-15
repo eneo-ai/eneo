@@ -1431,6 +1431,8 @@ class FlowRunReviewCheckpoints(BasePublic):
     )
 
     __table_args__ = (
+        UniqueConstraint("id", "tenant_id", name="uq_review_checkpoints_id_tenant"),
+        UniqueConstraint("id", "flow_run_id", name="uq_review_checkpoints_id_run"),
         CheckConstraint(
             f"state IN ({_check_values(FLOW_RUN_REVIEW_CHECKPOINT_STATE_VALUES)})",
             name="ck_flow_run_review_checkpoints_state",
@@ -1748,6 +1750,12 @@ class FlowRunAuditOutbox(BasePublic):
         index=True,
     )
     checkpoint_revision: Mapped[Optional[int]] = mapped_column(nullable=True)
+    payload_sha256_before: Mapped[Optional[str]] = mapped_column(
+        sa.String(64), nullable=True
+    )
+    payload_sha256_after: Mapped[Optional[str]] = mapped_column(
+        sa.String(64), nullable=True
+    )
     description: Mapped[str] = mapped_column(nullable=False)
     action: Mapped[str] = mapped_column(sa.String(64), nullable=False)
     entity_type: Mapped[str] = mapped_column(sa.String(64), nullable=False)
@@ -2390,6 +2398,7 @@ class FlowTranscriptCorrections(BasePublic):
     )
 
     __table_args__ = (
+        UniqueConstraint("id", "tenant_id", name="uq_transcript_corrections_id_tenant"),
         CheckConstraint(
             "revision >= 1",
             name="ck_flow_transcript_corrections_revision",
@@ -2420,6 +2429,124 @@ class FlowTranscriptCorrections(BasePublic):
             "flow_run_id",
             "step_id",
             name="uq_flow_transcript_corrections_run_step",
+        ),
+    )
+
+
+class FlowTranscriptCorrectionRevisions(BasePublic):
+    """Stores committed correction snapshots. Writer: FlowTranscriptCorrectionsRepository. Purpose: preserve correction content and authors for review history."""
+
+    tenant_id: Mapped[UUID] = mapped_column(nullable=False)
+    correction_set_id: Mapped[UUID] = mapped_column(
+        ForeignKey(FlowTranscriptCorrections.id, ondelete="CASCADE"), nullable=False
+    )
+    flow_id: Mapped[UUID] = mapped_column(nullable=False)
+    flow_run_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
+    step_id: Mapped[UUID] = mapped_column(nullable=False)
+    revision: Mapped[int] = mapped_column(nullable=False)
+    occurrences_json: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False
+    )
+    speaker_edits_json: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False
+    )
+    segments_hash: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    edited_by_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="RESTRICT"), nullable=True
+    )
+    edited_by_service_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("service_principals.id", ondelete="RESTRICT"), nullable=True
+    )
+    edited_by_principal_type: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "correction_set_id", "revision", name="uq_correction_revisions_set_revision"
+        ),
+        CheckConstraint("revision >= 1", name="ck_correction_revisions_revision"),
+        ForeignKeyConstraint(
+            ["correction_set_id", "tenant_id"],
+            ["flow_transcript_corrections.id", "flow_transcript_corrections.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_correction_revisions_set_tenant",
+        ),
+        CheckConstraint(
+            "(edited_by_principal_type = 'user' AND edited_by_user_id IS NOT NULL "
+            "AND edited_by_service_id IS NULL) OR "
+            "(edited_by_principal_type = 'service_key' AND edited_by_user_id IS NULL "
+            "AND edited_by_service_id IS NOT NULL)",
+            name="ck_correction_revisions_editor_principal",
+        ),
+    )
+
+
+class FlowRunReviewCheckpointEdits(BasePublic):
+    """Stores committed review payload replacements. Writer: FlowRunReviewCheckpointRepository. Purpose: preserve payloads, authors, digests, and the correction revision used by each fold."""
+
+    tenant_id: Mapped[UUID] = mapped_column(nullable=False)
+    flow_id: Mapped[UUID] = mapped_column(nullable=False)
+    flow_run_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
+    checkpoint_id: Mapped[UUID] = mapped_column(
+        ForeignKey(FlowRunReviewCheckpoints.id, ondelete="CASCADE"), nullable=False
+    )
+    revision: Mapped[int] = mapped_column(nullable=False)
+    cause: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    corrections_revision_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(FlowTranscriptCorrectionRevisions.id, ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    payload_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    payload_sha256_before: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    payload_sha256_after: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    edited_by_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="RESTRICT"), nullable=True
+    )
+    edited_by_service_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("service_principals.id", ondelete="RESTRICT"), nullable=True
+    )
+    edited_by_principal_type: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "checkpoint_id", "revision", name="uq_checkpoint_edits_checkpoint_revision"
+        ),
+        CheckConstraint("revision >= 1", name="ck_checkpoint_edits_revision"),
+        CheckConstraint(
+            "cause IN ('reviewer_edit', 'corrections_folded')",
+            name="ck_checkpoint_edits_cause",
+        ),
+        CheckConstraint(
+            "(corrections_revision_id IS NOT NULL) = (cause = 'corrections_folded')",
+            name="ck_checkpoint_edits_correction_reference",
+        ),
+        ForeignKeyConstraint(
+            ["checkpoint_id", "tenant_id"],
+            ["flow_run_review_checkpoints.id", "flow_run_review_checkpoints.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_checkpoint_edits_checkpoint_tenant",
+        ),
+        ForeignKeyConstraint(
+            ["checkpoint_id", "flow_run_id"],
+            [
+                "flow_run_review_checkpoints.id",
+                "flow_run_review_checkpoints.flow_run_id",
+            ],
+            ondelete="CASCADE",
+            name="fk_checkpoint_edits_checkpoint_run",
+        ),
+        ForeignKeyConstraint(
+            ["flow_run_id", "tenant_id"],
+            ["flow_runs.id", "flow_runs.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_checkpoint_edits_run_tenant",
+        ),
+        CheckConstraint(
+            "(edited_by_principal_type = 'user' AND edited_by_user_id IS NOT NULL "
+            "AND edited_by_service_id IS NULL) OR "
+            "(edited_by_principal_type = 'service_key' AND edited_by_user_id IS NULL "
+            "AND edited_by_service_id IS NOT NULL)",
+            name="ck_checkpoint_edits_editor_principal",
         ),
     )
 

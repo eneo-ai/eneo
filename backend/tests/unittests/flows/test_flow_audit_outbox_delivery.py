@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -134,9 +135,33 @@ def test_completed_run_outbox_builds_human_audit_log_description() -> None:
         "target_status": "completed",
         "review_checkpoint_id": None,
         "checkpoint_revision": None,
+        "payload_sha256_before": None,
+        "payload_sha256_after": None,
         "error_code": None,
         "outbox_description": "flow_run_completed:executor_completed",
     }
+
+
+@pytest.mark.parametrize(
+    "action",
+    [
+        ActionType.FLOW_RUN_REVIEW_CHECKPOINT_EDITED,
+        ActionType.FLOW_RUN_REVIEW_CHECKPOINT_APPROVED,
+        ActionType.FLOW_RUN_REVIEW_CHECKPOINT_OPENED,
+    ],
+)
+def test_review_audit_metadata_preserves_payload_digests(action) -> None:
+    changed = action != ActionType.FLOW_RUN_REVIEW_CHECKPOINT_OPENED
+    before = "a" * 64 if changed else None
+    after = "b" * 64 if changed else None
+    row = replace(
+        _outbox_row(action=action.value),
+        payload_sha256_before=before,
+        payload_sha256_after=after,
+    )
+    metadata = build_audit_log_from_outbox(row).metadata
+    assert metadata["payload_sha256_before"] == before
+    assert metadata["payload_sha256_after"] == after
 
 
 def test_failed_run_outbox_uses_non_empty_error_message_fallback() -> None:

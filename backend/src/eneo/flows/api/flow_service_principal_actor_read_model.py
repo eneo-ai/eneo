@@ -17,6 +17,31 @@ class FlowServicePrincipalActorPresenter:
     api_key_repo: ApiKeysV2Repository
     tenant_id: UUID
 
+    async def present_history_items(
+        self, items: Sequence[Mapping[str, object]]
+    ) -> list[dict[str, object]]:
+        actors = await _load_flow_service_principal_actor_summaries(
+            api_key_repo=self.api_key_repo,
+            tenant_id=self.tenant_id,
+            service_principal_ids=tuple(
+                service_id
+                for item in items
+                for service_id in _iter_record_service_ids(
+                    item, ("edited_by_service_id",)
+                )
+            ),
+        )
+        return cast(
+            list[dict[str, object]],
+            _enrich_records(
+                items,
+                actors=actors,
+                service_fields=(
+                    ("edited_by_service_id", "edited_by_service_principal"),
+                ),
+            ),
+        )
+
     async def present_review_checkpoint(
         self, checkpoint: FlowRunReviewCheckpoint
     ) -> FlowRunReviewCheckpointPublic:
@@ -65,6 +90,11 @@ class FlowServicePrincipalActorPresenter:
                 ("decided_by_service_id", "decided_by_service_principal"),
             ),
         )
+        enriched["transcript_correction_revisions"] = _enrich_records(
+            payload.get("transcript_correction_revisions", []),
+            actors=actors,
+            service_fields=(("edited_by_service_id", "edited_by_service_principal"),),
+        )
         return enriched
 
 
@@ -102,6 +132,10 @@ def _iter_review_checkpoint_service_ids(
         yield from _iter_record_service_ids(
             record, ("requester_service_id", "decided_by_service_id")
         )
+        for edit in _iter_mapping_records(record.get("edits")):
+            yield from _iter_record_service_ids(edit, ("edited_by_service_id",))
+    for record in _iter_mapping_records(payload.get("transcript_correction_revisions")):
+        yield from _iter_record_service_ids(record, ("edited_by_service_id",))
 
 
 def _iter_record_service_ids(
@@ -142,6 +176,14 @@ def _enrich_records(
             enriched_records.append(item)
             continue
         enriched = dict(record)
+        if "edits" in record:
+            enriched["edits"] = _enrich_records(
+                record["edits"],
+                actors=actors,
+                service_fields=(
+                    ("edited_by_service_id", "edited_by_service_principal"),
+                ),
+            )
         for service_id_field, summary_field in service_fields:
             service_id = _coerce_uuid(record.get(service_id_field))
             if service_id is None:

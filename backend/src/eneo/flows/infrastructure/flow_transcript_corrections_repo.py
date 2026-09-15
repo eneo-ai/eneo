@@ -14,11 +14,18 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from eneo.database.tables.flow_tables import FlowTranscriptCorrections
+from eneo.database.tables.flow_tables import (
+    FlowTranscriptCorrectionRevisions,
+    FlowTranscriptCorrections,
+)
 from eneo.flows.domain.transcript_corrections import (
     TRANSCRIPT_CORRECTIONS_SCHEMA_VERSION,
+    FlowTranscriptCorrectionRevision,
     FlowTranscriptCorrectionSet,
     FlowTranscriptCorrectionsStaleRevisionError,
+)
+from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
+    FlowRunReviewCheckpointEvidenceMeasurement,
 )
 from eneo.flows.principal import FlowPrincipal
 
@@ -26,6 +33,127 @@ from eneo.flows.principal import FlowPrincipal
 class FlowTranscriptCorrectionsRepository:
     def __init__(self, *, session: AsyncSession):
         self.session = session
+
+    async def get_revision(
+        self,
+        *,
+        revision_id: UUID,
+        tenant_id: UUID,
+    ) -> FlowTranscriptCorrectionRevision | None:
+        row = await self.session.scalar(
+            sa.select(FlowTranscriptCorrectionRevisions)
+            .where(FlowTranscriptCorrectionRevisions.id == revision_id)
+            .where(FlowTranscriptCorrectionRevisions.tenant_id == tenant_id)
+        )
+        return (
+            FlowTranscriptCorrectionRevision.model_validate(row)
+            if row is not None
+            else None
+        )
+
+    async def list_revisions_for_run(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        limit: int | None = None,
+        logical_byte_budget: int | None = None,
+    ) -> list[FlowTranscriptCorrectionRevision]:
+        stmt = (
+            sa.select(FlowTranscriptCorrectionRevisions)
+            .where(FlowTranscriptCorrectionRevisions.flow_run_id == run_id)
+            .where(FlowTranscriptCorrectionRevisions.tenant_id == tenant_id)
+            .order_by(
+                FlowTranscriptCorrectionRevisions.step_id,
+                FlowTranscriptCorrectionRevisions.revision,
+            )
+        )
+        if logical_byte_budget is not None:
+            logical = sa.func.octet_length(
+                sa.cast(FlowTranscriptCorrectionRevisions.occurrences_json, sa.Text)
+            ) + sa.func.octet_length(
+                sa.cast(FlowTranscriptCorrectionRevisions.speaker_edits_json, sa.Text)
+            )
+            candidates = (
+                sa.select(
+                    FlowTranscriptCorrectionRevisions.id,
+                    FlowTranscriptCorrectionRevisions.step_id,
+                    FlowTranscriptCorrectionRevisions.revision,
+                    logical.label("logical"),
+                )
+                .where(
+                    FlowTranscriptCorrectionRevisions.flow_run_id == run_id,
+                    FlowTranscriptCorrectionRevisions.tenant_id == tenant_id,
+                )
+                .order_by(
+                    FlowTranscriptCorrectionRevisions.step_id,
+                    FlowTranscriptCorrectionRevisions.revision,
+                )
+            )
+            if limit is not None:
+                candidates = candidates.limit(limit)
+            bounded = candidates.subquery()
+            ranked = sa.select(
+                bounded.c.id,
+                sa.func.sum(bounded.c.logical)
+                .over(order_by=(bounded.c.step_id, bounded.c.revision))
+                .label("cumulative"),
+            ).subquery()
+            stmt = stmt.where(
+                FlowTranscriptCorrectionRevisions.id.in_(
+                    sa.select(ranked.c.id).where(
+                        ranked.c.cumulative <= logical_byte_budget
+                    )
+                )
+            )
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        rows = await self.session.scalars(stmt)
+        return [FlowTranscriptCorrectionRevision.model_validate(row) for row in rows]
+
+    async def list_revisions(
+        self,
+        *,
+        run_id: UUID,
+        step_id: UUID,
+        tenant_id: UUID,
+        after_revision: int | None,
+        limit: int,
+    ) -> tuple[list[FlowTranscriptCorrectionRevision], bool]:
+        rows = (
+            await self.session.scalars(
+                sa.select(FlowTranscriptCorrectionRevisions)
+                .where(
+                    FlowTranscriptCorrectionRevisions.flow_run_id == run_id,
+                    FlowTranscriptCorrectionRevisions.step_id == step_id,
+                    FlowTranscriptCorrectionRevisions.tenant_id == tenant_id,
+                    FlowTranscriptCorrectionRevisions.revision > (after_revision or 0),
+                )
+                .order_by(FlowTranscriptCorrectionRevisions.revision)
+                .limit(limit + 1)
+            )
+        ).all()
+        return [
+            FlowTranscriptCorrectionRevision.model_validate(row) for row in rows[:limit]
+        ], len(rows) > limit
+
+    async def _insert_revision(self, row: FlowTranscriptCorrections) -> None:
+        await self.session.execute(
+            sa.insert(FlowTranscriptCorrectionRevisions).values(
+                tenant_id=row.tenant_id,
+                correction_set_id=row.id,
+                flow_id=row.flow_id,
+                flow_run_id=row.flow_run_id,
+                step_id=row.step_id,
+                revision=row.revision,
+                occurrences_json=row.occurrences_json,
+                speaker_edits_json=row.speaker_edits_json,
+                segments_hash=row.segments_hash,
+                edited_by_user_id=row.edited_by_user_id,
+                edited_by_service_id=row.edited_by_service_id,
+                edited_by_principal_type=row.edited_by_principal_type,
+            )
+        )
 
     async def list_for_run(
         self,
@@ -110,6 +238,7 @@ class FlowTranscriptCorrectionsRepository:
                         run_id=run_id, step_id=step_id, tenant_id=tenant_id
                     ),
                 )
+            await self._insert_revision(row)
             return FlowTranscriptCorrectionSet.model_validate(row)
 
         update_stmt = (
@@ -137,7 +266,79 @@ class FlowTranscriptCorrectionsRepository:
                     run_id=run_id, step_id=step_id, tenant_id=tenant_id
                 ),
             )
+        await self._insert_revision(row)
         return FlowTranscriptCorrectionSet.model_validate(row)
+
+    async def measure_revision_evidence_row_count(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        ceiling: int,
+    ) -> int:
+        candidates = (
+            sa.select(FlowTranscriptCorrectionRevisions.id)
+            .where(
+                FlowTranscriptCorrectionRevisions.flow_run_id == run_id,
+                FlowTranscriptCorrectionRevisions.tenant_id == tenant_id,
+            )
+            .limit(ceiling + 1)
+            .subquery()
+        )
+        return int(
+            await self.session.scalar(
+                sa.select(sa.func.count()).select_from(candidates)
+            )
+            or 0
+        )
+
+    async def measure_revision_evidence(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        candidate_limit: int | None = None,
+    ) -> FlowRunReviewCheckpointEvidenceMeasurement:
+        stmt = sa.select(
+            (
+                sa.func.octet_length(
+                    sa.cast(FlowTranscriptCorrectionRevisions.occurrences_json, sa.Text)
+                )
+                + sa.func.octet_length(
+                    sa.cast(
+                        FlowTranscriptCorrectionRevisions.speaker_edits_json, sa.Text
+                    )
+                )
+            ).label("logical"),
+            (
+                sa.func.pg_column_size(
+                    FlowTranscriptCorrectionRevisions.occurrences_json
+                )
+                + sa.func.pg_column_size(
+                    FlowTranscriptCorrectionRevisions.speaker_edits_json
+                )
+            ).label("stored"),
+        ).where(
+            FlowTranscriptCorrectionRevisions.flow_run_id == run_id,
+            FlowTranscriptCorrectionRevisions.tenant_id == tenant_id,
+        )
+        if candidate_limit is not None:
+            stmt = stmt.limit(candidate_limit)
+        candidates = stmt.subquery()
+        row = (
+            await self.session.execute(
+                sa.select(
+                    sa.func.count(),
+                    sa.func.coalesce(sa.func.sum(candidates.c.stored), 0),
+                    sa.func.coalesce(sa.func.sum(candidates.c.logical), 0),
+                )
+            )
+        ).one()
+        return FlowRunReviewCheckpointEvidenceMeasurement(
+            row_count=int(row[0]),
+            stored_json_bytes=int(row[1]),
+            logical_json_bytes=int(row[2]),
+        )
 
     async def _current_revision(
         self,

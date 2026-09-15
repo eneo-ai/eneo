@@ -34,6 +34,7 @@ from eneo.flows.domain.flow import (
     FlowPersistedJsonObject,
     FlowRun,
     FlowRunReviewCheckpoint,
+    FlowRunReviewCheckpointEdit,
     FlowRunStatus,
     FlowRunTokenUsage,
     FlowStepAttempt,
@@ -45,6 +46,7 @@ from eneo.flows.domain.flow_step_attempt_input import (
     FlowStepAttemptExecutionInput,
     FlowStepAttemptInput,
 )
+from eneo.flows.domain.transcript_corrections import FlowTranscriptCorrectionRevision
 from eneo.flows.enums import (
     FlowOutputType,
     FlowRunReviewCheckpointState,
@@ -1411,6 +1413,7 @@ def test_render_evidence_json_export_adds_manifest_and_summary() -> None:
             "expired": 0,
         },
         "any_edited": False,
+        "any_corrections_edited": False,
         "any_resumed": False,
         "active_checkpoint_id": None,
         "active_checkpoint_conflict": False,
@@ -1729,6 +1732,94 @@ def test_evidence_export_includes_review_checkpoint_lineage() -> None:
     assert export["summary"]["review_checkpoints"]["any_resumed"] is True
 
 
+def test_evidence_preserves_and_redacts_change_history() -> None:
+    run, version = _evidence_run_and_version()
+    checkpoint = _review_checkpoint_for_run(run).model_copy(update={"edited_at": None})
+    version = _evidence_version_with_steps(run, step_ids=[checkpoint.step_id])
+    revision = FlowTranscriptCorrectionRevision(
+        id=uuid4(),
+        tenant_id=run.tenant_id,
+        correction_set_id=uuid4(),
+        flow_id=run.flow_id,
+        flow_run_id=run.id,
+        step_id=checkpoint.step_id,
+        revision=1,
+        occurrences_json=[
+            {"original": "password=first", "corrected": "password=second"}
+        ],
+        speaker_edits_json=[{"speaker": "token=hidden"}],
+        segments_hash="a" * 64,
+        edited_by_user_id=run.principal_user_id,
+        edited_by_service_id=None,
+        edited_by_principal_type=PrincipalType.USER,
+        created_at=checkpoint.created_at,
+    )
+    edit = FlowRunReviewCheckpointEdit(
+        id=uuid4(),
+        tenant_id=run.tenant_id,
+        flow_id=run.flow_id,
+        flow_run_id=run.id,
+        checkpoint_id=checkpoint.id,
+        revision=2,
+        cause="corrections_folded",
+        corrections_revision_id=revision.id,
+        correction_set_id=revision.correction_set_id,
+        corrections_revision=1,
+        payload_json={"text": "password=secret"},
+        payload_sha256_before="b" * 64,
+        payload_sha256_after="c" * 64,
+        edited_by_user_id=run.principal_user_id,
+        edited_by_service_id=None,
+        edited_by_principal_type=PrincipalType.USER,
+        created_at=checkpoint.created_at,
+    )
+    later = edit.model_copy(update={"id": uuid4(), "revision": 3})
+    bundle = build_evidence_bundle(
+        run=run,
+        version=version,
+        step_results=[],
+        step_attempts=[],
+        review_checkpoints=[checkpoint],
+        review_checkpoint_edits=[later, edit],
+        transcript_correction_revisions=[revision],
+    )
+    raw = bundle.to_dict()
+    assert [item["revision"] for item in raw["review_checkpoints"][0]["edits"]] == [
+        2,
+        3,
+    ]
+    assert raw["transcript_correction_revisions"][0]["id"] == str(revision.id)
+    redacted = redact_evidence_bundle(bundle).to_dict()
+    redacted_edit = redacted["review_checkpoints"][0]["edits"][0]
+    assert redacted_edit["payload_json"]["text"] != "password=secret"
+    assert redacted_edit["payload_sha256_after"] == "c" * 64
+    assert (
+        redacted["transcript_correction_revisions"][0]["occurrences_json"]
+        != revision.occurrences_json
+    )
+    assert (
+        redacted["transcript_correction_revisions"][0]["speaker_edits_json"]
+        != revision.speaker_edits_json
+    )
+    export = render_evidence_json_export(bundle=bundle, context=_raw_export_context())
+    assert export["summary"]["review_checkpoints"]["any_edited"] is True
+    assert export["summary"]["review_checkpoints"]["any_corrections_edited"] is True
+
+    impact = export["summary"]["step_overview"][0]["review_impact"]
+    assert impact["any_corrections_edited"] is True
+    assert impact["events"][0]["corrections_edited"] is True
+    revisions_only = render_evidence_json_export(
+        bundle=replace(bundle, review_checkpoints=(), review_checkpoint_edits=()),
+        context=_raw_export_context(),
+    )
+    assert (
+        revisions_only["summary"]["step_overview"][0]["review_impact"][
+            "any_corrections_edited"
+        ]
+        is True
+    )
+
+
 @pytest.mark.parametrize("redacted", [False, True])
 def test_evidence_export_typed_summary_adds_review_impact_without_changing_content_hash(
     redacted: bool,
@@ -1882,6 +1973,7 @@ def test_evidence_export_typed_summary_adds_review_impact_without_changing_conte
     assert step_2_review == {
         "checkpoint_count": 0,
         "any_edited": False,
+        "any_corrections_edited": False,
         "any_resumed": False,
         "any_output_changed": False,
         "last_event": None,
@@ -2251,6 +2343,7 @@ def test_evidence_export_manifest_rejects_unknown_fields() -> None:
                 "cancelled": 0,
             },
             "any_edited": False,
+            "any_corrections_edited": False,
             "any_resumed": False,
             "active_checkpoint_id": None,
             "active_checkpoint_conflict": False,

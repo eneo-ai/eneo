@@ -38,6 +38,8 @@ EvidenceSectionIdentifier: TypeAlias = Literal[
     "result_files",
     "runtime_input_files",
     "review_checkpoints",
+    "review_checkpoint_edits",
+    "transcript_correction_revisions",
     "webhook_deliveries",
     "provider_calls",
     "whole_bundle",

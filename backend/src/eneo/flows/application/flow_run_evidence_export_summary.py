@@ -96,6 +96,7 @@ class EvidenceStepReviewEvent(BaseModel):
     state: FlowRunReviewCheckpointState
     decision: EvidenceReviewDecision | None = None
     edited: bool
+    corrections_edited: bool = False
     resumed: bool
     attempt_no: int
     revision: int
@@ -114,6 +115,7 @@ class EvidenceStepReviewImpact(BaseModel):
 
     checkpoint_count: int
     any_edited: bool
+    any_corrections_edited: bool = False
     any_resumed: bool
     any_output_changed: bool
     last_event: EvidenceStepReviewEvent | None = None
@@ -172,11 +174,15 @@ class EvidenceExportSummary(BaseModel):
 
 def build_evidence_step_review_impacts_by_step_order(
     review_checkpoints: Sequence[Mapping[str, object]],
+    transcript_correction_revisions: Sequence[Mapping[str, object]] = (),
 ) -> dict[int, EvidenceStepReviewImpact]:
+    corrected_step_ids = {
+        str(item.get("step_id")) for item in transcript_correction_revisions
+    }
     return {
         step_order: _review_impact(events)
         for step_order, events in _review_events_by_step_order(
-            review_checkpoints
+            review_checkpoints, corrected_step_ids
         ).items()
     }
 
@@ -187,6 +193,7 @@ def empty_evidence_step_review_impact() -> EvidenceStepReviewImpact:
 
 def _review_events_by_step_order(
     checkpoints: Sequence[Mapping[str, object]],
+    corrected_step_ids: set[str],
 ) -> dict[int, list[EvidenceStepReviewEvent]]:
     event_rows_by_step_order: dict[
         int, list[tuple[tuple[int, int, str, str], EvidenceStepReviewEvent]]
@@ -196,6 +203,7 @@ def _review_events_by_step_order(
         event = _review_event(checkpoint)
         if step_order is None or event is None:
             continue
+        event.corrections_edited = str(checkpoint.get("step_id")) in corrected_step_ids
         created_at = _str_or_none(checkpoint.get("created_at")) or ""
         sort_key = (
             event.attempt_no,
@@ -225,7 +233,8 @@ def _review_event(
         state=state,
         decision=_review_decision(checkpoint.get("decision")),
         edited=state == FlowRunReviewCheckpointState.EDITED
-        or checkpoint.get("edited_at") is not None,
+        or checkpoint.get("edited_at") is not None
+        or bool(checkpoint.get("edits")),
         resumed=state == FlowRunReviewCheckpointState.RESUMED
         or checkpoint.get("resumed_at") is not None,
         attempt_no=attempt_no,
@@ -240,6 +249,7 @@ def _review_impact(
     return EvidenceStepReviewImpact(
         checkpoint_count=len(events),
         any_edited=any(event.edited for event in events),
+        any_corrections_edited=any(event.corrections_edited for event in events),
         any_resumed=any(event.resumed for event in events),
         any_output_changed=any(event.output_changed is True for event in events),
         last_event=events[-1] if events else None,

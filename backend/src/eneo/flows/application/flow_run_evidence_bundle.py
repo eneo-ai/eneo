@@ -21,6 +21,7 @@ from eneo.flows.application.flow_run_evidence import (
 from eneo.flows.domain.flow import (
     FlowRun,
     FlowRunReviewCheckpoint,
+    FlowRunReviewCheckpointEdit,
     FlowRunTokenUsage,
     FlowRunTranscriptionUsage,
     FlowStepAttempt,
@@ -30,6 +31,7 @@ from eneo.flows.domain.flow import (
 from eneo.flows.domain.flow_step_attempt_input import parse_flow_step_attempt_input
 from eneo.flows.domain.provider_call import ProviderCallEvidencePage
 from eneo.flows.domain.runtime import RuntimeStep
+from eneo.flows.domain.transcript_corrections import FlowTranscriptCorrectionRevision
 from eneo.flows.enums import FlowRunReviewCheckpointState
 from eneo.flows.flow_run_contract_service import build_final_output_contract
 from eneo.flows.flow_run_provenance import (
@@ -91,6 +93,8 @@ class EvidenceBundle:
     ]
     citation_summaries_by_step_id: Mapping[UUID, FlowCitationSummaryPublic | None]
     debug_export: dict[str, Any]
+    review_checkpoint_edits: Sequence[FlowRunReviewCheckpointEdit] = ()
+    transcript_correction_revisions: Sequence[FlowTranscriptCorrectionRevision] = ()
 
     def to_export_payload(self) -> EvidenceBundlePayload:
         step_attempts: list[dict[str, Any]] = []
@@ -130,9 +134,15 @@ class EvidenceBundle:
                 "result_files": [
                     item.model_dump(mode="json") for item in self.result_files
                 ],
-                "review_checkpoints": [
-                    _dump_review_checkpoint_record(item)
-                    for item in self.review_checkpoints
+                "review_checkpoints": _dump_review_checkpoint_records(
+                    self.review_checkpoints, self.review_checkpoint_edits
+                ),
+                "transcript_correction_revisions": [
+                    item.model_dump(mode="json")
+                    for item in sorted(
+                        self.transcript_correction_revisions,
+                        key=lambda item: (item.step_id, item.revision),
+                    )
                 ],
                 "webhook_deliveries": [
                     _dump_webhook_delivery(item) for item in self.webhook_deliveries
@@ -163,6 +173,7 @@ class RedactedEvidenceBundle:
     masked_paths: tuple[str, ...]
     masked_fields: tuple[MaskedField, ...]
     provenance_parse_results: tuple[FlowAttemptProvenanceParseResult, ...] = ()
+    transcript_correction_revisions: tuple[dict[str, Any], ...] = ()
 
     def to_export_payload(self) -> EvidenceBundlePayload:
         return EvidenceBundlePayload(
@@ -174,6 +185,9 @@ class RedactedEvidenceBundle:
                 "step_attempts": [dict(item) for item in self.step_attempts],
                 "result_files": [dict(item) for item in self.result_files],
                 "review_checkpoints": [dict(item) for item in self.review_checkpoints],
+                "transcript_correction_revisions": [
+                    dict(item) for item in self.transcript_correction_revisions
+                ],
                 "webhook_deliveries": [dict(item) for item in self.webhook_deliveries],
                 "provider_calls": self.provider_calls.model_dump(mode="json"),
                 "debug_export": dict(self.debug_export),
@@ -196,6 +210,8 @@ def build_evidence_bundle(
     ],
     result_files: Sequence[FlowRunStepResultFile] = (),
     review_checkpoints: Sequence[FlowRunReviewCheckpoint] = (),
+    review_checkpoint_edits: Sequence[FlowRunReviewCheckpointEdit] = (),
+    transcript_correction_revisions: Sequence[FlowTranscriptCorrectionRevision] = (),
     webhook_deliveries: Sequence[FlowRunWebhookDeliveryRead] = (),
     provider_calls: ProviderCallEvidencePage | None = None,
     token_usage: FlowRunTokenUsage | None = None,
@@ -259,6 +275,8 @@ def build_evidence_bundle(
         step_attempts=tuple(step_attempts),
         result_files=tuple(result_files),
         review_checkpoints=tuple(review_checkpoints),
+        review_checkpoint_edits=tuple(review_checkpoint_edits),
+        transcript_correction_revisions=tuple(transcript_correction_revisions),
         webhook_deliveries=tuple(webhook_deliveries),
         provider_calls=provider_calls
         or ProviderCallEvidencePage(
@@ -351,13 +369,25 @@ def redact_evidence_bundle(bundle: EvidenceBundle) -> RedactedEvidenceBundle:
 
     review_checkpoint_section = _redact_record_payloads(
         section_path="bundle.review_checkpoints",
-        payloads=[
-            _dump_review_checkpoint_record(checkpoint)
-            for checkpoint in bundle.review_checkpoints
-        ],
+        payloads=_dump_review_checkpoint_records(
+            bundle.review_checkpoints, bundle.review_checkpoint_edits
+        ),
     )
     masked_paths.extend(review_checkpoint_section.masked_paths)
     masked_fields.extend(review_checkpoint_section.masked_fields)
+
+    corrections_section = _redact_record_payloads(
+        section_path="bundle.transcript_correction_revisions",
+        payloads=[
+            item.model_dump(mode="json")
+            for item in sorted(
+                bundle.transcript_correction_revisions,
+                key=lambda item: (item.step_id, item.revision),
+            )
+        ],
+    )
+    masked_paths.extend(corrections_section.masked_paths)
+    masked_fields.extend(corrections_section.masked_fields)
 
     debug_result = redact_payload_with_manifest(
         bundle.debug_export, path="bundle.debug_export"
@@ -381,6 +411,7 @@ def redact_evidence_bundle(bundle: EvidenceBundle) -> RedactedEvidenceBundle:
         step_attempts=step_attempt_section.records,
         result_files=result_file_section.records,
         review_checkpoints=review_checkpoint_section.records,
+        transcript_correction_revisions=corrections_section.records,
         webhook_deliveries=tuple(
             _dump_webhook_delivery(item) for item in bundle.webhook_deliveries
         ),
@@ -404,6 +435,24 @@ def redact_evidence_bundle(bundle: EvidenceBundle) -> RedactedEvidenceBundle:
         ),
         provenance_parse_results=tuple(provenance_parse_results),
     )
+
+
+def _dump_review_checkpoint_records(
+    checkpoints: Sequence[FlowRunReviewCheckpoint],
+    edits: Sequence[FlowRunReviewCheckpointEdit],
+) -> list[dict[str, Any]]:
+    edits_by_checkpoint: dict[UUID, list[dict[str, Any]]] = {}
+    for edit in sorted(edits, key=lambda item: item.revision):
+        edits_by_checkpoint.setdefault(edit.checkpoint_id, []).append(
+            edit.model_dump(mode="json")
+        )
+    return [
+        {
+            **_dump_review_checkpoint_record(checkpoint),
+            "edits": edits_by_checkpoint.get(checkpoint.id, []),
+        }
+        for checkpoint in checkpoints
+    ]
 
 
 def _redact_record_payloads(

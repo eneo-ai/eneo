@@ -121,6 +121,7 @@ class EvidenceReviewCheckpointSummary(BaseModel):
     count: int
     by_state: dict[FlowRunReviewCheckpointState, int]
     any_edited: bool
+    any_corrections_edited: bool = False
     any_resumed: bool
     active_checkpoint_id: str | None = None
     active_checkpoint_conflict: bool

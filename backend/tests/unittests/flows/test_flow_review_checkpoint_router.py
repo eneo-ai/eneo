@@ -465,3 +465,233 @@ async def test_reject_review_checkpoint_builds_response_inside_transaction(monke
         expected_checkpoint_revision=ctx.checkpoint.revision,
         reason="Needs correction",
     )
+
+
+def _history_context(monkeypatch, *, corrections=False):
+    from eneo.authentication.principal_types import PrincipalType
+    from eneo.flows.application.flow_run_evidence_service import FlowRunEvidenceService
+    from eneo.flows.domain.flow import FlowRunReviewCheckpointEdit
+    from eneo.flows.domain.transcript_corrections import (
+        FlowTranscriptCorrectionRevision,
+    )
+
+    container = MagicMock()
+    ctx = _enable_review_checkpoint_route_context(container)
+    _disable_flow_scope_filter(monkeypatch)
+    repo = AsyncMock()
+    corrections_repo = AsyncMock()
+    repo.get_review_checkpoint.return_value = ctx.checkpoint
+    actor_id = uuid4()
+    common = dict(
+        tenant_id=ctx.run.tenant_id,
+        flow_id=ctx.flow_id,
+        flow_run_id=ctx.run.id,
+        edited_by_user_id=None,
+        edited_by_service_id=actor_id,
+        edited_by_principal_type=PrincipalType.SERVICE_KEY,
+        created_at=ctx.checkpoint.created_at,
+    )
+    if corrections:
+        rows = [
+            FlowTranscriptCorrectionRevision(
+                id=uuid4(),
+                correction_set_id=uuid4(),
+                step_id=ctx.checkpoint.step_id,
+                revision=revision,
+                occurrences_json=[{"corrected": f"revision {revision}"}],
+                speaker_edits_json=[],
+                segments_hash="a" * 64,
+                **common,
+            )
+            for revision in (1, 2, 3)
+        ]
+        reader = corrections_repo.list_revisions
+    else:
+        rows = [
+            FlowRunReviewCheckpointEdit(
+                id=uuid4(),
+                checkpoint_id=ctx.checkpoint.id,
+                revision=revision,
+                cause="reviewer_edit",
+                corrections_revision_id=None,
+                payload_json={"text": f"revision {revision}"},
+                payload_sha256_before="a" * 64,
+                payload_sha256_after="b" * 64,
+                **common,
+            )
+            for revision in (2, 3, 4)
+        ]
+        reader = repo.list_review_checkpoint_edits
+
+    async def list_rows(*, after_revision, limit, **kwargs):
+        remaining = [row for row in rows if row.revision > (after_revision or 0)]
+        return remaining[:limit], len(remaining) > limit
+
+    reader.side_effect = list_rows
+    service = FlowRunEvidenceService(
+        user=container.user(),
+        flow_repo=AsyncMock(),
+        flow_run_repo=AsyncMock(),
+        provider_call_repo=AsyncMock(),
+        flow_run_review_checkpoint_repo=repo,
+        flow_version_repo=AsyncMock(),
+        file_repo=AsyncMock(),
+        webhook_delivery_repo=AsyncMock(),
+        access_policy=AsyncMock(),
+        transcript_corrections_repo=corrections_repo,
+    )
+    container.flow_run_evidence_service.return_value = service
+    container.api_key_v2_repo.return_value = AsyncMock()
+    container.api_key_v2_repo.return_value.list_service_principals_by_ids.return_value = {
+        actor_id: SimpleNamespace(id=actor_id, display_name="History editor"),
+    }
+    return container, ctx, repo, rows
+
+
+async def _call_history(
+    container, ctx, *, corrections=False, after_revision=None, limit=50
+):
+    if corrections:
+        from eneo.flows.api import flow_run_transcript_corrections_router
+
+        endpoint = flow_run_transcript_corrections_router.list_flow_run_transcript_correction_revisions
+        identifier = {"step_id": ctx.checkpoint.step_id}
+    else:
+        endpoint = router_module.list_flow_run_review_checkpoint_edits
+        identifier = {"checkpoint_id": ctx.checkpoint.id}
+    return await endpoint(
+        id=ctx.flow_id,
+        run_id=ctx.run.id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        container=container,
+        after_revision=after_revision,
+        limit=limit,
+        **identifier,
+    )
+
+
+@pytest.mark.asyncio
+async def test_terminal_checkpoint_history_baselines_and_cursor(monkeypatch):
+    container, ctx, repo, rows = _history_context(monkeypatch)
+    page = await _call_history(container, ctx, limit=1)
+    assert page.baseline.revision == 1
+    assert page.baseline.payload_json == ctx.checkpoint.original_payload_json
+    assert [item.revision for item in page.items] == [2]
+    assert page.truncated is True and page.next_after_revision == 2
+    assert page.items[0].edited_by_service_principal.display_name == "History editor"
+    later = await _call_history(container, ctx, after_revision=2, limit=50)
+    assert later.baseline.payload_json == rows[0].payload_json
+    assert [item.revision for item in later.items] == [3, 4]
+    assert later.next_after_revision is None and later.truncated is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("corrections", [False, True])
+async def test_history_byte_budget_advances_or_reports_obstructing_revision(
+    monkeypatch, corrections
+):
+    from eneo.flows.application import flow_run_evidence_service
+    from eneo.flows.domain.canonical_json_hash import canonical_json_bytes
+    from eneo.main.exceptions import FileTooLargeException
+
+    container, ctx, repo, rows = _history_context(monkeypatch, corrections=corrections)
+    complete = await _call_history(container, ctx, corrections=corrections)
+    first_page_bytes = len(
+        canonical_json_bytes(complete.baseline.model_dump(mode="json"))
+    ) + len(canonical_json_bytes(complete.items[0].model_dump(mode="json")))
+    monkeypatch.setattr(
+        flow_run_evidence_service,
+        "RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES",
+        first_page_bytes + 10,
+    )
+    page = await _call_history(container, ctx, corrections=corrections)
+    assert len(page.items) == 1
+    assert page.truncated and page.next_after_revision == rows[0].revision
+    monkeypatch.setattr(
+        flow_run_evidence_service, "RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES", 1
+    )
+    with pytest.raises(FileTooLargeException) as exc:
+        await _call_history(container, ctx, corrections=corrections)
+    assert exc.value.code == "flow_review_history_too_large"
+    assert exc.value.context["revision"] == rows[0].revision
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("corrections", [False, True])
+@pytest.mark.parametrize("failure", ["insert", "commit"])
+async def test_history_exposes_no_payload_when_required_audit_fails(
+    monkeypatch, corrections, failure
+):
+    container, ctx, repo, rows = _history_context(monkeypatch, corrections=corrections)
+    if failure == "insert":
+        container.audit_service.return_value.log.side_effect = RuntimeError(
+            "audit unavailable"
+        )
+    else:
+        container.session.return_value.begin.return_value = _CommitFailureTransaction()
+    with pytest.raises(AuditLoggingUnavailableException) as exc:
+        await _call_history(container, ctx, corrections=corrections)
+    assert exc.value.code == FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED.value
+
+
+@pytest.mark.asyncio
+async def test_history_unknown_checkpoint_is_not_found(monkeypatch):
+    from eneo.main.exceptions import NotFoundException
+
+    container, ctx, repo, rows = _history_context(monkeypatch)
+    repo.get_review_checkpoint.return_value = None
+    with pytest.raises(NotFoundException):
+        await _call_history(container, ctx)
+    repo.list_review_checkpoint_edits.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("corrections", [False, True])
+async def test_history_requires_view_scope_before_reading(monkeypatch, corrections):
+    from eneo.flows.flow_access_policy import FlowApiAction
+    from eneo.main.exceptions import UnauthorizedException
+
+    container, ctx, repo, rows = _history_context(monkeypatch, corrections=corrections)
+    enforce = AsyncMock(side_effect=UnauthorizedException("Missing flows_view"))
+    monkeypatch.setattr(flow_access_context_module, "enforce_flow_scope", enforce)
+    with pytest.raises(UnauthorizedException):
+        await _call_history(container, ctx, corrections=corrections)
+    assert enforce.await_args.kwargs["required_access"] == FlowApiAction.VIEW
+    assert enforce.await_args.kwargs["allow_service_key_principals"] is True
+    repo.get_review_checkpoint.assert_not_awaited()
+    container.flow_run_evidence_service.return_value.transcript_corrections_repo.list_revisions.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_evidence_presenter_enriches_nested_edits_and_correction_revisions(
+    monkeypatch,
+):
+    from eneo.flows.api.flow_service_principal_actor_read_model import (
+        FlowServicePrincipalActorPresenter,
+    )
+
+    container, ctx, repo, rows = _history_context(monkeypatch)
+    presenter = FlowServicePrincipalActorPresenter(
+        api_key_repo=container.api_key_v2_repo(),
+        tenant_id=ctx.run.tenant_id,
+    )
+    payload = {
+        "review_checkpoints": [{"edits": [rows[0].model_dump(mode="json")]}],
+        "transcript_correction_revisions": [
+            {"edited_by_service_id": str(rows[0].edited_by_service_id)}
+        ],
+    }
+    enriched = await presenter.present_evidence(payload)
+    assert (
+        enriched["review_checkpoints"][0]["edits"][0]["edited_by_service_principal"][
+            "display_name"
+        ]
+        == "History editor"
+    )
+    assert (
+        enriched["transcript_correction_revisions"][0]["edited_by_service_principal"][
+            "display_name"
+        ]
+        == "History editor"
+    )
+    container.api_key_v2_repo.return_value.list_service_principals_by_ids.assert_awaited_once()

@@ -1,6 +1,7 @@
 // Generated from backend/src/eneo/flows/flow_api_error_code.py. Do not edit by hand.
 export const FLOW_API_ERROR_CODE = Object.freeze({
   FLOW_NOT_PUBLISHED: "flow_not_published",
+  REVIEW_HISTORY_TOO_LARGE: "flow_review_history_too_large",
   FLOW_DELETED: "flow_deleted",
   OWNER_REQUIRED: "flow_owner_required",
   SERVICE_KEY_ADMIN_REQUIRED: "flow_service_key_admin_required",
@@ -166,6 +167,7 @@ export const FLOW_API_ERROR_CODE = Object.freeze({
 });
 export const FLOW_API_ERROR_CODES = Object.freeze([
   "flow_not_published",
+  "flow_review_history_too_large",
   "flow_deleted",
   "flow_owner_required",
   "flow_service_key_admin_required",

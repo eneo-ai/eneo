@@ -16,9 +16,11 @@ from eneo.authentication.principal_types import PrincipalType
 from eneo.database.database import sessionmanager
 from eneo.database.tables.flow_tables import (
     FlowRunAuditOutbox,
+    FlowRunReviewCheckpointEdits,
     FlowRunReviewCheckpoints,
     FlowRuns,
     FlowStepResults,
+    FlowTranscriptCorrectionRevisions,
 )
 from eneo.database.tables.service_principals_table import ServicePrincipals
 from eneo.flows import FlowRepository, FlowVersionRepository
@@ -26,6 +28,7 @@ from eneo.flows.application.flow_review_expiry_reconciliation import (
     FlowReviewExpiryReconciler,
 )
 from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
+from eneo.flows.domain.canonical_json_hash import canonical_json_hash
 from eneo.flows.domain.flow import Flow, FlowRun, FlowRunReviewCheckpoint, FlowStep
 from eneo.flows.domain.review_checkpoint_exceptions import (
     FlowReviewCheckpointAlreadyResumedError,
@@ -65,8 +68,282 @@ from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
 )
+from eneo.flows.infrastructure.flow_transcript_corrections_repo import (
+    FlowTranscriptCorrectionsRepository,
+)
 from eneo.flows.principal import FlowPrincipal
 from eneo.flows.runtime import tasks as flow_runtime_tasks
+
+
+@pytest.mark.parametrize("folded", [False, True])
+async def test_checkpoint_history_preserves_edits_and_fold_reference(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    folded,
+    monkeypatch,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_review_checkpoint_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        run_repo = FlowRunRepository(session=session)
+        repo = _review_checkpoint_repo(session=session, run_repo=run_repo)
+        principal_a = FlowPrincipal.from_user(admin_user)
+        principal_b = FlowPrincipal(
+            principal_type=PrincipalType.SERVICE_KEY,
+            principal_service_id=await _create_service_principal_id(
+                session=session,
+                tenant_id=scenario.tenant_id,
+                created_by_user_id=admin_user.id,
+            ),
+        )
+        approver = FlowPrincipal(
+            principal_type=PrincipalType.SERVICE_KEY,
+            principal_service_id=await _create_service_principal_id(
+                session=session,
+                tenant_id=scenario.tenant_id,
+                created_by_user_id=admin_user.id,
+            ),
+        )
+        await run_repo.mark_running_if_claimable(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+            expected_revision=scenario.run.revision,
+        )
+        await _complete_reviewed_step_result(session=session, scenario=scenario)
+        opened = await repo.open_review_checkpoint_for_completed_step(
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            step_id=scenario.step_ids[0],
+            step_order=1,
+            attempt_no=1,
+            requester_principal=principal_a,
+            next_step_ids=(scenario.step_ids[1],),
+            review_mode=FlowStepReviewMode.EDIT,
+            output_type=FlowOutputType.JSON,
+        )
+        original = opened.checkpoint.original_payload_json
+        assert original is not None
+        edited = await repo.edit_review_checkpoint_payload(
+            checkpoint_id=opened.checkpoint.id,
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            expected_revision=1,
+            current_payload_json={"answer": "changed"},
+            principal=principal_a,
+        )
+        reverted = await repo.edit_review_checkpoint_payload(
+            checkpoint_id=edited.id,
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            expected_revision=2,
+            current_payload_json=original,
+            principal=principal_b,
+        )
+        history = await repo.list_review_checkpoint_edits_for_run(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+        )
+        assert [row.revision for row in history] == [2, 3]
+        assert history[0].edited_by_user_id == admin_user.id
+        assert history[1].edited_by_service_id == principal_b.principal_service_id
+        assert history[0].payload_sha256_before == canonical_json_hash(original)
+        assert history[0].payload_sha256_after == canonical_json_hash(
+            {"answer": "changed"}
+        )
+        assert history[1].payload_sha256_before == history[0].payload_sha256_after
+        assert history[1].payload_sha256_after == canonical_json_hash(original)
+
+        async def fail_outbox(**kwargs):
+            assert (
+                await session.scalar(
+                    sa.select(sa.func.count())
+                    .select_from(FlowRunReviewCheckpointEdits)
+                    .where(FlowRunReviewCheckpointEdits.checkpoint_id == reverted.id)
+                )
+                == 3
+            )
+            raise RuntimeError("forced outbox failure")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(
+                repo.audit_outbox_repo,
+                "insert_review_checkpoint_audit_outbox",
+                fail_outbox,
+            )
+            with pytest.raises(RuntimeError, match="forced outbox failure"):
+                async with session.begin_nested():
+                    await repo.edit_review_checkpoint_payload(
+                        checkpoint_id=reverted.id,
+                        tenant_id=scenario.tenant_id,
+                        flow_id=scenario.flow_id,
+                        flow_run_id=scenario.flow_run_id,
+                        expected_revision=3,
+                        current_payload_json={"answer": "must roll back"},
+                        principal=principal_a,
+                    )
+        unchanged = await repo.get_review_checkpoint(
+            checkpoint_id=reverted.id,
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+        )
+        assert unchanged is not None and unchanged.revision == 3
+        assert unchanged.current_payload_json == original
+        assert (
+            len(
+                await repo.list_review_checkpoint_edits_for_run(
+                    run_id=scenario.flow_run_id, tenant_id=scenario.tenant_id
+                )
+            )
+            == 2
+        )
+        corrections_repo = FlowTranscriptCorrectionsRepository(session=session)
+        applied_set = None
+        for step_id in scenario.step_ids:
+            saved = None
+            for revision in range(2):
+                saved = await corrections_repo.save(
+                    tenant_id=scenario.tenant_id,
+                    flow_id=scenario.flow_id,
+                    run_id=scenario.flow_run_id,
+                    step_id=step_id,
+                    occurrences_json=[{"corrected": str(revision)}],
+                    speaker_edits_json=[],
+                    segments_hash="a" * 64,
+                    expected_revision=saved.revision if saved else None,
+                    principal=principal_a,
+                )
+            if step_id == scenario.step_ids[0]:
+                applied_set = saved
+        await repo.approve_review_checkpoint(
+            checkpoint_id=reverted.id,
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            expected_revision=3,
+            principal=approver,
+            current_payload_json={"answer": "folded"} if folded else None,
+            correction_set=applied_set if folded else None,
+        )
+        history = await repo.list_review_checkpoint_edits_for_run(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+        )
+        assert [row.revision for row in history] == ([2, 3, 4] if folded else [2, 3])
+        if folded:
+            assert applied_set is not None
+            revision = await corrections_repo.get_revision(
+                revision_id=history[-1].corrections_revision_id,
+                tenant_id=scenario.tenant_id,
+            )
+            assert revision is not None
+            assert (revision.correction_set_id, revision.revision) == (
+                applied_set.id,
+                2,
+            )
+            assert history[-1].cause.value == "corrections_folded"
+            assert history[-1].edited_by_service_id == approver.principal_service_id
+            assert history[-1].payload_sha256_before == canonical_json_hash(original)
+            assert history[-1].payload_sha256_after == canonical_json_hash(
+                {"answer": "folded"}
+            )
+
+        revisions = await corrections_repo.list_revisions_for_run(
+            run_id=scenario.flow_run_id, tenant_id=scenario.tenant_id
+        )
+        invalid_edits = [
+            {"revision": 2},
+            {"tenant_id": uuid4()},
+            {"edited_by_principal_type": None, "edited_by_user_id": None},
+            {"cause": "corrections_folded", "corrections_revision_id": None},
+            {"cause": "reviewer_edit", "corrections_revision_id": revisions[0].id},
+        ]
+        for invalid in invalid_edits:
+            values = history[0].model_dump(
+                exclude={"correction_set_id", "corrections_revision"}
+            )
+            values.update(id=uuid4(), revision=99)
+            values.update(invalid)
+            with pytest.raises(IntegrityError):
+                async with session.begin_nested():
+                    await session.execute(
+                        sa.insert(FlowRunReviewCheckpointEdits).values(**values)
+                    )
+        outbox = (
+            await session.scalars(
+                sa.select(FlowRunAuditOutbox)
+                .where(FlowRunAuditOutbox.review_checkpoint_id == reverted.id)
+                .order_by(FlowRunAuditOutbox.checkpoint_revision)
+            )
+        ).all()
+        assert outbox[1].payload_sha256_before == canonical_json_hash(original)
+        assert outbox[1].payload_sha256_after == history[0].payload_sha256_after
+        assert outbox[-1].payload_sha256_after == (
+            history[-1].payload_sha256_after if folded else None
+        )
+        measurement = await repo.measure_edit_evidence(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+            candidate_limit=10,
+        )
+        assert measurement.row_count == len(history)
+        assert measurement.logical_json_bytes > 0
+        assert (
+            await repo.list_review_checkpoint_edits_for_run(
+                run_id=scenario.flow_run_id,
+                tenant_id=scenario.tenant_id,
+                limit=2,
+                logical_byte_budget=0,
+            )
+            == []
+        )
+        assert (
+            len(
+                await repo.list_review_checkpoint_edits_for_run(
+                    run_id=scenario.flow_run_id, tenant_id=scenario.tenant_id, limit=1
+                )
+            )
+            == 1
+        )
+        await session.execute(
+            sa.delete(FlowRunAuditOutbox).where(
+                FlowRunAuditOutbox.flow_run_id == scenario.flow_run_id
+            )
+        )
+        await session.execute(
+            sa.delete(FlowRuns).where(FlowRuns.id == scenario.flow_run_id)
+        )
+        assert (
+            await session.scalar(
+                sa.select(sa.func.count())
+                .select_from(FlowRunReviewCheckpointEdits)
+                .where(FlowRunReviewCheckpointEdits.flow_run_id == scenario.flow_run_id)
+            )
+            == 0
+        )
+        assert (
+            await session.scalar(
+                sa.select(sa.func.count())
+                .select_from(FlowTranscriptCorrectionRevisions)
+                .where(
+                    FlowTranscriptCorrectionRevisions.flow_run_id
+                    == scenario.flow_run_id
+                )
+            )
+            == 0
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -2671,3 +2948,79 @@ async def test_reject_review_checkpoint_does_not_add_cancelled_checkpoint_outbox
         "flow_run_review_checkpoint_rejected",
     ]
     assert terminal_outbox_source == FlowRunLifecycleSource.REVIEW_REJECTED.value
+
+
+@pytest.mark.parametrize("folded", [False, True])
+async def test_history_digests_match_stored_jsonb_numbers(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    folded,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_review_checkpoint_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        run_repo = FlowRunRepository(session=session)
+        repo = _review_checkpoint_repo(session=session, run_repo=run_repo)
+        principal = FlowPrincipal.from_user(admin_user)
+        await run_repo.mark_running_if_claimable(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+            expected_revision=scenario.run.revision,
+        )
+        await _complete_reviewed_step_result(session=session, scenario=scenario)
+        opened = await repo.open_review_checkpoint_for_completed_step(
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            step_id=scenario.step_ids[0],
+            step_order=1,
+            attempt_no=1,
+            requester_principal=principal,
+            next_step_ids=(scenario.step_ids[1],),
+            review_mode=FlowStepReviewMode.EDIT,
+            output_type=FlowOutputType.JSON,
+        )
+        kwargs = dict(
+            checkpoint_id=opened.checkpoint.id,
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            expected_revision=1,
+            current_payload_json={"score": 1e20},
+            principal=principal,
+        )
+        if folded:
+            corrections = await FlowTranscriptCorrectionsRepository(
+                session=session
+            ).save(
+                tenant_id=scenario.tenant_id,
+                flow_id=scenario.flow_id,
+                run_id=scenario.flow_run_id,
+                step_id=scenario.step_ids[0],
+                occurrences_json=[],
+                speaker_edits_json=[],
+                segments_hash="a" * 64,
+                expected_revision=None,
+                principal=principal,
+            )
+            await repo.approve_review_checkpoint(**kwargs, correction_set=corrections)
+        else:
+            await repo.edit_review_checkpoint_payload(**kwargs)
+        stored = await session.scalar(
+            sa.select(FlowRunReviewCheckpoints.current_payload_json).where(
+                FlowRunReviewCheckpoints.id == opened.checkpoint.id,
+            )
+        )
+        edits = await repo.list_review_checkpoint_edits_for_run(
+            run_id=scenario.flow_run_id, tenant_id=scenario.tenant_id
+        )
+        assert edits[0].payload_sha256_after == canonical_json_hash(stored)

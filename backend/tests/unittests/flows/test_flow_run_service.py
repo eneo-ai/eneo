@@ -260,6 +260,17 @@ def _flow_run_evidence_service(
         FlowRunReviewCheckpointEvidenceMeasurement.empty()
     )
     flow_run_review_checkpoint_repo.measure_evidence_row_count.return_value = 0
+    flow_run_review_checkpoint_repo.measure_edit_evidence.return_value = (
+        FlowRunReviewCheckpointEvidenceMeasurement.empty()
+    )
+    flow_run_review_checkpoint_repo.measure_edit_evidence_row_count.return_value = 0
+    flow_run_review_checkpoint_repo.list_review_checkpoint_edits_for_run.return_value = []
+    correction_repo = AsyncMock()
+    correction_repo.measure_revision_evidence.return_value = (
+        FlowRunReviewCheckpointEvidenceMeasurement.empty()
+    )
+    correction_repo.measure_revision_evidence_row_count.return_value = 0
+    correction_repo.list_revisions_for_run.return_value = []
     provider_call_repo.measure_evidence.return_value = (
         FlowProviderCallEvidenceMeasurement.empty()
     )
@@ -269,6 +280,7 @@ def _flow_run_evidence_service(
     )
     webhook_delivery_repo.measure_evidence_row_count.return_value = 0
     return FlowRunEvidenceService(
+        transcript_corrections_repo=correction_repo,
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,

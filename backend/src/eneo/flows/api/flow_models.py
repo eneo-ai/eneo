@@ -72,6 +72,7 @@ from eneo.flows.application.flow_run_evidence_export_summary import (
     EvidenceExportSummary,
 )
 from eneo.flows.domain.flow import (
+    FlowRunReviewCheckpointEdit,
     FlowStepRetrievalPolicy,
     parse_flow_step_retrieval_policy,
 )
@@ -84,6 +85,7 @@ from eneo.flows.domain.rag_evidence import (
     RecordedPassageContent,
     RetrievedSource,
 )
+from eneo.flows.domain.transcript_corrections import FlowTranscriptCorrectionRevision
 from eneo.flows.enums import (
     FlowInputSource,
     FlowInputType,
@@ -1960,6 +1962,40 @@ class FlowStepAttemptPublic(BaseModel):
     updated_at: datetime
 
 
+class FlowRunReviewCheckpointEditPublic(FlowRunReviewCheckpointEdit):
+    edited_by_service_principal: FlowServicePrincipalActorPublic | None = None
+
+
+class FlowTranscriptCorrectionRevisionPublic(FlowTranscriptCorrectionRevision):
+    edited_by_service_principal: FlowServicePrincipalActorPublic | None = None
+
+
+class FlowRunReviewCheckpointEditBaselinePublic(BaseModel):
+    revision: int
+    payload_json: dict[str, Any] | None
+    payload_sha256: str
+
+
+class FlowTranscriptCorrectionRevisionBaselinePublic(BaseModel):
+    revision: int
+    occurrences_json: list[dict[str, Any]]
+    speaker_edits_json: list[dict[str, Any]]
+
+
+class FlowRunReviewCheckpointEditPagePublic(BaseModel):
+    baseline: FlowRunReviewCheckpointEditBaselinePublic
+    items: list[FlowRunReviewCheckpointEditPublic]
+    next_after_revision: int | None
+    truncated: bool
+
+
+class FlowTranscriptCorrectionRevisionPagePublic(BaseModel):
+    baseline: FlowTranscriptCorrectionRevisionBaselinePublic
+    items: list[FlowTranscriptCorrectionRevisionPublic]
+    next_after_revision: int | None
+    truncated: bool
+
+
 class FlowRunReviewCheckpointEvidencePublic(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={"example": FLOW_RUN_REVIEW_CHECKPOINT_EVIDENCE_EXAMPLE}
@@ -1976,6 +2012,9 @@ class FlowRunReviewCheckpointEvidencePublic(BaseModel):
     revision: int
     schema_version: int
     original_payload_json: dict[str, Any] | None = None
+    edits: list[FlowRunReviewCheckpointEditPublic] = Field(
+        default_factory=list[FlowRunReviewCheckpointEditPublic]
+    )
     current_payload_json: dict[str, Any] | None = None
     step_label: str | None = Field(
         default=None,
@@ -2064,6 +2103,9 @@ class FlowRunEvidenceResponse(BaseModel):
     step_attempts: list[FlowStepAttemptPublic]
     result_files: list[FlowRunStepResultFile]
     review_checkpoints: list[FlowRunReviewCheckpointEvidencePublic]
+    transcript_correction_revisions: list[FlowTranscriptCorrectionRevisionPublic] = (
+        Field(default_factory=list[FlowTranscriptCorrectionRevisionPublic])
+    )
     webhook_deliveries: list[FlowRunWebhookDeliveryPublic]
     provider_calls: ProviderCallEvidencePage
     debug_export: FlowRunDebugExport

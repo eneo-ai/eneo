@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
+from eneo.authentication.principal_types import PrincipalType
 from eneo.database.tables.flow_tables import FlowStepResults
 from eneo.flows import FlowRepository, FlowVersionRepository
 from eneo.flows.application.flow_run_access_policy import FlowRunAccessPolicy
@@ -22,6 +23,10 @@ from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from eneo.flows.infrastructure.flow_transcript_corrections_repo import (
     FlowTranscriptCorrectionsRepository,
+)
+from eneo.flows.principal import FlowPrincipal
+from tests.integration.flows.test_flow_run_review_checkpoint_repository import (
+    _create_service_principal_id,
 )
 
 SEGMENTS = [
@@ -319,6 +324,91 @@ async def test_save_and_list_round_trip(
         assert len(views) == 1
         assert views[0].corrections.step_id == scenario.transcription_step_id
         assert views[0].stale is False
+
+
+async def test_saves_and_revert_preserve_correction_revisions(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        repo = FlowTranscriptCorrectionsRepository(session=session)
+        principal = FlowPrincipal.from_user(admin_user)
+        service_id = await _create_service_principal_id(
+            session=session,
+            tenant_id=scenario.tenant_id,
+            created_by_user_id=admin_user.id,
+        )
+        service_principal = FlowPrincipal(
+            principal_type=PrincipalType.SERVICE_KEY, principal_service_id=service_id
+        )
+        saved = None
+        contents = [
+            [_occurrence(corrected="Çagri").as_json()],
+            [_occurrence(corrected="Cagri").as_json()],
+            [],
+        ]
+        for index, occurrences in enumerate(contents):
+            saved = await repo.save(
+                tenant_id=scenario.tenant_id,
+                flow_id=scenario.flow_id,
+                run_id=scenario.flow_run_id,
+                step_id=scenario.transcription_step_id,
+                occurrences_json=occurrences,
+                speaker_edits_json=[],
+                segments_hash="a" * 64,
+                expected_revision=saved.revision if saved else None,
+                principal=service_principal if index == 1 else principal,
+            )
+        revisions = await repo.list_revisions_for_run(
+            run_id=scenario.flow_run_id, tenant_id=scenario.tenant_id
+        )
+        assert [item.revision for item in revisions] == [1, 2, 3]
+        assert [item.occurrences_json for item in revisions] == contents
+        assert [item.edited_by_user_id for item in revisions] == [
+            admin_user.id,
+            None,
+            admin_user.id,
+        ]
+        assert [item.edited_by_service_id for item in revisions] == [
+            None,
+            service_id,
+            None,
+        ]
+        assert saved is not None
+        assert {item.correction_set_id for item in revisions} == {saved.id}
+        assert (
+            len(
+                await repo.list_revisions_for_run(
+                    run_id=scenario.flow_run_id, tenant_id=scenario.tenant_id, limit=1
+                )
+            )
+            == 1
+        )
+        assert (
+            await repo.list_revisions_for_run(
+                run_id=scenario.flow_run_id,
+                tenant_id=scenario.tenant_id,
+                limit=3,
+                logical_byte_budget=0,
+            )
+            == []
+        )
+        measurement = await repo.measure_revision_evidence(
+            run_id=scenario.flow_run_id, tenant_id=scenario.tenant_id, candidate_limit=2
+        )
+        assert measurement.row_count == 2
+        assert measurement.logical_json_bytes > 0
 
 
 async def test_revision_compare_and_swap(
@@ -706,3 +796,78 @@ async def test_revision_cas_replaces_speaker_edits(
         )
         assert cleared.corrections.revision == saved.corrections.revision + 1
         assert cleared.corrections.speaker_edits_json == []
+
+
+@pytest.mark.migration_isolation
+async def test_history_migration_preserves_current_correction_revision(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    import importlib.util
+    from pathlib import Path
+
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        repo = FlowTranscriptCorrectionsRepository(session=session)
+        saved = None
+        for _ in range(2):
+            saved = await repo.save(
+                tenant_id=scenario.tenant_id,
+                flow_id=scenario.flow_id,
+                run_id=scenario.flow_run_id,
+                step_id=scenario.transcription_step_id,
+                occurrences_json=[_occurrence().as_json()],
+                speaker_edits_json=[],
+                segments_hash="a" * 64,
+                expected_revision=saved.revision if saved else None,
+                principal=FlowPrincipal.from_user(admin_user),
+            )
+        path = (
+            Path(__file__).parents[3]
+            / "alembic/versions/202609151000_add_review_change_history.py"
+        )
+        spec = importlib.util.spec_from_file_location("history_migration", path)
+        assert spec is not None and spec.loader is not None
+        migration = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(migration)
+
+        def cycle(connection):
+            with Operations.context(MigrationContext.configure(connection)):
+                migration.downgrade()
+                assert not sa.inspect(connection).has_table(
+                    "flow_transcript_correction_revisions"
+                )
+                assert not sa.inspect(connection).has_table(
+                    "flow_run_review_checkpoint_edits"
+                )
+                assert "payload_sha256_before" not in {
+                    column["name"]
+                    for column in sa.inspect(connection).get_columns(
+                        "flow_run_audit_outbox"
+                    )
+                }
+                migration.upgrade()
+
+        await (await session.connection()).run_sync(cycle)
+        revisions = await repo.list_revisions_for_run(
+            run_id=scenario.flow_run_id, tenant_id=scenario.tenant_id
+        )
+        assert saved is not None
+        assert [(item.correction_set_id, item.revision) for item in revisions] == [
+            (saved.id, 2)
+        ]
+        assert revisions[0].occurrences_json == saved.occurrences_json
+        assert revisions[0].created_at == saved.updated_at

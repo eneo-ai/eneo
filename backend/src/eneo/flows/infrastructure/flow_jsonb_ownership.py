@@ -689,6 +689,51 @@ FLOW_JSONB_COLUMN_OWNER_ENTRIES: tuple[FlowJsonbColumnOwner, ...] = (
         ),
     ),
     _owner(
+        "flow_run_review_checkpoint_edits",
+        "payload_json",
+        owner_module="eneo.flows.infrastructure.flow_run_review_checkpoint_repo",
+        envelope_name="FlowRunReviewCheckpointEdit",
+        owner_symbols=(
+            "FlowRunReviewCheckpointRepository.edit_review_checkpoint_payload",
+            "FlowRunReviewCheckpointRepository.approve_review_checkpoint",
+        ),
+        storage_category=FlowJsonbStorageCategory.IMMUTABLE_SNAPSHOT,
+        schema_version_policy="The snapshot retains the checkpoint payload shape without a separate schema version.",
+        corruption_behavior="There is no dedicated pre-write payload validation at this owner.",
+        rationale=(
+            "Each committed replacement snapshots the stored checkpoint payload, "
+            "its author, and before/after digests in the same transaction."
+        ),
+    ),
+    _owner(
+        "flow_transcript_correction_revisions",
+        "occurrences_json",
+        owner_module="eneo.flows.infrastructure.flow_transcript_corrections_repo",
+        envelope_name="FlowTranscriptCorrectionRevision",
+        owner_symbols=("FlowTranscriptCorrectionsRepository.save",),
+        storage_category=FlowJsonbStorageCategory.IMMUTABLE_SNAPSHOT,
+        schema_version_policy="The snapshot retains the saved correction set shape without a separate schema version.",
+        corruption_behavior="Copies the saved correction set; no additional item validation occurs at the snapshot owner.",
+        rationale=(
+            "Every saved correction set keeps its occurrence content at that "
+            "revision so a folded checkpoint can name the exact applied set."
+        ),
+    ),
+    _owner(
+        "flow_transcript_correction_revisions",
+        "speaker_edits_json",
+        owner_module="eneo.flows.infrastructure.flow_transcript_corrections_repo",
+        envelope_name="FlowTranscriptCorrectionRevision",
+        owner_symbols=("FlowTranscriptCorrectionsRepository.save",),
+        storage_category=FlowJsonbStorageCategory.IMMUTABLE_SNAPSHOT,
+        schema_version_policy="The snapshot retains the saved correction set shape without a separate schema version.",
+        corruption_behavior="Copies the saved correction set; no additional item validation occurs at the snapshot owner.",
+        rationale=(
+            "Speaker re-attributions are snapshotted together with occurrences "
+            "and the author in the same correction revision."
+        ),
+    ),
+    _owner(
         "flow_step_transcript_words",
         "words_json",
         owner_module="eneo.flows.runtime.transcription",

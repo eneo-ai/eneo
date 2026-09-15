@@ -1568,6 +1568,7 @@ async def test_flow_run_evidence_export_preserves_review_checkpoint_lineage(
             "expired": 0,
         },
         "any_edited": True,
+        "any_corrections_edited": False,
         "any_resumed": True,
         "active_checkpoint_id": None,
         "active_checkpoint_conflict": False,

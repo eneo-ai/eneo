@@ -20,14 +20,18 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.authentication.principal_types import PrincipalType
 from eneo.database.tables.flow_tables import (
+    FlowRunReviewCheckpointEdits,
     FlowRunReviewCheckpoints,
     FlowRuns,
     FlowStepResults,
+    FlowTranscriptCorrectionRevisions,
 )
+from eneo.flows.domain.canonical_json_hash import canonical_json_hash
 from eneo.flows.domain.flow import (
     FlowPersistedJsonObject,
     FlowRun,
     FlowRunReviewCheckpoint,
+    FlowRunReviewCheckpointEdit,
     FlowRunStatus,
     FlowStepResultStatus,
 )
@@ -55,11 +59,13 @@ from eneo.flows.domain.review_checkpoint_exceptions import (
     FlowReviewRunNoLongerAwaitingReviewError,
     FlowReviewRunNotAwaitingReviewError,
 )
+from eneo.flows.domain.transcript_corrections import FlowTranscriptCorrectionSet
 from eneo.flows.enums import (
     ACTIVE_FLOW_RUN_REVIEW_CHECKPOINT_STATES,
     RECONCILABLE_REVIEW_CHECKPOINT_STATES,
     FlowOutputType,
     FlowRunLifecycleSource,
+    FlowRunReviewCheckpointEditCause,
     FlowRunReviewCheckpointState,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
@@ -157,6 +163,238 @@ class FlowRunReviewCheckpointRepository:
     ):
         self.session = session
         self.audit_outbox_repo = audit_outbox_repo
+
+    @staticmethod
+    def _edit_select():
+        return sa.select(
+            FlowRunReviewCheckpointEdits,
+            FlowTranscriptCorrectionRevisions.correction_set_id,
+            FlowTranscriptCorrectionRevisions.revision,
+        ).outerjoin(
+            FlowTranscriptCorrectionRevisions,
+            FlowTranscriptCorrectionRevisions.id
+            == FlowRunReviewCheckpointEdits.corrections_revision_id,
+        )
+
+    async def _read_edits(
+        self, stmt: sa.Select[Any]
+    ) -> list[FlowRunReviewCheckpointEdit]:
+        rows = (await self.session.execute(stmt)).all()
+        return [
+            FlowRunReviewCheckpointEdit.model_validate(row).model_copy(
+                update={
+                    "correction_set_id": set_id,
+                    "corrections_revision": revision,
+                }
+            )
+            for row, set_id, revision in rows
+        ]
+
+    async def list_review_checkpoint_edits_for_run(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        limit: int | None = None,
+        logical_byte_budget: int | None = None,
+    ) -> list[FlowRunReviewCheckpointEdit]:
+        stmt = (
+            self._edit_select()
+            .join(
+                FlowRunReviewCheckpoints,
+                FlowRunReviewCheckpoints.id
+                == FlowRunReviewCheckpointEdits.checkpoint_id,
+            )
+            .where(FlowRunReviewCheckpointEdits.flow_run_id == run_id)
+            .where(FlowRunReviewCheckpointEdits.tenant_id == tenant_id)
+            .order_by(
+                FlowRunReviewCheckpoints.step_order,
+                FlowRunReviewCheckpoints.attempt_no,
+                FlowRunReviewCheckpointEdits.checkpoint_id,
+                FlowRunReviewCheckpointEdits.revision,
+            )
+        )
+        if logical_byte_budget is not None:
+            candidates = (
+                sa.select(
+                    FlowRunReviewCheckpointEdits.id,
+                    FlowRunReviewCheckpoints.step_order,
+                    FlowRunReviewCheckpoints.attempt_no,
+                    FlowRunReviewCheckpointEdits.checkpoint_id,
+                    FlowRunReviewCheckpointEdits.revision,
+                    sa.func.octet_length(
+                        sa.cast(FlowRunReviewCheckpointEdits.payload_json, sa.Text)
+                    ).label("logical"),
+                )
+                .join(
+                    FlowRunReviewCheckpoints,
+                    FlowRunReviewCheckpoints.id
+                    == FlowRunReviewCheckpointEdits.checkpoint_id,
+                )
+                .where(
+                    FlowRunReviewCheckpointEdits.flow_run_id == run_id,
+                    FlowRunReviewCheckpointEdits.tenant_id == tenant_id,
+                )
+                .order_by(
+                    FlowRunReviewCheckpoints.step_order,
+                    FlowRunReviewCheckpoints.attempt_no,
+                    FlowRunReviewCheckpointEdits.checkpoint_id,
+                    FlowRunReviewCheckpointEdits.revision,
+                )
+            )
+            if limit is not None:
+                candidates = candidates.limit(limit)
+            bounded = candidates.subquery()
+            ranked = sa.select(
+                bounded.c.id,
+                sa.func.sum(bounded.c.logical)
+                .over(
+                    order_by=(
+                        bounded.c.step_order,
+                        bounded.c.attempt_no,
+                        bounded.c.checkpoint_id,
+                        bounded.c.revision,
+                    )
+                )
+                .label("cumulative"),
+            ).subquery()
+            stmt = stmt.where(
+                FlowRunReviewCheckpointEdits.id.in_(
+                    sa.select(ranked.c.id).where(
+                        ranked.c.cumulative <= logical_byte_budget
+                    )
+                )
+            )
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        return await self._read_edits(stmt)
+
+    async def get_review_checkpoint(
+        self,
+        *,
+        checkpoint_id: UUID,
+        tenant_id: UUID,
+        flow_id: UUID,
+        flow_run_id: UUID,
+    ) -> FlowRunReviewCheckpoint | None:
+        row = await self.session.scalar(
+            sa.select(FlowRunReviewCheckpoints).where(
+                FlowRunReviewCheckpoints.id == checkpoint_id,
+                FlowRunReviewCheckpoints.tenant_id == tenant_id,
+                FlowRunReviewCheckpoints.flow_id == flow_id,
+                FlowRunReviewCheckpoints.flow_run_id == flow_run_id,
+            )
+        )
+        return FlowRunReviewCheckpoint.model_validate(row) if row is not None else None
+
+    async def list_review_checkpoint_edits(
+        self,
+        *,
+        checkpoint_id: UUID,
+        tenant_id: UUID,
+        after_revision: int | None,
+        limit: int,
+    ) -> tuple[list[FlowRunReviewCheckpointEdit], bool]:
+        rows = await self._read_edits(
+            self._edit_select()
+            .where(
+                FlowRunReviewCheckpointEdits.checkpoint_id == checkpoint_id,
+                FlowRunReviewCheckpointEdits.tenant_id == tenant_id,
+                FlowRunReviewCheckpointEdits.revision > (after_revision or 1),
+            )
+            .order_by(FlowRunReviewCheckpointEdits.revision)
+            .limit(limit + 1)
+        )
+        return rows[:limit], len(rows) > limit
+
+    async def _insert_edit(
+        self,
+        *,
+        checkpoint: FlowRunReviewCheckpoint,
+        principal: FlowPrincipal,
+        cause: FlowRunReviewCheckpointEditCause,
+        payload_sha256_before: str,
+        payload_sha256_after: str,
+        corrections_revision_id: UUID | None = None,
+    ) -> None:
+        await self.session.execute(
+            sa.insert(FlowRunReviewCheckpointEdits).values(
+                tenant_id=checkpoint.tenant_id,
+                flow_id=checkpoint.flow_id,
+                flow_run_id=checkpoint.flow_run_id,
+                checkpoint_id=checkpoint.id,
+                revision=checkpoint.revision,
+                cause=cause.value,
+                corrections_revision_id=corrections_revision_id,
+                payload_json=checkpoint.current_payload_json,
+                payload_sha256_before=payload_sha256_before,
+                payload_sha256_after=payload_sha256_after,
+                edited_by_user_id=principal.principal_user_id,
+                edited_by_service_id=principal.principal_service_id,
+                edited_by_principal_type=principal.principal_type.value,
+            )
+        )
+
+    async def measure_edit_evidence_row_count(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        ceiling: int,
+    ) -> int:
+        candidates = (
+            sa.select(FlowRunReviewCheckpointEdits.id)
+            .where(
+                FlowRunReviewCheckpointEdits.flow_run_id == run_id,
+                FlowRunReviewCheckpointEdits.tenant_id == tenant_id,
+            )
+            .limit(ceiling + 1)
+            .subquery()
+        )
+        return int(
+            await self.session.scalar(
+                sa.select(sa.func.count()).select_from(candidates)
+            )
+            or 0
+        )
+
+    async def measure_edit_evidence(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        candidate_limit: int | None = None,
+    ) -> FlowRunReviewCheckpointEvidenceMeasurement:
+        stmt = sa.select(
+            (
+                sa.func.octet_length(
+                    sa.cast(FlowRunReviewCheckpointEdits.payload_json, sa.Text)
+                )
+            ).label("logical"),
+            (sa.func.pg_column_size(FlowRunReviewCheckpointEdits.payload_json)).label(
+                "stored"
+            ),
+        ).where(
+            FlowRunReviewCheckpointEdits.flow_run_id == run_id,
+            FlowRunReviewCheckpointEdits.tenant_id == tenant_id,
+        )
+        if candidate_limit is not None:
+            stmt = stmt.limit(candidate_limit)
+        candidates = stmt.subquery()
+        row = (
+            await self.session.execute(
+                sa.select(
+                    sa.func.count(),
+                    sa.func.coalesce(sa.func.sum(candidates.c.stored), 0),
+                    sa.func.coalesce(sa.func.sum(candidates.c.logical), 0),
+                )
+            )
+        ).one()
+        return FlowRunReviewCheckpointEvidenceMeasurement(
+            row_count=int(row[0]),
+            stored_json_bytes=int(row[1]),
+            logical_json_bytes=int(row[2]),
+        )
 
     async def measure_evidence_row_count(
         self, *, run_id: UUID, tenant_id: UUID, ceiling: int
@@ -535,6 +773,7 @@ class FlowRunReviewCheckpointRepository:
                 FlowRunReviewCheckpointState.EDITED,
             ),
         )
+        before = canonical_json_hash(checkpoint_row.current_payload_json)
         updated_checkpoint = await self._update_review_checkpoint_state(
             checkpoint_id=checkpoint_id,
             tenant_id=tenant_id,
@@ -542,6 +781,7 @@ class FlowRunReviewCheckpointRepository:
             principal=principal,
             values={"current_payload_json": current_payload_json},
         )
+        after = canonical_json_hash(updated_checkpoint.current_payload_json)
         step_result_id = await self.session.scalar(
             sa.update(FlowStepResults)
             .where(FlowStepResults.flow_run_id == flow_run_id)
@@ -554,6 +794,13 @@ class FlowRunReviewCheckpointRepository:
         )
         if step_result_id is None:
             raise FlowReviewEditStepResultMissingError()
+        await self._insert_edit(
+            checkpoint=updated_checkpoint,
+            principal=principal,
+            cause=FlowRunReviewCheckpointEditCause.REVIEWER_EDIT,
+            payload_sha256_before=before,
+            payload_sha256_after=after,
+        )
         await self._insert_review_checkpoint_transition_outbox(
             checkpoint=updated_checkpoint,
             run_revision=run_row.revision,
@@ -561,6 +808,8 @@ class FlowRunReviewCheckpointRepository:
             action=ActionType.FLOW_RUN_REVIEW_CHECKPOINT_EDITED,
             source=FlowRunLifecycleSource.REVIEW_CHECKPOINT_EDITED,
             target_state=FlowRunReviewCheckpointState.EDITED,
+            payload_sha256_before=before,
+            payload_sha256_after=after,
         )
         return updated_checkpoint
 
@@ -574,6 +823,7 @@ class FlowRunReviewCheckpointRepository:
         expected_revision: int,
         principal: FlowPrincipal,
         current_payload_json: FlowPersistedJsonObject | None = None,
+        correction_set: FlowTranscriptCorrectionSet | None = None,
     ) -> FlowRunReviewCheckpoint:
         """Approve the checkpoint, optionally replacing its payload in the
         same revision bump (transcript-corrections fold-in). A provided
@@ -601,6 +851,36 @@ class FlowRunReviewCheckpointRepository:
                 FlowRunReviewCheckpointState.EDITED,
             ),
         )
+        before = (
+            canonical_json_hash(checkpoint_row.current_payload_json)
+            if current_payload_json is not None
+            else None
+        )
+        after = None
+        corrections_revision_id = None
+        if current_payload_json is not None:
+            if correction_set is None:
+                raise ValueError("A folded payload requires its correction set.")
+            corrections_revision_id = await self.session.scalar(
+                sa.select(FlowTranscriptCorrectionRevisions.id)
+                .where(
+                    FlowTranscriptCorrectionRevisions.correction_set_id
+                    == correction_set.id
+                )
+                .where(
+                    FlowTranscriptCorrectionRevisions.revision
+                    == correction_set.revision
+                )
+                .where(FlowTranscriptCorrectionRevisions.tenant_id == tenant_id)
+                .where(FlowTranscriptCorrectionRevisions.flow_run_id == flow_run_id)
+            )
+            if corrections_revision_id is None:
+                raise FlowRunPersistenceInvariantError(
+                    operation="resolve_fold_correction_revision",
+                    run_id=flow_run_id,
+                    tenant_id=tenant_id,
+                    flow_id=flow_id,
+                )
         updated_checkpoint = await self._update_review_checkpoint_state(
             checkpoint_id=checkpoint_id,
             tenant_id=tenant_id,
@@ -613,6 +893,7 @@ class FlowRunReviewCheckpointRepository:
             ),
         )
         if current_payload_json is not None:
+            after = canonical_json_hash(updated_checkpoint.current_payload_json)
             step_result_id = await self.session.scalar(
                 sa.update(FlowStepResults)
                 .where(FlowStepResults.flow_run_id == flow_run_id)
@@ -625,6 +906,15 @@ class FlowRunReviewCheckpointRepository:
             )
             if step_result_id is None:
                 raise FlowReviewEditStepResultMissingError()
+            assert before is not None and after is not None
+            await self._insert_edit(
+                checkpoint=updated_checkpoint,
+                principal=principal,
+                cause=FlowRunReviewCheckpointEditCause.CORRECTIONS_FOLDED,
+                payload_sha256_before=before,
+                payload_sha256_after=after,
+                corrections_revision_id=corrections_revision_id,
+            )
         await self._insert_review_checkpoint_transition_outbox(
             checkpoint=updated_checkpoint,
             run_revision=run_row.revision,
@@ -632,6 +922,8 @@ class FlowRunReviewCheckpointRepository:
             action=ActionType.FLOW_RUN_REVIEW_CHECKPOINT_APPROVED,
             source=FlowRunLifecycleSource.REVIEW_CHECKPOINT_APPROVED,
             target_state=FlowRunReviewCheckpointState.APPROVED,
+            payload_sha256_before=before,
+            payload_sha256_after=after,
         )
         return updated_checkpoint
 
@@ -1040,6 +1332,7 @@ class FlowRunReviewCheckpointRepository:
             .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
             .values(**update_values)
             .returning(FlowRunReviewCheckpoints)
+            .execution_options(populate_existing=True)
         )
         if checkpoint_row is None:
             raise FlowReviewCheckpointNotFoundError()
@@ -1056,6 +1349,8 @@ class FlowRunReviewCheckpointRepository:
         target_state: FlowRunReviewCheckpointState,
         error_code: str | None = None,
         error_message: str | None = None,
+        payload_sha256_before: str | None = None,
+        payload_sha256_after: str | None = None,
     ) -> UUID:
         actor_fields: FlowAuditActorFields = (
             principal.audit_actor_fields()
@@ -1077,6 +1372,8 @@ class FlowRunReviewCheckpointRepository:
             target_state=target_state,
             error_code=error_code,
             error_message=error_message,
+            payload_sha256_before=payload_sha256_before,
+            payload_sha256_after=payload_sha256_after,
         )
 
     async def list_review_checkpoints_for_run(

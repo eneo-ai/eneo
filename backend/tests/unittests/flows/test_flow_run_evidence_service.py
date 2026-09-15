@@ -151,7 +151,22 @@ def _provider_call_evidence() -> ProviderCallEvidence:
     )
 
 
+def _corrections_repo():
+    repo = AsyncMock()
+    repo.list_revisions_for_run.return_value = []
+    repo.measure_revision_evidence.return_value = (
+        FlowRunReviewCheckpointEvidenceMeasurement.empty()
+    )
+    repo.measure_revision_evidence_row_count.return_value = 0
+    return repo
+
+
 def _seed_empty_evidence_measurements(service: FlowRunEvidenceService) -> None:
+    service.flow_run_review_checkpoint_repo.list_review_checkpoint_edits_for_run.return_value = []
+    service.flow_run_review_checkpoint_repo.measure_edit_evidence.return_value = (
+        FlowRunReviewCheckpointEvidenceMeasurement.empty()
+    )
+    service.flow_run_review_checkpoint_repo.measure_edit_evidence_row_count.return_value = 0
     service.flow_run_repo.measure_evidence_sections.return_value = (
         FlowRunEvidenceMeasurements.empty()
     )
@@ -201,6 +216,7 @@ def _service_for_empty_run(
     resolved_access_policy = access_policy or _access_policy_double()
     resolved_access_policy.load_run.return_value = run
     service = FlowRunEvidenceService(
+        transcript_corrections_repo=_corrections_repo(),
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -408,6 +424,7 @@ async def test_evidence_exports_identical_safe_webhook_delivery_metadata(user):
     flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
     webhook_delivery_repo.list_run_delivery_statuses.return_value = [delivery]
     service = FlowRunEvidenceService(
+        transcript_corrections_repo=_corrections_repo(),
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -470,6 +487,7 @@ async def test_get_evidence_loads_run_through_access_policy(user):
     flow_run_repo.list_current_step_input_file_metadata_by_step_result_id.return_value = {}
     flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
     service = FlowRunEvidenceService(
+        transcript_corrections_repo=_corrections_repo(),
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -511,6 +529,7 @@ async def test_get_evidence_preserves_corrupt_snapshot_with_integrity_status(use
     flow_run_repo.list_result_files.return_value = []
     flow_version_repo.get.return_value = version
     service = FlowRunEvidenceService(
+        transcript_corrections_repo=_corrections_repo(),
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -582,6 +601,7 @@ async def test_get_evidence_populates_runtime_input_file_metadata_from_repo(user
     }
     flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
     service = FlowRunEvidenceService(
+        transcript_corrections_repo=_corrections_repo(),
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -626,6 +646,7 @@ async def test_get_evidence_populates_runtime_input_file_metadata_from_repo(user
 @pytest.mark.asyncio
 async def test_export_evidence_json_rejects_injected_run_id_mismatch(user):
     service = FlowRunEvidenceService(
+        transcript_corrections_repo=_corrections_repo(),
         user=user,
         flow_repo=_flow_repo(),
         flow_run_repo=AsyncMock(),
@@ -678,6 +699,7 @@ async def test_preloaded_run_is_revalidated_before_evidence_is_returned(
     flow_run_repo.list_result_files.return_value = []
     flow_run_repo.list_current_step_input_file_metadata_by_step_result_id.return_value = {}
     service = FlowRunEvidenceService(
+        transcript_corrections_repo=_corrections_repo(),
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -768,6 +790,7 @@ def _service_with_attempts(*, user, attempts_bytes: list[int], access_kind_run=N
     access_policy = _access_policy_double()
     access_policy.load_run.return_value = run
     service = FlowRunEvidenceService(
+        transcript_corrections_repo=_corrections_repo(),
         user=user,
         flow_repo=flow_repo,
         flow_run_repo=flow_run_repo,
@@ -941,6 +964,10 @@ def _set_section_row_count(
         )
     elif section == "review_checkpoints":
         service.flow_run_review_checkpoint_repo.measure_evidence_row_count.return_value = row_count
+    elif section == "review_checkpoint_edits":
+        service.flow_run_review_checkpoint_repo.measure_edit_evidence_row_count.return_value = row_count
+    elif section == "transcript_correction_revisions":
+        service.transcript_corrections_repo.measure_revision_evidence_row_count.return_value = row_count
     elif section == "webhook_deliveries":
         service.webhook_delivery_repo.measure_evidence_row_count.return_value = (
             row_count
@@ -954,6 +981,16 @@ def _set_section_row_count(
 @pytest.mark.parametrize(
     ("section", "limit", "limit_kind"),
     [
+        (
+            "review_checkpoint_edits",
+            EVIDENCE_EXPORT_DEFAULT_FAN_OUT_ROW_CEILING,
+            "section_rows",
+        ),
+        (
+            "transcript_correction_revisions",
+            EVIDENCE_EXPORT_DEFAULT_FAN_OUT_ROW_CEILING,
+            "section_rows",
+        ),
         ("step_results", EVIDENCE_EXPORT_DEFAULT_FAN_OUT_ROW_CEILING, "section_rows"),
         ("step_attempts", EVIDENCE_EXPORT_DEFAULT_FAN_OUT_ROW_CEILING, "section_rows"),
         ("result_files", EVIDENCE_EXPORT_DEFAULT_FAN_OUT_ROW_CEILING, "section_rows"),
@@ -1381,6 +1418,7 @@ def _input_file_service(
     access_policy = AsyncMock()
     access_policy.load_run = AsyncMock(return_value=SimpleNamespace(id=uuid4()))
     service = FlowRunEvidenceService(
+        transcript_corrections_repo=_corrections_repo(),
         user=user,
         flow_repo=AsyncMock(),
         flow_run_repo=flow_run_repo,
@@ -1433,4 +1471,88 @@ async def test_run_input_file_without_original_content_is_gone(user) -> None:
 
     assert (
         excinfo.value.code == FlowApiErrorCode.RUN_INPUT_FILE_CONTENT_UNAVAILABLE.value
+    )
+
+
+@pytest.mark.parametrize(
+    "section", ["review_checkpoint_edits", "transcript_correction_revisions"]
+)
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason", ["row_limit", "logical_bytes"])
+async def test_history_sections_record_row_and_byte_omissions(
+    user, section, reason, monkeypatch
+):
+    from eneo.authentication.principal_types import PrincipalType
+    from eneo.flows.domain.flow import FlowRunReviewCheckpointEdit
+    from eneo.flows.domain.transcript_corrections import (
+        FlowTranscriptCorrectionRevision,
+    )
+    from tests.unittests.flows.test_flow_run_evidence import _review_checkpoint_for_run
+
+    monkeypatch.setattr(
+        flow_run_evidence_service, "RUN_VIEW_MAX_LOADED_SECTION_ROWS", 3
+    )
+    service, run = _service_with_attempts(user=_trace_user(user), attempts_bytes=[])
+    checkpoint = _review_checkpoint_for_run(run)
+    service.flow_run_review_checkpoint_repo.list_review_checkpoints_for_run.return_value = [
+        checkpoint
+    ]
+    common = dict(
+        id=uuid4(),
+        tenant_id=run.tenant_id,
+        flow_id=run.flow_id,
+        flow_run_id=run.id,
+        edited_by_user_id=run.principal_user_id,
+        edited_by_service_id=None,
+        edited_by_principal_type=PrincipalType.USER,
+        created_at=checkpoint.created_at,
+        revision=2,
+    )
+    measurement = FlowRunReviewCheckpointEvidenceMeasurement(
+        row_count=flow_run_evidence_service.RUN_VIEW_MAX_LOADED_SECTION_ROWS + 1,
+        stored_json_bytes=0,
+        logical_json_bytes=0
+        if reason == "row_limit"
+        else flow_run_evidence_service.RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES + 1,
+    )
+    if section == "review_checkpoint_edits":
+        service.flow_run_review_checkpoint_repo.measure_edit_evidence.return_value = (
+            measurement
+        )
+        reader = (
+            service.flow_run_review_checkpoint_repo.list_review_checkpoint_edits_for_run
+        )
+        item = FlowRunReviewCheckpointEdit(
+            **common,
+            checkpoint_id=checkpoint.id,
+            cause="reviewer_edit",
+            corrections_revision_id=None,
+            payload_json={"text": "edited"},
+            payload_sha256_before="a" * 64,
+            payload_sha256_after="b" * 64,
+        )
+    else:
+        service.transcript_corrections_repo.measure_revision_evidence.return_value = (
+            measurement
+        )
+        reader = service.transcript_corrections_repo.list_revisions_for_run
+        item = FlowTranscriptCorrectionRevision(
+            **common,
+            correction_set_id=uuid4(),
+            step_id=checkpoint.step_id,
+            occurrences_json=[],
+            speaker_edits_json=[],
+            segments_hash="a" * 64,
+        )
+    reader.return_value = [item] * 3 if reason == "row_limit" else []
+    bundle = await service.get_redacted_evidence_bundle(run_id=run.id)
+    omissions = bundle.debug_export["run"]["summary"]["omissions"]
+    assert any(
+        item["section"] == section and item["reason"] == reason for item in omissions
+    )
+    reader.assert_awaited_once_with(
+        run_id=run.id,
+        tenant_id=run.tenant_id,
+        limit=flow_run_evidence_service.RUN_VIEW_MAX_LOADED_SECTION_ROWS,
+        logical_byte_budget=flow_run_evidence_service.RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES,
     )

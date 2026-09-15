@@ -124,6 +124,25 @@ class FlowTranscriptCorrectionsStaleRevisionError(Exception):
     current_revision: int | None
 
 
+class FlowTranscriptCorrectionRevision(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    tenant_id: UUID
+    correction_set_id: UUID
+    flow_id: UUID
+    flow_run_id: UUID
+    step_id: UUID
+    revision: int
+    occurrences_json: list[dict[str, Any]]
+    speaker_edits_json: list[dict[str, Any]]
+    segments_hash: str
+    edited_by_user_id: UUID | None
+    edited_by_service_id: UUID | None
+    edited_by_principal_type: PrincipalType
+    created_at: datetime
+
+
 class FlowTranscriptCorrectionSet(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

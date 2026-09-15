@@ -10,6 +10,7 @@ from fastapi import (
     Depends,
     Header,
     Path,
+    Query,
     Request,
     status,
 )
@@ -33,6 +34,8 @@ from eneo.flows.api.flow_models import (
     FLOW_RUN_REVIEW_CHECKPOINT_REJECTED_RESPONSE_EXAMPLE,
     FLOW_RUN_REVIEW_CHECKPOINT_RESUME_RESPONSE_EXAMPLE,
     FlowRunReviewCheckpointApproveRequest,
+    FlowRunReviewCheckpointEditPagePublic,
+    FlowRunReviewCheckpointEditPublic,
     FlowRunReviewCheckpointEditRequest,
     FlowRunReviewCheckpointPublic,
     FlowRunReviewCheckpointRejectRequest,
@@ -76,6 +79,116 @@ from eneo.server.dependencies.container import (
 from eneo.users.user import UserInDB
 
 router = APIRouter()
+
+
+@router.get(
+    FLOW_REVIEW_CHECKPOINT_PATH.rstrip("/") + "/edits",
+    operation_id="list_flow_run_review_checkpoint_edits",
+    response_model=FlowRunReviewCheckpointEditPagePublic,
+    summary="List review checkpoint edits",
+    responses={
+        403: error_response(
+            description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
+            message="API key space scope does not match requested flow.",
+            eneo_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_scope",
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description="Run or history baseline not found for this flow and tenant.",
+            message="History not found.",
+            eneo_error_code=ErrorCodes.NOT_FOUND,
+            code="not_found",
+        ),
+        413: error_response(
+            description="The baseline and first remaining revision exceed the history page byte limit.",
+            message="Review history comparison exceeds the page size limit.",
+            eneo_error_code=ErrorCodes.FILE_TOO_LARGE,
+            code=FlowApiErrorCode.REVIEW_HISTORY_TOO_LARGE,
+            context={"revision": 2},
+        ),
+        503: error_response(
+            description="Required access audit logging is unavailable; no history was returned.",
+            message="Evidence audit logging is unavailable.",
+            eneo_error_code=ErrorCodes.INTERNAL_SERVER_ERROR,
+            code=FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED,
+            context={"audit_required": True},
+        ),
+    },
+)
+async def list_flow_run_review_checkpoint_edits(
+    id: UUID,
+    run_id: UUID,
+    checkpoint_id: UUID,
+    request: Request,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    after_revision: Annotated[int | None, Query(ge=1)] = None,
+    container: Container = Depends(
+        get_container_for_explicit_transaction(with_user=True)
+    ),
+) -> FlowRunReviewCheckpointEditPagePublic:
+    committed_audit_context: tuple[UserInDB, FlowRun] | None = None
+    try:
+        async with flow_run_evidence_snapshot_transaction(container):
+            await flow_access_context.enforce_flow_scope(
+                request,
+                container,
+                flow_id=id,
+                required_access=FlowApiAction.VIEW,
+                allow_service_key_principals=True,
+            )
+            run = await container.flow_run_service().get_run(
+                run_id=run_id, flow_id=id, access_kind="content"
+            )
+            service = container.flow_run_evidence_service()
+            page = await service.list_review_checkpoint_edits(
+                run=run,
+                checkpoint_id=checkpoint_id,
+                after_revision=after_revision,
+                limit=limit,
+            )
+            user = container.user()
+            presenter = FlowServicePrincipalActorPresenter(
+                api_key_repo=container.api_key_v2_repo(), tenant_id=user.tenant_id
+            )
+            enriched_items = await presenter.present_history_items(
+                [item.model_dump(mode="json") for item in page.items]
+            )
+            page = page.model_copy(
+                update={
+                    "items": [
+                        FlowRunReviewCheckpointEditPublic.model_validate(item)
+                        for item in enriched_items
+                    ]
+                }
+            )
+            response = service.admit_history_page(page)
+            await log_flow_trace_audit_or_raise(
+                container=container,
+                user=user,
+                run=run,
+                action=ActionType.FLOW_EVIDENCE_VIEWED,
+                description=f"Viewed review checkpoint edits for flow run {run.id}",
+                extra={
+                    "evidence_detail": "review_checkpoint_edits",
+                    "checkpoint_id": str(checkpoint_id),
+                },
+            )
+            committed_audit_context = (user, run)
+    except AuditLoggingUnavailableException:
+        raise
+    except Exception as exc:
+        if committed_audit_context is not None:
+            audit_user, audited_run = committed_audit_context
+            raise_flow_trace_audit_unavailable(
+                user=audit_user,
+                run=audited_run,
+                action=ActionType.FLOW_EVIDENCE_VIEWED,
+                cause=exc,
+            )
+        raise
+    return response
+
 
 _FLOW_REVIEW_RESUME_IDEMPOTENCY_HEADER_DESCRIPTION = (
     "Required caller-supplied idempotency key for review resume retries, 1 to 255 "

@@ -50,6 +50,8 @@ class FlowRunAuditOutboxDeliveryRow:
     error_message: str | None
     created_at: datetime
     delivery_attempts: int
+    payload_sha256_before: str | None = None
+    payload_sha256_after: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,6 +164,8 @@ class FlowRunAuditOutboxRepository:
         target_state: FlowRunReviewCheckpointState,
         error_code: str | None = None,
         error_message: str | None = None,
+        payload_sha256_before: str | None = None,
+        payload_sha256_after: str | None = None,
     ) -> UUID:
         outbox_id = await self.session.scalar(
             sa.insert(FlowRunAuditOutbox)
@@ -172,6 +176,8 @@ class FlowRunAuditOutboxRepository:
                 run_revision=run_revision,
                 review_checkpoint_id=checkpoint.id,
                 checkpoint_revision=checkpoint.revision,
+                payload_sha256_before=payload_sha256_before,
+                payload_sha256_after=payload_sha256_after,
                 description=flow_run_audit_description(action=action, source=source),
                 action=action.value,
                 entity_type=EntityType.FLOW_RUN_REVIEW_CHECKPOINT.value,
@@ -436,6 +442,8 @@ class FlowRunAuditOutboxRepository:
             run_revision=row.run_revision,
             review_checkpoint_id=row.review_checkpoint_id,
             checkpoint_revision=row.checkpoint_revision,
+            payload_sha256_before=row.payload_sha256_before,
+            payload_sha256_after=row.payload_sha256_after,
             description=row.description,
             action=row.action,
             entity_type=row.entity_type,

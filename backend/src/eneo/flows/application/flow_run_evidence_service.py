@@ -2,11 +2,19 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 from uuid import UUID
 
 from eneo.files.file_models import FileContentVariant, FileMetadata
 from eneo.files.file_repo import FileRepository
+from eneo.flows.api.flow_models import (
+    FlowRunReviewCheckpointEditBaselinePublic,
+    FlowRunReviewCheckpointEditPagePublic,
+    FlowRunReviewCheckpointEditPublic,
+    FlowTranscriptCorrectionRevisionBaselinePublic,
+    FlowTranscriptCorrectionRevisionPagePublic,
+    FlowTranscriptCorrectionRevisionPublic,
+)
 from eneo.flows.application.flow_run_access_policy import (
     FlowRunAccessKind,
     FlowRunAccessPolicy,
@@ -35,6 +43,10 @@ from eneo.flows.application.flow_run_evidence_export_manifest import (
     evidence_export_actor_from_principal,
 )
 from eneo.flows.application.flow_run_export_json import render_evidence_json_export
+from eneo.flows.domain.canonical_json_hash import (
+    canonical_json_bytes,
+    canonical_json_hash,
+)
 from eneo.flows.domain.flow import (
     FlowPersistedJsonObject,
     FlowRun,
@@ -46,6 +58,7 @@ from eneo.flows.domain.rag_evidence_policy import (
     resolve_flow_rag_evidence_policy,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_redaction import redact_payload
 from eneo.flows.infrastructure.flow_provider_call_repo import (
     FlowProviderCallNotFoundError,
     FlowProviderCallRepository,
@@ -61,6 +74,9 @@ from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
 from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRepository,
 )
+from eneo.flows.infrastructure.flow_transcript_corrections_repo import (
+    FlowTranscriptCorrectionsRepository,
+)
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from eneo.flows.principal import FlowPrincipal
 from eneo.main.exceptions import (
@@ -72,6 +88,11 @@ from eneo.main.exceptions import (
 from eneo.users.user import UserInDB
 
 EMBEDDED_PROVIDER_CALL_LIMIT = 100
+HistoryPage = TypeVar(
+    "HistoryPage",
+    FlowRunReviewCheckpointEditPagePublic,
+    FlowTranscriptCorrectionRevisionPagePublic,
+)
 PROVIDER_CALL_PAGE_MAX_LIMIT = 500
 PROVIDER_CALL_EXPORT_MAX_EVENTS = 10_000
 # An export refuses rather than truncates, so this is a hard boundary on the
@@ -151,11 +172,16 @@ class FlowRunEvidenceService:
         file_repo: FileRepository,
         webhook_delivery_repo: FlowRunWebhookDeliveryRepository,
         access_policy: FlowRunAccessPolicy | None = None,
+        transcript_corrections_repo: FlowTranscriptCorrectionsRepository | None = None,
     ):
         self.user = user
         self.flow_run_repo = flow_run_repo
         self.provider_call_repo = provider_call_repo
         self.flow_run_review_checkpoint_repo = flow_run_review_checkpoint_repo
+        self.transcript_corrections_repo = (
+            transcript_corrections_repo
+            or FlowTranscriptCorrectionsRepository(session=flow_run_repo.session)
+        )
         self.flow_version_repo = flow_version_repo
         self.file_repo = file_repo
         self.webhook_delivery_repo = webhook_delivery_repo
@@ -272,6 +298,163 @@ class FlowRunEvidenceService:
             access_kind="evidence_view",
             run=run,
         )
+
+    async def list_review_checkpoint_edits(
+        self,
+        *,
+        run: FlowRun,
+        checkpoint_id: UUID,
+        after_revision: int | None,
+        limit: int,
+    ) -> FlowRunReviewCheckpointEditPagePublic:
+        await self.access_policy.ensure_can_access_run(run, access_kind="content")
+        checkpoint = await self.flow_run_review_checkpoint_repo.get_review_checkpoint(
+            checkpoint_id=checkpoint_id,
+            tenant_id=self.user.tenant_id,
+            flow_id=run.flow_id,
+            flow_run_id=run.id,
+        )
+        if checkpoint is None:
+            raise NotFoundException("Review checkpoint not found.", code="not_found")
+        baseline_payload = checkpoint.original_payload_json
+        baseline_hash = canonical_json_hash(baseline_payload)
+        if after_revision is not None and after_revision > 1:
+            (
+                baseline_rows,
+                _,
+            ) = await self.flow_run_review_checkpoint_repo.list_review_checkpoint_edits(
+                checkpoint_id=checkpoint_id,
+                tenant_id=self.user.tenant_id,
+                after_revision=after_revision - 1,
+                limit=1,
+            )
+            if not baseline_rows or baseline_rows[0].revision != after_revision:
+                raise NotFoundException(
+                    "Review history revision not found.",
+                    code="not_found",
+                    context={"revision": after_revision},
+                )
+            baseline_payload = baseline_rows[0].payload_json
+            baseline_hash = baseline_rows[0].payload_sha256_after
+        (
+            rows,
+            more,
+        ) = await self.flow_run_review_checkpoint_repo.list_review_checkpoint_edits(
+            checkpoint_id=checkpoint_id,
+            tenant_id=self.user.tenant_id,
+            after_revision=after_revision,
+            limit=limit,
+        )
+        return FlowRunReviewCheckpointEditPagePublic(
+            baseline=FlowRunReviewCheckpointEditBaselinePublic(
+                revision=after_revision or 1,
+                payload_json=redact_payload(baseline_payload),
+                payload_sha256=baseline_hash,
+            ),
+            items=[
+                FlowRunReviewCheckpointEditPublic.model_validate(row).model_copy(
+                    update={
+                        "payload_json": redact_payload(row.payload_json),
+                    }
+                )
+                for row in rows
+            ],
+            next_after_revision=rows[-1].revision if more and rows else None,
+            truncated=more,
+        )
+
+    async def list_transcript_correction_revisions(
+        self,
+        *,
+        run: FlowRun,
+        step_id: UUID,
+        after_revision: int | None,
+        limit: int,
+    ) -> FlowTranscriptCorrectionRevisionPagePublic:
+        await self.access_policy.ensure_can_access_run(run, access_kind="content")
+        baseline = FlowTranscriptCorrectionRevisionBaselinePublic(
+            revision=0,
+            occurrences_json=[],
+            speaker_edits_json=[],
+        )
+        if after_revision is not None:
+            previous, _ = await self.transcript_corrections_repo.list_revisions(
+                run_id=run.id,
+                step_id=step_id,
+                tenant_id=self.user.tenant_id,
+                after_revision=after_revision - 1,
+                limit=1,
+            )
+            if not previous or previous[0].revision != after_revision:
+                raise NotFoundException(
+                    "Correction revision not found.",
+                    code="not_found",
+                    context={"revision": after_revision},
+                )
+            baseline = FlowTranscriptCorrectionRevisionBaselinePublic(
+                revision=after_revision,
+                occurrences_json=redact_payload(previous[0].occurrences_json),
+                speaker_edits_json=redact_payload(previous[0].speaker_edits_json),
+            )
+        rows, more = await self.transcript_corrections_repo.list_revisions(
+            run_id=run.id,
+            step_id=step_id,
+            tenant_id=self.user.tenant_id,
+            after_revision=after_revision,
+            limit=limit,
+        )
+        return FlowTranscriptCorrectionRevisionPagePublic(
+            baseline=baseline,
+            items=[
+                FlowTranscriptCorrectionRevisionPublic.model_validate(row).model_copy(
+                    update={
+                        "occurrences_json": redact_payload(row.occurrences_json),
+                        "speaker_edits_json": redact_payload(row.speaker_edits_json),
+                    }
+                )
+                for row in rows
+            ],
+            next_after_revision=rows[-1].revision if more and rows else None,
+            truncated=more,
+        )
+
+    @staticmethod
+    def admit_history_page(page: HistoryPage) -> HistoryPage:
+        budget = RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES
+        used = len(canonical_json_bytes(page.baseline.model_dump(mode="json")))
+        admitted = 0
+        for item in page.items:
+            used += len(canonical_json_bytes(item.model_dump(mode="json")))
+            if used > budget:
+                if admitted == 0:
+                    raise FileTooLargeException(
+                        "Review history comparison exceeds the page size limit.",
+                        code=FlowApiErrorCode.REVIEW_HISTORY_TOO_LARGE.value,
+                        context={
+                            "revision": item.revision,
+                            "max_logical_bytes": budget,
+                        },
+                    )
+                break
+            admitted += 1
+        if not page.items and used > budget:
+            raise FileTooLargeException(
+                "Review history baseline exceeds the page size limit.",
+                code=FlowApiErrorCode.REVIEW_HISTORY_TOO_LARGE.value,
+                context={
+                    "revision": page.baseline.revision,
+                    "max_logical_bytes": budget,
+                },
+            )
+        if admitted < len(page.items):
+            return page.model_copy(
+                update={
+                    "items": page.items[:admitted],
+                    "truncated": True,
+                    "next_after_revision": page.items[admitted - 1].revision,
+                }
+            )
+        return page
 
     async def list_provider_calls(
         self,
@@ -426,6 +609,20 @@ class FlowRunEvidenceService:
                 candidate_limit=measurement_candidate_limit,
             )
         )
+        edit_measurement = (
+            await self.flow_run_review_checkpoint_repo.measure_edit_evidence(
+                run_id=resolved_run.id,
+                tenant_id=self.user.tenant_id,
+                candidate_limit=measurement_candidate_limit,
+            )
+        )
+        correction_measurement = (
+            await self.transcript_corrections_repo.measure_revision_evidence(
+                run_id=resolved_run.id,
+                tenant_id=self.user.tenant_id,
+                candidate_limit=measurement_candidate_limit,
+            )
+        )
         provider_call_measurement = await self.provider_call_repo.measure_evidence(
             run_id=resolved_run.id,
             tenant_id=self.user.tenant_id,
@@ -441,6 +638,18 @@ class FlowRunEvidenceService:
             candidate_limit=measurement_candidate_limit,
         )
         section_usages = (
+            _EvidenceSectionUsage(
+                section="review_checkpoint_edits",
+                row_count=edit_measurement.row_count,
+                stored_json_bytes=edit_measurement.stored_json_bytes,
+                logical_json_bytes=edit_measurement.logical_json_bytes,
+            ),
+            _EvidenceSectionUsage(
+                section="transcript_correction_revisions",
+                row_count=correction_measurement.row_count,
+                stored_json_bytes=correction_measurement.stored_json_bytes,
+                logical_json_bytes=correction_measurement.logical_json_bytes,
+            ),
             _EvidenceSectionUsage(
                 section="run",
                 row_count=run_measurements.run_row_count,
@@ -625,6 +834,47 @@ class FlowRunEvidenceService:
                 returned_count=len(review_checkpoints),
                 row_limit=RUN_VIEW_MAX_LOADED_SECTION_ROWS,
             )
+        review_checkpoint_edits = await self.flow_run_review_checkpoint_repo.list_review_checkpoint_edits_for_run(
+            run_id=resolved_run.id,
+            tenant_id=self.user.tenant_id,
+            **view_read_kwargs,
+        )
+        correction_revisions = (
+            await self.transcript_corrections_repo.list_revisions_for_run(
+                run_id=resolved_run.id,
+                tenant_id=self.user.tenant_id,
+                **view_read_kwargs,
+            )
+        )
+        if is_view:
+            self._record_view_omission(
+                omissions=view_omissions,
+                usage=self._section_usage(section_usages, "review_checkpoint_edits"),
+                returned_count=len(review_checkpoint_edits),
+                row_limit=RUN_VIEW_MAX_LOADED_SECTION_ROWS,
+            )
+            self._record_view_omission(
+                omissions=view_omissions,
+                usage=self._section_usage(
+                    section_usages, "transcript_correction_revisions"
+                ),
+                returned_count=len(correction_revisions),
+                row_limit=RUN_VIEW_MAX_LOADED_SECTION_ROWS,
+            )
+            checkpoint_ids = {item.id for item in review_checkpoints}
+            visible_edits = [
+                item
+                for item in review_checkpoint_edits
+                if item.checkpoint_id in checkpoint_ids
+            ]
+            if len(visible_edits) < len(review_checkpoint_edits):
+                view_omissions.append(
+                    RunViewEvidenceParentOmission(
+                        section="review_checkpoint_edits",
+                        rows_omitted=len(review_checkpoint_edits) - len(visible_edits),
+                    )
+                )
+            review_checkpoint_edits = visible_edits
         result_files = await self.flow_run_repo.list_result_files(
             run_id=resolved_run.id,
             tenant_id=self.user.tenant_id,
@@ -705,6 +955,8 @@ class FlowRunEvidenceService:
             resolved_input_edges_by_attempt_id=resolved_input_edges_by_attempt_id,
             result_files=result_files,
             review_checkpoints=review_checkpoints,
+            review_checkpoint_edits=review_checkpoint_edits,
+            transcript_correction_revisions=correction_revisions,
             webhook_deliveries=webhook_deliveries,
             provider_calls=provider_calls,
             token_usage=run_usage.token_usage if run_usage is not None else None,
@@ -734,6 +986,24 @@ class FlowRunEvidenceService:
             ceiling=ceiling,
         )
         counts: tuple[tuple[EvidenceSectionIdentifier, int, int], ...] = (
+            (
+                "review_checkpoint_edits",
+                await self.flow_run_review_checkpoint_repo.measure_edit_evidence_row_count(
+                    run_id=run_id,
+                    tenant_id=self.user.tenant_id,
+                    ceiling=ceiling,
+                ),
+                ceiling,
+            ),
+            (
+                "transcript_correction_revisions",
+                await self.transcript_corrections_repo.measure_revision_evidence_row_count(
+                    run_id=run_id,
+                    tenant_id=self.user.tenant_id,
+                    ceiling=ceiling,
+                ),
+                ceiling,
+            ),
             ("step_results", run_counts.step_results, ceiling),
             ("step_attempts", run_counts.step_attempts, ceiling),
             ("result_files", run_counts.result_files, ceiling),

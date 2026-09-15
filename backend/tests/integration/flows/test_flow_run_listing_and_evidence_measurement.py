@@ -107,7 +107,8 @@ RUN_LISTING_STATEMENT_COUNT = 1
 # steps, attempts, provider calls, sources, or attached files. The reviewed
 # ceiling is the representative bundle's statement count (its two input files
 # cost two metadata reads the file-less heavy bundle does not issue).
-MAX_EVIDENCE_QUERY_COUNT = 25
+# Each history section adds one measurement and one bounded load.
+MAX_EVIDENCE_QUERY_COUNT = 29
 REPORT_PATH_ENV = "FLOW_RUN_LISTING_EVIDENCE_REPORT_PATH"
 SECRET_SENTINEL = "flow-evidence-secret-20260726"
 _BASE_TIME = datetime(2026, 7, 26, 12, 0, tzinfo=timezone.utc)

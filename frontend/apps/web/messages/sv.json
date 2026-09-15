@@ -5207,6 +5207,7 @@
   "flow_error_flow_review_edit_not_allowed": "Steget är inställt för enbart granskning, så resultatet kan inte redigeras.",
   "flow_error_flow_review_edit_output_too_large": "Det redigerade resultatet är för stort för att sparas. Korta ner det och försök igen.",
   "flow_error_flow_review_expired": "Granskningsfristen har gått ut. Läs om körningen om statusen inte har uppdaterats.",
+  "flow_error_flow_review_history_too_large": "Den här delen av ändringshistoriken är för stor för att visas på en sida. Öppna körningens bevisexport för att läsa den.",
   "flow_error_flow_review_idempotency_key_required": "Återupptagning kräver en nyckel för säkra omförsök. Läs om körningen och försök igen.",
   "flow_error_flow_review_not_active": "Granskningspunkten är inte längre aktiv. Läs om körningen innan du fortsätter.",
   "flow_error_flow_review_not_approved": "Godkänn granskningen innan du återupptar körningen.",

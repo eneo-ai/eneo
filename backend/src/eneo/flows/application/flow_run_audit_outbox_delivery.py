@@ -360,6 +360,8 @@ def _audit_metadata(
             else None
         ),
         "checkpoint_revision": row.checkpoint_revision,
+        "payload_sha256_before": row.payload_sha256_before,
+        "payload_sha256_after": row.payload_sha256_after,
         "error_code": row.error_code,
         "outbox_description": row.description,
     }

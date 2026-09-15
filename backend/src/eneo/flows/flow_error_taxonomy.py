@@ -676,6 +676,13 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
             "Open the run view to inspect the bounded evidence available there."
         ),
     ),
+    FlowApiErrorCode.REVIEW_HISTORY_TOO_LARGE: _entry(
+        category="Review checkpoint",
+        surfaced_through="API error response",
+        cause="The comparison baseline and next history revision exceed the page byte limit.",
+        consumer_action="Report the obstructing revision; reducing the row limit cannot make this comparison fit.",
+        user_action="Use the evidence export to inspect this revision if the export fits its size limit.",
+    ),
     FlowApiErrorCode.LLM_REQUEST_TIMEOUT: _entry(
         category="Typed input/output",
         surfaced_through="Run error payload",

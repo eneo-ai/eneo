@@ -27,6 +27,7 @@ from eneo.flows.enums import (
     FlowInputType,
     FlowOutputMode,
     FlowOutputType,
+    FlowRunReviewCheckpointEditCause,
     FlowRunReviewCheckpointState,
     FlowRunStatus,
     FlowRuntimeInputFormat,
@@ -495,6 +496,28 @@ class FlowStepAttempt(BaseModel):
     finished_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
+
+
+class FlowRunReviewCheckpointEdit(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    tenant_id: UUID
+    flow_id: UUID
+    flow_run_id: UUID
+    checkpoint_id: UUID
+    revision: int
+    cause: FlowRunReviewCheckpointEditCause
+    corrections_revision_id: UUID | None
+    correction_set_id: UUID | None = None
+    corrections_revision: int | None = None
+    payload_json: FlowPersistedJsonObject
+    payload_sha256_before: str
+    payload_sha256_after: str
+    edited_by_user_id: UUID | None
+    edited_by_service_id: UUID | None
+    edited_by_principal_type: PrincipalType
+    created_at: datetime
 
 
 class FlowRunReviewCheckpoint(BaseModel):
