@@ -9119,7 +9119,9 @@ def test_suite_demand_for_the_frozen_corpus_exceeds_the_default_ceilings() -> No
         cases=cases, repetitions=3, timeout_seconds=900
     )
 
-    assert demand["total"] == 11_566
+    # 2026-09-15: the two saved-step edit cases add their seeding requests
+    # (3 fixed + 2 per seeded step) on top of the shared per-observation cost.
+    assert demand["total"] == 11_926
     assert demand["total"] > 10_000
 
 
@@ -10291,3 +10293,325 @@ def test_an_unrenderable_server_question_stays_a_builder_error(tmp_path: Path) -
         )
         == "builder_semantic"
     )
+
+
+# --- saved-step edit cases -------------------------------------------------
+
+
+def _edit_namespace(**overrides: object) -> SimpleNamespace:
+    arguments: dict[str, object] = {
+        "cases_file": None,
+        "run_suite": False,
+        "sealed_targeted_suite": False,
+        "case_id": None,
+        "cohort": ["edit_chain"],
+        "max_cases": None,
+        "file_ids": None,
+    }
+    arguments.update(overrides)
+    return SimpleNamespace(**arguments)
+
+
+def test_seed_flow_fixtures_are_steps_the_flow_api_accepts() -> None:
+    from uuid import uuid4
+
+    from eneo.flows.api.flow_models import FlowStepCreateRequest
+
+    harness = _battle_harness()
+    fixtures = {
+        name: harness._load_seed_flow_fixture(name)
+        for name in ("edit_chain_10.json", "edit_chain_30.json")
+    }
+    api_fields = (
+        "user_description",
+        "input_source",
+        "input_type",
+        "input_contract",
+        "output_mode",
+        "output_type",
+        "output_contract",
+        "input_bindings",
+        "input_config",
+    )
+    for name, fixture in fixtures.items():
+        assert len(fixture["steps"]) == int(name.split("_")[2].split(".")[0])
+        for order, step in enumerate(fixture["steps"], start=1):
+            FlowStepCreateRequest.model_validate(
+                {
+                    **{field: step.get(field) for field in api_fields},
+                    "assistant_id": str(uuid4()),
+                    "step_order": order,
+                }
+            )
+    small, large = fixtures["edit_chain_10.json"], fixtures["edit_chain_30.json"]
+    # Same target, same direct producers and consumer, same renderer at the end;
+    # only the number of distant review steps differs.
+    assert small["steps"][:4] == large["steps"][:4]
+    assert small["steps"][-1] == large["steps"][-1]
+    assert small["steps"][2]["name"] == "Skriv beslutsdokument"
+    assert {step["input_source"] for step in large["steps"][3:]} == {"previous_step"}
+
+
+def test_edit_cases_load_with_the_fixture_hash_in_their_contract() -> None:
+    harness = _battle_harness()
+
+    cases = harness._cases_from_args(_edit_namespace())
+
+    assert [case.case_id for case in cases] == [
+        "edit_chain_10_instruction",
+        "edit_chain_30_instruction",
+    ]
+    assert cases[0].prompt == cases[1].prompt
+    for case in cases:
+        assert case.edit is not None
+        assert case.edit.target_step_order == 3
+        assert case.edit.seed_flow_sha256 == harness._seed_flow_fixture_sha256(
+            case.edit.seed_flow_fixture
+        )
+        contract = harness._case_contract_payload(case)
+        assert contract["edit"] == {
+            "seed_flow_fixture": case.edit.seed_flow_fixture,
+            "seed_flow_sha256": case.edit.seed_flow_sha256,
+            "target_step_order": 3,
+        }
+        assert (
+            harness._observed_case_contract_payload(
+                {**contract, "direct_file_slot_count": 0}
+            )["edit"]
+            == contract["edit"]
+        )
+    assert harness._case_contract_sha256(cases[0]) != harness._case_contract_sha256(
+        cases[1]
+    )
+
+
+def test_create_case_contracts_do_not_change_shape() -> None:
+    harness = _battle_harness()
+
+    cases = harness._cases_from_args(_edit_namespace(cohort=["smoke_v3"]))
+
+    assert cases and all(case.edit is None for case in cases)
+    assert all("edit" not in harness._case_contract_payload(case) for case in cases)
+
+
+def test_a_changed_seed_fixture_changes_the_case_contract(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    harness = _battle_harness()
+    original = harness.FIXTURE_DIR / "edit_chain_10.json"
+    copy = tmp_path / "edit_chain_10.json"
+    copy.write_bytes(original.read_bytes())
+    monkeypatch.setattr(harness, "FIXTURE_DIR", tmp_path)
+    raw_case = {
+        "edit": {"seed_flow_fixture": "edit_chain_10.json", "target_step_order": 3}
+    }
+
+    before = harness._saved_step_edit_from_case(
+        raw_case, path=Path("cases.json"), case_id="c"
+    )
+    fixture = json.loads(copy.read_text())
+    fixture["steps"][2]["instructions"] += " Var kortfattad."
+    copy.write_text(json.dumps(fixture, ensure_ascii=False))
+    after = harness._saved_step_edit_from_case(
+        raw_case, path=Path("cases.json"), case_id="c"
+    )
+
+    assert before is not None and after is not None
+    assert before.seed_flow_sha256 != after.seed_flow_sha256
+    with raises(ValueError, match="target_step_order"):
+        harness._saved_step_edit_from_case(
+            {
+                "edit": {
+                    "seed_flow_fixture": "edit_chain_10.json",
+                    "target_step_order": 11,
+                }
+            },
+            path=Path("cases.json"),
+            case_id="c",
+        )
+
+
+def test_seeding_provisions_the_flow_then_assistants_then_steps(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    harness = _battle_harness()
+    calls: list[tuple[str, str, object]] = []
+    assistant_counter = iter(range(1, 100))
+
+    def fake_request_json(
+        *, config: object, method: str, path: str, payload: object = None
+    ) -> dict[str, Any]:
+        calls.append((method, path, payload))
+        if method == "POST" and path == "/flows/":
+            assert isinstance(payload, dict) and payload["steps"] == []
+            return {"id": "flow-1"}
+        if method == "POST" and path.endswith("/assistants/"):
+            return {"id": f"asst-{next(assistant_counter)}"}
+        if method == "PATCH" and "/assistants/" in path:
+            return {"id": path.rstrip("/").split("/")[-1]}
+        if method == "PATCH":
+            assert isinstance(payload, dict)
+            return {
+                "id": "flow-1",
+                "steps": [
+                    {
+                        "id": f"step-{step['step_order']}",
+                        "step_order": step["step_order"],
+                    }
+                    for step in reversed(payload["steps"])
+                ],
+            }
+        raise AssertionError((method, path))
+
+    monkeypatch.setattr(harness, "_request_json", fake_request_json)
+    edit = harness.SavedStepEditCase(
+        seed_flow_fixture="edit_chain_10.json",
+        seed_flow_sha256=harness._seed_flow_fixture_sha256("edit_chain_10.json"),
+        target_step_order=3,
+        step_count=10,
+    )
+
+    seeded = harness._seed_edit_flow(config=object(), space_id="space-1", edit=edit)
+
+    assert seeded.flow_id == "flow-1"
+    assert seeded.step_ids == tuple(f"step-{n}" for n in range(1, 11))
+    assert seeded.target_step_id == "step-3"
+    methods = [(method, path) for method, path, _ in calls]
+    assert methods[0] == ("POST", "/flows/")
+    assert methods[1:3] == [
+        ("POST", "/flows/flow-1/assistants/"),
+        ("PATCH", "/flows/flow-1/assistants/asst-1/"),
+    ]
+    assert methods[-1] == ("PATCH", "/flows/flow-1/")
+    put_payload = calls[-1][2]
+    assert isinstance(put_payload, dict)
+    assert [step["assistant_id"] for step in put_payload["steps"]] == [
+        f"asst-{n}" for n in range(1, 11)
+    ]
+    prompt_payload = calls[2][2]
+    fixture = harness._load_seed_flow_fixture("edit_chain_10.json")
+    assert prompt_payload == {"prompt": {"text": fixture["steps"][0]["instructions"]}}
+
+
+def test_a_seeding_failure_deletes_the_half_built_flow(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    harness = _battle_harness()
+    deleted: list[str] = []
+
+    def fake_request_json(
+        *, config: object, method: str, path: str, payload: object = None
+    ) -> dict[str, Any]:
+        if method == "POST" and path == "/flows/":
+            return {"id": "flow-1"}
+        if method == "POST":
+            return {"id": "asst-1"}
+        if method == "PATCH" and "/assistants/" in path:
+            return {}
+        raise ValueError("step update refused")
+
+    def fake_request_no_content(*, config: object, method: str, path: str) -> None:
+        deleted.append(f"{method} {path}")
+
+    monkeypatch.setattr(harness, "_request_json", fake_request_json)
+    monkeypatch.setattr(harness, "_request_no_content", fake_request_no_content)
+    edit = harness.SavedStepEditCase(
+        seed_flow_fixture="edit_chain_10.json",
+        seed_flow_sha256=harness._seed_flow_fixture_sha256("edit_chain_10.json"),
+        target_step_order=3,
+        step_count=10,
+    )
+
+    with raises(ValueError, match="step update refused"):
+        harness._seed_edit_flow(config=object(), space_id="space-1", edit=edit)
+
+    assert deleted == ["DELETE /flows/flow-1/"]
+
+
+def test_edit_evidence_reads_the_servers_own_diff() -> None:
+    harness = _battle_harness()
+    seeded = harness.SeededFlow(
+        flow_id="flow-1",
+        target_step_id="step-3",
+        step_ids=tuple(f"s{n}" for n in range(10)),
+    )
+
+    def plan(kinds: dict[str, str]) -> dict[str, Any]:
+        return {
+            "proposal": {
+                "edit": {
+                    "scoped_target_existing_step_ref": "step_3",
+                    "diff": {
+                        "step_changes": [
+                            {
+                                "step_ref": ref,
+                                "step_name": ref,
+                                "kind": kind,
+                                "field_changes": (
+                                    [{"field": "instructions"}]
+                                    if kind == "modified"
+                                    else []
+                                ),
+                            }
+                            for ref, kind in kinds.items()
+                        ]
+                    },
+                }
+            }
+        }
+
+    clean = harness._saved_step_edit_evidence(
+        plan=plan({"step_1": "unchanged", "step_3": "modified", "step_4": "unchanged"}),
+        seeded_flow=seeded,
+    )
+    assert clean["available"] is True
+    assert clean["unrelated_steps_unchanged"] is True
+    assert clean["target_change_kind"] == "modified"
+    assert clean["target_field_changes"] == [{"field": "instructions"}]
+    assert clean["unrelated_step_count"] == 2
+
+    drifted = harness._saved_step_edit_evidence(
+        plan=plan({"step_1": "unchanged", "step_3": "modified", "step_4": "modified"}),
+        seeded_flow=seeded,
+    )
+    assert drifted["unrelated_steps_unchanged"] is False
+    assert drifted["step_change_kinds"]["step_4"] == "modified"
+
+    assert harness._saved_step_edit_evidence(plan=None, seeded_flow=seeded) == {
+        "seeded_step_count": 10,
+        "available": False,
+    }
+
+
+def test_an_edit_case_deletes_its_seeded_flow_even_when_the_session_fails(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    harness = _battle_harness()
+    deleted: list[str] = []
+    seeded = harness.SeededFlow(
+        flow_id="flow-1", target_step_id="step-3", step_ids=("a",)
+    )
+    monkeypatch.setattr(harness, "_seed_edit_flow", lambda **_kwargs: seeded)
+    monkeypatch.setattr(
+        harness,
+        "_request_no_content",
+        lambda *, config, method, path: deleted.append(f"{method} {path}"),
+    )
+
+    def failing_session(**_kwargs: object) -> dict[str, Any]:
+        raise ValueError("turn failed")
+
+    monkeypatch.setattr(harness, "_run_case_session", failing_session)
+    case = harness._cases_from_args(_edit_namespace())[0]
+
+    with raises(harness.BattleFlowLifecycleError) as raised:
+        harness._run_case(
+            case=case,
+            config=object(),
+            args=SimpleNamespace(space_id="space-1"),
+            existing_session_id=None,
+            artifact_output_dir=tmp_path,
+        )
+
+    assert deleted == ["DELETE /flows/flow-1/"]
+    assert raised.value.flow_lifecycle == {"status": "deleted", "flow_id": "flow-1"}

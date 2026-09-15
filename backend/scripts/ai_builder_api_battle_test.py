@@ -240,6 +240,30 @@ def _failure_error_fields(error: Exception) -> JsonObject:
 
 
 @dataclass(frozen=True, slots=True)
+class SavedStepEditCase:
+    """One saved-step edit on a flow the harness seeds from a frozen fixture.
+
+    The fixture is harness-owned (name, description, steps with instructions):
+    the Flow API cannot create a flow with instructions in one call, so the
+    harness provisions it (empty flow, flow-managed assistants, prompt text,
+    step update) and deletes it after the observation. The prompt of the case
+    is the edit message; the fixture bytes are part of the case contract.
+    """
+
+    seed_flow_fixture: str
+    seed_flow_sha256: str
+    target_step_order: int
+    step_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class SeededFlow:
+    flow_id: str
+    target_step_id: str
+    step_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class BattleCase:
     case_id: str
     prompt: str
@@ -257,6 +281,15 @@ class BattleCase:
     cohorts: tuple[str, ...] = ()
     configured_question_answers: JsonObject | None = None
     question_answer_sources: JsonObject | None = None
+    edit: SavedStepEditCase | None = None
+
+
+def _edit_contract(edit: SavedStepEditCase) -> JsonObject:
+    return {
+        "seed_flow_fixture": edit.seed_flow_fixture,
+        "seed_flow_sha256": edit.seed_flow_sha256,
+        "target_step_order": edit.target_step_order,
+    }
 
 
 def _case_identity(case: BattleCase) -> JsonObject:
@@ -271,7 +304,7 @@ def _case_identity(case: BattleCase) -> JsonObject:
 
 def _case_contract_payload(case: BattleCase) -> JsonObject:
     """Return the portable behavior contract for one selected benchmark case."""
-    return {
+    payload: JsonObject = {
         "id": case.case_id,
         "prompt": case.prompt,
         "complexity": case.complexity,
@@ -295,6 +328,9 @@ def _case_contract_payload(case: BattleCase) -> JsonObject:
         "configured_question_answers": case.configured_question_answers or {},
         "question_answer_sources": case.question_answer_sources or {},
     }
+    if case.edit is not None:
+        payload["edit"] = _edit_contract(case.edit)
+    return payload
 
 
 def _case_contract_sha256(case: BattleCase) -> str:
@@ -314,7 +350,7 @@ def _observed_case_contract_payload(case: Mapping[str, object]) -> JsonObject:
     expected = case.get("expected")
     configured_answers = case.get("configured_question_answers")
     answer_sources = case.get("question_answer_sources")
-    return {
+    payload: JsonObject = {
         "id": case.get("id"),
         "prompt": case.get("prompt"),
         "complexity": case.get("complexity"),
@@ -340,6 +376,77 @@ def _observed_case_contract_payload(case: Mapping[str, object]) -> JsonObject:
             dict(answer_sources) if isinstance(answer_sources, Mapping) else None
         ),
     }
+    raw_edit = case.get("edit")
+    if isinstance(raw_edit, Mapping):
+        edit = cast(Mapping[str, Any], raw_edit)
+        payload["edit"] = {
+            key: edit.get(key)
+            for key in ("seed_flow_fixture", "seed_flow_sha256", "target_step_order")
+        }
+    return payload
+
+
+_SEED_FLOW_STEP_KEYS = frozenset(
+    {
+        "name",
+        "instructions",
+        "user_description",
+        "input_source",
+        "input_type",
+        "input_contract",
+        "output_mode",
+        "output_type",
+        "output_contract",
+        "input_bindings",
+        "input_config",
+    }
+)
+_SEED_FLOW_STEP_REQUIRED_STRINGS = (
+    "name",
+    "instructions",
+    "input_source",
+    "input_type",
+    "output_mode",
+    "output_type",
+)
+
+
+def _load_seed_flow_fixture(name: str) -> JsonObject:
+    """Read and shape-check a harness-owned seed flow fixture."""
+
+    if not name or name != Path(name).name or not name.endswith(".json"):
+        raise ValueError(f"seed_flow_fixture must be a .json file name: {name!r}")
+    path = FIXTURE_DIR / name
+    if not path.is_file():
+        raise ValueError(f"seed flow fixture is missing: {path}")
+    raw = json.loads(path.read_bytes())
+    if not isinstance(raw, Mapping):
+        raise ValueError(f"{path} must be an object.")
+    fixture = cast(Mapping[str, Any], raw)
+    unknown = set(fixture) - {"name", "description", "steps"}
+    if unknown or not isinstance(fixture.get("name"), str) or not fixture["name"]:
+        raise ValueError(f"{path} must carry name, description and steps only.")
+    description = fixture.get("description")
+    if description is not None and not isinstance(description, str):
+        raise ValueError(f"{path}.description must be a string or null.")
+    steps = fixture.get("steps")
+    if not isinstance(steps, list) or not steps:
+        raise ValueError(f"{path}.steps must be a non-empty list.")
+    for index, raw_step in enumerate(cast(list[object], steps), start=1):
+        if not isinstance(raw_step, Mapping):
+            raise ValueError(f"{path}.steps[{index}] must be an object.")
+        step = cast(Mapping[str, Any], raw_step)
+        if set(step) - _SEED_FLOW_STEP_KEYS:
+            raise ValueError(f"{path}.steps[{index}] has unknown keys.")
+        for key in _SEED_FLOW_STEP_REQUIRED_STRINGS:
+            value = step.get(key)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{path}.steps[{index}].{key} must be a string.")
+    return dict(fixture)
+
+
+def _seed_flow_fixture_sha256(name: str) -> str:
+    return hashlib.sha256((FIXTURE_DIR / name).read_bytes()).hexdigest()
 
 
 def _fixture_manifest(path: Path = FIXTURE_MANIFEST_FILE) -> dict[str, str]:
@@ -554,6 +661,9 @@ def runtime_poll_requests(*, timeout_seconds: int) -> int:
     return math.ceil(timeout_seconds / RUNTIME_POLL_INTERVAL_SECONDS) + 1
 
 
+_SEED_FLOW_FIXED_REQUESTS = 3
+
+
 def observation_request_demand(case: BattleCase, *, timeout_seconds: int) -> int:
     """Worst-case charged requests for one observation of one case."""
     total = (
@@ -562,6 +672,10 @@ def observation_request_demand(case: BattleCase, *, timeout_seconds: int) -> int
         + _PLAN_FETCH_REQUESTS
         + _OBSERVATION_DIAGNOSTIC_REQUESTS
     )
+    if case.edit is not None:
+        # Seeding: create the flow, one assistant create + one prompt update
+        # per step, the step update, and the deletion afterwards.
+        total += _SEED_FLOW_FIXED_REQUESTS + 2 * case.edit.step_count
     if not case.apply_plan:
         return total
     total += _APPLY_PLAN_REQUESTS
@@ -949,6 +1063,40 @@ def _read_prompt(args: argparse.Namespace) -> str:
     return prompt
 
 
+def _saved_step_edit_from_case(
+    raw_case: Mapping[str, object], *, path: Path, case_id: str
+) -> SavedStepEditCase | None:
+    raw_edit = raw_case.get("edit")
+    if raw_edit is None:
+        return None
+    owner = f"{path} case {case_id}.edit"
+    if not isinstance(raw_edit, Mapping):
+        raise ValueError(f"{owner} must be an object.")
+    edit = cast(Mapping[str, Any], raw_edit)
+    if set(edit) != {"seed_flow_fixture", "target_step_order"}:
+        raise ValueError(f"{owner} must carry seed_flow_fixture and target_step_order.")
+    fixture_name = edit.get("seed_flow_fixture")
+    if not isinstance(fixture_name, str):
+        raise ValueError(f"{owner}.seed_flow_fixture must be a string.")
+    fixture = _load_seed_flow_fixture(fixture_name)
+    target = edit.get("target_step_order")
+    step_count = len(fixture["steps"])
+    if (
+        not isinstance(target, int)
+        or isinstance(target, bool)
+        or not 1 <= target <= step_count
+    ):
+        raise ValueError(
+            f"{owner}.target_step_order must be an integer in 1..{step_count}."
+        )
+    return SavedStepEditCase(
+        seed_flow_fixture=fixture_name,
+        seed_flow_sha256=_seed_flow_fixture_sha256(fixture_name),
+        target_step_order=target,
+        step_count=step_count,
+    )
+
+
 def _cases_from_args(args: argparse.Namespace) -> list[BattleCase]:
     run_suite = getattr(args, "run_suite", False)
     sealed_targeted_suite = getattr(args, "sealed_targeted_suite", False)
@@ -1119,6 +1267,7 @@ _CASE_KEYS = frozenset(
         "synthetic_user_profile",
         "question_answer_overrides",
         "cohorts",
+        "edit",
     }
 )
 _EXPECTATION_KEYS = frozenset(
@@ -1252,10 +1401,14 @@ def _read_cases_file(path: Path) -> list[BattleCase]:
             raise ValueError(f"{path} case {case_id} has an empty prompt.")
         if case_id in seen_case_ids:
             raise ValueError(f"{path} contains duplicate case id: {case_id}")
-        if prompt in seen_prompts:
+        edit = _saved_step_edit_from_case(raw_case, path=path, case_id=case_id)
+        # An edit case is identified by its prompt AND its seed flow: the same
+        # message against the 10-step and 30-step fixtures asks two questions.
+        if edit is None and prompt in seen_prompts:
             raise ValueError(f"{path} contains duplicate prompt in case: {case_id}")
         seen_case_ids.add(case_id)
-        seen_prompts.add(prompt)
+        if edit is None:
+            seen_prompts.add(prompt)
         file_ids = raw_case.get("file_ids")
         if file_ids is None:
             file_ids = []
@@ -1369,7 +1522,19 @@ def _read_cases_file(path: Path) -> list[BattleCase]:
             cohorts=tuple(cohorts),
             configured_question_answers=configured_answers,
             question_answer_sources=answer_sources,
+            edit=edit,
         )
+        if case.edit is not None and (
+            case.apply_plan
+            or case.execute_flow
+            or case.file_ids
+            or case.attachments
+            or case.runtime_files
+        ):
+            raise ValueError(
+                f"{path} case {case_id} is a saved-step edit case and cannot "
+                "apply, execute or attach files."
+            )
         if case.execute_flow and not case.apply_plan:
             raise ValueError(
                 f"{path} case {case_id} cannot execute without apply_plan=true."
@@ -3491,6 +3656,237 @@ def _run_case(
     cases_path: Path | None = DEFAULT_CASES_FILE,
     provisioned_fixtures: Mapping[str, object] | None = None,
 ) -> JsonObject:
+    if case.edit is None:
+        return _run_case_session(
+            case=case,
+            config=config,
+            args=args,
+            existing_session_id=existing_session_id,
+            artifact_output_dir=artifact_output_dir,
+            cases_path=cases_path,
+            provisioned_fixtures=provisioned_fixtures,
+            seeded_flow=None,
+        )
+    if existing_session_id:
+        raise ValueError(
+            "a saved-step edit case always seeds its own flow and session."
+        )
+    seeded_flow = _seed_edit_flow(config=config, space_id=args.space_id, edit=case.edit)
+    print(f"seeded flow {seeded_flow.flow_id} ({len(seeded_flow.step_ids)} steps)")
+    bundle: JsonObject | None = None
+    primary_error: Exception | None = None
+    cleanup_error: Exception | None = None
+    try:
+        bundle = _run_case_session(
+            case=case,
+            config=config,
+            args=args,
+            existing_session_id=None,
+            artifact_output_dir=artifact_output_dir,
+            cases_path=cases_path,
+            provisioned_fixtures=provisioned_fixtures,
+            seeded_flow=seeded_flow,
+        )
+    except Exception as error:
+        primary_error = error
+    finally:
+        try:
+            _request_no_content(
+                config=config,
+                method="DELETE",
+                path=f"/flows/{seeded_flow.flow_id}/",
+            )
+        except Exception as error:
+            cleanup_error = error
+    lifecycle: JsonObject = {
+        "status": "cleanup_failed" if cleanup_error is not None else "deleted",
+        "flow_id": seeded_flow.flow_id,
+    }
+    if cleanup_error is not None:
+        message = f"seeded Flow cleanup failed: {cleanup_error}"
+        if primary_error is not None:
+            message = f"{primary_error}; {message}"
+        raise BattleFlowLifecycleError(
+            message=message, flow_lifecycle=lifecycle, cause=cleanup_error
+        ) from cleanup_error
+    if primary_error is not None:
+        if isinstance(primary_error, (HTTPError, URLError, TimeoutError, ValueError)):
+            raise BattleFlowLifecycleError(
+                message=str(primary_error),
+                flow_lifecycle=lifecycle,
+                cause=primary_error,
+            ) from primary_error
+        raise primary_error
+    assert bundle is not None
+    bundle["seeded_flow_lifecycle"] = lifecycle
+    return bundle
+
+
+def _seed_edit_flow(
+    *, config: ApiConfig, space_id: str, edit: SavedStepEditCase
+) -> SeededFlow:
+    """Provision the fixture as a real flow: empty flow, assistants, prompts, steps.
+
+    Each step's instructions live on a flow-managed assistant, which can only be
+    created once the flow exists and can only be referenced by a step once it
+    exists; the flow update at the end is what turns the fixture into steps.
+    A failure after the flow was created deletes it before re-raising.
+    """
+
+    fixture = _load_seed_flow_fixture(edit.seed_flow_fixture)
+    if _seed_flow_fixture_sha256(edit.seed_flow_fixture) != edit.seed_flow_sha256:
+        raise ValueError(
+            f"seed flow fixture changed since selection: {edit.seed_flow_fixture}"
+        )
+    created = _request_json(
+        config=config,
+        method="POST",
+        path="/flows/",
+        payload={
+            "space_id": space_id,
+            "name": fixture["name"],
+            "description": fixture.get("description"),
+            "steps": [],
+        },
+    )
+    flow_id = _required_string(created, "id")
+    try:
+        step_payloads: list[JsonObject] = []
+        for step_order, step in enumerate(fixture["steps"], start=1):
+            assistant = _request_json(
+                config=config,
+                method="POST",
+                path=f"/flows/{flow_id}/assistants/",
+                payload={"name": step["name"]},
+            )
+            assistant_id = _required_string(assistant, "id")
+            _request_json(
+                config=config,
+                method="PATCH",
+                path=f"/flows/{flow_id}/assistants/{assistant_id}/",
+                payload={"prompt": {"text": step["instructions"]}},
+            )
+            step_payloads.append(
+                {
+                    "assistant_id": assistant_id,
+                    "step_order": step_order,
+                    "user_description": step.get("user_description") or step["name"],
+                    "input_source": step["input_source"],
+                    "input_type": step["input_type"],
+                    "input_contract": step.get("input_contract"),
+                    "output_mode": step["output_mode"],
+                    "output_type": step["output_type"],
+                    "output_contract": step.get("output_contract"),
+                    "input_bindings": step.get("input_bindings"),
+                    "input_config": step.get("input_config"),
+                }
+            )
+        updated = _request_json(
+            config=config,
+            method="PATCH",
+            path=f"/flows/{flow_id}/",
+            payload={
+                "name": fixture["name"],
+                "description": fixture.get("description"),
+                "steps": step_payloads,
+            },
+        )
+    except Exception:
+        try:
+            _request_no_content(
+                config=config, method="DELETE", path=f"/flows/{flow_id}/"
+            )
+        except Exception as cleanup_error:
+            print(
+                f"seeded flow {flow_id} could not be deleted after a seeding "
+                f"failure: {cleanup_error}",
+                file=sys.stderr,
+            )
+        raise
+    steps = updated.get("steps")
+    if not isinstance(steps, list) or len(steps) != len(step_payloads):
+        raise ValueError(f"seeded flow {flow_id} did not return every step.")
+    ordered = sorted(
+        (cast(Mapping[str, Any], step) for step in steps if isinstance(step, Mapping)),
+        key=lambda step: int(step.get("step_order") or 0),
+    )
+    step_ids = tuple(_required_string(step, "id") for step in ordered)
+    if len(step_ids) != len(step_payloads):
+        raise ValueError(f"seeded flow {flow_id} returned steps without ids.")
+    return SeededFlow(
+        flow_id=flow_id,
+        target_step_id=step_ids[edit.target_step_order - 1],
+        step_ids=step_ids,
+    )
+
+
+def _saved_step_edit_evidence(
+    *, plan: Mapping[str, Any] | None, seeded_flow: SeededFlow
+) -> JsonObject:
+    """What the server's own edit diff says about the untouched steps.
+
+    Read from the plan's edit approval, never recomputed client-side: the
+    receipt must show the same diff the review screen shows the user.
+    """
+
+    evidence: JsonObject = {
+        "seeded_step_count": len(seeded_flow.step_ids),
+        "available": False,
+    }
+    proposal = plan.get("proposal") if isinstance(plan, Mapping) else None
+    approval = proposal.get("edit") if isinstance(proposal, Mapping) else None
+    diff = approval.get("diff") if isinstance(approval, Mapping) else None
+    changes = diff.get("step_changes") if isinstance(diff, Mapping) else None
+    if not isinstance(approval, Mapping) or not isinstance(changes, list):
+        return evidence
+    target_ref = approval.get("scoped_target_existing_step_ref")
+    typed_changes = [
+        cast(Mapping[str, Any], change)
+        for change in changes
+        if isinstance(change, Mapping)
+    ]
+    target = next(
+        (change for change in typed_changes if change.get("step_ref") == target_ref),
+        None,
+    )
+    unrelated = [
+        change for change in typed_changes if change.get("step_ref") != target_ref
+    ]
+    evidence.update(
+        {
+            "available": True,
+            "target_step_ref": target_ref,
+            "target_change_kind": target.get("kind") if target is not None else None,
+            "target_field_changes": (
+                list(target.get("field_changes") or []) if target is not None else None
+            ),
+            "step_change_kinds": {
+                str(change.get("step_ref") or change.get("step_name")): change.get(
+                    "kind"
+                )
+                for change in typed_changes
+            },
+            "unrelated_step_count": len(unrelated),
+            "unrelated_steps_unchanged": (
+                isinstance(target_ref, str)
+                and all(change.get("kind") == "unchanged" for change in unrelated)
+            ),
+        }
+    )
+    return evidence
+
+
+def _run_case_session(
+    *,
+    case: BattleCase,
+    config: ApiConfig,
+    args: argparse.Namespace,
+    existing_session_id: str | None,
+    artifact_output_dir: Path,
+    cases_path: Path | None,
+    provisioned_fixtures: Mapping[str, object] | None,
+    seeded_flow: SeededFlow | None,
+) -> JsonObject:
     started_at = time.strftime("%Y%m%dT%H%M%S")
     if existing_session_id:
         session_id = existing_session_id
@@ -3504,6 +3900,7 @@ def _run_case(
         initial_session = _create_session(
             config=config,
             space_id=args.space_id,
+            flow_id=seeded_flow.flow_id if seeded_flow is not None else None,
         )
         session_id = _required_string(initial_session, "session_id")
         print(f"created session {session_id}")
@@ -3527,6 +3924,11 @@ def _run_case(
         file_ids=file_ids,
         ui_language=args.ui_language,
         question_answer=None,
+        edit_context=(
+            {"kind": "saved_flow_step", "flow_step_id": seeded_flow.target_step_id}
+            if seeded_flow is not None
+            else None
+        ),
     )
     interactions.append(first)
 
@@ -3685,7 +4087,7 @@ def _run_case(
         expected=case.expected or {},
     )
 
-    return {
+    bundle: JsonObject = {
         "artifact_mode": "live_execution",
         "case_identity": _case_identity(case),
         "live_execution_provenance": live_execution_provenance,
@@ -3731,6 +4133,12 @@ def _run_case(
         "runtime_metrics": _runtime_metrics_from_quality_report(quality_report),
         "quality_report": quality_report,
     }
+    if case.edit is not None and seeded_flow is not None:
+        bundle["case"]["edit"] = _edit_contract(case.edit)
+        bundle["edit_evidence"] = _saved_step_edit_evidence(
+            plan=plan, seeded_flow=seeded_flow
+        )
+    return bundle
 
 
 def _apply_execute_and_cleanup_flow(
@@ -4052,6 +4460,7 @@ def _send_and_fetch(
     file_ids: tuple[str, ...],
     ui_language: str,
     question_answer: JsonObject | None,
+    edit_context: JsonObject | None = None,
 ) -> JsonObject:
     client_turn_id = str(uuid4())
     payload: JsonObject = {
@@ -4062,6 +4471,8 @@ def _send_and_fetch(
         "question_answer": question_answer,
         "ui_language": ui_language,
     }
+    if edit_context is not None:
+        payload["edit_context"] = edit_context
     try:
         events = list(
             _send_message_stream(
@@ -6378,16 +6789,26 @@ def _create_session(
     *,
     config: ApiConfig,
     space_id: str,
+    flow_id: str | None = None,
 ) -> JsonObject:
+    payload: JsonObject = {
+        "target_kind": "create",
+        "space_id": space_id,
+        "force_new": False,
+    }
+    if flow_id is not None:
+        # One fresh edit session per observation on the seeded flow.
+        payload = {
+            "target_kind": "edit",
+            "space_id": space_id,
+            "flow_id": flow_id,
+            "force_new": True,
+        }
     return _request_json(
         config=config,
         method="POST",
         path="/flows/ai-builder/sessions",
-        payload={
-            "target_kind": "create",
-            "space_id": space_id,
-            "force_new": False,
-        },
+        payload=payload,
     )
 
 

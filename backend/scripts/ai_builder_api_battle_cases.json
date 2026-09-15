@@ -11106,6 +11106,22 @@
         ]
       },
       "cohorts": ["document", "long_context", "pdf"]
+    },
+    {
+      "id": "edit_chain_10_instruction",
+      "prompt": "Ändra instruktionen i det här steget så att den alltid listar vilka uppgifter som saknas i ansökan, som en punktlista.",
+      "complexity": "saved_step_edit",
+      "domain": "municipal_permit",
+      "cohorts": ["edit_chain"],
+      "edit": {"seed_flow_fixture": "edit_chain_10.json", "target_step_order": 3}
+    },
+    {
+      "id": "edit_chain_30_instruction",
+      "prompt": "Ändra instruktionen i det här steget så att den alltid listar vilka uppgifter som saknas i ansökan, som en punktlista.",
+      "complexity": "saved_step_edit",
+      "domain": "municipal_permit",
+      "cohorts": ["edit_chain"],
+      "edit": {"seed_flow_fixture": "edit_chain_30.json", "target_step_order": 3}
     }
   ]
 }
