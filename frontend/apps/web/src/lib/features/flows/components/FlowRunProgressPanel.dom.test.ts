@@ -105,28 +105,6 @@ describe("FlowRunProgressPanel", () => {
     expect(panel().textContent).not.toContain(m.flow_run_status_running());
   });
 
-  it("shows the output a manual refresh fetched even when a later poll applied first", async () => {
-    const [g0, g1, g2] = [deferred<FlowGraph>(), deferred<FlowGraph>(), deferred<FlowGraph>()];
-    const [s0, s1] = [deferred<FlowRunStep[]>(), deferred<FlowRunStep[]>()];
-    const eneo = makeEneo([g0, g1, g2], [s0, s1]);
-    const { rerender } = await renderRunning(eneo, g0, s0);
-
-    // Manual refresh: its graph answers, its audited step list is slow.
-    await fireEvent.click(screen.getByRole("button", { name: m.flow_run_progress_refresh() }));
-    g1.resolve(graphWith("completed"));
-    // A poll started after it applies first: completed, outputs not read yet.
-    await rerender(props(eneo, 1));
-    g2.resolve(graphWith("completed"));
-    await waitFor(() => expect(panel().textContent).toContain(m.flow_run_progress_details_stale()));
-
-    // The slow step list arrives with the output: it is the newest detail
-    // read and must not be discarded because a status poll came later.
-    s1.resolve(stepsWith("completed", "Klart"));
-    await waitFor(() => expect(panel().textContent).toContain("Klart"));
-    expect(panel().textContent).not.toContain(m.flow_run_progress_details_stale());
-    expect(panel().textContent).toContain(m.flow_run_status_completed());
-  });
-
   it("trusts the audited step list over an older graph inside one refresh", async () => {
     const [g0, g1] = [deferred<FlowGraph>(), deferred<FlowGraph>()];
     const [s0, s1] = [deferred<FlowRunStep[]>(), deferred<FlowRunStep[]>()];
@@ -140,6 +118,91 @@ describe("FlowRunProgressPanel", () => {
     await waitFor(() => expect(panel().textContent).toContain("Klart"));
     expect(panel().textContent).toContain(m.flow_run_status_completed());
     expect(panel().textContent).not.toContain(m.flow_run_progress_details_stale());
+  });
+
+  it("does not start a status poll while a detail read is in flight", async () => {
+    const [g0, g1, g2] = [deferred<FlowGraph>(), deferred<FlowGraph>(), deferred<FlowGraph>()];
+    const [s0, s1] = [deferred<FlowRunStep[]>(), deferred<FlowRunStep[]>()];
+    const eneo = makeEneo([g0, g1, g2], [s0, s1]);
+    const { rerender } = await renderRunning(eneo, g0, s0);
+    const graph = eneo.flows.graph as unknown as { mock: { calls: unknown[] } };
+
+    await fireEvent.click(screen.getByRole("button", { name: m.flow_run_progress_refresh() }));
+    expect(graph.mock.calls).toHaveLength(2);
+    // A poll tick during the refresh is skipped, not queued.
+    await rerender(props(eneo, 1));
+    await flush();
+    expect(graph.mock.calls).toHaveLength(2);
+
+    g1.resolve(graphWith("completed"));
+    s1.resolve(stepsWith("completed", "Klart"));
+    await waitFor(() => expect(panel().textContent).toContain("Klart"));
+
+    // Polling resumes on the next tick.
+    await rerender(props(eneo, 2));
+    await waitFor(() => expect(graph.mock.calls).toHaveLength(3));
+    g2.resolve(graphWith("completed"));
+    await flush();
+    expect(panel().textContent).toContain("Klart");
+  });
+
+  it("drops a poll that started before a refresh, whichever answer arrives first", async () => {
+    for (const pollAnswersFirst of [true, false]) {
+      cleanup();
+      const [g0, g1, g2] = [deferred<FlowGraph>(), deferred<FlowGraph>(), deferred<FlowGraph>()];
+      const [s0, s1] = [deferred<FlowRunStep[]>(), deferred<FlowRunStep[]>()];
+      const eneo = makeEneo([g0, g1, g2], [s0, s1]);
+      const { rerender } = await renderRunning(eneo, g0, s0);
+
+      // The poll starts first and will say "running"; the refresh started
+      // after it sees the step finish.
+      await rerender(props(eneo, 1));
+      await fireEvent.click(screen.getByRole("button", { name: m.flow_run_progress_refresh() }));
+      if (pollAnswersFirst) {
+        g1.resolve(graphWith("running"));
+        await flush();
+      }
+      g2.resolve(graphWith("completed"));
+      s1.resolve(stepsWith("completed", "Klart"));
+      await waitFor(() => expect(panel().textContent).toContain("Klart"));
+      if (!pollAnswersFirst) {
+        g1.resolve(graphWith("running"));
+        await flush();
+      }
+
+      expect(panel().textContent).toContain("Klart");
+      expect(panel().textContent).toContain(m.flow_run_status_completed());
+      expect(panel().textContent).not.toContain(m.flow_run_progress_details_stale());
+      expect(panel().textContent).not.toContain(m.flow_run_status_running());
+    }
+  });
+
+  it("ignores a superseded initial load's failure when a refresh already replaced it", async () => {
+    const [g0, g1] = [deferred<FlowGraph>(), deferred<FlowGraph>()];
+    const [s0, s1] = [deferred<FlowRunStep[]>(), deferred<FlowRunStep[]>()];
+    const eneo = makeEneo([g0, g1], [s0, s1]);
+    // Reopened with a cached snapshot: the panel shows it (and the refresh
+    // button) while the initial read is still out.
+    render(FlowRunProgressPanel, {
+      props: {
+        ...props(eneo, 0),
+        initialSnapshot: {
+          steps: [{ stepOrder: 1, label: "Summarize", status: "running", resultFiles: [] }]
+        }
+      }
+    });
+    await waitFor(() => expect(panel().textContent).toContain(m.flow_run_status_running()));
+
+    await fireEvent.click(screen.getByRole("button", { name: m.flow_run_progress_refresh() }));
+    g1.resolve(graphWith("completed"));
+    s1.resolve(stepsWith("completed", "Klart"));
+    await waitFor(() => expect(panel().textContent).toContain("Klart"));
+
+    g0.reject(new Error("gateway timeout"));
+    s0.resolve(stepsWith("running"));
+    await flush();
+    expect(screen.queryByText(m.flow_run_progress_load_failed())).toBeNull();
+    expect(panel().textContent).toContain("Klart");
   });
 
   it("says when a background refresh failed and clears it once one succeeds", async () => {

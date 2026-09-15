@@ -46,12 +46,15 @@
   // "Uppdatera nu") carries the audited step list and is the authority for
   // what a step produced. A STATUS read (each list poll) carries only the
   // run-pinned graph and overlays fresher statuses on the last detail read.
-  // A response is dropped when a read of its kind that started later has
-  // already been applied, or (for a status read) when a detail read that
-  // started later has been applied: that read's graph is at least as new.
+  // Start order is the only freshness the panel can know, so it keeps the
+  // two kinds from overlapping: no status read starts while a detail read
+  // is in flight, a status read that started earlier is superseded once
+  // the detail read applies, and a detail read is dropped only when a
+  // later detail read already applied.
   let issuedReads = 0;
   let appliedDetailRead = 0;
   let appliedStatusRead = 0;
+  let detailReadsInFlight = 0;
   let detail: { graph: FlowGraph | null; steps: FlowRunStep[] } = { graph: null, steps: [] };
   let statusGraph: FlowGraph | null = null;
 
@@ -69,9 +72,9 @@
     if (read < appliedDetailRead) return false;
     appliedDetailRead = read;
     detail = next;
-    // A status read that started after this one still overlays it; older
-    // overlays are superseded by the detail read's own graph.
-    if (appliedStatusRead < read) statusGraph = null;
+    // Polls paused while this read was in flight, so every overlay is older
+    // than what the audited list just said.
+    statusGraph = null;
     publish();
     return true;
   }
@@ -94,7 +97,7 @@
   // since the outputs were read leaves that step's details marked stale.
   let refreshingStatuses = false;
   async function refreshStepStatusesFromGraph() {
-    if (refreshingStatuses || loading) return;
+    if (refreshingStatuses || loading || detailReadsInFlight > 0) return;
     refreshingStatuses = true;
     const read = ++issuedReads;
     try {
@@ -120,13 +123,19 @@
     loading = snapshot.steps.length === 0;
     loadError = null;
     const read = ++issuedReads;
+    detailReadsInFlight += 1;
     try {
       const [graph, steps] = await Promise.all([fetchGraphSnapshot(), fetchStepStatuses()]);
       applyDetailRead(read, { graph, steps });
     } catch (error) {
-      console.error("Failed to load live run progress", error);
-      loadError = m.flow_run_progress_load_failed();
+      // A refresh the user started meanwhile may already have replaced this
+      // read; its failure then says nothing about what is on screen.
+      if (read >= appliedDetailRead) {
+        console.error("Failed to load live run progress", error);
+        loadError = m.flow_run_progress_load_failed();
+      }
     } finally {
+      detailReadsInFlight -= 1;
       loading = false;
     }
   }
@@ -135,6 +144,7 @@
     if (refreshing) return;
     refreshing = true;
     const read = ++issuedReads;
+    detailReadsInFlight += 1;
     try {
       const [graph, steps] = await Promise.all([fetchGraphSnapshot(), fetchStepStatuses()]);
       if (applyDetailRead(read, { graph, steps })) refreshFailed = false;
@@ -144,6 +154,7 @@
         refreshFailed = true;
       }
     } finally {
+      detailReadsInFlight -= 1;
       refreshing = false;
     }
   }
