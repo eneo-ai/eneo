@@ -39,7 +39,10 @@ from eneo.flows.input_binding_contract_rules import describe_input_bindings
 if TYPE_CHECKING:
     # The packet lives in the review module, which imports this one; the
     # review module rebuilds `FlowReviewSample` once the packet class exists.
-    from eneo.flows.ai_builder.ai_builder_flow_review import FlowReviewPacket
+    from eneo.flows.ai_builder.ai_builder_flow_review import (
+        FlowReviewPacket,
+        FlowReviewRunAdmission,
+    )
 
 SAMPLE_COMPLETED_RUNS = 2
 SAMPLE_FAILED_RUNS = 1
@@ -129,6 +132,32 @@ def select_sample_run_ids(packet: "FlowReviewPacket") -> list[UUID]:
     if failed:
         return completed[:SAMPLE_COMPLETED_RUNS] + failed[:SAMPLE_FAILED_RUNS]
     return completed[: SAMPLE_COMPLETED_RUNS + SAMPLE_FAILED_RUNS]
+
+
+_ADMISSION_NOTES_SV: dict[str, str] = {
+    "withheld_usage_not_measured": (
+        "tokenandel utelämnad, minst ett steg saknar kvitto från leverantören"
+    ),
+    "withheld_timing_missing": (
+        "tidsandel utelämnad, minst ett steg saknar tidsstämplar"
+    ),
+    "withheld_lineage_untracked": (
+        "indataspårning saknas, användning av utdata inte bedömd"
+    ),
+}
+
+
+def admission_note_sv(item: FlowReviewRunAdmission | None) -> str | None:
+    """What a run could not prove, for a model reading it; None when nothing
+    was withheld or the run has no admission (it is outside the cohort)."""
+    if item is None:
+        return None
+    notes = [
+        _ADMISSION_NOTES_SV[value]
+        for value in (item.token_share, item.latency_share, item.consumption)
+        if value in _ADMISSION_NOTES_SV
+    ]
+    return "; ".join(notes) or None
 
 
 def structural_steps(steps: list[RuntimeStep]) -> list[ReviewSampleStep]:

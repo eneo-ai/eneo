@@ -43,6 +43,7 @@ from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
     FlowReviewSample,
     ReviewPromptGroups,
     ReviewSampleExcerpt,
+    admission_note_sv,
     fit_sample_excerpts,
     quoted_excerpt,
     readable_prompt_groups,
@@ -239,8 +240,13 @@ def render_review_sample(
             lines.append(_render_sample_excerpt(sample.excerpts[indices[0]], sources))
         lines.append("")
     lines.append("### Körningar")
+    admission_by_run = {item.run_id: item for item in sample.packet.cohort.admission}
     for run in sample.runs:
-        lines.append(f"#### run{run_index_by_id[run.run_id]} ({run.status})")
+        note = admission_note_sv(admission_by_run.get(run.run_id))
+        lines.append(
+            f"#### run{run_index_by_id[run.run_id]} ({run.status})"
+            + (f" — {note}" if note is not None else "")
+        )
         for index, excerpt in enumerate(sample.excerpts):
             if index in shared_indices or excerpt.run_id != run.run_id:
                 continue
@@ -466,8 +472,7 @@ class _SampleIndex:
                 item.run_id
                 for item in sample.packet.cohort.admission
                 if item.status == "completed"
-            )
-            | frozenset(sample.packet.cohort.completed_run_ids),
+            ),
         )
 
 
@@ -557,13 +562,17 @@ def _parse_suggestion(
             return "drift_claim_without_output_source"
         if output != "included":
             return "drift_claim_cites_incomplete_output"
-    if kind in OPTIMIZATION_KINDS and not any(
-        source.run_id in index.completed_run_ids for source in sources
-    ):
+    if kind in OPTIMIZATION_KINDS:
         # A failed run is evidence for what failed. A claim about what a
-        # working flow does twice or does not use needs at least one run that
-        # completed; a quote from a failed run cannot carry it alone.
-        return "optimization_claim_cites_only_failed_runs"
+        # working flow does twice or does not use is argued from runs that
+        # completed, and from what those runs show of the steps it names: a
+        # quote of some other step proves nothing about them. The source
+        # limit is below the step limit, so one named step shown is the
+        # floor, not every one.
+        if any(source.run_id not in index.completed_run_ids for source in sources):
+            return "optimization_claim_cites_failed_run"
+        if not any(source.step_order in steps for source in sources):
+            return "optimization_claim_sources_outside_named_steps"
     return FlowReviewSuggestion(
         kind=cast(FlowReviewSuggestionKind, kind),
         step_orders=sorted(set(steps)),

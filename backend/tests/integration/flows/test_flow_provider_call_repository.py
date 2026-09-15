@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import wave
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,6 +15,7 @@ from eneo.database.database import sessionmanager
 from eneo.database.tables.flow_tables import (
     FlowProviderCalls,
     FlowStepAttemptResolvedInputs,
+    FlowStepResults,
 )
 from eneo.database.tables.token_usage_table import ProviderTokenUsages
 from eneo.flows.domain.flow import (
@@ -1386,7 +1387,9 @@ async def test_step_usage_receipts_measure_only_provider_reported_completed_call
 ):
     """The review's per-step receipt: completed provider-reported calls count,
     a rejected call contributes nothing, an estimated count is not a
-    measurement, an unresolved call withholds, and another tenant sees nothing."""
+    measurement, only the current attempt's calls are read once the step is
+    retried, an unresolved call withholds on its own, and another tenant sees
+    nothing."""
     async with db_container() as container:
         session = container.session()
         context = await _create_started_attempt(
@@ -1459,8 +1462,67 @@ async def test_step_usage_receipts_measure_only_provider_reported_completed_call
         assert with_estimate.provider_reported is False
         assert with_estimate.measured is False
 
+        # A retry: the second attempt records one clean call, but the step's
+        # result still points at the first attempt, so nothing changes...
+        run_repo = FlowRunRepository(session)
+        second = await run_repo.create_or_get_attempt_started(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            step_id=context.step_id,
+            step_order=1,
+            attempt_no=2,
+            dispatch_task_id="provider-call-lifecycle-test-retry",
+        )
+        retry = replace(context, attempt_id=second.id, attempt_no=2)
+        await _activate_resolved_inputs(
+            repo=run_repo,
+            context=retry,
+            aggregate=FlowResolvedInputEdges(schema_version=1, edges=()),
+        )
+        retried = await _start_provider_call(
+            repo=repo, context=retry, request=request("4")
+        )
+        await repo.complete_call(
+            call_id=retried.id,
+            receipt=ProviderCallCompletion(
+                response_model="gpt-4o-mini-2026-07-01",
+                provider_response_id="retried",
+                num_tokens_input=50,
+                num_tokens_output=40,
+                input_source="provider",
+                output_source="provider",
+            ),
+        )
+        still_first = (
+            await repo.list_step_usage_receipts(
+                run_ids=[context.run_id], tenant_id=context.tenant_id
+            )
+        )[(context.run_id, context.step_id)]
+        assert still_first == with_estimate
+        # ...until the result's current attempt moves: then the first
+        # attempt's calls, tokens and estimate are history and count nothing.
+        await session.execute(
+            sa.update(FlowStepResults)
+            .where(FlowStepResults.flow_run_id == context.run_id)
+            .where(FlowStepResults.step_id == context.step_id)
+            .values(current_attempt_no=2)
+        )
+        current = (
+            await repo.list_step_usage_receipts(
+                run_ids=[context.run_id], tenant_id=context.tenant_id
+            )
+        )[(context.run_id, context.step_id)]
+        assert (current.num_tokens_input, current.num_tokens_output) == (50, 40)
+        assert current.completion_call_count == 1
+        assert current.completed_call_count == 1
+        assert current.provider_reported is True
+        assert current.measured is True
+
+        # An unresolved call withholds on its own, with every completed call
+        # provider-reported.
         unresolved = await _start_provider_call(
-            repo=repo, context=context, request=request("4")
+            repo=repo, context=retry, request=request("5")
         )
         await repo.mark_outcome_unknown(
             call_id=unresolved.id, reason=ProviderCallUnknownReason.REQUEST_TIMEOUT
@@ -1471,6 +1533,7 @@ async def test_step_usage_receipts_measure_only_provider_reported_completed_call
             )
         )[(context.run_id, context.step_id)]
         assert with_unresolved.unresolved_call_count == 1
+        assert with_unresolved.provider_reported is True
         assert with_unresolved.measured is False
 
         assert (

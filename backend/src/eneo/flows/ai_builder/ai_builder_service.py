@@ -607,20 +607,20 @@ class AIBuilderService:
             )
         try:
             if isinstance(review_context, AIBuilderSuggestionContext):
-                levels = (
-                    {
-                        run.run_id: run.evidence_classification_level
-                        for run in sample.runs
-                    }
+                runs = (
+                    sample.runs
                     if sample is not None
-                    else await self.flow_review_service.resolve_sample_run_levels(
+                    else await self.flow_review_service.resolve_sample_runs(
                         flow_id=session.flow_id,
                         run_ids=review_context.sample_run_ids,
                         definition_checksum=packet.definition_checksum,
                     )
                 )
                 return resolve_suggestion_evidence(
-                    packet, review_context, sample_run_levels=levels, sample=sample
+                    packet,
+                    review_context,
+                    runs=runs,
+                    excerpts=sample.excerpts if sample is not None else (),
                 )
             return resolve_review_evidence(packet, review_context)
         except AIBuilderBadRequestException as refusal:

@@ -19,6 +19,7 @@ from eneo.flows.ai_builder.ai_builder_flow_review import (
     FlowReviewCohort,
     FlowReviewOmittedRuns,
     FlowReviewPacket,
+    FlowReviewRunAdmission,
 )
 from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
     FlowReviewSample,
@@ -51,6 +52,16 @@ def _sample() -> FlowReviewSample:
             completed_run_ids=[run_id],
             failed_run_ids=[],
             omitted=FlowReviewOmittedRuns(),
+            admission=[
+                FlowReviewRunAdmission(
+                    run_id=run_id,
+                    status="completed",
+                    token_share="admitted",
+                    latency_share="admitted",
+                    consumption="admitted",
+                    error_facts="not_applicable",
+                )
+            ],
         ),
         facts=[],
     )

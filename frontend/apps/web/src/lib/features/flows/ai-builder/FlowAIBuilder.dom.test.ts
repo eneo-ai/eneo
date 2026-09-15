@@ -42,7 +42,8 @@ const REVIEW_PACKET = {
   cohort: {
     completed_run_ids: ["r1"],
     failed_run_ids: [],
-    omitted: { other_version: 0, not_viewable: 0, level_unknown: 0, overflow: 0 }
+    omitted: { other_version: 0, not_viewable: 0, level_unknown: 0, overflow: 0 },
+    admission: []
   },
   facts: [
     {

@@ -18269,11 +18269,8 @@ export interface components {
     };
     /** FlowReviewCohort */
     FlowReviewCohort: {
-      /**
-       * Admission
-       * @default []
-       */
-      admission?: components["schemas"]["FlowReviewRunAdmission"][];
+      /** Admission */
+      admission: components["schemas"]["FlowReviewRunAdmission"][];
       /** Completed Run Ids */
       completed_run_ids: string[];
       /** Failed Run Ids */

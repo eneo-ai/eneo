@@ -122,8 +122,7 @@ def _metric(
     """A step's metrics; by default with a provider-reported receipt of ``tokens``.
 
     ``receipt=None`` models a step whose current attempt recorded no
-    completion call; the runtime counters stay populated to prove the review
-    never measures with them.
+    completion call.
     """
     return FlowStepResultMetrics(
         flow_run_id=run_id,
@@ -131,8 +130,6 @@ def _metric(
         step_order=step.step_order,
         status=status,
         error_code=error_code,
-        num_tokens_input=tokens,
-        num_tokens_output=0,
         started_at=_T0,
         finished_at=_T0 + timedelta(seconds=seconds),
         usage_receipt=_receipt(tokens) if receipt == "reported" else receipt,
@@ -146,6 +143,12 @@ def _admission(**kwargs: Any) -> list[FlowReviewRunAdmission]:
         failed_run_ids=kwargs["failed_run_ids"],
         metrics=kwargs["metrics"],
         lineage=kwargs["lineage"],
+    )
+
+
+def _run(run_id: UUID, level: int, status: str = "completed") -> ReviewSampleRun:
+    return ReviewSampleRun(
+        run_id=run_id, status=status, evidence_classification_level=level
     )
 
 
@@ -1107,35 +1110,33 @@ def test_a_suggestion_reference_is_held_to_its_runs_and_keeps_their_floor():
             )
         ],
     )
-    evidence = resolve_suggestion_evidence(
-        packet, context, sample_run_levels={run_a: 1, run_b: 3}
-    )
+    runs = [_run(run_a, 1), _run(run_b, 3, status="failed")]
+    evidence = resolve_suggestion_evidence(packet, context, runs=runs)
     # The sampled runs decide the floor, above the packet's own level.
     assert evidence.evidence_classification_level == 3
     assert [focus.step_orders for focus in evidence.suggestions] == [[2]]
-    # Only facts about the named steps, never the completeness footnote.
+    # Only facts about the named steps; the completeness footnote travels
+    # beside them as a diagnostic, never as a finding.
     assert all(getattr(fact, "step_order", None) == 2 for fact in evidence.facts)
+    assert evidence.completeness is not None
     rendered = render_review_evidence(evidence)
     assert "- möjligt dubbelarbete i steg 2." in rendered
     assert "hypotes" in rendered
+    assert "- Underlag: 1 körningar med resultat för alla steg" in rendered
 
     # A changed definition or a run that is no longer readable is stale; an
     # identical republish under a new version number is not.
     with pytest.raises(AIBuilderBadRequestException) as stale:
         resolve_suggestion_evidence(
-            _packet(version=3, checksum="new"),
-            context,
-            sample_run_levels={run_a: 1, run_b: 3},
+            _packet(version=3, checksum="new"), context, runs=runs
         )
     assert stale.value.code == AIBuilderErrorCode.REVIEW_STALE
     republished = resolve_suggestion_evidence(
-        _packet(version=3, checksum="sum"),
-        context,
-        sample_run_levels={run_a: 1, run_b: 3},
+        _packet(version=3, checksum="sum"), context, runs=runs
     )
     assert republished.flow_version == 3 and len(republished.suggestions) == 1
     with pytest.raises(AIBuilderBadRequestException) as gone:
-        resolve_suggestion_evidence(packet, context, sample_run_levels={run_a: 1})
+        resolve_suggestion_evidence(packet, context, runs=runs[:1])
     assert gone.value.code == AIBuilderErrorCode.REVIEW_STALE
     assert gone.value.context == {"missing_run_count": 1}
 
@@ -1154,10 +1155,140 @@ def test_a_suggestion_reference_is_held_to_its_runs_and_keeps_their_floor():
                     ]
                 }
             ),
-            sample_run_levels={run_a: 1, run_b: 3},
+            runs=runs,
         )
     assert unknown.value.code == AIBuilderErrorCode.REVIEW_FINDING_UNKNOWN
     assert unknown.value.context == {"unknown_step_orders": [-7, 999]}
+
+
+def test_an_investigation_is_held_to_the_rule_the_judge_was_held_to():
+    """A failed run shows what failed; a claim about what a working flow
+    could do without needs a run that completed, and an unfinished run is
+    not evidence of anything yet. The investigation applies the same rule
+    the judge's answer was validated under, so a hand-built reference
+    cannot reach the model with weaker evidence than a judged one."""
+    from eneo.flows.ai_builder.ai_builder_flow_review import (
+        AIBuilderSuggestionContext,
+        FlowReviewSuggestionFocus,
+        resolve_suggestion_evidence,
+    )
+
+    packet = _packet(version=2, checksum="sum")
+    failed_a, failed_b, completed = uuid4(), uuid4(), uuid4()
+
+    def _context(kind: str, *run_ids: UUID) -> AIBuilderSuggestionContext:
+        return AIBuilderSuggestionContext(
+            flow_version=2,
+            definition_checksum="sum",
+            sample_run_ids=list(run_ids),
+            suggestions=[
+                FlowReviewSuggestionFocus(suggestion_kind=kind, step_orders=[1])  # type: ignore[arg-type]
+            ],
+        )
+
+    only_failed = [_run(failed_a, 1, "failed"), _run(failed_b, 1, "failed")]
+    for kind in ("duplicated_work", "step_not_useful"):
+        with pytest.raises(AIBuilderBadRequestException) as refused:
+            resolve_suggestion_evidence(
+                packet, _context(kind, failed_a, failed_b), runs=only_failed
+            )
+        assert refused.value.code == AIBuilderErrorCode.REVIEW_FINDING_UNKNOWN
+        assert refused.value.context == {"suggestion_kinds": [kind]}
+    # A missing check may well be argued from a failure alone.
+    evidence = resolve_suggestion_evidence(
+        packet, _context("missing_check", failed_a), runs=only_failed
+    )
+    assert [run.run_id for run in evidence.sample_runs] == [failed_a]
+    # A completed run outside the cohort still carries a structural claim.
+    evidence = resolve_suggestion_evidence(
+        packet,
+        _context("duplicated_work", failed_a, completed),
+        runs=[*only_failed, _run(completed, 2)],
+    )
+    assert evidence.evidence_classification_level == 2
+    assert evidence.admission == []
+    # A run that has not finished is refused whatever the kind.
+    with pytest.raises(AIBuilderBadRequestException) as unfinished:
+        resolve_suggestion_evidence(
+            packet,
+            _context("missing_check", completed),
+            runs=[_run(completed, 2, status="running")],
+        )
+    assert unfinished.value.code == AIBuilderErrorCode.REVIEW_FINDING_UNKNOWN
+    assert unfinished.value.context == {"unfinished_run_count": 1}
+
+
+def test_what_a_sampled_run_had_withheld_reaches_the_investigating_model():
+    from eneo.flows.ai_builder.ai_builder_flow_review import (
+        AIBuilderSuggestionContext,
+        FlowReviewSuggestionFocus,
+        resolve_suggestion_evidence,
+    )
+
+    s1, s2 = _step(1), _step(2)
+    measured, unmeasured = uuid4(), uuid4()
+    evidence = dict(
+        steps=[s1, s2],
+        completed_run_ids=[measured, unmeasured],
+        failed_run_ids=[],
+        metrics=[
+            _metric(measured, s1, tokens=100),
+            _metric(measured, s2, tokens=900),
+            _metric(unmeasured, s1, tokens=100),
+            _metric(unmeasured, s2, tokens=900, receipt=_receipt(900, unresolved=1)),
+        ],
+        lineage=[_lineage(r, s) for r in (measured, unmeasured) for s in (s1, s2)],
+    )
+    admission = _admission(**evidence)
+    facts = review_facts(
+        flow_id=uuid4(), definition_checksum="sum", admission=admission, **evidence
+    )
+    packet = FlowReviewPacket(
+        flow_id=uuid4(),
+        flow_version=2,
+        definition_checksum="sum",
+        generated_at=_T0,
+        evidence_classification_level=0,
+        steps=[
+            FlowReviewStep(step_id=s.step_id, step_order=s.step_order, label=None)
+            for s in (s1, s2)
+        ],
+        cohort=FlowReviewCohort(
+            completed_run_ids=[measured, unmeasured],
+            failed_run_ids=[],
+            omitted=FlowReviewOmittedRuns(),
+            admission=admission,
+        ),
+        facts=list(facts),
+    )
+    resolved = resolve_suggestion_evidence(
+        packet,
+        AIBuilderSuggestionContext(
+            flow_version=2,
+            definition_checksum="sum",
+            sample_run_ids=[measured, unmeasured],
+            suggestions=[
+                FlowReviewSuggestionFocus(
+                    suggestion_kind="step_not_useful", step_orders=[2]
+                )
+            ],
+        ),
+        runs=[_run(measured, 0), _run(unmeasured, 0)],
+    )
+    rendered = render_review_evidence(resolved)
+    # The share is qualified as the current attempt's and counts only the
+    # run whose every step had a receipt.
+    assert (
+        "steg 2: står för 90 % av körningens tokens, räknat på varje stegs "
+        "senaste försök; tidigare försök ingår inte (medel över 1 lyckade "
+        "körningar med kvitto för alla steg)." in rendered
+    )
+    assert "- Tokenandelar utelämnade för 1 lyckade körningar" in rendered
+    assert "- Körning 1:" not in rendered
+    assert (
+        "- Körning 2: tokenandel utelämnad, minst ett steg saknar kvitto "
+        "från leverantören." in rendered
+    )
 
 
 def test_the_investigation_text_follows_the_request_language():
@@ -1282,7 +1413,7 @@ def test_suggestion_references_persist_with_the_resolved_level_and_parse_back():
 
 
 @pytest.mark.asyncio
-async def test_sample_run_levels_skip_runs_that_are_gone_or_not_viewable(user):
+async def test_sample_runs_skip_runs_that_are_gone_or_not_viewable(user):
     from eneo.main.exceptions import NotFoundException
 
     flow_id = uuid4()
@@ -1297,6 +1428,7 @@ async def test_sample_run_levels_skip_runs_that_are_gone_or_not_viewable(user):
             raise UnauthorizedException("no")
         return SimpleNamespace(
             id=run_id,
+            status=FlowRunStatus.COMPLETED,
             # The viewable run ran the published version; the republished
             # one ran an older version of the same definition.
             flow_version={republished: 1, other_definition: 0}.get(run_id, 3),
@@ -1314,12 +1446,12 @@ async def test_sample_run_levels_skip_runs_that_are_gone_or_not_viewable(user):
         ),
         compatible_versions={3, 1},
     )
-    levels = await service.resolve_sample_run_levels(
+    runs = await service.resolve_sample_runs(
         flow_id=flow_id,
         run_ids=[viewable, gone, denied, unlevelled, viewable, republished],
         definition_checksum="sum-3",
     )
-    assert levels == {viewable: 2, republished: 2}
+    assert runs == [_run(viewable, 2), _run(republished, 2)]
     service.flow_version_repo.versions_with_checksum.assert_awaited_once_with(
         flow_id=flow_id,
         tenant_id=user.tenant_id,
@@ -1328,7 +1460,7 @@ async def test_sample_run_levels_skip_runs_that_are_gone_or_not_viewable(user):
     )
     # A run of another definition is not quietly left out: it is refused.
     with pytest.raises(AIBuilderBadRequestException) as refused:
-        await service.resolve_sample_run_levels(
+        await service.resolve_sample_runs(
             flow_id=flow_id,
             run_ids=[viewable, other_definition],
             definition_checksum="sum-3",
@@ -1407,7 +1539,7 @@ async def test_an_explicit_suggestion_reference_is_refused_when_stale_but_an_inh
     packet = _packet(version=3, checksum="new")
     service, review = _builder_service(user, packet)
     run_id = uuid4()
-    review.resolve_sample_run_levels = AsyncMock(return_value={})
+    review.resolve_sample_runs = AsyncMock(return_value=[])
     stale = AIBuilderSuggestionContext(
         flow_version=3,
         definition_checksum="new",
@@ -1430,7 +1562,7 @@ async def test_an_explicit_suggestion_reference_is_refused_when_stale_but_an_inh
         )
         is None
     )
-    review.resolve_sample_run_levels = AsyncMock(return_value={run_id: 2})
+    review.resolve_sample_runs = AsyncMock(return_value=[_run(run_id, 2)])
     evidence = await service._resolve_review_evidence(
         session=_edit_session(user, review_metadata=None), review_context=stale
     )
@@ -1926,7 +2058,7 @@ async def test_without_an_audit_hook_an_investigation_reads_no_run_content(user)
     review.build_review_sample = AsyncMock(
         side_effect=AssertionError("no read without an audit")
     )
-    review.resolve_sample_run_levels = AsyncMock(return_value={run_id: 2})
+    review.resolve_sample_runs = AsyncMock(return_value=[_run(run_id, 2)])
 
     evidence = await service._resolve_review_evidence(
         session=_edit_session(user, review_metadata=None),

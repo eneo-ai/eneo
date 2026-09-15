@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -11,6 +11,7 @@ from eneo.flows.ai_builder.ai_builder_flow_review import (
     FlowReviewEvidence,
     FlowReviewOmittedRuns,
     FlowReviewPacket,
+    FlowReviewRunAdmission,
     StepShareFact,
     render_review_evidence,
 )
@@ -32,6 +33,18 @@ from eneo.flows.ai_builder.ai_builder_flow_review_suggestions import (
 from eneo.tokens.token_utils import measure_provider_input_reserve
 
 
+def _admitted(run_id: UUID, status: str) -> FlowReviewRunAdmission:
+    """A run with nothing withheld: the packet's own decision for a fixture."""
+    return FlowReviewRunAdmission(
+        run_id=run_id,
+        status=status,  # type: ignore[arg-type]
+        token_share="admitted" if status == "completed" else "not_applicable",
+        latency_share="admitted" if status == "completed" else "not_applicable",
+        consumption="admitted" if status == "completed" else "not_applicable",
+        error_facts="admitted" if status == "failed" else "not_applicable",
+    )
+
+
 def _sample() -> FlowReviewSample:
     run_a, run_b = uuid4(), uuid4()
     step_id = uuid4()
@@ -46,6 +59,7 @@ def _sample() -> FlowReviewSample:
             completed_run_ids=[run_a],
             failed_run_ids=[run_b],
             omitted=FlowReviewOmittedRuns(),
+            admission=[_admitted(run_a, "completed"), _admitted(run_b, "failed")],
         ),
         facts=[
             StepShareFact(
@@ -119,6 +133,32 @@ def _sample() -> FlowReviewSample:
 
 def _answer(*suggestions: dict) -> str:
     return json.dumps({"suggestions": list(suggestions)}, ensure_ascii=False)
+
+
+def test_prompt_tells_the_judge_what_each_run_had_withheld():
+    sample = _sample()
+    run_a = sample.packet.cohort.completed_run_ids[0]
+    withheld = sample.packet.model_copy(
+        update={
+            "cohort": sample.packet.cohort.model_copy(
+                update={
+                    "admission": [
+                        _admitted(run_a, "completed").model_copy(
+                            update={"token_share": "withheld_usage_not_measured"}
+                        ),
+                        *sample.packet.cohort.admission[1:],
+                    ]
+                }
+            )
+        }
+    )
+    rendered = render_review_sample(sample.model_copy(update={"packet": withheld}))
+    assert (
+        "#### run1 (completed) — tokenandel utelämnad, minst ett steg saknar "
+        "kvitto från leverantören" in rendered
+    )
+    assert "#### run2 (failed)\n" in rendered
+    assert "#### run1 (completed)\n" in render_review_sample(sample)
 
 
 def test_prompt_names_every_excerpt_by_source_id_and_marks_what_cannot_be_read():
@@ -849,7 +889,31 @@ def test_structural_claims_need_a_completed_run_but_a_missing_check_may_cite_a_f
         ],
     )
     assert parse_review_suggestions(_answer(only_failed), sample=sample).problems == (
-        "suggestion_1:optimization_claim_cites_only_failed_runs",
+        "suggestion_1:optimization_claim_cites_failed_run",
+    )
+    # One completed-run quote beside it does not make the failed run's
+    # material evidence of what a working flow does.
+    mixed = dict(
+        only_failed,
+        sources=[
+            *only_failed["sources"],
+            {"source_id": f"run{completed_index}.step2.prompt", "quote": "Sammanfatta"},
+        ],
+    )
+    assert parse_review_suggestions(_answer(mixed), sample=sample).problems == (
+        "suggestion_1:optimization_claim_cites_failed_run",
+    )
+    # A working run's quote of some other step says nothing about the steps
+    # the claim names.
+    unrelated = dict(
+        only_failed,
+        step_orders=[1],
+        sources=[
+            {"source_id": f"run{completed_index}.step2.prompt", "quote": "Sammanfatta"},
+        ],
+    )
+    assert parse_review_suggestions(_answer(unrelated), sample=sample).problems == (
+        "suggestion_1:optimization_claim_sources_outside_named_steps",
     )
     with_completed = dict(
         only_failed,

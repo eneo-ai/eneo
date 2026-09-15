@@ -19,6 +19,7 @@ from eneo.flows.ai_builder.ai_builder_flow_review import (
     FlowReviewCohort,
     FlowReviewOmittedRuns,
     FlowReviewPacket,
+    FlowReviewRunAdmission,
 )
 from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
     FlowReviewSample,
@@ -52,6 +53,18 @@ def _step(order: int, **overrides) -> RuntimeStep:
     return RuntimeStep(**fields)
 
 
+def _admitted(run_id: UUID, status: str) -> FlowReviewRunAdmission:
+    """A run with nothing withheld: the packet's own decision for a fixture."""
+    return FlowReviewRunAdmission(
+        run_id=run_id,
+        status=status,  # type: ignore[arg-type]
+        token_share="admitted" if status == "completed" else "not_applicable",
+        latency_share="admitted" if status == "completed" else "not_applicable",
+        consumption="admitted" if status == "completed" else "not_applicable",
+        error_facts="admitted" if status == "failed" else "not_applicable",
+    )
+
+
 def _packet(
     *, completed: list[UUID], failed: list[UUID], level: int = 1
 ) -> FlowReviewPacket:
@@ -66,6 +79,10 @@ def _packet(
             completed_run_ids=completed,
             failed_run_ids=failed,
             omitted=FlowReviewOmittedRuns(),
+            admission=[
+                *(_admitted(run_id, "completed") for run_id in completed),
+                *(_admitted(run_id, "failed") for run_id in failed),
+            ],
         ),
         facts=[],
     )
@@ -137,6 +154,7 @@ def _sample_with(excerpts: list[ReviewSampleExcerpt]) -> FlowReviewSample:
             completed_run_ids=list(run_ids),
             failed_run_ids=[],
             omitted=FlowReviewOmittedRuns(),
+            admission=[_admitted(run_id, "completed") for run_id in run_ids],
         ),
         facts=[],
     )

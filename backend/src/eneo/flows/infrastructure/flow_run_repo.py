@@ -231,10 +231,6 @@ class FlowStepResultMetrics:
     step_order: int
     status: str
     error_code: str | None
-    # The runtime's own counters, which fall back to local tokenization when
-    # the provider reported nothing; display them, never measure with them.
-    num_tokens_input: int | None
-    num_tokens_output: int | None
     started_at: datetime | None
     finished_at: datetime | None
     # Provider receipts of the current attempt; None when it recorded no
@@ -1144,7 +1140,7 @@ class FlowRunRepository:
     async def list_step_result_metrics(
         self, *, tenant_id: UUID, run_ids: Sequence[UUID]
     ) -> list[FlowStepResultMetrics]:
-        """Status, error code, token and timing columns per step for many runs.
+        """Status, error code, timing and provider receipt per step for many runs.
 
         One statement and no payload columns: a review over a cohort of runs
         must not pull step inputs and outputs it never reads.
@@ -1159,8 +1155,6 @@ class FlowRunRepository:
                     FlowStepResults.step_order,
                     FlowStepResults.status,
                     FlowStepResults.error_code,
-                    FlowStepResults.num_tokens_input,
-                    FlowStepResults.num_tokens_output,
                     FlowStepResults.started_at,
                     FlowStepResults.finished_at,
                 )
@@ -1179,8 +1173,6 @@ class FlowRunRepository:
                 step_order=row.step_order,
                 status=row.status,
                 error_code=row.error_code,
-                num_tokens_input=row.num_tokens_input,
-                num_tokens_output=row.num_tokens_output,
                 started_at=row.started_at,
                 finished_at=row.finished_at,
                 usage_receipt=receipts.get((row.flow_run_id, row.step_id)),

@@ -171,15 +171,15 @@ async def test_an_identical_republish_keeps_the_cohort_and_a_changed_one_exclude
                 )
             ],
         )
-        levels = await review.resolve_sample_run_levels(
+        runs = await review.resolve_sample_runs(
             flow_id=flow_id,
             run_ids=[run_id],
             definition_checksum=windowed.definition_checksum,
         )
-        assert levels == {run_id: 0}
-        evidence = resolve_suggestion_evidence(
-            windowed, context, sample_run_levels=levels
-        )
+        assert [
+            (run.run_id, run.status, run.evidence_classification_level) for run in runs
+        ] == [(run_id, "completed", 0)]
+        evidence = resolve_suggestion_evidence(windowed, context, runs=runs)
         assert evidence.flow_version == 2
         assert [focus.step_orders for focus in evidence.suggestions] == [[1]]
 
@@ -197,10 +197,10 @@ async def test_an_identical_republish_keeps_the_cohort_and_a_changed_one_exclude
         assert changed.cohort.completed_run_ids == []
         assert changed.cohort.omitted.other_version == 2
         with pytest.raises(AIBuilderBadRequestException) as stale_reference:
-            resolve_suggestion_evidence(changed, context, sample_run_levels=levels)
+            resolve_suggestion_evidence(changed, context, runs=runs)
         assert stale_reference.value.code == AIBuilderErrorCode.REVIEW_STALE
         with pytest.raises(AIBuilderBadRequestException) as stale_run:
-            await review.resolve_sample_run_levels(
+            await review.resolve_sample_runs(
                 flow_id=flow_id,
                 run_ids=[run_id],
                 definition_checksum=changed.definition_checksum,

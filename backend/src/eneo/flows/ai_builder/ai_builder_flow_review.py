@@ -26,7 +26,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from collections import Counter, defaultdict
-from collections.abc import Awaitable, Callable, Collection, Mapping
+from collections.abc import Awaitable, Callable, Collection
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Annotated, Literal, Protocol, Sequence
 from uuid import UUID
@@ -43,6 +43,7 @@ from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
     ReviewPromptGroups,
     ReviewSampleExcerpt,
     ReviewSampleRun,
+    admission_note_sv,
     excerpts_for_run,
     fit_excerpts,
     quoted_excerpt,
@@ -54,6 +55,7 @@ from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
 from eneo.flows.ai_builder.ai_builder_flow_review_suggestions import (
     MAX_SUGGESTION_STEPS,
     MAX_SUGGESTIONS,
+    OPTIMIZATION_KINDS,
     FlowReviewSuggestionKind,
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import EditOperationPermissions
@@ -154,7 +156,10 @@ class FlowReviewCohort(BaseModel):
     completed_run_ids: list[UUID]
     failed_run_ids: list[UUID]
     omitted: FlowReviewOmittedRuns
-    admission: list[FlowReviewRunAdmission] = []
+    # One entry per run in the two lists: the one decision of what each
+    # run may prove, read by the reducers, both model prompts and the
+    # validation of what a suggestion may cite.
+    admission: list[FlowReviewRunAdmission]
 
 
 class _FlowReviewFact(BaseModel):
@@ -347,6 +352,10 @@ class FlowReviewEvidence(BaseModel):
     suggestions: list[FlowReviewSuggestionFocus] = []
     sample_runs: list[ReviewSampleRun] = []
     excerpts: list[ReviewSampleExcerpt] = []
+    # Diagnostics of the evidence, never something to act on: what the
+    # cohort could not prove, and what each sampled run had withheld.
+    completeness: EvidenceCompletenessFact | None = None
+    admission: list[FlowReviewRunAdmission] = []
 
 
 _EXCERPT_FIELD_LABELS_SV: dict[str, str] = {
@@ -467,34 +476,70 @@ def _require_run_of_definition(
         )
 
 
+TERMINAL_RUN_STATUSES: frozenset[str] = frozenset({"completed", "failed"})
+
+
+def _completeness(packet: FlowReviewPacket) -> EvidenceCompletenessFact | None:
+    return next(
+        (fact for fact in packet.facts if isinstance(fact, EvidenceCompletenessFact)),
+        None,
+    )
+
+
 def resolve_suggestion_evidence(
     packet: FlowReviewPacket,
     context: AIBuilderSuggestionContext,
     *,
-    sample_run_levels: Mapping[UUID, int],
-    sample: FlowReviewSample | None = None,
+    runs: Sequence[ReviewSampleRun],
+    excerpts: Sequence[ReviewSampleExcerpt] = (),
 ) -> FlowReviewEvidence:
     """The packet facts about the suggestion's steps, held to the sampled runs.
 
-    The floor is the packet's raised to the sampled runs' persisted levels:
-    the runs the model read decide it, whether or not they are still in the
-    cohort. A changed definition is refused like any other stale review.
+    ``runs`` are the named runs as they are readable now, whether or not
+    they are still in the cohort: their persisted levels raise the floor
+    above the packet's, and their statuses hold the suggestions to the rule
+    the judge's answer was held to. A run that has not finished is not
+    evidence of anything yet, and a claim about what a working flow could
+    do without needs a run that completed; a failed run only shows what
+    failed. A changed definition is refused like any other stale review.
 
-    ``sample`` is the fresh read of those same runs. The suggestions were
+    ``excerpts`` are the fresh read of those same runs. The suggestions were
     judged on an earlier read, so this one is what the turn actually holds:
     the excerpts for the named steps travel with the facts, and the turn
     tests the hypotheses against them rather than restating them.
     """
 
     require_same_definition(packet, context)
-    missing = [
-        run_id for run_id in context.sample_run_ids if run_id not in sample_run_levels
-    ]
+    runs_by_id = {run.run_id: run for run in runs}
+    missing = [run_id for run_id in context.sample_run_ids if run_id not in runs_by_id]
     if missing:
         raise AIBuilderBadRequestException(
             "A run this suggestion was judged on is no longer readable.",
             code=AIBuilderErrorCode.REVIEW_STALE,
             context={"missing_run_count": len(missing)},
+        )
+    named_runs = [runs_by_id[run_id] for run_id in context.sample_run_ids]
+    unfinished = sum(run.status not in TERMINAL_RUN_STATUSES for run in named_runs)
+    if unfinished:
+        raise AIBuilderBadRequestException(
+            "A run this suggestion names has not finished; the review reads "
+            "finished runs only.",
+            code=AIBuilderErrorCode.REVIEW_FINDING_UNKNOWN,
+            context={"unfinished_run_count": unfinished},
+        )
+    structural = sorted(
+        {
+            focus.suggestion_kind
+            for focus in context.suggestions
+            if focus.suggestion_kind in OPTIMIZATION_KINDS
+        }
+    )
+    if structural and not any(run.status == "completed" for run in named_runs):
+        raise AIBuilderBadRequestException(
+            "A suggestion about what the flow could do without needs a run "
+            "that completed; the named runs all failed.",
+            code=AIBuilderErrorCode.REVIEW_FINDING_UNKNOWN,
+            context={"suggestion_kinds": structural},
         )
     steps = {
         step_order for focus in context.suggestions for step_order in focus.step_orders
@@ -512,24 +557,25 @@ def resolve_suggestion_evidence(
         if not isinstance(fact, EvidenceCompletenessFact)
         and getattr(fact, "step_order", None) in steps
     ]
+    named_ids = set(context.sample_run_ids)
     return FlowReviewEvidence(
         flow_version=packet.flow_version,
         definition_checksum=packet.definition_checksum,
         evidence_classification_level=max(
             packet.evidence_classification_level,
-            *(sample_run_levels[run_id] for run_id in context.sample_run_ids),
+            *(run.evidence_classification_level for run in named_runs),
         ),
         completed_run_count=len(packet.cohort.completed_run_ids),
         failed_run_count=len(packet.cohort.failed_run_ids),
         steps=list(packet.steps),
         facts=facts,
         suggestions=list(context.suggestions),
-        sample_runs=list(sample.runs) if sample is not None else [],
-        excerpts=(
-            [excerpt for excerpt in sample.excerpts if excerpt.step_order in steps]
-            if sample is not None
-            else []
-        ),
+        sample_runs=named_runs,
+        excerpts=[excerpt for excerpt in excerpts if excerpt.step_order in steps],
+        completeness=_completeness(packet),
+        admission=[
+            item for item in packet.cohort.admission if item.run_id in named_ids
+        ],
     )
 
 
@@ -566,6 +612,7 @@ def resolve_review_evidence(
         failed_run_count=len(packet.cohort.failed_run_ids),
         steps=list(packet.steps),
         facts=facts,
+        completeness=_completeness(packet),
     )
 
 
@@ -915,25 +962,37 @@ def render_review_evidence(
                 f"- {labels.get(fact.step_id, 'okänt steg')}: felkoden "
                 f"{fact.error_code} återkom i {fact.run_count} misslyckade körningar."
             )
-        elif isinstance(fact, StepShareFact):
-            what = "tokens" if fact.kind == "token_share" else "tid"
+        elif isinstance(fact, StepShareFact) and fact.kind == "token_share":
             lines.append(
                 f"- {labels.get(fact.step_id, 'okänt steg')}: står för "
-                f"{round(fact.share * 100)} % av körningens {what} "
+                f"{round(fact.share * 100)} % av körningens tokens, räknat på "
+                "varje stegs senaste försök; tidigare försök ingår inte (medel "
+                f"över {fact.run_count} lyckade körningar med kvitto för alla steg)."
+            )
+        elif isinstance(fact, StepShareFact):
+            lines.append(
+                f"- {labels.get(fact.step_id, 'okänt steg')}: står för "
+                f"{round(fact.share * 100)} % av körningens tid "
                 f"(medel över {fact.run_count} körningar)."
             )
-        else:
-            if fact.runs_with_usage_withheld:
-                lines.append(
-                    f"- Tokenandelar utelämnade för {fact.runs_with_usage_withheld} "
-                    "lyckade körningar: minst ett stegs förbrukning saknar kvitto "
-                    "från leverantören. Ingen slutsats om tokens för dem."
-                )
+    if evidence.completeness is not None:
+        completeness = evidence.completeness
+        if completeness.runs_with_usage_withheld:
             lines.append(
-                f"- Underlag: {fact.runs_with_all_step_results} körningar med "
-                f"resultat för alla steg, {fact.runs_missing_step_results} utan, "
-                f"{fact.runs_without_lineage} utan spårad indata."
+                f"- Tokenandelar utelämnade för {completeness.runs_with_usage_withheld} "
+                "lyckade körningar: minst ett stegs förbrukning saknar kvitto "
+                "från leverantören. Ingen slutsats om tokens för dem."
             )
+        lines.append(
+            f"- Underlag: {completeness.runs_with_all_step_results} körningar med "
+            f"resultat för alla steg, {completeness.runs_missing_step_results} utan, "
+            f"{completeness.runs_without_lineage} utan spårad indata."
+        )
+    admission_by_run = {item.run_id: item for item in evidence.admission}
+    for index, run in enumerate(evidence.sample_runs, start=1):
+        note = admission_note_sv(admission_by_run.get(run.run_id))
+        if note is not None:
+            lines.append(f"- Körning {index}: {note}.")
     if evidence.excerpts:
         run_number = {
             run.run_id: index + 1 for index, run in enumerate(evidence.sample_runs)
@@ -1129,7 +1188,6 @@ def review_facts(
     completed = set(completed_run_ids)
     failed = set(failed_run_ids)
     admission_by_run = {item.run_id: item for item in admission}
-    steps_by_id = {step.step_id: step for step in ordered_steps}
 
     def _id(
         kind: str, step_id: UUID | None = None, error_code: str | None = None
@@ -1287,7 +1345,6 @@ def review_facts(
             ),
         )
     )
-    del steps_by_id
     return facts
 
 
@@ -1500,10 +1557,10 @@ class AIBuilderFlowReviewService:
             excerpts=excerpts,
         )
 
-    async def resolve_sample_run_levels(
+    async def resolve_sample_runs(
         self, *, flow_id: UUID, run_ids: Sequence[UUID], definition_checksum: str
-    ) -> dict[UUID, int]:
-        """The persisted evidence level of each run the caller may still view.
+    ) -> list[ReviewSampleRun]:
+        """The named runs the caller may still view, with status and level.
 
         A run that is gone, no longer viewable, or without a level is left
         out; the caller decides whether that makes its reference stale. A run
@@ -1515,11 +1572,15 @@ class AIBuilderFlowReviewService:
         await self._require_runs_of_definition(
             flow_id=flow_id, runs=runs, definition_checksum=definition_checksum
         )
-        return {
-            run.id: run.evidence_classification_level
+        return [
+            ReviewSampleRun(
+                run_id=run.id,
+                status=run.status.value,
+                evidence_classification_level=run.evidence_classification_level,
+            )
             for run in runs
             if run.evidence_classification_level is not None
-        }
+        ]
 
     async def _versions_of_definition(
         self, *, flow_id: UUID, definition_checksum: str, versions: Collection[int]

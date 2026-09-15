@@ -40,7 +40,7 @@ function describe(
           step: stepLabel(fact.step_id),
           percent: String(Math.round(fact.share * 100))
         }),
-        evidence: m.ai_builder_review_share_evidence({ runs: String(fact.run_count) })
+        evidence: m.ai_builder_review_token_share_evidence({ runs: String(fact.run_count) })
       };
     case "latency_share":
       return {
