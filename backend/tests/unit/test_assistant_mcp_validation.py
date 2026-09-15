@@ -72,7 +72,9 @@ async def test_add_mcp_to_assistant_rejects_server_not_in_shared_space():
     service, assistant_id, session = _build_assistant_service_with_mocks(
         is_personal=False, server_in_space=False
     )
-    session.scalar.return_value = SimpleNamespace(id=uuid4())  # server is enabled
+    session.scalar.return_value = SimpleNamespace(
+        id=uuid4(), purpose="general"
+    )  # server is enabled
 
     with pytest.raises(
         BadRequestException, match="not assigned to this assistant's space"
@@ -103,7 +105,9 @@ async def test_add_mcp_to_assistant_allows_personal_space_server_enabled_after_c
     service.space_repo.get_space_by_assistant.return_value.mcp_servers = [mcp_server]
     assistant_in_db = SimpleNamespace(id=assistant_id)
     session.scalar.side_effect = [
-        SimpleNamespace(id=mcp_server_id),  # server exists and is enabled
+        SimpleNamespace(
+            id=mcp_server_id, purpose="general"
+        ),  # server exists and is enabled
         assistant_in_db,  # assistant row for set_mcp_servers
     ]
     result = MagicMock()
@@ -144,7 +148,7 @@ async def test_add_mcp_to_assistant_skips_space_mapping_when_governed():
         )
     )
     session.scalar.side_effect = [
-        SimpleNamespace(id=mcp_server_id),
+        SimpleNamespace(id=mcp_server_id, purpose="general"),
         assistant_in_db,
     ]
     result = MagicMock()

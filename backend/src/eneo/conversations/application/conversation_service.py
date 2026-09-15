@@ -13,9 +13,16 @@ from eneo.completion_models.infrastructure.static_prompts import (
 )
 from eneo.conversations.conversation_models import PreflightResponse
 from eneo.files.file_models import FileType
-from eneo.files.file_reference import url_only_file_ids
+from eneo.files.file_reference import inline_file_text_for_model, url_only_file_ids
+from eneo.governance_policy.domain.policy_resolver import (
+    select_effective_completion_model,
+    select_effective_inline_file_text,
+)
 from eneo.main.config import get_settings
 from eneo.main.exceptions import BadRequestException
+from eneo.mcp_servers.domain.capabilities import (
+    CapabilityPurpose,
+)
 from eneo.sessions.session import SessionUpdate
 
 if TYPE_CHECKING:
@@ -77,9 +84,9 @@ class ConversationService:
         stream: bool = False,
         tool_assistant_id: Optional["UUID"] = None,
         version: int = 1,
-        use_web_search: bool = False,
         require_tool_approval: bool = False,
         disabled_mcp_server_ids: "list[UUID] | None" = None,
+        disabled_capabilities: list[CapabilityPurpose] | None = None,
     ) -> "AssistantResponse":
         """
         Routes a conversation request to the appropriate service based on the parameters.
@@ -138,9 +145,9 @@ class ConversationService:
                     session_id=session_id,
                     tool_assistant_id=tool_assistant_id,
                     version=version,
-                    use_web_search=use_web_search,
                     require_tool_approval=require_tool_approval,
                     disabled_mcp_server_ids=disabled_mcp_server_ids,
+                    disabled_capabilities=disabled_capabilities,
                 )
 
         # case 2: starting a new conversation
@@ -166,9 +173,9 @@ class ConversationService:
                     session_id=None,  # explicitly None for new conversation
                     tool_assistant_id=tool_assistant_id,
                     version=version,
-                    use_web_search=use_web_search,
                     require_tool_approval=require_tool_approval,
                     disabled_mcp_server_ids=disabled_mcp_server_ids,
+                    disabled_capabilities=disabled_capabilities,
                 )
             else:
                 # should never happen due to model validation, but just to be safe
@@ -359,23 +366,15 @@ class ConversationService:
                 )
             else:
                 assert session.assistant is not None
-                # Governance-aware: same model ask() will use, including the
-                # policy fallback when the assistant's own model is disallowed.
-                model = await self.assistant_service.get_effective_completion_model(
+                model, inline_file_text = await self._assistant_preflight_settings(
                     session.assistant.id
                 )
                 selector_tokens = 0
-                assistant, _ = await self.assistant_service.get_assistant(
-                    session.assistant.id
-                )
-                inline_file_text = assistant.inline_file_text
         elif assistant_id:
-            model = await self.assistant_service.get_effective_completion_model(
+            model, inline_file_text = await self._assistant_preflight_settings(
                 assistant_id
             )
             selector_tokens = 0
-            assistant, _ = await self.assistant_service.get_assistant(assistant_id)
-            inline_file_text = assistant.inline_file_text
         elif group_chat_id:
             model, selector_tokens = await self._group_chat_preflight_model(
                 group_chat_id,
@@ -392,6 +391,33 @@ class ConversationService:
                 "No completion model configured for this conversation."
             )
         return model, selector_tokens, inline_file_text
+
+    async def _assistant_preflight_settings(
+        self, assistant_id: "UUID"
+    ) -> tuple["CompletionModel | None", bool]:
+        """Governance-aware model and file-inlining mode for one assistant.
+
+        Same resolution ask() applies — the policy model fallback when the
+        assistant's own model is disallowed, and the governed file policy —
+        so the estimate never disagrees with the actual request.
+        """
+        (
+            assistant,
+            _,
+            effective_config,
+        ) = await self.assistant_service.get_assistant_with_effective_config(
+            assistant_id
+        )
+        model = select_effective_completion_model(
+            current_model=assistant.completion_model,
+            effective_config=effective_config,
+        )
+        inline_file_text = select_effective_inline_file_text(
+            assistant.inline_file_text, effective_config
+        )
+        if model is not None:
+            inline_file_text = inline_file_text_for_model(inline_file_text, model)
+        return model, inline_file_text
 
     async def _group_chat_preflight_model(
         self,

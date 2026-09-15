@@ -16,9 +16,11 @@
   import type {
     CompletionModel,
     EmbeddingModel,
+    ImageModel,
     TranscriptionModel,
     TenantCompletionModelUpdate,
     TenantEmbeddingModelUpdate,
+    TenantImageModelUpdate,
     TenantTranscriptionModelUpdate
   } from "@eneo/eneo-js";
   import { invalidate } from "$app/navigation";
@@ -46,7 +48,7 @@
     type ModelType
   } from "./AddWizard/models/draft";
 
-  type ModelTypeKey = "completionModel" | "embeddingModel" | "transcriptionModel";
+  type ModelTypeKey = "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel";
 
   let {
     openController,
@@ -54,7 +56,7 @@
     type
   }: {
     openController: Writable<boolean>;
-    model: CompletionModel | EmbeddingModel | TranscriptionModel;
+    model: CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel;
     type: ModelTypeKey;
   } = $props();
 
@@ -73,7 +75,9 @@
       ? "completion"
       : type === "embeddingModel"
         ? "embedding"
-        : "transcription"
+        : type === "imageModel"
+          ? "image"
+          : "transcription"
   );
 
   let draft = $state<ModelDraftState>(untrack(() => createEmptyDraft(modelType, "openai")));
@@ -165,6 +169,20 @@
     };
   }
 
+  function buildImageUpdate(): TenantImageModelUpdate {
+    return {
+      display_name: draft.displayName.trim(),
+      description: draft.description.trim() || null,
+      hosting: draft.hosting,
+      open_source: openSource,
+      cost_per_image: rawCostToNumber(draft.costPerImageStr),
+      default_size: draft.defaultSize,
+      default_quality: draft.defaultQuality,
+      ...(hasDefaultToggle ? { is_default: isDefault } : {}),
+      ...securityClassificationPatch()
+    };
+  }
+
   async function handleSubmit() {
     error = null;
     if (!draft.displayName.trim()) {
@@ -188,6 +206,8 @@
         await eneo.tenantModels.updateCompletion({ id: model.id }, buildCompletionUpdate());
       } else if (type === "embeddingModel") {
         await eneo.tenantModels.updateEmbedding({ id: model.id }, buildEmbeddingUpdate());
+      } else if (type === "imageModel") {
+        await eneo.tenantModels.updateImage({ id: model.id }, buildImageUpdate());
       } else {
         await eneo.tenantModels.updateTranscription({ id: model.id }, buildTranscriptionUpdate());
       }

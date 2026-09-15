@@ -220,7 +220,7 @@
     </Alert.Root>
   {/if}
 
-  <div class="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+  <div class="border-border flex flex-wrap items-center justify-between gap-3 border-t pt-4">
     <p class="text-muted-foreground min-h-5 text-sm" role="status" aria-live="polite">
       {statusMessage ?? ""}
     </p>
@@ -244,7 +244,7 @@
     </div>
   </div>
 
-  <section class="border-t pt-5" aria-labelledby={fieldIds.models}>
+  <section class="border-border border-t pt-5" aria-labelledby={fieldIds.models}>
     <h4 id={fieldIds.models} class="text-base font-medium">{m.skills_runtime_models_title()}</h4>
 
     {#if modelProjections === null}

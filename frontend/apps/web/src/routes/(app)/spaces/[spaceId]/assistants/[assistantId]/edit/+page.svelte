@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Page, Settings } from "$lib/components/layout";
+  import OpenFilesHelp from "$lib/features/assistants/components/OpenFilesHelp.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager.js";
   import { hasPermission } from "$lib/core/hasPermission.js";
 
@@ -16,6 +17,9 @@
   import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";
   import SelectKnowledge from "$lib/features/knowledge/components/select/SelectKnowledge.svelte";
   import SelectMCPServers from "$lib/features/mcp/components/SelectMCPServers.svelte";
+  import PolicyFunctions from "$lib/features/mcp/components/PolicyFunctions.svelte";
+  import CapabilityToggle from "$lib/features/mcp/components/CapabilityToggle.svelte";
+  import { CAPABILITIES, getCapability } from "$lib/features/mcp/capabilities";
   import PromptVersionDialog from "$lib/features/prompts/components/PromptVersionDialog.svelte";
   import PromptGuideModal from "$lib/features/prompt-guide/components/PromptGuideModal.svelte";
   import dayjs from "dayjs";
@@ -579,9 +583,12 @@
         {/if}
 
         {#if data.settings.file_references_enabled}
+          <!-- Phrased as a capability, matching the personal-assistant policy:
+               "on" hands large files to the model as references it reads with a
+               tool, which the backend stores as inline_file_text = false. -->
           <Settings.Row
-            title={m.inline_file_text()}
-            description={m.inline_file_text_description()}
+            title={m.attachments_open_files_label()}
+            description=""
             hasChanges={$currentChanges.diff.inline_file_text !== undefined}
             revertFn={() => {
               discardChanges("inline_file_text");
@@ -593,12 +600,13 @@
               {/if}
             </svelte:fragment>
             <svelte:fragment slot="description">
+              <OpenFilesHelp />
               {#if objectStorageMissing}
                 <p
                   class="label-warning border-label-default bg-label-dimmer text-label-stronger mt-2.5 rounded-md border px-2 py-1 text-sm"
                 >
                   <span class="font-bold">{m.hint()}:&nbsp;</span
-                  >{m.inline_file_text_object_storage_hint()}
+                  >{m.attachments_open_files_storage_hint()}
                   {#if canConfigureStorage}
                     <a href={resolve("/admin/storage")} class="underline"
                       >{m.configure_object_storage()}</a
@@ -609,7 +617,9 @@
             </svelte:fragment>
             <div class="border-default flex h-14 border-b py-2">
               <Input.RadioSwitch
-                bind:value={$update.inline_file_text}
+                bind:value={
+                  () => !$update.inline_file_text, (on) => ($update.inline_file_text = !on)
+                }
                 disabled={objectStorageMissing}
                 labelTrue={m.enable()}
                 labelFalse={m.disable()}
@@ -639,9 +649,9 @@
         </Settings.Row>
       </Settings.Group>
 
-      <Settings.Group title={m.mcp_servers()}>
+      <Settings.Group title={m.tools()}>
         <Settings.Row
-          title={m.mcp_servers()}
+          title={m.tools()}
           description={m.select_mcp_servers_description()}
           hasChanges={$currentChanges.diff.mcp_servers !== undefined ||
             $currentChanges.diff.mcp_tools !== undefined}
@@ -656,7 +666,11 @@
             {#if availableMCPServers && availableMCPServers.length > 0}
               <div class="border-default bg-secondary/30 divide-default divide-y rounded-lg border">
                 {#each availableMCPServers as server (server.id)}
-                  <p class="text-default px-3 py-2 text-sm font-medium">{server.name}</p>
+                  <!-- Capability providers are policy-granted capabilities, not
+                       servers: show the capability, never the provider. -->
+                  <p class="text-default px-3 py-2 text-sm font-medium">
+                    {getCapability(server.purpose)?.label() ?? server.name}
+                  </p>
                 {/each}
               </div>
             {:else}
@@ -677,6 +691,35 @@
           {/if}
         </Settings.Row>
       </Settings.Group>
+
+      {#if !mcpEnforced}
+        <Settings.Group title={m.capabilities()}>
+          <Settings.Row
+            title={m.capabilities()}
+            description={m.capabilities_row_description()}
+            hasChanges={$currentChanges.diff.enabled_capabilities !== undefined}
+            revertFn={() => {
+              discardChanges("enabled_capabilities");
+            }}
+          >
+            <div class="border-default overflow-hidden rounded-xl border">
+              {#each CAPABILITIES as capability (capability.purpose)}
+                <CapabilityToggle
+                  {capability}
+                  selectedModel={$update.completion_model}
+                  bind:enabledCapabilities={$update.enabled_capabilities}
+                />
+              {/each}
+            </div>
+          </Settings.Row>
+        </Settings.Group>
+      {:else if effectiveConfig}
+        <Settings.Group title={m.capabilities()}>
+          <Settings.Row title={m.capabilities()} description={m.functions_policy_description()}>
+            <PolicyFunctions config={effectiveConfig} selectedModel={$update.completion_model} />
+          </Settings.Row>
+        </Settings.Group>
+      {/if}
 
       <Settings.Group title={m.security_and_privacy()}>
         {#if isHelpAssistant}

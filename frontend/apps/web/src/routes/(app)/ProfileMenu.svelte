@@ -105,7 +105,9 @@
     <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
     <DropdownMenu.Item variant="destructive">
       {#snippet child({ props })}
-        <a {...props} href={localizeHref("/logout")}>
+        <!-- The logout load clears the session cookies, so hover preloading
+             must not run it (hover is enabled on the (app) layout wrapper). -->
+        <a {...props} href={localizeHref("/logout")} data-sveltekit-preload-data="false">
           <LogOut />
           {m.logout()}
         </a>

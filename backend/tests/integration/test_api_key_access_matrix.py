@@ -743,6 +743,17 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "requires_admin_perm": True,
             "target_resource_key": None,
         },
+        # --- Image Models ---
+        {
+            "name": "list-image-models",
+            "method": "GET",
+            "path": "/api/v1/image-models/",
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
         # --- Tenant Models (admin) ---
         {
             "name": "create-tenant-completion-model",
@@ -770,6 +781,17 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "name": "create-tenant-transcription-model",
             "method": "POST",
             "path": "/api/v1/admin/tenant-models/transcription/",
+            "body": {"provider_id": fake, "name": "probe", "display_name": "Probe"},
+            "resource_type": None,
+            "scope_resource": "admin",
+            "is_admin_scope": True,
+            "requires_admin_perm": True,
+            "target_resource_key": None,
+        },
+        {
+            "name": "create-tenant-image-model",
+            "method": "POST",
+            "path": "/api/v1/admin/tenant-models/image/",
             "body": {"provider_id": fake, "name": "probe", "display_name": "Probe"},
             "resource_type": None,
             "scope_resource": "admin",

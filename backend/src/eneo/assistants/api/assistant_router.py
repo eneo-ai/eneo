@@ -104,7 +104,9 @@ async def create_assistant(
 
     # Create assistant
     created_assistant, permissions = await assistant_service.create_assistant(
-        name=assistant.name, space_id=assistant.space_id
+        name=assistant.name,
+        space_id=assistant.space_id,
+        enabled_capabilities=assistant.enabled_capabilities,
     )
 
     # Get space for context
@@ -120,6 +122,7 @@ async def create_assistant(
     extra = {
         "type": created_assistant.type.value if created_assistant.type else "standard",
         "configuration": {
+            "enabled_capabilities": created_assistant.enabled_capabilities,
             "model": created_assistant.completion_model.nickname
             if created_assistant.completion_model
             else None,
@@ -262,6 +265,11 @@ def _build_assistant_update_changes(
     """
     # Track ALL changes comprehensively
     changes: dict[str, object] = {}
+    if old_assistant.enabled_capabilities != updated_assistant.enabled_capabilities:
+        changes["enabled_capabilities"] = {
+            "old": old_assistant.enabled_capabilities,
+            "new": updated_assistant.enabled_capabilities,
+        }
 
     # Name change
     if assistant.name and assistant.name != old_assistant.name:
@@ -688,6 +696,7 @@ async def update_assistant(
         websites=websites,
         integration_knowledge_ids=integration_knowledge_ids,
         mcp_server_ids=mcp_server_ids,
+        enabled_capabilities=assistant.enabled_capabilities,
         mcp_tools=mcp_tool_settings,
         description=description,
         insight_enabled=assistant.insight_enabled,
@@ -861,6 +870,8 @@ async def ask_assistant(
         tool_assistant_id = ask.tools.assistants[0].id
     response = await service.ask(
         question=ask.question,
+        disabled_capabilities=ask.disabled_capabilities,
+        disabled_mcp_server_ids=ask.disabled_mcp_server_ids,
         assistant_id=id,
         file_ids=file_ids,
         stream=ask.stream,
@@ -1052,6 +1063,8 @@ async def ask_followup(
         tool_assistant_id = ask.tools.assistants[0].id
     response = await service.ask(
         question=ask.question,
+        disabled_capabilities=ask.disabled_capabilities,
+        disabled_mcp_server_ids=ask.disabled_mcp_server_ids,
         assistant_id=id,
         file_ids=file_ids,
         stream=ask.stream,

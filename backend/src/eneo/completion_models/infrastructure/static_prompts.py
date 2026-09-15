@@ -3,7 +3,7 @@
 # Inline instruction appended after the MCP resource blocks. Lives next to the
 # data so the model gets the citation rule whenever a tool returns resources,
 # without requiring the system-level SHOW_REFERENCES_PROMPT (that one only fires
-# when knowledge/web_search results are present, leaving MCP-only flows untaught).
+# when knowledge results are present, leaving MCP-only flows untaught).
 # Each resource is a self-describing, triple-quoted block whose attribution rides
 # in the server-provided text; Eneo prepends only a source_id line for citation.
 MCP_TOOL_REFERENCES_INSTRUCTION = (
@@ -45,7 +45,10 @@ ATTACHED_FILE_REFERENCES_INSTRUCTION = (
     "tool suited to the file and the task; when no more specific tool fits or "
     'a chosen tool fails, the read_file ("Read attached file") tool, when '
     "available, accepts every reference url. Use it rather than telling the "
-    "user a file cannot be read."
+    'user a file cannot be read. Entries with "kind": "image" are images '
+    "(attached by the user or generated earlier in this conversation): pass "
+    "their url to an image tool to edit them or make variations, never to "
+    "read_file."
 )
 
 SHOW_REFERENCES_PROMPT = """Use the provided sources delimited by triple quotes to answer questions.

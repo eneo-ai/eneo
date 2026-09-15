@@ -45,9 +45,7 @@
     type WizardStepId,
     type WizardModelDraft
   } from "./wizardState";
-  import { isCostValueOverflow, MAX_COST_INPUT } from "./models/draft";
-
-  type ModelType = "completion" | "embedding" | "transcription";
+  import { isCostValueOverflow, MAX_COST_INPUT, type ModelType } from "./models/draft";
 
   let {
     openController,
@@ -55,6 +53,7 @@
     favoriteProviders = [],
     /** Pre-selected provider when entering from a "Add Model" button. */
     preSelectedProviderId = null,
+    onModelsCreated,
     modelType = "completion"
   }: {
     openController: Writable<boolean>;
@@ -62,6 +61,7 @@
     favoriteProviders?: string[];
     preSelectedProviderId?: string | null;
     modelType?: ModelType;
+    onModelsCreated?: (ids: string[]) => void | Promise<void>;
   } = $props();
 
   const eneo = getEneo();
@@ -116,6 +116,7 @@
   // source of truth for the unsubmitted form. The form publishes its draft
   // upward via `onDraftChange` whenever it is "complete enough" to save.
   let pendingDraft = $state<WizardModelDraft | null>(null);
+  let createdIds: string[] = [];
 
   // --- Open transitions --------------------------------------------------
   // Initialise once per open. We previously did this in a `$:` block which
@@ -127,6 +128,7 @@
   $effect(() => {
     if (dialogOpen && !didInitialiseForThisOpen) {
       didInitialiseForThisOpen = true;
+      notifyOnClose = true;
       void ensureCapabilities();
       resetWizardForOpen();
     } else if (!dialogOpen && didInitialiseForThisOpen) {
@@ -135,6 +137,7 @@
   });
 
   function resetWizardForOpen() {
+    createdIds = [];
     wizardData = createEmptyWizardData();
     pendingDraft = null;
     error = null;
@@ -243,7 +246,8 @@
         if (
           isCostValueOverflow(model.inputCostPerToken) ||
           isCostValueOverflow(model.outputCostPerToken) ||
-          isCostValueOverflow(model.costPerMinute, true)
+          isCostValueOverflow(model.costPerMinute, true) ||
+          isCostValueOverflow(model.costPerImage, true)
         ) {
           throw new Error(m.cost_value_too_large({ max: MAX_COST_INPUT.toLocaleString("en-US") }));
         }
@@ -324,7 +328,8 @@
 
     for (const model of models) {
       try {
-        await createOneModel(model, providerId);
+        const created = await createOneModel(model, providerId);
+        if (created) createdIds.push(created.id);
         succeeded.push(model);
       } catch (err) {
         failures.push({ model, error: err });
@@ -415,7 +420,22 @@
           : null
       });
     }
-    return eneo.tenantModels.createTranscription({
+    if (modelType === "transcription") {
+      return eneo.tenantModels.createTranscription({
+        provider_id: providerId,
+        name: model.name,
+        display_name: model.displayName,
+        family: model.family ?? "openai",
+        hosting: model.hosting ?? "swe",
+        is_active: true,
+        description: model.description ?? null,
+        cost_per_minute: model.costPerMinute ?? null,
+        security_classification: model.securityClassification
+          ? { id: model.securityClassification.id }
+          : null
+      });
+    }
+    return eneo.tenantModels.createImage({
       provider_id: providerId,
       name: model.name,
       display_name: model.displayName,
@@ -423,16 +443,28 @@
       hosting: model.hosting ?? "swe",
       is_active: true,
       description: model.description ?? null,
-      cost_per_minute: model.costPerMinute ?? null,
+      cost_per_image: model.costPerImage ?? null,
+      default_size: model.defaultSize ?? "auto",
+      default_quality: model.defaultQuality ?? "auto",
       security_classification: model.securityClassification
         ? { id: model.securityClassification.id }
         : null
     });
   }
 
+  let notifyOnClose = false;
+
   async function reloadAndClose() {
     await Promise.all([invalidate("admin:model-providers:load"), invalidate("admin:models:load")]);
+    notifyOnClose = true;
     dialogOpen = false;
+  }
+
+  async function onOpenChangeComplete(open: boolean) {
+    if (!open && notifyOnClose) {
+      notifyOnClose = false;
+      await onModelsCreated?.([...createdIds]);
+    }
   }
 
   // --- Transitions ------------------------------------------------------
@@ -441,8 +473,12 @@
   const flyX = $derived(stepDirection === "forward" ? 24 : -24);
 </script>
 
-<Dialog.Root bind:open={dialogOpen}>
-  <Dialog.Content class="flex max-h-[90vh] flex-col gap-0 p-0 sm:max-w-3xl" showCloseButton={false}>
+<Dialog.Root bind:open={dialogOpen} {onOpenChangeComplete}>
+  <Dialog.Content
+    class="flex max-h-[90vh] flex-col gap-0 p-0 sm:max-w-3xl"
+    showCloseButton={false}
+    restoreScrollDelay={0}
+  >
     <Dialog.Header
       class="from-surface-dimmer/50 gap-6 bg-gradient-to-b to-transparent px-6 pt-6 pb-4"
     >

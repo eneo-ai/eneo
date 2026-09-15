@@ -68,8 +68,8 @@ def _extract_mode_hint(m: dict[str, Any]) -> str | None:
        use ``model_type: "text"`` for everything and rely on the flag.
 
     Returns one of ``"completion"``, ``"embedding"``, ``"transcription"``,
-    or ``None`` when the response carries neither field and the caller
-    should fall back to name-based inference.
+    ``"image"``, or ``None`` when the response carries neither field and the
+    caller should fall back to name-based inference.
     """
     raw_capabilities: Any = m.get("capabilities")
     embeddings_flag: bool = (
@@ -82,6 +82,8 @@ def _extract_mode_hint(m: dict[str, Any]) -> str | None:
         return "embedding"
     if model_type in ("audio", "transcription"):
         return "transcription"
+    if model_type in ("image", "image_generation"):
+        return "image"
     if model_type == "text":
         # Could still be an embedding flagged via capabilities.
         return "embedding" if embeddings_flag else "completion"
@@ -112,13 +114,43 @@ def _normalize_live_model(m: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-# LiteLLM mode → our model_type. Anything else (image, tts, moderation) is filtered out.
-_LITELLM_MODE_TO_OUR_MODE: dict[str, str] = {
+# LiteLLM mode → our model_type. Anything else (tts, moderation, ...) is
+# filtered out. Shared with the capabilities endpoint so the two cannot drift.
+LITELLM_MODE_TO_OUR_MODE: dict[str, str] = {
     "chat": "completion",
     "completion": "completion",
     "embedding": "embedding",
     "audio_transcription": "transcription",
+    "image_generation": "image",
 }
+
+# Name fragments that mark an image generation model when the name is not in
+# litellm.model_cost (self-hosted or brand-new models). Heuristic only: the
+# admin can always type a name the picker did not suggest.
+_IMAGE_NAME_KEYWORDS: tuple[str, ...] = (
+    "dall-e",
+    "gpt-image",
+    "imagen",
+    "stable-diffusion",
+    "sdxl",
+    "flux",
+    "-image",
+)
+
+
+def per_image_cost(info: dict[str, Any]) -> float | None:
+    """Flat USD price per generated image from a litellm.model_cost entry.
+
+    Providers that price per image put it under ``output_cost_per_image``
+    (Imagen) or ``input_cost_per_image`` (DALL-E). Token-priced image models
+    (gpt-image-1) have neither and return None: the admin fills in a figure.
+    """
+    for key in ("output_cost_per_image", "input_cost_per_image"):
+        value = info.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return float(value)
+    return None
+
 
 # Name substrings to drop — same set the static capabilities endpoint filters.
 # These run on every name regardless of whether it appears in litellm.model_cost,
@@ -141,14 +173,16 @@ def _infer_mode_from_name(name: str) -> str | None:
 
     This is only invoked for names that arrived via a live ``/v1/models``
     response — i.e. the provider has already asserted they serve this
-    model. Image/audio/moderation names are still dropped from the picker;
+    model. Speech and moderation names are still dropped from the picker;
     everything else defaults to ``"completion"`` since the alternative
     (returning None and dropping the entry) silently hides real models
     from any provider whose names don't match a hardcoded prefix.
     """
     lower = name.lower()
-    if any(kw in lower for kw in ("dall-e", "tts-", "moderation")):
+    if any(kw in lower for kw in ("tts-", "moderation")):
         return None
+    if any(kw in lower for kw in _IMAGE_NAME_KEYWORDS):
+        return "image"
     if "whisper" in lower:
         return "transcription"
     if "embedding" in lower:
@@ -170,7 +204,7 @@ def _enrich_with_litellm_metadata(
     keeps an intentionally frozen copy of the same documented semantics.
 
     Returns None when the name matches a non-text filter substring or maps to
-    a litellm mode we don't surface (image, tts, moderation, etc.).
+    a litellm mode we don't surface (tts, moderation, etc.).
 
     When the name isn't in the cost map, ``mode_hint`` (read from the
     provider's own response — see ``_extract_mode_hint``) wins over name
@@ -195,7 +229,7 @@ def _enrich_with_litellm_metadata(
         return {"name": name, "mode": chosen}
 
     litellm_mode = info.get("mode", "")
-    mode = _LITELLM_MODE_TO_OUR_MODE.get(litellm_mode)
+    mode = LITELLM_MODE_TO_OUR_MODE.get(litellm_mode)
     if mode is None:
         return None
 
@@ -221,6 +255,8 @@ def _enrich_with_litellm_metadata(
         input_per_second = info.get("input_cost_per_second")
         if isinstance(input_per_second, (int, float)):
             enriched["cost_per_minute"] = input_per_second * 60
+    elif mode == "image":
+        enriched["cost_per_image"] = per_image_cost(info)
     return enriched
 
 
@@ -390,11 +426,13 @@ class ModelProviderService:
         For completion models: sends a single-token completion request.
         For embedding models: sends a minimal embedding request.
         For transcription models: skips validation (requires audio file).
+        For image models: skips validation (a real generation is billed and
+        slow; a wrong name surfaces on first use through the provider error).
         """
-        if model_type == "transcription":
+        if model_type in ("transcription", "image"):
             return {
                 "success": True,
-                "message": "Validation skipped for transcription models",
+                "message": f"Validation skipped for {model_type} models",
             }
 
         import litellm

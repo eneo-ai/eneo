@@ -9,11 +9,6 @@
       "count": 1
     }
   },
-  "src/lib/components/toast/Toaster.svelte": {
-    "eneo/no-raw-color": {
-      "count": 3
-    }
-  },
   "src/lib/components/ui/alert-dialog/alert-dialog-overlay.svelte": {
     "eneo/no-raw-color": {
       "count": 1
@@ -194,9 +189,9 @@
       "count": 1
     }
   },
-  "src/routes/(app)/admin/mcp-servers/+page.svelte": {
+  "src/lib/components/toast/Toaster.svelte": {
     "eneo/no-raw-color": {
-      "count": 8
+      "count": 3
     }
   },
   "src/routes/(app)/admin/mcp-servers/MCPServerPrimaryCell.svelte": {

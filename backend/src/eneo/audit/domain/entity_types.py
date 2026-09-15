@@ -30,6 +30,7 @@ class EntityType(str, Enum):
     COMPLETION_MODEL = "completion_model"
     EMBEDDING_MODEL = "embedding_model"
     TRANSCRIPTION_MODEL = "transcription_model"
+    IMAGE_MODEL = "image_model"
     AUDIT_LOG = "audit_log"
     SESSION = "session"
     MCP_SERVER = "mcp_server"

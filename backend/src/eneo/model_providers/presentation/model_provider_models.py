@@ -44,7 +44,7 @@ class ValidateModelRequest(BaseModel):
     model_name: str = Field(..., description="Model name to validate")
     model_type: str = Field(
         default="completion",
-        description="Model type: completion, embedding, or transcription",
+        description="Model type: completion, embedding, transcription, or image",
     )
 
 

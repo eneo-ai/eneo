@@ -175,9 +175,8 @@ def postgres_container() -> Generator[PostgresContainer, None, None]:
     """
     Start a PostgreSQL container with pgvector extension for the test session.
     """
-    # Use postgres:16 with pgvector pre-installed
     postgres = PostgresContainer(
-        image="pgvector/pgvector:pg16",
+        image=os.environ.get("ENEO_TEST_POSTGRES_IMAGE", "pgvector/pgvector:pg16"),
         username="integration_test_user",
         password="integration_test_password",
         dbname="integration_test_db",
@@ -280,7 +279,6 @@ def test_settings(
         # Feature flags
         using_access_management=False,
         using_iam=False,
-        using_image_generation=False,
         using_crawl=False,
         tenant_credentials_enabled=False,  # Disable for integration tests (tests can override if needed)
         federation_enabled=True,
@@ -343,6 +341,30 @@ async def _force_gc_before_loop_closes():
     gc.collect()
 
 
+@pytest.fixture(autouse=True)
+def settings_singleton_restored(override_settings_for_session):
+    """Fail the test that leaves a replaced Settings object installed.
+
+    Tests may swap the singleton with set_settings(model_copy(...)) as long as
+    they reinstall the original object afterwards. Leaving a copy behind makes
+    every later test in this worker that mutates ``test_settings`` silently
+    ineffective, which surfaced as an order-dependent federation failure.
+
+    ``override_settings_for_session`` yields the object it installed. Isolated
+    migration modules override that fixture with a no-op that yields nothing,
+    so the check does not apply to them.
+    """
+    from eneo.main.config import get_settings
+
+    installed = override_settings_for_session
+    yield
+    if installed is not None:
+        assert get_settings() is installed, (
+            "This test replaced the settings singleton and did not reinstall the "
+            "original object; restore it with set_settings(<original>)."
+        )
+
+
 @pytest.fixture(scope="session", autouse=True)
 def override_settings_for_session(test_settings: Settings):
     """
@@ -383,7 +405,7 @@ def override_settings_for_session(test_settings: Settings):
     print(f"  - Testing mode: {test_settings.testing}")
     print(f"  - API prefix: {test_settings.api_prefix}")
 
-    yield
+    yield test_settings
 
     # Cleanup after all tests
     reset_settings()

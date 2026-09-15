@@ -13,17 +13,23 @@
   const { url, fixedAspectRatio = "800 / 608" }: Props = $props();
   const safeImageUrl = $derived(sanitizeImageSrc(url));
   const safeDownloadUrl = $derived(sanitizeLinkHref(url));
+  // The reserved aspect ratio only holds space while loading. Once the real
+  // image is in, the box follows the image: a wider image than the reserved
+  // ratio would otherwise leave the placeholder showing beneath it.
+  let loaded = $state(false);
 </script>
 
 <div
   class="group relative overflow-clip rounded-lg"
-  style={fixedAspectRatio ? `aspect-ratio: ${fixedAspectRatio};` : undefined}
+  style={fixedAspectRatio && !loaded ? `aspect-ratio: ${fixedAspectRatio};` : undefined}
 >
-  <img
-    src={placeholderImageUrl}
-    class=" bg-secondary absolute m-0 animate-pulse p-0"
-    alt={m.placeholder()}
-  />
+  {#if !loaded}
+    <img
+      src={placeholderImageUrl}
+      class=" bg-secondary absolute m-0 animate-pulse p-0"
+      alt={m.placeholder()}
+    />
+  {/if}
   {#if safeImageUrl}
     <img
       src={safeImageUrl}
@@ -34,6 +40,7 @@
         if (target) {
           target.style.opacity = "1";
         }
+        loaded = true;
       }}
       alt={m.generated_file()}
     />

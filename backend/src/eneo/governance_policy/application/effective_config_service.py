@@ -3,6 +3,7 @@
 # Licensed under the MIT License.
 
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from eneo.governance_policy.domain.governance_policy import PolicyScope
@@ -10,6 +11,13 @@ from eneo.governance_policy.domain.policy_resolver import (
     EffectiveConfig,
     resolve,
     resolve_personal_default,
+)
+from eneo.mcp_servers.application.capability_resolver import (
+    describe_capability_availability,
+)
+from eneo.mcp_servers.domain.entities.mcp_server import (
+    allowed_capability_purposes,
+    is_capability_purpose,
 )
 from eneo.skills.domain.skill import PersonalChatPinOverride, SkillRuntimeResolution
 
@@ -114,7 +122,15 @@ class EffectiveConfigService:
             if not policy.mcp_restriction_enabled:
                 return []
             servers = await self.mcp_server_settings_service.get_available_mcp_servers()
-            return [server for server in servers if server.is_enabled]
+            # Capability servers stay even when deactivated: the policy holds a
+            # capability marker that the ask path resolves to the active
+            # provider, so dropping it would silently remove the capability
+            # after a provider switch. General servers must be enabled.
+            return [
+                server
+                for server in servers
+                if server.is_enabled or is_capability_purpose(server.purpose)
+            ]
 
         async def _load_prompt_text() -> str | None:
             if policy.default_prompt_library_id is None:
@@ -142,10 +158,20 @@ class EffectiveConfigService:
         library_prompt_text = await _load_prompt_text()
         governance_skill_resolution = await _load_governance_skills()
 
-        return resolve_personal_default(
+        effective = resolve_personal_default(
             policy=policy,
             tenant_completion_models=tenant_models,
             tenant_mcp_servers=tenant_mcp_servers,
             library_prompt_text=library_prompt_text,
             governance_skill_resolution=governance_skill_resolution,
         )
+        availability = [
+            describe_capability_availability(
+                tenant_mcp_servers,
+                purpose,
+                user_group_ids=self.user.user_groups_ids,
+                allowed_purposes=allowed_capability_purposes(self.user.permissions),
+            )
+            for purpose in effective.enabled_capabilities
+        ]
+        return replace(effective, available_capabilities=availability)

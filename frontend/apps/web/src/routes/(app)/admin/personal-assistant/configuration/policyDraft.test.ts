@@ -68,6 +68,41 @@ describe("PolicyDraft", () => {
     });
   });
 
+  it("submits only the file facet when open-files handling is switched on", async () => {
+    const update = vi.fn(async () => {});
+    const draft = new PolicyDraft();
+    draft.sync({
+      eneo: { governancePolicy: { update } } as never,
+      policy: {
+        models_restriction: { enabled: false, models: [], provider_ids: [] },
+        mcp_restriction: { enabled: false, servers: [], disabled_tool_ids: [] },
+        prompt_enforcement: { enabled: false, prompt_library_id: null },
+        reasoning_policy: { configured: false, default_effort: null, allow_user_override: false },
+        file_policy: { configured: false, inline_file_text: null },
+        skills: { bindings: [] }
+      },
+      models: { completionModels: [] },
+      modelProviders: [],
+      mcpSettings: { items: [] },
+      promptLibrary: { items: [] },
+      skills: emptySkillBindingCatalogPage(),
+      skillRuntimePolicy: { selective_activation_enabled: true }
+    });
+
+    // An ungoverned policy seeds the switch to the assistant default (whole
+    // text inlined, so large files off) without registering a pending change.
+    expect(draft.openFilesEnabled).toBe(false);
+    expect(draft.dirty).toBe(false);
+
+    // "On" grants the capability, which the backend stores as inlining off.
+    draft.openFilesEnabled = true;
+    expect(draft.dirty).toBe(true);
+    draft.save();
+
+    await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
+    expect(update).toHaveBeenCalledWith({ file_policy: { inline_file_text: false } });
+  });
+
   it("activates an explicit provider-default policy without changing its values", async () => {
     const update = vi.fn(async () => {});
     const draft = new PolicyDraft();
@@ -413,5 +448,117 @@ describe("PolicyDraft", () => {
     });
 
     expect(draft.skillCatalogPage).toEqual(skills);
+  });
+  it("stores purposes independently of providers and preserves defaults", async () => {
+    const update = vi.fn(async () => {});
+    const draft = new PolicyDraft();
+    const base = {
+      description: null,
+      http_url: "http://provider.example/mcp",
+      http_auth_type: "none",
+      has_credentials: false,
+      tools: []
+    };
+    draft.sync({
+      eneo: { governancePolicy: { update } } as never,
+      policy: {
+        models_restriction: { enabled: false, models: [], provider_ids: [] },
+        mcp_restriction: {
+          enabled: true,
+          // A previously active search server: deactivated, but the policy
+          // still holds it as the web-search marker.
+          servers: [],
+          capabilities: [{ purpose: "web_search", is_default_enabled: true }],
+          disabled_tool_ids: []
+        },
+        prompt_enforcement: { enabled: false, prompt_library_id: null },
+        skills: { bindings: [] }
+      },
+      models: { completionModels: [] },
+      modelProviders: [],
+      mcpSettings: {
+        items: [
+          {
+            ...base,
+            id: "old-search",
+            name: "Old",
+            purpose: "web_search",
+            is_available: false,
+            is_enabled: false,
+            audience: "everyone"
+          },
+          {
+            ...base,
+            id: "group-search",
+            name: "Legal",
+            purpose: "web_search",
+            is_available: true,
+            is_enabled: true,
+            audience: "groups"
+          },
+          {
+            ...base,
+            id: "default-search",
+            name: "GDM",
+            purpose: "web_search",
+            is_available: true,
+            is_enabled: true,
+            audience: "everyone"
+          },
+          {
+            ...base,
+            id: "images",
+            name: "GDM images",
+            purpose: "image_generation",
+            is_available: true,
+            is_enabled: true,
+            audience: "everyone"
+          },
+          {
+            ...base,
+            id: "general",
+            name: "Tools",
+            purpose: "general",
+            is_available: true,
+            is_enabled: true,
+            audience: "everyone"
+          }
+        ]
+      } as never,
+      promptLibrary: { items: [] },
+      skills: emptySkillBindingCatalogPage(),
+      skillRuntimePolicy: { selective_activation_enabled: true }
+    });
+
+    expect(draft.capabilityRows.map((row) => row.purpose)).toEqual([
+      "web_search",
+      "image_generation"
+    ]);
+    // Stored intent stays selected across provider changes.
+    expect(draft.mcpSelections.has("capability:web_search")).toBe(true);
+    expect(draft.mcpSummary).toContain("1");
+
+    draft.toggleCapability("web_search", false);
+    expect(draft.mcpSelections.size).toBe(0);
+
+    draft.toggleCapability("web_search", true);
+    expect(Array.from(draft.mcpSelections.keys())).toEqual(["capability:web_search"]);
+
+    draft.toggleCapability("image_generation", true);
+    draft.toggleCapabilityDefault("image_generation", false);
+    draft.save();
+
+    await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
+    expect(update).toHaveBeenCalledWith({
+      mcp_restriction: {
+        enabled: true,
+        servers: [],
+        capabilities: [
+          { purpose: "web_search", is_default_enabled: true },
+          { purpose: "image_generation", is_default_enabled: false }
+        ],
+        disabled_tool_ids: []
+      }
+    });
   });
 });

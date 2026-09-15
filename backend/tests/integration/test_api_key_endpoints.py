@@ -1209,7 +1209,6 @@ async def test_admin_usage_endpoint_returns_key_events(
     owner_user_id = UUID(payload["api_key"]["owner_user_id"])
 
     settings = get_settings()
-    previous_sample_rate = settings.api_key_used_audit_sample_rate
     patched = settings.model_copy(update={"api_key_used_audit_sample_rate": 1.0})
     set_settings(patched)
 
@@ -1277,11 +1276,9 @@ async def test_admin_usage_endpoint_returns_key_events(
             item["action"] == "api_key_auth_failed" for item in usage_payload["items"]
         )
     finally:
-        set_settings(
-            settings.model_copy(
-                update={"api_key_used_audit_sample_rate": previous_sample_rate}
-            )
-        )
+        # Reinstall the original object, not a copy: later tests mutate the
+        # session's settings instance and the app must keep reading it.
+        set_settings(settings)
 
 
 @pytest.mark.integration

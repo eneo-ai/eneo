@@ -433,6 +433,18 @@ const ACTION_MESSAGES = {
     name: m.audit_action_transcription_model_migrated,
     description: m.audit_action_transcription_model_migrated_description
   },
+  image_model_created: {
+    name: m.audit_action_image_model_created,
+    description: m.audit_action_image_model_created_description
+  },
+  image_model_updated: {
+    name: m.audit_action_image_model_updated,
+    description: m.audit_action_image_model_updated_description
+  },
+  image_model_deleted: {
+    name: m.audit_action_image_model_deleted,
+    description: m.audit_action_image_model_deleted_description
+  },
   template_created: {
     name: m.audit_action_template_created,
     description: m.audit_action_template_created_description

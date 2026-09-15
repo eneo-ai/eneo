@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Optional
@@ -22,10 +21,13 @@ from eneo.authentication.signed_urls import build_signed_original_download_url
 from eneo.completion_models.domain.skill_activation import SkillActivationRuntime
 from eneo.completion_models.infrastructure.adapters.base_adapter import ProviderInput
 from eneo.completion_models.infrastructure.context_builder import ContextBuilder
-from eneo.files.file_models import File, FileType
-from eneo.files.file_reference import file_reference_base_url
+from eneo.files.file_models import File
+from eneo.files.file_reference import (
+    file_reference_base_url,
+    reference_url_file_ids,
+)
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
-from eneo.main.config import SETTINGS, Settings, get_settings
+from eneo.main.config import SETTINGS, Settings
 from eneo.main.exceptions import ProviderInactiveException
 from eneo.main.logging import get_logger
 from eneo.mcp_servers.infrastructure.identity_headers import build_identity_headers
@@ -37,14 +39,12 @@ from eneo.mcp_servers.infrastructure.tool_approval import get_approval_manager
 from eneo.sessions.session import SessionInDB
 from eneo.settings.encryption_service import EncryptionService
 from eneo.tokens.token_utils import log_token_count_drift
-from eneo.vision_models.infrastructure.flux_ai import FluxAdapter
 
 if TYPE_CHECKING:
     from eneo.audit.application.audit_service import AuditService
     from eneo.completion_models.infrastructure.adapters.base_adapter import (
         CompletionModelAdapter,
     )
-    from eneo.completion_models.infrastructure.web_search import WebSearchResult
     from eneo.database.database import AsyncSession
     from eneo.main.container.container import Container
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
@@ -59,12 +59,6 @@ if TYPE_CHECKING:
     from eneo.users.user import UserInDB
 
 logger = get_logger(__name__)
-
-
-async def generate_image(prompt: str):
-    flux = FluxAdapter()
-
-    return await flux.generate_image(prompt=prompt)
 
 
 @dataclass(frozen=True)
@@ -246,12 +240,12 @@ class CompletionService:
             return {}
 
         expires_in = self.config.file_reference_url_expiry_seconds
+        # Mint only what the reference block can actually expose (the shared
+        # predicate), which also keeps the mint audit truthful.
+        referenced = reference_url_file_ids(files)
         urls: dict[UUID, str] = {}
         for file in files:
-            # Only TEXT files are surfaced in the reference block (images ride
-            # as vision inputs), so mint only what can actually be exposed —
-            # which also keeps the mint audit truthful.
-            if file.file_type == FileType.TEXT and file.original_available:
+            if file.id in referenced and file.id not in urls:
                 urls[file.id] = build_signed_original_download_url(
                     file_id=file.id,
                     base_url=base_url,
@@ -266,11 +260,12 @@ class CompletionService:
         file_reference_urls: dict[UUID, str],
         session: SessionInDB | None,
     ) -> None:
-        """Audit the signed-URL mints for this turn's newly attached files.
+        """Audit the signed-URL mints for files first referenced on this turn.
 
         History files are re-minted every turn but represent the same exposure
         of the same file to the same session — the initial mint is the audited
-        event, so only current-turn files are logged. Skipped without a user
+        event, so only newly referenced files (this turn's attachments and the
+        previous turn's generated images) are logged. Skipped without a user
         (worker/service contexts): the mint has no attributable actor.
         """
         if self.audit_service is None or self.tenant is None or self.user is None:
@@ -358,22 +353,7 @@ class CompletionService:
             unavailable_model_ids=frozenset(unavailable_model_ids),
         )
 
-    @staticmethod
-    def is_valid_arguments(arguments: str):
-        try:
-            # Attempt to parse the string
-            parsed = json.loads(arguments)
-            # Check if the parsed object is a dictionary
-            return isinstance(parsed, dict)
-        except (json.JSONDecodeError, TypeError):
-            # If there is a JSON decode error or TypeError, return False
-            return False
-
     async def _handle_tool_call(self, completion: AsyncGenerator[Completion]):
-        name = None
-        arguments = ""
-        function_called = False
-
         async for chunk in completion:
             # Pass through stop chunk (carries usage data)
             if chunk.stop:
@@ -396,30 +376,12 @@ class CompletionService:
                 yield chunk
                 continue
 
-            if chunk.tool_call:
-                if chunk.tool_call.name:
-                    name = chunk.tool_call.name
+            # Pass through generated images (MCP image content blocks) directly
+            if chunk.response_type == ResponseType.FILES:
+                yield chunk
+                continue
 
-                if chunk.tool_call.arguments:
-                    arguments += chunk.tool_call.arguments
-
-                if not name or not arguments or not self.is_valid_arguments(arguments):
-                    # Keep collecting the tool call
-                    continue
-                elif not function_called:
-                    call_args = json.loads(arguments)
-
-                    if name == "generate_image":
-                        yield Completion(response_type=ResponseType.ENEO_EVENT)
-
-                        chunk.image_data = await generate_image(**call_args)  # type: ignore[attr-defined]
-                        chunk.response_type = ResponseType.FILES
-
-                        yield chunk
-
-                    function_called = True
-
-            elif chunk.text:
+            if chunk.text:
                 chunk.response_type = ResponseType.TEXT
 
                 yield chunk
@@ -434,12 +396,10 @@ class CompletionService:
         prompt_files: list[File] | None = None,
         transcription_inputs: list[str] | None = None,
         info_blob_chunks: list[InfoBlobChunkInDBWithScore] | None = None,
-        web_search_results: list["WebSearchResult"] | None = None,
         session: SessionInDB | None = None,
         stream: bool = False,
         extended_logging: bool = False,
         version: int = 1,
-        use_image_generation: bool = False,
         mcp_servers: list["MCPServer"] | None = None,
         require_tool_approval: bool = False,
         skill_runtime: SkillActivationRuntime | None = None,
@@ -454,8 +414,6 @@ class CompletionService:
             transcription_inputs = []
         if info_blob_chunks is None:
             info_blob_chunks = []
-        if web_search_results is None:
-            web_search_results = []
         if mcp_servers is None:
             mcp_servers = []
         # Org-level disable must be honored at runtime. Disabling a server only
@@ -478,12 +436,6 @@ class CompletionService:
         # Make sure everything fits in the context of the model
         max_tokens = model_adapter.get_token_limit_of_model()
 
-        # Image generation only works on streaming for now
-        # And only if feature flag is turned on
-        use_image_generation = (
-            use_image_generation and stream and get_settings().using_image_generation
-        )
-
         # Mint signed download URLs for attached files whose exact original is
         # durably stored, so the model can hand them to a URL-accepting MCP
         # tool. Covers history files too — URLs are minted fresh per request, and
@@ -491,14 +443,28 @@ class CompletionService:
         # same way the current turn does, or the skipped text leaks back into
         # context on every follow-up. Requires a reference base URL for absolute
         # URLs.
+        # Generated images count as history files too: a follow-up edit needs
+        # a reference URL for the image the assistant produced last turn.
         history_files = [
             file
             for question in (session.questions if session else [])
-            for file in question.files
+            for file in [*question.files, *question.generated_files]
         ]
         file_reference_urls = self._build_file_reference_urls(files + history_files)
+        # The previous turn's generated files are minted for the first time on
+        # this turn, so they are "new" exactly once, here.
+        newly_referenced = [
+            *files,
+            *(
+                session.questions[-1].generated_files
+                if session and session.questions
+                else []
+            ),
+        ]
         await self._audit_file_reference_mints(
-            files=files, file_reference_urls=file_reference_urls, session=session
+            files=newly_referenced,
+            file_reference_urls=file_reference_urls,
+            session=session,
         )
 
         # Create MCP proxy session before building the context, so the tool
@@ -531,8 +497,6 @@ class CompletionService:
                 prompt_files=prompt_files,
                 transcription_inputs=transcription_inputs,
                 version=version,
-                use_image_generation=use_image_generation,
-                web_search_results=web_search_results,
                 mcp_tools=(
                     [skill_runtime.tool_definition]
                     if skill_runtime is not None

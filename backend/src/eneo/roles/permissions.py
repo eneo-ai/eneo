@@ -31,6 +31,11 @@ class Permission(str, Enum):
     STORAGE = "storage"
     MODULES = "modules"
     ASSISTANT_DEBUG = "assistant_debug"
+    # Capability use permissions. Each value equals the MCP capability purpose
+    # it governs (see CAPABILITY_PURPOSES) so the purpose -> permission mapping
+    # stays generic: Permission(purpose).
+    WEB_SEARCH = "web_search"
+    IMAGE_GENERATION = "image_generation"
 
 
 def validate_permissions(permission: Permission) -> Callable[[_F], _F]:

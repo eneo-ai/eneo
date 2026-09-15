@@ -3,7 +3,8 @@
 <!--
   Compact cost chip for a model. Renders the indicative price the admin
   has stored against the model, formatted per 1M tokens for completion +
-  embedding models and per audio-minute for transcription. Shows "–"
+  embedding models, per audio-minute for transcription and per generated
+  image for image models. Shows "–"
   with an explanatory tooltip when no cost is on record so admin tables
   surface unpriced models at a glance.
 
@@ -12,16 +13,22 @@
 -->
 
 <script lang="ts">
-  import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@eneo/eneo-js";
+  import type {
+    CompletionModel,
+    EmbeddingModel,
+    ImageModel,
+    TranscriptionModel
+  } from "@eneo/eneo-js";
   import { Tooltip } from "@eneo/ui";
   import {
+    formatCostPerImage,
     formatCostPerMillionTokens,
     formatCostPerMinute,
     type CostFieldValue
   } from "../formatModelStats";
   import { m } from "$lib/paraglide/messages";
 
-  export let model: CompletionModel | EmbeddingModel | TranscriptionModel;
+  export let model: CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel;
   /** Tighter padding for table cells; default is comfortable for detail panes. */
   export let dense: boolean = false;
 
@@ -32,9 +39,19 @@
         output: string | null;
         raw: { input: CostFieldValue; output: CostFieldValue };
       }
-    | { kind: "per_minute"; value: string | null; raw: CostFieldValue };
+    | { kind: "per_minute"; value: string | null; raw: CostFieldValue }
+    | { kind: "per_image"; value: string | null; raw: CostFieldValue };
 
-  function pricingFor(model: CompletionModel | EmbeddingModel | TranscriptionModel): Pricing {
+  function pricingFor(
+    model: CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel
+  ): Pricing {
+    if ("cost_per_image" in model) {
+      return {
+        kind: "per_image",
+        value: formatCostPerImage(model.cost_per_image),
+        raw: model.cost_per_image
+      };
+    }
     if ("cost_per_minute" in model) {
       return {
         kind: "per_minute",
@@ -54,13 +71,16 @@
 
   $: pricing = pricingFor(model);
   $: hasData =
-    pricing.kind === "per_minute"
+    pricing.kind === "per_minute" || pricing.kind === "per_image"
       ? pricing.value !== null
       : pricing.input !== null || pricing.output !== null;
 
   $: chipText = (() => {
     if (pricing.kind === "per_minute") {
       return pricing.value ? `${pricing.value}/min` : "–";
+    }
+    if (pricing.kind === "per_image") {
+      return pricing.value ? m.model_cost_chip_per_image({ value: pricing.value }) : "–";
     }
     // For embeddings, output_cost_per_token is typically zero. Hide it when
     // missing or if it equals the input price exactly so the chip stays short.
@@ -74,6 +94,7 @@
   $: tooltip = (() => {
     if (!hasData) return m.model_cost_unknown();
     if (pricing.kind === "per_minute") return m.model_cost_tooltip_per_minute();
+    if (pricing.kind === "per_image") return m.model_cost_tooltip_per_image();
     return m.model_cost_tooltip_per_million();
   })();
 </script>

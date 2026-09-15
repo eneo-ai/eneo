@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import socket
 from typing import Any, Callable, NoReturn, cast
 
@@ -15,6 +16,7 @@ from litellm.exceptions import (
     RateLimitError,
     ServiceUnavailableError,
     Timeout,
+    UnsupportedParamsError,
 )
 
 from eneo.main.exceptions import (
@@ -90,6 +92,46 @@ async def aembedding(**kwargs: Any) -> Any:
 async def atranscription(**kwargs: Any) -> Any:
     call = cast(Callable[..., Any], getattr(litellm, "atranscription"))
     return await call(**kwargs)
+
+
+async def aimage_generation(**kwargs: Any) -> Any:
+    call = cast(Callable[..., Any], getattr(litellm, "aimage_generation"))
+    return await call(**kwargs)
+
+
+async def aimage_edit(**kwargs: Any) -> Any:
+    call = cast(Callable[..., Any], getattr(litellm, "aimage_edit"))
+    return await call(**kwargs)
+
+
+# LiteLLM's pre-call refusal ("Setting `response_format` is not supported by
+# openai, gpt-image-1"), its per-model list variant ("The following parameters
+# are not supported for model gpt-image-1: response_format, quality"), and the
+# provider's own rejection once the request was sent ("Unknown parameter:
+# 'quality'").
+_UNSUPPORTED_PARAM_RES = (
+    re.compile(r"Setting `(\w+)` is not supported"),
+    re.compile(r"not supported for model [^:]*: *(\w+)"),
+    re.compile(r"Unknown parameter: '(\w+)'"),
+)
+
+
+def unsupported_param(exc: BaseException) -> str | None:
+    """The request parameter a model rejected, when that is what ``exc`` says.
+
+    LiteLLM refuses parameters a model does not support before any network
+    call and providers reject unknown ones after it; each error names at least
+    one parameter, so callers drop the first and retry.
+    """
+    for candidate in _exception_chain(exc):
+        if not isinstance(candidate, (UnsupportedParamsError, BadRequestError)):
+            continue
+        text = str(candidate)
+        for pattern in _UNSUPPORTED_PARAM_RES:
+            match = pattern.search(text)
+            if match:
+                return match.group(1)
+    return None
 
 
 def _exception_chain(exc: BaseException) -> list[BaseException]:

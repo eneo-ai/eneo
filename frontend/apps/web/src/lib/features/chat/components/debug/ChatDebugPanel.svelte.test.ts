@@ -70,7 +70,6 @@ function message(id: string, question: string, extra: Partial<ConversationMessag
     references: [],
     files: [],
     generated_files: [],
-    web_search_references: [],
     mcp_tool_references: [],
     tool_calls: [],
     tools: { assistants: [] },

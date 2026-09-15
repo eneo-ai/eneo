@@ -20,8 +20,8 @@ knowledge file and audio uploads use it for the exact original while searchable
 text and vectors remain in PostgreSQL. New content is stored inline by default,
 so Eneo still needs no S3-compatible service.
 
-Legacy File and Icon adoption uses an expand, online backfill, and later contract
-sequence. Two consecutive Alembic revisions own the expand phase. The first
+Legacy File and Icon adoption uses an expand, online backfill, and optional
+cleanup sequence. Two consecutive Alembic revisions own the expand phase. The first
 creates the ledger, makes legacy columns nullable, installs the payload-write
 fence, and commits. The second scans owners and obtains exact logical source
 sizes in resumable, idempotent groups without hashing, converting, or copying
@@ -34,10 +34,11 @@ only source-bearing rows ready. The initial capacity decision is frozen after
 admission. If an adopted reference later fails verification, its replacement
 is re-admitted against the cumulative logical-byte total and requires a higher
 acknowledgement only above the automatic threshold. The worker adopts each ready
-variant in bounded, resumable PostgreSQL-inline transactions. The later contract
-applies the fail-closed completion and live-reference recheck described in
-[Verify and clean up](/guides/file-icon-storage-upgrade#verify-and-clean-up)
-before it removes the legacy schema.
+variant in bounded, resumable PostgreSQL-inline transactions. The optional 2.2
+cleanup command applies the fail-closed completion check, verifies every
+retained legacy source against its adopted copy and every surviving ledger
+reference, and only then removes the legacy columns, as described in
+[Verify and clean up](/guides/file-icon-storage-upgrade#verify-and-clean-up).
 
 ```mermaid
 flowchart LR
@@ -225,6 +226,24 @@ advancing cursor. An invalid or non-advancing page fails the run before Eneo
 marks unseen rows missing. A complete scan can mark absent available content as
 failed; retained content stays retained while health reports missing bytes.
 
+A missing-object scan only applies to remote descriptors created before that
+scan began. Moving older inline content to object storage does not inherit the
+inline placement's inventory age. Before recording a backend failure, the
+content repository rechecks the observed storage kind and object key; remote
+evidence also has to match the leased connection revision. A newer inventory
+observation supersedes an older missing or length-mismatch candidate. Reads may
+resolve a changed placement once more after releasing the old store lease and
+before returning any response bytes.
+
+Backend failures use the same legacy recovery owner as reads. For adopted
+content, it locks admission state, campaign, ordered ledger items, content, and
+then the remote descriptor. Inventory pages commit their content and descriptor
+updates before applying failure candidates in separate transactions, so they
+never enter that recovery sequence while holding page locks. A genuine failure
+reopens the affected ledger items and halts the campaign; its next run observes
+that durable state even when completion was cached. Recovery still requires
+the existing capacity acknowledgement and a higher resume revision.
+
 Unknown remote objects become orphan candidates. Eneo waits through repeated
 complete inventories and the configured grace period before deletion. This
 protects bytes that are newer than a restored PostgreSQL snapshot.
@@ -356,10 +375,10 @@ commands.
   safety headroom.
 - Removing legacy columns later does not by itself return PostgreSQL table
   storage to the filesystem; physical reclamation is separate maintenance.
-- The later contract migration must fail closed until legacy adoption is
-  complete, then lock and recheck every surviving File/Icon reference as
-  `available` in the same transaction that drops legacy columns. Operators
-  choose when to close that recovery window.
+- The optional cleanup command fails closed until legacy adoption is complete,
+  then locks the tables and verifies every retained legacy source and every
+  surviving ledger reference as `available` in the same transaction that drops
+  the legacy columns. Operators choose when to close that recovery window.
 - Physical reclamation stays outside Alembic and startup because `pg_repack` or
   `VACUUM FULL` has deployment-specific lock, time, and free-space costs.
 - If object-store rows exist, PostgreSQL and the object store must share one

@@ -1,5 +1,9 @@
-# Stage 1: Builder using Bun
-FROM oven/bun:1.3.0-slim AS builder
+# Stage 1: Builder. Bun installs dependencies and runs the package scripts;
+# vite itself runs under Node, as it does in CI and on developer machines.
+# Without a Node binary, Bun runs vite on its own JavaScript runtime, which
+# has crashed (1.3.0) or starved the CI runner (1.3.14) on this build.
+FROM node:22-bookworm-slim AS builder
+COPY --from=oven/bun:1.3.14-slim /usr/local/bin/bun /usr/local/bin/bun
 
 WORKDIR /app
 COPY . .

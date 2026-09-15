@@ -8,7 +8,7 @@
 <table>
   <thead>
     <tr>
-      {#each token.header as cell (cell)}
+      {#each token.header as cell, i (i)}
         <th scope="col" style={cell.align ? `text-align: ${cell.align};` : undefined}>
           <RenderToken token={cell.tokens} />
         </th>
@@ -16,9 +16,9 @@
     </tr>
   </thead>
   <tbody>
-    {#each token.rows as row (row)}
+    {#each token.rows as row, r (r)}
       <tr>
-        {#each row as cell (cell)}
+        {#each row as cell, c (c)}
           <td style={cell.align ? `text-align: ${cell.align};` : undefined}>
             <RenderToken token={cell.tokens} />
           </td>

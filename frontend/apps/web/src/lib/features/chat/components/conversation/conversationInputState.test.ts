@@ -7,6 +7,7 @@ describe("isConversationSubmitDisabled", () => {
     expect(
       isConversationSubmitDisabled({
         isLoading: false,
+        sendPending: false,
         isUploading: false,
         hasContent: true,
         hasCompletionModel: true,
@@ -19,8 +20,24 @@ describe("isConversationSubmitDisabled", () => {
     expect(
       isConversationSubmitDisabled({
         isLoading: false,
+        sendPending: false,
         isUploading: false,
         hasContent: false,
+        hasCompletionModel: true,
+        estimatedExceedsContext: false
+      })
+    ).toBe(true);
+  });
+});
+
+describe("isConversationSubmitDisabled", () => {
+  it("blocks a second submission while the first send is still waiting to be issued", () => {
+    expect(
+      isConversationSubmitDisabled({
+        isLoading: false,
+        sendPending: true,
+        isUploading: false,
+        hasContent: true,
         hasCompletionModel: true,
         estimatedExceedsContext: false
       })

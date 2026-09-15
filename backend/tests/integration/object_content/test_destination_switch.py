@@ -2063,30 +2063,40 @@ async def test_marker_publication_serializes_concurrent_abandon(
     binding_id = await _binding_id(object_content_database)
     original_create_binding = S3ObjectStore.create_binding
     abandon_task: asyncio.Task[None] | None = None
+    initial_snapshot_taken = asyncio.Event()
 
     async def wait_for_abandon_row_lock() -> None:
-        async with object_content_database.session() as session, session.begin():
-            while not await session.scalar(
-                text(
-                    """
-                    SELECT EXISTS (
-                        SELECT 1
-                        FROM pg_stat_activity
-                        WHERE datname = current_database()
-                          AND pid <> pg_backend_pid()
-                          AND wait_event_type = 'Lock'
-                          AND query ILIKE '%object_store_connections%'
-                          AND query ILIKE '%FOR UPDATE%'
+        async with object_content_database.session() as session:
+            while True:
+                # PostgreSQL caches activity within a transaction. Each probe
+                # must see locks acquired after the initial snapshot.
+                async with session.begin():
+                    blocked = await session.scalar(
+                        text(
+                            """
+                            SELECT EXISTS (
+                                SELECT 1
+                                FROM pg_stat_activity
+                                WHERE datname = current_database()
+                                  AND pid <> pg_backend_pid()
+                                  AND wait_event_type = 'Lock'
+                                  AND query ILIKE '%object_store_connections%'
+                                  AND query ILIKE '%FOR UPDATE%'
+                            )
+                            """
+                        )
                     )
-                    """
-                )
-            ):
-                pass
+                if blocked:
+                    return
+                initial_snapshot_taken.set()
+                await asyncio.sleep(0.01)
 
     async def create_after_abandon_blocks(self, creation):  # type: ignore[no-untyped-def]
         nonlocal abandon_task
         pending = await service.get_candidate()
         assert pending is not None
+        lock_wait = asyncio.create_task(wait_for_abandon_row_lock())
+        await asyncio.wait_for(initial_snapshot_taken.wait(), timeout=5)
         abandon_task = asyncio.create_task(
             service.abandon_switch_candidate(
                 actor_user_id=actor,
@@ -2094,7 +2104,7 @@ async def test_marker_publication_serializes_concurrent_abandon(
             )
         )
         try:
-            await asyncio.wait_for(wait_for_abandon_row_lock(), timeout=10)
+            await asyncio.wait_for(lock_wait, timeout=10)
         except TimeoutError as error:
             raise AssertionError(
                 "concurrent abandon never blocked on the candidate row lock"

@@ -13,6 +13,7 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.governance_policy.domain.governance_policy import (
     GovernancePolicy,
+    PolicyCapability,
     PolicyCompletionModel,
     PolicyMcpServer,
 )
@@ -46,6 +47,10 @@ def _policy_changes(
     after_skills: list[ResolvedSkillBinding],
 ) -> dict[str, object]:
     changes: dict[str, object] = {}
+    before_caps = {c.purpose: c.is_default_enabled for c in before.capabilities}
+    after_caps = {c.purpose: c.is_default_enabled for c in after.capabilities}
+    if before_caps != after_caps:
+        changes["capabilities"] = {"old": before_caps, "new": after_caps}
 
     def _model_entries(policy: GovernancePolicy) -> list[dict[str, object]]:
         # Sort by id so a reordered-but-identical model set is not logged as a
@@ -127,6 +132,12 @@ def _policy_changes(
         changes["allow_user_reasoning_effort"] = {
             "old": before.allow_user_reasoning_effort,
             "new": after.allow_user_reasoning_effort,
+        }
+
+    if before.inline_file_text != after.inline_file_text:
+        changes["inline_file_text"] = {
+            "old": before.inline_file_text,
+            "new": after.inline_file_text,
         }
 
     before_skill_entries = skill_binding_audit_entries(before_skills)
@@ -220,6 +231,10 @@ async def update_governance_policy(
             payload.reasoning_policy.allow_user_override,
         )
 
+    inline_file_text = None
+    if payload.file_policy is not None:
+        inline_file_text = payload.file_policy.inline_file_text
+
     skill_intents = None
     if payload.skills is not None:
         skill_intents = assistant_skill_binding_intents_from_input(
@@ -229,8 +244,15 @@ async def update_governance_policy(
     policy = await service.update_policy(
         models_restriction=models_restriction,
         mcp_restriction=mcp_restriction,
+        capabilities=[
+            PolicyCapability(purpose=c.purpose, is_default_enabled=c.is_default_enabled)
+            for c in payload.mcp_restriction.capabilities
+        ]
+        if payload.mcp_restriction is not None
+        else None,
         prompt_enforcement=prompt_enforcement,
         reasoning_policy=reasoning_policy,
+        inline_file_text=inline_file_text,
         skill_intents=skill_intents,
     )
     if (

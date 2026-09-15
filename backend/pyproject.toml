@@ -42,9 +42,8 @@ dependencies = [
     "python-magic>=0.4.27,<0.5",
     "redis>=5.0.8,<6",
     "sentry-sdk[fastapi]==2.8.0",
-    "tavily-python>=0.5.1,<0.6",
     "greenlet>=3.2.2,<4",
-    "litellm==1.98.0",
+    "litellm==1.101.0",
     "mcp>=1.2.0,<2", # Model Context Protocol SDK for MCP server integration
     "anyio>=4.5,<5",  # memory-stream types the MCP client annotates against; floor matches mcp's
     "cryptography>=50.0.0,<51", # For Fernet encryption of HTTP auth passwords; >=50 clears CVE-2026-69247
@@ -193,7 +192,6 @@ exclude = ["*/completion_models/infrastructure/adapters/base_adapter.py"]
 ignore_names = [
     "exc_val",                     # __aexit__ context-manager protocol params
     "exc_tb",
-    "max_results",                 # _TavilyClient.search mirrors Tavily's API
     "priority",                    # accepted-but-not-yet-persisted API param (documented in code)
     "BaseDBModel",                 # imports below are used only in string/future annotations
     "DomainIntegrationKnowledge",

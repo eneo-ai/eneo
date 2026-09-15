@@ -24,7 +24,7 @@
   }
 </script>
 
-{#each tokens as token (token)}
+{#each tokens as token, i (i)}
   {@const [Component, props] = getRenderer(token)}
   {#if props.children}
     <Component token={props.token}>

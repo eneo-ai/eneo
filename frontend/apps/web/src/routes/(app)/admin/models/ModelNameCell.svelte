@@ -1,7 +1,12 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <script lang="ts">
-  import type { CompletionModel, EmbeddingModel, TranscriptionModel } from "@eneo/eneo-js";
+  import type {
+    CompletionModel,
+    EmbeddingModel,
+    ImageModel,
+    TranscriptionModel
+  } from "@eneo/eneo-js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { writable } from "svelte/store";
@@ -11,8 +16,8 @@
   import { TriangleAlert, Clock } from "lucide-svelte";
   import { getDeprecationStatus } from "$lib/features/ai-models/formatModelStats";
 
-  type AnyModel = CompletionModel | EmbeddingModel | TranscriptionModel;
-  type ModelTypeKey = "completionModel" | "embeddingModel" | "transcriptionModel";
+  type AnyModel = CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel;
+  type ModelTypeKey = "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel";
 
   // Rendered via svelte-headless-table's `createRender`, which requires the
   // legacy `export let` API. Keep this file on Svelte 4 component syntax.
@@ -31,6 +36,11 @@
   $: isRetiring = deprecation.kind === "retiring";
 
   $: statusKey = isDeprecated ? "deprecated" : isRetiring ? "retiring" : "ok";
+
+  // Capability providers running on the model; while any exists the model
+  // cannot be deleted, so say so up front instead of after a failed delete.
+  $: usedBy = "used_by_mcp_servers" in model ? (model.used_by_mcp_servers ?? []) : [];
+  $: usedByNames = usedBy.map((u) => u.name).join(", ");
 
   $: statusLabel = isDeprecated
     ? m.model_label_deprecated()
@@ -104,6 +114,25 @@
           {/snippet}
         </Tooltip.Trigger>
         <Tooltip.Content>{m.default_model_tooltip()}</Tooltip.Content>
+      </Tooltip.Root>
+    </Tooltip.Provider>
+  {/if}
+
+  {#if usedBy.length > 0}
+    <Tooltip.Provider delayDuration={150}>
+      <Tooltip.Root>
+        <Tooltip.Trigger>
+          {#snippet child({ props })}
+            <div
+              {...props}
+              class="bg-warning-dimmer text-warning-stronger inline-flex cursor-default items-center rounded-full px-2 py-[2px] text-[11px] font-medium tracking-wide"
+              data-status="in-use"
+            >
+              {m.model_used_by_image_generation()}
+            </div>
+          {/snippet}
+        </Tooltip.Trigger>
+        <Tooltip.Content>{usedByNames}</Tooltip.Content>
       </Tooltip.Root>
     </Tooltip.Provider>
   {/if}

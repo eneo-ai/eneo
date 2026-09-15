@@ -10,6 +10,7 @@
   import { Button, Dialog } from "@eneo/ui";
   import { writable } from "svelte/store";
   import { m } from "$lib/paraglide/messages";
+  import { getCapability } from "$lib/features/mcp/capabilities";
   import { toastError } from "$lib/core/errors";
 
   type Props = { classifications: SecurityClassification[]; onUpdateDone: () => void };
@@ -50,7 +51,14 @@
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (result.mcp_servers ?? []).map((s: any) => ({ name: s.name }));
   });
-  let hasAnyImpact = $derived(affectedModels.length > 0 || affectedMcpServers.length > 0);
+  const affectedCapabilities = $derived(
+    (result?.capabilities ?? []).map((purpose) => ({
+      name: getCapability(purpose)?.label() ?? purpose
+    }))
+  );
+  let hasAnyImpact = $derived(
+    affectedModels.length > 0 || affectedMcpServers.length > 0 || affectedCapabilities.length > 0
+  );
 
   const check = createAsyncState(async () => {
     if (!classification) {
@@ -131,6 +139,7 @@
         {:else if hasAnyImpact}
           <div class="flex flex-col gap-2">
             {@render access(m.models(), affectedModels)}
+            {@render access(m.capabilities(), affectedCapabilities)}
             {@render access(m.mcp_servers(), affectedMcpServers)}
             {@render access(m.assistants(), result?.assistants)}
             {@render access(m.group_chats(), result?.group_chats)}

@@ -64,6 +64,8 @@ export type Widget = components["schemas"]["WidgetPublic"];
 export type CompletionModel = components["schemas"]["CompletionModelPublic"];
 export type EmbeddingModel = components["schemas"]["EmbeddingModelPublic"];
 export type TranscriptionModel = components["schemas"]["TranscriptionModelPublic"];
+export type ImageModel = components["schemas"]["ImageModelPublic"];
+export type MCPServerBackingModel = components["schemas"]["MCPServerBackingModelPublic"];
 export type SecurityClassification = components["schemas"]["SecurityClassificationPublic"];
 export type Job = components["schemas"]["JobPublic"];
 export type JobFailureCode = components["schemas"]["JobFailureCode"];
@@ -253,6 +255,8 @@ export type TenantCompletionModelUpdate = components["schemas"]["TenantCompletio
 export type TenantEmbeddingModelUpdate = components["schemas"]["TenantEmbeddingModelUpdate"];
 export type TenantTranscriptionModelUpdate =
   components["schemas"]["TenantTranscriptionModelUpdate"];
+export type TenantImageModelCreate = components["schemas"]["TenantImageModelCreate"];
+export type TenantImageModelUpdate = components["schemas"]["TenantImageModelUpdate"];
 
 // Federation types
 export type TenantInfo = {

@@ -58,16 +58,23 @@ from eneo.object_content.file_icon_backfill import (
 from eneo.object_content.object_store_provider import ObjectStoreProvider
 from tests.integration.object_content.conftest import RealObjectStore
 
+# How long a test waits for a coordination lock to become observable. CI runs
+# the integration suite on four workers, and each object-content worker starts
+# its own PostgreSQL container, so a campaign can take several seconds to reach
+# a lock on a loaded runner. This only bounds how long a broken run takes to
+# fail; it never shortens a passing one.
+LOCK_WAIT_SECONDS = 30
+
 
 async def _tenant_and_user(
     database: DatabaseSessionManager,
+    *,
+    user_email: str = "object-content@example.test",
 ) -> tuple[UUID, UUID]:
     async with database.session() as session, session.begin():
         return (
             await session.execute(
-                sa.select(Users.tenant_id, Users.id).where(
-                    Users.email == "object-content@example.test"
-                )
+                sa.select(Users.tenant_id, Users.id).where(Users.email == user_email)
             )
         ).one()
 
@@ -79,8 +86,9 @@ async def _seed_legacy_text(
     estimate: int | None = None,
     file_id: UUID | None = None,
     parent_file_id: UUID | None = None,
+    user_email: str = "object-content@example.test",
 ) -> UUID:
-    tenant_id, user_id = await _tenant_and_user(database)
+    tenant_id, user_id = await _tenant_and_user(database, user_email=user_email)
     file_id = file_id or uuid4()
     async with database.session() as session, session.begin():
         await session.execute(sa.text("SET LOCAL session_replication_role = replica"))
@@ -971,6 +979,7 @@ async def test_reference_failure_before_admission_requires_inline_capacity(
         await ObjectContentRepository(session).mark_backend_failure(
             content_id=referenced_content_id,
             failure_code=ContentFailureCode.BACKEND_CORRUPT,
+            observed_storage_kind=StorageKind.POSTGRES_INLINE,
         )
 
     waiting = await backfill.run_once()
@@ -1032,6 +1041,7 @@ async def test_reference_failure_invalidates_cached_capacity_requirement(
         await ObjectContentRepository(session).mark_backend_failure(
             content_id=referenced_content_id,
             failure_code=ContentFailureCode.BACKEND_CORRUPT,
+            observed_storage_kind=StorageKind.POSTGRES_INLINE,
         )
 
     refreshed_wait = await backfill.run_once()
@@ -1093,13 +1103,14 @@ async def test_concurrent_reference_failure_precedes_campaign_capacity_snapshot(
             await failure_repository.mark_backend_failure(
                 content_id=referenced_content_id,
                 failure_code=ContentFailureCode.BACKEND_CORRUPT,
+                observed_storage_kind=StorageKind.POSTGRES_INLINE,
             )
 
     failure_task = asyncio.create_task(fail_reference())
     startup_task: asyncio.Task[FileIconBackfillResult] | None = None
     capacity_lock_observed = False
     try:
-        await asyncio.wait_for(failure_paused.wait(), timeout=5)
+        await asyncio.wait_for(failure_paused.wait(), timeout=LOCK_WAIT_SECONDS)
         startup_task = asyncio.create_task(
             _backfill(
                 object_content_database,
@@ -1133,14 +1144,14 @@ async def test_concurrent_reference_failure_precedes_campaign_capacity_snapshot(
 
         capacity_lock_observed = await asyncio.wait_for(
             wait_for_blocked_campaign_start(),
-            timeout=5,
+            timeout=LOCK_WAIT_SECONDS,
         )
     finally:
         release_failure.set()
-        await asyncio.wait_for(failure_task, timeout=5)
+        await asyncio.wait_for(failure_task, timeout=LOCK_WAIT_SECONDS)
 
     assert startup_task is not None
-    startup = await asyncio.wait_for(startup_task, timeout=5)
+    startup = await asyncio.wait_for(startup_task, timeout=LOCK_WAIT_SECONDS)
     assert capacity_lock_observed
     assert startup.state is FileIconBackfillState.WAITING_FOR_CAPACITY
     assert startup.detail is not None
@@ -1217,10 +1228,10 @@ async def test_unrelated_content_failure_does_not_wait_for_admission_lock(
         failure_task = asyncio.create_task(read_corrupt_content())
         completed_while_locked, _ = await asyncio.wait(
             {failure_task},
-            timeout=1,
+            timeout=LOCK_WAIT_SECONDS,
         )
 
-    await asyncio.wait_for(failure_task, timeout=5)
+    await asyncio.wait_for(failure_task, timeout=LOCK_WAIT_SECONDS)
     assert failure_task in completed_while_locked
     async with object_content_database.session() as session, session.begin():
         failed = (
@@ -1286,11 +1297,12 @@ async def test_reference_failure_rechecks_admission_before_lock_order_fallback(
             await ObjectContentRepository(session).mark_backend_failure(
                 content_id=content_id,
                 failure_code=ContentFailureCode.BACKEND_CORRUPT,
+                observed_storage_kind=StorageKind.POSTGRES_INLINE,
             )
 
     failure_task = asyncio.create_task(fail_reference())
     try:
-        await asyncio.wait_for(first_check_finished.wait(), timeout=5)
+        await asyncio.wait_for(first_check_finished.wait(), timeout=LOCK_WAIT_SECONDS)
         admitted = await _backfill(object_content_database).run_once()
         assert admitted.state is FileIconBackfillState.COMPLETE
         assert failure_backend_pid is not None
@@ -1322,7 +1334,7 @@ async def test_reference_failure_rechecks_admission_before_lock_order_fallback(
 
             blocked_on_admission = await asyncio.wait_for(
                 wait_for_failure_on_admission(),
-                timeout=5,
+                timeout=LOCK_WAIT_SECONDS,
             )
             locked_content_id = await session.scalar(
                 sa.select(ObjectContents.id)
@@ -1331,7 +1343,7 @@ async def test_reference_failure_rechecks_admission_before_lock_order_fallback(
             )
     finally:
         release_failure.set()
-    await asyncio.wait_for(failure_task, timeout=5)
+    await asyncio.wait_for(failure_task, timeout=LOCK_WAIT_SECONDS)
 
     async with object_content_database.session() as session, session.begin():
         state = (
@@ -1961,6 +1973,7 @@ async def test_failed_existing_reference_is_replaced_by_available_legacy_content
         await ObjectContentRepository(session).mark_backend_failure(
             content_id=failed_content_id,
             failure_code=ContentFailureCode.BACKEND_CORRUPT,
+            observed_storage_kind=StorageKind.POSTGRES_INLINE,
         )
 
     original_delete_reference = (
@@ -2107,6 +2120,7 @@ async def test_failed_icon_reference_is_replaced_by_available_legacy_content(
         await ObjectContentRepository(session).mark_backend_failure(
             content_id=failed_content_id,
             failure_code=ContentFailureCode.BACKEND_CORRUPT,
+            observed_storage_kind=StorageKind.POSTGRES_INLINE,
         )
 
     result = await _backfill(object_content_database).run_once()
@@ -2198,7 +2212,7 @@ async def test_owner_delete_waits_for_existing_reference_admission_fence(
             )
 
     try:
-        await asyncio.wait_for(reference_seen.wait(), timeout=5)
+        await asyncio.wait_for(reference_seen.wait(), timeout=LOCK_WAIT_SECONDS)
         deleting = asyncio.create_task(delete_owner())
         await asyncio.sleep(0.1)
         assert not deleting.done()
@@ -2263,7 +2277,7 @@ async def test_owner_delete_locks_admission_before_ledger_item(
             )
         )
         deleting = asyncio.create_task(delete_owner())
-        await asyncio.wait_for(delete_started.wait(), timeout=5)
+        await asyncio.wait_for(delete_started.wait(), timeout=LOCK_WAIT_SECONDS)
         await asyncio.sleep(0.1)
         assert not deleting.done()
         state_while_delete_waits = await session.scalar(
@@ -2280,7 +2294,7 @@ async def test_owner_delete_locks_admission_before_ledger_item(
         assert state_while_delete_waits == "pending"
 
     assert deleting is not None
-    await asyncio.wait_for(deleting, timeout=5)
+    await asyncio.wait_for(deleting, timeout=LOCK_WAIT_SECONDS)
     async with object_content_database.session() as session, session.begin():
         item_state = await session.scalar(
             sa.select(FileIconBackfillItems.state).where(
@@ -2333,7 +2347,7 @@ async def test_bulk_owner_delete_after_campaign_does_not_lock_admission(
             )
         )
         deleting = asyncio.create_task(delete_owners())
-        await asyncio.wait_for(deleting, timeout=5)
+        await asyncio.wait_for(deleting, timeout=LOCK_WAIT_SECONDS)
 
     async with object_content_database.session() as session, session.begin():
         generation_after = await session.scalar(
@@ -2415,13 +2429,13 @@ async def test_admission_retries_instead_of_deadlocking_with_parent_delete(
 
     deleting = asyncio.create_task(delete_family())
     try:
-        await asyncio.wait_for(parent_locked.wait(), timeout=5)
+        await asyncio.wait_for(parent_locked.wait(), timeout=LOCK_WAIT_SECONDS)
         contended = await asyncio.wait_for(
-            _backfill(object_content_database).run_once(), timeout=5
+            _backfill(object_content_database).run_once(), timeout=LOCK_WAIT_SECONDS
         )
     finally:
         allow_delete.set()
-    await asyncio.wait_for(deleting, timeout=5)
+    await asyncio.wait_for(deleting, timeout=LOCK_WAIT_SECONDS)
 
     assert contended.state is FileIconBackfillState.ACTIVE
     assert contended.admitted_count == 0
@@ -2724,8 +2738,10 @@ async def test_concurrent_runs_share_one_cluster_wide_batch_bound(
     backfill = _backfill(object_content_database)
     first = asyncio.create_task(backfill.run_once())
     try:
-        await asyncio.wait_for(entered_flip.wait(), timeout=5)
-        overlapping = await asyncio.wait_for(backfill.run_once(), timeout=5)
+        await asyncio.wait_for(entered_flip.wait(), timeout=LOCK_WAIT_SECONDS)
+        overlapping = await asyncio.wait_for(
+            backfill.run_once(), timeout=LOCK_WAIT_SECONDS
+        )
     finally:
         release_flip.set()
     completed = await first

@@ -224,6 +224,7 @@ async def update_space(
             update_space_req.transcription_models
         ),
         mcp_server_ids=_get_model_ids_or_none(update_space_req.mcp_servers),
+        enabled_capabilities=update_space_req.enabled_capabilities,
         mcp_tools=update_space_req.mcp_tools,
         security_classification=security_classification,
         data_retention_days=data_retention_days,
@@ -304,6 +305,12 @@ async def update_space(
                     for m in (space.transcription_models or [])
                 ],
             }
+
+    if old_space.enabled_capabilities != space.enabled_capabilities:
+        changes["enabled_capabilities"] = {
+            "old": old_space.enabled_capabilities,
+            "new": space.enabled_capabilities,
+        }
 
     # Track security classification changes
     if security_classification is not NOT_PROVIDED:
@@ -463,7 +470,10 @@ async def create_space_assistant(
 
     # Create assistant
     assistant, permissions = await service.create_assistant(
-        name=assistant_in.name, space_id=id, template_data=assistant_in.from_template
+        name=assistant_in.name,
+        space_id=id,
+        template_data=assistant_in.from_template,
+        enabled_capabilities=assistant_in.enabled_capabilities,
     )
 
     # Get space for context (graceful degradation if space fetch fails)

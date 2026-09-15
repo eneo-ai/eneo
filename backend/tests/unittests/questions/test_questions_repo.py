@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -7,7 +8,7 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy.dialects import postgresql
 
-from eneo.questions.question import QuestionAdd
+from eneo.questions.question import QuestionAdd, ToolCallInfo
 from eneo.questions.questions_repo import QuestionRepository, QuestionSessionPartner
 from eneo.skills.domain.skill import (
     SkillActivationEvidenceV1,
@@ -375,3 +376,32 @@ async def test_turn_without_activation_evidence_is_distinct_from_missing_message
 
     assert stored is not None
     assert stored.evidence is None
+
+
+async def test_answer_finalization_stores_tool_calls_as_json_values():
+    session = AsyncMock()
+    repo = QuestionRepository(session)
+    generated = uuid4()
+
+    await repo.update_with_answer(
+        question_id=uuid4(),
+        tenant_id=uuid4(),
+        answer="Completed",
+        num_tokens_question=10,
+        num_tokens_answer=5,
+        tool_calls=[
+            ToolCallInfo(
+                server_name="image_generation",
+                tool_name="generate_image",
+                tool_call_id="call-1",
+                result="[Image 1 (image/png) was generated and is shown to the user.]",
+                generated_file_ids=[generated],
+            )
+        ],
+    )
+
+    statement = session.execute.await_args.args[0]
+    params = statement.compile(dialect=postgresql.dialect()).params
+    # The JSONB column takes plain JSON values: no UUID objects survive the dump.
+    json.dumps(params["tool_calls"])
+    assert params["tool_calls"][0]["generated_file_ids"] == [str(generated)]

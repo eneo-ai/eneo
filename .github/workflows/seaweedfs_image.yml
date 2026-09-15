@@ -88,6 +88,7 @@ jobs:
         run: docker/seaweedfs/verify-supply-chain.sh source seaweedfs-source-evidence
 
       - name: Upload source policy evidence
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: seaweedfs-source-evidence
@@ -152,6 +153,7 @@ jobs:
           grype-version: ${{ env.GRYPE_VERSION }}
 
       - name: Upload audit evidence
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: seaweedfs-${{ matrix.slug }}-audit-evidence
@@ -244,6 +246,7 @@ jobs:
           subject-path: seaweedfs-${{ matrix.slug }}-evidence/*
 
       - name: Upload platform policy evidence
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: seaweedfs-${{ matrix.slug }}-evidence
@@ -480,9 +483,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform:
-          - linux/amd64
-          - linux/arm64
+        include:
+          - platform: linux/amd64
+            slug: linux-amd64
+          - platform: linux/arm64
+            slug: linux-arm64
 
     steps:
       - name: Set up Docker Buildx
@@ -522,4 +527,15 @@ jobs:
           fail-build: true
           severity-cutoff: high
           only-fixed: false
+          output-format: json
+          output-file: grype-${{ matrix.slug }}.json
           grype-version: ${{ env.GRYPE_VERSION }}
+
+      - name: Upload published image audit evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: seaweedfs-${{ matrix.slug }}-published-audit-evidence
+          path: grype-${{ matrix.slug }}.json
+          if-no-files-found: error
+          retention-days: 14

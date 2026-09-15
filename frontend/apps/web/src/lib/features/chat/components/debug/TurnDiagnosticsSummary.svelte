@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Badge } from "$lib/components/ui/badge/index.js";
+  import AttachmentPreview from "$lib/features/attachments/components/AttachmentPreview.svelte";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import type { TurnDebugDetails } from "../../turnDebugProjection";
@@ -65,21 +66,56 @@
   {:else}
     <ol class="flex flex-col gap-1">
       {#each details.tools as tool (tool.order)}
-        <li
-          class="border-border flex min-w-0 items-start justify-between gap-3 rounded-lg border px-3 py-2.5"
-        >
-          <div class="min-w-0">
-            <p class="text-sm font-medium break-words">
-              <span class="text-muted-foreground tabular-nums"
-                >{m.chat_debug_tool_order({ order: String(tool.order) })}</span
-              >
-              · {tool.toolName}
-            </p>
-            <p class="text-muted-foreground mt-0.5 text-xs break-words">{tool.serverName}</p>
+        <li class="border-border min-w-0 rounded-lg border px-3 py-2.5">
+          <div class="flex min-w-0 items-start justify-between gap-3">
+            <div class="min-w-0">
+              <p class="text-sm font-medium break-words">
+                <span class="text-muted-foreground tabular-nums"
+                  >{m.chat_debug_tool_order({ order: String(tool.order) })}</span
+                >
+                · {tool.toolName}
+              </p>
+              <p class="text-muted-foreground mt-0.5 text-xs break-words">{tool.serverName}</p>
+            </div>
+            <Badge class="shrink-0" variant="outline">
+              {tool.status ?? m.chat_debug_status_unknown()}
+            </Badge>
           </div>
-          <Badge class="shrink-0" variant="outline">
-            {tool.status ?? m.chat_debug_status_unknown()}
-          </Badge>
+          {#if tool.usage}
+            <dl
+              class="border-border mt-2 grid grid-cols-2 gap-x-5 gap-y-2 border-t pt-2 text-sm"
+              aria-label={m.chat_debug_tool_usage()}
+            >
+              {#if tool.usage.model}
+                <div class="min-w-0">
+                  <dt class="text-muted-foreground text-xs">{m.chat_debug_model()}</dt>
+                  <dd class="mt-0.5 font-medium break-words">{tool.usage.model}</dd>
+                </div>
+              {/if}
+              {#if tool.usage.provider}
+                <div class="min-w-0">
+                  <dt class="text-muted-foreground text-xs">{m.chat_debug_provider()}</dt>
+                  <dd class="mt-0.5 font-medium break-words">{tool.usage.provider}</dd>
+                </div>
+              {/if}
+              {#if tool.usage.inputTokens !== null}
+                <div>
+                  <dt class="text-muted-foreground text-xs">{m.chat_debug_input_tokens()}</dt>
+                  <dd class="mt-0.5 font-medium tabular-nums">
+                    {numberFormatter.format(tool.usage.inputTokens)}
+                  </dd>
+                </div>
+              {/if}
+              {#if tool.usage.outputTokens !== null}
+                <div>
+                  <dt class="text-muted-foreground text-xs">{m.chat_debug_output_tokens()}</dt>
+                  <dd class="mt-0.5 font-medium tabular-nums">
+                    {numberFormatter.format(tool.usage.outputTokens)}
+                  </dd>
+                </div>
+              {/if}
+            </dl>
+          {/if}
         </li>
       {/each}
     </ol>
@@ -129,7 +165,20 @@
         <li
           class="border-border flex min-w-0 items-start justify-between gap-3 rounded-lg border px-3 py-2.5"
         >
-          <span class="text-sm break-all">{file.name}</span>
+          <AttachmentPreview
+            file={{ id: file.id, name: file.name, mimetype: file.mimetype, size: file.size }}
+          >
+            {#snippet children({ showFile })}
+              <button
+                type="button"
+                class="text-primary min-w-0 text-left text-sm break-all underline-offset-2 hover:underline"
+                aria-label={m.chat_debug_open_file({ name: file.name })}
+                onclick={showFile}
+              >
+                {file.name}
+              </button>
+            {/snippet}
+          </AttachmentPreview>
           <Badge class="shrink-0" variant="secondary">
             {file.kind === "input" ? m.chat_debug_file_input() : m.chat_debug_file_generated()}
           </Badge>

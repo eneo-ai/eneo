@@ -66,6 +66,21 @@ def assistant_id_from_token(token: str) -> UUID:
     return UUID(str(raw))
 
 
+def mcp_server_id_from_token(token: str) -> UUID:
+    """The built-in provider row this token was minted for."""
+    settings = get_settings()
+    claims = jwt.decode(
+        token,
+        key=str(settings.jwt_secret),
+        audience=settings.jwt_audience,
+        algorithms=[settings.jwt_algorithm],
+    )
+    raw = claims.get("mcp_server_id")
+    if not raw:
+        raise ValueError("Access token is not scoped to a built-in provider.")
+    return UUID(str(raw))
+
+
 @asynccontextmanager
 async def internal_tool_context(ctx: Context):
     """Bootstrap a user-bound container for the token's user + assistant.

@@ -22,6 +22,7 @@ from eneo.files.file_models import FileType
 from eneo.main.config import get_settings
 
 if TYPE_CHECKING:
+    from eneo.completion_models.domain.completion_model import CompletionModel
     from eneo.files.file_models import File
     from eneo.main.config import Settings
 
@@ -65,6 +66,47 @@ def referenced_file_ids(files: Iterable["File"]) -> set[UUID]:
         for file in files
         if file.file_type == FileType.TEXT and file.original_available
     }
+
+
+def image_reference_file_ids(files: Iterable["File"]) -> set[UUID]:
+    """Ids of IMAGE files a signed reference URL can serve to an image tool.
+
+    Covers user-attached images (stored original) and generated images (the
+    generated artifact is the original). Derived images (rendered document
+    pages, embedded images) are excluded: they belong to their parent document
+    and are never edit inputs. No object-store requirement: generated artifacts
+    are inline, and uploads without a stored original are simply not marked
+    available. Images are never URL-only; the reference is an extra handle
+    next to the vision input, not a replacement for it.
+    """
+    if not file_reference_base_url():
+        return set()
+    return {
+        file.id
+        for file in files
+        if file.file_type == FileType.IMAGE
+        and file.original_available
+        and file.parent_file_id is None
+    }
+
+
+def reference_url_file_ids(files: Iterable["File"]) -> set[UUID]:
+    """Ids of every file that gets a signed reference URL in the prompt."""
+    files = list(files)
+    return referenced_file_ids(files) | image_reference_file_ids(files)
+
+
+def inline_file_text_for_model(
+    inline_file_text: bool, completion_model: "CompletionModel"
+) -> bool:
+    """URL-only mode needs a model that can call the files tool.
+
+    A model without tool calling would see only a link it cannot open, so
+    the text is inlined after all whatever the assistant or policy says.
+    Ask-time and preflight both go through here so the meter and the
+    request agree.
+    """
+    return inline_file_text or not completion_model.supports_tool_calling
 
 
 def url_only_file_ids(files: Iterable["File"], inline_file_text: bool) -> set[UUID]:

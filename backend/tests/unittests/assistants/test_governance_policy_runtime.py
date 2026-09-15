@@ -1,4 +1,5 @@
 import asyncio
+import copy
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -154,6 +155,7 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
     space.get_assistant.return_value = assistant
     space.can_ask_assistant.return_value = None
     space.is_personal.return_value = True
+    space.security_classification = None
 
     actor = MagicMock()
     actor.can_read_assistant.return_value = True
@@ -169,6 +171,7 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
         prompt_enforced=False,
         enforced_prompt_text=None,
         reasoning_policy_configured=True,
+        inline_file_text=None,
         default_reasoning_effort="high",
         reasoning_effort_user_configurable=True,
         governance_skill_resolution=SkillRuntimeResolution(eligible=(), blocked=()),
@@ -257,6 +260,7 @@ async def test_ask_rejects_empty_model_policy_before_creating_history():
     space.get_assistant.return_value = assistant
     space.can_ask_assistant.return_value = None
     space.is_personal.return_value = True
+    space.security_classification = None
 
     actor = MagicMock()
     actor.can_read_assistant.return_value = True
@@ -271,6 +275,7 @@ async def test_ask_rejects_empty_model_policy_before_creating_history():
         prompt_enforced=False,
         enforced_prompt_text=None,
         reasoning_policy_configured=False,
+        inline_file_text=None,
         governance_skill_resolution=SkillRuntimeResolution(eligible=(), blocked=()),
     )
     session_service = AsyncMock(
@@ -327,7 +332,7 @@ async def test_ask_grants_policy_mcp_servers_to_personal_assistant():
     )
     response = MagicMock()
     datastore_result = DatastoreResult(chunks=[], no_duplicate_chunks=[], info_blobs=[])
-    policy_server = SimpleNamespace(id=uuid4(), name="Sundsvall.se")
+    policy_server = SimpleNamespace(id=uuid4(), name="Sundsvall.se", purpose=None)
 
     assistant = MagicMock()
     assistant.id = assistant_id
@@ -343,6 +348,7 @@ async def test_ask_grants_policy_mcp_servers_to_personal_assistant():
     space.get_assistant.return_value = assistant
     space.can_ask_assistant.return_value = None
     space.is_personal.return_value = True
+    space.security_classification = None
 
     actor = MagicMock()
     actor.can_read_assistant.return_value = True
@@ -354,9 +360,11 @@ async def test_ask_grants_policy_mcp_servers_to_personal_assistant():
         policy_default_model=None,
         mcp_enforced=True,
         available_mcp_servers=[policy_server],
+        enabled_capabilities=[],
         prompt_enforced=False,
         enforced_prompt_text=None,
         reasoning_policy_configured=False,
+        inline_file_text=None,
         governance_skill_resolution=SkillRuntimeResolution(eligible=(), blocked=()),
     )
 
@@ -400,6 +408,108 @@ async def test_ask_grants_policy_mcp_servers_to_personal_assistant():
     assert assistant.ask.await_args.kwargs["mcp_servers_override"] == [policy_server]
 
 
+@pytest.mark.parametrize(
+    ("supports_tool_calling", "expected_inline"),
+    [
+        # Tool-calling model: the policy's URL-only mode applies.
+        (True, False),
+        # No tool calling: the model could not open a reference, so the text
+        # is inlined after all despite the policy.
+        (False, True),
+    ],
+)
+async def test_ask_applies_governed_file_policy_to_personal_assistant(
+    supports_tool_calling: bool, expected_inline: bool
+):
+    """The file policy replaces the entity's own inlining flag for the request,
+    so every downstream reader (fit gate, files tool, completion) sees it."""
+    assistant_id = uuid4()
+    model = copy.copy(TEST_MODEL_CHATGPT)
+    model.supports_tool_calling = supports_tool_calling
+    session = SessionInDB(
+        id=uuid4(),
+        name="hello",
+        user_id=TEST_USER.id,
+        questions=[],
+    )
+    response = MagicMock()
+    datastore_result = DatastoreResult(chunks=[], no_duplicate_chunks=[], info_blobs=[])
+
+    assistant = MagicMock()
+    assistant.id = assistant_id
+    assistant.name = "Personal assistant"
+    assistant.description = None
+    assistant.is_default = True
+    assistant.completion_model = model
+    assistant.tool_assistants = []
+    assistant.mcp_servers = []
+    assistant.inline_file_text = True
+    assistant.ask = AsyncMock(return_value=(response, datastore_result))
+
+    space = MagicMock()
+    space.get_assistant.return_value = assistant
+    space.can_ask_assistant.return_value = None
+    space.is_personal.return_value = True
+    space.security_classification = None
+
+    actor = MagicMock()
+    actor.can_read_assistant.return_value = True
+
+    effective_config_service = AsyncMock()
+    effective_config_service.resolve_for.return_value = SimpleNamespace(
+        models_enforced=False,
+        available_models=[],
+        policy_default_model=None,
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        enabled_capabilities=[],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+        reasoning_policy_configured=False,
+        inline_file_text=False,
+        governance_skill_resolution=SkillRuntimeResolution(eligible=(), blocked=()),
+    )
+
+    service = AssistantService(
+        repo=AsyncMock(),
+        space_repo=AsyncMock(get_space_by_assistant=AsyncMock(return_value=space)),
+        user=TEST_USER,
+        auth_service=MagicMock(),
+        service_repo=AsyncMock(),
+        step_repo=AsyncMock(),
+        completion_model_crud_service=AsyncMock(),
+        space_service=AsyncMock(),
+        factory=MagicMock(),
+        prompt_service=AsyncMock(),
+        file_service=AsyncMock(get_files_by_ids=AsyncMock(return_value=[])),
+        assistant_template_service=AsyncMock(),
+        session_service=AsyncMock(
+            create_session=AsyncMock(return_value=session),
+            create_question_placeholder=AsyncMock(return_value=(uuid4(), None)),
+            create_session_with_question_placeholder=AsyncMock(
+                return_value=(session, uuid4(), None)
+            ),
+        ),
+        actor_manager=MagicMock(
+            get_space_actor_from_space=MagicMock(return_value=actor)
+        ),
+        integration_knowledge_repo=AsyncMock(),
+        completion_service=AsyncMock(),
+        references_service=AsyncMock(),
+        icon_repo=AsyncMock(),
+        org_space_assistant_role_repo=_not_helper_role_repo(),
+        help_assistant_assignment_history_repo=_not_helper_history_repo(),
+        skill_service=_empty_skill_service(),
+        effective_config_service=effective_config_service,
+    )
+    service._handle_response = AsyncMock(return_value="answer")  # type: ignore[method-assign]
+
+    await service.ask(question="hello", assistant_id=assistant_id)
+
+    assistant.ask.assert_awaited_once()
+    assert assistant.inline_file_text is expected_inline
+
+
 async def test_ask_respects_disabled_mcp_server_ids():
     """A per-request opt-out narrows the effective MCP set (here the granted
     policy servers) by the servers the user switched off in the composer."""
@@ -407,8 +517,8 @@ async def test_ask_respects_disabled_mcp_server_ids():
     session = SessionInDB(id=uuid4(), name="hello", user_id=TEST_USER.id, questions=[])
     response = MagicMock()
     datastore_result = DatastoreResult(chunks=[], no_duplicate_chunks=[], info_blobs=[])
-    server_a = SimpleNamespace(id=uuid4(), name="Sundsvall.se")
-    server_b = SimpleNamespace(id=uuid4(), name="Confluence")
+    server_a = SimpleNamespace(id=uuid4(), name="Sundsvall.se", purpose=None)
+    server_b = SimpleNamespace(id=uuid4(), name="Confluence", purpose=None)
 
     assistant = MagicMock()
     assistant.id = assistant_id
@@ -424,6 +534,7 @@ async def test_ask_respects_disabled_mcp_server_ids():
     space.get_assistant.return_value = assistant
     space.can_ask_assistant.return_value = None
     space.is_personal.return_value = True
+    space.security_classification = None
 
     actor = MagicMock()
     actor.can_read_assistant.return_value = True
@@ -435,9 +546,11 @@ async def test_ask_respects_disabled_mcp_server_ids():
         policy_default_model=None,
         mcp_enforced=True,
         available_mcp_servers=[server_a, server_b],
+        enabled_capabilities=[],
         prompt_enforced=False,
         enforced_prompt_text=None,
         reasoning_policy_configured=False,
+        inline_file_text=None,
         governance_skill_resolution=SkillRuntimeResolution(eligible=(), blocked=()),
     )
 
@@ -679,9 +792,9 @@ def _personal_default_space(assistant):
     return space
 
 
-async def test_get_effective_completion_model_enforces_read_auth():
-    # Preflight is reachable with an arbitrary assistant_id; it must not return a
-    # model for an assistant the caller cannot read.
+async def test_get_assistant_with_effective_config_enforces_read_auth():
+    # Preflight is reachable with an arbitrary assistant_id; it must not return
+    # an assistant the caller cannot read.
     from eneo.main.exceptions import UnauthorizedException
 
     assistant = MagicMock()
@@ -702,10 +815,10 @@ async def test_get_effective_completion_model_enforces_read_auth():
     service.space_repo.get_space_by_assistant = AsyncMock(return_value=space)
 
     with pytest.raises(UnauthorizedException):
-        await service.get_effective_completion_model(assistant.id)
+        await service.get_assistant_with_effective_config(assistant.id)
 
 
-async def test_get_effective_completion_model_allows_personal_default_for_baseline_user():
+async def test_get_assistant_with_effective_config_allows_personal_default_for_baseline_user():
     # A PERSONAL_CHAT-only user (no ASSISTANTS permission) can read their own
     # personal default assistant via the carve-out.
     assistant = MagicMock()
@@ -733,8 +846,11 @@ async def test_get_effective_completion_model_allows_personal_default_for_baseli
     service.space_repo = AsyncMock()
     service.space_repo.get_space_by_assistant = AsyncMock(return_value=space)
 
-    model = await service.get_effective_completion_model(assistant.id)
-    assert model is TEST_MODEL_CHATGPT
+    resolved, _, effective_config = await service.get_assistant_with_effective_config(
+        assistant.id
+    )
+    assert resolved is assistant
+    assert effective_config is effective_config_service.resolve_for.return_value
 
 
 def _resolved_skill(
@@ -1086,6 +1202,7 @@ async def test_personal_default_rejects_invalid_direct_bindings_before_history()
         prompt_enforced=False,
         enforced_prompt_text=None,
         reasoning_policy_configured=False,
+        inline_file_text=None,
         governance_skill_resolution=SkillRuntimeResolution(eligible=(), blocked=()),
     )
     service, assistant, session_service = _runtime_service(
@@ -1150,6 +1267,7 @@ async def test_governance_skill_composes_after_enforced_prompt():
         prompt_enforced=True,
         enforced_prompt_text="Enforced tenant base",
         reasoning_policy_configured=False,
+        inline_file_text=None,
         governance_skill_resolution=SkillRuntimeResolution(
             eligible=(binding,),
             blocked=(blocked,),
@@ -1193,6 +1311,7 @@ async def test_governance_prompt_rechecks_persistent_baseline_on_plain_turn():
         prompt_enforced=True,
         enforced_prompt_text="Enforced tenant base",
         reasoning_policy_configured=False,
+        inline_file_text=None,
         governance_skill_resolution=SkillRuntimeResolution(eligible=(), blocked=()),
     )
     service, assistant, _ = _runtime_service(
@@ -1209,4 +1328,120 @@ async def test_governance_prompt_rechecks_persistent_baseline_on_plain_turn():
             "validate_persistent_baseline"
         ]
         is True
+    )
+
+
+async def test_ask_checks_space_with_policy_default_when_assistant_has_no_model():
+    """A personal default assistant with no stored model must not be rejected
+    before the policy default is resolved (the frontend already shows that
+    model as selected)."""
+    assistant_id = uuid4()
+    now = datetime.now(UTC)
+    effective_model = DomainCompletionModel(
+        user=TEST_USER,
+        id=TEST_MODEL_GPT4.id,
+        created_at=now,
+        updated_at=now,
+        nickname=TEST_MODEL_GPT4.nickname,
+        name=TEST_MODEL_GPT4.name,
+        max_input_tokens=TEST_MODEL_GPT4.max_input_tokens,
+        max_output_tokens=TEST_MODEL_GPT4.max_output_tokens,
+        vision=False,
+        family="openai",
+        hosting="usa",
+        org="OpenAI",
+        stability="stable",
+        open_source=False,
+        description=None,
+        nr_billion_parameters=None,
+        hf_link=None,
+        is_deprecated=False,
+        deployment_name=None,
+        is_org_enabled=True,
+        is_org_default=False,
+        reasoning=False,
+        tenant_id=TEST_USER.tenant_id,
+        provider_type="openai",
+    )
+    session = SessionInDB(id=uuid4(), name="hello", user_id=TEST_USER.id, questions=[])
+    assistant = MagicMock()
+    assistant.id = assistant_id
+    assistant.name = "Personal assistant"
+    assistant.description = None
+    assistant.is_default = True
+    assistant.completion_model = None
+    assistant.completion_model_kwargs = ModelKwargs()
+    assistant.tool_assistants = []
+    assistant.ask = AsyncMock(
+        return_value=(
+            MagicMock(),
+            DatastoreResult(chunks=[], no_duplicate_chunks=[], info_blobs=[]),
+        )
+    )
+
+    space = MagicMock()
+    space.get_assistant.return_value = assistant
+    space.can_ask_assistant.return_value = None
+    space.is_personal.return_value = True
+    space.default_assistant = assistant
+    space.security_classification = None
+
+    actor = MagicMock()
+    actor.can_read_default_assistant.return_value = True
+
+    effective_config_service = AsyncMock()
+    effective_config_service.resolve_for.return_value = EffectiveConfig(
+        models_enforced=True,
+        available_models=[effective_model],
+        locked_model=None,
+        policy_default_model=effective_model,
+        mcp_enforced=False,
+        available_mcp_servers=[],
+        prompt_enforced=False,
+        enforced_prompt_text=None,
+        reasoning_policy_configured=False,
+        inline_file_text=None,
+        default_reasoning_effort=None,
+        reasoning_effort_user_configurable=False,
+        governance_skill_resolution=SkillRuntimeResolution(eligible=(), blocked=()),
+    )
+    session_service = AsyncMock(
+        create_session=AsyncMock(return_value=session),
+        create_question_placeholder=AsyncMock(return_value=(uuid4(), None)),
+        create_session_with_question_placeholder=AsyncMock(
+            return_value=(session, uuid4(), None)
+        ),
+    )
+    service = AssistantService(
+        repo=AsyncMock(),
+        space_repo=AsyncMock(get_space_by_assistant=AsyncMock(return_value=space)),
+        user=TEST_USER,
+        auth_service=MagicMock(),
+        service_repo=AsyncMock(),
+        step_repo=AsyncMock(),
+        completion_model_crud_service=AsyncMock(),
+        space_service=AsyncMock(),
+        factory=MagicMock(),
+        prompt_service=AsyncMock(),
+        file_service=AsyncMock(get_files_by_ids=AsyncMock(return_value=[])),
+        assistant_template_service=AsyncMock(),
+        session_service=session_service,
+        actor_manager=MagicMock(
+            get_space_actor_from_space=MagicMock(return_value=actor)
+        ),
+        integration_knowledge_repo=AsyncMock(),
+        completion_service=AsyncMock(),
+        references_service=AsyncMock(),
+        icon_repo=AsyncMock(),
+        org_space_assistant_role_repo=_not_helper_role_repo(),
+        help_assistant_assignment_history_repo=_not_helper_history_repo(),
+        skill_service=_empty_skill_service(),
+        effective_config_service=effective_config_service,
+    )
+    service._handle_response = AsyncMock(return_value="answer")  # type: ignore[method-assign]
+
+    await service.ask(question="hello", assistant_id=assistant_id)
+
+    space.can_ask_assistant.assert_called_once_with(
+        assistant=assistant, completion_model=effective_model
     )

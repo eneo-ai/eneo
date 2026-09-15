@@ -6,7 +6,8 @@ Tests cover:
 - Credential clearing when switching auth type to "none"
 - has_credentials boolean and credential_preview in assemblers
 - Proxy factory decryption of http_auth_config_schema
-- Auth type literal validation (only "none" and "bearer")
+- Auth type literal validation ("none", "bearer", "api_key_header")
+- api_key_header header-name validation (token syntax + reserved-header deny list)
 - refresh_tools uses stored encrypted credentials
 """
 
@@ -61,7 +62,7 @@ def _make_service(encryption_service=None):
 
 
 class TestAuthTypeLiterals:
-    """Test that only 'none' and 'bearer' are accepted."""
+    """Test that only 'none', 'bearer', and 'api_key_header' are accepted."""
 
     def test_create_accepts_none(self):
         dto = MCPServerCreate(name="test", http_url="http://localhost:8080")
@@ -75,13 +76,13 @@ class TestAuthTypeLiterals:
         )
         assert dto.http_auth_type == "bearer"
 
-    def test_create_rejects_api_key(self):
-        with pytest.raises(ValidationError):
-            MCPServerCreate(
-                name="test",
-                http_url="http://localhost:8080",
-                http_auth_type="api_key",
-            )
+    def test_create_accepts_api_key_header(self):
+        dto = MCPServerCreate(
+            name="test",
+            http_url="http://localhost:8080",
+            http_auth_type="api_key_header",
+        )
+        assert dto.http_auth_type == "api_key_header"
 
     def test_create_rejects_custom_headers(self):
         with pytest.raises(ValidationError):
@@ -95,9 +96,74 @@ class TestAuthTypeLiterals:
         dto = MCPServerUpdate(http_auth_type="bearer")
         assert dto.http_auth_type == "bearer"
 
-    def test_update_rejects_api_key(self):
+    def test_update_rejects_unknown_type(self):
         with pytest.raises(ValidationError):
             MCPServerUpdate(http_auth_type="api_key")
+
+
+class TestApiKeyHeaderValidation:
+    """Header names must use HTTP token syntax and avoid reserved headers."""
+
+    @staticmethod
+    def _validate(header_name: str, token: str = "sk-123"):
+        from eneo.mcp_servers.application.mcp_server_service import MCPServerService
+
+        MCPServerService._validate_auth_config(
+            "api_key_header", {"header_name": header_name, "token": token}
+        )
+
+    def test_accepts_typical_api_key_header(self):
+        self._validate("X-Api-Key")
+        self._validate("Api-Key")
+
+    def test_rejects_missing_header_name(self):
+        from eneo.main.exceptions import BadRequestException
+        from eneo.mcp_servers.application.mcp_server_service import MCPServerService
+
+        with pytest.raises(BadRequestException):
+            MCPServerService._validate_auth_config(
+                "api_key_header", {"token": "sk-123"}
+            )
+
+    def test_rejects_non_token_characters(self):
+        from eneo.main.exceptions import BadRequestException
+
+        for bad in ("X Api Key", "X-Api-Key:", "héader", "X-Key\r\nHost"):
+            with pytest.raises(BadRequestException):
+                self._validate(bad)
+
+    def test_rejects_reserved_headers(self):
+        from eneo.main.exceptions import BadRequestException
+
+        for reserved in (
+            "Host",
+            "Content-Length",
+            "Authorization",
+            "Mcp-Session-Id",
+            "X-Forwarded-For",
+            "X-Eneo-User",
+            "Cookie",
+        ):
+            with pytest.raises(BadRequestException):
+                self._validate(reserved)
+
+    def test_rejects_control_characters_in_token(self):
+        from eneo.main.exceptions import BadRequestException
+
+        with pytest.raises(BadRequestException):
+            self._validate("X-Api-Key", token="secret\r\nInjected: yes")
+
+    def test_bearer_token_control_characters_rejected(self):
+        from eneo.main.exceptions import BadRequestException
+        from eneo.mcp_servers.application.mcp_server_service import MCPServerService
+
+        with pytest.raises(BadRequestException):
+            MCPServerService._validate_auth_config("bearer", {"token": "abc\ndef"})
+
+    def test_none_auth_skips_validation(self):
+        from eneo.mcp_servers.application.mcp_server_service import MCPServerService
+
+        MCPServerService._validate_auth_config("none", None)
 
 
 # =============================================================================
@@ -225,10 +291,19 @@ class TestAssemblerHasCredentials:
         )
 
         server = MagicMock()
+        server.image_model = None
+        server.effective_security_classification = None
+        server.image_model_id = None
+        server.readiness_reason = None
         server.id = uuid4()
         server.name = "test"
         server.description = None
         server.http_url = "http://localhost"
+        server.purpose = "general"
+        server.audience = "everyone"
+        server.audience_priority = 100
+        server.user_groups = []
+        server.is_enabled = True
         server.http_auth_type = "bearer"
         server.http_auth_config_schema = {"token": "enc:fernet:v1:xxx"}
         server.tags = None
@@ -246,10 +321,19 @@ class TestAssemblerHasCredentials:
         )
 
         server = MagicMock()
+        server.image_model = None
+        server.effective_security_classification = None
+        server.image_model_id = None
+        server.readiness_reason = None
         server.id = uuid4()
         server.name = "test"
         server.description = None
         server.http_url = "http://localhost"
+        server.purpose = "general"
+        server.audience = "everyone"
+        server.audience_priority = 100
+        server.user_groups = []
+        server.is_enabled = True
         server.http_auth_type = "none"
         server.http_auth_config_schema = None
         server.tags = None
@@ -268,10 +352,19 @@ class TestAssemblerHasCredentials:
         )
 
         server = MagicMock()
+        server.image_model = None
+        server.effective_security_classification = None
+        server.image_model_id = None
+        server.readiness_reason = None
         server.id = uuid4()
         server.name = "test"
         server.description = None
         server.http_url = "http://localhost"
+        server.purpose = "general"
+        server.audience = "everyone"
+        server.audience_priority = 100
+        server.user_groups = []
+        server.is_enabled = True
         server.http_auth_type = "bearer"
         server.http_auth_config_schema = {"token": "enc:fernet:v1:xxx"}
         server.tags = None
@@ -311,10 +404,19 @@ class TestAssemblerHasCredentials:
         )
 
         server = MagicMock()
+        server.image_model = None
+        server.effective_security_classification = None
+        server.image_model_id = None
+        server.readiness_reason = None
         server.id = uuid4()
         server.name = "test"
         server.description = None
         server.http_url = "http://localhost"
+        server.purpose = "general"
+        server.audience = "everyone"
+        server.audience_priority = 100
+        server.user_groups = []
+        server.is_enabled = True
         server.http_auth_type = "none"
         server.http_auth_config_schema = None
         server.tags = None
@@ -343,10 +445,19 @@ class TestAssemblerHasCredentials:
         encrypted_token = enc.encrypt("my-secret-bearer-token-12345")
 
         server = MagicMock()
+        server.image_model = None
+        server.effective_security_classification = None
+        server.image_model_id = None
+        server.readiness_reason = None
         server.id = uuid4()
         server.name = "test"
         server.description = None
         server.http_url = "http://localhost"
+        server.purpose = "general"
+        server.audience = "everyone"
+        server.audience_priority = 100
+        server.user_groups = []
+        server.is_enabled = True
         server.http_auth_type = "bearer"
         server.http_auth_config_schema = {"token": encrypted_token}
         server.tags = None
@@ -370,10 +481,19 @@ class TestAssemblerHasCredentials:
         )
 
         server = MagicMock()
+        server.image_model = None
+        server.effective_security_classification = None
+        server.image_model_id = None
+        server.readiness_reason = None
         server.id = uuid4()
         server.name = "test"
         server.description = None
         server.http_url = "http://localhost"
+        server.purpose = "general"
+        server.audience = "everyone"
+        server.audience_priority = 100
+        server.user_groups = []
+        server.is_enabled = True
         server.http_auth_type = "bearer"
         server.http_auth_config_schema = {"token": "plaintext-token-5678"}
         server.tags = None
@@ -406,6 +526,11 @@ class TestProxyFactoryDecryption:
         server.id = uuid4()
         server.name = "test"
         server.http_url = "http://localhost"
+        server.purpose = "general"
+        server.audience = "everyone"
+        server.audience_priority = 100
+        server.user_groups = []
+        server.is_enabled = True
         server.http_auth_type = "bearer"
         server.http_auth_config_schema = {
             "token": "my-bearer-token",
@@ -431,6 +556,11 @@ class TestProxyFactoryDecryption:
         server.id = uuid4()
         server.name = "test"
         server.http_url = "http://localhost"
+        server.purpose = "general"
+        server.audience = "everyone"
+        server.audience_priority = 100
+        server.user_groups = []
+        server.is_enabled = True
         server.http_auth_type = "bearer"
         server.http_auth_config_schema = {
             "token": encrypted_token,
@@ -451,6 +581,11 @@ class TestProxyFactoryDecryption:
         server.id = uuid4()
         server.name = "public-server"
         server.http_url = "http://localhost"
+        server.purpose = "general"
+        server.audience = "everyone"
+        server.audience_priority = 100
+        server.user_groups = []
+        server.is_enabled = True
         server.http_auth_type = "none"
         server.http_auth_config_schema = None
         server.tools = []

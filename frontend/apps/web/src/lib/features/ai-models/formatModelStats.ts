@@ -44,6 +44,11 @@ export function formatCostPerMillionTokens(value: CostFieldValue): string | null
   return `$${perMillion.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}`;
 }
 
+/** "$0.04" per generated image — used by image model rows. */
+export function formatCostPerImage(value: CostFieldValue): string | null {
+  return formatCostPerMinute(value);
+}
+
 /** "$0.006/min" — used by transcription rows. */
 export function formatCostPerMinute(value: CostFieldValue): string | null {
   const n = toNumber(value);
