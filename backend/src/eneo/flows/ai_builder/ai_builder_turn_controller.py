@@ -261,7 +261,7 @@ def _runtime_input_field_details_required(session_state: PlanningState) -> bool:
         session_state.commit_grade_slot_value("runtime_metadata_fields")
         in {"basic_runtime_metadata", "detailed_runtime_metadata"}
         and not session_state.input_fields
-        and not session_state.saved_input_fields
+        and session_state.saved_input_field_count == 0
     )
 
 

@@ -321,9 +321,14 @@
                   <p class="mt-0.5">{failure.body}</p>
                 {/if}
                 {#if failure.retry}
-                  <Button variant="outline" size="sm" class="mt-2.5" onclick={() => onsuggest?.()}>
-                    {m.ai_builder_review_retry()}
-                  </Button>
+                  <!-- The controls stay: a model the sample's evidence level
+                       refuses is corrected here, then retried. -->
+                  <div class="mt-2.5 flex flex-wrap items-center gap-2">
+                    <Button variant="outline" size="sm" onclick={() => onsuggest?.()}>
+                      {m.ai_builder_review_retry()}
+                    </Button>
+                    {@render plannerControls?.()}
+                  </div>
                 {/if}
               </div>
             {:else}

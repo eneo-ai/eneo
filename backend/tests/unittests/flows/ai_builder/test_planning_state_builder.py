@@ -7275,10 +7275,8 @@ def test_saved_form_fields_seed_the_planning_baseline_without_confirming_them() 
 
     state = build_planning_state_from_conversation([], flow=flow)
 
-    assert [field.name for field in state.saved_input_fields] == [
-        "brukarens_namn",
-        "datum_intervju",
-    ]
-    # Known, not confirmed: no field claims a user-confirmed purpose.
+    assert state.saved_input_field_count == 2
+    # Known, not confirmed: no field claims a user-confirmed purpose, and the
+    # fields themselves stay with the flow rather than in the persisted state.
     assert state.input_fields == []
-    assert build_planning_state_from_conversation([]).saved_input_fields == []
+    assert build_planning_state_from_conversation([]).saved_input_field_count == 0

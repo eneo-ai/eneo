@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createRawSnippet } from "svelte";
 import { m } from "$lib/paraglide/messages";
 import { getLocale, setLocale } from "$lib/paraglide/runtime";
 import type { AIBuilderFlowReviewPacket } from "./protocol";
@@ -539,5 +540,31 @@ describe("BuilderFindingsScreen suggestions", () => {
     });
     expect(screen.getByText(m.ai_builder_review_suggestions_invalid_output())).toBeTruthy();
     expect(screen.getByRole("button", { name: m.ai_builder_review_retry() })).toBeTruthy();
+  });
+
+  it("keeps the model controls and a retry when the chosen model may not read the sample", () => {
+    const controls = createRawSnippet(() => ({
+      render: () => `<span data-testid="planner-controls">controls</span>`
+    }));
+    render(BuilderFindingsScreen, {
+      review: { status: "ready", packet: makePacket() },
+      suggestions: {
+        status: "failed",
+        error: {
+          code: "planner_model_below_evidence_level",
+          message: "The planner model may not read runs at this level.",
+          category: "bad_request",
+          phase: "router",
+          transient: false
+        } as never
+      },
+      plannerControls: controls,
+      onprepare: vi.fn(),
+      onclose: vi.fn(),
+      onretry: vi.fn()
+    });
+    expect(screen.getByText(m.ai_builder_review_suggestions_below_level())).toBeTruthy();
+    expect(screen.getByRole("button", { name: m.ai_builder_review_retry() })).toBeTruthy();
+    expect(screen.getByTestId("planner-controls")).toBeTruthy();
   });
 });

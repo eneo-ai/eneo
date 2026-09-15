@@ -145,7 +145,6 @@ from eneo.flows.domain.mapped_execution_policy import (
     max_mapped_items_per_step,
 )
 from eneo.flows.enums import FlowOutputMode
-from eneo.flows.flow_authoring_spec import FormFieldSpec
 from eneo.json_types import JsonObject
 
 CLASSIFIER_REBUILD_INPUT_CLASSES: frozenset[ClassifierRetentionClass] = frozenset(
@@ -183,7 +182,7 @@ def build_planning_state_from_conversation(
         resolved_slots=resolved_slots,
         file_roles=list(attachment_file_roles or ()),
         input_fields=_confirmed_input_fields(conversation),
-        saved_input_fields=_saved_input_fields(flow),
+        saved_input_field_count=_saved_input_field_count(flow),
         mapped_file_limit=_mapped_file_limit(
             conversation,
             mapped_execution_policy=mapped_execution_policy,
@@ -287,10 +286,10 @@ def _mapped_file_limit(
     )
 
 
-def _saved_input_fields(flow: Flow | None) -> list[FormFieldSpec]:
+def _saved_input_field_count(flow: Flow | None) -> int:
     if flow is None:
-        return []
-    return extract_form_fields_from_metadata(flow.metadata_json) or []
+        return 0
+    return len(extract_form_fields_from_metadata(flow.metadata_json) or [])
 
 
 def _confirmed_input_fields(

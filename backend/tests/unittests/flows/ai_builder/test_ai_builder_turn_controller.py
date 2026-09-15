@@ -83,7 +83,6 @@ from eneo.flows.ai_builder.question_catalog import (
     RUNTIME_METADATA_FIELD_PURPOSES,
     render_summary_label,
 )
-from eneo.flows.flow_authoring_spec import FormFieldSpec
 
 
 def _slot(
@@ -156,6 +155,7 @@ def _decision(
     ui_language: str | None,
     requirements_confirmed: bool = False,
     selected_discovery_question_ids: tuple[str, ...] = (),
+    is_edit_mode: bool = False,
 ) -> object:
     disclosure = build_requirements_disclosure(
         state,
@@ -163,6 +163,7 @@ def _decision(
     )
     return resolve_turn_control(
         session_state=state,
+        is_edit_mode=is_edit_mode,
         selected_discovery_question_ids=selected_discovery_question_ids,
         requirements_disclosure=disclosure,
         confirmed_requirements_version=(
@@ -308,24 +309,18 @@ def test_saved_form_fields_are_a_known_baseline_and_are_not_asked_for_again(
 ) -> None:
     # An edit or review session of a saved flow: the runner already fills in
     # these fields today, so the session must not open with an empty form
-    # asking what they are.
+    # asking what they are; it goes on to the requirements confirmation.
     state = _state(
         primary_runtime_input="text",
         terminal_output="structured_text",
         runtime_metadata_fields=runtime_metadata_state,
     )
-    state.saved_input_fields = [
-        FormFieldSpec(name="brukarens_namn", type="text", label="Brukarens namn"),
-        FormFieldSpec(name="datum_intervju", type="date", label="Datum"),
-    ]
+    state.saved_input_field_count = 4
     state.architecture_commit = _finalized_commit_for_state(state)
 
-    decision = _decision(state=state, ui_language="en")
+    decision = _decision(state=state, ui_language="en", is_edit_mode=True)
 
-    assert not (
-        isinstance(decision, AskCanonicalQuestion)
-        and decision.slot_name == "runtime_metadata_field_details"
-    )
+    assert isinstance(decision, ConfirmRequirements)
 
 
 def test_every_purpose_a_field_can_be_stored_with_can_also_be_chosen() -> None:

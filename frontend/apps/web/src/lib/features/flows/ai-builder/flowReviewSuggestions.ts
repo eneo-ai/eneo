@@ -139,10 +139,12 @@ export function suggestionsFailureCopy(error: AIBuilderError): {
         retry: true
       };
     case "planner_model_below_evidence_level":
+      // Retryable: the findings screen keeps the model selector beside
+      // the retry, so the user can pick a model that clears the level.
       return {
         title: m.ai_builder_review_suggestions_failed(),
         body: m.ai_builder_review_suggestions_below_level(),
-        retry: false
+        retry: true
       };
     case "no_planner_model_available":
       return {

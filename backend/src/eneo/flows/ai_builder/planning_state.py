@@ -63,7 +63,6 @@ from eneo.flows.enums import (
     FlowAuthoringOutputMode,
     FlowOutputType,
 )
-from eneo.flows.flow_authoring_spec import FormFieldSpec
 from eneo.flows.flow_capability_manifest import FCM_VERSION
 from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.json_types import JsonObject
@@ -1000,12 +999,12 @@ class PlanningState(_PlanningModel):
         default_factory=list[ConfirmedRuntimeMetadataField],
         max_length=20,
     )
-    # The form fields the saved flow already has. They are a known baseline
-    # for an edit or review session (the runner fills them in today), not a
-    # confirmed answer: nothing here claims user confirmation or a purpose.
-    saved_input_fields: list[FormFieldSpec] = Field(
-        default_factory=list[FormFieldSpec],
-    )
+    # How many form fields the saved flow already has. A known baseline for an
+    # edit or review session (the runner fills them in today), not a confirmed
+    # answer: no confirmation or purpose is claimed, and the fields themselves
+    # stay owned by the saved flow (the edit compiler reads them there), so the
+    # persisted planning state carries a count, not a copy.
+    saved_input_field_count: int = Field(default=0, ge=0)
     architecture_commit: ArchitectureCommit | None = None
     mapped_file_limit: MappedFileLimit = Field(default_factory=MappedFileLimit)
     inherited_template: InheritedTemplateBinding | None = None
