@@ -16,6 +16,19 @@ describe("splitPendingInref", () => {
     expect(splitPendingInref('Se <inref id="aaaa')).toEqual(["Se ", '<inref id="aaaa']);
   });
 
+  it("releases text that starts like a tag but cannot become one", () => {
+    // The renderer needs whitespace after the tag name.
+    expect(splitPendingInref("<inreference prose")).toEqual(["<inreference prose", ""]);
+    expect(splitPendingInref("Se <inrefs och mer")).toEqual(["Se <inrefs och mer", ""]);
+    // "<inref" at the end of a chunk is still a possible tag.
+    expect(splitPendingInref("Se <inref")).toEqual(["Se ", "<inref"]);
+    expect(splitPendingInref("Se <inref ")).toEqual(["Se ", "<inref "]);
+    expect(splitPendingInref("Se <inref/prose")).toEqual(["Se <inref/prose", ""]);
+    expect(splitPendingInref("Se <inref\n")).toEqual(["Se ", "<inref\n"]);
+    // A malformed restart releases the earlier fragment and keeps the new "<".
+    expect(splitPendingInref("<inref <")).toEqual(["<inref ", "<"]);
+  });
+
   it("releases a complete tag", () => {
     expect(splitPendingInref(`Se ${A} mer`)).toEqual([`Se ${A} mer`, ""]);
     expect(splitPendingInref('<inref id="x"></inref>')).toEqual(['<inref id="x"></inref>', ""]);
