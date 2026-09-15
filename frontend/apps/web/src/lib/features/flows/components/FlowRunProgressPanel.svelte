@@ -32,8 +32,6 @@
   let loadError: string | null = $state(null);
   let refreshFailed = $state(false);
   let refreshing = $state(false);
-  let graphSnapshot: FlowGraph | null = $state(null);
-  let stepSnapshot: FlowRunStep[] = $state([]);
   let snapshot: FlowRunProgressSnapshot = $state(untrack(() => initialSnapshot ?? { steps: [] }));
 
   async function fetchGraphSnapshot() {
@@ -44,22 +42,49 @@
     return await eneo.flows.runs.steps({ flowId, runId });
   }
 
-  // Every read is numbered when it starts; a response is applied only if no
-  // later read has been applied already, so a slow background read cannot
-  // roll a fresher status (or a manual refresh) back.
+  // Reads are numbered when they start. A DETAIL read (initial open,
+  // "Uppdatera nu") carries the audited step list and is the authority for
+  // what a step produced. A STATUS read (each list poll) carries only the
+  // run-pinned graph and overlays fresher statuses on the last detail read.
+  // A response is dropped when a read of its kind that started later has
+  // already been applied, or (for a status read) when a detail read that
+  // started later has been applied: that read's graph is at least as new.
   let issuedReads = 0;
-  let appliedRead = 0;
+  let appliedDetailRead = 0;
+  let appliedStatusRead = 0;
+  let detail: { graph: FlowGraph | null; steps: FlowRunStep[] } = { graph: null, steps: [] };
+  let statusGraph: FlowGraph | null = null;
 
-  function applySnapshot(
-    read: number,
-    { graph, steps }: { graph: FlowGraph | null; steps: FlowRunStep[] }
-  ): boolean {
-    if (read <= appliedRead) return false;
-    appliedRead = read;
-    graphSnapshot = graph;
-    stepSnapshot = steps;
-    snapshot = buildFlowRunProgressSnapshot(graphSnapshot, steps);
+  function publish() {
+    snapshot = statusGraph
+      ? buildFlowRunProgressSnapshot(statusGraph, detail.steps, { statusOverlay: true })
+      : buildFlowRunProgressSnapshot(detail.graph, detail.steps);
     onSnapshotUpdate?.(snapshot);
+  }
+
+  function applyDetailRead(
+    read: number,
+    next: { graph: FlowGraph | null; steps: FlowRunStep[] }
+  ): boolean {
+    if (read < appliedDetailRead) return false;
+    appliedDetailRead = read;
+    detail = next;
+    // A status read that started after this one still overlays it; older
+    // overlays are superseded by the detail read's own graph.
+    if (appliedStatusRead < read) statusGraph = null;
+    publish();
+    return true;
+  }
+
+  function statusReadSuperseded(read: number): boolean {
+    return read < appliedStatusRead || read < appliedDetailRead;
+  }
+
+  function applyStatusRead(read: number, graph: FlowGraph | null): boolean {
+    if (statusReadSuperseded(read)) return false;
+    appliedStatusRead = read;
+    statusGraph = graph;
+    publish();
     return true;
   }
 
@@ -74,11 +99,13 @@
     const read = ++issuedReads;
     try {
       const graph = await fetchGraphSnapshot();
-      if (applySnapshot(read, { graph, steps: stepSnapshot })) refreshFailed = false;
+      if (applyStatusRead(read, graph)) refreshFailed = false;
     } catch (error) {
-      console.error("Failed to refresh run step statuses", error);
-      // The snapshot stays; the panel says it may be behind the row.
-      refreshFailed = true;
+      if (!statusReadSuperseded(read)) {
+        console.error("Failed to refresh run step statuses", error);
+        // The snapshot stays; the panel says it may be behind the row.
+        refreshFailed = true;
+      }
     } finally {
       refreshingStatuses = false;
     }
@@ -95,7 +122,7 @@
     const read = ++issuedReads;
     try {
       const [graph, steps] = await Promise.all([fetchGraphSnapshot(), fetchStepStatuses()]);
-      applySnapshot(read, { graph, steps });
+      applyDetailRead(read, { graph, steps });
     } catch (error) {
       console.error("Failed to load live run progress", error);
       loadError = m.flow_run_progress_load_failed();
@@ -110,10 +137,12 @@
     const read = ++issuedReads;
     try {
       const [graph, steps] = await Promise.all([fetchGraphSnapshot(), fetchStepStatuses()]);
-      if (applySnapshot(read, { graph, steps })) refreshFailed = false;
+      if (applyDetailRead(read, { graph, steps })) refreshFailed = false;
     } catch (error) {
-      console.error("Failed to refresh live run progress", error);
-      refreshFailed = true;
+      if (read >= appliedDetailRead) {
+        console.error("Failed to refresh live run progress", error);
+        refreshFailed = true;
+      }
     } finally {
       refreshing = false;
     }

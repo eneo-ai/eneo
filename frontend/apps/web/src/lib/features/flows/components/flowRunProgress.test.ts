@@ -13,7 +13,40 @@ describe("flowRunProgress helpers", () => {
     expect(formatFlowRunDuration(61_000)).toBe("1m 1s");
   });
 
-  test("withholds a step's outputs and end time when the graph status moved past the step list", () => {
+  test("trusts the step list over an older graph when both come from one detail read", () => {
+    const snapshot = buildFlowRunProgressSnapshot(
+      {
+        nodes: [
+          { id: "step-1", label: "Summarize", type: "llm", step_order: 1, run_status: "running" }
+        ],
+        edges: []
+      },
+      [
+        {
+          flow_run_id: "run-1",
+          flow_id: "flow-1",
+          tenant_id: "tenant-1",
+          step_id: "step-1",
+          step_order: 1,
+          status: "completed",
+          error_message: null,
+          output_payload_json: { text: "done" },
+          num_tokens_input: 5,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:09Z"
+        }
+      ]
+    );
+
+    expect(snapshot.steps[0]).toMatchObject({
+      status: "completed",
+      outputPayload: { text: "done" },
+      numTokensInput: 5
+    });
+    expect(snapshot.steps[0].detailsStale).toBeUndefined();
+  });
+
+  test("withholds a step's outputs and end time when a status poll moved past the step list", () => {
     const snapshot = buildFlowRunProgressSnapshot(
       {
         nodes: [
@@ -36,7 +69,8 @@ describe("flowRunProgress helpers", () => {
           created_at: "2026-01-01T00:00:00Z",
           updated_at: "2026-01-01T00:00:09Z"
         }
-      ]
+      ],
+      { statusOverlay: true }
     );
 
     expect(snapshot.steps[0]).toMatchObject({
@@ -49,7 +83,7 @@ describe("flowRunProgress helpers", () => {
     });
   });
 
-  test("takes the status and token counts from the re-polled graph over the older step list", () => {
+  test("takes the status and token counts from a status poll over the older step list", () => {
     const snapshot = buildFlowRunProgressSnapshot(
       {
         nodes: [
@@ -77,7 +111,8 @@ describe("flowRunProgress helpers", () => {
           created_at: "2026-01-01T00:00:00Z",
           updated_at: "2026-01-01T00:00:01Z"
         }
-      ]
+      ],
+      { statusOverlay: true }
     );
 
     expect(snapshot.steps[0]).toMatchObject({

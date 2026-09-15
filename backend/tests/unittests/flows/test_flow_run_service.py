@@ -3020,7 +3020,7 @@ async def test_get_run_versioned_view_rejects_checksum_drift_before_results(user
         await service.get_run_versioned_view(flow_id=flow.id, run_id=run.id)
 
     assert exc_info.value.code is FlowApiErrorCode.DEFINITION_CHECKSUM_MISMATCH
-    flow_run_repo.list_step_results.assert_not_awaited()
+    flow_run_repo.list_step_result_annotations.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -3070,7 +3070,7 @@ async def test_get_run_versioned_view_rejects_matching_checksum_invalid_runtime_
         await service.get_run_versioned_view(flow_id=flow.id, run_id=run.id)
 
     assert exc_info.value.code == FLOW_DEFINITION_STEPS_INVALID
-    flow_run_repo.list_step_results.assert_not_awaited()
+    flow_run_repo.list_step_result_annotations.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -3112,7 +3112,7 @@ async def test_get_run_versioned_view_rejects_empty_snapshot_before_results(user
 
     assert exc_info.value.flow_id == flow.id
     assert exc_info.value.flow_version == run.flow_version
-    flow_run_repo.list_step_results.assert_not_awaited()
+    flow_run_repo.list_step_result_annotations.assert_not_awaited()
 
 
 @pytest.mark.asyncio

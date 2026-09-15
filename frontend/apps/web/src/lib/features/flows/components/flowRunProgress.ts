@@ -47,8 +47,15 @@ export type FlowRunProgressStats = {
 
 export function buildFlowRunProgressSnapshot(
   graph: FlowGraph | null,
-  steps: FlowRunStep[]
+  steps: FlowRunStep[],
+  options: {
+    /** The graph was read AFTER the step list (a status poll): its statuses
+     *  win and a step it moved past has stale details. Without it, graph and
+     *  steps come from one read and the audited step list is the authority. */
+    statusOverlay?: boolean;
+  } = {}
 ): FlowRunProgressSnapshot {
+  const statusOverlay = options.statusOverlay === true;
   const stepsByOrder = new Map(steps.map((step) => [step.step_order, step] as const));
   const graphNodes = (graph?.nodes ?? [])
     .filter(
@@ -62,16 +69,20 @@ export function buildFlowRunProgressSnapshot(
   for (const node of graphNodes) {
     knownOrders.add(node.step_order);
     const live = stepsByOrder.get(node.step_order);
-    // The graph is re-read on every poll while the run is active; the step
-    // list only on demand (audited). The graph annotation is the fresher
-    // status, and when it has moved past the step list's status the list's
-    // content for that step describes an earlier state.
+    // On a status overlay the graph is the fresher status, and when it has
+    // moved past the step list's status the list's content for that step
+    // describes an earlier state.
     const detailsStale =
-      live !== undefined && node.run_status != null && live.status !== node.run_status;
+      statusOverlay &&
+      live !== undefined &&
+      node.run_status != null &&
+      live.status !== node.run_status;
     viewSteps.push({
       stepOrder: node.step_order,
       label: node.label || `Step ${node.step_order}`,
-      status: node.run_status ?? live?.status ?? "pending",
+      status: statusOverlay
+        ? (node.run_status ?? live?.status ?? "pending")
+        : (live?.status ?? node.run_status ?? "pending"),
       inputSource: typeof node.input_source === "string" ? node.input_source : undefined,
       outputMode: typeof node.output_mode === "string" ? node.output_mode : undefined,
       outputType: typeof node.output_type === "string" ? node.output_type : undefined,
@@ -80,8 +91,12 @@ export function buildFlowRunProgressSnapshot(
         ? (node.error_message ?? null)
         : (live?.error_message ?? node.error_message ?? null),
       errorCode: detailsStale ? null : (live?.error_code ?? null),
-      numTokensInput: node.num_tokens_input ?? live?.num_tokens_input ?? null,
-      numTokensOutput: node.num_tokens_output ?? live?.num_tokens_output ?? null,
+      numTokensInput: statusOverlay
+        ? (node.num_tokens_input ?? live?.num_tokens_input ?? null)
+        : (live?.num_tokens_input ?? node.num_tokens_input ?? null),
+      numTokensOutput: statusOverlay
+        ? (node.num_tokens_output ?? live?.num_tokens_output ?? null)
+        : (live?.num_tokens_output ?? node.num_tokens_output ?? null),
       inputPayload: live?.input_payload_json ?? null,
       outputPayload: detailsStale ? null : (live?.output_payload_json ?? null),
       resultFiles: detailsStale ? [] : (live?.result_files ?? []),
