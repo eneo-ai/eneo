@@ -309,21 +309,6 @@
       "count": 6
     }
   },
-  "src/routes/(public)/login/+page.svelte": {
-    "eneo/no-raw-color": {
-      "count": 28
-    }
-  },
-  "src/routes/(public)/login/failed/+page.svelte": {
-    "eneo/no-raw-color": {
-      "count": 2
-    }
-  },
-  "src/routes/(public)/logout/+page.svelte": {
-    "eneo/no-raw-color": {
-      "count": 2
-    }
-  },
   "src/routes/integrations/callback/token/+page.svelte": {
     "eneo/no-raw-color": {
       "count": 12

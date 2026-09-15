@@ -1,17 +1,25 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { enhance } from "$app/forms";
-  import { Button, Input } from "@eneo/ui";
   import { goto } from "$app/navigation";
   import { browser } from "$app/environment";
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
+  import { prefersReducedMotion } from "svelte/motion";
   import { fade } from "svelte/transition";
+  import { SvelteURLSearchParams } from "svelte/reactivity";
+  import { ArrowLeft } from "lucide-svelte";
+  import { Button } from "$lib/components/ui/button";
+  import * as Field from "$lib/components/ui/field";
+  import { Input } from "$lib/components/ui/input";
   import { LoadingScreen } from "$lib/components/layout";
-  import EneoWordMark from "$lib/assets/EneoWordMark.svelte";
-  import TenantSelector from "$lib/components/TenantSelector.svelte";
+  import AuthAlert from "$lib/features/auth/components/AuthAlert.svelte";
+  import AuthPageShell from "$lib/features/auth/components/AuthPageShell.svelte";
+  import CorrelationReference from "$lib/features/auth/components/CorrelationReference.svelte";
+  import LoginStatusAlert from "$lib/features/auth/components/LoginStatusAlert.svelte";
+  import PasswordInput from "$lib/features/auth/components/PasswordInput.svelte";
+  import TenantSelector from "$lib/features/auth/components/TenantSelector.svelte";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
-  import { SvelteURLSearchParams } from "svelte/reactivity";
 
   type TenantInfo = {
     slug: string;
@@ -62,7 +70,10 @@
   const TENANT_SELECTOR_CACHE_KEY = "eneo:last-tenant";
 
   let loginFailed = $state(false);
+  // Survives the loading-view swap so a typo in the password doesn't cost the email too.
+  let email = $state("");
   let upLoginCorrelationId = $state<string | null>(null);
+  let loginErrorAlert = $state<HTMLDivElement | null>(null);
   let isAwaitingLoginResponse = $state(false);
   let showTenantSelector = $state(false);
   let federationError = $state<string | null>(null);
@@ -76,6 +87,7 @@
   let tenantFederationEnabled = $derived(
     Boolean(data.featureFlags?.federationStatus?.has_multi_tenant_federation)
   );
+  const fadeDuration = $derived(prefersReducedMotion.current ? 0 : 200);
 
   // Check if user explicitly wants to see login form (e.g., after logout)
   const hasQueryParams = $derived(
@@ -83,6 +95,13 @@
       oidcErrorCode !== null ||
       showUsernameAndPassword !== null ||
       activeTenantSlug !== null
+  );
+
+  const hasExternalLogin = $derived(
+    Boolean(data.mobilityguardLink || data.singleTenantOidcLink || oidcErrorCode)
+  );
+  const showCredentialsForm = $derived(
+    Boolean(showUsernameAndPassword) || (!data.mobilityguardLink && !data.singleTenantOidcLink)
   );
 
   // Determine which loading message to display
@@ -236,19 +255,22 @@
     activeTenantSlug = null;
   }
 
-  async function clearOidcErrorFromUrl() {
-    if (!browser) return;
+  async function replaceQueryParams(remove: string[]) {
     const params = new SvelteURLSearchParams(window.location.search);
-    params.delete("message");
-    params.delete("detailCode");
-    params.delete("correlation");
-    params.delete("rawDetail");
+    for (const key of remove) {
+      params.delete(key);
+    }
     const query = params.toString();
     // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic URL built from window.location
     await goto(`${window.location.pathname}${query ? `?${query}` : ""}`, {
       replaceState: true,
       noScroll: true
     });
+  }
+
+  async function clearOidcErrorFromUrl() {
+    if (!browser) return;
+    await replaceQueryParams(["message", "detailCode", "correlation", "rawDetail"]);
   }
 
   async function beginTenantLogin(slug: string): Promise<boolean> {
@@ -333,31 +355,10 @@
       } catch {
         // ignore storage errors (private browsing, etc.)
       }
-      const params = new SvelteURLSearchParams(window.location.search);
-      params.delete("message");
-      params.delete("detailCode");
-      params.delete("correlation");
-      params.delete("rawDetail");
-      params.delete("tenant");
-      const query = params.toString();
-      // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic URL built from window.location
-      await goto(`${window.location.pathname}${query ? `?${query}` : ""}`, {
-        replaceState: true,
-        noScroll: true
-      });
+      await replaceQueryParams(["message", "detailCode", "correlation", "rawDetail", "tenant"]);
     }
 
     await loadTenantsAndMaybeShow({ forceShow: true });
-  }
-
-  async function handleRetryClick(event: MouseEvent) {
-    event.preventDefault();
-    await retryTenantLogin();
-  }
-
-  async function handleChooseAnotherClick(event: MouseEvent) {
-    event.preventDefault();
-    await chooseAnotherTenant();
   }
 
   function getOidcErrorMessage(): string {
@@ -369,18 +370,6 @@
     }
     return m.oidc_error_generic();
   }
-
-  // Copy to clipboard functionality for correlation ID
-  let copied = $state(false);
-
-  function copyToClipboard(text: string) {
-    navigator.clipboard.writeText(text).then(() => {
-      copied = true;
-      setTimeout(() => {
-        copied = false;
-      }, 2000);
-    });
-  }
 </script>
 
 <svelte:head>
@@ -388,283 +377,89 @@
 </svelte:head>
 
 {#if isInitializing || isAwaitingLoginResponse || isSubmittingUPLogin || ((data.zitadelLink || data.singleTenantOidcLink) && !hasQueryParams)}
-  <div
-    class="relative flex h-[100vh] w-[100vw] items-center justify-center"
-    transition:fade={{ duration: 200 }}
-  >
-    <div class="flex flex-col items-center gap-6">
-      <LoadingScreen message={loadingMessage} />
+  <!-- Overlays the page so the outgoing loader doesn't push the incoming view down mid-fade. -->
+  <div class="absolute inset-0" transition:fade={{ duration: fadeDuration }}>
+    <LoadingScreen message={loadingMessage} />
 
-      {#if showSlowLoadingWarning}
-        <div
-          class="bg-warning-dimmer text-warning-default max-w-md rounded-lg p-4 shadow-lg"
-          role="alert"
-        >
-          <p class="mb-2">{m.connection_slow_warning()}</p>
-          <Button
-            variant="outlined"
-            on:click={() => window.location.reload()}
-            class="w-full justify-center"
-          >
-            {m.retry()}
-          </Button>
-        </div>
-      {/if}
-    </div>
+    {#if showSlowLoadingWarning}
+      <div class="absolute inset-x-0 bottom-8 flex flex-col items-center gap-3 px-4">
+        <AuthAlert tone="warning" class="max-w-md">
+          <p>{m.connection_slow_warning()}</p>
+        </AuthAlert>
+        <Button variant="outline" onclick={() => window.location.reload()}>
+          {m.retry()}
+        </Button>
+      </div>
+    {/if}
   </div>
 {:else if showTenantSelector}
-  <!-- Tenant Selector for Federation -->
-  <div
-    class="relative flex h-[100vh] w-[100vw] items-center justify-center py-8"
-    transition:fade={{ duration: 200 }}
-  >
-    <div class="w-full max-w-6xl">
-      <h1 class="mb-8 flex justify-center">
-        <EneoWordMark class="text-brand-eneo h-16 w-24" />
-        <span class="sr-only">{m.app_name()}</span>
-      </h1>
-
+  <div transition:fade={{ duration: fadeDuration }}>
+    <AuthPageShell title={m.select_your_organization()} size="md">
       {#if federationError}
-        <div class="mx-auto mb-6 max-w-md">
-          <div class="bg-negative-dimmer text-negative-default flex flex-col gap-3 p-4 shadow-lg">
-            <strong>{m.authentication_failed()}</strong>
-            {federationError}
-          </div>
-        </div>
+        <AuthAlert tone="error" title={m.authentication_failed()}>
+          <p>{federationError}</p>
+        </AuthAlert>
       {/if}
 
-      <TenantSelector
-        onTenantSelect={handleTenantSelect}
-        baseUrl={window.location.origin}
-        tenants={preloadedTenants}
-      />
-    </div>
+      <TenantSelector onTenantSelect={handleTenantSelect} tenants={preloadedTenants} />
+    </AuthPageShell>
   </div>
 {:else}
-  <div
-    class="relative flex h-[100vh] w-[100vw] items-center justify-center"
-    transition:fade={{ duration: 200 }}
-  >
-    <div class="box w-[400px] justify-center">
-      <h1 class="flex justify-center">
-        <EneoWordMark class="text-brand-eneo h-16 w-24" />
-        <span class="sr-only">{m.app_name()}</span>
-      </h1>
-
-      <!-- Return to tenant selector button (visible on login form) -->
+  <div transition:fade={{ duration: fadeDuration }}>
+    <AuthPageShell
+      title={m.login()}
+      description={oidcErrorCode ? undefined : m.login_description()}
+    >
       {#if tenantFederationEnabled && activeTenantSlug}
-        <div class="mt-2 mb-6">
-          <Button
-            variant="simple"
-            on:click={chooseAnotherTenant}
-            class="text-dimmer hover:text-default -ml-1 p-0 transition-colors duration-150"
-          >
-            ← {m.oidc_choose_another_org()}
-          </Button>
-        </div>
+        <Button variant="link" class="h-auto self-start p-0" onclick={chooseAnotherTenant}>
+          <ArrowLeft aria-hidden="true" />
+          {m.oidc_choose_another_org()}
+        </Button>
       {/if}
 
       {#if oidcErrorCode}
-        <!-- Error Box Container with WCAG AA-compliant colors -->
-        <div
-          class="mx-auto mb-4 w-full max-w-md rounded-lg bg-red-100 p-6 shadow-md"
-          role="alert"
-          aria-live="assertive"
-        >
-          <!-- Error Title Section -->
-          <div class="flex items-start gap-2">
-            <!-- Error Icon -->
-            <svg
-              class="mt-0.5 h-6 w-6 flex-shrink-0 text-red-900"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              aria-hidden="true"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-              />
-            </svg>
+        <AuthAlert tone="error" title={m.failed_to_login()}>
+          <p>{getOidcErrorMessage()}</p>
+          {#if !oidcErrorDetailCode && oidcRawDetail}
+            <p class="text-xs">{m.oidc_error_detail({ detail: oidcRawDetail })}</p>
+          {/if}
+          {#if oidcCorrelationId}
+            <CorrelationReference correlationId={oidcCorrelationId} />
+          {/if}
+        </AuthAlert>
 
-            <!-- Error Title -->
-            <h1 class="text-lg leading-tight font-semibold text-red-900">
-              {m.failed_to_login()}
-            </h1>
-          </div>
-
-          <!-- Error Message Section -->
-          <div class="mt-4">
-            <p class="leading-relaxed text-red-900">
-              {getOidcErrorMessage()}
-            </p>
-            {#if !oidcErrorDetailCode && oidcRawDetail}
-              <p class="mt-2 text-sm text-red-900">
-                {m.oidc_error_detail({ detail: oidcRawDetail })}
-              </p>
-            {/if}
-          </div>
-
-          <!-- Action Buttons Section -->
-          <div class="mt-6 flex flex-col items-stretch gap-4 sm:flex-row">
-            <!-- Primary Action: Retry Login -->
-            {#if activeTenantSlug}
-              <Button
-                type="button"
-                variant="primary"
-                class="flex-1 justify-center"
-                disabled={isAwaitingLoginResponse}
-                on:click={handleRetryClick}
-              >
-                {#if isAwaitingLoginResponse}
-                  {m.redirecting_to_authentication()}
-                {:else}
-                  {m.oidc_retry_login()}
-                {/if}
-              </Button>
-            {/if}
-
-            <!-- Secondary Action: Choose Another Organization -->
+        <div class="flex flex-col gap-2">
+          {#if activeTenantSlug}
             <Button
               type="button"
-              variant="outlined"
-              on:click={handleChooseAnotherClick}
-              class="flex-1 justify-center border-gray-700 bg-white text-gray-900 shadow-sm hover:border-gray-800 hover:bg-gray-50 hover:text-gray-900"
+              size="lg"
+              class="w-full"
+              disabled={isAwaitingLoginResponse}
+              onclick={retryTenantLogin}
             >
-              {m.oidc_choose_another_org()}
+              {#if isAwaitingLoginResponse}
+                {m.redirecting_to_authentication()}
+              {:else}
+                {m.oidc_retry_login()}
+              {/if}
             </Button>
-          </div>
-
-          <!-- Correlation ID Section -->
-          {#if oidcCorrelationId}
-            <div class="mt-6 border-t border-red-800 pt-4">
-              <div class="flex items-start gap-2">
-                <div class="flex-1">
-                  <p class="mb-1 text-sm text-red-900">
-                    {m.oidc_correlation_hint()}
-                  </p>
-                  <code class="font-mono text-sm break-all text-red-900 select-all">
-                    {oidcCorrelationId}
-                  </code>
-                </div>
-
-                <!-- Copy to Clipboard Button -->
-                <button
-                  type="button"
-                  class="flex-shrink-0 rounded bg-red-50 p-2 text-red-800 transition-colors hover:border hover:border-red-300 hover:bg-red-100 focus-visible:ring-2 focus-visible:ring-red-900 focus-visible:ring-offset-2 focus-visible:outline-none"
-                  onclick={() => copyToClipboard(oidcCorrelationId!)}
-                  aria-label={copied ? m.copied_to_clipboard() : m.copy_correlation_id()}
-                >
-                  {#if copied}
-                    <!-- Check Icon (copied state) -->
-                    <svg
-                      class="h-5 w-5 text-green-800"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      aria-hidden="true"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M5 13l4 4L19 7"
-                      />
-                    </svg>
-                  {:else}
-                    <!-- Copy Icon (default state) -->
-                    <svg
-                      class="h-5 w-5 text-red-900"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      aria-hidden="true"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-                      />
-                    </svg>
-                  {/if}
-                </button>
-              </div>
-            </div>
           {/if}
+          <Button
+            type="button"
+            variant="outline"
+            size="lg"
+            class="w-full"
+            onclick={chooseAnotherTenant}
+          >
+            {m.oidc_choose_another_org()}
+          </Button>
         </div>
-      {/if}
+      {:else}
+        <LoginStatusAlert {message} />
 
-      <div aria-live="polite">
-        {#if message === "logout"}
-          <div
-            class="bg-positive-dimmer text-positive-default mb-2 flex flex-col gap-3 p-4 shadow-lg"
-          >
-            {m.logout_success()}
-          </div>{/if}
-        {#if message === "expired"}
-          <div
-            class="bg-warning-dimmer text-warning-default mb-2 flex flex-col gap-3 p-4 shadow-lg"
-          >
-            {m.session_expired_please_login_again()}
-          </div>{/if}
-        {#if message === "mobilityguard_login_error"}
-          <div
-            class="bg-negative-dimmer text-negative-default mb-2 flex flex-col gap-3 p-4 shadow-lg"
-          >
-            <strong>{m.authentication_failed()}</strong>
-            {m.authentication_failed_details()}
-            <ul class="mt-1 list-inside list-disc">
-              <li>{m.invalid_credentials()}</li>
-              <li>{m.account_restrictions()}</li>
-              <li>{m.system_configuration_issues()}</li>
-            </ul>
-            {m.try_again_contact_admin()}
-          </div>
-        {:else if message === "mobilityguard_oauth_error"}
-          <div
-            class="bg-negative-dimmer text-negative-default mb-2 flex flex-col gap-3 p-4 shadow-lg"
-          >
-            <strong>{m.authentication_provider_error()}</strong>
-            {m.authentication_service_error()}
-          </div>
-        {:else if message === "mobilityguard_access_denied"}
-          <div
-            class="bg-negative-dimmer text-negative-default mb-2 flex flex-col gap-3 p-4 shadow-lg"
-          >
-            <strong>{m.access_denied()}</strong>
-            {m.access_denied_eneo()}
-          </div>
-        {:else if message === "mobilityguard_invalid_request"}
-          <div
-            class="bg-warning-dimmer text-warning-default mb-2 flex flex-col gap-3 p-4 shadow-lg"
-          >
-            <strong>{m.invalid_request()}</strong>
-            {m.invalid_login_request()}
-          </div>
-        {:else if message === "no_code_received" || message === "no_state_received"}
-          <div
-            class="bg-warning-dimmer text-warning-default mb-2 flex flex-col gap-3 p-4 shadow-lg"
-          >
-            <strong>{m.login_process_interrupted()}</strong>
-            {m.authentication_incomplete()}
-          </div>
-        {:else if message && message.includes("error")}
-          <div
-            class="bg-negative-dimmer text-negative-default mb-2 flex flex-col gap-3 p-4 shadow-lg"
-          >
-            <strong>{m.login_failed_general()}</strong>
-            {m.authentication_error_occurred()}
-          </div>
-        {/if}
-      </div>
-
-      {#if !oidcErrorCode}
         <form
           method="POST"
-          class="border-default bg-primary flex flex-col gap-3 p-4"
+          class="flex flex-col gap-4"
           action="?/login"
           use:enhance={() => {
             isSubmittingUPLogin = true;
@@ -675,111 +470,62 @@
               if (result.type === "redirect") {
                 // eslint-disable-next-line svelte/no-navigation-without-resolve -- redirect location from server form action
                 await goto(result.location);
-              } else {
-                isSubmittingUPLogin = false;
-                message = null;
-                loginFailed = true;
-                // Capture correlation ID from form action result
-                if (result.type === "failure" && result.data) {
-                  upLoginCorrelationId = (result.data.correlationId as string) || null;
-                }
+                return;
               }
+
+              isSubmittingUPLogin = false;
+              message = null;
+              loginFailed = true;
+              // Capture correlation ID from form action result
+              if (result.type === "failure" && result.data) {
+                upLoginCorrelationId = (result.data.correlationId as string) || null;
+              }
+              await tick();
+              loginErrorAlert?.focus();
             };
           }}
         >
-          <input type="text" hidden value={page.url.searchParams.get("next") ?? ""} name="next" />
+          <input type="hidden" name="next" value={page.url.searchParams.get("next") ?? ""} />
 
           {#if loginFailed}
-            <div
-              role="alert"
-              class="label-negative bg-label-dimmer text-label-stronger rounded-lg p-4"
-            >
+            <AuthAlert tone="error" id="login-error" tabindex={-1} bind:ref={loginErrorAlert}>
               <p>{m.incorrect_credentials()}</p>
-
-              <!-- Correlation ID Section for Developer Debugging -->
               {#if upLoginCorrelationId}
-                <div class="mt-4 border-t border-red-300/30 pt-3">
-                  <div class="flex items-start gap-2">
-                    <div class="flex-1">
-                      <p class="mb-1 text-xs opacity-75">
-                        {m.oidc_correlation_hint()}
-                      </p>
-                      <code class="font-mono text-xs break-all select-all">
-                        {upLoginCorrelationId}
-                      </code>
-                    </div>
-
-                    <!-- Copy to Clipboard Button -->
-                    <button
-                      type="button"
-                      class="flex-shrink-0 rounded bg-red-100 p-1.5 transition-colors hover:bg-red-200 focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 focus-visible:outline-none"
-                      onclick={() => copyToClipboard(upLoginCorrelationId!)}
-                      aria-label={copied ? m.copied_to_clipboard() : m.copy_correlation_id()}
-                    >
-                      {#if copied}
-                        <!-- Check Icon (copied state) -->
-                        <svg
-                          class="h-4 w-4 text-green-700"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                          aria-hidden="true"
-                        >
-                          <path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M5 13l4 4L19 7"
-                          />
-                        </svg>
-                      {:else}
-                        <!-- Copy Icon (default state) -->
-                        <svg
-                          class="h-4 w-4"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                          aria-hidden="true"
-                        >
-                          <path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-                          />
-                        </svg>
-                      {/if}
-                    </button>
-                  </div>
-                </div>
+                <CorrelationReference correlationId={upLoginCorrelationId} />
               {/if}
-            </div>
+            </AuthAlert>
           {/if}
 
-          {#if showUsernameAndPassword || (!data.mobilityguardLink && !data.singleTenantOidcLink)}
-            <Input.Text
-              label={m.email()}
-              value=""
-              name="email"
-              autocomplete="username"
-              type="email"
-              required
-              hiddenLabel={true}
-              placeholder={m.email()}
-            ></Input.Text>
+          {#if showCredentialsForm}
+            <Field.Group class="gap-4">
+              <Field.Field>
+                <Field.Label for="login-email">{m.email()}</Field.Label>
+                <Input
+                  id="login-email"
+                  name="email"
+                  bind:value={email}
+                  type="email"
+                  autocomplete="username"
+                  required
+                  class="h-10"
+                  aria-describedby={loginFailed ? "login-error" : undefined}
+                />
+              </Field.Field>
 
-            <Input.Text
-              label={m.password()}
-              value=""
-              name="password"
-              autocomplete="current-password"
-              type="password"
-              required
-              hiddenLabel={true}
-              placeholder={m.password()}
-            ></Input.Text>
+              <Field.Field>
+                <Field.Label for="login-password">{m.password()}</Field.Label>
+                <PasswordInput
+                  id="login-password"
+                  name="password"
+                  autocomplete="current-password"
+                  required
+                  class="h-10"
+                  aria-describedby={loginFailed ? "login-error" : undefined}
+                />
+              </Field.Field>
+            </Field.Group>
 
-            <Button type="submit" disabled={isSubmittingUPLogin} variant="primary">
+            <Button type="submit" size="lg" class="w-full" disabled={isSubmittingUPLogin}>
               {#if isSubmittingUPLogin}
                 {m.logging_in()}
               {:else}
@@ -787,45 +533,24 @@
               {/if}
             </Button>
           {:else if data.singleTenantOidcLink}
-            <Button variant="primary" href={data.singleTenantOidcLink}>{m.login()}</Button>
+            <Button size="lg" class="w-full" href={data.singleTenantOidcLink}>{m.login()}</Button>
           {:else if data.mobilityguardLink}
-            <Button variant="primary" href={data.mobilityguardLink}>{m.login()}</Button>
+            <Button size="lg" class="w-full" href={data.mobilityguardLink}>{m.login()}</Button>
           {/if}
         </form>
       {/if}
-    </div>
-    <div class="absolute bottom-10 mt-12 flex justify-center">
-      {#if showUsernameAndPassword && (data.mobilityguardLink || data.singleTenantOidcLink || oidcErrorCode)}
-        <Button
-          variant="outlined"
-          class="bg-primary text-primary border-default hover:bg-hover-default"
-          href={localizeHref("/login")}
-        >
-          {m.hide_login_fields()}
-        </Button>
-      {:else if data.mobilityguardLink || data.singleTenantOidcLink || oidcErrorCode}
-        <Button
-          variant="outlined"
-          class="bg-primary text-primary border-default hover:bg-hover-default"
-          href={localizeHref("/login?showUsernameAndPassword=true")}
-        >
-          {m.show_login_fields()}
-        </Button>
-      {/if}
-    </div>
+
+      {#snippet footer()}
+        {#if hasExternalLogin}
+          {#if showUsernameAndPassword}
+            <Button variant="link" href={localizeHref("/login")}>{m.hide_login_fields()}</Button>
+          {:else}
+            <Button variant="link" href={localizeHref("/login?showUsernameAndPassword=true")}>
+              {m.show_login_fields()}
+            </Button>
+          {/if}
+        {/if}
+      {/snippet}
+    </AuthPageShell>
   </div>
 {/if}
-
-<style>
-  form {
-    box-shadow: 0px 8px 20px 4px rgba(0, 0, 0, 0.1);
-    border: 0.5px solid rgba(54, 54, 54, 0.3);
-  }
-
-  /* Respect reduced motion user preferences */
-  @media (prefers-reduced-motion: reduce) {
-    * {
-      transition-duration: 0ms !important;
-    }
-  }
-</style>
