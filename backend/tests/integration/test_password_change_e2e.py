@@ -1,6 +1,7 @@
 """HTTP/PostgreSQL coverage for the local password-change lifecycle."""
 
 import asyncio
+from dataclasses import asdict
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
@@ -8,6 +9,7 @@ import pytest
 
 from eneo.authentication.auth_service import AuthService
 from eneo.main.exceptions import ErrorCodes
+from eneo.users.password import LOCAL_PASSWORD_POLICY
 from eneo.users.user_service import UserService
 
 
@@ -107,7 +109,7 @@ async def test_password_change_rotates_login_and_rejects_prior_session(
     assert current_user.status_code == 200, current_user.text
     assert current_user.json()["password_change"] == {
         "source": "eneo",
-        "policy": {"min_length": 12, "max_bytes": 72},
+        "policy": asdict(LOCAL_PASSWORD_POLICY),
     }
 
 
