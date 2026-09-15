@@ -690,6 +690,28 @@ class SpaceActor:
             return base
         return {resource: actions & allowed for resource, actions in base.items()}
 
+    def tenant_permits(
+        self, action: SpaceAction, resource_type: SpaceResourceType
+    ) -> bool:
+        """The tenant-level permission gate, independent of the space role.
+
+        Applies to every space, personal and shared. Service API keys
+        authorize via scope and permission, not user roles, so the gate does
+        not apply to them. Reading websites and integration knowledge needs no
+        tenant permission; every other permission-gated resource needs its
+        mapped permission on the user's role.
+        """
+        if resource_type not in PERMISSION_RESOURCES or self._is_service_api_key():
+            return True
+        permission = self._to_permisson(resource_type=resource_type)
+        if permission is not None and permission in self.user.permissions:
+            return True
+        return (
+            resource_type
+            in {SpaceResourceType.WEBSITE, SpaceResourceType.INTEGRATION_KNOWLEDGE}
+            and action == SpaceAction.READ
+        )
+
     def can_perform_action(
         self,
         action: SpaceAction,
@@ -699,21 +721,10 @@ class SpaceActor:
         role = self._get_role()
         permissions = self._get_permissions(role=role)
 
-        # Check tenant-level permissions for all spaces (personal and shared).
-        # Service API keys authorize via scope+permission, not user roles —
-        # their synthetic user has no roles, so skip this gate for them.
-        if resource_type in PERMISSION_RESOURCES and not self._is_service_api_key():
-            permission = self._to_permisson(resource_type=resource_type)
-            has_permission = (
-                permission in self.user.permissions if permission else False
-            )
-            if not has_permission and not (
-                resource_type
-                in {SpaceResourceType.WEBSITE, SpaceResourceType.INTEGRATION_KNOWLEDGE}
-                and action == SpaceAction.READ
-            ):
-                return False
+        if not self.tenant_permits(action=action, resource_type=resource_type):
+            return False
 
+        if resource_type in PERMISSION_RESOURCES and not self._is_service_api_key():
             if (
                 resource_type == SpaceResourceType.SKILL
                 and action in {SpaceAction.CREATE, SpaceAction.EDIT, SpaceAction.DELETE}

@@ -47,11 +47,13 @@ async def knowledge(
     user_factory,
     user_integration_factory,
     embedding_model_factory,
+    grant_knowledge_permissions,
 ):
     async with db_container() as container:
         session = container.session()
         admin = container.user()
         reader = await user_factory(session)
+        await grant_knowledge_permissions(container, reader.id, admin.tenant_id)
         org = (
             await session.scalars(
                 sa.select(Spaces).where(

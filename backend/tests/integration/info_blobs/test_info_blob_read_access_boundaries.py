@@ -10,9 +10,10 @@ where that stops, so a later change cannot widen it unnoticed:
 * a user group from another tenant cannot grant membership
 * assistant-scoped user keys never enter the fallback
 * the original-file path follows the same rule as the text preview
-* the rule is space visibility, not chat permission: a linked personal-space
-  owner with no tenant permissions reads organization knowledge even though
-  personal chat and assistants are denied to them
+* the rule is space visibility plus the source type's tenant permission, not
+  chat permission: a linked personal-space owner without chat or assistant
+  permissions reads organization knowledge, while a reader whose role lacks
+  ``collections`` cannot open collection documents through the fallback
 """
 
 from dataclasses import dataclass
@@ -36,6 +37,7 @@ from eneo.database.tables.spaces_table import Spaces, SpacesUserGroups, SpacesUs
 from eneo.database.tables.user_groups_table import UserGroups
 from eneo.database.tables.users_table import usergroups_users_table
 from eneo.main.exceptions import UnauthorizedException
+from eneo.roles.permissions import Permission
 from eneo.users.user import UserInDB
 
 
@@ -77,11 +79,14 @@ async def _make_blob(session, *, space_id, tenant_id, admin_id, model_id):
 
 
 @pytest.fixture
-async def boundary(db_container, user_factory, embedding_model_factory):
+async def boundary(
+    db_container, user_factory, embedding_model_factory, grant_knowledge_permissions
+):
     async with db_container() as container:
         session = container.session()
         admin = container.user()
         reader = await user_factory(session)
+        await grant_knowledge_permissions(container, reader.id, admin.tenant_id)
         org = (
             await session.scalars(
                 sa.select(Spaces).where(
@@ -347,7 +352,8 @@ async def test_original_file_access_follows_the_preview_rule(db_container, bound
 async def test_linked_personal_space_reads_without_chat_permissions(
     db_container, boundary
 ):
-    """The contract is space visibility plus space role, not chat permission.
+    """The contract is space visibility, space role and the source type's
+    tenant permission, not chat permission.
 
     A user whose personal space is linked to the organization sees the
     organization's knowledge in that space, so they may preview it and fetch
@@ -357,7 +363,8 @@ async def test_linked_personal_space_reads_without_chat_permissions(
     """
     from eneo.info_blobs.info_blob_service import InfoBlobOriginalUnavailableError
 
-    assert not boundary.reader.permissions
+    assert Permission.PERSONAL_CHAT not in boundary.reader.permissions
+    assert Permission.ASSISTANTS not in boundary.reader.permissions
     async with db_container() as container:
         session = container.session()
         await session.execute(
@@ -383,3 +390,35 @@ async def test_linked_personal_space_reads_without_chat_permissions(
         assert (await container.info_blob_service().get_by_id(blob_id)).text
         with pytest.raises(InfoBlobOriginalUnavailableError):
             await container.info_blob_service().ensure_original_available(blob_id)
+
+
+async def test_fallback_requires_the_source_type_permission(
+    db_container, boundary, user_factory
+):
+    """Removing the ``collections`` tenant permission keeps collection documents
+    closed through the fallback, even for a member of a space that sees them,
+    so an administrator's choice is not bypassed by reading a document by id.
+    """
+    async with db_container() as container:
+        session = container.session()
+        child = await _child(session, boundary.tenant_id, boundary.org_id, "Shared")
+        unprivileged = await user_factory(session)
+        for user_id in (boundary.reader.id, unprivileged.id):
+            session.add(SpacesUsers(space_id=child, user_id=user_id, role="viewer"))
+        _, blob_id = await _make_blob(
+            session,
+            space_id=boundary.org_id,
+            tenant_id=boundary.tenant_id,
+            admin_id=boundary.admin_id,
+            model_id=boundary.model_id,
+        )
+        await session.flush()
+        unprivileged = await container.user_repo().get_user_by_id(unprivileged.id)
+
+    assert Permission.COLLECTIONS not in unprivileged.permissions
+    async with db_container(user=unprivileged) as container:
+        with pytest.raises(UnauthorizedException):
+            await container.info_blob_service().get_by_id(blob_id)
+    # control: same membership with the collections permission -> allowed
+    async with db_container(user=boundary.reader) as container:
+        assert (await container.info_blob_service().get_by_id(blob_id)).text
