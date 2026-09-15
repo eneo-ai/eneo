@@ -396,6 +396,8 @@ from eneo.websites.infrastructure.update_website_size_service import (
     UpdateWebsiteSizeService,
 )
 from eneo.websites.infrastructure.website_cleaner_service import WebsiteCleanerService
+from eneo.whats_new.whats_new_repo import WhatsNewRepository
+from eneo.whats_new.whats_new_service import WhatsNewService
 from eneo.worker.task_manager import TaskManager
 from eneo.worker.tenant_concurrency import TenantConcurrencyLimiter
 from eneo.workflows.step_repo import StepRepository
@@ -649,6 +651,7 @@ class Container(containers.DeclarativeContainer):
         TenantRepository, session=session, encryption_service=encryption_service
     )
     settings_repo = providers.Factory(SettingsRepository, session=session)
+    whats_new_repo = providers.Factory(WhatsNewRepository, session=session)
     prompt_repo = providers.Factory(
         PromptRepository, session=session, factory=prompt_factory
     )
@@ -1112,6 +1115,11 @@ class Container(containers.DeclarativeContainer):
         AllowedOriginService,
         user=user,
         repo=allowed_origin_repo,
+    )
+    whats_new_service = providers.Factory(
+        WhatsNewService,
+        user=user,
+        repo=whats_new_repo,
     )
     role_service = providers.Factory(
         RolesService, user=user, repo=role_repo, user_repo=user_repo

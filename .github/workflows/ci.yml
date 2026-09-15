@@ -322,6 +322,12 @@ jobs:
           python3 apps/web/scripts/check-i18n-duplicates.py
           python3 apps/web/scripts/check-i18n-parity.py
 
+      # User-facing release notes: schema, sv+en parity, newest-first order and
+      # that every "Show me" anchor still exists in the web app.
+      - name: Check What's new release notes
+        working-directory: .
+        run: python3 scripts/check_whats_new.py --repo-root .
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
@@ -344,6 +350,7 @@ jobs:
         run: |
           FORCE_COLOR=1 bun run --filter '@eneo/eslint-plugin' test
           FORCE_COLOR=1 bun run --filter '@eneo/eneo-js' test
+          FORCE_COLOR=1 bun run --filter '@eneo/whats-new' test
 
       # Component tests run in a real Chromium via Vitest browser mode, so the
       # matching Playwright browser must be on the runner. Pin the playwright

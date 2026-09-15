@@ -114,6 +114,7 @@ export type Limits = components["schemas"]["Limits"];
 export type UploadedFile = components["schemas"]["FilePublic"];
 export type Website = components["schemas"]["WebsitePublic"];
 export type Settings = components["schemas"]["SettingsPublic"];
+export type WhatsNewSeen = components["schemas"]["WhatsNewSeenPublic"];
 export type SkillExecutionBlockPublic = components["schemas"]["SkillExecutionBlockPublic"];
 export type SkillExecutionBlockState = components["schemas"]["SkillExecutionBlockState"];
 export type WebsiteSparse = components["schemas"]["WebsiteSparse"];

@@ -6,6 +6,7 @@
   import JobManagerDropdown from "$lib/features/jobs/components/JobManagerDropdownButton.svelte";
   import { initJobManager } from "$lib/features/jobs/JobManager";
   import { initExpiringKeysStore } from "$lib/features/api-keys/expiringKeysStore";
+  import { initWhatsNewStore } from "$lib/features/whats-new/whatsNewStore";
   import ProfileMenu from "./ProfileMenu.svelte";
   import { initEneo } from "$lib/core/Eneo";
   import { initEneoSocket } from "$lib/core/EneoSocket";
@@ -25,6 +26,7 @@
   initAppContext(data);
   initJobManager(data);
   initExpiringKeysStore(data);
+  initWhatsNewStore(data);
   initAttachmentUrlService(data);
   initFaviconUrlService();
   const socket = initEneoSocket(data);

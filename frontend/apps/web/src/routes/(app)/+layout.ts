@@ -46,14 +46,17 @@ export const load = async (event) => {
     return null;
   };
 
-  const [userInfo, user, tenant, backendVersion, limits, settings] = await Promise.all([
-    getUserInfo(),
-    eneo.users.me(),
-    eneo.users.tenant(),
-    eneo.version.get(),
-    eneo.limits.list(),
-    eneo.settings.get()
-  ]);
+  const [userInfo, user, tenant, backendVersion, limits, settings, whatsNewSeen] =
+    await Promise.all([
+      getUserInfo(),
+      eneo.users.me(),
+      eneo.users.tenant(),
+      eneo.version.get(),
+      eneo.limits.list(),
+      eneo.settings.get(),
+      // Non-essential: an older backend during a rolling deploy must not block the app.
+      eneo.whatsNew.getSeen().catch(() => null)
+    ]);
 
   const versions = {
     frontend: environment.frontendVersion,
@@ -77,6 +80,7 @@ export const load = async (event) => {
     versions,
     limits,
     settings,
+    whatsNewSeenVersion: whatsNewSeen?.version ?? null,
     featureFlags,
     environment
   };

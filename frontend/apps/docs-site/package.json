@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@eneo/whats-new": "workspace:*",
     "@theguild/remark-mermaid": "^0.3.0",
     "classnames": "^2.5.1",
     "next": "15.5.22",

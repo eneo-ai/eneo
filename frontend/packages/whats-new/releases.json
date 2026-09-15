@@ -1,0 +1,103 @@
+{
+  "$schema": "./releases.schema.json",
+  "releases": [
+    {
+      "version": "2.2.0",
+      "entries": [
+        {
+          "id": "self-service-password",
+          "type": "new",
+          "area": "account",
+          "title": {
+            "en": "Change your own password",
+            "sv": "Byt lösenord själv"
+          },
+          "body": {
+            "en": "If you sign in with a password you can now change it yourself under My account. Other devices where you are signed in are logged out when the password changes.",
+            "sv": "Om du loggar in med lösenord kan du nu byta det själv under Mitt konto. Andra enheter där du är inloggad loggas ut när lösenordet byts."
+          },
+          "showMe": { "href": "/account", "anchor": "account-password" }
+        },
+        {
+          "id": "login-page",
+          "type": "improved",
+          "area": "account",
+          "title": {
+            "en": "Clearer sign-in page",
+            "sv": "Tydligare inloggningssida"
+          },
+          "body": {
+            "en": "The sign-in page has been rebuilt with clearer error messages, better support for screen readers and keyboard navigation, and your email address stays filled in after a failed attempt.",
+            "sv": "Inloggningssidan är ombyggd med tydligare felmeddelanden, bättre stöd för skärmläsare och tangentbord, och din e-postadress finns kvar efter ett misslyckat försök."
+          }
+        },
+        {
+          "id": "skill-use-in-chat",
+          "type": "new",
+          "area": "chat",
+          "title": {
+            "en": "See when a Skill is used in an answer",
+            "sv": "Se när en Skill används i ett svar"
+          },
+          "body": {
+            "en": "When a Skill contributes to an answer, a note appears above it. Open the note to see whether the Skill is always on or activated on demand, and why a Skill could not be used.",
+            "sv": "När en Skill bidrar till ett svar visas en markering ovanför svaret. Öppna den för att se om Skillen alltid är på eller aktiveras vid behov, och varför en Skill inte kunde användas."
+          }
+        },
+        {
+          "id": "image-variations",
+          "type": "new",
+          "area": "chat",
+          "title": {
+            "en": "Edit and vary images",
+            "sv": "Redigera och variera bilder"
+          },
+          "body": {
+            "en": "Attach an image and ask for a variation or an edit. You can also follow up on an image the assistant just generated, for example \"make it bluer\".",
+            "sv": "Bifoga en bild och be om en variant eller en redigering. Du kan också följa upp en bild som assistenten precis skapat, till exempel \"gör den blåare\"."
+          }
+        },
+        {
+          "id": "open-shared-sources",
+          "type": "fixed",
+          "area": "knowledge",
+          "title": {
+            "en": "Open sources from organisation knowledge",
+            "sv": "Öppna källor från organisationens kunskap"
+          },
+          "body": {
+            "en": "Citations that point to organisation knowledge or knowledge shared into your space can now be opened. Previously the answer could cite a source that you were not allowed to open.",
+            "sv": "Källhänvisningar som pekar på organisationens kunskap eller kunskap som delats till din yta går nu att öppna. Tidigare kunde svaret hänvisa till en källa som du inte fick öppna."
+          }
+        },
+        {
+          "id": "download-original",
+          "type": "new",
+          "area": "knowledge",
+          "title": {
+            "en": "Download the original file",
+            "sv": "Ladda ner originalfilen"
+          },
+          "body": {
+            "en": "Where the uploaded original is kept, the knowledge view now shows it and lets you download the exact file that was uploaded.",
+            "sv": "Där originalfilen sparats visar kunskapsvyn det nu och låter dig ladda ner exakt den fil som laddades upp."
+          }
+        },
+        {
+          "id": "personal-assistant-attachments",
+          "type": "new",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Manage attachment handling for the personal assistant",
+            "sv": "Styr bilagehantering för den personliga assistenten"
+          },
+          "body": {
+            "en": "Under Admin › Personal assistant there is a new Attachments section. Instead of pasting whole files into the conversation, the assistant can be given a link it reads on demand, which keeps large attachments within the context window.",
+            "sv": "Under Admin › Personlig assistent finns en ny sektion för bilagor. I stället för att klistra in hela filer i konversationen kan assistenten få en länk som den läser vid behov, vilket gör att stora bilagor ryms i kontextfönstret."
+          }
+        }
+      ]
+    }
+  ]
+}
