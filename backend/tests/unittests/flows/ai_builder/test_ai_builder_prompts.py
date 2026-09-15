@@ -645,9 +645,9 @@ def _saved_step_authoring_fixture(total_steps: int = 10):
         for n in range(1, total_steps + 1)
     ]
     # Everything past the tenth step is unrelated to the target: it neither
-    # feeds it nor reads it, and carries a sentinel a projection would leak.
+    # feeds it nor reads it. Its name is sent (an edit may refer to it); its
+    # bindings carry a sentinel that must not reach the prompt.
     for n, step in enumerate(steps[10:], 11):
-        step.user_description = f"UNRELATED-STAGE-{n}"
         step.input_bindings = {"question": f"UNRELATED-INPUT-{n}"}
     producer, target = steps[2:4]
     producer.output_type = "json"
@@ -771,16 +771,17 @@ def _saved_step_projection(total_steps: int):
         target_existing_step_ref="existing_step_4",
     )
     _, encoded = rendered.split("\n")
-    # No step that is merely in the same flow reaches the prompt.
+    # Nothing but the name of a step that is merely in the same flow is sent.
     assert "UNRELATED-" not in rendered
     return json.loads(encoded)
 
 
-def test_saved_step_authoring_projection_does_not_grow_with_the_flow():
-    """Cost follows the target's producer and consumer degree, not flow length.
+def test_saved_step_authoring_projection_grows_by_a_name_per_unrelated_step():
+    """Cost is the target's degree plus one number-and-name entry per other step.
 
     Twenty steps that neither feed nor read the target are added; the two
-    projections must differ only in the step count they report.
+    projections must differ only in the step count and in twenty short
+    entries, so an edit can still name any step in the flow.
     """
 
     small = _saved_step_projection(10)
@@ -788,12 +789,21 @@ def test_saved_step_authoring_projection_does_not_grow_with_the_flow():
 
     assert small["flow"] == {"step_count": 10}
     assert large["flow"] == {"step_count": 30}
-    assert {key: value for key, value in small.items() if key != "flow"} == {
-        key: value for key, value in large.items() if key != "flow"
+    varying = {"flow", "other_steps"}
+    assert {key: value for key, value in small.items() if key not in varying} == {
+        key: value for key, value in large.items() if key not in varying
     }
     # Same producer and consumer degree in both, so the same rows.
     assert [row["step_number"] for row in large["producers"]] == [3]
     assert [row["step_number"] for row in large["consumers"]] == list(range(5, 10))
+    assert small["other_steps"] == [
+        {"step_number": 1, "name": "Stage 1"},
+        {"step_number": 2, "name": "Stage 2"},
+        {"step_number": 10, "name": "Stage 10"},
+    ]
+    assert large["other_steps"] == small["other_steps"] + [
+        {"step_number": n, "name": f"Stage {n}"} for n in range(11, 31)
+    ]
 
 
 def test_saved_step_authoring_projection_keeps_complete_facts_as_quoted_data():
@@ -862,8 +872,12 @@ def test_saved_step_authoring_projection_keeps_complete_facts_as_quoted_data():
         "step_d.output.structured.report.summary"
     ]
     assert [field["name"] for field in data["form_fields"]] == ["audience"]
-    # Steps that neither feed nor read the target are not sent; the count is.
-    assert "other_steps" not in data
+    # Steps that neither feed nor read the target are sent as number and name.
+    assert data["other_steps"] == [
+        {"step_number": 1, "name": "Stage 1"},
+        {"step_number": 2, "name": "Stage 2"},
+        {"step_number": 10, "name": "Stage 10"},
+    ]
     assert data["flow"]["step_count"] == 10
     assert data["template_placeholders"] == []
     assert data["target"]["review_policy"] == {

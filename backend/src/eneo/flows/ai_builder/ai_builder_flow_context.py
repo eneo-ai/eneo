@@ -157,19 +157,22 @@ def _build_saved_step_authoring_context(
     target_existing_step_ref: str,
     selected_template_placeholders: tuple[str, ...] | None,
 ) -> str:
-    """What one step's author needs, and nothing that merely shares the flow.
+    """What one step's author needs, and a name for everything else in the flow.
 
     The target in full, the steps that feed it, the steps that read it, the
-    form fields it names, and how many steps the flow has. A step that neither
-    produces for nor consumes from the target cannot be broken by editing it -
-    every edge is checked again by full-flow validation on the merged spec -
-    so listing it bought orientation at a price that grew with the flow.
+    form fields it names. A step that neither produces for nor consumes from
+    the target cannot be broken by editing it - every edge is checked again by
+    full-flow validation on the merged spec - so it is listed by number and
+    name only. The name stays because an edit may refer to another step by it
+    ("same name as step 1"); its sources, modes and contracts do not, because
+    nothing about the target depends on them.
 
-    The honest cost claim: this projection is proportional to the target's
-    direct producer and consumer DEGREE, not to the flow's length. Adding
-    unrelated steps leaves it byte-identical apart from the step count.
-    Consumers stay complete: they can depend on nested paths and on implicit
-    JSON compatibility, so trimming them by top-level property name would hide
+    The honest cost claim: producers and consumers cost their contracts, so
+    that part is proportional to the target's direct DEGREE; every other step
+    costs one short entry, so the whole projection still grows with the flow,
+    by a name per step rather than by a step's full shape. Consumers stay
+    complete: they can depend on nested paths and on implicit JSON
+    compatibility, so trimming them by top-level property name would hide
     exactly what validation checks.
     """
 
@@ -188,6 +191,7 @@ def _build_saved_step_authoring_context(
     target_dependencies: dict[int, _AuthoringDependency] = {}
     target_forms: set[str] = set()
     consumers: list[dict[str, object]] = []
+    consumer_orders: set[int] = set()
     uses_template = target.output_mode == OutputMode.TEMPLATE_FILL
     for order, step in enumerate(spec.steps, 1):
         dependencies, referenced_forms = _authoring_dependencies(
@@ -200,6 +204,7 @@ def _build_saved_step_authoring_context(
         if order == target_order:
             target_dependencies, target_forms = dependencies, referenced_forms
         elif target_order in dependencies:
+            consumer_orders.add(order)
             consumers.append(
                 {
                     "plan_step_ref": step.plan_step_ref,
@@ -258,6 +263,13 @@ def _build_saved_step_authoring_context(
         "template_placeholders": list(selected_template_placeholders or ())
         if uses_template
         else [],
+        "other_steps": [
+            {"step_number": order, "name": step.name}
+            for order, step in enumerate(spec.steps, 1)
+            if order != target_order
+            and order not in target_dependencies
+            and order not in consumer_orders
+        ],
         "flow": {"step_count": len(spec.steps)},
     }
     return (
