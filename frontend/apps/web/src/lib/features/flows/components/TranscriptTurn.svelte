@@ -63,7 +63,7 @@
     /** Drop the stored text corrections of every segment in this turn. */
     onRevertTurn: () => void;
     /** Reassign the whole turn to another raw label. */
-    onReassignTurn: (speaker: string) => void;
+    onReassignTurn: (speaker: string | null) => void;
     /** Reset this turn's overridden parts to their stored speakers. */
     onResetTurn?: () => void;
   } = $props();
@@ -74,7 +74,7 @@
   const hasCorrections = $derived(
     turn.parts.some((part) => correctedFrom(part.segmentIndex) !== null)
   );
-  const speakerEditable = $derived(editable && !editing && !busy && speakerOptions.length > 0);
+  const speakerEditable = $derived(editable && !editing && !busy);
 
   // Joins adjacent parts visually; lives outside the anchored run spans so
   // selection offsets stay exact.
@@ -250,10 +250,10 @@
   data-turn-index={turn.index}
 >
   <div class="flex flex-col items-start gap-0.5 pt-0.5">
-    {#if turn.speaker}
+    {#if turn.speaker || editable}
       <TranscriptSpeakerBadge
-        display={displayName(turn.speaker)}
-        colorClass={speakerClass(turn.speaker)}
+        display={turn.speaker ? displayName(turn.speaker) : "Okänd talare"}
+        colorClass={turn.speaker ? speakerClass(turn.speaker) : ""}
         editable={speakerEditable}
         {overridden}
         changedFrom={null}
@@ -264,6 +264,15 @@
         onSelect={onReassignTurn}
         onReset={overridden ? onResetTurn : undefined}
       />
+    {/if}
+    {#if turn.reviewDetails}
+      <details class="text-muted inline-block text-xs">
+        <summary
+          class="focus-visible:ring-accent-default cursor-pointer rounded px-1 focus-visible:ring-2"
+          >{m.flow_transcript_review_details()}</summary
+        >
+        <p class="bg-primary border-default my-1 rounded border p-2">{turn.reviewDetails}</p>
+      </details>
     {/if}
     <button
       type="button"

@@ -73,6 +73,8 @@ def _present_transcript_words(
         segments=[
             TranscriptSegmentWordsPublic(
                 segment_index=int(entry["segment_index"]),
+                speaker_attribution=entry.get("speaker_attribution"),
+                overlap_ids=entry.get("overlap_ids", []),
                 words=[
                     TranscriptWordPublic.model_validate(word)
                     for word in entry.get("words", [])

@@ -19,7 +19,7 @@
     /** The minted label behind "Ny talare". */
     newSpeakerLabel: string;
     disabled?: boolean;
-    onChoose: (label: string) => void;
+    onChoose: (label: string | null) => void;
   } = $props();
 
   // The toolbar measures itself and sits fully above the selection, or below
@@ -49,6 +49,14 @@
   onpointerdown={(event) => event.preventDefault()}
 >
   <span class="text-muted px-1 text-xs">{m.flow_run_transcript_change_speaker()}:</span>
+  <button
+    type="button"
+    {disabled}
+    class="focus-visible:ring-accent-default rounded px-1.5 py-px text-xs focus-visible:ring-2"
+    onclick={() => onChoose(null)}
+  >
+    {m.flow_transcript_review_unresolved()}
+  </button>
   {#each options as option (option.label)}
     <button
       type="button"

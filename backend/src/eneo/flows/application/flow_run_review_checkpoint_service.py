@@ -672,6 +672,7 @@ class FlowRunReviewCheckpointService:
         checkpoint: FlowRunReviewCheckpoint,
         source_text: str,
         new_text: str,
+        required: bool = False,
     ) -> None:
         """Keep ``{{transkribering}}`` equal to the reviewed transcript.
 
@@ -685,6 +686,12 @@ class FlowRunReviewCheckpointService:
         previous_payload = checkpoint.current_payload_json or {}
         previous_text = previous_payload.get("text")
         if current not in (source_text, previous_text):
+            if required:
+                raise FlowBadRequestException(
+                    "The downstream transcript changed. Reload before approval.",
+                    code=FlowApiErrorCode.TRANSCRIPT_CORRECTIONS_STALE_REVISION,
+                    context={"reason": "propagation_failed"},
+                )
             return
         run.input_payload_json = await self.flow_run_repo.update_input_payload(
             run_id=run.id,
@@ -727,6 +734,19 @@ class FlowRunReviewCheckpointService:
                 run=run,
                 checkpoint=pre_fold_checkpoint,
             )
+        if (
+            fold is not None
+            and fold.correction_set.schema_version >= 3
+            and not fold.propagated
+        ):
+            raise FlowBadRequestException(
+                "Saved transcript decisions could not be propagated. Reload and retry approval.",
+                code=FlowApiErrorCode.TRANSCRIPT_CORRECTIONS_STALE_REVISION,
+                context={
+                    "reason": "propagation_failed",
+                    "skip_reason": fold.skip_reason,
+                },
+            )
         folded_payload = fold.folded_payload if fold is not None else None
         approved = await self._with_review_lifecycle_translation(
             self.flow_run_review_checkpoint_repo.approve_review_checkpoint(
@@ -753,6 +773,7 @@ class FlowRunReviewCheckpointService:
                 checkpoint=pre_fold_checkpoint,
                 source_text=fold.previous_text,
                 new_text=str(folded_payload.get("text", "")),
+                required=fold.correction_set.schema_version >= 3,
             )
         return FlowReviewCheckpointApproval(
             checkpoint=approved,
@@ -772,9 +793,8 @@ class FlowRunReviewCheckpointService:
         its corrections fold into that step's label-form output and the
         names-applied payload is rebuilt from the result.
 
-        Never raises for foldability problems: a stale set, a hand-edited
-        text, or a file-backed output skips the fold (with a reason) so the
-        approval itself always proceeds.
+        Returns foldability failures to the caller. Approval rejects these
+        failures for v3 decisions instead of silently losing saved review.
         """
         if self.transcript_corrections_repo is None or self.flow_run_repo is None:
             return None
@@ -785,6 +805,12 @@ class FlowRunReviewCheckpointService:
                 source_step_id = UUID(str(extension.get("source_step_id")))
             except (TypeError, ValueError):
                 return None
+        step_result = await self.flow_run_repo.get_step_result(
+            run_id=run.id,
+            step_id=source_step_id,
+            tenant_id=run.tenant_id,
+            for_update=True,
+        )
         correction_set = await self.transcript_corrections_repo.get_for_step(
             run_id=run.id,
             step_id=source_step_id,
@@ -795,11 +821,6 @@ class FlowRunReviewCheckpointService:
             and not correction_set.speaker_edits_json
         ):
             return None
-        step_result = await self.flow_run_repo.get_step_result(
-            run_id=run.id,
-            step_id=source_step_id,
-            tenant_id=run.tenant_id,
-        )
         words_by_segment = await self._fold_words(
             run=run,
             step_id=source_step_id,

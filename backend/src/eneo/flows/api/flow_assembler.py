@@ -207,8 +207,24 @@ class FlowAssembler:
         runtime_input_file_ids: Sequence[UUID] = (),
         result_files: Sequence[FlowRunStepResultFile] = (),
     ) -> FlowRunStepPublic:
+        from eneo.flows.application.flow_transcript_corrections_service import (
+            extract_transcription_segments,
+        )
+        from eneo.flows.domain.transcript_corrections import segments_content_hash
+
+        input_payload = result.input_payload_json
+        segments = extract_transcription_segments(input_payload)
+        if segments is not None and input_payload is not None:
+            input_payload = {
+                **input_payload,
+                "transcription": {
+                    **input_payload["transcription"],
+                    "segments_hash": segments_content_hash(segments),
+                },
+            }
         return FlowRunStepPublic.model_validate(result).model_copy(
             update={
+                "input_payload_json": input_payload,
                 "diagnostics": _project_step_diagnostics(result),
                 "runtime_input_file_ids": list(runtime_input_file_ids),
                 "result_files": list(result_files),

@@ -31,6 +31,7 @@
   } from "./FlowRunEvidenceStepCard.svelte";
   import {
     attachWords,
+    fileReviewsFromMetadata,
     segmentsFromMetadata,
     type TranscriptWordsPayload
   } from "$lib/features/flows/transcriptSegments";
@@ -302,6 +303,7 @@
       const segments = segmentsFromMetadata(transcription as Record<string, unknown>);
       return {
         fileIds,
+        speakerReviews: fileReviewsFromMetadata(transcription as Record<string, unknown>),
         segments: segments ? attachWords(segments, transcriptWords) : null,
         stepId: result.step_id,
         getAudioUrl: (fileIndex: number) => {

@@ -985,3 +985,34 @@ describe("flows transcript corrections endpoints", () => {
     });
   });
 });
+
+it("pins the reviewed source and retry key when regenerating downstream output", async () => {
+  const fetch = vi.fn(async () => ({ run: { id: "child" }, created: true }));
+  const flows = initFlows({ fetch });
+  await flows.runs.regenerateTranscript({
+    flowId: "flow",
+    runId: "source",
+    stepId: "transcript",
+    expectedRunRevision: 4,
+    expectedCorrectionRevision: 8,
+    segmentsHash: "a".repeat(64),
+    idempotencyKey: "regeneration-1"
+  });
+  expect(fetch.mock.calls[0]).toEqual([
+    "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/transcript-regenerations/",
+    {
+      method: "post",
+      params: {
+        path: { id: "flow", run_id: "source", step_id: "transcript" },
+        header: { "Idempotency-Key": "regeneration-1" }
+      },
+      requestBody: {
+        "application/json": {
+          expected_run_revision: 4,
+          expected_correction_revision: 8,
+          segments_hash: "a".repeat(64)
+        }
+      }
+    }
+  ]);
+});

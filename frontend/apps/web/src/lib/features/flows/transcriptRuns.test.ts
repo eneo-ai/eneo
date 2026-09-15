@@ -25,6 +25,7 @@ function edit(partial: Partial<SpeakerEdit>): SpeakerEdit {
     char_start: null,
     char_end: null,
     original: null,
+    decision: "confirmed",
     original_speaker: "SPEAKER_00",
     speaker: "SPEAKER_01",
     ...partial
@@ -168,6 +169,7 @@ describe("applySpeakerEditOverlay", () => {
         char_start: 11,
         char_end: 17,
         original: "sugary",
+        decision: "confirmed",
         original_speaker: "SPEAKER_01",
         speaker: "SPEAKER_02"
       }
@@ -187,6 +189,7 @@ describe("applySpeakerEditOverlay", () => {
         char_start: null,
         char_end: null,
         original: null,
+        decision: "confirmed",
         original_speaker: "SPEAKER_00",
         speaker: "SPEAKER_01"
       }
@@ -211,10 +214,10 @@ describe("applySpeakerEditOverlay", () => {
     expect(merged[0].original).toBe("ab");
   });
 
-  it("drops an edit when content is reassigned back to the stored speaker", () => {
+  it("removes an overlay only with an explicit reset", () => {
     const merged = applySpeakerEditOverlay(
       [edit({})],
-      [{ segment_index: 0, char_start: null, char_end: null, speaker: "SPEAKER_00" }],
+      [{ segment_index: 0, char_start: null, char_end: null, speaker: "SPEAKER_00", reset: true }],
       segments
     );
 
@@ -259,6 +262,7 @@ describe("applySpeakerEditOverlay", () => {
         char_start: 9,
         char_end: 17,
         original: "Vad bra.",
+        decision: "confirmed",
         original_speaker: "SPEAKER_00",
         speaker: "SPEAKER_01"
       }

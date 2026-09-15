@@ -1,172 +1,137 @@
 <script lang="ts">
-  import { Badge } from "$lib/components/ui/badge/index.js";
-  import { Input } from "$lib/components/ui/input/index.js";
-  import * as Select from "$lib/components/ui/select/index.js";
-  import { m } from "$lib/paraglide/messages";
-  import { SvelteSet } from "svelte/reactivity";
-  import type { SpeakerMappingRow } from "$lib/features/flows/speakerMappingReview";
-
-  const NONE = "__none__";
-  const OTHER = "__other__";
-
+  import * as m from "$lib/paraglide/messages";
+  import type { SpeakerMappingRow } from "../speakerMappingReview";
+  import { speakerColorIndex } from "../transcriptSegments";
   let {
     rows,
     participants,
     inferred = false,
     disabled = false,
-    onChange
+    onChange,
+    onListen,
+    sampleAvailable = () => false
   }: {
     rows: SpeakerMappingRow[];
     participants: string[];
-    /** The proposal may name people the conversation revealed. */
     inferred?: boolean;
     disabled?: boolean;
     onChange: (rows: SpeakerMappingRow[]) => void;
+    onListen?: (label: string) => void;
+    sampleAvailable?: (label: string) => boolean;
   } = $props();
-
-  // Names the model found in the conversation rather than picked from the
-  // list, so the reviewer knows which proposals to look at twice.
-  const inferredLabels = $derived(
-    new Set(
-      inferred
-        ? rows
-            .filter((row) => row.name !== null && !participants.includes(row.name))
-            .map((row) => row.label)
-        : []
-    )
+  const id = $props.id();
+  const names = $derived([
+    ...new Set([
+      ...participants,
+      ...rows.map((r) => r.name?.trim()).filter((n): n is string => !!n)
+    ])
+  ]);
+  const summary = $derived(
+    rows
+      .map((r, i) => r.name?.trim() || m.flow_transcript_editor_speaker({ number: i + 1 }))
+      .join(", ")
   );
-
-  // Rows whose name is not a listed participant (proposed from the
-  // conversation, or typed) keep the free-text input visible so a misspelling
-  // is corrected in place; a reviewer who picked "someone else" but has not
-  // typed yet is tracked separately.
-  const forcedOther = new SvelteSet<string>();
-  // Names typed for one speaker are offered to the others: diarization often
-  // splits one person into several labels.
-  const knownNames = $derived.by(() => {
-    const names = [...participants];
-    for (const row of rows) {
-      const name = row.name?.trim();
-      if (name && !names.includes(name)) names.push(name);
-    }
-    return names;
-  });
-  const customLabels = $derived(
-    new Set(
-      rows
-        .filter(
-          (row) =>
-            forcedOther.has(row.label) || (row.name !== null && !participants.includes(row.name))
-        )
-        .map((row) => row.label)
-    )
-  );
-
-  function selectValue(row: SpeakerMappingRow): string {
-    if (customLabels.has(row.label)) return OTHER;
-    return row.name ?? NONE;
-  }
-
-  function selectLabel(row: SpeakerMappingRow): string {
-    const value = selectValue(row);
-    if (value === OTHER) return m.flow_run_review_speakers_other();
-    if (value === NONE) return m.flow_run_review_speakers_unassigned();
-    return value;
-  }
-
-  function update(label: string, patch: Partial<SpeakerMappingRow>) {
-    onChange(rows.map((row) => (row.label === label ? { ...row, ...patch } : row)));
-  }
-
-  function onSelect(row: SpeakerMappingRow, value: string | undefined) {
-    if (value === OTHER) {
-      forcedOther.add(row.label);
-      // A listed participant is replaced by a blank; any other name stays put.
-      update(row.label, { name: participants.includes(row.name ?? "") ? "" : row.name });
-      return;
-    }
-    forcedOther.delete(row.label);
-    update(row.label, { name: value === NONE || !value ? null : value });
-  }
-
-  function confidenceText(confidence: SpeakerMappingRow["confidence"]): string {
-    if (confidence === "high") return m.flow_run_review_speakers_confidence_high();
-    if (confidence === "medium") return m.flow_run_review_speakers_confidence_medium();
-    return m.flow_run_review_speakers_confidence_low();
-  }
+  const colors = [
+    "accent-stronger",
+    "positive-stronger",
+    "warning-stronger",
+    "negative-stronger",
+    "label-stronger",
+    "dynamic-stronger",
+    "accent-stronger",
+    "positive-stronger"
+  ];
 </script>
 
-<div class="flex flex-col gap-3">
-  <div>
-    <h4 class="text-primary text-sm font-semibold">{m.flow_run_review_speakers_title()}</h4>
-    <p class="text-muted mt-1 text-xs leading-relaxed">{m.flow_run_review_speakers_help()}</p>
-  </div>
-  {#each rows as row (row.label)}
-    <div class="border-default bg-primary flex flex-col gap-3 rounded-lg border p-3">
-      <div class="flex flex-wrap items-center gap-2">
-        <Badge variant="secondary" class="font-mono">{row.label}</Badge>
-        <span class="text-muted text-xs">
-          {m.flow_run_review_speakers_lines({ count: String(row.lineCount) })}
-        </span>
-        {#if inferredLabels.has(row.label)}
-          <Badge variant="outline" class="ml-auto text-xs">
-            {m.flow_run_review_speakers_inferred()}
-          </Badge>
-          <Badge variant="outline" class="text-xs">{confidenceText(row.confidence)}</Badge>
-        {:else}
-          <Badge variant="outline" class="ml-auto text-xs">{confidenceText(row.confidence)}</Badge>
-        {/if}
-      </div>
-      {#if row.samples.length > 0}
-        <ul class="text-secondary flex flex-col gap-1 text-xs leading-relaxed">
-          {#each row.samples as sample, index (index)}
-            <li class="truncate italic">“{sample}”</li>
-          {/each}
-        </ul>
-      {/if}
-      <div class="grid gap-2 sm:grid-cols-2">
-        <Select.Root
-          type="single"
-          value={selectValue(row)}
+<details class="border-default bg-primary min-w-0 rounded-xl border p-4" open>
+  <summary
+    class="text-primary focus-visible:ring-accent-default cursor-pointer text-sm font-medium focus-visible:ring-2"
+  >
+    {m.flow_transcript_editor_speakers()}
+    <span class="text-muted ml-2 font-normal [overflow-wrap:anywhere]">{summary}</span>
+  </summary>
+  <p class="text-muted mt-2 text-xs leading-relaxed">
+    {m.flow_transcript_editor_naming_hint()}
+  </p>
+  <datalist {id}
+    >{#each names as name (name)}<option value={name}></option>{/each}</datalist
+  >
+  {#each rows as row, index (row.label)}
+    <div
+      class="border-default grid min-w-0 grid-cols-[5.5rem_minmax(0,1fr)_2.5rem] items-start gap-3 border-b py-5 last:border-b-0"
+    >
+      <label
+        for={id + "-" + index}
+        class="pt-2 text-xs font-medium"
+        style:color={"var(--" + colors[speakerColorIndex(row.label) % colors.length] + ")"}
+        >● {m.flow_transcript_editor_speaker({ number: index + 1 })}</label
+      >
+      <div class="min-w-0">
+        <input
+          id={id + "-" + index}
+          list={id}
+          class="border-default bg-primary min-h-9 w-full rounded-md border px-3 text-sm"
+          value={row.name ?? ""}
           {disabled}
-          onValueChange={(value) => onSelect(row, value)}
-        >
-          <Select.Trigger class="w-full" aria-label={row.label}>
-            {selectLabel(row)}
-          </Select.Trigger>
-          <Select.Content>
-            <Select.Group>
-              {#each knownNames as name (name)}
-                <Select.Item value={name} label={name}>{name}</Select.Item>
-              {/each}
-              <Select.Item value={OTHER} label={m.flow_run_review_speakers_other()}>
-                {m.flow_run_review_speakers_other()}
-              </Select.Item>
-              <Select.Item value={NONE} label={m.flow_run_review_speakers_unassigned()}>
-                {m.flow_run_review_speakers_unassigned()}
-              </Select.Item>
-            </Select.Group>
-          </Select.Content>
-        </Select.Root>
-        {#if customLabels.has(row.label)}
-          <Input
-            value={row.name ?? ""}
-            {disabled}
-            placeholder={m.flow_run_review_speakers_other_placeholder()}
-            aria-label={m.flow_run_review_speakers_other_placeholder()}
-            oninput={(event) => {
-              forcedOther.add(row.label);
-              update(row.label, { name: event.currentTarget.value });
-            }}
-          />
-        {/if}
-      </div>
-      {#if row.evidence}
-        <p class="text-muted text-xs leading-relaxed">
-          <span class="font-medium">{m.flow_run_review_speakers_evidence()}:</span>
-          {row.evidence}
+          placeholder={m.flow_transcript_editor_name_placeholder()}
+          oninput={(e) =>
+            onChange(
+              rows.map((r) =>
+                r.label === row.label ? { ...r, name: e.currentTarget.value || null } : r
+              )
+            )}
+        />
+        <p class="text-muted mt-1 text-xs">
+          {m.flow_transcript_editor_lines({ count: row.lineCount })} · {row.name
+            ? m.flow_transcript_editor_confidence({
+                confidence:
+                  row.confidence === "high"
+                    ? m.flow_transcript_editor_confidence_high()
+                    : row.confidence === "medium"
+                      ? m.flow_transcript_editor_confidence_medium()
+                      : m.flow_transcript_editor_confidence_low()
+              })
+            : m.flow_transcript_editor_no_suggestion()}{inferred &&
+          row.name &&
+          !participants.includes(row.name)
+            ? m.flow_transcript_editor_inferred_name()
+            : ""}
         </p>
-      {/if}
+        <details class="text-muted mt-1 text-xs">
+          <summary class="focus-visible:ring-accent-default cursor-pointer focus-visible:ring-2"
+            >{m.flow_transcript_editor_why()}</summary
+          >
+          <p class="mt-2 leading-relaxed">
+            {row.evidence || m.flow_transcript_editor_no_evidence()}
+          </p>
+          {#each row.samples as sample, i (i)}<p
+              class="mt-1 leading-relaxed [overflow-wrap:anywhere] italic"
+            >
+              “{sample}”
+            </p>{/each}
+          {#if !row.samples.length}<p class="mt-1">
+              {m.flow_transcript_editor_no_sample()}
+            </p>{/if}
+        </details>
+      </div>
+      <button
+        type="button"
+        class="border-default focus-visible:ring-accent-default mt-0.5 flex size-9 items-center justify-center rounded-full border focus-visible:ring-2 disabled:opacity-40"
+        aria-label={m.flow_transcript_editor_listen_speaker({ number: index + 1 })}
+        disabled={!onListen || !sampleAvailable(row.label)}
+        onclick={() => onListen?.(row.label)}
+      >
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+          aria-hidden="true"><path d="M3 14v-3a9 9 0 0 1 18 0v3M3 13h4v8H3zM17 13h4v8h-4z" /></svg
+        >
+      </button>
     </div>
   {/each}
-</div>
+  <p class="text-muted text-xs">{m.flow_transcript_editor_unnamed_hint()}</p>
+</details>

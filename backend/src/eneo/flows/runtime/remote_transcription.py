@@ -25,7 +25,7 @@ import tempfile
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, BinaryIO, Literal, NoReturn, cast
+from typing import TYPE_CHECKING, Any, BinaryIO, Literal, NoReturn, cast
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -142,6 +142,7 @@ class RemoteTranscriptionResult:
     # The service's segments behind ``text``, one per rendered line, with the
     # same speaker labels. None when the service sent none.
     segments: tuple[TranscriptSegment, ...] | None = None
+    speaker_review: dict[str, Any] | None = None
 
 
 class RemoteTranscriptionClient:
@@ -161,6 +162,7 @@ class RemoteTranscriptionClient:
         poll_timeout_seconds: float,
         result_timeout_seconds: float,
         transport: httpx.AsyncBaseTransport | None = None,
+        include_speaker_review: bool = False,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self._api_key = api_key
@@ -169,6 +171,7 @@ class RemoteTranscriptionClient:
         self.poll_timeout_seconds = poll_timeout_seconds
         self.result_timeout_seconds = result_timeout_seconds
         self._transport = transport
+        self.include_speaker_review = include_speaker_review
 
     def _http_client(self, *, timeout: float) -> httpx.AsyncClient:
         return httpx.AsyncClient(timeout=timeout, transport=self._transport)
@@ -205,7 +208,16 @@ class RemoteTranscriptionClient:
             "language": language or "auto",
             "diarize": "true" if diarize else "false",
         }
+        if self.include_speaker_review and diarize:
+            data["include_speaker_review"] = "true"
         if task == "diarize":
+            if segments and any(
+                segment.speaker_attribution or segment.overlap_ids
+                for segment in segments
+            ):
+                raise ValueError(
+                    "Reviewed transcripts require explicit re-diarization and decision invalidation."
+                )
             if not words and not segments:
                 raise ValueError("A diarize job needs a timestamped transcript.")
             data["task"] = task
@@ -227,8 +239,14 @@ class RemoteTranscriptionClient:
                 )
         if model:
             data["model"] = model
-        if diarize and max_speakers is not None and max_speakers >= 1:
+        if max_speakers is not None:
+            max_speakers = _positive_speaker_bound(max_speakers)
+        if diarize and max_speakers is not None:
             data["max_speakers"] = str(max_speakers)
+        logger.info(
+            "remote_transcription.speaker_prior mode=%s",
+            "maximum" if diarize and max_speakers is not None else "automatic",
+        )
         try:
             async with self._http_client(timeout=self.submit_timeout_seconds) as client:
                 response = await client.post(
@@ -488,6 +506,7 @@ class RemoteTranscriptionClient:
         model = body.get("model")
         language = body.get("language")
         alignment = body.get("alignment")
+        review = body.get("speaker_review")
         return RemoteTranscriptionResult(
             text=text,
             duration_seconds=float(duration)
@@ -497,6 +516,9 @@ class RemoteTranscriptionClient:
             language=language if isinstance(language, str) else None,
             alignment=alignment if isinstance(alignment, str) else None,
             segments=_parse_result_segments(body.get("segments")),
+            speaker_review=cast(dict[str, Any], review)
+            if isinstance(review, dict)
+            else None,
         )
 
     def _parse_job_id(self, response: httpx.Response) -> str:
@@ -591,6 +613,7 @@ class RemoteFlowTranscriber:
             transcript_segments=result.segments,
             diarization="external" if diarize else None,
             alignment=result.alignment if diarize else None,
+            speaker_review=result.speaker_review,
         )
 
     async def label_speakers(
@@ -820,6 +843,7 @@ def build_remote_flow_transcriber(settings: "Settings") -> RemoteFlowTranscriber
     return RemoteFlowTranscriber(
         RemoteTranscriptionClient(
             base_url=url,
+            include_speaker_review=settings.flow_transcription_include_speaker_review,
             api_key=api_key,
             submit_timeout_seconds=(
                 settings.flow_transcription_service_submit_timeout_seconds
@@ -905,6 +929,8 @@ def _parse_result_segments(raw: object) -> tuple[TranscriptSegment, ...] | None:
         ):
             continue
         speaker = item.get("speaker")
+        attribution = item.get("speaker_attribution")
+        overlap_ids = item.get("overlap_ids")
         segments.append(
             TranscriptSegment(
                 text=text,
@@ -912,6 +938,16 @@ def _parse_result_segments(raw: object) -> tuple[TranscriptSegment, ...] | None:
                 end=float(end),
                 speaker=speaker if isinstance(speaker, str) and speaker else None,
                 words=_parse_result_words(item.get("words")),
+                speaker_attribution=attribution
+                if isinstance(attribution, str)
+                else None,
+                overlap_ids=tuple(
+                    value
+                    for value in cast(list[object], overlap_ids)
+                    if isinstance(value, str)
+                )
+                if isinstance(overlap_ids, list)
+                else (),
             )
         )
     return tuple(segments)
@@ -974,3 +1010,9 @@ def _digest_file(file_path: Path) -> str:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _positive_speaker_bound(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError("max_speakers must be a positive integer")
+    return value

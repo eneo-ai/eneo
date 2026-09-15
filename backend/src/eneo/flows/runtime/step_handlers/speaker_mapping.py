@@ -118,12 +118,39 @@ class SpeakerMappingStepHandler:
 
         source_text = prepared.step_input.text
         inventory = build_speaker_inventory(source_text)
-        if not inventory and _upstream_diarization_skipped(step, state):
-            # The transcription model gave no timestamps, so there are no
-            # speakers to map. Pass the transcript through and say so rather
-            # than fail a run the author configured correctly.
+        previous = state.completed_by_order.get(step.step_order - 1)
+        raw_metadata: object = (
+            (previous.input_payload_json or {}).get("transcription")
+            if previous
+            else None
+        )
+        metadata = (
+            cast(dict[str, Any], raw_metadata) if isinstance(raw_metadata, dict) else {}
+        )
+        raw_inventory = metadata.get("speakers")
+        if isinstance(raw_inventory, list):
+            by_label = {entry["label"]: entry for entry in inventory}
+            for raw_entry in cast(list[object], raw_inventory):
+                if not isinstance(raw_entry, dict):
+                    continue
+                entry = cast(dict[str, Any], raw_entry)
+                if entry.get("label") not in by_label:
+                    inventory.append(
+                        {**entry, "samples": [], "clean_example_available": False}
+                    )
+            # Provisional lines cannot become name-mapping samples.
+        if not inventory and (
+            _upstream_diarization_skipped(step, state) or metadata.get("speaker_review")
+        ):
+            # An entirely unresolved transcript still carries readable words.
+            # No labels need names; keep the uncertainty markers downstream.
             return await self._pass_through(
-                step=step, run=run, state=state, attempt_no=attempt_no, preview=preview
+                step=step,
+                run=run,
+                state=state,
+                attempt_no=attempt_no,
+                preview=preview,
+                unresolved=bool(metadata.get("speaker_review")),
             )
         if not inventory:
             raise attach_typed_failure_context(
@@ -258,6 +285,7 @@ class SpeakerMappingStepHandler:
         state: RunExecutionState,
         attempt_no: int,
         preview: PreparedAssistantStep,
+        unresolved: bool = False,
     ) -> StepExecutionResult:
         prepared = preview.prepared
         # No provider call happens, but the attempt still records what it read.
@@ -274,10 +302,14 @@ class SpeakerMappingStepHandler:
             StepDiagnostic(
                 code="speaker_mapping_skipped",
                 message=(
-                    f"Step {step.step_order}: speaker identification was skipped on "
-                    "the transcription step (no timestamps from the model), so "
-                    "there are no speakers to name; the transcript is passed on "
-                    "unchanged."
+                    "No speaker could be determined; readable transcript words are preserved."
+                    if unresolved
+                    else (
+                        f"Step {step.step_order}: speaker identification was skipped on "
+                        "the transcription step (no timestamps from the model), so "
+                        "there are no speakers to name; the transcript is passed on "
+                        "unchanged."
+                    )
                 ),
                 severity="warning",
             ),

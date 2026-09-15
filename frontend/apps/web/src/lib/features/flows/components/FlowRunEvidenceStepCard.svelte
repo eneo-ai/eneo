@@ -20,6 +20,7 @@
   import {
     isPureTranscript,
     parseTranscript,
+    type TranscriptFileReview,
     type TranscriptSegment
   } from "$lib/features/flows/transcriptSegments";
   import {
@@ -58,6 +59,7 @@
   /** Audio and segments of the run's transcription step, shared by every card. */
   export type FlowRunTranscriptContext = {
     fileIds: string[];
+    speakerReviews?: TranscriptFileReview[];
     segments: TranscriptSegment[] | null;
     /** The transcription step the segments (and any corrections) anchor to. */
     stepId: string | null;
@@ -311,7 +313,18 @@
                   </Alert.Description>
                 </Alert.Root>
               {/if}
+              {#if !ownsStoredSegments}
+                <p class="text-muted text-xs">
+                  {m.flow_transcript_review_details_unavailable()}
+                </p>
+              {:else if correctionsController?.speakerEdits.length}
+                <p class="text-muted text-xs">
+                  {m.flow_transcript_review_regenerate()}
+                </p>
+              {/if}
               <TranscriptPlayer
+                reviewEditor
+                speakerReviews={ownsStoredSegments ? transcriptContext.speakerReviews : []}
                 segments={transcriptSegments}
                 fileCount={transcriptContext.fileIds.length}
                 getAudioUrl={transcriptContext.getAudioUrl}

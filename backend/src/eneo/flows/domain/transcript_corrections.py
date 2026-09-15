@@ -22,7 +22,7 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, cast
+from typing import Any, Literal, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -30,13 +30,13 @@ from pydantic import BaseModel, ConfigDict, Field
 from eneo.authentication.principal_types import PrincipalType
 from eneo.flows.domain.speaker_labels import (
     SPEAKER_LABEL_RE,
-    SPEAKER_LINE_RE,
     render_line_prefix,
 )
+from eneo.flows.domain.speaker_review import attribution_text
 from eneo.flows.domain.transcript_words import LocatedWord
 
-TRANSCRIPT_CORRECTIONS_SCHEMA_VERSION = 2
-SUPPORTED_TRANSCRIPT_CORRECTIONS_SCHEMA_VERSIONS = frozenset({1, 2})
+TRANSCRIPT_CORRECTIONS_SCHEMA_VERSION = 3
+SUPPORTED_TRANSCRIPT_CORRECTIONS_SCHEMA_VERSIONS = frozenset({1, 2, 3})
 MAX_CORRECTION_OCCURRENCES = 2000
 MAX_SPEAKER_EDITS = 2000
 
@@ -77,8 +77,9 @@ class TranscriptSpeakerEdit:
     char_start: int | None
     char_end: int | None
     original: str | None
-    original_speaker: str
-    speaker: str
+    original_speaker: str | None
+    speaker: str | None
+    decision: Literal["confirmed", "unresolved"] = "confirmed"
 
     @property
     def is_whole_segment(self) -> bool:
@@ -92,6 +93,7 @@ class TranscriptSpeakerEdit:
             "original": self.original,
             "original_speaker": self.original_speaker,
             "speaker": self.speaker,
+            "decision": self.decision,
         }
 
 
@@ -189,8 +191,9 @@ class FlowTranscriptCorrectionSet(BaseModel):
                 original=(
                     str(item["original"]) if item["original"] is not None else None
                 ),
-                original_speaker=str(item["original_speaker"]),
-                speaker=str(item["speaker"]),
+                original_speaker=item["original_speaker"],
+                speaker=item["speaker"],
+                decision=item.get("decision", "confirmed"),
             )
             for item in self.speaker_edits_json
         ]
@@ -316,9 +319,9 @@ def validate_speaker_edits(
 
     Raises TranscriptSpeakerEditInvalidError for the first violation. A
     whole-segment edit is exclusive with any other edit on the same segment;
-    span edits must not overlap each other (adjacent spans are fine). An edit
-    that keeps the stored speaker is rejected: revert is expressed by removing
-    the edit, never by writing a no-op.
+    span edits must not overlap each other (adjacent spans are fine).
+    Confirmation may keep the model label; unresolved decisions may be null
+    to null. Undo removes the overlay and restores the model suggestion.
     """
     if len(speaker_edits) > MAX_SPEAKER_EDITS:
         raise TranscriptSpeakerEditInvalidError(
@@ -339,18 +342,13 @@ def validate_speaker_edits(
                 },
             )
         for label in (edit.original_speaker, edit.speaker):
-            if not SPEAKER_LABEL_RE.match(label):
+            if label is not None and not SPEAKER_LABEL_RE.fullmatch(label):
                 raise TranscriptSpeakerEditInvalidError(
                     reason="invalid_speaker_label",
                     context={"segment_index": edit.segment_index, "label": label},
                 )
         segment = segments[edit.segment_index]
         stored_speaker = _segment_speaker(segment)
-        if stored_speaker is None:
-            raise TranscriptSpeakerEditInvalidError(
-                reason="segment_has_no_speaker",
-                context={"segment_index": edit.segment_index},
-            )
         if edit.original_speaker != stored_speaker:
             raise TranscriptSpeakerEditInvalidError(
                 reason="original_speaker_mismatch",
@@ -399,13 +397,11 @@ def validate_speaker_edits(
                         "original": edit.original,
                     },
                 )
-        if edit.speaker == stored_speaker:
+        if edit.decision not in ("confirmed", "unresolved") or (
+            (edit.decision == "confirmed") != (edit.speaker is not None)
+        ):
             raise TranscriptSpeakerEditInvalidError(
-                reason="speaker_unchanged",
-                context={
-                    "segment_index": edit.segment_index,
-                    "speaker": edit.speaker,
-                },
+                reason="invalid_decision", context={"segment_index": edit.segment_index}
             )
         by_segment.setdefault(edit.segment_index, []).append(edit)
     for segment_index, segment_edits in by_segment.items():
@@ -425,6 +421,30 @@ def validate_speaker_edits(
                         "segment_index": segment_index,
                         "first_range": [previous[0], previous[1]],
                         "second_range": [current[0], current[1]],
+                    },
+                )
+
+
+def validate_correction_partitions(
+    occurrences: list[TranscriptCorrectionOccurrence],
+    edits: list[TranscriptSpeakerEdit],
+) -> None:
+    """A replacement cannot consume text on both sides of a speaker decision boundary."""
+    for occurrence in occurrences:
+        for edit in edits:
+            if edit.segment_index != occurrence.segment_index or edit.is_whole_segment:
+                continue
+            if any(
+                boundary is not None
+                and occurrence.char_start < boundary < occurrence.char_end
+                for boundary in (edit.char_start, edit.char_end)
+            ):
+                raise TranscriptCorrectionInvalidOccurrenceError(
+                    reason="crosses_speaker_boundary",
+                    context={
+                        "segment_index": occurrence.segment_index,
+                        "char_start": occurrence.char_start,
+                        "char_end": occurrence.char_end,
                     },
                 )
 
@@ -476,7 +496,7 @@ def _map_raw_offset(
 
 def _corrected_speaker_runs(
     raw_text: str,
-    stored_speaker: str,
+    stored_speaker: str | None,
     spans: list[TranscriptSpeakerEdit],
     applicable: list[TranscriptCorrectionOccurrence],
     skipped: list[TranscriptSpeakerEdit],
@@ -486,7 +506,7 @@ def _corrected_speaker_runs(
     ``spans`` are this segment's anchor-verified span edits. A single run in
     the stored speaker means nothing changed and the result is empty.
     """
-    raw_runs: list[tuple[int, int, str]] = []
+    raw_runs: list[tuple[int, int, str | None, str | None]] = []
     cursor = 0
     for edit in sorted(spans, key=lambda item: item.char_start or 0):
         start = edit.char_start or 0
@@ -496,24 +516,33 @@ def _corrected_speaker_runs(
             skipped.append(edit)
             continue
         if cursor < start:
-            raw_runs.append((cursor, start, stored_speaker))
-        raw_runs.append((start, end, edit.speaker))
+            raw_runs.append((cursor, start, stored_speaker, None))
+        raw_runs.append((start, end, edit.speaker, edit.decision))
         cursor = end
     if cursor < len(raw_text):
-        raw_runs.append((cursor, len(raw_text), stored_speaker))
+        raw_runs.append((cursor, len(raw_text), stored_speaker, None))
 
     merged: list[dict[str, Any]] = []
-    for raw_start, raw_end, speaker in raw_runs:
+    for raw_start, raw_end, speaker, decision in raw_runs:
         start = _map_raw_offset(raw_start, applicable)
         end = _map_raw_offset(raw_end, applicable)
         if start >= end:
             continue
-        if merged and merged[-1]["speaker"] == speaker:
+        if (
+            merged
+            and merged[-1]["speaker"] == speaker
+            and merged[-1].get("decision") == decision
+        ):
             merged[-1]["char_end"] = end
             continue
-        merged.append({"char_start": start, "char_end": end, "speaker": speaker})
-    if len(merged) == 1 and merged[0]["speaker"] == stored_speaker:
-        return []
+        merged.append(
+            {
+                "char_start": start,
+                "char_end": end,
+                "speaker": speaker,
+                "decision": decision,
+            }
+        )
     return merged
 
 
@@ -575,9 +604,7 @@ def apply_corrections_and_speaker_edits(
 
         applicable_edits: list[TranscriptSpeakerEdit] = []
         for edit in sort_speaker_edits(edits_by_segment.get(segment_index, [])):
-            anchored = (
-                stored_speaker is not None and edit.original_speaker == stored_speaker
-            )
+            anchored = edit.original_speaker == stored_speaker
             if anchored and not edit.is_whole_segment:
                 anchored = (
                     edit.char_start is not None
@@ -595,14 +622,16 @@ def apply_corrections_and_speaker_edits(
             # Canonical sets hold at most one whole-segment edit and no
             # coexisting spans; anything extra is corrupt storage — skip it.
             corrected_segments[segment_index]["speaker"] = wholes[0].speaker
+            corrected_segments[segment_index]["speaker_decision"] = wholes[0].as_json()
             skipped_speaker_edits.extend(wholes[1:])
             skipped_speaker_edits.extend(spans)
-        elif spans and stored_speaker is not None:
+        elif spans:
             runs = _corrected_speaker_runs(
                 raw_text, stored_speaker, spans, applicable, skipped_speaker_edits
             )
             if len(runs) == 1:
                 corrected_segments[segment_index]["speaker"] = runs[0]["speaker"]
+                corrected_segments[segment_index]["speaker_decision"] = runs[0]
             elif runs:
                 corrected_segments[segment_index]["speaker_runs"] = runs
     return corrected_segments, skipped_occurrences, skipped_speaker_edits
@@ -682,26 +711,28 @@ def apply_to_rendered_transcript(
     """
     lines = rendered_text.split("\n")
     matches: list[tuple[int, re.Match[str]]] = []
+    line_re = re.compile(
+        r"^(?P<prefix>\[\d{2,}:\d{2}:\d{2} - \d{2,}:\d{2}:\d{2}\] )(?P<body>.*)$"
+    )
     for line_index, line in enumerate(lines):
-        match = SPEAKER_LINE_RE.match(line)
+        match = line_re.match(line)
         if match:
             matches.append((line_index, match))
     if len(matches) != len(segments):
         return None
     for (_, match), segment in zip(matches, segments):
-        if match.group("label") != _segment_speaker(segment):
+        if match.group("body") != attribution_text(segment) + _segment_text(segment):
             return None
-        if match.group("text") != _segment_text(segment):
-            return None
-    corrected_segments, _, _ = apply_corrections_and_speaker_edits(
-        segments, occurrences, speaker_edits
+    corrected_segments, skipped_occurrences, skipped_edits = (
+        apply_corrections_and_speaker_edits(segments, occurrences, speaker_edits)
     )
+    if skipped_occurrences or skipped_edits:
+        return None
     for segment_index, ((line_index, match), corrected) in enumerate(
         zip(matches, corrected_segments)
     ):
         prefix = match.group("prefix")
         text = _segment_text(corrected)
-        speaker = _segment_speaker(corrected)
         runs = corrected.get("speaker_runs")
         rendered_runs: list[str] = []
         if isinstance(runs, list):
@@ -717,11 +748,15 @@ def apply_to_rendered_transcript(
             for run, run_prefix in zip(typed_runs, prefixes):
                 run_text = text[run["char_start"] : run["char_end"]].strip()
                 if run_text:
-                    rendered_runs.append(f"{run_prefix}{run['speaker']}: {run_text}")
+                    rendered_runs.append(
+                        f"{run_prefix}{attribution_text(segments[segment_index], run if run.get('decision') else None)}{run_text}"
+                    )
         if rendered_runs:
             lines[line_index] = "\n".join(rendered_runs)
         else:
-            lines[line_index] = f"{prefix}{speaker}: {text}"
+            lines[line_index] = (
+                f"{prefix}{attribution_text(segments[segment_index], corrected.get('speaker_decision'))}{text}"
+            )
     return "\n".join(lines)
 
 

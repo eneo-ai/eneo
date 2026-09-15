@@ -33,7 +33,7 @@
     /** The minted label behind "Ny talare". */
     newSpeakerLabel?: string;
     disabled?: boolean;
-    onSelect?: (label: string) => void;
+    onSelect?: (label: string | null) => void;
     onReset?: () => void;
   } = $props();
 
@@ -64,9 +64,7 @@
       {/snippet}
     </DropdownMenu.Trigger>
     <DropdownMenu.Content align="start" class="min-w-40">
-      <DropdownMenu.Label class="text-xs">
-        {m.flow_run_transcript_change_speaker()}
-      </DropdownMenu.Label>
+      <DropdownMenu.Label class="text-xs">{m.flow_transcript_review_choose()}</DropdownMenu.Label>
       {#each options as option (option.label)}
         <DropdownMenu.Item onclick={() => onSelect?.(option.label)}>
           <span class="inline-block rounded px-1.5 py-px text-xs font-semibold {option.colorClass}">
@@ -75,6 +73,9 @@
         </DropdownMenu.Item>
       {/each}
       <DropdownMenu.Separator />
+      <DropdownMenu.Item onclick={() => onSelect?.(null)}>
+        {m.flow_transcript_review_unresolved()}
+      </DropdownMenu.Item>
       <DropdownMenu.Item onclick={() => onSelect?.(newSpeakerLabel)}>
         {m.flow_run_transcript_new_speaker()}
         <span class="text-muted ml-1 text-xs">({newSpeakerLabel})</span>

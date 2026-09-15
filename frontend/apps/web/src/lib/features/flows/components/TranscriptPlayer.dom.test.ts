@@ -458,3 +458,74 @@ describe("TranscriptPlayer speaker re-attribution", () => {
     expect(screen.queryByRole("toolbar")).toBeNull();
   });
 });
+
+describe("speaker review", () => {
+  const reviewed = [
+    {
+      index: 0,
+      fileIndex: 0,
+      start: 0,
+      end: 1,
+      speaker: "SPEAKER_00",
+      text: "Tydligt.",
+      speakerAttribution: "assigned"
+    },
+    {
+      index: 1,
+      fileIndex: 0,
+      start: 1,
+      end: 2,
+      speaker: "SPEAKER_00",
+      text: "Samtidigt.",
+      speakerAttribution: "provisional",
+      overlapIds: ["file:overlap_0000"]
+    },
+    {
+      index: 2,
+      fileIndex: 0,
+      start: 2,
+      end: 3,
+      speaker: "SPEAKER_00",
+      text: "Tydligt igen.",
+      speakerAttribution: "assigned"
+    }
+  ];
+  it("keeps overlap boundaries and does not display the proposed name as settled", () => {
+    const { container } = render(TranscriptPlayer, {
+      props: {
+        segments: reviewed,
+        getAudioUrl: signed(),
+        speakerNames: { SPEAKER_00: "Anna" }
+      }
+    });
+    expect(turnBlocks(container)).toHaveLength(3);
+    const provisional = turnBlocks(container)[1];
+    expect(provisional.textContent).toContain("Överlappande tal – osäker talare");
+    expect(provisional.textContent).not.toContain("Anna");
+    expect(within(provisional).getByText("Granskningsdetaljer")).toBeTruthy();
+  });
+  it("offers an explicit unresolved choice even when the proposed speaker is null and audio is missing", async () => {
+    const save = vi.fn(async () => true);
+    const { container } = render(TranscriptPlayer, {
+      props: {
+        segments: [{ ...reviewed[1], index: 0, speaker: null }],
+        editable: true,
+        getAudioUrl: vi.fn(async () => {
+          throw new Error("audio missing");
+        }),
+        onSaveSpeakerEdits: save
+      }
+    });
+    await fireEvent.click(
+      within(turnBlocks(container)[0]).getByRole("button", {
+        name: /talare.*repliken|speaker.*turn/i
+      })
+    );
+    await fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Talare går inte att avgöra" })
+    );
+    expect(save).toHaveBeenCalledWith([
+      expect.objectContaining({ segment_index: 0, speaker: null })
+    ]);
+  });
+});

@@ -291,6 +291,16 @@ class FlowTranscriptCorrectionsRepository:
             return None
         return FlowTranscriptCorrectionSet.model_validate(row)
 
+    async def copy_snapshot(
+        self, *, corrections: FlowTranscriptCorrectionSet, run_id: UUID
+    ) -> None:
+        """Keep the source editor and revision on a newly created run's immutable import."""
+        values = corrections.model_dump(exclude={"id", "flow_run_id"})
+        values["edited_by_principal_type"] = corrections.edited_by_principal_type.value
+        await self.session.execute(
+            sa.insert(FlowTranscriptCorrections).values(**values, flow_run_id=run_id)
+        )
+
     async def save(
         self,
         *,
@@ -303,6 +313,7 @@ class FlowTranscriptCorrectionsRepository:
         segments_hash: str,
         expected_revision: int | None,
         principal: FlowPrincipal,
+        schema_version: int = TRANSCRIPT_CORRECTIONS_SCHEMA_VERSION,
     ) -> FlowTranscriptCorrectionSet:
         """Create (expected_revision None) or CAS-replace the step's set."""
         principal_values = {
@@ -321,7 +332,7 @@ class FlowTranscriptCorrectionsRepository:
                     occurrences_json=occurrences_json,
                     speaker_edits_json=speaker_edits_json,
                     segments_hash=segments_hash,
-                    schema_version=TRANSCRIPT_CORRECTIONS_SCHEMA_VERSION,
+                    schema_version=schema_version,
                     **principal_values,
                 )
                 .on_conflict_do_nothing(
@@ -351,7 +362,7 @@ class FlowTranscriptCorrectionsRepository:
                 speaker_edits_json=speaker_edits_json,
                 segments_hash=segments_hash,
                 revision=FlowTranscriptCorrections.revision + 1,
-                schema_version=TRANSCRIPT_CORRECTIONS_SCHEMA_VERSION,
+                schema_version=schema_version,
                 updated_at=sa.func.now(),
                 **principal_values,
             )

@@ -439,3 +439,97 @@ async def test_approval_skips_a_stale_source_set_but_still_approves() -> None:
     approved = service.flow_run_review_checkpoint_repo.approve_review_checkpoint
     assert approved.await_args.kwargs["current_payload_json"] is None
     flow_run_repo.update_input_payload.assert_not_awaited()
+
+
+@pytest.mark.parametrize("failure", ["stale_source", "unaligned_text", "write_failure"])
+async def test_v3_approval_does_not_report_failed_propagation_as_success(failure):
+    checkpoint = _checkpoint(_payload(SOURCE))
+    run = SimpleNamespace(
+        id=checkpoint.flow_run_id,
+        tenant_id=checkpoint.tenant_id,
+        flow_id=checkpoint.flow_id,
+        input_payload_json={"transkribering": SOURCE},
+    )
+    source = _source_result(
+        checkpoint, SOURCE if failure != "unaligned_text" else "changed"
+    ).model_copy(
+        update={"input_payload_json": {"transcription": {"segments": SOURCE_SEGMENTS}}}
+    )
+    correction_set = _correction_set(checkpoint).model_copy(
+        update={"schema_version": 3}
+    )
+    if failure == "stale_source":
+        correction_set.segments_hash = "stale"
+    repo = AsyncMock()
+    repo.get_step_result.return_value = source
+    repo.update_input_payload.side_effect = RuntimeError("write failed")
+    service = _service(checkpoint, run, repo)
+    service.transcript_corrections_repo = AsyncMock()
+    service.transcript_corrections_repo.get_for_step.return_value = correction_set
+    service.flow_run_review_checkpoint_repo.approve_review_checkpoint = AsyncMock(
+        return_value=checkpoint
+    )
+    with pytest.raises((FlowBadRequestException, RuntimeError)):
+        await service.approve_review_checkpoint(
+            flow_id=checkpoint.flow_id,
+            run_id=run.id,
+            checkpoint_id=checkpoint.id,
+            expected_checkpoint_revision=1,
+        )
+    if failure != "write_failure":
+        service.flow_run_review_checkpoint_repo.approve_review_checkpoint.assert_not_awaited()
+
+
+async def test_v3_unresolved_approval_propagates_to_named_output_and_run_variable():
+    checkpoint = _checkpoint(_payload(SOURCE))
+    run = SimpleNamespace(
+        id=checkpoint.flow_run_id,
+        tenant_id=checkpoint.tenant_id,
+        flow_id=checkpoint.flow_id,
+        input_payload_json={"transkribering": SOURCE},
+    )
+    source = _source_result(checkpoint, SOURCE).model_copy(
+        update={"input_payload_json": {"transcription": {"segments": SOURCE_SEGMENTS}}}
+    )
+    correction_set = _correction_set(checkpoint).model_copy(
+        update={
+            "schema_version": 3,
+            "occurrences_json": [],
+            "speaker_edits_json": [
+                {
+                    "segment_index": 0,
+                    "char_start": None,
+                    "char_end": None,
+                    "original": None,
+                    "original_speaker": "SPEAKER_00",
+                    "speaker": None,
+                    "decision": "unresolved",
+                }
+            ],
+        }
+    )
+    repo = AsyncMock()
+    repo.get_step_result.return_value = source
+    repo.update_input_payload.return_value = {}
+    service = _service(checkpoint, run, repo)
+    service.transcript_corrections_repo = AsyncMock()
+    service.transcript_corrections_repo.get_for_step.return_value = correction_set
+    service.flow_run_review_checkpoint_repo.approve_review_checkpoint = AsyncMock(
+        return_value=checkpoint
+    )
+    approval = await service.approve_review_checkpoint(
+        flow_id=checkpoint.flow_id,
+        run_id=run.id,
+        checkpoint_id=checkpoint.id,
+        expected_checkpoint_revision=1,
+    )
+    assert approval.corrections_fold.propagated
+    text = approval.corrections_fold.folded_payload["text"]
+    assert "[Talare går inte att avgöra]: Hej." in text
+    assert "Anna: Hej." not in text
+    assert (
+        repo.update_input_payload.await_args.kwargs[
+            "input_payload_patch"
+        ].to_merge_dict()["transkribering"]
+        == text
+    )

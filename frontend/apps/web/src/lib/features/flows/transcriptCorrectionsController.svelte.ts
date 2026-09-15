@@ -9,12 +9,13 @@
  * guarded by the revision.
  */
 
-import { EneoError, type Eneo, type FlowRunTranscriptCorrections } from "@eneo/eneo-js";
+import { type Eneo, type FlowRunTranscriptCorrections } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
 import { getFlowRuntimeErrorMessage } from "$lib/features/flows/flowRuntimeErrorMapping";
 import type { TranscriptSegment } from "$lib/features/flows/transcriptSegments";
 import {
   applyCasingPattern,
+  convertTranscriptAnchors,
   diffLineEdit,
   findOccurrences,
   sortOccurrences,
@@ -54,24 +55,36 @@ export function createTranscriptCorrectionsController(options: {
   let occurrences = $state<CorrectionOccurrence[]>([]);
   let speakerEdits = $state<SpeakerEdit[]>([]);
   let revision = $state<number | null>(null);
+  let segmentsHash = $state<string | null>(rawSegments[0]?.segmentsHash ?? null);
   let stale = $state(false);
   let loaded = $state(false);
   let saving = $state(false);
   let error = $state<string | null>(null);
   let dialog = $state<SuggestionDialogState | null>(null);
+  let queue: Promise<boolean> = Promise.resolve(true);
+  let generation = 0;
+  let blocked = $state(false);
+  let pendingWrites = 0;
 
   function seat(set: FlowRunTranscriptCorrections | null) {
-    const nextOccurrences = (set?.occurrences ?? []).map((occurrence) => ({ ...occurrence }));
+    const nextOccurrences = set?.stale
+      ? [...set.occurrences]
+      : convertTranscriptAnchors(set?.occurrences ?? [], rawSegments, "fromWire");
     // The generated schema marks null-span fields optional; the domain shape
     // uses explicit nulls, so normalize here once.
-    const nextSpeakerEdits: SpeakerEdit[] = (set?.speaker_edits ?? []).map((edit) => ({
+    const storedSpeakerEdits: SpeakerEdit[] = (set?.speaker_edits ?? []).map((edit) => ({
       segment_index: edit.segment_index,
       char_start: edit.char_start ?? null,
       char_end: edit.char_end ?? null,
       original: edit.original ?? null,
       original_speaker: edit.original_speaker,
-      speaker: edit.speaker
+      speaker: edit.speaker,
+      decision: edit.decision ?? "confirmed"
     }));
+    const nextSpeakerEdits = set?.stale
+      ? storedSpeakerEdits
+      : convertTranscriptAnchors(storedSpeakerEdits, rawSegments, "fromWire");
+    if (!set?.stale && set?.segments_hash && !segmentsHash) segmentsHash = set.segments_hash;
     const nextRevision = set?.revision ?? null;
     const nextStale = set?.stale ?? false;
     // Keep identities stable when nothing changed: replacing the occurrence
@@ -95,6 +108,7 @@ export function createTranscriptCorrectionsController(options: {
       const sets = await eneo.flows.runs.transcriptCorrections.list({ flowId, runId });
       seat(sets.find((set) => set.step_id === stepId) ?? null);
       loaded = true;
+      error = null;
     } catch (loadError) {
       console.error("Failed to load transcript corrections", loadError);
       error = getFlowRuntimeErrorMessage(
@@ -104,49 +118,109 @@ export function createTranscriptCorrectionsController(options: {
     }
   }
 
-  function isStaleRevision(candidate: unknown): boolean {
-    return (
-      candidate instanceof EneoError &&
-      (candidate.response as { code?: string } | undefined)?.code ===
-        "flow_transcript_corrections_stale_revision"
-    );
-  }
-
-  async function persist(
+  function persist(
     next: CorrectionOccurrence[],
     nextSpeakerEdits: SpeakerEdit[]
   ): Promise<boolean> {
+    if (!loaded || stale) return Promise.resolve(false);
+    // Drafts change immediately; each request captures a full immutable replacement.
+    const draftOccurrences = next.map((item) => ({ ...item }));
+    const draftSpeakers = nextSpeakerEdits.map((item) => ({ ...item }));
+    occurrences = draftOccurrences;
+    speakerEdits = draftSpeakers;
+    const requested = ++generation;
+    pendingWrites += 1;
     saving = true;
-    error = null;
-    try {
-      seat(
-        await eneo.flows.runs.transcriptCorrections.save({
-          flowId,
-          runId,
-          stepId,
-          expectedRevision: revision,
-          occurrences: sortOccurrences(next),
-          speakerEdits: sortSpeakerEdits(nextSpeakerEdits)
-        })
-      );
-      return true;
-    } catch (saveError) {
-      console.error("Failed to save transcript corrections", saveError);
-      if (isStaleRevision(saveError)) {
-        // Another editor (the other surface, or another person) saved first;
-        // reload their state instead of silently overwriting it.
-        error = m.flow_run_transcript_corrections_conflict();
-        await load();
-      } else {
-        error = getFlowRuntimeErrorMessage(
-          saveError,
-          m.flow_run_transcript_corrections_save_failed()
-        );
-      }
-      return false;
-    } finally {
-      saving = false;
+    queue = queue
+      .then(async (previousSaved) => {
+        if (!previousSaved || blocked) return false;
+        try {
+          const saved = await eneo.flows.runs.transcriptCorrections.save({
+            flowId,
+            runId,
+            stepId,
+            expectedRevision: revision,
+            ...(segmentsHash ? { schemaVersion: 3 as const, segmentsHash } : {}),
+            occurrences: convertTranscriptAnchors(
+              sortOccurrences(draftOccurrences),
+              rawSegments,
+              "toWire"
+            ),
+            speakerEdits: convertTranscriptAnchors(
+              sortSpeakerEdits(draftSpeakers),
+              rawSegments,
+              "toWire"
+            )
+          });
+          if (saved.stale) throw new Error(m.flow_run_transcript_corrections_conflict());
+          revision = saved.revision;
+          if (requested === generation) seat(saved);
+          error = null;
+          return true;
+        } catch (saveError) {
+          blocked = true;
+          error = getFlowRuntimeErrorMessage(
+            saveError,
+            m.flow_run_transcript_corrections_save_failed()
+          );
+          // Keep the original revision and latest local draft. Never silently rebase.
+          return false;
+        }
+      })
+      .finally(() => {
+        pendingWrites -= 1;
+        saving = pendingWrites > 0;
+      });
+    return queue;
+  }
+
+  function replaceDraft(draft: {
+    occurrences: CorrectionOccurrence[];
+    speakerEdits: SpeakerEdit[];
+  }) {
+    return persist(draft.occurrences, draft.speakerEdits);
+  }
+
+  async function flush(): Promise<boolean> {
+    let observed: Promise<boolean>;
+    do {
+      observed = queue;
+      await observed;
+    } while (observed !== queue);
+    return !blocked && !stale && loaded;
+  }
+
+  async function retry(): Promise<boolean> {
+    if (!loaded) {
+      await load();
+      return loaded && !stale;
     }
+    await queue;
+    blocked = false;
+    error = null;
+    queue = Promise.resolve(true);
+    return persist([...occurrences], [...speakerEdits]);
+  }
+
+  function downloadDraft() {
+    const payload = {
+      flowId,
+      runId,
+      stepId,
+      schema_version: 3,
+      segments_hash: segmentsHash,
+      expected_revision: revision,
+      occurrences: convertTranscriptAnchors(occurrences, rawSegments, "toWire"),
+      speaker_edits: convertTranscriptAnchors(speakerEdits, rawSegments, "toWire")
+    };
+    const url = URL.createObjectURL(
+      new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" })
+    );
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "osparade-rattningar.json";
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 
   /** Stale occurrences anchor to replaced text; they never carry into a save. */
@@ -286,12 +360,16 @@ export function createTranscriptCorrectionsController(options: {
     },
     /** Editing is enabled only once the stored state is known. */
     get ready(): boolean {
-      return loaded;
+      return loaded && !stale;
     },
     get dialog(): SuggestionDialogState | null {
       return dialog;
     },
     load,
+    replaceDraft,
+    flush,
+    retry,
+    downloadDraft,
     saveLine,
     revertLine,
     saveSpeakerEdits,
@@ -299,7 +377,7 @@ export function createTranscriptCorrectionsController(options: {
     confirmSuggestions,
     dismissSuggestions,
     clearError(): void {
-      error = null;
+      if (!blocked) error = null;
     }
   };
 }

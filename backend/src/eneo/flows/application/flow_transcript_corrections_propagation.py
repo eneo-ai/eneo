@@ -12,8 +12,9 @@ For a speaker-mapping step it is the *source* transcription step's output: the
 corrections are folded into that label-form text and the caller rebuilds the
 names-applied payload from it.
 
-Folding never blocks an approval: any foldability problem (stale set,
-hand-edited text, file-backed output) is reported as a skip reason instead.
+Foldability problems are returned as skip reasons. The approval service
+blocks version 3 decisions when required propagation cannot complete; legacy
+sets retain their earlier skip behavior.
 """
 
 from __future__ import annotations

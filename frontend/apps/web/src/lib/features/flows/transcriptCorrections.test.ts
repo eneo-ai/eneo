@@ -251,3 +251,24 @@ describe("sortOccurrences", () => {
     ]);
   });
 });
+
+it("anchors emoji replacement and adjacent insertion to complete code points", () => {
+  expect(diffLineEdit("🙂", "🙃").occurrence).toEqual({
+    char_start: 0,
+    char_end: 2,
+    original: "🙂",
+    corrected: "🙃"
+  });
+  expect(diffLineEdit("🙂", "🙂.").occurrence).toEqual({
+    char_start: 0,
+    char_end: 2,
+    original: "🙂",
+    corrected: "🙂."
+  });
+  expect(diffLineEdit("🙂", ".🙂").occurrence).toEqual({
+    char_start: 0,
+    char_end: 2,
+    original: "🙂",
+    corrected: ".🙂"
+  });
+});

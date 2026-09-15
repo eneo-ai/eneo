@@ -10,6 +10,7 @@
  * Everything here is pure and derived; nothing mutates segments or overlays.
  */
 
+import { m } from "$lib/paraglide/messages";
 import type { CorrectionOccurrence } from "$lib/features/flows/transcriptCorrections";
 import {
   applicableOccurrences,
@@ -18,6 +19,7 @@ import {
   type SegmentDetails,
   type SpeakerEdit
 } from "$lib/features/flows/transcriptRuns";
+import { effectiveSpeaker } from "./speakerReview";
 import type { TranscriptSegment } from "$lib/features/flows/transcriptSegments";
 
 /** A stored word placed inside one part, in the part's own display text. */
@@ -67,6 +69,8 @@ export type TranscriptTurn = {
   /** Seconds: the first part's start. */
   start: number;
   parts: TurnPart[];
+  reviewKey?: string;
+  reviewDetails?: string;
 };
 
 /** Display-space ranges the corrections rewrote, per raw line. */
@@ -112,15 +116,57 @@ export function computeTurns(
     const segmentRanges = correctedDisplayRanges(segment.text, segmentOccurrences);
     const segmentWords = segment.words ? locatePartWords(segment, segmentOccurrences) : null;
     for (const run of detail.runs) {
-      const effective = run.speaker ?? segment.speaker;
+      const effective = effectiveSpeaker(segment, run.overridden ? run : undefined);
+      const reviewKey =
+        segment.speakerAttribution === "provisional" ||
+        segment.overlapIds?.length ||
+        speakerEdits.some(
+          (edit) => edit.segment_index === segment.index && edit.decision !== undefined
+        )
+          ? JSON.stringify([segment.index, run.rawStart, run.rawEnd, run.decision])
+          : undefined;
       const start = runStart(segment, run.rawStart);
-      if (!current || current.speaker !== effective || current.fileIndex !== segment.fileIndex) {
+      if (
+        !current ||
+        current.speaker !== effective ||
+        current.fileIndex !== segment.fileIndex ||
+        current.reviewKey !== reviewKey
+      ) {
         current = {
           index: turns.length,
           speaker: effective,
           fileIndex: segment.fileIndex,
           start,
-          parts: []
+          parts: [],
+          reviewKey,
+          reviewDetails:
+            reviewKey || segment.speakerAttribution
+              ? [
+                  m.flow_transcript_review_model_suggestion({
+                    speaker: segment.speaker ?? m.flow_transcript_review_no_suggestion()
+                  }),
+                  ...(segment.overlaps ?? []).map((overlap) =>
+                    m.flow_transcript_review_overlap_interval({
+                      start: overlap.start,
+                      end: overlap.end,
+                      count: overlap.detected_speaker_count
+                    })
+                  ),
+                  segment.reviewDetection === "unavailable"
+                    ? m.flow_transcript_review_detection_unavailable()
+                    : "",
+                  segment.overlapIds?.length
+                    ? m.flow_transcript_review_overlap_count({ count: segment.overlapIds.length })
+                    : "",
+                  run.overridden
+                    ? run.decision === "unresolved"
+                      ? m.flow_transcript_review_human_unresolved()
+                      : m.flow_transcript_review_human_confirmed()
+                    : m.flow_transcript_review_unconfirmed()
+                ]
+                  .filter(Boolean)
+                  .join(". ")
+              : undefined
         };
         turns.push(current);
       }

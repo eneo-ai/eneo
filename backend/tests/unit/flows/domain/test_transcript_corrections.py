@@ -293,14 +293,12 @@ class TestValidateSpeakerEdits:
     def test_rejects_segment_without_speaker(self) -> None:
         with pytest.raises(TranscriptSpeakerEditInvalidError) as excinfo:
             validate_speaker_edits([_segment("Hej.", speaker=None)], [_speaker_edit()])
-        assert excinfo.value.reason == "segment_has_no_speaker"
+        assert excinfo.value.reason == "original_speaker_mismatch"
 
-    def test_rejects_noop_edit(self) -> None:
-        with pytest.raises(TranscriptSpeakerEditInvalidError) as excinfo:
-            validate_speaker_edits(
-                [_segment("Hej.")], [_speaker_edit(speaker="SPEAKER_00")]
-            )
-        assert excinfo.value.reason == "speaker_unchanged"
+    def test_accepts_same_label_confirmation(self) -> None:
+        validate_speaker_edits(
+            [_segment("Hej.")], [_speaker_edit(speaker="SPEAKER_00")]
+        )
 
     def test_rejects_span_text_mismatch(self) -> None:
         with pytest.raises(TranscriptSpeakerEditInvalidError) as excinfo:
@@ -405,8 +403,18 @@ class TestApplySpeakerEdits:
         assert corrected[0]["text"] == "Vi frågade Çagri om planen."
         assert corrected[0]["speaker"] == "SPEAKER_00"
         assert corrected[0]["speaker_runs"] == [
-            {"char_start": 0, "char_end": 17, "speaker": "SPEAKER_00"},
-            {"char_start": 17, "char_end": 27, "speaker": "SPEAKER_01"},
+            {
+                "char_start": 0,
+                "char_end": 17,
+                "speaker": "SPEAKER_00",
+                "decision": None,
+            },
+            {
+                "char_start": 17,
+                "char_end": 27,
+                "speaker": "SPEAKER_01",
+                "decision": "confirmed",
+            },
         ]
         assert skipped_edits == []
 
@@ -423,8 +431,18 @@ class TestApplySpeakerEdits:
 
         assert corrected[0]["text"] == "Vi frågade X om planen."
         assert corrected[0]["speaker_runs"] == [
-            {"char_start": 0, "char_end": 12, "speaker": "SPEAKER_00"},
-            {"char_start": 12, "char_end": 23, "speaker": "SPEAKER_01"},
+            {
+                "char_start": 0,
+                "char_end": 12,
+                "speaker": "SPEAKER_00",
+                "decision": None,
+            },
+            {
+                "char_start": 12,
+                "char_end": 23,
+                "speaker": "SPEAKER_01",
+                "decision": "confirmed",
+            },
         ]
 
     def test_full_coverage_spans_collapse_to_speaker_replacement(self) -> None:
@@ -600,7 +618,12 @@ class TestSpeakerRunWindows:
 
     def test_each_run_takes_the_window_of_the_words_it_covers(self) -> None:
         runs = [
-            {"char_start": 0, "char_end": 17, "speaker": "SPEAKER_00"},
+            {
+                "char_start": 0,
+                "char_end": 17,
+                "speaker": "SPEAKER_00",
+                "decision": None,
+            },
             {"char_start": 18, "char_end": 28, "speaker": "SPEAKER_01"},
         ]
 
@@ -620,7 +643,12 @@ class TestSpeakerRunWindows:
         ]
         runs = [
             {"char_start": 0, "char_end": 16, "speaker": "SPEAKER_00"},
-            {"char_start": 17, "char_end": 27, "speaker": "SPEAKER_01"},
+            {
+                "char_start": 17,
+                "char_end": 27,
+                "speaker": "SPEAKER_01",
+                "decision": "confirmed",
+            },
         ]
 
         windows = speaker_run_windows(
@@ -631,7 +659,12 @@ class TestSpeakerRunWindows:
 
     def test_a_run_without_words_keeps_the_segment_window(self) -> None:
         runs = [
-            {"char_start": 0, "char_end": 17, "speaker": "SPEAKER_00"},
+            {
+                "char_start": 0,
+                "char_end": 17,
+                "speaker": "SPEAKER_00",
+                "decision": None,
+            },
             {"char_start": 18, "char_end": 28, "speaker": "SPEAKER_01"},
         ]
         only_first_words = _words(self.TEXT, self.TIMINGS[:3])
@@ -695,3 +728,86 @@ class TestLocateWords:
         assert located[1].probability == 0.0
         assert located[3].probability is None
         assert located[2].located is False
+
+
+@pytest.mark.parametrize(
+    "original,speaker,decision",
+    [
+        ("SPEAKER_00", "SPEAKER_00", "confirmed"),
+        (None, "SPEAKER_01", "confirmed"),
+        (None, None, "unresolved"),
+        ("SPEAKER_00", None, "unresolved"),
+    ],
+)
+def test_v3_review_decision_round_trip(original, speaker, decision):
+    segment = {
+        **_segment("Läsbara ord.", speaker=original),
+        "speaker_attribution": "provisional",
+        "overlap_ids": ["file:overlap_0000"],
+    }
+    edit = TranscriptSpeakerEdit(0, None, None, None, original, speaker, decision)
+    validate_speaker_edits([segment], [edit])
+    raw = "[00:00:00 - 00:00:04] [Överlappande tal – osäker talare]: Läsbara ord."
+    rendered = apply_to_rendered_transcript(raw, [segment], [], [edit])
+    expected = (
+        f"{speaker}: " if decision == "confirmed" else "[Talare går inte att avgöra]: "
+    )
+    assert rendered == "[00:00:00 - 00:00:04] " + expected + "Läsbara ord."
+    assert segment["speaker"] == original
+    assert segment["overlap_ids"] == ["file:overlap_0000"]
+    assert apply_to_rendered_transcript(raw, [segment], [], []) == raw
+
+
+@pytest.mark.parametrize(
+    "speaker,decision", [(None, "confirmed"), ("SPEAKER_00", "unresolved")]
+)
+def test_v3_decision_requires_consistent_speaker(speaker, decision):
+    with pytest.raises(TranscriptSpeakerEditInvalidError) as excinfo:
+        validate_speaker_edits(
+            [_segment("Hej.")],
+            [
+                TranscriptSpeakerEdit(
+                    0, None, None, None, "SPEAKER_00", speaker, decision
+                )
+            ],
+        )
+    assert excinfo.value.reason == "invalid_decision"
+
+
+def test_partial_same_label_confirmation_preserves_review_boundaries():
+    segment = {**_segment("Hej där alla"), "speaker_attribution": "provisional"}
+    edit = TranscriptSpeakerEdit(0, 4, 7, "där", "SPEAKER_00", "SPEAKER_00")
+    validate_speaker_edits([segment], [edit])
+    raw = "[00:00:00 - 00:00:04] [Överlappande tal – osäker talare]: Hej där alla"
+    assert apply_to_rendered_transcript(raw, [segment], [], [edit]).splitlines() == [
+        "[00:00:00 - 00:00:04] [Överlappande tal – osäker talare]: Hej",
+        "[00:00:00 - 00:00:04] SPEAKER_00: där",
+        "[00:00:00 - 00:00:04] [Överlappande tal – osäker talare]: alla",
+    ]
+
+
+def test_null_speaker_partial_unresolved_does_not_fall_back_to_suggestion():
+    segment = {
+        **_segment("Hej där", speaker=None),
+        "speaker_attribution": "provisional",
+    }
+    edit = TranscriptSpeakerEdit(0, 4, 7, "där", None, None, "unresolved")
+    raw = "[00:00:00 - 00:00:04] [Överlappande tal – osäker talare]: Hej där"
+    rendered = apply_to_rendered_transcript(raw, [segment], [], [edit])
+    assert "[Talare går inte att avgöra]: där" in rendered
+    assert "[Överlappande tal – osäker talare]: Hej" in rendered
+
+
+def test_v3_text_replacement_cannot_cross_a_speaker_decision_boundary():
+    from eneo.flows.domain.transcript_corrections import validate_correction_partitions
+
+    edit = TranscriptSpeakerEdit(0, 2, 5, "two", None, None, "unresolved")
+    with pytest.raises(TranscriptCorrectionInvalidOccurrenceError) as excinfo:
+        validate_correction_partitions(
+            [TranscriptCorrectionOccurrence(0, 1, 3, " t", "x")], [edit]
+        )
+    assert excinfo.value.reason == "crosses_speaker_boundary"
+    # Replacements, including punctuation insertions, contained in one partition are valid.
+    validate_correction_partitions(
+        [TranscriptCorrectionOccurrence(0, 4, 5, "o", "o.")], [edit]
+    )

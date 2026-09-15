@@ -7,12 +7,14 @@ from eneo.flows.domain.flow import FlowPersistedJsonObject
 EXPECTED_FLOW_VERSION_KEY = "expected_flow_version"
 STEP_INPUTS_KEY = "step_inputs"
 FLOW_INPUT_TRANSCRIPTION_KEY = "transkribering"
+TRANSCRIPT_REGENERATION_KEY = "transcript_regeneration"
 
 _REMOVED_TOP_LEVEL_RUNTIME_FILE_IDS_KEY = "file_ids"
 _PERSISTED_RUNTIME_INPUT_KEYS = frozenset(
     {
         EXPECTED_FLOW_VERSION_KEY,
         FLOW_INPUT_TRANSCRIPTION_KEY,
+        TRANSCRIPT_REGENERATION_KEY,
     }
 )
 FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS = _PERSISTED_RUNTIME_INPUT_KEYS | frozenset(

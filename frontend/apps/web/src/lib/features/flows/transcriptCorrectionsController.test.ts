@@ -26,7 +26,8 @@ const WHOLE_EDIT = {
   char_end: null,
   original: null,
   original_speaker: "SPEAKER_01",
-  speaker: "SPEAKER_02"
+  speaker: "SPEAKER_02",
+  decision: "confirmed" as const
 };
 
 const SPAN_EDIT = {
@@ -35,7 +36,8 @@ const SPAN_EDIT = {
   char_end: 17,
   original: "sugary",
   original_speaker: "SPEAKER_00",
-  speaker: "SPEAKER_03"
+  speaker: "SPEAKER_03",
+  decision: "confirmed" as const
 };
 
 function correctionSet(partial: Record<string, unknown> = {}) {
@@ -53,7 +55,7 @@ function correctionSet(partial: Record<string, unknown> = {}) {
   };
 }
 
-function makeController(options: { list?: unknown[] } = {}) {
+function makeController(options: { list?: unknown[]; segments?: TranscriptSegment[] } = {}) {
   const list = vi.fn(async () => options.list ?? []);
   const save = vi.fn(async (args: Record<string, unknown>) =>
     correctionSet({
@@ -68,7 +70,7 @@ function makeController(options: { list?: unknown[] } = {}) {
     flowId: "flow-1",
     runId: "run-1",
     stepId: "step-1",
-    rawSegments: RAW_SEGMENTS
+    rawSegments: options.segments ?? RAW_SEGMENTS
   });
   return { controller, list, save };
 }
@@ -147,17 +149,137 @@ describe("transcriptCorrectionsController speaker edits", () => {
       { segment_index: 0, char_start: 11, char_end: 17, speaker: "SPEAKER_05" }
     ]);
 
-    const body = save.mock.calls[0][0] as Record<string, unknown>;
-    expect(body.occurrences).toEqual([]);
-    expect(body.speakerEdits).toEqual([
-      {
-        segment_index: 0,
-        char_start: 11,
-        char_end: 17,
-        original: "sugary",
-        original_speaker: "SPEAKER_00",
-        speaker: "SPEAKER_05"
-      }
-    ]);
+    expect(save).not.toHaveBeenCalled();
+    expect(await controller.flush()).toBe(false);
   });
+});
+
+it("sends v3 source hash and preserves same-label confirmation after reload", async () => {
+  const segments = RAW_SEGMENTS.map((segment) => ({
+    ...segment,
+    segmentsHash: "a".repeat(64),
+    speakerAttribution: "provisional"
+  }));
+  const { controller, save } = makeController({ segments });
+  await controller.load();
+  expect(
+    await controller.saveSpeakerEdits([
+      { segment_index: 0, char_start: null, char_end: null, speaker: "SPEAKER_00" }
+    ])
+  ).toBe(true);
+  expect(save.mock.calls[0][0]).toMatchObject({
+    schemaVersion: 3,
+    segmentsHash: "a".repeat(64),
+    speakerEdits: [{ segment_index: 0, speaker: "SPEAKER_00", decision: "confirmed" }]
+  });
+  expect(controller.speakerEdits[0].decision).toBe("confirmed");
+});
+
+it("preserves a failed draft and blocks approval", async () => {
+  const { controller, save } = makeController();
+  await controller.load();
+  save.mockRejectedValueOnce(new Error("write failed"));
+  expect(
+    await controller.saveSpeakerEdits([
+      { segment_index: 0, char_start: null, char_end: null, speaker: null }
+    ])
+  ).toBe(false);
+  expect(controller.speakerEdits[0].decision).toBe("unresolved");
+  expect(await controller.flush()).toBe(false);
+  expect(controller.error).not.toBeNull();
+});
+
+it("serializes full-list writes and approval waits for the complete queue", async () => {
+  const { controller, save } = makeController();
+  await controller.load();
+  let release!: (value: ReturnType<typeof correctionSet>) => void;
+  save.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        release = resolve;
+      })
+  );
+  const first = controller.saveSpeakerEdits([
+    { segment_index: 0, char_start: null, char_end: null, speaker: null }
+  ]);
+  const second = controller.saveSpeakerEdits([
+    { segment_index: 1, char_start: null, char_end: null, speaker: "SPEAKER_00" }
+  ]);
+  await Promise.resolve();
+  expect(save).toHaveBeenCalledTimes(1);
+  let finished = false;
+  const flush = controller.flush().then((value) => {
+    finished = true;
+    return value;
+  });
+  await Promise.resolve();
+  expect(finished).toBe(false);
+  release(correctionSet({ revision: 5 }));
+  expect(await first).toBe(true);
+  expect(await second).toBe(true);
+  expect(await flush).toBe(true);
+  expect(save.mock.calls[1][0].expectedRevision).toBe(5);
+  expect(save.mock.calls[1][0].speakerEdits).toHaveLength(2);
+});
+
+it("blocks queued replacements after failure and retries the latest draft with its original revision", async () => {
+  const { controller, save, list } = makeController();
+  await controller.load();
+  save.mockRejectedValueOnce(new Error("conflict"));
+  const first = controller.saveSpeakerEdits([
+    { segment_index: 0, char_start: null, char_end: null, speaker: null }
+  ]);
+  const second = controller.saveSpeakerEdits([
+    { segment_index: 1, char_start: null, char_end: null, speaker: "SPEAKER_00" }
+  ]);
+  expect(await first).toBe(false);
+  expect(await second).toBe(false);
+  expect(save).toHaveBeenCalledTimes(1);
+  expect(list).toHaveBeenCalledTimes(1);
+  expect(controller.speakerEdits).toHaveLength(2);
+  expect(await controller.retry()).toBe(true);
+  expect(save.mock.calls[1][0].expectedRevision).toBeNull();
+  expect(save.mock.calls[1][0].speakerEdits).toHaveLength(2);
+  expect(await controller.flush()).toBe(true);
+});
+
+it("round-trips speaker decisions after emoji using API code-point offsets", async () => {
+  const segments = [
+    {
+      ...RAW_SEGMENTS[0],
+      text: "🙂 ett två",
+      speakerAttribution: "provisional",
+      segmentsHash: "a".repeat(64)
+    }
+  ];
+  const { controller, save } = makeController({ segments });
+  await controller.load();
+  expect(
+    await controller.saveSpeakerEdits([
+      { segment_index: 0, char_start: 3, char_end: 6, speaker: "SPEAKER_01" }
+    ])
+  ).toBe(true);
+  expect(save.mock.calls[0][0].speakerEdits).toEqual([
+    expect.objectContaining({ char_start: 2, char_end: 5, original: "ett" })
+  ]);
+  expect(controller.speakerEdits[0]).toMatchObject({ char_start: 3, char_end: 6, original: "ett" });
+});
+
+it("retries a failed initial load without overwriting existing corrections", async () => {
+  const { controller, list, save } = makeController({
+    list: [correctionSet({ occurrences: [OCCURRENCE] })]
+  });
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  list.mockRejectedValueOnce(new Error("offline"));
+  try {
+    await controller.load();
+    expect(controller.ready).toBe(false);
+    expect(controller.error).not.toBeNull();
+    expect(await controller.retry()).toBe(true);
+    expect(controller.error).toBeNull();
+    expect(controller.occurrences).toEqual([OCCURRENCE]);
+    expect(save).not.toHaveBeenCalled();
+  } finally {
+    log.mockRestore();
+  }
 });

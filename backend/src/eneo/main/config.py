@@ -358,6 +358,7 @@ class Settings(BaseSettings):
     # fetch result) instead of the model-registry transcription path. Unset
     # means the feature is off; knowledge uploads and app runs always use the
     # model-registry path regardless.
+    flow_transcription_include_speaker_review: bool = False
     flow_transcription_service_url: Optional[str] = None
     flow_transcription_service_api_key: Optional[str] = None
     flow_transcription_service_submit_timeout_seconds: int = 600

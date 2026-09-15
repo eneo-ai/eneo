@@ -5,6 +5,7 @@
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
+  import { renderReviewedTranscript } from "../speakerReview";
   import {
     countFiles,
     countUncertainWords,
@@ -12,6 +13,7 @@
     findActiveWordIndex,
     formatClock,
     speakerColorIndex,
+    type TranscriptFileReview,
     type TranscriptSegment
   } from "$lib/features/flows/transcriptSegments";
   import {
@@ -37,6 +39,8 @@
     type SegmentGeometry,
     type SelectionSpan
   } from "$lib/features/flows/transcriptSelection";
+  import TranscriptReviewEditor from "./TranscriptReviewEditor.svelte";
+  import type { ReviewDraft } from "../transcriptReviewEditor";
   import TranscriptTurnBlock from "./TranscriptTurn.svelte";
   import TranscriptSpeakerToolbar from "./TranscriptSpeakerToolbar.svelte";
 
@@ -53,6 +57,9 @@
     corrections = [],
     speakerEdits = [],
     busy = false,
+    speakerReviews = [],
+    reviewEditor = false,
+    onChange,
     onSaveLine,
     onRevertLine,
     onSaveSpeakerEdits,
@@ -78,6 +85,9 @@
     speakerEdits?: readonly SpeakerEdit[];
     /** Disables edit controls while the caller is saving. */
     busy?: boolean;
+    speakerReviews?: TranscriptFileReview[];
+    reviewEditor?: boolean;
+    onChange?: (draft: ReviewDraft) => Promise<boolean>;
     /** Commits one segment's edited display text; resolve true on success. */
     onSaveLine?: (
       segmentIndex: number,
@@ -119,6 +129,7 @@
   // is not loaded yet lands where the reviewer clicked.
   let pendingSeek: number | null = null;
   let pendingAutoplay = false;
+  let playbackEnd: number | null = null;
   // Scrolls this component starts must not switch "follow" off.
   let programmaticScrollUntil = 0;
   // Only the newest load may touch the element; an older signing that
@@ -137,7 +148,7 @@
   const totalFiles = $derived(Math.max(fileCount, countFiles(segments)));
   const hasSegments = $derived(shown.length > 0);
   const withHours = $derived(duration >= 3600 || shown.some((segment) => segment.end >= 3600));
-  const seekable = $derived(!audioUnavailable && hasSegments);
+  const seekable = $derived(!audioUnavailable && (hasSegments || speakerReviews.length > 0));
   // Words the aligner could not place: the reviewer's cue to listen there.
   const uncertainWords = $derived(countUncertainWords(segments));
 
@@ -202,6 +213,10 @@
   function onTimeUpdate() {
     if (!audioEl) return;
     const time = audioEl.currentTime;
+    if (playbackEnd !== null && time >= playbackEnd) {
+      audioEl.pause();
+      playbackEnd = null;
+    }
     const previous = activeIndex;
     activeIndex = findActiveSegmentIndex(shown, currentFile, time, activeIndex);
     const words = segments[activeIndex]?.words;
@@ -242,7 +257,7 @@
     activeIndex = part.segmentIndex;
     activeWordIndex = -1;
     if (part.fileIndex !== currentFile || !audioEl) {
-      void loadAudio(part.fileIndex, target, false);
+      void loadAudio(part.fileIndex, target, !paused);
       return;
     }
     audioEl.currentTime = target;
@@ -250,20 +265,18 @@
 
   // ---- Turn editing -----------------------------------------------------
   let editingTurnIndex = $state(-1);
-  let followBeforeEdit = false;
 
   function startEditTurn(turn: TranscriptTurn) {
     editingTurnIndex = turn.index;
     toolbar = null;
     // The list must not scroll away under an open editor while audio plays;
     // follow is restored when the editor closes.
-    followBeforeEdit = follow;
     follow = false;
   }
 
   function closeEditor() {
     editingTurnIndex = -1;
-    follow = followBeforeEdit;
+    follow = false;
   }
 
   function displaySpanToRaw(
@@ -341,7 +354,7 @@
     }
   }
 
-  function reassignTurn(turn: TranscriptTurn, speaker: string) {
+  function reassignTurn(turn: TranscriptTurn, speaker: string | null) {
     void onSaveSpeakerEdits?.(
       turn.parts.map((part) => ({
         segment_index: part.segmentIndex,
@@ -358,12 +371,13 @@
     const inputs: SpeakerSpanInput[] = [];
     for (const part of turn.parts) {
       const stored = segments[part.segmentIndex]?.speaker;
-      if (!part.overridden || !stored) continue;
+      if (!part.overridden) continue;
       inputs.push({
         segment_index: part.segmentIndex,
         char_start: part.rawStart,
         char_end: part.rawEnd,
-        speaker: stored
+        speaker: stored ?? null,
+        reset: true
       });
     }
     if (inputs.length > 0) void onSaveSpeakerEdits?.(inputs);
@@ -434,7 +448,7 @@
     };
   }
 
-  async function chooseSpeakerForSelection(speaker: string) {
+  async function chooseSpeakerForSelection(speaker: string | null) {
     const current = toolbar;
     if (!current || !onSaveSpeakerEdits) return;
     toolbar = null;
@@ -447,6 +461,29 @@
       }))
     );
     if (accepted) window.getSelection()?.removeAllRanges();
+  }
+
+  function reviewSeek(file: number, time: number, autoplay: boolean, end?: number) {
+    playbackEnd = end ?? null;
+    if (file !== currentFile || !audioEl) {
+      void loadAudio(file, time, autoplay);
+      return;
+    }
+    audioEl.currentTime = time;
+    if (autoplay) void audioEl.play().catch(markPlayFailure);
+    else audioEl.pause();
+  }
+
+  export function playSpeakerSample(label: string) {
+    const sample = segments.find(
+      (s) =>
+        s.speaker === label &&
+        s.text.trim() &&
+        s.speakerAttribution !== "provisional" &&
+        s.speakerAttribution !== "unassigned"
+    );
+    if (sample)
+      reviewSeek(sample.fileIndex, Math.max(0, sample.start - 0.5), true, sample.end + 0.5);
   }
 
   function selectFile(fileIndex: number) {
@@ -532,7 +569,7 @@
   // itself is untracked: the caller's signing function may read its own
   // state, and that must not re-run this effect and sign again.
   $effect(() => {
-    const ready = hasSegments && !audioPending && fileCount > 0;
+    const ready = (hasSegments || speakerReviews.length > 0) && !audioPending && fileCount > 0;
     if (!ready) return;
     untrack(() => {
       if (src === null && !loadingAudio) void loadAudio(0);
@@ -552,6 +589,18 @@
     "bg-chart-3/15 text-chart-3"
   ];
 
+  function downloadTranscript() {
+    const text = segments.length
+      ? renderReviewedTranscript(segments, corrections, speakerEdits, speakerNames)
+      : textFallback;
+    const url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "transkript.txt";
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
   function speakerClass(label: string): string {
     return SPEAKER_CLASSES[speakerColorIndex(label) % SPEAKER_CLASSES.length];
   }
@@ -567,7 +616,7 @@
   tabindex="0"
   onkeydown={onKeydown}
 >
-  {#if hasSegments}
+  {#if hasSegments || (reviewEditor && speakerReviews.length > 0)}
     <audio
       bind:this={audioEl}
       {src}
@@ -598,10 +647,15 @@
         </Alert.Root>
       {/if}
       <div class="flex flex-wrap items-center gap-2">
+        {#if !reviewEditor}
+          <Button variant="outline" size="sm" disabled={busy} onclick={downloadTranscript}
+            >{m.flow_transcript_download()}</Button
+          >
+        {/if}
         <Button
-          variant="outline"
+          variant={reviewEditor ? "default" : "outline"}
           size="icon"
-          class="size-9 shrink-0 rounded-full"
+          class="{reviewEditor ? 'size-10' : 'size-9'} shrink-0 rounded-full"
           aria-label={paused ? m.flow_run_transcript_play() : m.flow_run_transcript_pause()}
           disabled={audioUnavailable || loadingAudio || audioPending}
           onclick={togglePlay}
@@ -617,7 +671,27 @@
             </svg>
           {/if}
         </Button>
-        <span class="text-secondary min-w-[4.5rem] text-xs tabular-nums">
+        {#if reviewEditor}
+          <Button
+            variant="ghost"
+            size="icon"
+            class="size-9 rounded-full text-xs"
+            disabled={!seekable}
+            aria-label={m.flow_transcript_editor_skip_back()}
+            title={m.flow_transcript_editor_skip_back()}
+            onclick={() => seekBy(-5)}>{m.flow_transcript_editor_skip_back_short()}</Button
+          >
+          <Button
+            variant="ghost"
+            size="icon"
+            class="size-9 rounded-full text-xs"
+            disabled={!seekable}
+            aria-label={m.flow_transcript_editor_skip_forward()}
+            title={m.flow_transcript_editor_skip_forward()}
+            onclick={() => seekBy(5)}>{m.flow_transcript_editor_skip_forward_short()}</Button
+          >
+        {/if}
+        <span class="text-secondary min-w-[3rem] text-xs tabular-nums">
           {formatClock(currentTime, withHours)}
         </span>
         <input
@@ -658,6 +732,15 @@
           {m.flow_run_transcript_follow()}
         </Button>
       </div>
+      {#if reviewEditor}
+        <button
+          class="focus-visible:ring-accent-default w-fit text-xs underline focus-visible:ring-2"
+          disabled={busy}
+          onclick={downloadTranscript}
+        >
+          {m.flow_transcript_download()}
+        </button>
+      {/if}
       {#if totalFiles > 1}
         <div class="flex flex-wrap items-center gap-1" role="group">
           {#each { length: totalFiles } as _, fileIndex (fileIndex)}
@@ -687,43 +770,65 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       bind:this={listEl}
-      class="bg-primary selection:bg-accent-dimmer selection:text-accent-stronger relative max-h-[32rem] flex-1 overflow-auto p-2"
+      class="bg-primary selection:bg-accent-dimmer selection:text-accent-stronger relative flex-1 overflow-auto {reviewEditor
+        ? 'max-h-[65vh]'
+        : 'max-h-[32rem] p-2'}"
       onwheel={onUserScroll}
       ontouchmove={onUserScroll}
       onscroll={onUserScroll}
       {@attach watchSelection}
     >
-      <div class="flex flex-col gap-1.5">
-        {#each turns as turn, position (turn.index)}
-          {#if totalFiles > 1 && (position === 0 || turns[position - 1].fileIndex !== turn.fileIndex)}
-            <p class="text-muted px-2 pt-2 pb-1 text-xs font-semibold" aria-hidden="true">
-              {m.flow_run_transcript_part({ n: String(turn.fileIndex + 1) })}
-            </p>
-          {/if}
-          <TranscriptTurnBlock
-            {turn}
-            activeSegmentIndex={activeIndex}
-            {activeWordIndex}
-            {withHours}
-            {editable}
-            {busy}
-            editing={editable && editingTurnIndex === turn.index}
-            {displayName}
-            {speakerClass}
-            speakerOptions={speakerEditingEnabled ? speakerOptions : []}
-            newSpeakerLabel={newLabel}
-            correctedFrom={(segmentIndex) => correctedFrom.get(segmentIndex) ?? null}
-            onSeek={seekToPart}
-            onStartEdit={() => startEditTurn(turn)}
-            onCancelEdit={closeEditor}
-            onCommitEdit={(text, reassign) => void commitTurnEdit(turn, text, reassign)}
-            onRevertTurn={() => void revertTurn(turn)}
-            onReassignTurn={(speaker) => reassignTurn(turn, speaker)}
-            onResetTurn={() => resetTurn(turn)}
-          />
-        {/each}
-      </div>
-      {#if toolbar}
+      {#if reviewEditor}
+        <TranscriptReviewEditor
+          {speakerReviews}
+          {segments}
+          draft={{ occurrences: [...corrections], speakerEdits: [...speakerEdits] }}
+          editable={editable && !busy}
+          {onChange}
+          audioAvailable={!audioUnavailable && !audioPending && fileCount > 0 && !loadingAudio}
+          {currentFile}
+          {currentTime}
+          playing={!paused}
+          {displayName}
+          speakerOptions={labels}
+          onSeek={reviewSeek}
+          onInteract={() => {
+            follow = false;
+          }}
+        />
+      {:else}
+        <div class="flex flex-col gap-1.5">
+          {#each turns as turn, position (turn.index)}
+            {#if totalFiles > 1 && (position === 0 || turns[position - 1].fileIndex !== turn.fileIndex)}
+              <p class="text-muted px-2 pt-2 pb-1 text-xs font-semibold" aria-hidden="true">
+                {m.flow_run_transcript_part({ n: String(turn.fileIndex + 1) })}
+              </p>
+            {/if}
+            <TranscriptTurnBlock
+              {turn}
+              activeSegmentIndex={activeIndex}
+              {activeWordIndex}
+              {withHours}
+              {editable}
+              {busy}
+              editing={editable && editingTurnIndex === turn.index}
+              {displayName}
+              {speakerClass}
+              speakerOptions={speakerEditingEnabled ? speakerOptions : []}
+              newSpeakerLabel={newLabel}
+              correctedFrom={(segmentIndex) => correctedFrom.get(segmentIndex) ?? null}
+              onSeek={seekToPart}
+              onStartEdit={() => startEditTurn(turn)}
+              onCancelEdit={closeEditor}
+              onCommitEdit={(text, reassign) => void commitTurnEdit(turn, text, reassign)}
+              onRevertTurn={() => void revertTurn(turn)}
+              onReassignTurn={(speaker) => reassignTurn(turn, speaker)}
+              onResetTurn={() => resetTurn(turn)}
+            />
+          {/each}
+        </div>
+      {/if}
+      {#if toolbar && !reviewEditor}
         <TranscriptSpeakerToolbar
           anchorTop={toolbar.anchorTop}
           anchorBottom={toolbar.anchorBottom}

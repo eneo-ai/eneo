@@ -4,7 +4,7 @@ import contextlib
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from eneo.files import audio
 from eneo.files.audio import AudioMimeTypes
@@ -63,6 +63,7 @@ class TranscribedAudio:
     diarization_elapsed_ms: int | None = None
     # The service's word-timestamp source for the labels, when reported.
     alignment: str | None = None
+    speaker_review: dict[str, Any] | None = None
 
 
 class Transcriber:

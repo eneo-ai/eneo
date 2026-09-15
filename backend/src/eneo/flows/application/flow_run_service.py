@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Sequence
 from uuid import UUID
@@ -39,6 +39,7 @@ from eneo.flows.domain.run_step_input_exceptions import (
 from eneo.flows.domain.runtime_invariant_exceptions import (
     FlowPublishedDefinitionWithoutExecutableStepsError,
 )
+from eneo.flows.domain.transcript_regeneration import TranscriptRegenerationSeed
 from eneo.flows.enums import FlowRunLifecycleSource, is_terminal_flow_run_status
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
@@ -48,7 +49,11 @@ from eneo.flows.flow_input_limits import (
 )
 from eneo.flows.flow_run_contract_service import build_final_output_contract
 from eneo.flows.flow_run_error import FlowRunError
-from eneo.flows.flow_run_input_envelope import build_initial_run_input_envelope
+from eneo.flows.flow_run_input_envelope import (
+    FLOW_INPUT_TRANSCRIPTION_KEY,
+    TRANSCRIPT_REGENERATION_KEY,
+    build_initial_run_input_envelope,
+)
 from eneo.flows.flow_run_input_payload import normalize_and_validate_flow_run_payload
 from eneo.flows.flow_run_payload_validation import (
     ensure_inline_payload_size_allowed,
@@ -285,6 +290,7 @@ class FlowRunService:
         expected_flow_version: int | None = None,
         step_inputs: FlowRunStepInputs | None = None,
         idempotency_key: str | None = None,
+        transcript_seed: TranscriptRegenerationSeed | None = None,
     ) -> CreateRunResult:
         idempotency_key = self._validate_idempotency_key(idempotency_key)
         principal = self._principal()
@@ -301,6 +307,27 @@ class FlowRunService:
             input_payload_json=input_payload_json,
             step_inputs=step_inputs,
         )
+        if transcript_seed is not None:
+            payload = {
+                **(prepared.input_payload_json or {}),
+                FLOW_INPUT_TRANSCRIPTION_KEY: transcript_seed.transcript,
+                TRANSCRIPT_REGENERATION_KEY: transcript_seed.provenance,
+            }
+            ensure_inline_payload_size_allowed(
+                flow_id=flow_id, input_payload_json=payload
+            )
+            prepared = replace(
+                prepared,
+                input_payload_json=payload,
+                request_fingerprint=self._build_idempotency_fingerprint(
+                    tenant_id=self.user.tenant_id,
+                    principal=principal,
+                    flow_id=flow_id,
+                    flow_version=published.flow_version,
+                    input_payload_json=payload,
+                    step_input_files=prepared.step_input_files,
+                ),
+            )
         existing_run = await self._find_idempotent_run_or_enforce_creation_limits(
             flow_id=flow_id,
             flow_version=published.flow_version,
@@ -317,6 +344,11 @@ class FlowRunService:
             prepared=prepared,
             idempotency_key=idempotency_key,
         )
+        if transcript_seed is not None:
+            await self.flow_run_repo.seed_reviewed_transcript(
+                run=created_run,
+                seed=transcript_seed,
+            )
         return CreateRunResult(run=created_run, created=True)
 
     async def _load_published_run_definition(

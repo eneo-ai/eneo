@@ -330,6 +330,12 @@ FLOW_ROUTE_AUDIT_CONTRACTS: dict[str, FlowAuditContract] = {
         metadata_keys=(*_FILE_METADATA, "file_type", "runtime_role"),
         idempotency="a repeated delete returns not found and emits no success event",
     ),
+    "regenerate_flow_run_transcript": _required_transaction(
+        ActionType.FLOW_RUN_CREATED,
+        owner="FlowTranscriptRegenerationService.regenerate",
+        metadata_keys=("flow_id", "run_id", "revision", "transcript_regeneration"),
+        idempotency="same key and source revision replay one accepted snapshot",
+    ),
     "create_flow_run": _required_transaction(
         ActionType.FLOW_RUN_CREATED,
         owner="flow_run_lifecycle_router.create_flow_run",
@@ -406,9 +412,10 @@ FLOW_ROUTE_AUDIT_CONTRACTS: dict[str, FlowAuditContract] = {
         owner="flow_trace_audit.log_flow_trace_audit_or_raise",
         metadata_keys=("flow_id", "run_id", "step_id", "evidence_detail"),
     ),
-    "edit_flow_run_transcript_corrections": _configurable(
+    "edit_flow_run_transcript_corrections": _required_transaction(
         ActionType.FLOW_RUN_TRANSCRIPT_CORRECTIONS_EDITED,
-        owner="flow_run_transcript_corrections_router.edit_flow_run_transcript_corrections",
+        owner="FlowTranscriptCorrectionsService.save",
+        idempotency="revision compare-and-swap rejects repeated or stale writes",
         metadata_keys=(
             "flow_id",
             "run_id",

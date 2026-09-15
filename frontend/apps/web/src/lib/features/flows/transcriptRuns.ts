@@ -12,6 +12,7 @@
  */
 
 import type { CorrectionOccurrence } from "$lib/features/flows/transcriptCorrections";
+import type { SpeakerDecision } from "./speakerReview";
 import type { TranscriptSegment } from "$lib/features/flows/transcriptSegments";
 
 /** Wire shape of one stored speaker edit (matches the backend API). */
@@ -24,18 +25,21 @@ export type SpeakerEdit = {
   /** The exact raw text of the span, or null for a whole-segment edit. */
   original: string | null;
   /** The segment's stored label the edit anchors to. */
-  original_speaker: string;
+  original_speaker: string | null;
   /** The raw label the content is reassigned to. */
-  speaker: string;
+  speaker: string | null;
+  decision?: SpeakerDecision;
 };
 
 /** A requested reassignment before anchors are filled in from raw segments. */
 export type SpeakerSpanInput = {
+  reset?: boolean;
   segment_index: number;
   /** Raw-space span; null endpoints reassign the whole segment. */
   char_start: number | null;
   char_end: number | null;
-  speaker: string;
+  speaker: string | null;
+  decision?: SpeakerDecision;
 };
 
 export type OffsetBias = "start" | "end";
@@ -109,6 +113,7 @@ export type SegmentRun = {
   speaker: string | null;
   /** True when a speaker edit produced this run (drives reset + tooltip). */
   overridden: boolean;
+  decision?: SpeakerDecision;
   /** Display-space slice (text corrections applied). */
   text: string;
   /** Raw-space span — the identity a revert addresses. */
@@ -124,7 +129,7 @@ function anchorsToSegment(
   rawText: string,
   segmentSpeaker: string | null
 ): boolean {
-  if (segmentSpeaker === null || edit.original_speaker !== segmentSpeaker) return false;
+  if (edit.original_speaker !== segmentSpeaker) return false;
   if (edit.char_start === null || edit.char_end === null) return edit.original === null;
   return (
     edit.char_start >= 0 &&
@@ -167,7 +172,14 @@ export function computeSegmentRuns(
   const anchored = speakerEdits.filter((edit) => anchorsToSegment(edit, rawText, segmentSpeaker));
   const whole = anchored.find((edit) => edit.char_start === null);
   if (whole) {
-    return [{ ...baseRun, speaker: whole.speaker, overridden: true }];
+    return [
+      {
+        ...baseRun,
+        speaker: whole.speaker,
+        overridden: true,
+        decision: whole.decision ?? "confirmed"
+      }
+    ];
   }
   const spans = anchored
     .filter((edit) => edit.char_start !== null)
@@ -175,13 +187,20 @@ export function computeSegmentRuns(
   if (spans.length === 0) return [baseRun];
 
   const runs: SegmentRun[] = [];
-  const push = (rawStart: number, rawEnd: number, speaker: string | null, overridden: boolean) => {
+  const push = (
+    rawStart: number,
+    rawEnd: number,
+    speaker: string | null,
+    overridden: boolean,
+    decision?: SpeakerDecision
+  ) => {
     const displayStart = map.rawToDisplay(rawStart);
     const displayEnd = map.rawToDisplay(rawEnd);
     if (displayStart >= displayEnd) return;
     runs.push({
       speaker,
       overridden,
+      decision,
       text: displayText.slice(displayStart, displayEnd),
       rawStart,
       rawEnd,
@@ -196,7 +215,7 @@ export function computeSegmentRuns(
     // Overlapping stored spans can only mean corrupt storage; skip, never guess.
     if (start < cursor) continue;
     if (cursor < start) push(cursor, start, null, false);
-    push(start, end, edit.speaker, true);
+    push(start, end, edit.speaker, true, edit.decision ?? "confirmed");
     cursor = end;
   }
   if (cursor < rawText.length) push(cursor, rawText.length, null, false);
@@ -212,9 +231,15 @@ export function sortSpeakerEdits(speakerEdits: readonly SpeakerEdit[]): SpeakerE
   );
 }
 
-type RawRun = { start: number; end: number; speaker: string };
+type RawRun = { start: number; end: number; speaker: string | null; decision?: SpeakerDecision };
 
-function overlayRun(runs: RawRun[], start: number, end: number, speaker: string): RawRun[] {
+function overlayRun(
+  runs: RawRun[],
+  start: number,
+  end: number,
+  speaker: string | null,
+  decision?: SpeakerDecision
+): RawRun[] {
   if (start >= end) return runs;
   const next: RawRun[] = [];
   for (const run of runs) {
@@ -222,99 +247,91 @@ function overlayRun(runs: RawRun[], start: number, end: number, speaker: string)
       next.push(run);
       continue;
     }
-    if (run.start < start) next.push({ start: run.start, end: start, speaker: run.speaker });
-    if (run.end > end) next.push({ start: end, end: run.end, speaker: run.speaker });
+    if (run.start < start) next.push({ ...run, end: start });
+    if (run.end > end) next.push({ ...run, start: end });
   }
-  next.push({ start, end, speaker });
+  next.push({ start, end, speaker, decision });
   return next.sort((a, b) => a.start - b.start);
 }
 
-/**
- * Merge requested reassignments over the stored edits, last writer wins, and
- * re-serialize canonically: per segment the effective attribution is rebuilt
- * as raw-space runs, and only runs whose speaker differs from the stored one
- * become edits again — one whole-segment (null-span) edit when a single run
- * covers everything, span edits otherwise. Normalization guarantees the
- * backend invariants by construction: no overlaps, no whole+span conflicts,
- * no no-ops, and anchors (`original`, `original_speaker`) filled from the raw
- * segments.
- */
+/** Last decision wins within the requested span; reset removes the overlay. */
 export function applySpeakerEditOverlay(
   existing: readonly SpeakerEdit[],
   incoming: readonly SpeakerSpanInput[],
-  rawSegments: readonly TranscriptSegment[]
+  rawSegments: readonly TranscriptSegment[],
+  preserveBoundaries = false
 ): SpeakerEdit[] {
-  const touched = new Set<number>([
-    ...existing.map((edit) => edit.segment_index),
-    ...incoming.map((edit) => edit.segment_index)
-  ]);
+  const touched = new Set([...existing, ...incoming].map((edit) => edit.segment_index));
   const result: SpeakerEdit[] = [];
   for (const segmentIndex of touched) {
     const segment = rawSegments[segmentIndex];
-    const stored = segment?.speaker ?? null;
-    if (!segment || stored === null) continue;
+    if (!segment) continue;
+    const stored = segment.speaker;
     const length = segment.text.length;
     let runs: RawRun[] = [{ start: 0, end: length, speaker: stored }];
-    const storedEdits = existing.filter(
-      (edit) => edit.segment_index === segmentIndex && anchorsToSegment(edit, segment.text, stored)
-    );
-    for (const edit of sortSpeakerEdits(storedEdits)) {
-      runs = overlayRun(runs, edit.char_start ?? 0, edit.char_end ?? length, edit.speaker);
+    for (const edit of sortSpeakerEdits(
+      existing.filter(
+        (edit) =>
+          edit.segment_index === segmentIndex && anchorsToSegment(edit, segment.text, stored)
+      )
+    )) {
+      runs = overlayRun(
+        runs,
+        edit.char_start ?? 0,
+        edit.char_end ?? length,
+        edit.speaker,
+        edit.decision ?? "confirmed"
+      );
     }
     for (const input of incoming) {
       if (input.segment_index !== segmentIndex) continue;
-      const start = Math.max(0, input.char_start ?? 0);
-      const end = Math.min(length, input.char_end ?? length);
-      runs = overlayRun(runs, start, end, input.speaker);
+      runs = overlayRun(
+        runs,
+        Math.max(0, input.char_start ?? 0),
+        Math.min(length, input.char_end ?? length),
+        input.reset ? stored : input.speaker,
+        input.reset
+          ? undefined
+          : (input.decision ?? (input.speaker === null ? "unresolved" : "confirmed"))
+      );
     }
-    // Punctuation-only residue (the lone "." left behind when the words
-    // around it were reassigned) never deserves its own attribution: absorb
-    // it into the preceding run (trailing punctuation follows its sentence),
-    // or into the following one at the segment start.
-    const hasWords = (run: RawRun) => /[\p{L}\p{N}]/u.test(segment.text.slice(run.start, run.end));
-    const absorbed: RawRun[] = [];
-    for (const run of runs) {
-      const previous = absorbed[absorbed.length - 1];
-      if (previous && !hasWords(run)) {
-        previous.end = run.end;
-        continue;
+    if (!preserveBoundaries && !segment.speakerAttribution) {
+      const hasWords = (run: RawRun) =>
+        /[\p{L}\p{N}]/u.test(segment.text.slice(run.start, run.end));
+      const absorbed: RawRun[] = [];
+      for (const run of runs) {
+        const previous = absorbed[absorbed.length - 1];
+        if (previous && !hasWords(run)) previous.end = run.end;
+        else absorbed.push({ ...run });
       }
-      absorbed.push({ ...run });
+      while (absorbed.length > 1 && !hasWords(absorbed[0])) {
+        absorbed[1].start = absorbed[0].start;
+        absorbed.shift();
+      }
+      runs = absorbed;
     }
-    while (absorbed.length > 1 && !hasWords(absorbed[0])) {
-      absorbed[1].start = absorbed[0].start;
-      absorbed.shift();
-    }
-    // Merge adjacent equal-speaker runs so the serialization is canonical.
     const merged: RawRun[] = [];
-    for (const run of absorbed) {
+    for (const run of runs) {
       const last = merged[merged.length - 1];
-      if (last && last.speaker === run.speaker && last.end === run.start) {
+      if (
+        last &&
+        last.speaker === run.speaker &&
+        last.decision === run.decision &&
+        last.end === run.start
+      )
         last.end = run.end;
-      } else {
-        merged.push({ ...run });
-      }
+      else merged.push({ ...run });
     }
-    const changed = merged.filter((run) => run.speaker !== stored && run.start < run.end);
-    if (changed.length === 1 && changed[0].start === 0 && changed[0].end === length) {
+    for (const run of merged.filter((run) => run.decision && run.start < run.end)) {
+      const whole = run.start === 0 && run.end === length;
       result.push({
         segment_index: segmentIndex,
-        char_start: null,
-        char_end: null,
-        original: null,
+        char_start: whole ? null : run.start,
+        char_end: whole ? null : run.end,
+        original: whole ? null : segment.text.slice(run.start, run.end),
         original_speaker: stored,
-        speaker: changed[0].speaker
-      });
-      continue;
-    }
-    for (const run of changed) {
-      result.push({
-        segment_index: segmentIndex,
-        char_start: run.start,
-        char_end: run.end,
-        original: segment.text.slice(run.start, run.end),
-        original_speaker: stored,
-        speaker: run.speaker
+        speaker: run.speaker,
+        decision: run.decision
       });
     }
   }

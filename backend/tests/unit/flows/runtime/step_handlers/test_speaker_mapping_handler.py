@@ -358,3 +358,62 @@ async def test_without_inference_the_call_is_unchanged(harness) -> None:
     assert "Never invent a name" in calls["prompt"]
     extension = result.output.output_payload_extensions["speaker_mapping"]
     assert extension["infer_names"] is False
+
+
+async def test_provisional_only_speaker_has_no_naming_evidence(harness):
+    calls, activate = harness
+    source = "[00:00:00 - 00:00:01] [Överlappande tal – osäker talare]: Jag heter Anna."
+    handler, _ = _handler(activate, prepared_text=source)
+    state, previous = _state()
+    previous.input_payload_json["transcription"].update(
+        {
+            "speaker_review": {"files": [{"overlap_detection": "available"}]},
+            "speakers": [
+                {
+                    "label": "SPEAKER_00",
+                    "file_index": 0,
+                    "file_id": str(uuid4()),
+                    "line_count": 1,
+                    "samples": [],
+                    "clean_example_available": False,
+                }
+            ],
+        }
+    )
+    calls["structured"] = {"speakers": [PROPOSAL["speakers"][0]]}
+    result = await handler.execute(
+        step=_step(),
+        run=SimpleNamespace(id=uuid4(), input_payload_json={}),
+        state=state,
+        version_metadata=None,
+        attempt_no=1,
+    )
+    inventory = result.output.output_payload_extensions["speaker_mapping"]["inventory"]
+    assert inventory[0]["label"] == "SPEAKER_00"
+    assert inventory[0]["samples"] == []
+    assert inventory[0]["clean_example_available"] is False
+    assert "Jag heter Anna" not in calls["question"]
+    assert result.output.full_text == source
+
+
+async def test_unknown_review_speaker_passes_readable_words_without_naming(harness):
+    calls, activate = harness
+    source = "[00:00:00 - 00:00:01] [Överlappande tal – osäker talare]: Hej."
+    handler, _ = _handler(activate, prepared_text=source)
+    state, previous = _state()
+    previous.input_payload_json["transcription"]["speaker_review"] = {
+        "files": [{"overlap_detection": "unavailable"}]
+    }
+    result = await handler.execute(
+        step=_step(),
+        run=SimpleNamespace(id=uuid4(), input_payload_json={}),
+        state=state,
+        version_metadata=None,
+        attempt_no=1,
+    )
+    assert result.output.full_text == source
+    assert result.output.structured_output == {"speakers": []}
+    assert "question" not in calls
+    assert result.output.output_payload_extensions["speaker_mapping"][
+        "source_step_id"
+    ] == str(previous.step_id)

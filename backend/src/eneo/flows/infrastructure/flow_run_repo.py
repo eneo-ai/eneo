@@ -54,6 +54,7 @@ from eneo.flows.domain.flow_step_attempt_input import (
     merge_flow_step_attempt_input,
     parse_flow_step_attempt_input,
 )
+from eneo.flows.domain.transcript_regeneration import TranscriptRegenerationSeed
 from eneo.flows.enums import (
     ACTIVE_FLOW_RUN_STATUSES,
     ACTIVE_FLOW_STEP_RESULT_STATUS_VALUES,
@@ -493,6 +494,63 @@ class FlowRunRepository:
         )
 
         return FlowRun.model_validate(run_row)
+
+    async def seed_reviewed_transcript(
+        self,
+        *,
+        run: FlowRun,
+        seed: TranscriptRegenerationSeed,
+    ) -> None:
+        """Import a validated prefix; the caller commits its required creation audit."""
+        now = datetime.now(timezone.utc)
+        for source in seed.results:
+            provenance = {
+                **seed.provenance,
+                "kind": "reviewed_transcript_snapshot",
+                "source_step_result_id": str(source.id),
+                "source_step_id": str(source.step_id),
+                "source_attempt_no": source.current_attempt_no,
+            }
+            values = dict(
+                status=FlowStepResultStatus.COMPLETED.value,
+                current_attempt_no=1,
+                input_payload_json=source.input_payload_json,
+                output_payload_json=source.output_payload_json,
+                model_parameters_json={"mode": "reviewed_transcript_snapshot"},
+                flow_step_execution_hash=source.flow_step_execution_hash,
+                num_tokens_input=0,
+                num_tokens_output=0,
+                started_at=now,
+                finished_at=now,
+            )
+            updated = await self.session.execute(
+                sa.update(FlowStepResults)
+                .where(FlowStepResults.flow_run_id == run.id)
+                .where(FlowStepResults.tenant_id == run.tenant_id)
+                .where(FlowStepResults.step_id == source.step_id)
+                .values(**values)
+                .returning(FlowStepResults.id)
+            )
+            updated.scalar_one()
+            await self.session.execute(
+                sa.insert(FlowStepAttempts).values(
+                    flow_run_id=run.id,
+                    flow_id=run.flow_id,
+                    tenant_id=run.tenant_id,
+                    step_id=source.step_id,
+                    step_order=source.step_order,
+                    attempt_no=1,
+                    status=FlowStepResultStatus.COMPLETED.value,
+                    input_payload_json=source.input_payload_json,
+                    output_payload_json=source.output_payload_json,
+                    flow_step_execution_hash=source.flow_step_execution_hash,
+                    provenance_json=provenance,
+                    num_tokens_input=0,
+                    num_tokens_output=0,
+                    started_at=now,
+                    finished_at=now,
+                )
+            )
 
     async def get(
         self,
@@ -2244,13 +2302,17 @@ class FlowRunRepository:
         run_id: UUID,
         step_id: UUID,
         tenant_id: UUID,
+        for_update: bool = False,
     ) -> FlowStepResult | None:
-        row = await self.session.scalar(
+        statement = (
             sa.select(FlowStepResults)
             .where(FlowStepResults.flow_run_id == run_id)
             .where(FlowStepResults.step_id == step_id)
             .where(FlowStepResults.tenant_id == tenant_id)
         )
+        if for_update:
+            statement = statement.with_for_update()
+        row = await self.session.scalar(statement)
         if row is None:
             return None
         return FlowStepResult.model_validate(row)

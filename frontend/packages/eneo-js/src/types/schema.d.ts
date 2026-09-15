@@ -5247,7 +5247,9 @@ export interface paths {
      *     reassigns the whole segment, a present span reassigns exactly `original` at
      *     `[char_start, char_end)` of the raw text. `original_speaker` must equal the segment's
      *     stored label, span edits must not overlap within a segment and are exclusive with a
-     *     whole-segment edit there, and a no-op edit (same speaker) is rejected. Failures return
+     *     whole-segment edit there. Version 3 supports same-label confirmation and explicit
+     *     unresolved decisions (null speaker); it requires the original segments_hash. Older
+     *     clients cannot replace v3 decisions. Failures return
      *     `400` with code `flow_transcript_corrections_invalid_speaker_edit`.
      *
      *     Service-key principals may edit corrections only for runs they own (key must have
@@ -5256,6 +5258,43 @@ export interface paths {
      *     Successful runtime mutations are committed before the response is returned, so clients can immediately use the returned id or revision in the next poll/edit/approve/resume request.
      */
     patch: operations["edit_flow_run_transcript_corrections"];
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/transcript-regenerations/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Regenerate downstream output from a reviewed transcript
+     * @description Create a new run of the source run's published flow version. The source run must
+     *     be completed, its first step must have structured transcription evidence, and
+     *     it may be followed by one speaker-mapping step. This prefix is imported as a
+     *     reviewed snapshot; all subsequent steps execute normally, including review gates.
+     *     No audio is transcribed or realigned by importing the prefix.
+     *
+     *     The source run, its summary and files stay unchanged. The new run stores source
+     *     run/step IDs, correction revision and source/reviewed-text hashes in its input
+     *     provenance and imported attempt records. Raw segments, word evidence and human
+     *     decisions remain separate. Unresolved spans are preserved.
+     *
+     *     Supply the original segments_hash and observed run/correction revisions.
+     *     The same Idempotency-Key and request replay the accepted run (200), even if
+     *     later corrections were saved. A new key against stale revisions is rejected.
+     *     A changed published version, unavailable source details or an unsupported
+     *     transcription layout must be resolved before retrying; no partial run is committed.
+     *     Creation, imported evidence and its required audit commit before dispatch.
+     *     Poll the returned run using the existing run endpoint.
+     */
+    post: operations["regenerate_flow_run_transcript"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
     trace?: never;
   };
   "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/transcript-words/": {
@@ -23575,6 +23614,14 @@ export interface components {
        */
       occurrences: components["schemas"]["TranscriptCorrectionOccurrencePublic"][];
       /**
+       * Schema Version
+       * @default 2
+       * @enum {integer}
+       */
+      schema_version?: 2 | 3;
+      /** Segments Hash */
+      segments_hash?: string | null;
+      /**
        * Speaker Edits
        * @description The full replacement list of speaker reassignments for this step (replace-style, like `occurrences`). Omit or send an empty list to clear them.
        */
@@ -23628,6 +23675,13 @@ export interface components {
        */
       revision: number;
       /**
+       * Schema Version
+       * @default 3
+       */
+      schema_version?: number;
+      /** Segments Hash */
+      segments_hash?: string | null;
+      /**
        * Speaker Edits
        * @description Speaker reassignments stored with the set; empty for sets saved before speaker edits existed.
        */
@@ -23647,6 +23701,36 @@ export interface components {
        * Format: date-time
        */
       updated_at: string;
+    };
+    /** FlowTranscriptRegenerationPublic */
+    FlowTranscriptRegenerationPublic: {
+      /** Correction Revision */
+      correction_revision: number | null;
+      /** Created */
+      created: boolean;
+      /**
+       * First Regenerated Step Id
+       * Format: uuid
+       */
+      first_regenerated_step_id: string;
+      run: components["schemas"]["FlowRunPublic"];
+      /**
+       * Source Run Id
+       * Format: uuid
+       */
+      source_run_id: string;
+    };
+    /** FlowTranscriptRegenerationRequest */
+    FlowTranscriptRegenerationRequest: {
+      /**
+       * Expected Correction Revision
+       * @description Last saved correction revision, or null when no set exists.
+       */
+      expected_correction_revision: number | null;
+      /** Expected Run Revision */
+      expected_run_revision: number;
+      /** Segments Hash */
+      segments_hash: string;
     };
     /**
      * FlowTranscriptWordsPublic
@@ -33464,12 +33548,12 @@ export interface components {
     TranscriptCorrectionOccurrencePublic: {
       /**
        * Char End
-       * @description Exclusive character offset; must be greater than `char_start`.
+       * @description Exclusive Unicode code-point offset; must be greater than `char_start`.
        */
       char_end: number;
       /**
        * Char Start
-       * @description Inclusive character offset into the segment's `text`.
+       * @description Inclusive Unicode code-point offset into the segment's `text`.
        */
       char_start: number;
       /**
@@ -33490,11 +33574,15 @@ export interface components {
     };
     /** TranscriptSegmentWordsPublic */
     TranscriptSegmentWordsPublic: {
+      /** Overlap Ids */
+      overlap_ids?: string[];
       /**
        * Segment Index
        * @description Index into the step's stored `transcription.segments` array.
        */
       segment_index: number;
+      /** Speaker Attribution */
+      speaker_attribution?: string | null;
       /** Words */
       words: components["schemas"]["TranscriptWordPublic"][];
     };
@@ -33509,14 +33597,20 @@ export interface components {
     TranscriptSpeakerEditPublic: {
       /**
        * Char End
-       * @description Exclusive character offset; must be greater than `char_start`. Null for a whole-segment reassignment.
+       * @description Exclusive Unicode code-point offset; must be greater than `char_start`. Null for a whole-segment reassignment.
        */
       char_end?: number | null;
       /**
        * Char Start
-       * @description Inclusive character offset into the segment's raw `text`, or null for a whole-segment reassignment.
+       * @description Inclusive Unicode code-point offset into the segment's raw `text`, or null for a whole-segment reassignment.
        */
       char_start?: number | null;
+      /**
+       * Decision
+       * @default confirmed
+       * @enum {string}
+       */
+      decision?: "confirmed" | "unresolved";
       /**
        * Original
        * @description The exact raw text at `[char_start, char_end)`, or null for a whole-segment reassignment. A mismatch returns `400` with code `flow_transcript_corrections_invalid_speaker_edit`.
@@ -33526,7 +33620,7 @@ export interface components {
        * Original Speaker
        * @description The segment's stored speaker label the edit anchors to. A mismatch returns `400` with code `flow_transcript_corrections_invalid_speaker_edit`.
        */
-      original_speaker: string;
+      original_speaker: string | null;
       /**
        * Segment Index
        * @description Index into the transcription step's stored `transcription.segments` array (the same array the steps listing returns).
@@ -33536,7 +33630,7 @@ export interface components {
        * Speaker
        * @description The label the content is reassigned to. A label not present in the transcript is allowed (splitting a merged speaker); it becomes nameable once the speaker-mapping step sees it.
        */
-      speaker: string;
+      speaker: string | null;
     };
     /**
      * TranscriptWordPublic
@@ -54615,6 +54709,148 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Required audit logging is unavailable; no correction changes were committed. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_evidence_audit_logging_failed",
+           *       "context": {
+           *         "audit_required": true
+           *       },
+           *       "eneo_error_code": 9024,
+           *       "message": "Evidence audit logging is unavailable."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  regenerate_flow_run_transcript: {
+    parameters: {
+      query?: never;
+      header: {
+        "Idempotency-Key": string;
+      };
+      path: {
+        id: string;
+        run_id: string;
+        step_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowTranscriptRegenerationRequest"];
+      };
+    };
+    responses: {
+      /** @description Idempotent replay. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowTranscriptRegenerationPublic"];
+        };
+      };
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowTranscriptRegenerationPublic"];
+        };
+      };
+      /** @description Stale source/revision, changed publication, unsupported layout or conflicting idempotency key. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "eneo_error_code": 9007,
+           *       "message": "Stale source/revision, changed publication, unsupported layout or conflicting idempotency key."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The caller needs run and review access and source content access. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "eneo_error_code": 9001,
+           *       "message": "The caller needs run and review access and source content access."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The source flow, run or transcript is unavailable in tenant scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "eneo_error_code": 9000,
+           *       "message": "The source flow, run or transcript is unavailable in tenant scope."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Tenant concurrent-run capacity is exhausted. */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "eneo_error_code": 9007,
+           *       "message": "Tenant concurrent-run capacity is exhausted."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Required audit failed; no new run was accepted. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "eneo_error_code": 9024,
+           *       "message": "Required audit failed; no new run was accepted."
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };

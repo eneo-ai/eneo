@@ -34,7 +34,10 @@
   import {
     attachWords,
     parseTranscript,
+    isPureTranscript,
     segmentsFromMetadata,
+    fileReviewsFromMetadata,
+    type TranscriptFileReview,
     type TranscriptSegment
   } from "$lib/features/flows/transcriptSegments";
   import TranscriptCorrectionReviewDialog from "./TranscriptCorrectionReviewDialog.svelte";
@@ -62,6 +65,8 @@
   let loadError: string | null = $state(null);
   let actionError: string | null = $state(null);
   let draftValueText = $state("");
+  let transcriptPlayer = $state<{ playSpeakerSample: (label: string) => void }>();
+  let speakerReviews = $state<TranscriptFileReview[]>([]);
   let speakerRows = $state<SpeakerMappingRow[]>([]);
   // Every saved change to the checkpoint's output, oldest first, with the
   // baseline the first page's items are compared against. Loaded per
@@ -114,6 +119,7 @@
   const isSpeakerMapping = $derived(isSpeakerMappingCheckpoint(checkpoint?.current_payload_json));
   // Stored segments carry raw labels, so the reviewer's draft names apply
   // live; the rendered text already has the saved names baked in.
+  const isTranscriptReview = $derived(isSpeakerMapping || isPureTranscript(draftValueText));
   const transcriptSegments = $derived(storedSegments ?? parseTranscript(draftValueText));
   const speakerNames = $derived(speakerNamesFromRows(speakerRows));
   const speakerParticipants = $derived(
@@ -143,7 +149,16 @@
   );
   // The flow author decides whether this step's output may be replaced at all.
   const canEdit = $derived(canDecide && checkpoint?.review_mode === "edit");
-  const canApprove = $derived(canDecide);
+  const canApprove = $derived(
+    canDecide &&
+      (!isTranscriptReview ||
+        (!audioContextPending &&
+          !audioContextError &&
+          (!correctionsController ||
+            (correctionsController.ready &&
+              !correctionsController.error &&
+              !correctionsController.dialog))))
+  );
   const canReject = $derived(canDecide);
   // Attached by every checkpoint response (active read and mutations), so
   // an edit flips staleness in the same response without a second fetch.
@@ -287,13 +302,14 @@
     try {
       const steps = await eneo.flows.runs.steps({ flowId, runId });
       const sourceStep =
-        steps.find((step) => step.step_id === source.stepId) ??
+        steps.find((step) => step.step_id === (source.stepId ?? checkpoint?.step_id)) ??
         steps.find((step) => step.step_order === source.stepOrder) ??
         steps.find((step) => readTranscription(step.input_payload_json) !== null);
       const transcription = readTranscription(sourceStep?.input_payload_json);
       const fileIds = Array.isArray(transcription?.file_ids)
         ? transcription.file_ids.filter((id): id is string => typeof id === "string")
         : (sourceStep?.runtime_input_file_ids ?? []);
+      speakerReviews = fileReviewsFromMetadata(transcription);
       const segments = segmentsFromMetadata(transcription);
       const stepId = sourceStep?.step_id ?? null;
       storedSegments =
@@ -348,7 +364,7 @@
     try {
       const active = await eneo.flows.runs.reviewCheckpoints.active({ flowId, runId });
       applyCheckpoint(active);
-      if (active && isSpeakerMappingCheckpoint(active.current_payload_json)) {
+      if (active && isTranscriptReview) {
         void loadTranscriptContext(active.current_payload_json);
       }
     } catch (error) {
@@ -432,6 +448,11 @@
     try {
       // Approving is meant to accept what the reviewer sees, so pending
       // speaker edits are saved first rather than silently dropped.
+      if (correctionsController && !(await correctionsController.flush())) {
+        actionError =
+          correctionsController.error ?? m.flow_run_transcript_corrections_save_failed();
+        return;
+      }
       let current = checkpoint;
       if (speakerEditsPending && canEdit) {
         current = await eneo.flows.runs.reviewCheckpoints.edit({
@@ -451,11 +472,27 @@
           expectedCheckpointRevision: current.revision
         })
       );
-      toast.success(m.flow_run_review_approved());
+      if (isTranscriptReview && checkpoint?.state === "approved") {
+        activeAction = "resume";
+        const result = await eneo.flows.runs.reviewCheckpoints.resume({
+          flowId,
+          runId,
+          checkpointId: checkpoint.id,
+          expectedCheckpointRevision: checkpoint.revision,
+          idempotencyKey: `flow-review-resume:${checkpoint.id}:${checkpoint.revision}`
+        });
+        applyCheckpoint(result.checkpoint);
+        toast.success(m.flow_run_review_resumed());
+      } else toast.success(m.flow_run_review_approved());
       onChanged?.();
     } catch (error) {
       console.error("Failed to approve review checkpoint", error);
-      actionError = getFlowRuntimeErrorMessage(error, m.flow_run_review_approve_failed());
+      actionError = getFlowRuntimeErrorMessage(
+        error,
+        activeAction === "resume"
+          ? m.flow_run_review_resume_failed()
+          : m.flow_run_review_approve_failed()
+      );
     } finally {
       activeAction = null;
     }
@@ -606,19 +643,31 @@
       </div>
     {/if}
 
-    <Field.Group
-      class="grid gap-4 {isSpeakerMapping
-        ? 'lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]'
-        : 'lg:grid-cols-2'}"
-    >
-      {#if isSpeakerMapping}
-        <SpeakerMappingReviewEditor
-          rows={speakerRows}
-          participants={speakerParticipants}
-          inferred={speakerNamesInferred}
-          disabled={!canEdit || activeAction !== null}
-          onChange={(rows) => (speakerRows = rows)}
-        />
+    <Field.Group class="grid gap-4 {isTranscriptReview ? 'grid-cols-1' : 'lg:grid-cols-2'}">
+      {#if isTranscriptReview}
+        {#if isSpeakerMapping}
+          <SpeakerMappingReviewEditor
+            rows={speakerRows}
+            sampleAvailable={(label) =>
+              transcriptSegments.some(
+                (s) =>
+                  s.speaker === label &&
+                  s.speakerAttribution !== "provisional" &&
+                  s.speakerAttribution !== "unassigned"
+              ) &&
+              audioFileIds.length > 0 &&
+              !audioContextPending}
+            onListen={(label) => transcriptPlayer?.playSpeakerSample(label)}
+            participants={speakerParticipants}
+            inferred={speakerNamesInferred}
+            disabled={!canEdit || activeAction !== null}
+            onChange={(rows) => (speakerRows = rows)}
+          />
+        {:else}
+          <p class="text-muted text-sm">
+            {m.flow_transcript_review_help()}
+          </p>
+        {/if}
         <Field.Field>
           <Field.Label class="text-primary text-xs font-medium">
             {m.flow_run_review_speakers_preview()}
@@ -641,9 +690,25 @@
             <Alert.Root variant="destructive">
               <Alert.Description class="text-xs">
                 {correctionsController.error}
+                <p>
+                  {m.flow_transcript_editor_draft_preserved()}
+                </p>
+                <button
+                  class="mt-2 mr-4 underline"
+                  onclick={() => void correctionsController?.retry()}
+                  >{m.flow_transcript_editor_retry()}</button
+                >
+                <button
+                  class="mt-2 underline"
+                  onclick={() => correctionsController?.downloadDraft()}
+                  >{m.flow_transcript_editor_download_draft()}</button
+                >
               </Alert.Description>
             </Alert.Root>
           {/if}
+          {#if correctionsController?.saving}<p class="text-muted text-xs" role="status">
+              {m.flow_transcript_editor_saving()}
+            </p>{/if}
           {#if correctionsController && correctionsController.staleCount > 0}
             <Alert.Root>
               <Alert.Description class="text-xs">
@@ -653,20 +718,29 @@
               </Alert.Description>
             </Alert.Root>
           {/if}
+          {#if !storedSegments}
+            <p class="text-muted text-sm">
+              {m.flow_transcript_review_details_unavailable()}
+            </p>
+          {/if}
           {#key checkpoint.id}
             <TranscriptPlayer
+              bind:this={transcriptPlayer}
+              reviewEditor
+              {speakerReviews}
+              onChange={correctionsController?.replaceDraft}
               segments={transcriptSegments}
               fileCount={audioFileIds.length}
               {getAudioUrl}
               {speakerNames}
               textFallback={draftValueText}
               audioPending={audioContextPending}
-              editable={canDecide &&
+              editable={canEdit &&
                 storedSegments !== null &&
                 (correctionsController?.ready ?? false)}
               corrections={correctionsController?.occurrences ?? []}
               speakerEdits={correctionsController?.speakerEdits ?? []}
-              busy={(correctionsController?.saving ?? false) || activeAction !== null}
+              busy={activeAction !== null}
               onSaveLine={correctionsController ? correctionsController.saveLine : undefined}
               onRevertLine={correctionsController ? correctionsController.revertLine : undefined}
               onSaveSpeakerEdits={correctionsController
@@ -790,63 +864,105 @@
       {/if}
     </section>
 
-    <Field.Field data-invalid={reviewDecisionExpired ? "true" : undefined}>
-      <Field.Label class="text-primary text-xs font-medium" for="flow-review-reject-reason">
-        {m.flow_run_review_reject_reason()}
-      </Field.Label>
-      <Textarea
-        id="flow-review-reject-reason"
-        bind:value={rejectReason}
-        disabled={!canReject || activeAction !== null}
-        aria-invalid={reviewDecisionExpired || checkpointExpired}
-        maxlength={1024}
-        class="min-h-24 resize-y text-sm"
-      />
-      {#if deadlineDisplay}
-        <Field.Description class="text-xs">
-          {m.flow_run_review_deadline_help()}
-        </Field.Description>
-      {/if}
-    </Field.Field>
+    {#if isTranscriptReview}
+      <details class="text-secondary text-sm">
+        <summary class="focus-visible:ring-accent-default cursor-pointer py-2 focus-visible:ring-2"
+          >{m.flow_transcript_editor_reject()}</summary
+        >
+        <Field.Field data-invalid={reviewDecisionExpired ? "true" : undefined}>
+          <Field.Label class="text-primary text-xs font-medium" for="flow-review-reject-reason">
+            {m.flow_run_review_reject_reason()}
+          </Field.Label>
+          <Textarea
+            id="flow-review-reject-reason"
+            bind:value={rejectReason}
+            disabled={!canReject || activeAction !== null}
+            aria-invalid={reviewDecisionExpired || checkpointExpired}
+            maxlength={1024}
+            class="min-h-24 resize-y text-sm"
+          />
+          {#if deadlineDisplay}
+            <Field.Description class="text-xs">
+              {m.flow_run_review_deadline_help()}
+            </Field.Description>
+          {/if}
+        </Field.Field>
+
+        <Button
+          variant="destructive"
+          disabled={!canReject || activeAction !== null || !rejectReason.trim()}
+          onclick={() => void rejectCheckpoint()}>{m.reject()}</Button
+        >
+      </details>
+    {:else}
+      <Field.Field data-invalid={reviewDecisionExpired ? "true" : undefined}>
+        <Field.Label class="text-primary text-xs font-medium" for="flow-review-reject-reason">
+          {m.flow_run_review_reject_reason()}
+        </Field.Label>
+        <Textarea
+          id="flow-review-reject-reason"
+          bind:value={rejectReason}
+          disabled={!canReject || activeAction !== null}
+          aria-invalid={reviewDecisionExpired || checkpointExpired}
+          maxlength={1024}
+          class="min-h-24 resize-y text-sm"
+        />
+        {#if deadlineDisplay}
+          <Field.Description class="text-xs">
+            {m.flow_run_review_deadline_help()}
+          </Field.Description>
+        {/if}
+      </Field.Field>
+    {/if}
 
     <div
       class="flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end"
     >
+      {#if !isTranscriptReview}
+        <Button
+          variant={speakerEditsPending ? "default" : "outline"}
+          size="sm"
+          class="min-h-10 sm:min-h-8"
+          disabled={!canEdit || activeAction !== null}
+          onclick={() => void saveEdit()}
+        >
+          {activeAction === "edit" ? m.saving() : m.flow_run_review_save_edit()}
+        </Button>
+      {/if}
       <Button
-        variant={speakerEditsPending ? "default" : "outline"}
-        size="sm"
-        class="min-h-10 sm:min-h-8"
-        disabled={!canEdit || activeAction !== null}
-        onclick={() => void saveEdit()}
-      >
-        {activeAction === "edit" ? m.saving() : m.flow_run_review_save_edit()}
-      </Button>
-      <Button
-        variant="outline"
+        variant={isTranscriptReview ? "default" : "outline"}
         size="sm"
         class="min-h-10 sm:min-h-8"
         disabled={!canApprove || activeAction !== null}
         onclick={() => void approveCheckpoint()}
       >
-        {activeAction === "approve" ? m.flow_run_review_approving() : m.approve()}
+        {activeAction === "approve" || activeAction === "resume"
+          ? m.flow_run_review_approving()
+          : isTranscriptReview
+            ? m.flow_transcript_editor_approve_continue()
+            : m.approve()}
       </Button>
-      <Button
-        variant="destructive"
-        size="sm"
-        class="min-h-10 sm:min-h-8"
-        disabled={!canReject || activeAction !== null || rejectReason.trim().length === 0}
-        onclick={() => void rejectCheckpoint()}
-      >
-        {activeAction === "reject" ? m.flow_run_review_rejecting() : m.reject()}
-      </Button>
-      <Button
-        size="sm"
-        class="min-h-10 sm:min-h-8"
-        disabled={!canResume || activeAction !== null}
-        onclick={() => void resumeCheckpoint()}
-      >
-        {activeAction === "resume" ? m.flow_run_review_resuming() : m.flow_run_review_resume()}
-      </Button>
+      {#if !isTranscriptReview}
+        <Button
+          variant="destructive"
+          size="sm"
+          class="min-h-10 sm:min-h-8"
+          disabled={!canReject || activeAction !== null || rejectReason.trim().length === 0}
+          onclick={() => void rejectCheckpoint()}
+        >
+          {activeAction === "reject" ? m.flow_run_review_rejecting() : m.reject()}
+        </Button>
+      {/if}
+      {#if !isTranscriptReview || canResume}
+        <Button
+          size="sm"
+          class="min-h-10 sm:min-h-8"
+          disabled={!canResume || activeAction !== null}
+          onclick={() => void resumeCheckpoint()}
+        >
+          {activeAction === "resume" ? m.flow_run_review_resuming() : m.flow_run_review_resume()}
+        </Button>
+      {/if}
     </div>
   </div>
 {/if}

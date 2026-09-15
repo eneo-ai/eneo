@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  fileReviewsFromMetadata,
   applySpeakerNames,
   attachWords,
   countFiles,
@@ -268,5 +269,46 @@ describe("findActiveWordIndex", () => {
     expect(findActiveWordIndex(words, 1.2)).toBe(1);
     expect(findActiveWordIndex(words, 1.7, 1)).toBe(1);
     expect(findActiveWordIndex(words, 9)).toBe(2);
+  });
+});
+
+describe("fileReviewsFromMetadata", () => {
+  it("preserves file scope for identical overlap ids and intervals without transcript words", () => {
+    const overlaps = [{ id: "same", start: 20, end: 22, detected_speaker_count: 2 }];
+    expect(
+      fileReviewsFromMetadata({
+        speaker_review: {
+          files: [
+            { file_index: 0, overlap_detection: "available", overlaps },
+            { file_index: 1, overlap_detection: "available", overlaps },
+            { file_index: 2, overlap_detection: "unavailable", overlaps: [] }
+          ]
+        }
+      })
+    ).toEqual([
+      { fileIndex: 0, overlapDetection: "available", detailsOmitted: false, overlaps },
+      { fileIndex: 1, overlapDetection: "available", detailsOmitted: false, overlaps },
+      { fileIndex: 2, overlapDetection: "unavailable", detailsOmitted: false, overlaps: [] }
+    ]);
+  });
+  it("retains omitted evidence and ignores malformed playback intervals", () => {
+    expect(
+      fileReviewsFromMetadata({
+        speaker_review: {
+          details_omitted_reason: "size_limit",
+          files: [
+            { file_index: -1 },
+            {
+              file_index: 0,
+              overlaps: [
+                { id: "backwards", start: 4, end: 2, detected_speaker_count: 2 },
+                { id: "negative", start: -1, end: 2, detected_speaker_count: 2 },
+                { id: "invalid", start: 0, end: 2, detected_speaker_count: 1 }
+              ]
+            }
+          ]
+        }
+      })
+    ).toEqual([{ fileIndex: 0, overlapDetection: "unknown", detailsOmitted: true, overlaps: [] }]);
   });
 });

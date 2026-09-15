@@ -63,10 +63,15 @@ def _format_label(index: int) -> str:
     return f"SPEAKER_{index:02d}"
 
 
-def build_label_renumbering(text: str, offset: int) -> dict[str, str]:
+def build_label_renumbering(
+    text: str, offset: int, *, segments: Sequence["TranscriptSegment"] = ()
+) -> dict[str, str]:
     """This file's labels mapped to ``SPEAKER_{offset + n}`` in order of first
     appearance in the text."""
     mapping: dict[str, str] = {}
+    for segment in segments:
+        if segment.speaker and segment.speaker not in mapping:
+            mapping[segment.speaker] = _format_label(offset + len(mapping))
     for line in text.split("\n"):
         match = SPEAKER_LINE_RE.match(line)
         if match is None:
@@ -111,9 +116,36 @@ def build_speaker_inventory(
     *,
     file_index: int = 0,
     file_id: str | None = None,
+    segments: Sequence["TranscriptSegment"] = (),
 ) -> list[dict[str, Any]]:
     """One entry per label, in order of first appearance, with sample lines."""
     entries: dict[str, dict[str, Any]] = {}
+    if segments:
+        for segment in segments:
+            if not segment.speaker:
+                continue
+            entry = entries.setdefault(
+                segment.speaker,
+                {
+                    "label": segment.speaker,
+                    "file_index": file_index,
+                    "file_id": file_id,
+                    "line_count": 0,
+                    "samples": [],
+                    "clean_example_available": False,
+                },
+            )
+            entry["line_count"] += 1
+            if segment.speaker_attribution != "provisional":
+                entry["clean_example_available"] = True
+                if (
+                    segment.text.strip()
+                    and len(entry["samples"]) < INVENTORY_SAMPLE_LINES
+                ):
+                    entry["samples"].append(
+                        segment.text.strip()[:INVENTORY_SAMPLE_CHARS]
+                    )
+        return list(entries.values())
     for line in text.split("\n"):
         match = SPEAKER_LINE_RE.match(line)
         if match is None:
@@ -211,3 +243,14 @@ def format_clock(seconds: float) -> str:
 def render_line_prefix(start: float, end: float) -> str:
     """The ``[HH:MM:SS - HH:MM:SS] `` prefix ``SPEAKER_LINE_RE`` recognises."""
     return f"[{format_clock(start)} - {format_clock(end)}] "
+
+
+def render_segments(segments: Sequence["TranscriptSegment"]) -> str:
+    from eneo.flows.domain.speaker_review import attribution_text
+
+    return "\n".join(
+        f"{render_line_prefix(segment.start, segment.end)}"
+        f"{attribution_text({'speaker': segment.speaker, 'speaker_attribution': segment.speaker_attribution})}"
+        f"{segment.text}"
+        for segment in segments
+    )

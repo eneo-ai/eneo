@@ -1031,7 +1031,7 @@ export function initFlows(client) {
          * compare token (null creates the step's first set, empty lists
          * clear it).
          *
-         * @param {{flowId: string, runId: string, stepId: string, expectedRevision: number | null, occurrences: import('../types/resources').FlowTranscriptCorrectionOccurrence[], speakerEdits?: import('../types/resources').FlowTranscriptSpeakerEdit[]}} params
+         * @param {{flowId: string, runId: string, stepId: string, expectedRevision: number | null, occurrences: import('../types/resources').FlowTranscriptCorrectionOccurrence[], speakerEdits?: import('../types/resources').FlowTranscriptSpeakerEdit[], schemaVersion?: 2 | 3, segmentsHash?: string}} params
          * @returns {Promise<import('../types/resources').FlowRunTranscriptCorrections>}
          */
         save: async ({
@@ -1040,7 +1040,9 @@ export function initFlows(client) {
           stepId,
           expectedRevision = null,
           occurrences,
-          speakerEdits = []
+          speakerEdits = [],
+          schemaVersion = 2,
+          segmentsHash
         }) => {
           return _fetch(
             "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/transcript-corrections/",
@@ -1051,12 +1053,47 @@ export function initFlows(client) {
                 "application/json": {
                   expected_revision: expectedRevision,
                   occurrences,
-                  speaker_edits: speakerEdits
+                  speaker_edits: speakerEdits,
+                  ...(schemaVersion === 3 ? { schema_version: 3, segments_hash: segmentsHash } : {})
                 }
               }
             }
           );
         }
+      },
+
+      /**
+       * Create a separate downstream run from a saved reviewed transcript.
+       * Reuse idempotencyKey when retrying the same logical action.
+       * @param {{flowId: string, runId: string, stepId: string, expectedRunRevision: number, expectedCorrectionRevision: number | null, segmentsHash: string, idempotencyKey: string}} params
+       * @returns {Promise<import('../types/schema').components['schemas']['FlowTranscriptRegenerationPublic']>}
+       */
+      regenerateTranscript: async ({
+        flowId,
+        runId,
+        stepId,
+        expectedRunRevision,
+        expectedCorrectionRevision,
+        segmentsHash,
+        idempotencyKey
+      }) => {
+        return _fetch(
+          "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/transcript-regenerations/",
+          {
+            method: "post",
+            params: {
+              path: { id: flowId, run_id: runId, step_id: stepId },
+              header: { "Idempotency-Key": idempotencyKey }
+            },
+            requestBody: {
+              "application/json": {
+                expected_run_revision: expectedRunRevision,
+                expected_correction_revision: expectedCorrectionRevision,
+                segments_hash: segmentsHash
+              }
+            }
+          }
+        );
       },
 
       transcriptWords: {

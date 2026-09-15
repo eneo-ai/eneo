@@ -14,9 +14,11 @@ from eneo.files.audio import AudioMimeTypes
 from eneo.flows.domain.speaker_labels import (
     build_label_renumbering,
     build_speaker_inventory,
+    render_segments,
     renumber_segment_speakers,
     renumber_speaker_labels,
 )
+from eneo.flows.domain.transcript_corrections import segments_content_hash
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.runtime.run_cancellation import FlowStepCancelledError
 from eneo.flows.transcription_config import (
@@ -166,24 +168,41 @@ WORDS_OMITTED_NO_SEGMENTS = "segments_unavailable"
 
 
 def serialize_segments(
-    segments: Sequence["TranscriptSegment"], *, file_index: int
+    segments: Sequence["TranscriptSegment"],
+    *,
+    file_index: int,
+    file_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Structured transcript lines for one file, timestamps relative to that
     file's audio (a multi-file transcript restarts at zero per file)."""
     return [
         {
             "file_index": file_index,
-            "start": round(segment.start, 2),
-            "end": round(segment.end, 2),
+            "start": segment.start,
+            "end": segment.end,
             "speaker": segment.speaker,
             "text": segment.text,
+            **(
+                {
+                    "speaker_attribution": segment.speaker_attribution,
+                    "overlap_ids": [
+                        f"{file_id}:{value}" if file_id else value
+                        for value in segment.overlap_ids
+                    ],
+                }
+                if segment.speaker_attribution is not None or segment.overlap_ids
+                else {}
+            ),
         }
         for segment in segments
     ]
 
 
 def serialize_segment_words(
-    segments: Sequence["TranscriptSegment"], *, first_segment_index: int
+    segments: Sequence["TranscriptSegment"],
+    *,
+    first_segment_index: int,
+    file_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Word timings for one file's segments, keyed by the index each segment
     gets in the stored array (``first_segment_index`` + position). Segments
@@ -195,11 +214,22 @@ def serialize_segment_words(
         entries.append(
             {
                 "segment_index": first_segment_index + position,
+                **(
+                    {
+                        "speaker_attribution": segment.speaker_attribution,
+                        "overlap_ids": [
+                            f"{file_id}:{value}" if file_id else value
+                            for value in segment.overlap_ids
+                        ],
+                    }
+                    if segment.speaker_attribution is not None or segment.overlap_ids
+                    else {}
+                ),
                 "words": [
                     {
                         "word": word.word,
-                        "start": round(word.start, 3),
-                        "end": round(word.end, 3),
+                        "start": word.start,
+                        "end": word.end,
                         "probability": word.probability,
                     }
                     for word in segment.words
@@ -241,6 +271,7 @@ class FlowTranscriptionResult:
     # out of the metadata: they are persisted in their own row.
     words: list[dict[str, Any]] | None = None
     words_omitted_reason: str | None = None
+    speaker_review: dict[str, Any] | None = None
 
     def to_metadata(self) -> dict[str, Any]:
         return {
@@ -261,7 +292,11 @@ class FlowTranscriptionResult:
             "speakers": self.speakers,
             "max_speakers": self.max_speakers,
             "alignment": self.alignment,
+            "speaker_review": self.speaker_review,
             "segments": self.segments,
+            "segments_hash": segments_content_hash(self.segments)
+            if self.segments
+            else None,
             "segments_omitted_reason": self.segments_omitted_reason,
             "words_omitted_reason": self.words_omitted_reason,
         }
@@ -366,6 +401,7 @@ async def transcribe_audio_input(
     transcription_started = time.monotonic()
     provider_language = to_provider_language(language)
     text_blocks: list[str] = []
+    text_file_indices: list[int] = []
     block_segments: list[tuple[str, int, datetime] | None] = []
     measured_seconds: list[float] = []
     every_file_measured = True
@@ -376,6 +412,7 @@ async def transcribe_audio_input(
     segments: list[dict[str, Any]] = []
     words: list[dict[str, Any]] = []
     every_file_segmented = True
+    review_files: list[dict[str, Any]] = []
     # Labels are assigned per file by the diarization service; renumber so one
     # label means one speaker across the whole transcript.
     label_offset = 0
@@ -437,27 +474,56 @@ async def transcribe_audio_input(
         if transcribed.alignment:
             alignments.append(transcribed.alignment)
         block_text = transcribed.text
-        block_transcript_segments = list(transcribed.transcript_segments or ())
+        block_transcript_segments = sorted(
+            transcribed.transcript_segments or (),
+            key=lambda segment: (segment.start, segment.end),
+        )
+        if transcribed.speaker_review is not None:
+            review_files.append(
+                {
+                    **transcribed.speaker_review,
+                    "file_index": file_index,
+                    "file_id": str(file.id),
+                    "overlaps": [
+                        {**overlap, "id": f"{file.id}:{overlap['id']}"}
+                        for overlap in transcribed.speaker_review.get("overlaps", [])
+                    ],
+                }
+            )
         if transcribed.diarization == "external":
-            label_mapping = build_label_renumbering(block_text, label_offset)
+            label_mapping = build_label_renumbering(
+                block_text, label_offset, segments=block_transcript_segments
+            )
             block_text, label_count = renumber_speaker_labels(block_text, label_offset)
+            label_count = len(label_mapping)
             block_transcript_segments = renumber_segment_speakers(
                 block_transcript_segments, label_mapping
             )
+            if block_transcript_segments:
+                block_text = render_segments(block_transcript_segments)
             speakers.extend(
                 build_speaker_inventory(
-                    block_text, file_index=file_index, file_id=str(file.id)
+                    block_text,
+                    file_index=file_index,
+                    file_id=str(file.id),
+                    segments=block_transcript_segments,
                 )
             )
             label_offset += label_count
         if block_transcript_segments:
             words.extend(
                 serialize_segment_words(
-                    block_transcript_segments, first_segment_index=len(segments)
+                    block_transcript_segments,
+                    first_segment_index=len(segments),
+                    file_id=str(file.id),
                 )
             )
             segments.extend(
-                serialize_segments(block_transcript_segments, file_index=file_index)
+                serialize_segments(
+                    block_transcript_segments,
+                    file_index=file_index,
+                    file_id=str(file.id),
+                )
             )
         elif block_text.strip():
             # A reader can only seek by segments when every file has them;
@@ -465,11 +531,18 @@ async def transcribe_audio_input(
             every_file_segmented = False
         if block_text.strip():
             text_blocks.append(block_text.strip())
+            text_file_indices.append(file_index)
             block_segments.append(
                 _parse_segment_filename(str(getattr(file, "name", "") or ""))
             )
 
     combined = _join_transcription_blocks(text_blocks, block_segments)
+    if len(files) > 1 and review_files:
+        # Explicit file headers retain playback identity even when timestamps restart.
+        combined = "\n\n".join(
+            f"## Del {file_index + 1}\n\n{block}"
+            for file_index, block in zip(text_file_indices, text_blocks)
+        )
     if not combined:
         raise TypedIOValidationException(
             f"Step {step_order}: transcription produced empty text.",
@@ -493,6 +566,29 @@ async def transcribe_audio_input(
     kept_segments, segments_omitted_reason = _cap_segments(
         segments if every_file_segmented else []
     )
+    review_metadata = {"files": review_files} if review_files else None
+    if (
+        len(
+            json.dumps(
+                {"segments": kept_segments, "speaker_review": review_metadata},
+                ensure_ascii=False,
+            ).encode("utf-8")
+        )
+        > MAX_SEGMENTS_BYTES
+    ):
+        kept_segments = None
+        segments_omitted_reason = SEGMENTS_OMITTED_TOO_LARGE
+        review_metadata = (
+            {
+                "files": [
+                    {key: value for key, value in review.items() if key != "overlaps"}
+                    for review in review_files
+                ],
+                "details_omitted_reason": SEGMENTS_OMITTED_TOO_LARGE,
+            }
+            if review_files
+            else None
+        )
     kept_words, words_omitted_reason = _cap_words(
         words, segments_kept=kept_segments is not None
     )
@@ -520,6 +616,7 @@ async def transcribe_audio_input(
         segments_omitted_reason=segments_omitted_reason,
         words=kept_words,
         words_omitted_reason=words_omitted_reason,
+        speaker_review=review_metadata,
     )
 
 

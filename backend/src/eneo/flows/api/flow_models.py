@@ -2553,11 +2553,11 @@ class TranscriptCorrectionOccurrencePublic(BaseModel):
     )
     char_start: int = Field(
         ge=0,
-        description="Inclusive character offset into the segment's `text`.",
+        description="Inclusive Unicode code-point offset into the segment's `text`.",
     )
     char_end: int = Field(
         ge=1,
-        description="Exclusive character offset; must be greater than `char_start`.",
+        description="Exclusive Unicode code-point offset; must be greater than `char_start`.",
     )
     original: str = Field(
         min_length=1,
@@ -2595,7 +2595,7 @@ class TranscriptSpeakerEditPublic(BaseModel):
         default=None,
         ge=0,
         description=(
-            "Inclusive character offset into the segment's raw `text`, or null "
+            "Inclusive Unicode code-point offset into the segment's raw `text`, or null "
             "for a whole-segment reassignment."
         ),
     )
@@ -2603,7 +2603,7 @@ class TranscriptSpeakerEditPublic(BaseModel):
         default=None,
         ge=1,
         description=(
-            "Exclusive character offset; must be greater than `char_start`. "
+            "Exclusive Unicode code-point offset; must be greater than `char_start`. "
             "Null for a whole-segment reassignment."
         ),
     )
@@ -2616,7 +2616,7 @@ class TranscriptSpeakerEditPublic(BaseModel):
             "`flow_transcript_corrections_invalid_speaker_edit`."
         ),
     )
-    original_speaker: str = Field(
+    original_speaker: str | None = Field(
         pattern=r"^SPEAKER_\d{2,}$",
         description=(
             "The segment's stored speaker label the edit anchors to. A "
@@ -2624,7 +2624,7 @@ class TranscriptSpeakerEditPublic(BaseModel):
             "`flow_transcript_corrections_invalid_speaker_edit`."
         ),
     )
-    speaker: str = Field(
+    speaker: str | None = Field(
         pattern=r"^SPEAKER_\d{2,}$",
         description=(
             "The label the content is reassigned to. A label not present in "
@@ -2633,8 +2633,12 @@ class TranscriptSpeakerEditPublic(BaseModel):
         ),
     )
 
+    decision: Literal["confirmed", "unresolved"] = "confirmed"
+
     @model_validator(mode="after")
     def validate_span_shape(self) -> Self:
+        if (self.decision == "confirmed") != (self.speaker is not None):
+            raise ValueError("confirmed requires a speaker; unresolved requires null")
         span_fields = (self.char_start, self.char_end, self.original)
         nulls = [field is None for field in span_fields]
         if any(nulls) and not all(nulls):
@@ -2656,6 +2660,8 @@ class FlowTranscriptCorrectionsPublic(BaseModel):
         json_schema_extra={"example": FLOW_TRANSCRIPT_CORRECTIONS_PUBLIC_EXAMPLE},
     )
 
+    schema_version: int = 3
+    segments_hash: str | None = None
     flow_run_id: UUID
     step_id: UUID
     occurrences: list[TranscriptCorrectionOccurrencePublic]
@@ -2691,6 +2697,22 @@ class FlowTranscriptCorrectionsEditRequest(BaseModel):
         extra="forbid",
         json_schema_extra={"example": FLOW_TRANSCRIPT_CORRECTIONS_EDIT_REQUEST_EXAMPLE},
     )
+
+    schema_version: Literal[2, 3] = 2
+    segments_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def validate_version(self) -> Self:
+        if self.schema_version == 3 and self.segments_hash is None:
+            raise ValueError("v3 writes require the original segments_hash")
+        if self.schema_version < 3 and any(
+            edit.decision != "confirmed"
+            or edit.speaker == edit.original_speaker
+            or edit.original_speaker is None
+            for edit in self.speaker_edits
+        ):
+            raise ValueError("Review decisions require schema_version 3")
+        return self
 
     expected_revision: int | None = Field(
         default=None,
@@ -2771,6 +2793,9 @@ class TranscriptWordPublic(BaseModel):
 
 
 class TranscriptSegmentWordsPublic(BaseModel):
+    speaker_attribution: str | None = None
+    overlap_ids: list[str] = Field(default_factory=list)
+
     segment_index: int = Field(
         ge=0,
         description="Index into the step's stored `transcription.segments` array.",

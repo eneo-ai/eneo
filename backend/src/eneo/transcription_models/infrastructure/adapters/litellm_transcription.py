@@ -69,6 +69,8 @@ class TranscriptSegment:
     speaker: str | None = None
     # Word timings inside the segment, when the service produced them.
     words: tuple[TranscriptWord, ...] | None = None
+    speaker_attribution: str | None = None
+    overlap_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

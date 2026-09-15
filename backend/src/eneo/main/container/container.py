@@ -124,6 +124,9 @@ from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from eneo.flows.application.flow_transcript_corrections_service import (
     FlowTranscriptCorrectionsService,
 )
+from eneo.flows.application.flow_transcript_regeneration_service import (
+    FlowTranscriptRegenerationService,
+)
 from eneo.flows.application.flow_transcript_words_service import (
     FlowTranscriptWordsService,
 )
@@ -1570,8 +1573,19 @@ class Container(containers.DeclarativeContainer):
         FlowTranscriptCorrectionsService,
         user=user,
         transcript_corrections_repo=flow_transcript_corrections_repo,
+        audit_service=audit_service,
         access_policy=flow_run_access_policy,
         flow_run_repo=flow_run_repo,
+    )
+    flow_transcript_regeneration_service = providers.Factory(
+        FlowTranscriptRegenerationService,
+        user=user,
+        run_service=flow_run_service,
+        access_policy=flow_run_access_policy,
+        run_repo=flow_run_repo,
+        corrections_repo=flow_transcript_corrections_repo,
+        words_repo=flow_transcript_words_repo,
+        audit_service=audit_service,
     )
     flow_transcript_words_service = providers.Factory(
         FlowTranscriptWordsService,

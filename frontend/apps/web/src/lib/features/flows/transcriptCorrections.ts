@@ -9,7 +9,7 @@
 
 import type { TranscriptSegment } from "$lib/features/flows/transcriptSegments";
 
-/** Wire shape of one stored correction (matches the backend API). */
+/** UI correction with UTF-16 offsets; the controller converts API code-point offsets. */
 export type CorrectionOccurrence = {
   segment_index: number;
   char_start: number;
@@ -89,15 +89,17 @@ const MAX_SUGGESTION_TOKENS = 3;
 /** Minimal diff of one line edit: common prefix/suffix trim over the raw text. */
 export function diffLineEdit(original: string, edited: string): LineEditDiff {
   if (original === edited) return { occurrence: null, tokenShaped: null };
+  const originalPoints = Array.from(original);
+  const editedPoints = Array.from(edited);
   let start = 0;
-  const maxStart = Math.min(original.length, edited.length);
-  while (start < maxStart && original[start] === edited[start]) start += 1;
-  let endOriginal = original.length;
-  let endEdited = edited.length;
+  const maxStart = Math.min(originalPoints.length, editedPoints.length);
+  while (start < maxStart && originalPoints[start] === editedPoints[start]) start += 1;
+  let endOriginal = originalPoints.length;
+  let endEdited = editedPoints.length;
   while (
     endOriginal > start &&
     endEdited > start &&
-    original[endOriginal - 1] === edited[endEdited - 1]
+    originalPoints[endOriginal - 1] === editedPoints[endEdited - 1]
   ) {
     endOriginal -= 1;
     endEdited -= 1;
@@ -107,7 +109,7 @@ export function diffLineEdit(original: string, edited: string): LineEditDiff {
     // cannot be addressed as a replacement (occurrences need a non-empty
     // `original`). Widen by one anchoring character; the widened character is
     // part of the common prefix/suffix, so it is identical in both strings.
-    if (endOriginal < original.length) {
+    if (endOriginal < originalPoints.length) {
       endOriginal += 1;
       endEdited += 1;
     } else if (start > 0) {
@@ -117,6 +119,10 @@ export function diffLineEdit(original: string, edited: string): LineEditDiff {
       return { occurrence: null, tokenShaped: null };
     }
   }
+  // Keep complete Unicode code points in the anchor, then return DOM offsets.
+  start = originalPoints.slice(0, start).join("").length;
+  endOriginal = originalPoints.slice(0, endOriginal).join("").length;
+  endEdited = editedPoints.slice(0, endEdited).join("").length;
   const occurrence = {
     char_start: start,
     char_end: endOriginal,
@@ -279,4 +285,36 @@ export function sortOccurrences(
   return [...occurrences].sort(
     (a, b) => a.segment_index - b.segment_index || a.char_start - b.char_start
   );
+}
+
+/** Translate immutable raw-text anchors at the browser/API boundary only. */
+export function convertTranscriptAnchors<
+  T extends {
+    segment_index: number;
+    char_start?: number | null;
+    char_end?: number | null;
+  }
+>(
+  entries: readonly T[],
+  segments: readonly TranscriptSegment[],
+  direction: "toWire" | "fromWire"
+): T[] {
+  return entries.map((entry) => {
+    const text = segments[entry.segment_index]?.text;
+    if (text === undefined) return { ...entry };
+    const offset = (value: number | null | undefined) => {
+      if (value == null) return value;
+      if (direction === "fromWire") return Array.from(text).slice(0, value).join("").length;
+      if (
+        value > 0 &&
+        value < text.length &&
+        /[\uD800-\uDBFF]/.test(text[value - 1]) &&
+        /[\uDC00-\uDFFF]/.test(text[value])
+      ) {
+        throw new Error("Transcript anchor splits a Unicode code point.");
+      }
+      return Array.from(text.slice(0, value)).length;
+    };
+    return { ...entry, char_start: offset(entry.char_start), char_end: offset(entry.char_end) };
+  });
 }

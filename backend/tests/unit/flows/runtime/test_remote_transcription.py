@@ -648,6 +648,7 @@ def test_build_remote_flow_transcriber_requires_configuration() -> None:
         build_remote_flow_transcriber(unset)
 
     configured = SimpleNamespace(
+        flow_transcription_include_speaker_review=False,
         flow_transcription_service_url="http://tolka.test",
         flow_transcription_service_api_key="devtoken",
         flow_transcription_service_submit_timeout_seconds=600,
@@ -792,3 +793,35 @@ async def test_flow_audio_step_runs_through_remote_transcriber() -> None:
             load_audio_payload=load_audio_payload,
         )
     assert excinfo.value.code == FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_FAILED.value
+
+
+@pytest.mark.parametrize(
+    "enabled,diarize,expected",
+    [(False, True, False), (True, True, True), (True, False, False)],
+)
+async def test_review_request_is_explicitly_opt_in(enabled, diarize, expected):
+    service = ScriptedService(submit_responses=[accepted()])
+    client = make_client(service)
+    client.include_speaker_review = enabled
+    await client.submit(
+        filename="a.wav",
+        mimetype="audio/wav",
+        payload=io.BytesIO(b"audio"),
+        language="sv",
+        diarize=diarize,
+    )
+    assert (b'name="include_speaker_review"' in service.requests[0].read()) == expected
+
+
+@pytest.mark.parametrize("bound", [0, -1, True, 1.5])
+async def test_invalid_speaker_count_does_not_submit(bound):
+    service = ScriptedService()
+    with pytest.raises(ValueError):
+        await make_client(service).submit(
+            filename="a.wav",
+            mimetype="audio/wav",
+            payload=io.BytesIO(b"audio"),
+            language="sv",
+            max_speakers=bound,
+        )
+    assert service.requests == []

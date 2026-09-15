@@ -5,14 +5,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Query, Request, status
 
-from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
-from eneo.audit.domain.entity_types import EntityType
 from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_api_common import (
     FLOW_RUN_COMMIT_BEFORE_RESPONSE_CLAUSE,
     FLOW_RUN_FORBIDDEN_DESCRIPTION,
-    audit_actor_kwargs,
     commit_flow_runtime_write_before_response,
     error_response,
 )
@@ -205,7 +202,9 @@ steps without structured lines return `flow_transcript_corrections_segments_unav
 reassigns the whole segment, a present span reassigns exactly `original` at
 `[char_start, char_end)` of the raw text. `original_speaker` must equal the segment's
 stored label, span edits must not overlap within a segment and are exclusive with a
-whole-segment edit there, and a no-op edit (same speaker) is rejected. Failures return
+whole-segment edit there. Version 3 supports same-label confirmation and explicit
+unresolved decisions (null speaker); it requires the original segments_hash. Older
+clients cannot replace v3 decisions. Failures return
 `400` with code `flow_transcript_corrections_invalid_speaker_edit`.
 
 Service-key principals may edit corrections only for runs they own (key must have
@@ -283,6 +282,8 @@ def _present_transcript_corrections(
     view: FlowTranscriptCorrectionsView,
 ) -> FlowTranscriptCorrectionsPublic:
     return FlowTranscriptCorrectionsPublic(
+        schema_version=view.corrections.schema_version,
+        segments_hash=view.corrections.segments_hash,
         flow_run_id=view.corrections.flow_run_id,
         step_id=view.corrections.step_id,
         occurrences=[
@@ -420,6 +421,13 @@ async def list_flow_run_transcript_corrections(
             eneo_error_code=ErrorCodes.NOT_FOUND,
             code="not_found",
         ),
+        503: error_response(
+            description="Required audit logging is unavailable; no correction changes were committed.",
+            message="Evidence audit logging is unavailable.",
+            eneo_error_code=ErrorCodes.INTERNAL_SERVER_ERROR,
+            code=FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED,
+            context={"audit_required": True},
+        ),
     },
 )
 async def edit_flow_run_transcript_corrections(
@@ -451,6 +459,8 @@ async def edit_flow_run_transcript_corrections(
             run_id=run_id,
             step_id=step_id,
             expected_revision=corrections_in.expected_revision,
+            schema_version=corrections_in.schema_version,
+            expected_segments_hash=corrections_in.segments_hash,
             occurrences=[
                 TranscriptCorrectionOccurrence(
                     segment_index=occurrence.segment_index,
@@ -469,33 +479,10 @@ async def edit_flow_run_transcript_corrections(
                     original=edit.original,
                     original_speaker=edit.original_speaker,
                     speaker=edit.speaker,
+                    decision=edit.decision,
                 )
                 for edit in corrections_in.speaker_edits
             ],
-        )
-        user = container.user()
-        actor_kwargs = audit_actor_kwargs(user)
-        await container.audit_service().log_async(
-            tenant_id=user.tenant_id,
-            actor_id=actor_kwargs["actor_id"],
-            actor_type=actor_kwargs["actor_type"],
-            actor_api_key_id=actor_kwargs["actor_api_key_id"],
-            action=ActionType.FLOW_RUN_TRANSCRIPT_CORRECTIONS_EDITED,
-            entity_type=EntityType.FLOW_RUN,
-            entity_id=run_id,
-            description="Replaced transcript corrections for a flow run step",
-            metadata=AuditMetadata.standard(
-                actor=user,
-                target=view.corrections,
-                extra={
-                    "flow_id": str(id),
-                    "run_id": str(run_id),
-                    "step_id": str(step_id),
-                    "occurrence_count": len(view.corrections.occurrences_json),
-                    "speaker_edit_count": len(view.corrections.speaker_edits_json),
-                    "revision": view.corrections.revision,
-                },
-            ),
         )
         response = _present_transcript_corrections(view)
     return response

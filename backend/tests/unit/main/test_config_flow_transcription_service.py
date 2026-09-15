@@ -19,7 +19,15 @@ _BASE_KWARGS: dict[str, object] = {
 
 
 def make_settings(**overrides: object) -> Settings:
-    return Settings(**{**_BASE_KWARGS, **overrides})
+    return Settings(
+        **{
+            **_BASE_KWARGS,
+            "flow_transcription_service_url": None,
+            "flow_transcription_service_api_key": None,
+            "flow_transcription_include_speaker_review": False,
+            **overrides,
+        }
+    )
 
 
 def test_unset_service_is_valid_default() -> None:
@@ -61,3 +69,13 @@ def test_poll_timeout_must_stay_below_task_execution_timeout() -> None:
 def test_timeouts_must_be_positive(field: str) -> None:
     with pytest.raises(SystemExit):
         make_settings(**{field: 0})
+
+
+def test_speaker_review_rollout_is_disabled_by_default():
+    assert make_settings().flow_transcription_include_speaker_review is False
+    assert (
+        make_settings(
+            flow_transcription_include_speaker_review=True
+        ).flow_transcription_include_speaker_review
+        is True
+    )

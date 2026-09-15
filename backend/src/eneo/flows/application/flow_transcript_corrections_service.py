@@ -13,6 +13,10 @@ from dataclasses import dataclass
 from typing import Any, cast
 from uuid import UUID
 
+from eneo.audit.application.audit_metadata import AuditMetadata
+from eneo.audit.application.audit_service import AuditService
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
 from eneo.flows.application.flow_run_access_policy import FlowRunAccessPolicy
 from eneo.flows.domain.transcript_corrections import (
     FlowTranscriptCorrectionSet,
@@ -24,6 +28,7 @@ from eneo.flows.domain.transcript_corrections import (
     segments_content_hash,
     sort_occurrences,
     sort_speaker_edits,
+    validate_correction_partitions,
     validate_occurrences,
     validate_speaker_edits,
 )
@@ -76,11 +81,13 @@ class FlowTranscriptCorrectionsService:
         transcript_corrections_repo: FlowTranscriptCorrectionsRepository,
         access_policy: FlowRunAccessPolicy,
         flow_run_repo: FlowRunRepository,
+        audit_service: AuditService,
     ):
         self.user = user
         self.transcript_corrections_repo = transcript_corrections_repo
         self.access_policy = access_policy
         self.flow_run_repo = flow_run_repo
+        self.audit_service = audit_service
 
     async def list_for_run(
         self,
@@ -129,7 +136,15 @@ class FlowTranscriptCorrectionsService:
         expected_revision: int | None,
         occurrences: list[TranscriptCorrectionOccurrence],
         speaker_edits: list[TranscriptSpeakerEdit] | None = None,
+        schema_version: int = 2,
+        expected_segments_hash: str | None = None,
     ) -> FlowTranscriptCorrectionsView:
+        if schema_version not in (2, 3):
+            raise FlowBadRequestException(
+                "Unsupported transcript correction schema version.",
+                code=FlowApiErrorCode.TRANSCRIPT_CORRECTIONS_INVALID_SPEAKER_EDIT,
+                context={"reason": "client_upgrade_required"},
+            )
         speaker_edits = speaker_edits or []
         run = await self.access_policy.load_run(
             run_id=run_id,
@@ -140,6 +155,7 @@ class FlowTranscriptCorrectionsService:
             run_id=run.id,
             step_id=step_id,
             tenant_id=self.user.tenant_id,
+            for_update=True,
         )
         if step_result is None:
             raise NotFoundException("Flow run step result not found.")
@@ -150,14 +166,54 @@ class FlowTranscriptCorrectionsService:
                 code=FlowApiErrorCode.TRANSCRIPT_CORRECTIONS_SEGMENTS_UNAVAILABLE,
                 context={"step_id": str(step_id)},
             )
+        current_hash = segments_content_hash(segments)
+        if (schema_version >= 3 and expected_segments_hash != current_hash) or (
+            expected_segments_hash is not None
+            and expected_segments_hash != current_hash
+        ):
+            raise FlowBadRequestException(
+                "The source transcript changed. Reload before reviewing.",
+                code=FlowApiErrorCode.TRANSCRIPT_CORRECTIONS_STALE_REVISION,
+                context={"reason": "stale_segments"},
+            )
+        existing = await self.transcript_corrections_repo.get_for_step(
+            run_id=run.id,
+            step_id=step_id,
+            tenant_id=self.user.tenant_id,
+        )
+        if existing is not None and existing.schema_version >= 3 and schema_version < 3:
+            raise FlowBadRequestException(
+                "This correction set requires a version 3 client.",
+                code=FlowApiErrorCode.TRANSCRIPT_CORRECTIONS_STALE_REVISION,
+                context={"reason": "client_upgrade_required"},
+            )
         try:
             validate_occurrences(segments, occurrences)
+            if schema_version >= 3:
+                validate_correction_partitions(occurrences, speaker_edits)
         except TranscriptCorrectionInvalidOccurrenceError as exc:
             raise FlowBadRequestException(
                 "A correction occurrence does not match the stored transcript.",
                 code=FlowApiErrorCode.TRANSCRIPT_CORRECTIONS_INVALID_OCCURRENCE,
                 context={"reason": exc.reason, **exc.context},
             ) from exc
+        if schema_version < 3 and any(
+            edit.decision != "confirmed"
+            or edit.speaker == edit.original_speaker
+            or edit.original_speaker is None
+            for edit in speaker_edits
+        ):
+            raise FlowBadRequestException(
+                "Speaker review decisions require schema version 3.",
+                code=FlowApiErrorCode.TRANSCRIPT_CORRECTIONS_INVALID_SPEAKER_EDIT,
+                context={
+                    "reason": "speaker_unchanged"
+                    if any(
+                        edit.speaker == edit.original_speaker for edit in speaker_edits
+                    )
+                    else "client_upgrade_required"
+                },
+            )
         try:
             validate_speaker_edits(segments, speaker_edits)
         except TranscriptSpeakerEditInvalidError as exc:
@@ -178,6 +234,7 @@ class FlowTranscriptCorrectionsService:
                 speaker_edits_json=[edit.as_json() for edit in canonical_speaker_edits],
                 segments_hash=segments_content_hash(segments),
                 expected_revision=expected_revision,
+                schema_version=schema_version,
                 principal=FlowPrincipal.from_user(self.user),
             )
         except FlowTranscriptCorrectionsStaleRevisionError as exc:
@@ -189,4 +246,38 @@ class FlowTranscriptCorrectionsService:
                     "current_revision": exc.current_revision,
                 },
             ) from exc
+        try:
+            await self.audit_service.log(
+                tenant_id=self.user.tenant_id,
+                user=self.user,
+                action=ActionType.FLOW_RUN_TRANSCRIPT_CORRECTIONS_EDITED,
+                entity_type=EntityType.FLOW_RUN,
+                entity_id=run.id,
+                description="Replaced transcript corrections for a flow run step",
+                metadata=AuditMetadata.standard(
+                    actor=self.user,
+                    target=saved,
+                    extra={
+                        "flow_id": str(flow_id),
+                        "run_id": str(run.id),
+                        "step_id": str(step_id),
+                        "occurrence_count": len(saved.occurrences_json),
+                        "speaker_edit_count": len(saved.speaker_edits_json),
+                        "revision": saved.revision,
+                        "schema_version": saved.schema_version,
+                    },
+                ),
+                required=True,
+            )
+        except Exception as exc:
+            from eneo.flows.application.flow_trace_audit import (
+                raise_flow_trace_audit_unavailable,
+            )
+
+            raise_flow_trace_audit_unavailable(
+                user=self.user,
+                run=run,
+                action=ActionType.FLOW_RUN_TRANSCRIPT_CORRECTIONS_EDITED,
+                cause=exc,
+            )
         return FlowTranscriptCorrectionsView(corrections=saved, stale=False)

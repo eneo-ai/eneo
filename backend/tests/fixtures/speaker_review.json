@@ -1,0 +1,601 @@
+{
+  "contract_version": 1,
+  "cases": [
+    {
+      "name": "legacy",
+      "input": {
+        "language": "sv",
+        "duration_seconds": 3.0,
+        "model": "fixture",
+        "text": "[00:00:00 - 00:00:03] SPEAKER_00: Vi ses imorgon.",
+        "segments": [
+          {
+            "start": 0.0,
+            "end": 3.0,
+            "speaker": "SPEAKER_00",
+            "text": "Vi ses imorgon.",
+            "words": [
+              {
+                "word": "Vi",
+                "start": 0.0,
+                "end": 0.5,
+                "probability": null
+              },
+              {
+                "word": "ses",
+                "start": 1.0,
+                "end": 1.5,
+                "probability": null
+              },
+              {
+                "word": "imorgon.",
+                "start": 2.0,
+                "end": 3.0,
+                "probability": null
+              }
+            ],
+            "speaker_attribution": null,
+            "overlap_ids": []
+          }
+        ],
+        "alignment": "provider_words",
+        "speaker_review": null
+      },
+      "review": null,
+      "result": {
+        "language": "sv",
+        "duration_seconds": 3.0,
+        "model": "fixture",
+        "text": "[00:00:00 - 00:00:03] SPEAKER_00: Vi ses imorgon.",
+        "segments": [
+          {
+            "start": 0.0,
+            "end": 3.0,
+            "speaker": "SPEAKER_00",
+            "text": "Vi ses imorgon.",
+            "words": [
+              {
+                "word": "Vi",
+                "start": 0.0,
+                "end": 0.5,
+                "probability": null
+              },
+              {
+                "word": "ses",
+                "start": 1.0,
+                "end": 1.5,
+                "probability": null
+              },
+              {
+                "word": "imorgon.",
+                "start": 2.0,
+                "end": 3.0,
+                "probability": null
+              }
+            ],
+            "speaker_attribution": null,
+            "overlap_ids": []
+          }
+        ],
+        "alignment": "provider_words",
+        "speaker_review": null
+      }
+    },
+    {
+      "name": "clear",
+      "input": {
+        "language": "sv",
+        "duration_seconds": 3.0,
+        "model": "fixture",
+        "text": "[00:00:00 - 00:00:03] SPEAKER_00: Vi ses imorgon.",
+        "segments": [
+          {
+            "start": 0.0,
+            "end": 3.0,
+            "speaker": "SPEAKER_00",
+            "text": "Vi ses imorgon.",
+            "words": [
+              {
+                "word": "Vi",
+                "start": 0.0,
+                "end": 0.5,
+                "probability": null
+              },
+              {
+                "word": "ses",
+                "start": 1.0,
+                "end": 1.5,
+                "probability": null
+              },
+              {
+                "word": "imorgon.",
+                "start": 2.0,
+                "end": 3.0,
+                "probability": null
+              }
+            ],
+            "speaker_attribution": null,
+            "overlap_ids": []
+          }
+        ],
+        "alignment": "provider_words",
+        "speaker_review": null
+      },
+      "review": {
+        "version": 1,
+        "overlap_detection": "available",
+        "overlaps": []
+      },
+      "result": {
+        "language": "sv",
+        "duration_seconds": 3.0,
+        "model": "fixture",
+        "text": "[00:00:00 - 00:00:03] SPEAKER_00: Vi ses imorgon.",
+        "segments": [
+          {
+            "start": 0.0,
+            "end": 3.0,
+            "speaker": "SPEAKER_00",
+            "text": "Vi ses imorgon.",
+            "words": [
+              {
+                "word": "Vi",
+                "start": 0.0,
+                "end": 0.5,
+                "probability": null
+              },
+              {
+                "word": "ses",
+                "start": 1.0,
+                "end": 1.5,
+                "probability": null
+              },
+              {
+                "word": "imorgon.",
+                "start": 2.0,
+                "end": 3.0,
+                "probability": null
+              }
+            ],
+            "speaker_attribution": "assigned",
+            "overlap_ids": []
+          }
+        ],
+        "alignment": "provider_words",
+        "speaker_review": {
+          "version": 1,
+          "overlap_detection": "available",
+          "overlaps": []
+        }
+      }
+    },
+    {
+      "name": "overlap",
+      "input": {
+        "language": "sv",
+        "duration_seconds": 3.0,
+        "model": "fixture",
+        "text": "[00:00:00 - 00:00:03] SPEAKER_00: Vi ses imorgon.",
+        "segments": [
+          {
+            "start": 0.0,
+            "end": 3.0,
+            "speaker": "SPEAKER_00",
+            "text": "Vi ses imorgon.",
+            "words": [
+              {
+                "word": "Vi",
+                "start": 0.0,
+                "end": 0.5,
+                "probability": null
+              },
+              {
+                "word": "ses",
+                "start": 1.0,
+                "end": 1.5,
+                "probability": null
+              },
+              {
+                "word": "imorgon.",
+                "start": 2.0,
+                "end": 3.0,
+                "probability": null
+              }
+            ],
+            "speaker_attribution": null,
+            "overlap_ids": []
+          }
+        ],
+        "alignment": "provider_words",
+        "speaker_review": null
+      },
+      "review": {
+        "version": 1,
+        "overlap_detection": "available",
+        "overlaps": [
+          {
+            "id": "overlap_0000",
+            "start": 1.0,
+            "end": 1.5,
+            "detected_speaker_count": 2
+          }
+        ]
+      },
+      "result": {
+        "language": "sv",
+        "duration_seconds": 3.0,
+        "model": "fixture",
+        "text": "[00:00:00 - 00:00:00] SPEAKER_00: Vi\n[00:00:01 - 00:00:01] [Överlappande tal – osäker talare]: ses\n[00:00:02 - 00:00:03] SPEAKER_00: imorgon.",
+        "segments": [
+          {
+            "start": 0.0,
+            "end": 0.5,
+            "speaker": "SPEAKER_00",
+            "text": "Vi",
+            "words": [
+              {
+                "word": "Vi",
+                "start": 0.0,
+                "end": 0.5,
+                "probability": null
+              }
+            ],
+            "speaker_attribution": "assigned",
+            "overlap_ids": []
+          },
+          {
+            "start": 1.0,
+            "end": 1.5,
+            "speaker": "SPEAKER_00",
+            "text": "ses",
+            "words": [
+              {
+                "word": "ses",
+                "start": 1.0,
+                "end": 1.5,
+                "probability": null
+              }
+            ],
+            "speaker_attribution": "provisional",
+            "overlap_ids": [
+              "overlap_0000"
+            ]
+          },
+          {
+            "start": 2.0,
+            "end": 3.0,
+            "speaker": "SPEAKER_00",
+            "text": "imorgon.",
+            "words": [
+              {
+                "word": "imorgon.",
+                "start": 2.0,
+                "end": 3.0,
+                "probability": null
+              }
+            ],
+            "speaker_attribution": "assigned",
+            "overlap_ids": []
+          }
+        ],
+        "alignment": "provider_words",
+        "speaker_review": {
+          "version": 1,
+          "overlap_detection": "available",
+          "overlaps": [
+            {
+              "id": "overlap_0000",
+              "start": 1.0,
+              "end": 1.5,
+              "detected_speaker_count": 2
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "three-voices",
+      "input": {
+        "language": "sv",
+        "duration_seconds": 3.0,
+        "model": "fixture",
+        "text": "[00:00:00 - 00:00:03] SPEAKER_00: Vi ses imorgon.",
+        "segments": [
+          {
+            "start": 0.0,
+            "end": 3.0,
+            "speaker": "SPEAKER_00",
+            "text": "Vi ses imorgon.",
+            "words": [
+              {
+                "word": "Vi",
+                "start": 0.0,
+                "end": 0.5,
+                "probability": null
+              },
+              {
+                "word": "ses",
+                "start": 1.0,
+                "end": 1.5,
+                "probability": null
+              },
+              {
+                "word": "imorgon.",
+                "start": 2.0,
+                "end": 3.0,
+                "probability": null
+              }
+            ],
+            "speaker_attribution": null,
+            "overlap_ids": []
+          }
+        ],
+        "alignment": "provider_words",
+        "speaker_review": null
+      },
+      "review": {
+        "version": 1,
+        "overlap_detection": "available",
+        "overlaps": [
+          {
+            "id": "overlap_0000",
+            "start": 1.0,
+            "end": 1.2,
+            "detected_speaker_count": 2
+          },
+          {
+            "id": "overlap_0001",
+            "start": 1.2,
+            "end": 1.4,
+            "detected_speaker_count": 3
+          },
+          {
+            "id": "overlap_0002",
+            "start": 1.4,
+            "end": 1.5,
+            "detected_speaker_count": 2
+          }
+        ]
+      },
+      "result": {
+        "language": "sv",
+        "duration_seconds": 3.0,
+        "model": "fixture",
+        "text": "[00:00:00 - 00:00:00] SPEAKER_00: Vi\n[00:00:01 - 00:00:01] [Överlappande tal – osäker talare]: ses\n[00:00:02 - 00:00:03] SPEAKER_00: imorgon.",
+        "segments": [
+          {
+            "start": 0.0,
+            "end": 0.5,
+            "speaker": "SPEAKER_00",
+            "text": "Vi",
+            "words": [
+              {
+                "word": "Vi",
+                "start": 0.0,
+                "end": 0.5,
+                "probability": null
+              }
+            ],
+            "speaker_attribution": "assigned",
+            "overlap_ids": []
+          },
+          {
+            "start": 1.0,
+            "end": 1.5,
+            "speaker": "SPEAKER_00",
+            "text": "ses",
+            "words": [
+              {
+                "word": "ses",
+                "start": 1.0,
+                "end": 1.5,
+                "probability": null
+              }
+            ],
+            "speaker_attribution": "provisional",
+            "overlap_ids": [
+              "overlap_0000",
+              "overlap_0001",
+              "overlap_0002"
+            ]
+          },
+          {
+            "start": 2.0,
+            "end": 3.0,
+            "speaker": "SPEAKER_00",
+            "text": "imorgon.",
+            "words": [
+              {
+                "word": "imorgon.",
+                "start": 2.0,
+                "end": 3.0,
+                "probability": null
+              }
+            ],
+            "speaker_attribution": "assigned",
+            "overlap_ids": []
+          }
+        ],
+        "alignment": "provider_words",
+        "speaker_review": {
+          "version": 1,
+          "overlap_detection": "available",
+          "overlaps": [
+            {
+              "id": "overlap_0000",
+              "start": 1.0,
+              "end": 1.2,
+              "detected_speaker_count": 2
+            },
+            {
+              "id": "overlap_0001",
+              "start": 1.2,
+              "end": 1.4,
+              "detected_speaker_count": 3
+            },
+            {
+              "id": "overlap_0002",
+              "start": 1.4,
+              "end": 1.5,
+              "detected_speaker_count": 2
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "unavailable",
+      "input": {
+        "language": "sv",
+        "duration_seconds": 3.0,
+        "model": "fixture",
+        "text": "[00:00:00 - 00:00:03] SPEAKER_00: Vi ses imorgon.",
+        "segments": [
+          {
+            "start": 0.0,
+            "end": 3.0,
+            "speaker": "SPEAKER_00",
+            "text": "Vi ses imorgon.",
+            "words": [
+              {
+                "word": "Vi",
+                "start": 0.0,
+                "end": 0.5,
+                "probability": null
+              },
+              {
+                "word": "ses",
+                "start": 1.0,
+                "end": 1.5,
+                "probability": null
+              },
+              {
+                "word": "imorgon.",
+                "start": 2.0,
+                "end": 3.0,
+                "probability": null
+              }
+            ],
+            "speaker_attribution": null,
+            "overlap_ids": []
+          }
+        ],
+        "alignment": "provider_words",
+        "speaker_review": null
+      },
+      "review": {
+        "version": 1,
+        "overlap_detection": "unavailable",
+        "overlaps": []
+      },
+      "result": {
+        "language": "sv",
+        "duration_seconds": 3.0,
+        "model": "fixture",
+        "text": "[00:00:00 - 00:00:03] SPEAKER_00: Vi ses imorgon.",
+        "segments": [
+          {
+            "start": 0.0,
+            "end": 3.0,
+            "speaker": "SPEAKER_00",
+            "text": "Vi ses imorgon.",
+            "words": [
+              {
+                "word": "Vi",
+                "start": 0.0,
+                "end": 0.5,
+                "probability": null
+              },
+              {
+                "word": "ses",
+                "start": 1.0,
+                "end": 1.5,
+                "probability": null
+              },
+              {
+                "word": "imorgon.",
+                "start": 2.0,
+                "end": 3.0,
+                "probability": null
+              }
+            ],
+            "speaker_attribution": "assigned",
+            "overlap_ids": []
+          }
+        ],
+        "alignment": "provider_words",
+        "speaker_review": {
+          "version": 1,
+          "overlap_detection": "unavailable",
+          "overlaps": []
+        }
+      }
+    },
+    {
+      "name": "wordless-unknown",
+      "input": {
+        "language": "sv",
+        "duration_seconds": 3.0,
+        "model": "fixture",
+        "text": "[00:00:00 - 00:00:03] SPEAKER_00: Vi ses imorgon.",
+        "segments": [
+          {
+            "start": 0.0,
+            "end": 3.0,
+            "speaker": null,
+            "text": "Det går inte att avgöra.",
+            "words": [],
+            "speaker_attribution": null,
+            "overlap_ids": []
+          }
+        ],
+        "alignment": "provider_words",
+        "speaker_review": null
+      },
+      "review": {
+        "version": 1,
+        "overlap_detection": "available",
+        "overlaps": [
+          {
+            "id": "overlap_0000",
+            "start": 1.0,
+            "end": 2.0,
+            "detected_speaker_count": 2
+          }
+        ]
+      },
+      "result": {
+        "language": "sv",
+        "duration_seconds": 3.0,
+        "model": "fixture",
+        "text": "[00:00:00 - 00:00:03] [Överlappande tal – osäker talare]: Det går inte att avgöra.",
+        "segments": [
+          {
+            "start": 0.0,
+            "end": 3.0,
+            "speaker": null,
+            "text": "Det går inte att avgöra.",
+            "words": [],
+            "speaker_attribution": "provisional",
+            "overlap_ids": [
+              "overlap_0000"
+            ]
+          }
+        ],
+        "alignment": "provider_words",
+        "speaker_review": {
+          "version": 1,
+          "overlap_detection": "available",
+          "overlaps": [
+            {
+              "id": "overlap_0000",
+              "start": 1.0,
+              "end": 2.0,
+              "detected_speaker_count": 2
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

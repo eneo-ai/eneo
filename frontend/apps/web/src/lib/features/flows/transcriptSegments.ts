@@ -18,6 +18,11 @@ export type TranscriptSegment = {
   /** Diarization label (`SPEAKER_00`) or, in a renamed transcript, a name. */
   speaker: string | null;
   text: string;
+  speakerAttribution?: string | null;
+  overlapIds?: string[];
+  overlaps?: { id: string; start: number; end: number; detected_speaker_count: number }[];
+  reviewDetection?: string;
+  segmentsHash?: string;
   /** Timed words inside the line, when the service produced them. */
   words?: TranscriptWord[];
 };
@@ -171,18 +176,55 @@ export function segmentsFromMetadata(transcription: Payload): TranscriptSegment[
   const segments: TranscriptSegment[] = [];
   for (const item of raw) {
     const entry = record(item);
-    if (!entry) continue;
+    if (!entry) return null;
     const start = finite(entry.start);
     const end = finite(entry.end);
-    if (start === null || end === null || typeof entry.text !== "string") continue;
+    if (start === null || end === null || typeof entry.text !== "string") return null;
     const fileIndex = finite(entry.file_index) ?? 0;
+    const reviews = record(transcription?.speaker_review)?.files;
+    const review = Array.isArray(reviews)
+      ? record(reviews.find((file) => record(file)?.file_index === fileIndex))
+      : null;
+    const overlapIds = Array.isArray(entry.overlap_ids) ? entry.overlap_ids : [];
+    const overlaps = Array.isArray(review?.overlaps)
+      ? review.overlaps.flatMap((value) => {
+          const overlap = record(value);
+          if (
+            !overlap ||
+            typeof overlap.id !== "string" ||
+            !overlapIds.includes(overlap.id) ||
+            finite(overlap.start) === null ||
+            finite(overlap.end) === null ||
+            finite(overlap.detected_speaker_count) === null
+          )
+            return [];
+          return [
+            {
+              id: overlap.id,
+              start: overlap.start as number,
+              end: overlap.end as number,
+              detected_speaker_count: overlap.detected_speaker_count as number
+            }
+          ];
+        })
+      : [];
     segments.push({
       index: segments.length,
       fileIndex,
       start,
       end: Math.max(start, end),
       speaker: typeof entry.speaker === "string" && entry.speaker ? entry.speaker : null,
-      text: entry.text
+      text: entry.text,
+      ...(review ? { overlaps, reviewDetection: String(review.overlap_detection) } : {}),
+      ...(typeof entry.speaker_attribution === "string"
+        ? { speakerAttribution: entry.speaker_attribution }
+        : {}),
+      ...(Array.isArray(entry.overlap_ids)
+        ? { overlapIds: entry.overlap_ids.filter((id): id is string => typeof id === "string") }
+        : {}),
+      ...(typeof transcription?.segments_hash === "string"
+        ? { segmentsHash: transcription.segments_hash }
+        : {})
     });
   }
   return segments.length > 0 ? segments : null;
@@ -250,7 +292,10 @@ export function applySpeakerNames(
   names: Readonly<Record<string, string | null | undefined>>
 ): TranscriptSegment[] {
   return segments.map((segment) => {
-    const name = segment.speaker ? names[segment.speaker]?.trim() : undefined;
+    const name =
+      segment.speakerAttribution !== "provisional" && segment.speaker
+        ? names[segment.speaker]?.trim()
+        : undefined;
     return name ? { ...segment, speaker: name } : segment;
   });
 }
@@ -308,4 +353,52 @@ export function formatClock(totalSeconds: number, withHours = false): string {
   const mm = String(m).padStart(2, "0");
   const ss = String(s).padStart(2, "0");
   return withHours || h > 0 ? `${String(h).padStart(2, "0")}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+export type TranscriptFileReview = {
+  fileIndex: number;
+  overlapDetection: string;
+  detailsOmitted: boolean;
+  overlaps: { id: string; start: number; end: number; detected_speaker_count: number }[];
+};
+
+/** File-level evidence includes intervals with no transcript words to assign. */
+export function fileReviewsFromMetadata(
+  transcription: Record<string, unknown> | null | undefined
+): TranscriptFileReview[] {
+  const review = record(transcription?.speaker_review);
+  const files = review?.files;
+  if (!Array.isArray(files)) return [];
+  return files.flatMap((value) => {
+    const file = record(value);
+    const fileIndex = finite(file?.file_index);
+    if (!file || fileIndex === null || !Number.isInteger(fileIndex) || fileIndex < 0) return [];
+    return [
+      {
+        fileIndex,
+        overlapDetection:
+          typeof file.overlap_detection === "string" ? file.overlap_detection : "unknown",
+        detailsOmitted: !!(file.details_omitted_reason || review?.details_omitted_reason),
+        overlaps: Array.isArray(file.overlaps)
+          ? file.overlaps.flatMap((value) => {
+              const overlap = record(value);
+              const start = finite(overlap?.start),
+                end = finite(overlap?.end),
+                count = finite(overlap?.detected_speaker_count);
+              return overlap &&
+                typeof overlap.id === "string" &&
+                overlap.id.length > 0 &&
+                start !== null &&
+                start >= 0 &&
+                end !== null &&
+                end > start &&
+                count !== null &&
+                Number.isInteger(count) &&
+                count >= 2
+                ? [{ id: overlap.id, start, end, detected_speaker_count: count }]
+                : [];
+            })
+          : []
+      }
+    ];
+  });
 }

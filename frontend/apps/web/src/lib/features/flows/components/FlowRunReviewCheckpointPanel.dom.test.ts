@@ -125,6 +125,16 @@ function buildEneo({
         inputFileSignedUrl:
           inputFileSignedUrl ??
           vi.fn(async () => ({ url: "https://app.test/f", expires_at: 4102444800 })),
+        transcriptCorrections: {
+          list: vi.fn(async () => []),
+          save: vi.fn(async (args) => ({
+            revision: 1,
+            stale: false,
+            occurrences: args.occurrences,
+            speaker_edits: args.speakerEdits
+          }))
+        },
+        transcriptWords: { get: vi.fn(async () => null) },
         reviewCheckpoints: {
           active: active ?? vi.fn(async () => activeCheckpoint),
           edits: edits ?? vi.fn(async () => emptyHistory),
@@ -745,6 +755,123 @@ describe("FlowRunReviewCheckpointPanel speaker mapping", () => {
     };
   }
 
+  it.each([false, true])(
+    "approval waits for corrections; failed save blocks downstream execution (%s)",
+    async (fails) => {
+      let release!: (value: unknown) => void;
+      const checkpoint = buildSpeakerCheckpoint();
+      const approved = { ...checkpoint, state: "approved" as const, revision: 2 };
+      const approve = vi.fn(async () => approved);
+      const resume = vi.fn(async () => ({
+        checkpoint: { ...approved, state: "resumed" as const, revision: 3 },
+        run: buildRun("queued")
+      }));
+      const steps = vi.fn(async () => [
+        {
+          step_id: "step-0",
+          step_order: 1,
+          runtime_input_file_ids: ["file-1"],
+          input_payload_json: {
+            transcription: {
+              file_ids: ["file-1"],
+              segments_hash: "a".repeat(64),
+              segments: [
+                {
+                  file_index: 0,
+                  start: 0,
+                  end: 4,
+                  speaker: "SPEAKER_00",
+                  speaker_attribution: "provisional",
+                  text: "Hej."
+                }
+              ]
+            }
+          }
+        }
+      ]);
+      const eneo = buildEneo({ activeCheckpoint: checkpoint, steps, approve, resume });
+      const save = vi.fn(
+        () =>
+          new Promise((resolve) => {
+            release = resolve;
+          })
+      );
+      eneo.flows.runs.transcriptCorrections.save = save as never;
+      render(FlowRunReviewCheckpointPanel, {
+        flowId: "flow-1",
+        runId: "run-1",
+        eneo: eneo as unknown as Eneo
+      });
+      const passage = await screen.findByRole("button", { name: /Markera hela passagen: Hej/ });
+      await waitFor(() =>
+        expect(
+          (screen.getByRole("button", { name: "Bekräfta alla förslag (1)" }) as HTMLButtonElement)
+            .disabled
+        ).toBe(false)
+      );
+      await fireEvent.click(passage);
+      await fireEvent.click(screen.getByRole("button", { name: "Bekräfta Anna" }));
+      await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+      await fireEvent.click(screen.getByRole("button", { name: "Godkänn och fortsätt" }));
+      expect(approve).not.toHaveBeenCalled();
+      expect(resume).not.toHaveBeenCalled();
+      release({ revision: 1, stale: fails, occurrences: [], speaker_edits: [] });
+      if (fails) {
+        await screen.findByText("Hämta osparade rättningar");
+        expect(approve).not.toHaveBeenCalled();
+        expect(resume).not.toHaveBeenCalled();
+      } else {
+        await waitFor(() => expect(resume).toHaveBeenCalledTimes(1));
+        expect(approve).toHaveBeenCalledTimes(1);
+        expect(resume).toHaveBeenCalledWith(
+          expect.objectContaining({
+            expectedCheckpointRevision: 2,
+            idempotencyKey: "flow-review-resume:checkpoint-1:2"
+          })
+        );
+      }
+    }
+  );
+
+  it("keeps an approved checkpoint available for resume retry after dispatch failure", async () => {
+    const checkpoint = buildSpeakerCheckpoint();
+    const approved = { ...checkpoint, state: "approved" as const, revision: 2 };
+    const resume = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("unavailable"))
+      .mockResolvedValueOnce({ checkpoint: { ...approved, state: "resumed", revision: 3 } });
+    const eneo = buildEneo({
+      activeCheckpoint: checkpoint,
+      approve: vi.fn(async () => approved),
+      resume,
+      steps: vi.fn(async () => [
+        {
+          step_id: "step-0",
+          step_order: 1,
+          input_payload_json: {
+            transcription: {
+              file_ids: ["file-1"],
+              segments: [{ file_index: 0, start: 0, end: 4, speaker: "SPEAKER_00", text: "Hej." }]
+            }
+          }
+        }
+      ])
+    });
+    render(FlowRunReviewCheckpointPanel, {
+      flowId: "flow-1",
+      runId: "run-1",
+      eneo: eneo as unknown as Eneo
+    });
+    const button = await screen.findByRole("button", { name: "Godkänn och fortsätt" });
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+    await fireEvent.click(button);
+    const retry = await screen.findByRole("button", { name: m.flow_run_review_resume() });
+    await waitFor(() => expect((retry as HTMLButtonElement).disabled).toBe(false));
+    await fireEvent.click(retry);
+    await waitFor(() => expect(resume).toHaveBeenCalledTimes(2));
+    expect(resume.mock.calls[0][0].idempotencyKey).toBe(resume.mock.calls[1][0].idempotencyKey);
+  });
+
   beforeEach(() => {
     vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(() => Promise.resolve());
     vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
@@ -781,7 +908,7 @@ describe("FlowRunReviewCheckpointPanel speaker mapping", () => {
       props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
     });
 
-    await screen.findByText(m.flow_run_review_speakers_title());
+    await screen.findAllByPlaceholderText("Välj eller skriv namn");
     await waitFor(() =>
       expect(inputFileSignedUrl).toHaveBeenCalledWith(
         expect.objectContaining({ flowId: "flow-1", runId: "run-1", fileId: "file-1" })
@@ -792,13 +919,9 @@ describe("FlowRunReviewCheckpointPanel speaker mapping", () => {
     const line = await screen.findByText("Hej.");
     expect(line.closest("[data-turn-index]")?.textContent).toContain("Anna");
     expect(screen.getByText("Hallå.").closest("[data-turn-index]")?.textContent).toContain(
-      "SPEAKER_01"
+      "Talare 2"
     );
-    expect(
-      screen
-        .getByRole("button", { name: m.flow_run_transcript_seek_to({ time: "00:00" }) })
-        .hasAttribute("disabled")
-    ).toBe(false);
+    expect(screen.getByRole("button", { name: "00:00" }).hasAttribute("disabled")).toBe(false);
   });
 
   it("keeps the transcript visible and retries when audio context cannot be loaded", async () => {

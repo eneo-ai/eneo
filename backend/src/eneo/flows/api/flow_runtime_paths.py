@@ -56,6 +56,9 @@ FLOW_RUN_TRANSCRIPT_CORRECTIONS_PATH: Final[str] = (
 FLOW_RUN_STEP_TRANSCRIPT_CORRECTIONS_PATH: Final[str] = (
     "/{id}/runs/{run_id}/steps/{step_id}/transcript-corrections/"
 )
+FLOW_RUN_TRANSCRIPT_REGENERATION_PATH: Final[str] = (
+    "/{id}/runs/{run_id}/steps/{step_id}/transcript-regenerations/"
+)
 FLOW_RUN_STEP_TRANSCRIPT_WORDS_PATH: Final[str] = (
     "/{id}/runs/{run_id}/steps/{step_id}/transcript-words/"
 )

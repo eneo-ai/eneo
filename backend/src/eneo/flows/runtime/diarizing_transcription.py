@@ -93,4 +93,5 @@ class DiarizingFlowTranscriber:
             diarization="external",
             diarization_elapsed_ms=int((time.monotonic() - started) * 1000),
             alignment=labelled.alignment,
+            speaker_review=labelled.speaker_review,
         )
