@@ -353,6 +353,9 @@ jobs:
       - name: Install Playwright Chromium
         run: bun x playwright@1.61.1 install --with-deps chromium chromium-headless-shell
 
+      - name: Run frontend dev lifecycle tests
+        run: FORCE_COLOR=1 bun run test:dev-lifecycle
+
       - name: Run web unit & component tests
         run: FORCE_COLOR=1 bun run --filter '@eneo/web' test
 
