@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Barrier, Lock
 from types import ModuleType, SimpleNamespace
-from typing import Any, get_args
+from typing import Any, NoReturn, get_args
 from uuid import UUID
 
 from pytest import CaptureFixture, MonkeyPatch, mark, raises
@@ -10589,7 +10589,7 @@ def test_an_interrupted_edit_observation_still_deletes_its_seeded_flow(
     deleted: list[str] = []
     monkeypatch.setattr(harness, "_create_seed_flow", lambda **_kwargs: "flow-1")
 
-    def interrupted_seeding(**_kwargs: object) -> harness.SeededFlow:
+    def interrupted_seeding(**_kwargs: object) -> NoReturn:
         raise KeyboardInterrupt
 
     monkeypatch.setattr(harness, "_seed_edit_flow", interrupted_seeding)
@@ -10618,7 +10618,7 @@ def test_a_seeding_failure_whose_cleanup_also_fails_keeps_both_in_the_receipt(
     harness = _battle_harness()
     monkeypatch.setattr(harness, "_create_seed_flow", lambda **_kwargs: "flow-1")
 
-    def refused_seeding(**_kwargs: object) -> harness.SeededFlow:
+    def refused_seeding(**_kwargs: object) -> NoReturn:
         raise ValueError("assistant refused")
 
     def refused_delete(*, config: object, method: str, path: str) -> None:
