@@ -178,12 +178,13 @@ describe("FlowRunProgressPanel", () => {
   });
 
   it("ignores a superseded initial load's failure when a refresh already replaced it", async () => {
-    const [g0, g1] = [deferred<FlowGraph>(), deferred<FlowGraph>()];
+    const [g0, g1, g2] = [deferred<FlowGraph>(), deferred<FlowGraph>(), deferred<FlowGraph>()];
     const [s0, s1] = [deferred<FlowRunStep[]>(), deferred<FlowRunStep[]>()];
-    const eneo = makeEneo([g0, g1], [s0, s1]);
+    const eneo = makeEneo([g0, g1, g2], [s0, s1]);
+    const graph = eneo.flows.graph as unknown as { mock: { calls: unknown[] } };
     // Reopened with a cached snapshot: the panel shows it (and the refresh
     // button) while the initial read is still out.
-    render(FlowRunProgressPanel, {
+    const { rerender } = render(FlowRunProgressPanel, {
       props: {
         ...props(eneo, 0),
         initialSnapshot: {
@@ -194,15 +195,22 @@ describe("FlowRunProgressPanel", () => {
     await waitFor(() => expect(panel().textContent).toContain(m.flow_run_status_running()));
 
     await fireEvent.click(screen.getByRole("button", { name: m.flow_run_progress_refresh() }));
-    g1.resolve(graphWith("completed"));
-    s1.resolve(stepsWith("completed", "Klart"));
-    await waitFor(() => expect(panel().textContent).toContain("Klart"));
+    g1.resolve(graphWith("running"));
+    s1.resolve(stepsWith("running", "Delvis"));
+    await waitFor(() => expect(panel().textContent).toContain("Delvis"));
+
+    // The stalled initial read no longer counts: the next tick polls and the
+    // status moves on while that read is still out.
+    await rerender(props(eneo, 1));
+    await waitFor(() => expect(graph.mock.calls).toHaveLength(3));
+    g2.resolve(graphWith("completed"));
+    await waitFor(() => expect(panel().textContent).toContain(m.flow_run_status_completed()));
 
     g0.reject(new Error("gateway timeout"));
     s0.resolve(stepsWith("running"));
     await flush();
     expect(screen.queryByText(m.flow_run_progress_load_failed())).toBeNull();
-    expect(panel().textContent).toContain("Klart");
+    expect(panel().textContent).toContain(m.flow_run_status_completed());
   });
 
   it("says when a background refresh failed and clears it once one succeeds", async () => {

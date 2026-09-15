@@ -1,6 +1,7 @@
 <script lang="ts">
   import { type FlowGraph, type FlowRunStep, type Eneo } from "@eneo/eneo-js";
   import { onMount, untrack } from "svelte";
+  import { SvelteSet } from "svelte/reactivity";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
@@ -54,7 +55,10 @@
   let issuedReads = 0;
   let appliedDetailRead = 0;
   let appliedStatusRead = 0;
-  let detailReadsInFlight = 0;
+  // Detail reads that are still eligible to apply. A read a later detail
+  // read has superseded leaves the set at that moment, not when it settles,
+  // so a stalled request cannot keep polling paused.
+  const pendingDetailReads = new SvelteSet<number>();
   let detail: { graph: FlowGraph | null; steps: FlowRunStep[] } = { graph: null, steps: [] };
   let statusGraph: FlowGraph | null = null;
 
@@ -71,6 +75,9 @@
   ): boolean {
     if (read < appliedDetailRead) return false;
     appliedDetailRead = read;
+    for (const pending of pendingDetailReads) {
+      if (pending < read) pendingDetailReads.delete(pending);
+    }
     detail = next;
     // Polls paused while this read was in flight, so every overlay is older
     // than what the audited list just said.
@@ -97,7 +104,7 @@
   // since the outputs were read leaves that step's details marked stale.
   let refreshingStatuses = false;
   async function refreshStepStatusesFromGraph() {
-    if (refreshingStatuses || loading || detailReadsInFlight > 0) return;
+    if (refreshingStatuses || loading || pendingDetailReads.size > 0) return;
     refreshingStatuses = true;
     const read = ++issuedReads;
     try {
@@ -123,7 +130,7 @@
     loading = snapshot.steps.length === 0;
     loadError = null;
     const read = ++issuedReads;
-    detailReadsInFlight += 1;
+    pendingDetailReads.add(read);
     try {
       const [graph, steps] = await Promise.all([fetchGraphSnapshot(), fetchStepStatuses()]);
       applyDetailRead(read, { graph, steps });
@@ -135,7 +142,7 @@
         loadError = m.flow_run_progress_load_failed();
       }
     } finally {
-      detailReadsInFlight -= 1;
+      pendingDetailReads.delete(read);
       loading = false;
     }
   }
@@ -144,7 +151,7 @@
     if (refreshing) return;
     refreshing = true;
     const read = ++issuedReads;
-    detailReadsInFlight += 1;
+    pendingDetailReads.add(read);
     try {
       const [graph, steps] = await Promise.all([fetchGraphSnapshot(), fetchStepStatuses()]);
       if (applyDetailRead(read, { graph, steps })) refreshFailed = false;
@@ -154,7 +161,7 @@
         refreshFailed = true;
       }
     } finally {
-      detailReadsInFlight -= 1;
+      pendingDetailReads.delete(read);
       refreshing = false;
     }
   }
