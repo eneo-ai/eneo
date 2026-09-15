@@ -5513,6 +5513,8 @@
   "flow_run_review_history_cause_reviewer_edit": "Ändrad av granskare",
   "flow_run_review_history_cause_corrections_folded": "Transkriptkorrigeringar tillämpade vid godkännande",
   "flow_run_review_history_editor_service": "Tjänstenyckel: {name}",
+  "flow_run_review_history_editor_you": "Du",
+  "flow_run_review_history_editor_user": "Granskare {id}",
   "flow_run_review_history_before": "Före ändringen",
   "flow_run_review_history_after": "Efter ändringen",
   "flow_run_review_history_load_more": "Visa fler ändringar",

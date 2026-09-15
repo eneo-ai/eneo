@@ -70,6 +70,15 @@
   let historyLoading = $state(false);
   let historyError: string | null = $state(null);
   let selectedHistoryRevision = $state<number | null>(null);
+  // Which checkpoint and cursor the next history page is for, so a retry
+  // re-asks the same question.
+  let historyRequest: { checkpointId: string; afterRevision: number | null } | null = $state(null);
+  // A save and an approval can each refresh the history while the other's
+  // request is still in flight; only the newest request may write state.
+  let historyGeneration = 0;
+  // The signed-in user's id, so their own changes read as "you"; other
+  // reviewers are named by id because the run has no user directory access.
+  let currentUserId = $state<string | null>(null);
   // The transcription step's stored segments and audio, loaded once per
   // checkpoint so the reviewer can listen while naming speakers.
   let storedSegments = $state<TranscriptSegment[] | null>(null);
@@ -206,6 +215,8 @@
   }
 
   async function loadHistory(target: FlowRunReviewCheckpoint, afterRevision: number | null = null) {
+    const generation = ++historyGeneration;
+    historyRequest = { checkpointId: target.id, afterRevision };
     historyLoading = true;
     historyError = null;
     try {
@@ -215,17 +226,25 @@
         checkpointId: target.id,
         afterRevision
       });
+      if (generation !== historyGeneration) return;
       const previous = history;
       history =
         afterRevision === null || previous === null
           ? page
           : { ...page, baseline: previous.baseline, items: [...previous.items, ...page.items] };
     } catch (error) {
+      if (generation !== historyGeneration) return;
       console.error("Failed to load review checkpoint history", error);
+      // Pages already shown stay; the failed page can be asked for again.
       historyError = getFlowRuntimeErrorMessage(error, m.flow_run_review_history_load_failed());
     } finally {
-      historyLoading = false;
+      if (generation === historyGeneration) historyLoading = false;
     }
+  }
+
+  function retryHistory() {
+    if (!checkpoint || !historyRequest || historyRequest.checkpointId !== checkpoint.id) return;
+    void loadHistory(checkpoint, historyRequest.afterRevision);
   }
 
   // The payload each history item changed: the page baseline for the first
@@ -241,11 +260,24 @@
       : m.flow_run_review_history_cause_reviewer_edit();
   }
 
-  function historyEditorLabel(item: FlowRunReviewCheckpointEdit): string | null {
+  function historyEditorLabel(item: FlowRunReviewCheckpointEdit): string {
     const service = item.edited_by_service_principal;
-    return service
-      ? m.flow_run_review_history_editor_service({ name: service.display_name })
-      : null;
+    if (service) return m.flow_run_review_history_editor_service({ name: service.display_name });
+    if (item.edited_by_user_id && item.edited_by_user_id === currentUserId) {
+      return m.flow_run_review_history_editor_you();
+    }
+    return m.flow_run_review_history_editor_user({
+      id: item.edited_by_user_id?.slice(0, 8) ?? item.edited_by_service_id?.slice(0, 8) ?? "?"
+    });
+  }
+
+  async function loadCurrentUser() {
+    try {
+      currentUserId = (await eneo.users.me()).id;
+    } catch (error) {
+      console.error("Failed to load the current user for review history labels", error);
+      currentUserId = null;
+    }
   }
 
   async function loadTranscriptContext(payload: Record<string, unknown> | null | undefined) {
@@ -477,6 +509,7 @@
   }
 
   onMount(() => {
+    void loadCurrentUser();
     void loadCheckpoint();
     const timer = window.setInterval(() => {
       nowMs = Date.now();
@@ -684,17 +717,20 @@
       </div>
       <Field.Description class="mt-1 text-xs">{m.flow_run_review_history_help()}</Field.Description>
       {#if historyError}
-        <Alert.Root variant="destructive" class="mt-2">
-          <Alert.Description>{historyError}</Alert.Description>
+        <Alert.Root variant="destructive" class="mt-2 flex items-center gap-3">
+          <Alert.Description class="flex-1">{historyError}</Alert.Description>
+          <Button variant="outline" size="sm" disabled={historyLoading} onclick={retryHistory}>
+            {m.retry()}
+          </Button>
         </Alert.Root>
-      {:else if history && history.items.length === 0}
+      {/if}
+      {#if history && history.items.length === 0}
         <Field.Description class="mt-2 text-xs"
           >{m.flow_run_review_history_empty()}</Field.Description
         >
       {:else if history}
         <ol class="mt-2 flex flex-col gap-1">
           {#each history.items as item, index (item.id)}
-            {@const editor = historyEditorLabel(item)}
             {@const selected = selectedHistoryRevision === item.revision}
             <li>
               <button
@@ -707,9 +743,7 @@
                   >{m.flow_run_review_history_revision({ revision: item.revision })}</span
                 >
                 <span>{historyCauseLabel(item.cause)}</span>
-                {#if editor}
-                  <span>{editor}</span>
-                {/if}
+                <span>{historyEditorLabel(item)}</span>
                 <span class="ml-auto">{formatReviewDeadline(item.created_at)}</span>
               </button>
               {#if selected}

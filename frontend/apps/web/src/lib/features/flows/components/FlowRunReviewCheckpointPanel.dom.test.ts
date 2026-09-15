@@ -118,6 +118,7 @@ function buildEneo({
   inputFileSignedUrl?: ReturnType<typeof vi.fn>;
 }) {
   return {
+    users: { me: vi.fn(async () => ({ id: "user-1" })) },
     flows: {
       runs: {
         steps: steps ?? vi.fn(async () => []),
@@ -148,12 +149,11 @@ describe("FlowRunReviewCheckpointPanel", () => {
     await screen.findByText(m.flow_run_review_no_active_checkpoint());
   });
 
-  it("lists the checkpoint's saved changes and shows what a selected one changed", async () => {
-    const checkpoint = buildCheckpoint("edited", 3);
-    const edits = vi.fn(async () => ({
+  function buildHistoryPage(checkpoint: FlowRunReviewCheckpoint): FlowRunReviewCheckpointEditPage {
+    return {
       baseline: {
         revision: 1,
-        payload_json: checkpoint.original_payload_json,
+        payload_json: checkpoint.original_payload_json ?? null,
         payload_sha256: "a".repeat(64)
       },
       items: [
@@ -176,8 +176,7 @@ describe("FlowRunReviewCheckpointPanel", () => {
           edited_by_service_id: null,
           edited_by_principal_type: "user",
           edited_by_service_principal: null,
-          created_at: "2026-03-17T10:06:00Z",
-          updated_at: "2026-03-17T10:06:00Z"
+          created_at: "2026-03-17T10:06:00Z"
         },
         {
           id: "edit-3",
@@ -188,20 +187,24 @@ describe("FlowRunReviewCheckpointPanel", () => {
           revision: 3,
           cause: "corrections_folded",
           corrections_revision_id: "rev-1",
-          payload_json: checkpoint.current_payload_json,
+          payload_json: checkpoint.current_payload_json ?? {},
           payload_sha256_before: "b".repeat(64),
           payload_sha256_after: "c".repeat(64),
           edited_by_user_id: null,
           edited_by_service_id: "service-1",
           edited_by_principal_type: "service_key",
           edited_by_service_principal: { id: "service-1", display_name: "Kommunroboten" },
-          created_at: "2026-03-17T10:07:00Z",
-          updated_at: "2026-03-17T10:07:00Z"
+          created_at: "2026-03-17T10:07:00Z"
         }
       ],
       next_after_revision: null,
       truncated: false
-    }));
+    };
+  }
+
+  it("lists the checkpoint's saved changes and shows what a selected one changed", async () => {
+    const checkpoint = buildCheckpoint("edited", 3);
+    const edits = vi.fn(async () => buildHistoryPage(checkpoint));
     const eneo = buildEneo({ activeCheckpoint: checkpoint, edits });
 
     render(FlowRunReviewCheckpointPanel, {
@@ -219,6 +222,8 @@ describe("FlowRunReviewCheckpointPanel", () => {
     expect(
       screen.getByText(m.flow_run_review_history_editor_service({ name: "Kommunroboten" }))
     ).toBeTruthy();
+    // The signed-in reviewer's own change reads as "you".
+    await screen.findByText(m.flow_run_review_history_editor_you());
 
     await fireEvent.click(
       screen.getByRole("button", {
@@ -231,6 +236,66 @@ describe("FlowRunReviewCheckpointPanel", () => {
     const panes = screen.getAllByText(/First pass\.|Reviewed answer\./);
     expect(panes.some((node) => node.textContent?.includes("First pass."))).toBe(true);
     expect(panes.some((node) => node.textContent?.includes("Reviewed answer."))).toBe(true);
+  });
+
+  it("names another reviewer's change by id, not as the signed-in user", async () => {
+    const checkpoint = buildCheckpoint("edited", 3);
+    const page = buildHistoryPage(checkpoint);
+    page.items[0] = { ...page.items[0], edited_by_user_id: "b2c3d4e5-0000-4000-8000-000000000002" };
+    const eneo = buildEneo({ activeCheckpoint: checkpoint, edits: vi.fn(async () => page) });
+
+    render(FlowRunReviewCheckpointPanel, {
+      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
+    });
+
+    await screen.findByText(m.flow_run_review_history_editor_user({ id: "b2c3d4e5" }));
+    expect(screen.queryByText(m.flow_run_review_history_editor_you())).toBeNull();
+  });
+
+  it("keeps the history it has and offers a retry when a page fails", async () => {
+    const checkpoint = buildCheckpoint("edited", 3);
+    const edits = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("network"))
+      .mockResolvedValueOnce(buildHistoryPage(checkpoint));
+    const eneo = buildEneo({ activeCheckpoint: checkpoint, edits });
+
+    render(FlowRunReviewCheckpointPanel, {
+      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
+    });
+
+    await screen.findByText(m.flow_run_review_history_load_failed());
+    await fireEvent.click(screen.getAllByRole("button", { name: m.retry() }).at(-1) as HTMLElement);
+    await screen.findByText(m.flow_run_review_history_revision({ revision: 2 }));
+    expect(screen.queryByText(m.flow_run_review_history_load_failed())).toBeNull();
+    expect(edits).toHaveBeenCalledTimes(2);
+  });
+
+  it("ignores a history response that arrives after a newer request", async () => {
+    const checkpoint = buildCheckpoint("edited", 3);
+    const fullPage = buildHistoryPage(checkpoint);
+    const stalePage = { ...fullPage, items: [fullPage.items[0]] };
+    let releaseStale: (page: FlowRunReviewCheckpointEditPage) => void = () => {};
+    const edits = vi
+      .fn()
+      .mockImplementationOnce(
+        () => new Promise<FlowRunReviewCheckpointEditPage>((resolve) => (releaseStale = resolve))
+      )
+      .mockResolvedValueOnce(fullPage);
+    const approve = vi.fn(async () => buildCheckpoint("approved", 3));
+    const eneo = buildEneo({ activeCheckpoint: checkpoint, edits, approve });
+
+    render(FlowRunReviewCheckpointPanel, {
+      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
+    });
+
+    // The first (stale) request is still pending when approval refreshes the history.
+    await screen.findByRole("button", { name: m.approve() });
+    await fireEvent.click(screen.getByRole("button", { name: m.approve() }));
+    await screen.findByText(m.flow_run_review_history_revision({ revision: 3 }));
+    releaseStale(stalePage);
+    await waitFor(() => expect(edits).toHaveBeenCalledTimes(2));
+    expect(screen.getByText(m.flow_run_review_history_revision({ revision: 3 }))).toBeTruthy();
   });
 
   it("renders the citation summary attached to the active checkpoint", async () => {

@@ -5513,6 +5513,8 @@
   "flow_run_review_history_cause_reviewer_edit": "Edited by a reviewer",
   "flow_run_review_history_cause_corrections_folded": "Transcript corrections applied at approval",
   "flow_run_review_history_editor_service": "Service key: {name}",
+  "flow_run_review_history_editor_you": "You",
+  "flow_run_review_history_editor_user": "Reviewer {id}",
   "flow_run_review_history_before": "Before this change",
   "flow_run_review_history_after": "After this change",
   "flow_run_review_history_load_more": "Show more changes",
