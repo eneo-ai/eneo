@@ -518,7 +518,8 @@ function signalProcess(pid, signal, asGroup = false) {
   try {
     process.kill(asGroup && process.platform !== "win32" ? -pid : pid, signal);
   } catch (error) {
-    if (error?.code !== "ESRCH") throw error;
+    // macOS reports EPERM for a group whose last member is an unreaped zombie.
+    if (error?.code !== "ESRCH" && error?.code !== "EPERM") throw error;
   }
 }
 
@@ -537,10 +538,14 @@ async function terminateChildren(children) {
     (child) => child.exitCode === null && child.signalCode === null,
   );
   for (const child of active) signalChild(child, "SIGTERM");
+  let timeout;
   await Promise.race([
     Promise.allSettled(active.map((child) => waitForChild(child))),
-    delay(shutdownTimeoutMs),
+    new Promise((resolveTimeout) => {
+      timeout = setTimeout(resolveTimeout, shutdownTimeoutMs);
+    }),
   ]);
+  clearTimeout(timeout);
   for (const child of active) signalChild(child, "SIGKILL");
 }
 
@@ -567,8 +572,12 @@ async function runDevelopmentStack() {
   };
   const handleInterrupt = () => handleSignal("SIGINT");
   const handleTermination = () => handleSignal("SIGTERM");
-  process.once("SIGINT", handleInterrupt);
-  process.once("SIGTERM", handleTermination);
+  // Workers run in their own sessions, so a terminal hangup only reaches the
+  // controller; forward it like SIGTERM instead of orphaning them. Handlers
+  // stay armed so repeated Ctrl+C keeps forwarding rather than skipping cleanup.
+  process.on("SIGINT", handleInterrupt);
+  process.on("SIGTERM", handleTermination);
+  process.on("SIGHUP", handleTermination);
 
   try {
     console.log("[eneo] Building the UI package for development...");
@@ -587,6 +596,7 @@ async function runDevelopmentStack() {
     }
 
     const postBuildStatus = await snapshotFrontendStatus();
+    if (requestedSignal) return requestedSignal === "SIGINT" ? 130 : 143;
     if (postBuildStatus.kind !== "starting") {
       printStatus(postBuildStatus);
       return postBuildStatus.kind === "conflict" ? 1 : 0;
@@ -614,6 +624,7 @@ async function runDevelopmentStack() {
     await clearLock(process.pid);
     process.off("SIGINT", handleInterrupt);
     process.off("SIGTERM", handleTermination);
+    process.off("SIGHUP", handleTermination);
   }
 }
 
