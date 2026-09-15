@@ -80,13 +80,15 @@ async def _make_blob(session, *, space_id, tenant_id, admin_id, model_id):
 
 @pytest.fixture
 async def boundary(
-    db_container, user_factory, embedding_model_factory, grant_knowledge_permissions
+    db_container, user_factory, embedding_model_factory, grant_collections_permission
 ):
     async with db_container() as container:
         session = container.session()
         admin = container.user()
         reader = await user_factory(session)
-        await grant_knowledge_permissions(container, reader.id, admin.tenant_id)
+        # Every boundary case reads collection documents, which need the
+        # collections tenant permission through the fallback.
+        await grant_collections_permission(container, reader.id, admin.tenant_id)
         org = (
             await session.scalars(
                 sa.select(Spaces).where(

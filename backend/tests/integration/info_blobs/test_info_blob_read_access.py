@@ -47,13 +47,18 @@ async def knowledge(
     user_factory,
     user_integration_factory,
     embedding_model_factory,
-    grant_knowledge_permissions,
+    grant_collections_permission,
 ):
     async with db_container() as container:
         session = container.session()
         admin = container.user()
         reader = await user_factory(session)
-        await grant_knowledge_permissions(container, reader.id, admin.tenant_id)
+        source_type = getattr(request, "param", "website")
+        if source_type == "collection":
+            # Collection documents need the collections tenant permission
+            # through the fallback; website and integration readers stay
+            # permissionless so their exemption is exercised.
+            await grant_collections_permission(container, reader.id, admin.tenant_id)
         org = (
             await session.scalars(
                 sa.select(Spaces).where(
@@ -72,7 +77,6 @@ async def knowledge(
         )
         session.add(reader_space)
         model = await embedding_model_factory(session)
-        source_type = getattr(request, "param", "website")
         source_fields = dict(
             name="Organization knowledge",
             space_id=org.id,
