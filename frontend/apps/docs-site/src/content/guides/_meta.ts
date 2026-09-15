@@ -2,7 +2,7 @@ import type { MetaRecord } from "nextra";
 
 const meta: MetaRecord = {
   index: "Overview",
-  authentication: "Authentication & OIDC",
+  "oidc-federation": "Authentication & OIDC",
   "scim-provisioning": "SCIM Provisioning",
   "audit-logging": "Audit Logging",
   skills: "Skills",

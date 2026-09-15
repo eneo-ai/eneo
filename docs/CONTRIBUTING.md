@@ -12,7 +12,11 @@ Eneo embodies the principle that **"Generative AI must not be a technology for t
 
 ## 🚀 Quick Start for Contributors
 
-### 1. Development Environment Setup
+### 1. Start With an Issue
+
+Every contribution starts with a GitHub issue, before any code is written. Search the [existing issues](https://github.com/eneo-ai/eneo/issues) first; if nothing matches, open one using the issue templates and describe what you want to change, why, and how you plan to approach it. New issues are picked up automatically by the project intake workflow, which labels them and adds them to the Eneo GitHub Project so maintainers can triage them. Wait for maintainer feedback before implementing: it avoids work that cannot be accepted, and the resulting pull request must reference the approved issue.
+
+### 2. Development Environment Setup
 
 **Prerequisites:**
 - Docker and VS Code with Dev Containers extension
@@ -94,10 +98,10 @@ to the operator-managed connection instead, and the admin dialog stops being the
 authority. See [docs/deployment/OBJECT_CONTENT.md](deployment/OBJECT_CONTENT.md)
 for the operator-managed path and for connecting an external endpoint.
 
-### 2. Make Your First Contribution
+### 3. Make Your First Contribution
 
 ```bash
-# Create feature branch
+# Create feature branch for the approved issue
 git checkout -b feature/your-feature-name
 
 # Install local hooks once per clone
@@ -114,7 +118,7 @@ cd frontend && bun run test
 git add .
 git commit -m "feat: add your feature description"
 
-# Push and create pull request
+# Push and create a pull request that references the issue
 git push origin feature/your-feature-name
 ```
 
@@ -160,7 +164,7 @@ All UI contributions must follow Eneo's established design system.
 No PR may compromise existing functionality.
 
 **Testing Requirements:**
-- Include comprehensive unit tests (≥80% coverage)
+- Include unit tests for new behavior
 - Add integration tests for new features
 - Test for regressions in related features
 - Verify no breaking changes to existing APIs
@@ -248,7 +252,7 @@ frontend/
 - **Style**: PEP 8 compliance with Black formatting
 - **Type Safety**: Full type hints for all functions
 - **Documentation**: Docstrings for public APIs
-- **Testing**: Unit tests with pytest, ≥80% coverage target
+- **Testing**: Unit tests with pytest
 
 **TypeScript (Frontend):**
 - **Style**: ESLint configuration with strict rules
@@ -388,9 +392,6 @@ uv run pytest
 # Run specific domain tests
 uv run pytest tests/unittests/assistants/
 
-# Run with coverage
-uv run pytest --cov=src --cov-report=html
-
 # Run specific test
 uv run pytest tests/unittests/assistants/test_assistant.py::test_assistant_update_system_prompt
 ```
@@ -454,7 +455,7 @@ gitgraph
     commit id: "merge: new assistant type"
 ```
 
-> Features always flow back to `develop`. Version tags live on `release/v1.X` branches, not on `develop`. See [DEPLOYMENT_WORKFLOW.md](./DEPLOYMENT_WORKFLOW.md) for the full release flow.
+> Features always flow back to `develop`. Version tags live on `release/vX.Y` branches (for example `release/v2.0` and `release/v2.1`), not on `develop`. See [DEPLOYMENT_WORKFLOW.md](./DEPLOYMENT_WORKFLOW.md) for the full release flow.
 
 **Branch Naming:**
 - `feature/description` - New features
@@ -836,12 +837,6 @@ Eneo follows [Semantic Versioning](https://semver.org/):
 - **MINOR**: New features, backward compatible
 - **PATCH**: Bug fixes, backward compatible
 
-### Release Schedule
-
-- **Minor releases**: Monthly (feature additions)
-- **Patch releases**: As needed (critical bug fixes)
-- **Major releases**: Quarterly (breaking changes)
-
 ### Contributing to Releases
 
 - Feature freeze 1 week before minor releases
@@ -881,7 +876,6 @@ Eneo follows [Semantic Versioning](https://semver.org/):
 ### Contribution Quality
 
 **Code Quality Metrics:**
-- Test coverage maintained above 80%
 - No critical security vulnerabilities
 - Performance regression prevention
 - Documentation completeness

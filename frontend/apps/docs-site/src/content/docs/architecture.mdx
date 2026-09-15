@@ -1,6 +1,10 @@
+import { Callout } from "nextra/components";
+
 # Architecture
 
-Eneo follows a modern microservices architecture with clean separation of concerns, designed for scalability, maintainability, and deployment flexibility.
+Eneo is a modular monolith: one FastAPI backend, one SvelteKit frontend, one
+background worker that runs the same backend image, PostgreSQL with pgvector,
+and Redis. Everything is deployed with Docker Compose behind Traefik.
 
 ## High-Level Overview
 
@@ -10,132 +14,120 @@ Eneo follows a modern microservices architecture with clean separation of concer
 
 </div>
 
+| Component     | Technology                                             | Reference deployment                       |
+| ------------- | ------------------------------------------------------ | ------------------------------------------ |
+| Reverse proxy | Traefik v3 with Let's Encrypt                          | `traefik` container, ports 80/443          |
+| Frontend      | SvelteKit 2, Svelte 5, TypeScript, Tailwind CSS 4      | `ghcr.io/eneo-ai/eneo-frontend`, port 3000 |
+| Backend API   | FastAPI on Python 3.11, SQLAlchemy 2 (async), Pydantic 2 | `ghcr.io/eneo-ai/eneo-backend`, port 8000  |
+| Worker        | ARQ (Redis-backed async task queue)                    | Same backend image, `RUN_AS_WORKER=true`   |
+| Database      | PostgreSQL 16 with pgvector                            | `pgvector/pgvector:pg16`                   |
+| Cache/queue   | Redis 7                                                | `redis:7-alpine`                           |
+| AI providers  | LiteLLM transport to per-tenant configured providers   | Outbound HTTPS from backend and worker     |
+
 ---
 
 ## Core Components
 
 ### Frontend (SvelteKit)
 
-**Technology Stack:**
+**Technology stack:**
 
-- **Framework**: SvelteKit with TypeScript
-- **Styling**: Tailwind CSS
-- **State Management**: Svelte stores
-- **HTTP Client**: Fetch API with type-safe wrappers
+- SvelteKit 2 with Svelte 5 runes, TypeScript, Vite
+- Tailwind CSS 4
+- Node adapter (`@sveltejs/adapter-node`) listening on port 3000
+- `@eneo/eneo-js`: the typed API client (`fetch` wrapper, endpoint modules,
+  WebSocket client, and `schema.d.ts` generated from the backend OpenAPI
+  document)
+- `@eneo/ui`: shared component library
 
 **Responsibilities:**
 
-- User interface and user experience
-- Client-side routing and navigation
-- Form handling and validation
-- Real-time updates via SSE and WebSockets
-- State management and caching
+- User interface, routing, and forms
+- Server-side rendering and the login flow (cookies are set server-side)
+- Streaming chat responses over Server-Sent Events
+- Live job and crawl status over the `/api/v1/ws` WebSocket
 
-**Key Features:**
-
-- Server-side rendering (SSR) for SEO
-- Hot module replacement for development
-- Type-safe API client generation
-- Responsive design
-- Dark mode support
-
-**Directory Structure:**
+**Directory structure:**
 
 ```
-frontend/apps/client/
-├── src/
-│   ├── routes/          # SvelteKit routes
-│   ├── lib/             # Shared utilities
-│   │   ├── api/         # API client
-│   │   ├── stores/      # State stores
-│   │   └── components/  # Reusable components
-│   └── app.html         # HTML template
-└── package.json
+frontend/
+├── apps/
+│   ├── web/                     # SvelteKit application
+│   │   └── src/
+│   │       ├── routes/
+│   │       │   ├── (app)/       # spaces, assistants, admin, dashboard, account
+│   │       │   └── (public)/    # login, logout, activate, invite, module-login
+│   │       └── lib/
+│   │           ├── api/
+│   │           ├── components/
+│   │           ├── core/
+│   │           ├── features/    # admin, assistants, auth, chat, knowledge, spaces, ...
+│   │           └── hooks/
+│   └── docs-site/               # This documentation site (Nextra)
+└── packages/
+    ├── eneo-js/                 # Typed API client
+    ├── ui/                      # Shared UI components
+    └── eslint-plugin/           # Repository lint rules
 ```
 
 ---
 
 ### Backend (FastAPI)
 
-**Technology Stack:**
+**Technology stack:**
 
-- **Framework**: FastAPI (Python 3.11+)
-- **ORM**: SQLAlchemy 2.0
-- **Validation**: Pydantic v2
-- **Authentication**: JWT tokens, OIDC
-- **API Documentation**: OpenAPI/Swagger
+- FastAPI on Python 3.11
+- SQLAlchemy 2 with the async `asyncpg` driver; Alembic for migrations
+- Pydantic 2 for request/response models and `pydantic-settings` for configuration
+- `dependency-injector` container wiring services and repositories per request
+- LiteLLM as the transport for completion, embedding, and transcription providers
+- Scrapy for web crawling, `pdfplumber`, `docx2python`, `python-pptx`, and
+  pandas for text extraction
 
-**Responsibilities:**
+**Process model:** the backend container runs Alembic migrations and then
+Gunicorn with Uvicorn workers on port 8000 (three workers unless `NUM_WORKERS`
+is set). With `RUN_AS_WORKER=true` the same image starts the ARQ worker
+instead.
 
-- RESTful API endpoints
-- Business logic and validation
-- Authentication and authorization
-- Database operations
-- AI provider integration
-- WebSocket connections
-
-**Architecture Pattern:**
-
-- **Domain-Driven Design** (DDD)
-- **Repository Pattern** for data access
-- **Service Layer** for business logic
-- **Dependency Injection** for modularity
-
-**Directory Structure:**
+**Layout:** the code is organised by domain under `backend/src/eneo/`. Newer
+domains follow a layered layout (`application/`, `domain/`,
+`infrastructure/`, `presentation/`); older domains use flat
+`<name>.py`, `<name>_repo.py`, `<name>_service.py`, and `<name>_router.py`
+modules, sometimes with an `api/` folder.
 
 ```
 backend/
-├── app/
-│   ├── main.py              # Application entry point
-│   ├── api/                 # API endpoints
-│   │   ├── routes/          # Route handlers
-│   │   └── dependencies.py  # DI dependencies
-│   ├── core/                # Core functionality
-│   │   ├── config.py        # Configuration
-│   │   ├── security.py      # Auth & security
-│   │   └── database.py      # DB connection
-│   ├── models/              # SQLAlchemy models
-│   ├── schemas/             # Pydantic schemas
-│   ├── services/            # Business logic
-│   │   ├── ai/              # AI integrations
-│   │   ├── embeddings/      # Vector embeddings
-│   │   └── documents/       # Document processing
-│   └── worker.py            # Background worker
-└── tests/
+├── alembic/                     # Migrations (alembic upgrade head at startup)
+├── init_db.py                   # First-run migrations and default tenant/user
+├── run.sh                       # Gunicorn or ARQ entrypoint
+└── src/eneo/
+    ├── server/                  # FastAPI app, routers, middleware, websockets
+    ├── main/                    # Settings, DI container, logging, observability
+    ├── database/                # Engine, tables/, repositories/
+    ├── worker/                  # ARQ adapter, upload and crawl tasks, feeder
+    ├── tenants/  users/  roles/  authentication/  scim/  sysadmin/  admin/
+    ├── spaces/  assistants/  group_chat/  sessions/  questions/  conversations/
+    ├── collections/  groups_legacy/  info_blobs/  files/  websites/  crawler/
+    ├── object_content/          # Durable content control plane and S3 adapter
+    ├── embedding_models/  completion_models/  transcription_models/
+    ├── model_providers/  ai_models/  tenant_models/  token_usage/
+    ├── mcp_servers/  internal_mcp/  skills/  apps/  services/  workflows/
+    ├── integration/             # SharePoint and Confluence knowledge sources
+    ├── audit/  data_retention/  jobs/  limits/  modules/  observability/
+    └── ...
 ```
 
-**Key Design Patterns:**
+**HTTP surface:**
 
-**Repository Pattern:**
-
-```python
-class UserRepository:
-    def __init__(self, db: Session):
-        self.db = db
-
-    def get(self, user_id: int) -> User:
-        return self.db.query(User).filter(User.id == user_id).first()
-
-    def create(self, user_data: UserCreate) -> User:
-        user = User(**user_data.dict())
-        self.db.add(user)
-        self.db.commit()
-        return user
-```
-
-**Service Layer:**
-
-```python
-class AIService:
-    def __init__(self, user_repo: UserRepository, ai_provider: AIProvider):
-        self.user_repo = user_repo
-        self.ai_provider = ai_provider
-
-    async def generate_response(self, prompt: str, user_id: int) -> str:
-        user = self.user_repo.get(user_id)
-        # Business logic here
-        return await self.ai_provider.generate(prompt)
-```
+- All application routes are mounted under `API_PREFIX` (`/api/v1` in the
+  reference deployment). Swagger UI is served at `/docs` and the schema at
+  `/openapi.json`, both at the root.
+- SCIM provisioning is a separate ASGI app mounted at `/scim/v2`.
+- Loopback MCP servers for knowledge search and attachment reading are mounted
+  on the same process.
+- Middleware adds a request context, an `X-Trace-Id` response header, CORS
+  whose origins are matched against the `allowed_origins` table, and
+  OpenTelemetry instrumentation.
 
 ---
 
@@ -143,52 +135,82 @@ class AIService:
 
 **Technology:**
 
-- **Database**: PostgreSQL 13+
-- **Extension**: pgvector for vector similarity search
-- **Migrations**: Alembic
+- PostgreSQL 16 (`pgvector/pgvector:pg16` in the reference deployment)
+- pgvector for cosine-distance search over chunk embeddings
+- Alembic migrations in `backend/alembic/`, applied by `init_db.py` on first
+  start and by `run.sh` on every backend start
 
-**Schema Design:**
+**Schema conventions:** every table is declared in
+`backend/src/eneo/database/tables/`. Table names are derived from the class
+name in snake case, primary keys are UUIDs, and rows carry `created_at` and
+`updated_at`.
 
-**Core Tables:**
+**Core tables:**
 
-- `users` - User accounts and profiles
-- `organizations` - Organization/tenant data
-- `spaces` - Collaborative workspaces
-- `assistants` - AI assistant configurations
-- `conversations` - Chat conversations
-- `messages` - Individual messages
-- `documents` - Uploaded documents
-- `document_chunks` - Chunked document text with embeddings
+| Table                                   | Purpose                                                                                  |
+| --------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `tenants`                               | Organisations; hold federation, crawler, and API-key policy as JSONB                     |
+| `users`                                 | Accounts within a tenant, with roles and user groups                                     |
+| `spaces`                                | Workspaces; a personal space has a unique `user_id`, shared spaces have members and roles |
+| `assistants`                            | Assistant configuration, completion model, and knowledge bindings                        |
+| `sessions`                              | Conversations with an assistant, service, or group chat                                  |
+| `questions`                             | One question/answer pair per row, including token counts and tool calls                  |
+| `info_blob_references`                  | Which `info_blobs` a question cited and with which similarity score                     |
+| `groups`                                | Collections of uploaded documents (the code calls them collections)                     |
+| `websites`, `crawl_runs`                | Crawled sources and each crawl execution                                                 |
+| `info_blobs`                            | Extracted text per document or page, with `source_id` and `version_state`                |
+| `info_blob_chunks`                      | Chunked text with its embedding vector                                                   |
+| `files`                                 | Uploaded files and attachments                                                           |
+| `object_contents` and related tables    | Durable byte control plane (see below)                                                   |
+| `jobs`                                  | Background job status for the frontend                                                   |
+| `api_keys_v2`                           | API keys stored as hashes with prefix and suffix for display                             |
+| `audit_logs` and audit config tables    | Audit trail and retention policy                                                         |
 
-**Key Relationships:**
+**Key relationships:**
 
 ```
-organizations (1) ─── (N) users
-organizations (1) ─── (N) spaces
-spaces (1) ─── (N) assistants
-spaces (1) ─── (N) documents
-users (1) ─── (N) conversations
-conversations (1) ─── (N) messages
-documents (1) ─── (N) document_chunks
+tenants (1) ─── (N) users
+tenants (1) ─── (N) spaces
+spaces  (1) ─── (N) assistants
+spaces  (1) ─── (N) groups (collections) / websites / integration knowledge
+groups | websites | integration knowledge (1) ─── (N) info_blobs
+info_blobs (1) ─── (N) info_blob_chunks
+assistants (1) ─── (N) sessions
+sessions (1) ─── (N) questions ─── (N) info_blob_references
 ```
 
-**Vector Search:**
+**Vector search:** `info_blob_chunks.embedding` is a dimensionless pgvector
+`Vector()` column, so one table holds embeddings from every configured
+embedding model. Retrieval orders by cosine distance, restricts the scope to
+the requested collections, websites, or integrations, and reads only the
+active document version:
 
-```sql
--- Example vector similarity search
-SELECT id, content,
-       1 - (embedding <=> query_embedding) as similarity
-FROM document_chunks
-WHERE 1 - (embedding <=> query_embedding) > 0.7
-ORDER BY embedding <=> query_embedding
-LIMIT 5;
+```python
+# backend/src/eneo/info_blobs/info_blob_chunk_repo.py
+await self.session.execute(sa.text("SET LOCAL enable_seqscan = off;"))
+
+stmt = (
+    sa.select(
+        InfoBlobChunks,
+        InfoBlobChunks.embedding.cosine_distance(embedding),
+        InfoBlobs.title,
+    )
+    .join(InfoBlobs)
+    .where(active_info_blob_version())
+    .options(defer(InfoBlobChunks.embedding))
+    .order_by(InfoBlobChunks.embedding.cosine_distance(embedding))
+    .limit(limit)
+)
 ```
 
-**Indexes:**
-
-- B-tree indexes on foreign keys
-- IVFFlat index on vector embeddings
-- GiST indexes for full-text search
+<Callout type="info">
+  There is no approximate-nearest-neighbour index (no IVFFlat or HNSW) on the
+  embedding column. The B-tree indexes on `info_blob_id`, `tenant_id`, and the
+  scope foreign keys narrow the candidate set, and `SET LOCAL enable_seqscan =
+  off` steers the planner away from a full scan of the TOAST-heavy chunk table.
+  Retrieval cost therefore grows with the number of chunks in scope, not with
+  the whole table.
+</Callout>
 
 ---
 
@@ -228,50 +250,41 @@ covers deployment and operations.
 
 - **Queue**: Redis-based ARQ (Async Redis Queue)
 - **Language**: Python with async/await
-- **Concurrency**: Configurable worker pool
+- **Concurrency**: `WORKER_MAX_JOBS` concurrent jobs per worker process
+  (default 15) and `TENANT_WORKER_CONCURRENCY_LIMIT` concurrent crawl jobs per
+  tenant (default 4), enforced with a Redis semaphore
 
 **Responsibilities:**
 
-- Document processing (PDF, Word, etc.)
-- Web crawling and content extraction
-- Embedding generation
-- Background tasks and scheduled jobs
+- Document upload processing (extraction, chunking, embedding, versioned publish)
+- Web crawling, metered by a crawl feeder that releases queued crawls in batches
+- SharePoint and Confluence synchronisation, including subscription renewal
+- Audit log export and cleanup, usage statistics, conversation insights
+- Scheduled jobs: daily data retention, weekly cleanup of orphaned models,
+  redispatch and reaping of stale knowledge jobs, object-content
+  reconciliation (also run at worker startup)
 
 Object-content reconciliation is implemented as a queue-neutral async task.
 Only the current registration and schedule adapter depends on ARQ. A future
 worker change therefore does not alter the object store, lifecycle, or database
 contract, and Eneo avoids a speculative generic queue framework in the meantime.
 
-**Task Types:**
-
-**Document Processing:**
-
-```python
-@worker.task
-async def process_document(ctx, document_id: int):
-    # Extract text from document
-    text = await extract_text(document_id)
-
-    # Chunk the text
-    chunks = chunk_text(text)
-
-    # Generate embeddings
-    embeddings = await generate_embeddings(chunks)
-
-    # Store in database
-    await store_chunks(document_id, chunks, embeddings)
-```
-
-**Web Crawling:**
+**Task registration:** each domain declares tasks on its own `Worker`
+instance, and `worker/arq.py` composes them into one `WorkerSettings` for ARQ.
 
 ```python
-@worker.task
-async def crawl_website(ctx, url: str, max_depth: int):
-    async with Crawler() as crawler:
-        pages = await crawler.crawl(url, max_depth=max_depth)
-        for page in pages:
-            await process_page_content(page)
+# backend/src/eneo/worker/routes.py
+@worker.function(with_user=False)
+async def log_audit_event(
 ```
+
+```python
+# backend/src/eneo/data_retention/infrastructure/data_retention_worker.py
+@worker.cron_job(hour=3, minute=0)  # Run daily at 3 AM
+```
+
+The worker writes a heartbeat key to Redis; `/api/healthz` reports the worker
+as unhealthy when that heartbeat is stale.
 
 ---
 
@@ -283,22 +296,20 @@ See [Audit Logging](/docs/audit-logging) for implementation details, retention h
 
 ---
 
-### Redis (Cache & Queue)
+### Redis (Queue, Pub/Sub, Coordination)
+
+Redis is not a session store. Authentication is a stateless JWT (see below),
+so no login session lives in Redis.
 
 **Responsibilities:**
 
-- Session storage
-- Task queue for ARQ
-- Caching frequently accessed data
-- Rate limiting counters
-- WebSocket pub/sub
-
-**Cache Strategy:**
-
-- **Session data**: 24-hour TTL
-- **API responses**: 5-minute TTL
-- **Embeddings**: 1-hour TTL
-- **User preferences**: No expiration
+- ARQ job queue and worker heartbeat
+- Pub/sub channel between worker and backend: task status updates are published
+  by the worker and forwarded to browsers over the WebSocket
+- API-key rate limiting counters per key over `API_KEY_RATE_LIMIT_WINDOW_SECONDS`
+- Per-tenant crawl concurrency semaphores
+- Small coordination state: pending MCP tool approvals, one-time module-login
+  tickets, the runtime debug toggle, audit-session rate limits
 
 ---
 
@@ -306,26 +317,26 @@ See [Audit Logging](/docs/audit-logging) for implementation details, retention h
 
 **Responsibilities:**
 
-- SSL/TLS termination
-- Load balancing
-- Request routing
-- Automatic certificate management (Let's Encrypt)
-- Health checks
+- TLS termination with automatic Let's Encrypt certificates (HTTP challenge)
+- HTTP to HTTPS redirect
+- Routing by path: the backend receives `/api`, `/scim`, `/docs`,
+  `/openapi.json`, and `/version`; everything else goes to the frontend
 
-**Configuration:**
+**Configuration** (from `docs/deployment/docker-compose.yml`):
 
 ```yaml
-# Route HTTP to HTTPS
-- "traefik.http.routers.http-catchall.rule=hostregexp(`{host:.+}`)"
-- "traefik.http.routers.http-catchall.middlewares=redirect-to-https"
+backend:
+  labels:
+    - "traefik.http.routers.eneo-backend-secure.rule=Host(`your-domain.com`) && (PathPrefix(`/api`) || PathPrefix(`/scim`) || PathPrefix(`/docs`) || PathPrefix(`/openapi.json`) || PathPrefix(`/version`))"
+    - "traefik.http.routers.eneo-backend-secure.tls.certresolver=letsencrypt"
+    - "traefik.http.services.eneo-backend-svc.loadbalancer.server.port=8000"
+    - "traefik.http.routers.eneo-backend-secure.priority=10"
 
-# Backend routing
-- "traefik.http.routers.backend.rule=Host(`eneo.example.com`) && PathPrefix(`/api`)"
-- "traefik.http.routers.backend.tls.certresolver=myresolver"
-
-# Frontend routing
-- "traefik.http.routers.frontend.rule=Host(`eneo.example.com`)"
-- "traefik.http.routers.frontend.tls.certresolver=myresolver"
+frontend:
+  labels:
+    - "traefik.http.routers.eneo-frontend-secure.rule=Host(`your-domain.com`)"
+    - "traefik.http.services.eneo-frontend-svc.loadbalancer.server.port=3000"
+    - "traefik.http.routers.eneo-frontend-secure.priority=1"
 ```
 
 ---
@@ -335,40 +346,48 @@ See [Audit Logging](/docs/audit-logging) for implementation details, retention h
 ### User Authentication Flow
 
 ```
-User → Frontend → Backend → Database
-                     ↓
-                  Generate JWT
-                     ↓
-                  Response ← Frontend ← User
+Browser ──POST /login (SvelteKit form action)──▶ Frontend server
+Frontend ──POST /api/v1/users/login/token/ ──▶ Backend  (password login)
+Frontend ──GET  /api/v1/auth/initiate → IdP → POST /api/v1/auth/callback ──▶ Backend  (OIDC)
+Backend  ──signed JWT (sub, aud, iss, exp)──▶ Frontend
+Frontend ──Set-Cookie: auth=<jwt>; HttpOnly; Secure; SameSite=Lax──▶ Browser
+Browser  ──subsequent requests: frontend server forwards the JWT as a bearer token──▶ Backend
 ```
+
+The frontend stores the backend-issued JWT in an httpOnly `auth` cookie whose
+`maxAge` is the token expiry minus ten minutes. There is no refresh token: when
+the token expires the user signs in again. A second httpOnly cookie, `acc`,
+carries a provider access token when the identity provider issues one.
 
 ### AI Chat Flow
 
 ```
 User types message
     ↓
-Frontend sends POST /api/chat
+Frontend POSTs to /api/v1/conversations/ with stream: true
     ↓
-Backend validates & authenticates
+Backend authenticates the JWT and checks space access
     ↓
-Retrieve relevant documents (RAG)
+Embed the question and run the pgvector search over the assistant's
+collections, websites, and integrations (or expose search as an MCP tool)
     ↓
-Generate prompt with context
+Build the prompt within the model's context budget
     ↓
-Stream to AI Provider (OpenAI/Claude)
+LiteLLM streams from the tenant's configured provider
     ↓
-Stream response back via SSE
+Server-Sent Events stream chunks back to the browser
     ↓
-Frontend displays streaming text
-    ↓
-Save conversation to database
+Question, answer, token counts, and info-blob references are saved
 ```
+
+See [Knowledge Retrieval and MCP](/docs/knowledge-retrieval-and-mcp) for the
+retrieval modes.
 
 ### Document Upload Flow
 
 <div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
 
-![Document Processing Pipeline showing User uploading to Backend API, which queues jobs in Redis for the Worker to process. The Worker runs the Processing Pipeline (Text Extractor, Text Chunker, Embedding Model, Vector Store) and stores results in PostgreSQL with pgvector (InfoBlobs for raw text, InfoBlobChunks for embeddings with HNSW index, Jobs for status tracking).](/diagrams/document-processing-pipeline.svg)
+![Document Processing Pipeline showing User uploading to Backend API, which queues jobs in Redis for the Worker to process. The Worker runs the Processing Pipeline (Text Extractor, Text Chunker, Embedding Model, Vector Store) and stores results in PostgreSQL with pgvector (InfoBlobs for raw text, InfoBlobChunks for embeddings searched by cosine distance, Jobs for status tracking).](/diagrams/document-processing-pipeline.svg)
 
 </div>
 
@@ -389,41 +408,45 @@ where Eneo stores the original File bytes. Object storage remains optional.
 
 ## Security Architecture
 
-### Authentication Layers
+### Authentication
 
-1. **Session-based** (default)
+1. **Username and password** (`POST /api/v1/users/login/token/`): the backend
+   verifies the credentials and mints a JWT signed with `JWT_SECRET` using
+   `JWT_ALGORITHM`, with `JWT_AUDIENCE`, `JWT_ISSUER`, and `JWT_EXPIRY_TIME`.
+2. **OIDC federation** (`/api/v1/auth/federation-status`, `/auth/tenants`,
+   `/auth/initiate`, `/auth/callback`): per-tenant identity providers configured in the tenant's
+   `federation_config`, with a signed state parameter. See
+   [Authentication Architecture](/docs/authentication-architecture).
+3. **API keys** (`X-API-Key` header): scoped keys stored as HMAC hashes in
+   `api_keys_v2`, with optional rate limits, allowed origins, allowed IPs, and
+   expiry. A separate super API key protects the `/api/v1/sysadmin` routes.
+4. **SCIM** (`/scim/v2`): tenant-scoped bearer token for user provisioning.
 
-   - JWT tokens stored in httpOnly cookies
-   - CSRF protection
-   - Token refresh mechanism
-
-2. **OIDC** (optional)
-   - Integration with enterprise IdP
-   - Automatic user provisioning
-   - Single sign-on (SSO)
+Cookies are `HttpOnly`, `Secure` outside development, and `SameSite=Lax`.
+There is no separate CSRF token or refresh-token mechanism.
 
 ### Authorization Model
 
-**Role-Based Access Control (RBAC):**
-
-- **Global Roles**: Admin, User
-- **Space Roles**: Owner, Editor, Viewer
-- **Resource-level**: Per-assistant, per-document permissions
-
-**Permission Checks:**
-
-```python
-def check_permission(user: User, resource: Space, action: str) -> bool:
-    membership = get_membership(user.id, resource.id)
-    return membership.role.has_permission(action)
-```
+- **Tenant permissions**: users hold roles that grant permissions such as
+  `assistants`, `collections`, `websites`, `api_keys`, `storage`, `modules`,
+  and `admin`.
+- **Space roles**: `admin`, `editor`, or `viewer` per space member or user
+  group. A personal space belongs to exactly one user.
+- **Resource checks**: every space action goes through a space actor that
+  answers questions such as "can this user create websites here" based on the
+  member's role and the resource type.
 
 ### Data Security
 
-- **At Rest**: Database encryption (optional)
-- **In Transit**: TLS 1.3 everywhere
-- **Secrets**: Environment variables, never in code
-- **API Keys**: Hashed storage, regular rotation
+- TLS is terminated by Traefik with Let's Encrypt certificates.
+- Secrets are read from environment files (`env_backend.env`,
+  `env_frontend.env`, `env_db.env`), never from the image.
+- API keys are stored as keyed HMAC hashes; only the prefix and suffix are kept
+  for display.
+- Durable object content is verified against its PostgreSQL-owned SHA-256
+  before being served.
+- PostgreSQL and Redis sit on an internal Docker network (`data_net`) with no
+  internet egress and no route from Traefik or the frontend.
 
 ---
 
@@ -431,76 +454,49 @@ def check_permission(user: User, resource: Space, action: str) -> bool:
 
 ### Horizontal Scaling
 
-**Stateless Services:**
+- The API holds no per-user session state, and worker-to-browser updates travel
+  through Redis pub/sub, so several backend instances can sit behind Traefik.
+  The reference Compose file pins `container_name` for every service, so remove
+  those names before running more than one replica.
+- Each backend container already runs three Gunicorn/Uvicorn workers
+  (`NUM_WORKERS`).
+- Worker capacity scales with additional worker containers; per-process
+  concurrency is `WORKER_MAX_JOBS`, and crawl fan-out per tenant is capped by
+  `TENANT_WORKER_CONCURRENCY_LIMIT`.
 
-- Frontend and Backend are stateless
-- Can run multiple instances behind load balancer
-- Session state in Redis (shared)
+### Database
 
-**Scaling Strategy:**
-
-```yaml
-# Docker Compose scaling
-docker compose up -d --scale backend=3 --scale worker=2
-```
-
-### Database Scaling
-
-**Read Replicas:**
-
-- Primary for writes
-- Replicas for reads
-- Connection pooling (PgBouncer)
-
-**Partitioning:**
-
-- Partition large tables by date
-- Separate hot and cold data
-
-### Caching Strategy
-
-**Multi-Level Cache:**
-
-1. Browser cache (static assets)
-2. CDN cache (public content)
-3. Redis cache (dynamic data)
-4. Application cache (in-memory)
+- Keep `WORKER_MAX_JOBS` below roughly 60 % of `DB_POOL_SIZE +
+  DB_POOL_MAX_OVERFLOW` so the API always has connections; the backend
+  environment template documents the sizing formula.
+- Retrieval cost is proportional to the chunks in scope of a search, so large
+  tenants benefit from splitting knowledge into focused collections.
 
 ---
 
-## Deployment Architectures
+## Deployment Topology
 
-### Single Server (Small Organizations)
+The reference deployment in `docs/deployment/docker-compose.yml` starts the
+services in this order, gated by health checks:
 
-All services on one server with Docker Compose:
+1. `db` (PostgreSQL 16 + pgvector) and `redis` become healthy.
+2. `db-init` runs `python init_db.py`: Alembic migrations and the default
+   tenant and user, then exits.
+3. `backend` and `worker` start; `backend` exposes `/api/healthz`.
+4. `frontend` starts.
 
-- Frontend, Backend, Worker
-- PostgreSQL, Redis
-- Traefik
+Networks: `proxy_tier` (Traefik, frontend, backend, worker; internet-facing),
+`data_net` (PostgreSQL and Redis; internal only), and `module_net` (Traefik and
+backend; reserved for optional module containers).
 
-**Suitable for:** < 100 users
+Optional overlays:
 
-### Multi-Server (Medium Organizations)
+- `docker-compose.object-content.yml` adds the bundled SeaweedFS S3 endpoint
+  under the `object-content` profile on its own internal network.
+- `docker-compose.modules.yml` adds optional module containers such as
+  speech-to-text.
 
-Separate servers for different roles:
-
-- **Web Server**: Frontend + Backend
-- **Database Server**: PostgreSQL
-- **Worker Server**: Background processing
-- **Cache Server**: Redis
-
-**Suitable for:** 100-1000 users
-
-### Kubernetes (Large Organizations)
-
-Fully orchestrated with K8s:
-
-- Auto-scaling pods
-- Service discovery
-- Rolling updates
-- Health checks and self-healing
-
-**Suitable for:** 1000+ users
+See [Deploy Eneo](/guides/deployment) for the full procedure.
 
 ---
 
@@ -508,38 +504,23 @@ Fully orchestrated with K8s:
 
 ### Logging
 
-**Structured Logging:**
+Backend and worker log JSON lines to stdout, with the trace id of the current
+request attached when tracing is active.
 
-```json
-{
-  "timestamp": "2025-09-30T10:30:45Z",
-  "level": "INFO",
-  "service": "backend",
-  "user_id": "user-123",
-  "request_id": "req-456",
-  "message": "AI request completed",
-  "duration_ms": 1250
-}
-```
+### Tracing
 
-### Metrics
-
-**Key Metrics:**
-
-- Request rate and latency
-- Error rates (4xx, 5xx)
-- Database query performance
-- AI provider response times
-- Worker queue depth
+FastAPI, SQLAlchemy, Redis, aiohttp, and httpx are instrumented with
+OpenTelemetry, and every response carries an `X-Trace-Id` header for
+correlating a user report with server logs.
 
 ### Health Checks
 
-**Endpoints:**
-
-- `GET /api/health` - Basic health
-- `GET /api/health/db` - Database connectivity
-- `GET /api/health/redis` - Redis connectivity
-- `GET /api/health/ready` - Readiness probe
+| Endpoint               | Purpose                                                                                                           |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `GET /api/livez`       | Liveness: the API process can serve requests                                                                      |
+| `GET /api/healthz`     | Backend, worker heartbeat, and object-content readiness; `503` when the worker is stale or the store is not ready |
+| `GET /api/readyz`      | Alias of `/api/healthz` for readiness probes                                                                      |
+| `GET /api/healthz/crawler` | Crawler queue and feeder diagnostics; not intended for orchestrator probes                                    |
 
 ---
 
@@ -547,50 +528,33 @@ Fully orchestrated with K8s:
 
 ### Why SvelteKit?
 
-- Lightweight and fast
-- Excellent developer experience
-- Built-in SSR and routing
-- Smaller bundle sizes than React
+- Server-side rendering with a single Node process
+- Small bundles and a compiler-driven component model
+- Form actions keep login and cookie handling on the server
 
 ### Why FastAPI?
 
-- Modern Python async framework
-- Automatic OpenAPI documentation
-- Type safety with Pydantic
-- High performance (comparable to Node.js)
+- Async-native Python with first-class OpenAPI generation, which also feeds the
+  frontend's typed client
+- Pydantic models shared between validation and documentation
 
 ### Why PostgreSQL + pgvector?
 
-- Reliable and mature RDBMS
-- Native vector support (pgvector)
-- Excellent performance
-- ACID compliance for data integrity
+- One database for relational data, versioned text, and vectors: a document
+  version and its chunks publish in a single transaction
+- Dimensionless vector column allows several embedding models per tenant
 
 ### Why ARQ?
 
-- Python-native async task queue
-- Simple and reliable
-- Redis-backed for speed
-- Cron-like scheduling support
-
----
-
-## Future Architecture Plans
-
-### Planned Enhancements
-
-- **Kubernetes Native**: Helm charts for K8s deployment
-- **Multi-Region**: Geographic distribution
-- **Plugin System**: Extensibility via plugins
-- **GraphQL API**: Alternative to REST
-- **Event Sourcing**: Audit trail improvements
-- **Microservices**: Further service decomposition
+- Python-native async task queue on the Redis that is already deployed
+- Cron jobs, job abort, and lifecycle hooks with a small surface, kept behind a
+  queue-neutral task layer
 
 ---
 
 ## Additional Resources
 
-- **Technical Diagrams**: [Architecture diagrams on GitHub](https://github.com/eneo-ai/eneo/tree/main/docs/architecture)
-- **API Documentation**: [OpenAPI Specification](https://your-eneo-instance.com/api/docs)
-- **Database Schema**: [Schema documentation](https://github.com/eneo-ai/eneo/tree/main/backend/migrations)
-- **Contributing Guide**: [Development guidelines](https://github.com/eneo-ai/eneo/blob/develop/docs/CONTRIBUTING.md)
+- **Migrations**: [`backend/alembic`](https://github.com/eneo-ai/eneo/tree/develop/backend/alembic)
+- **Reference deployment**: [`docs/deployment`](https://github.com/eneo-ai/eneo/tree/develop/docs/deployment)
+- **API documentation**: Swagger UI at `/docs` on your instance, or the [API Reference](/docs/api)
+- **Contributing guide**: [Development guidelines](https://github.com/eneo-ai/eneo/blob/develop/docs/CONTRIBUTING.md)

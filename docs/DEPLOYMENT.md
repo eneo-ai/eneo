@@ -292,7 +292,7 @@ docker compose exec backend python -c "import eneo; print(eneo.__version__)"
 
 ```bash
 # Back up your database
-docker compose exec db pg_dump -U eneo eneo_db > backup_$(date +%Y%m%d).sql
+docker compose exec db pg_dump -U postgres eneo > backup_$(date +%Y%m%d).sql
 
 # Back up your volumes
 docker compose down
@@ -334,7 +334,7 @@ The safest approach is to start fresh:
 
 ```bash
 # 1. Back up your data (if needed)
-docker compose exec db pg_dump -U eneo eneo_db > backup.sql
+docker compose exec db pg_dump -U postgres eneo > backup.sql
 
 # 2. Stop all containers
 docker compose down
@@ -347,7 +347,7 @@ docker volume rm eneo_eneo_postgres_data eneo_eneo_redis_data eneo_eneo_backend_
 docker compose up -d
 
 # 5. Restore data if needed (advanced)
-# docker compose exec -T db psql -U eneo eneo_db < backup.sql
+# docker compose exec -T db psql -U postgres eneo < backup.sql
 ```
 
 > **Note:** If you need to preserve your data across major migrations, use `pg_dump` to export, then restore to the fresh database. This may require manual schema adjustments depending on the changes between versions.
@@ -527,7 +527,7 @@ If you see `middleware "redirect-to-https@docker" does not exist` in Traefik log
 
 ### Errors when uploading large files (e.g., PDFs)
 - Ask an administrator with the Storage permission to review configured and
-  effective limits in **Admin > Storage**. Policy updates apply without
+  effective limits in **Admin > File storage**. Policy updates apply without
   restarting backend or worker.
 - For PostgreSQL-inline session uploads, the effective limit is the smaller of
   the admin policy and the operator-owned

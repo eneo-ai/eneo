@@ -5,7 +5,9 @@ Technical reference for Eneo's OIDC authentication system, including protocol de
 import { Callout, Tabs, Steps } from 'nextra/components'
 
 <Callout type="info">
-  Looking to set up authentication? See the [Multi-Tenant OIDC Federation](/guides/oidc-federation/multi-tenant) guide.
+  Looking to set up authentication? See the [OIDC Federation](/guides/oidc-federation) guides
+  ([single-tenant](/guides/oidc-federation/single-tenant) or
+  [multi-tenant](/guides/oidc-federation/multi-tenant)).
   For how optional module applications reuse the Eneo session through one-time
   tickets, see [Module Authentication](/docs/module-authentication).
 </Callout>
@@ -14,7 +16,7 @@ import { Callout, Tabs, Steps } from 'nextra/components'
 
 ## OIDC Protocol Flow
 
-Eneo implements the **OAuth 2.0 Authorization Code Flow** with OpenID Connect. Multi-tenant federation uses server-signed state JWTs (HS256) for security.
+Eneo implements the **OAuth 2.0 Authorization Code Flow** with OpenID Connect. Both single-tenant and multi-tenant setups go through the same public endpoints (`/api/v1/auth/initiate` and `/api/v1/auth/callback`) and use server-signed state JWTs (HS256) for security.
 
 ### Overview
 
@@ -28,29 +30,29 @@ Eneo implements the **OAuth 2.0 Authorization Code Flow** with OpenID Connect. M
 
 <Steps>
 ### Authorization Request
-User clicks "Sign In". Backend generates security tokens:
+The frontend calls `GET /api/v1/auth/initiate` (with `?tenant={slug}` in multi-tenant mode). The backend resolves the tenant's IdP configuration, computes the `redirect_uri` server-side and generates:
 - `state` - JWT signed with HS256, contains tenant context
 - `nonce` - 32 hex characters (`secrets.token_hex(16)`)
 - `correlation_id` - 16 hex characters (`secrets.token_hex(8)`) for request tracing
 
-State cached in Redis with key `oidc:state:{nonce}`.
+A copy of the state is cached in Redis under `oidc:state:{nonce}` on a best-effort basis (a cache failure is logged and the flow continues).
 
 ### User Authentication
 User authenticates with their Identity Provider.
 
 ### Authorization Response
-IdP redirects to callback URL with:
+IdP redirects to `{origin}/login/callback` with:
 - `code` - Authorization code (single-use)
 - `state` - Original state JWT for validation
 
 ### Token Exchange
-Backend validates state JWT signature (HS256), retrieves cached data from Redis, exchanges code for tokens.
+The frontend posts `code` and `state` to `POST /api/v1/auth/callback`. The backend validates the state JWT signature (HS256) and expiry, compares it with the cached state when Redis is available, validates the `redirect_uri`, then exchanges the code for tokens at the IdP's token endpoint.
 
 ### ID Token Validation
-JWT signature verified against IdP's JWKS. Claims validated: `aud` (audience), `exp` (expiration).
+JWT signature verified against the IdP's JWKS (RS256). Claims validated: `aud` (audience), `exp` (expiration), `at_hash` when present.
 
 ### Session Creation
-User matched in Eneo by email, session JWT issued.
+The email claim is checked against the tenant's `allowed_domains`, then the user is looked up by email. If no user exists and the tenant has `provisioning` enabled, the user is created just-in-time (see [JIT Provisioning](#jit-provisioning)). Finally the user's tenant is verified and an Eneo session JWT is issued.
 </Steps>
 
 ---
@@ -63,50 +65,62 @@ The `state` parameter is a JWT signed with HS256:
 
 ```python
 # federation_router.py
-state_payload = {
+state_payload: OIDCStatePayload = {
     "tenant_id": str(tenant_obj.id),
     "tenant_slug": tenant_obj.slug or tenant_obj.name,
     "frontend_state": state or "",
-    "nonce": secrets.token_hex(16),        # 32 hex chars
+    "nonce": secrets.token_hex(16),
     "redirect_uri": redirect_uri,
-    "correlation_id": correlation_id,      # 16 hex chars
-    "exp": int(time.time()) + 600,         # 10 minute TTL
+    "correlation_id": correlation_id,
+    "exp": int(time.time()) + settings.oidc_state_ttl_seconds,
     "iat": int(time.time()),
     "config_version": tenant_config_version,
 }
-signed_state = pyjwt.encode(state_payload, settings.jwt_secret, algorithm="HS256")
+signed_state = pyjwt.encode(
+    cast(dict[str, Any], state_payload), settings.jwt_secret, algorithm="HS256"
+)
 ```
 
 **Key parameters:**
 | Parameter | Value | Source |
 |-----------|-------|--------|
-| Algorithm | HS256 | `config.py` |
+| Algorithm | HS256 | `federation_router.py` |
+| Signing key | `JWT_SECRET` | `config.py` |
 | TTL | 600 seconds (10 minutes) | `oidc_state_ttl_seconds` |
 | Nonce length | 32 hex chars (16 bytes) | `secrets.token_hex(16)` |
 | Correlation ID | 16 hex chars (8 bytes) | `secrets.token_hex(8)` |
 
+An expired state is rejected with `400 Authorization session expired. Please try logging in again.`; a state that fails signature validation is rejected with `400 Invalid state parameter`.
+
 ### Redis State Cache
 
 ```python
-# Cache key format
-state_cache_key = f"oidc:state:{nonce}"
-
-# Cached payload (5 fields)
-state_cache_payload = {
+# federation_router.py
+state_cache_payload: OIDCStateCache = {
     "tenant_id": str(tenant_obj.id),
     "tenant_slug": tenant_obj.slug or tenant_obj.name,
     "redirect_uri": redirect_uri,
     "config_version": tenant_config_version,
     "iat": state_payload["iat"],
 }
+state_cache_key = f"oidc:state:{state_payload['nonce']}"
 
-# Storage with TTL
 await redis_client.setex(
     state_cache_key,
-    settings.oidc_state_ttl_seconds,  # 600 seconds
-    json.dumps(state_cache_payload)
+    settings.oidc_state_ttl_seconds,
+    json.dumps(state_cache_payload, separators=(",", ":")),
 )
 ```
+
+The cache is **best-effort**:
+
+| Situation | Behaviour |
+|-----------|-----------|
+| Redis reachable, key present | Cached state is compared with the signed state (tamper detection) and used for the grace-period check |
+| Redis reachable, key missing (expired or already consumed) | `400 Authorization session is invalid or has expired. Please restart the sign-in flow.` |
+| Redis unavailable | Warning logged (`initiate.state_cache_failed` / `callback.state_cache_error`), the flow continues on the signed state alone |
+
+The key is deleted when the callback finishes, whether it succeeded or failed, so a state cannot be replayed while Redis is available.
 
 ### Redirect URI Grace Period
 
@@ -117,24 +131,36 @@ When tenant federation configuration changes (e.g., updating `canonical_public_o
 ```python
 # federation_router.py
 grace_period = min(
-    settings.oidc_redirect_grace_period_seconds,  # 900 seconds (15 min)
-    settings.oidc_state_ttl_seconds,               # 600 seconds (10 min)
+    settings.oidc_redirect_grace_period_seconds,
+    settings.oidc_state_ttl_seconds,
 )
+
+if redirect_mismatch:
+    if not settings.strict_oidc_redirect_validation:
+        allow_redirect_mismatch = True
+    else:
+        # grace-period checks, see table below
+        ...
 ```
 
-The system accepts the old redirect URI from the state token if **all** conditions are met:
+The `redirect_uri` carried in the state is first checked for well-formedness and then compared with the tenant's currently configured redirect URIs (canonical plus `additional_redirect_uris`). On a mismatch:
+
+- **`strict_oidc_redirect_validation = false`**: any well-formed `redirect_uri` from the state is accepted.
+- **`strict_oidc_redirect_validation = true`** (default): the old `redirect_uri` is accepted only if **all** of the following hold:
 
 | Condition | Check |
 |-----------|-------|
-| Strict validation disabled | `strict_oidc_redirect_validation = false` |
 | Config version changed | `current_config_version != state_config_version` |
+| Grace period configured | `grace_period > 0` |
+| Cached state available and consistent | `cached_state.redirect_uri == redirect_uri` (requires Redis) |
 | State issued within grace period | `seconds_since_issue <= grace_period` |
 | Config updated within grace period | `seconds_since_update <= grace_period` |
 | Config changed after state issued | `tenant_updated_at > state_config_dt` |
-| State redirect matches cached | `cached_state.redirect_uri == redirect_uri` |
+
+Otherwise the callback fails with `400 Redirect URI mismatch - authentication flow invalid. This may occur if tenant configuration changed during login. …`.
 
 <Callout type="info">
-  The grace period defaults to 15 minutes but is capped at the state TTL (10 minutes), effectively making it 10 minutes maximum.
+  The grace period defaults to 15 minutes but is capped at the state TTL (10 minutes), effectively making it 10 minutes maximum. The backend logs a warning at startup when `OIDC_REDIRECT_GRACE_PERIOD_SECONDS` exceeds `OIDC_STATE_TTL_SECONDS`.
 </Callout>
 
 ### Token Auth Method Selection
@@ -164,23 +190,21 @@ def _select_auth_method(methods: list[str] | None) -> str | None:
 | 4 | First supported | First method from discovery |
 | 5 | Default | Falls back to `client_secret_post` |
 
+Any other method selected from discovery is logged as unsupported and replaced by `client_secret_post`.
+
 ### Tenant State Validation
 
-Authentication is blocked for non-active tenants at both initiate and callback stages:
+Authentication is blocked for non-active tenants at both initiate and callback stages. Both return `403 Forbidden`:
 
-```python
-# federation_router.py
-if tenant_obj.state != TenantState.ACTIVE:
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="Authentication unavailable - tenant is not active",
-    )
-```
+| Stage | Response detail |
+|-------|-----------------|
+| `GET /auth/initiate` | `Tenant '{slug}' is not active. Contact your administrator.` |
+| `POST /auth/callback` | `Tenant is not active. Contact your administrator.` |
 
 | Tenant State | Authentication Allowed |
 |--------------|------------------------|
-| `ACTIVE` | Yes |
-| `SUSPENDED` | No |
+| `active` | Yes |
+| `suspended` | No |
 
 <Callout type="warning">
   If a tenant becomes suspended during a user's authentication flow, the callback will fail even if initiate succeeded.
@@ -188,19 +212,21 @@ if tenant_obj.state != TenantState.ACTIVE:
 
 ### State Tamper Detection
 
-The callback validates that the tenant context in the state token matches the cached state to detect tampering:
+When the cached state is available, the callback validates that the tenant context in the signed state matches the cached state to detect tampering:
 
 ```python
 # federation_router.py
-# Check tenant_id matches
+expected_tenant_id = cached_state["tenant_id"]
 if expected_tenant_id and expected_tenant_id != str(tenant_id):
-    # Event: callback.state_tampered, reason: tenant_id_mismatch
-    raise HTTPException(403, "Invalid state - security validation failed")
-
-# Check tenant_slug matches (case-insensitive)
-if expected_tenant_slug and expected_tenant_slug != tenant_slug.lower():
-    # Event: callback.state_tampered, reason: tenant_slug_mismatch
-    raise HTTPException(403, "Invalid state - security validation failed")
+    ...
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=(
+            "Authorization state mismatch detected. "
+            "Please restart the sign-in flow."
+        ),
+        headers={"X-Correlation-ID": correlation_id},
+    )
 ```
 
 **Validation checks:**
@@ -210,7 +236,7 @@ if expected_tenant_slug and expected_tenant_slug != tenant_slug.lower():
 | `tenant_id` | Exact match | Prevents tenant ID substitution |
 | `tenant_slug` | Case-insensitive | Prevents tenant slug substitution |
 
-Both checks are logged as `callback.state_tampered` debug events with specific `reason` fields for diagnostics.
+Both checks return `400` with the same detail and are logged as `callback.state_tampered` debug events with `reason` set to `tenant_id_mismatch` or `tenant_slug_mismatch`. The checks only run when Redis returned a cached state; the signed JWT itself is always verified.
 
 ---
 
@@ -224,40 +250,37 @@ Both checks are logged as `callback.state_tampered` debug events with specific `
 
 ### Tenant Resolution
 
-When federation is enabled (`FEDERATION_PER_TENANT_ENABLED=true`):
+When federation is enabled (`FEDERATION_ENABLED=true`) and more than one active tenant exists, the login page has to know which tenant's IdP to use. Eneo does **not** derive the tenant from the hostname; the frontend resolves it in this order:
 
-| Priority | Method | Example |
-|----------|--------|---------|
-| 1 | Subdomain | `sundsvall.eneo.local` → tenant "sundsvall" |
-| 2 | Tenant Selector UI | User selects from list |
+| Priority | Method | Description |
+|----------|--------|-------------|
+| 1 | `?tenant={slug}` query parameter | `https://eneo.example.com/login?tenant=sundsvall` starts the flow for that tenant directly |
+| 2 | Remembered slug | The last used slug is stored in `sessionStorage` (`eneo-last-tenant-slug`) and stays the active tenant within the browser session: the selector is skipped and the sign-in form is shown with a **Choose another organisation** link. It does not start the IdP redirect by itself |
+| 3 | Tenant selector | `GET /api/v1/auth/tenants` lists tenants; the user picks one. When exactly one tenant is returned it is selected automatically |
+
+Slugs must match `^[a-z0-9-]+$`. The selector lists every **active tenant that has a slug**, regardless of whether federation is configured for it; a tenant without an IdP fails at `/auth/initiate` with `500 No identity provider configured for tenant '{slug}'`.
+
+On the backend, `GET /api/v1/auth/initiate` without a `tenant` parameter auto-selects the tenant when exactly one active tenant exists and otherwise returns `400 Tenant parameter required when multiple tenants exist`.
 
 ### Federation Config Storage
 
-Federation config is stored as **JSONB** in the `tenants` table:
+Federation config is stored in the `federation_config` JSONB column of the `tenants` table. `PUT …/federation` fetches the discovery document immediately and stores the resolved endpoints alongside the request fields:
 
-```sql
--- tenant_table.py
-ALTER TABLE tenants ADD COLUMN federation_config JSONB NOT NULL DEFAULT '{}';
-```
-
-**Stored fields:**
-```python
-federation_config = {
-    "provider": "entra_id",                    # Identity provider label
-    "client_id": "...",                        # OAuth client ID
-    "client_secret": "enc:fernet:v1:...",      # Encrypted with Fernet
-    "discovery_endpoint": "https://...",       # OIDC discovery URL
-    "issuer": "...",                           # From discovery
-    "authorization_endpoint": "...",           # From discovery
-    "token_endpoint": "...",                   # From discovery
-    "jwks_uri": "...",                         # From discovery
-    "scopes": ["openid", "email", "profile"],  # Default scopes
-    "allowed_domains": ["example.com"],        # Email domain whitelist
-    "canonical_public_origin": "https://...",  # Tenant's access URL
-    "redirect_path": "/login/callback",        # Callback path
-    "encrypted_at": "2025-01-07T12:00:00Z",    # When secret was encrypted
-}
-```
+| Key | Source | Notes |
+|-----|--------|-------|
+| `provider` | request | Identity provider label (`entra_id`, `mobilityguard`, …) |
+| `discovery_endpoint` | request | OIDC discovery URL |
+| `client_id` | request | OAuth client ID |
+| `client_secret` | request | Encrypted with Fernet before storage |
+| `allowed_domains` | request | Email domain allowlist (lower-cased) |
+| `canonical_public_origin` | request (optional) | Tenant's access URL, falls back to `PUBLIC_ORIGIN` |
+| `redirect_path` | request (optional) | Defaults to `/login/callback` |
+| `additional_redirect_uris` | request (optional) | Extra fully-qualified redirect URIs accepted at callback |
+| `issuer`, `authorization_endpoint`, `token_endpoint`, `userinfo_endpoint`, `jwks_uri` | discovery | Resolved at PUT/PATCH time |
+| `token_endpoint_auth_method`, `token_endpoint_auth_methods_supported` | discovery | See [Token Auth Method Selection](#token-auth-method-selection) |
+| `scopes` | default | `["openid", "email", "profile"]` (not configurable via the API) |
+| `claims_mapping` | default | `{"email": "email", "username": "sub", "name": "name"}`; only `email` is read at login |
+| `encrypted_at` | server | Timestamp of the last secret encryption |
 
 ### Secret Encryption
 
@@ -276,7 +299,7 @@ uv run python -m eneo.cli.generate_encryption_key
 ```
 
 <Callout type="warning">
-  `ENCRYPTION_KEY` is required when `FEDERATION_PER_TENANT_ENABLED=true`. Back up securely - loss means re-registering all tenant IdPs.
+  `ENCRYPTION_KEY` is required when `FEDERATION_ENABLED=true`; the backend refuses to start without a valid key. Back up securely - loss means re-registering all tenant IdPs.
 </Callout>
 
 ---
@@ -291,8 +314,8 @@ The backend validates these claims (`auth_service.py`):
 |-------|------------|---------|
 | `aud` | **Yes** | Must match `client_id` |
 | `exp` | **Yes** | Automatic PyJWT validation |
-| `iss` | Implicit | Validated via JWKS signature |
-| `iat` | Logged only | Extracted but not enforced |
+| `iss` | **No** | Not checked (no `issuer` is passed to PyJWT); trust comes from the signature against the configured `jwks_uri` |
+| `iat` | **Yes** | A token issued more than the clock leeway in the future is rejected as not yet valid (`ImmatureSignatureError`); the drift is logged |
 | `nonce` | **No** | Not validated in ID token |
 | `at_hash` | Conditional | If present, must match access token hash |
 
@@ -300,45 +323,61 @@ The backend validates these claims (`auth_service.py`):
 
 ### User Claims Extracted
 
-| ID Token Claim | User Field | Notes |
-|----------------|------------|-------|
-| `email` | `email` | Via configurable `claims_mapping` |
-| `sub` | `oidc_subject` | Subject identifier |
+Only the email claim is used. The claim name comes from `claims_mapping.email` (default `email`); the ID token's `sub` is logged for diagnostics but not persisted:
 
-**Email claim mapping:**
 ```python
-claims_mapping = federation_config.get("claims_mapping", {"email": "email"})
+# federation_router.py
+claims_mapping: OIDCClaimsMapping = federation_config.get(
+    "claims_mapping"
+) or {"email": "email"}
 email_claim = claims_mapping.get("email", "email")
+...
 email = payload.get(email_claim)
 ```
 
+A missing claim is rejected with `401 Email claim not found in ID token`; a malformed address with `401 Email claim from identity provider is invalid. Contact your administrator.`
+
 ### Domain Validation
 
-When `allowed_domains` is configured:
+When `allowed_domains` is configured, the domain part of the email is lower-cased and IDNA-normalized and compared against the (equally normalized) allowlist. A non-matching domain is rejected with:
 
-```python
-email = id_token.get("email")
-domain = email.split("@")[1].lower()  # Case-insensitive
-if domain not in [d.lower() for d in allowed_domains]:
-    raise HTTPException(403, "Domain not allowed")
 ```
+403 Email domain '{domain}' is not allowed for this organization. Contact your administrator to add your domain.
+```
+
+The outcome is logged as `callback.domain_rejected` or `callback.domain_allowed`. Configurations created from `OIDC_*` environment variables have no `allowed_domains`, so no domain check applies in that mode.
+
+### JIT Provisioning
+
+After domain validation the user is looked up by email (`user_repo.get_user_by_email`). If no user exists:
+
+| `tenant.provisioning` | Result |
+|-----------------------|--------|
+| `true` | The user is created in the tenant with `state=ACTIVE`, `username` = the email's local part (lower-cased), and the tenant's `default_role_id` as its only role. If no default role is configured the user is created **without roles** and a warning is logged. An audit event `USER_CREATED` (actor type `SYSTEM`, `provisioning_method: jit_federation`) is written. |
+| `false` (default) | `403 User not found. Contact your administrator for access.` (`callback.user_missing`) |
+
+Provisioning is a per-tenant flag set through the sysadmin API (`POST /api/v1/sysadmin/tenants/{id}/` with `{"provisioning": true}`, optionally with `default_role_id`). A user that exists but belongs to another tenant is rejected with `403 Access denied for this organization.` (`callback.user_tenant_mismatch`).
 
 ---
 
 ## JWKS Handling
 
-JWKS is fetched using PyJWT's built-in `PyJWKClient`:
+The signing key is fetched with PyJWT's `PyJWKClient`, constructed anew for every callback:
 
 ```python
 # federation_router.py
-jwk_client = PyJWKClient(jwks_uri)
-signing_key = jwk_client.get_signing_key_from_jwt(id_token).key
+jwk_client = JWKClient(jwks_uri)
+signing_key = jwk_client.get_signing_key_from_jwt(
+    id_token
+).key  # Extract raw key from PyJWK wrapper
 ```
 
 **Caching:**
-- PyJWT provides built-in per-process in-memory cache
+- No JWKS caching across requests - each callback creates a fresh client and downloads the key set
 - No Redis/persistent caching for JWKS keys
-- Fresh discovery fetch on each callback
+- Endpoints missing from the stored config (`authorization_endpoint`, `token_endpoint`, `jwks_uri`) are resolved by fetching the discovery document, also without caching. API-configured tenants have these stored at `PUT`/`PATCH` time; the environment-variable configuration only has `discovery_endpoint`, so discovery is fetched on every login
+
+A JWKS fetch or key lookup failure is reported as `401 Failed to validate ID token signature`.
 
 ---
 
@@ -348,10 +387,16 @@ From `config.py`:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
+| `federation_enabled` (`FEDERATION_ENABLED`) | `false` | `false`: IdP from `OIDC_*` env vars; `true`: per-tenant config via the sysadmin API |
+| `federation_per_tenant_enabled` (`FEDERATION_PER_TENANT_ENABLED`) | - | Deprecated alias for `FEDERATION_ENABLED`; logs a warning at startup, `FEDERATION_ENABLED` wins when both are set |
+| `oidc_discovery_endpoint`, `oidc_client_id`, `oidc_client_secret` | - | Global IdP used when `FEDERATION_ENABLED=false`; active when discovery endpoint and client secret are both set |
+| `public_origin` (`PUBLIC_ORIGIN`) | - | Origin used to build `redirect_uri` when the tenant has no `canonical_public_origin`; must be `https://` (or `http://localhost`) without a path |
+| `encryption_key` (`ENCRYPTION_KEY`) | - | Fernet key; required when `FEDERATION_ENABLED=true` |
+| `eneo_super_api_key` (`ENEO_SUPER_API_KEY`) | - | Super admin key for the sysadmin API (sent as `X-API-Key`) |
 | `oidc_state_ttl_seconds` | 600 | State token TTL (10 minutes) |
-| `oidc_redirect_grace_period_seconds` | 900 | Config change grace period (15 min) |
+| `oidc_redirect_grace_period_seconds` | 900 | Config change grace period (15 min, capped at the state TTL) |
 | `oidc_clock_leeway_seconds` | 120 | Clock skew tolerance (2 minutes) |
-| `strict_oidc_redirect_validation` | true | Enforce exact redirect_uri match |
+| `strict_oidc_redirect_validation` | true | Enforce exact redirect_uri match (with grace period) |
 
 ---
 
@@ -359,24 +404,33 @@ From `config.py`:
 
 ### Endpoints
 
+All paths are relative to `/api/v1/sysadmin` and return `404 Federation is not enabled` unless `FEDERATION_ENABLED=true`.
+
 | Method | Path | Description |
 |--------|------|-------------|
-| `PUT` | `/tenants/{tenant_id}/federation` | Create/update config |
+| `PUT` | `/tenants/{tenant_id}/federation` | Provide a complete config (replaces the current one) |
+| `PATCH` | `/tenants/{tenant_id}/federation` | Update individual fields of an existing config |
 | `GET` | `/tenants/{tenant_id}/federation` | View config (secrets masked) |
 | `DELETE` | `/tenants/{tenant_id}/federation` | Remove config |
-| `POST` | `/tenants/{tenant_id}/federation/test` | Test IdP connectivity |
+| `POST` | `/tenants/{tenant_id}/federation/test` | Test IdP discovery endpoint |
 
-**Authentication:** `X-API-Key` header with super admin API key.
+**Authentication:** `X-API-Key` header with the super admin API key (`ENEO_SUPER_API_KEY`).
+
+`PUT` and `PATCH` (when `discovery_endpoint` changes) fetch the discovery document before saving and fail with `400` if it is unreachable or lacks `issuer`, `authorization_endpoint`, `token_endpoint` or `jwks_uri`. Every change writes a `FEDERATION_UPDATED` audit event.
 
 ### Test Endpoint Behavior
 
 `POST /tenants/{tenant_id}/federation/test` performs:
 
-- Fetches discovery document
+- Fetches the discovery document from the stored `discovery_endpoint`
 - Validates HTTP 200 response
-- Verifies required OIDC endpoints present (`issuer`, `authorization_endpoint`, `token_endpoint`, `jwks_uri`)
+- Verifies required OIDC fields are present (`issuer`, `authorization_endpoint`, `token_endpoint`, `jwks_uri`)
+- Returns `{"success": true, "message": "Federation config is valid and IdP is reachable", "issuer": "…"}`
+- Does NOT fetch the JWKS
 - Does NOT attempt authentication
 - Does NOT validate client credentials
+
+Failures are reported as `500` with the reason in `detail` (HTTP status from the IdP, missing fields, or connection error).
 
 ---
 
@@ -389,29 +443,32 @@ Generated with `secrets.token_hex(8)` → 16 hex characters.
 - Created in `/auth/initiate`
 - Embedded in state JWT
 - Reused in `/auth/callback`
-- Included in all log entries
+- Included in all log entries and returned as the `X-Correlation-ID` header on callback errors
 
 ### OIDC Debug Events
 
-Enable debug logging via observability API. Events follow pattern `[OIDC DEBUG] {event}`:
+Enable debug logging via the observability API (`POST /api/v1/sysadmin/observability/oidc-debug/`). Events follow pattern `[OIDC DEBUG] {event}`:
 
 **Initiate phase:**
 - `initiate.state_cached`
-- `initiate.state_cache_failed`
+- `initiate.state_cache_failed` / `initiate.state_cache_skipped`
 - `initiate.authorization_ready`
 
 **Callback phase:**
 - `callback.state_decoded`
 - `callback.state_cache_hit` / `callback.state_cache_miss`
-- `callback.state_cache_error`
+- `callback.state_cache_error` / `callback.state_cache_unavailable` / `callback.state_cache_missing`
 - `callback.state_tampered` (with `reason`: `tenant_id_mismatch` or `tenant_slug_mismatch`)
 - `callback.tenant_loaded`
 - `callback.tenant_inactive`
-- `callback.domain_rejected` / `callback.domain_allowed`
 - `callback.email_extracted`
+- `callback.email_invalid_format`
+- `callback.domain_rejected` / `callback.domain_allowed`
+- `callback.jit_provisioning`
 - `callback.user_missing`
 - `callback.user_tenant_mismatch`
 - `callback.success`
+- `callback.unexpected_error`
 
 ---
 
@@ -474,6 +531,7 @@ These endpoints do NOT require authentication:
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `GET` | `/auth/tenants` | List tenants for selector |
-| `GET` | `/auth/initiate` | Initiate OIDC authentication |
-| `POST` | `/auth/callback` | Handle OIDC callback |
+| `GET` | `/api/v1/auth/federation-status` | Tells the login page which mode is active (`has_single_tenant_federation`, `has_multi_tenant_federation`, `has_global_oidc_config`, `tenant_count`) |
+| `GET` | `/api/v1/auth/tenants` | List active tenants with a slug for the selector |
+| `GET` | `/api/v1/auth/initiate` | Initiate OIDC authentication (`tenant`, `state`, optional `redirect_uri` query parameters) |
+| `POST` | `/api/v1/auth/callback` | Handle OIDC callback (`code`, `state`) and issue the Eneo session token |
