@@ -870,6 +870,57 @@ def test_normalize_ai_builder_spec_renames_non_adjacent_pdf_body_step() -> None:
     ] == ["pre_terminal_artifact_body_step_renamed"]
 
 
+def test_normalize_ai_builder_spec_leaves_a_saved_body_step_as_the_user_named_it() -> (
+    None
+):
+    """A saved step edited through the Builder is not renamed or prefixed.
+
+    The same flow as the non-adjacent PDF case above, but the body step is a
+    saved one (it carries an existing_step_ref). Its name and instructions are
+    the user's, so the normalizer leaves them; only steps the plan invents are
+    shaped.
+    """
+
+    saved_body = _step(
+        ref="step_b",
+        name="Skriv beslutsdokument",
+        instructions="Skriv det kompletta beslutsdokumentet som ska bli PDF.",
+        input_source=InputSource.PREVIOUS_STEP,
+        output_type=OutputType.TEXT,
+    ).model_copy(update={"existing_step_ref": "existing_step_2"})
+    spec = FlowDraftSpecCore(
+        flow_name="PDF report",
+        steps=[
+            _step(ref="step_a", name="Extract", input_source=InputSource.FLOW_INPUT),
+            saved_body,
+            _step(
+                ref="step_c",
+                name="Granska kvalitet",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.TEXT,
+            ),
+            _step(
+                ref="step_d",
+                name="Skapa PDF",
+                input_source=InputSource.PREVIOUS_STEP,
+                output_type=OutputType.PDF,
+            ),
+        ],
+    )
+
+    normalized, changes = normalize_ai_builder_spec(
+        spec,
+        terminal_output_type=OutputType.PDF,
+    )
+
+    assert normalized.steps[1] == saved_body
+    assert not [
+        change
+        for _step_spec, change in changes
+        if change.code == "pre_terminal_artifact_body_step_renamed"
+    ]
+
+
 def test_normalize_ai_builder_spec_preserves_artifact_tail_without_output_intent() -> (
     None
 ):

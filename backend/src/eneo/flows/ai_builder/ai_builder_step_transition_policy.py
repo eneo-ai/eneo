@@ -237,10 +237,15 @@ def _normalize_pre_terminal_artifact_body_step(
     if terminal_step.output_type != output_type:
         return spec, []
 
+    # A saved step's name and instructions are the user's: they were approved
+    # or typed in the editor. Only steps this plan invents are shaped here; a
+    # saved body step edited through the Builder keeps its name and gets only
+    # the change the model authored (eneo-mhr).
     body_step_indexes = {
         index
         for index, step in enumerate(spec.steps[:-1])
-        if _looks_like_artifact_body_step(step, output_type=output_type)
+        if step.existing_step_ref is None
+        and _looks_like_artifact_body_step(step, output_type=output_type)
     }
     if not body_step_indexes:
         return spec, []

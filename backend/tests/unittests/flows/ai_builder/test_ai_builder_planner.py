@@ -5821,7 +5821,9 @@ async def test_saved_step_provider_request_contains_focused_data_and_permissions
         "properties"
     ]["name"] == {"type": "string"}
     assert len(data["consumers"]) == 5
-    assert len(data["other_steps"]) == 9
+    # Steps that neither feed nor read the target are not sent; the count is.
+    assert "other_steps" not in data
+    assert data["flow"]["step_count"] == 10
     assert "PRIVATE-INSTRUCTION" not in prompt
     assert "Prior plan steps:" not in prompt
     assert (

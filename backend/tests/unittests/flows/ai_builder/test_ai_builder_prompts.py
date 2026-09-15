@@ -627,7 +627,7 @@ def test_saved_step_projection_includes_whole_flow_input(expression, expected_fi
     assert [field["name"] for field in data["form_fields"]] == expected_fields
 
 
-def _saved_step_authoring_fixture():
+def _saved_step_authoring_fixture(total_steps: int = 10):
     def obj(properties):
         return {
             "type": "object",
@@ -642,8 +642,13 @@ def _saved_step_authoring_fixture():
             user_description=f"Stage {n}",
             input_source="flow_input" if n == 1 else "previous_step",
         )
-        for n in range(1, 11)
+        for n in range(1, total_steps + 1)
     ]
+    # Everything past the tenth step is unrelated to the target: it neither
+    # feeds it nor reads it, and carries a sentinel a projection would leak.
+    for n, step in enumerate(steps[10:], 11):
+        step.user_description = f"UNRELATED-STAGE-{n}"
+        step.input_bindings = {"question": f"UNRELATED-INPUT-{n}"}
     producer, target = steps[2:4]
     producer.output_type = "json"
     producer.output_contract = obj(
@@ -732,6 +737,65 @@ def _saved_step_authoring_fixture():
     return flow, snapshots
 
 
+def _saved_step_projection(total_steps: int):
+    from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
+        AIBuilderSavedFlowStepEditContext,
+        ResolvedAIBuilderEditContext,
+    )
+    from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
+        _prior_spec_for_revision,
+    )
+    from eneo.flows.ai_builder.ai_builder_resource_catalog import (
+        build_ai_builder_resource_catalog,
+    )
+
+    flow, snapshots = _saved_step_authoring_fixture(total_steps=total_steps)
+    spec = _prior_spec_for_revision(
+        context=ResolvedAIBuilderEditContext(
+            request=AIBuilderSavedFlowStepEditContext(flow_step_id=flow.steps[3].id),
+            scope="step",
+            target_existing_step_ref="existing_step_4",
+        ),
+        prior_plan=None,
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=build_ai_builder_resource_catalog(
+            available_models=None, available_kbs=None
+        ),
+    )
+    assert spec is not None
+    rendered = build_flow_context(
+        flow,
+        is_edit_mode=True,
+        authoring_spec=spec,
+        target_existing_step_ref="existing_step_4",
+    )
+    _, encoded = rendered.split("\n")
+    # No step that is merely in the same flow reaches the prompt.
+    assert "UNRELATED-" not in rendered
+    return json.loads(encoded)
+
+
+def test_saved_step_authoring_projection_does_not_grow_with_the_flow():
+    """Cost follows the target's producer and consumer degree, not flow length.
+
+    Twenty steps that neither feed nor read the target are added; the two
+    projections must differ only in the step count they report.
+    """
+
+    small = _saved_step_projection(10)
+    large = _saved_step_projection(30)
+
+    assert small["flow"] == {"step_count": 10}
+    assert large["flow"] == {"step_count": 30}
+    assert {key: value for key, value in small.items() if key != "flow"} == {
+        key: value for key, value in large.items() if key != "flow"
+    }
+    # Same producer and consumer degree in both, so the same rows.
+    assert [row["step_number"] for row in large["producers"]] == [3]
+    assert [row["step_number"] for row in large["consumers"]] == list(range(5, 10))
+
+
 def test_saved_step_authoring_projection_keeps_complete_facts_as_quoted_data():
     from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
         AIBuilderSavedFlowStepEditContext,
@@ -798,7 +862,9 @@ def test_saved_step_authoring_projection_keeps_complete_facts_as_quoted_data():
         "step_d.output.structured.report.summary"
     ]
     assert [field["name"] for field in data["form_fields"]] == ["audience"]
-    assert len(data["other_steps"]) == 9
+    # Steps that neither feed nor read the target are not sent; the count is.
+    assert "other_steps" not in data
+    assert data["flow"]["step_count"] == 10
     assert data["template_placeholders"] == []
     assert data["target"]["review_policy"] == {
         "mode": "view",
