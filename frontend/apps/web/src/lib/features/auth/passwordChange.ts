@@ -69,10 +69,27 @@ export const ENEO_PASSWORD_POLICY = Object.freeze({
   requiresSymbol: false
 } satisfies PasswordPolicy);
 
-export function validateNewPassword(
+export type PasswordPolicyError = Extract<
+  PasswordValidationError,
+  | "too_short"
+  | "too_short_bytes"
+  | "too_long_bytes"
+  | "uppercase_required"
+  | "lowercase_required"
+  | "number_required"
+  | "symbol_required"
+>;
+
+export type PasswordPolicyCheck = Readonly<{
+  error: PasswordPolicyError;
+  satisfied: boolean;
+}>;
+
+/** The same checks drive validation and live policy feedback. */
+export function getPasswordPolicyChecks(
   password: string,
   capability: AvailablePasswordChangeCapability
-): PasswordValidationError | undefined {
+): PasswordPolicyCheck[] {
   const { policy, source } = capability;
   const byteLength = new TextEncoder().encode(password).byteLength;
   // Zitadel's Auth API counts UTF-8 bytes and uses ASCII character classes.
@@ -80,15 +97,36 @@ export function validateNewPassword(
   // See zitadel/internal/domain/policy_password_complexity.go.
   const length = source === "zitadel" ? byteLength : [...password].length;
 
-  if (length < policy.minLength) return source === "zitadel" ? "too_short_bytes" : "too_short";
-  if (policy.maxBytes !== null && byteLength > policy.maxBytes) {
-    return "too_long_bytes";
+  const checks: PasswordPolicyCheck[] = [];
+  if (policy.minLength > 0) {
+    checks.push({
+      error: source === "zitadel" ? "too_short_bytes" : "too_short",
+      satisfied: length >= policy.minLength
+    });
   }
-  if (policy.requiresUppercase && !/[A-Z]/.test(password)) return "uppercase_required";
-  if (policy.requiresLowercase && !/[a-z]/.test(password)) return "lowercase_required";
-  if (policy.requiresNumber && !/[0-9]/.test(password)) return "number_required";
-  if (policy.requiresSymbol && !/[^A-Za-z0-9]/.test(password)) return "symbol_required";
-  return undefined;
+  if (policy.maxBytes !== null) {
+    checks.push({ error: "too_long_bytes", satisfied: byteLength <= policy.maxBytes });
+  }
+  if (policy.requiresUppercase) {
+    checks.push({ error: "uppercase_required", satisfied: /[A-Z]/.test(password) });
+  }
+  if (policy.requiresLowercase) {
+    checks.push({ error: "lowercase_required", satisfied: /[a-z]/.test(password) });
+  }
+  if (policy.requiresNumber) {
+    checks.push({ error: "number_required", satisfied: /[0-9]/.test(password) });
+  }
+  if (policy.requiresSymbol) {
+    checks.push({ error: "symbol_required", satisfied: /[^A-Za-z0-9]/.test(password) });
+  }
+  return checks;
+}
+
+export function validateNewPassword(
+  password: string,
+  capability: AvailablePasswordChangeCapability
+): PasswordValidationError | undefined {
+  return getPasswordPolicyChecks(password, capability).find((check) => !check.satisfied)?.error;
 }
 
 export function validatePasswordChange(

@@ -16,6 +16,7 @@
     type PasswordFieldErrors,
     type PasswordValidationError
   } from "$lib/features/auth/passwordChange";
+  import PasswordPolicyChecklist from "$lib/features/auth/PasswordPolicyChecklist.svelte";
   import { m } from "$lib/paraglide/messages";
   import { Eye, EyeOff } from "lucide-svelte";
   import type { SubmitFunction } from "./$types";
@@ -369,25 +370,7 @@
         </Field.Field>
       </Field.Group>
 
-      <div id="password-policy" class="bg-subtle text-secondary rounded-lg p-3 text-sm">
-        <p class="text-default font-medium">{m.password_policy_intro()}</p>
-        <ul class="mt-1 list-inside list-disc">
-          {#if capability.policy.minLength > 0}
-            <li>
-              {capability.source === "zitadel"
-                ? m.password_policy_min_bytes({ min: capability.policy.minLength })
-                : m.password_policy_min_length({ min: capability.policy.minLength })}
-            </li>
-          {/if}
-          {#if capability.policy.maxBytes !== null}
-            <li>{m.password_policy_max_bytes({ max: capability.policy.maxBytes })}</li>
-          {/if}
-          {#if capability.policy.requiresUppercase}<li>{m.password_policy_uppercase()}</li>{/if}
-          {#if capability.policy.requiresLowercase}<li>{m.password_policy_lowercase()}</li>{/if}
-          {#if capability.policy.requiresNumber}<li>{m.password_policy_number()}</li>{/if}
-          {#if capability.policy.requiresSymbol}<li>{m.password_policy_symbol()}</li>{/if}
-        </ul>
-      </div>
+      <PasswordPolicyChecklist id="password-policy" password={newPassword} {capability} />
 
       <p class="text-secondary text-sm">{m.password_change_sign_out_notice()}</p>
 

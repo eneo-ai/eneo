@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   ENEO_PASSWORD_POLICY,
   firstInvalidPasswordField,
+  getPasswordPolicyChecks,
   isCurrentPasswordChangeDialogSubmission,
   validateNewPassword,
   validateNewPasswordPair,
@@ -13,6 +14,58 @@ const eneoCapability: PasswordChangeCapability = {
   source: "eneo",
   policy: ENEO_PASSWORD_POLICY
 };
+
+describe("live password policy feedback", () => {
+  test.each(["a", "å", "🔑"])(
+    "updates the minimum at 12 Unicode characters for %s",
+    (character) => {
+      expect(getPasswordPolicyChecks(character.repeat(11), eneoCapability)).toEqual([
+        { error: "too_short", satisfied: false },
+        { error: "too_long_bytes", satisfied: true }
+      ]);
+      expect(getPasswordPolicyChecks(character.repeat(12), eneoCapability)).toEqual([
+        { error: "too_short", satisfied: true },
+        { error: "too_long_bytes", satisfied: true }
+      ]);
+      expect(getPasswordPolicyChecks(character.repeat(11), eneoCapability)[0].satisfied).toBe(
+        false
+      );
+    }
+  );
+
+  test("withdraws the maximum-length check when UTF-8 content exceeds the limit", () => {
+    expect(getPasswordPolicyChecks("🔑".repeat(18), eneoCapability)[1].satisfied).toBe(true);
+    expect(getPasswordPolicyChecks("🔑".repeat(19), eneoCapability)[1].satisfied).toBe(false);
+    expect(validateNewPassword("🔑".repeat(19), eneoCapability)).toBe("too_long_bytes");
+  });
+
+  test("reports all enabled provider requirements independently", () => {
+    const capability = {
+      source: "zitadel",
+      policy: {
+        minLength: 12,
+        maxBytes: null,
+        requiresUppercase: true,
+        requiresLowercase: true,
+        requiresNumber: true,
+        requiresSymbol: true
+      }
+    } as const;
+
+    expect(getPasswordPolicyChecks("longpassword", capability)).toEqual([
+      { error: "too_short_bytes", satisfied: true },
+      { error: "uppercase_required", satisfied: false },
+      { error: "lowercase_required", satisfied: true },
+      { error: "number_required", satisfied: false },
+      { error: "symbol_required", satisfied: false }
+    ]);
+    expect(
+      getPasswordPolicyChecks("Longpassword1!", capability).every((check) => check.satisfied)
+    ).toBe(true);
+    expect(getPasswordPolicyChecks("å".repeat(6), capability)[0].satisfied).toBe(true);
+    expect(getPasswordPolicyChecks("å".repeat(5), capability)[0].satisfied).toBe(false);
+  });
+});
 
 describe("administrator password entry", () => {
   const newPassword = "a sufficiently long new password";

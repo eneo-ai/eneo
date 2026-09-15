@@ -23,6 +23,7 @@
     type NewPasswordFieldErrors,
     type PasswordValidationError
   } from "$lib/features/auth/passwordChange";
+  import PasswordPolicyChecklist from "$lib/features/auth/PasswordPolicyChecklist.svelte";
   import SelectRole from "./SelectRole.svelte";
   import SelectUserGroups from "./SelectUserGroups.svelte";
 
@@ -207,12 +208,6 @@
           <Field.Description id={`${id}-password-hint`}>
             {mode === "update" ? m.admin_password_optional_hint() : m.admin_password_create_hint()}
           </Field.Description>
-          <Field.Description id={`${id}-password-policy`}>
-            {m.admin_password_policy_hint({
-              min: ENEO_PASSWORD_POLICY.minLength,
-              max: ENEO_PASSWORD_POLICY.maxBytes
-            })}
-          </Field.Description>
           <Field.Group class="gap-4">
             <Field.Field data-invalid={!!newPasswordError}>
               <Field.Label for={`${id}-new-password`}>{m.new_password()}</Field.Label>
@@ -255,6 +250,11 @@
               {/if}
             </Field.Field>
           </Field.Group>
+          <PasswordPolicyChecklist
+            id={`${id}-password-policy`}
+            password={newPassword}
+            capability={{ source: "eneo", policy: ENEO_PASSWORD_POLICY }}
+          />
         </Field.Set>
       </fieldset>
 
