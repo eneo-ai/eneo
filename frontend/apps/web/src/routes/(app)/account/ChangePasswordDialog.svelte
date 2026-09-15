@@ -300,7 +300,8 @@
           <div class="relative">
             <Input
               bind:ref={newPasswordInput}
-              bind:value={newPassword}
+              value={newPassword}
+              oninput={(event) => (newPassword = event.currentTarget.value)}
               id="new-password"
               name="newPassword"
               type={showNewPassword ? "text" : "password"}
@@ -338,14 +339,17 @@
           <div class="relative">
             <Input
               bind:ref={confirmPasswordInput}
-              bind:value={confirmPassword}
+              value={confirmPassword}
+              oninput={(event) => (confirmPassword = event.currentTarget.value)}
               id="confirm-password"
               name="confirmPassword"
               type={showConfirmPassword ? "text" : "password"}
               autocomplete="new-password"
               required
               aria-invalid={fieldErrors.confirmPassword ? "true" : undefined}
-              aria-describedby={fieldErrors.confirmPassword ? "confirm-password-error" : undefined}
+              aria-describedby={fieldErrors.confirmPassword
+                ? "password-policy confirm-password-error"
+                : "password-policy"}
               disabled={pending}
               class="pr-10"
             />
@@ -370,7 +374,12 @@
         </Field.Field>
       </Field.Group>
 
-      <PasswordPolicyChecklist id="password-policy" password={newPassword} {capability} />
+      <PasswordPolicyChecklist
+        id="password-policy"
+        password={newPassword}
+        {confirmPassword}
+        {capability}
+      />
 
       <p class="text-secondary text-sm">{m.password_change_sign_out_notice()}</p>
 

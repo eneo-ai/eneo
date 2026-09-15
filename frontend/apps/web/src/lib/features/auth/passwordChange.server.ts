@@ -3,7 +3,7 @@ import {
   ZitadelRequestError,
   type ZitadelPasswordChangeCapability
 } from "$lib/core/Zitadel";
-import type { PasswordChangeCapability } from "./passwordChange";
+import { normalizeLocalPasswordCapability, type PasswordChangeCapability } from "./passwordChange";
 
 type RequestContext = Readonly<{
   backendUrl?: string;
@@ -78,28 +78,7 @@ function normalizeEneoCapability(response: LocalPasswordChangeResponse): Passwor
     return { source: "unavailable", policy: null };
   }
 
-  const minLength = capability.policy.min_length;
-  const maxBytes = capability.policy.max_bytes;
-  if (
-    !Number.isSafeInteger(minLength) ||
-    Number(minLength) < 1 ||
-    !Number.isSafeInteger(maxBytes) ||
-    Number(maxBytes) < 1
-  ) {
-    return { source: "unavailable", policy: null };
-  }
-
-  return {
-    source: "eneo",
-    policy: {
-      minLength: Number(minLength),
-      maxBytes: Number(maxBytes),
-      requiresUppercase: false,
-      requiresLowercase: false,
-      requiresNumber: false,
-      requiresSymbol: false
-    }
-  };
+  return normalizeLocalPasswordCapability(capability.policy);
 }
 
 /**

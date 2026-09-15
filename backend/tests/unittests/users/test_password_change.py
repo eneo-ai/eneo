@@ -1,9 +1,11 @@
+from dataclasses import asdict, replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import bcrypt
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy.dialects import postgresql
 
 from eneo.audit.domain.action_types import ActionType
@@ -18,6 +20,7 @@ from eneo.main.exceptions import AuthenticationException, ErrorCodes
 from eneo.server.exception_handlers import DOMAIN_EXCEPTION_MAP
 from eneo.users import user_router
 from eneo.users.password import (
+    LOCAL_PASSWORD_POLICY,
     CurrentPasswordIncorrectError,
     LocalPasswordChangeUnavailableError,
     PasswordPolicyViolationError,
@@ -73,6 +76,61 @@ def test_local_password_minimum_is_twelve_unicode_characters(character: str):
     with pytest.raises(PasswordPolicyViolationError) as too_short:
         validate_new_local_password(character * 11)
     assert too_short.value.details == {"rule": "min_length", "min_length": 12}
+
+
+@pytest.mark.parametrize(
+    "requirement, missing, accepted",
+    [
+        ("requires_uppercase", "a long password", "A long password"),
+        ("requires_lowercase", "A LONG PASSWORD", "A long password"),
+        ("requires_number", "a long password", "a long password1"),
+        ("requires_symbol", "alongpassword", "a long password"),
+    ],
+)
+def test_policy_requirements_are_enforced_by_the_canonical_owner(
+    monkeypatch, requirement, missing, accepted
+):
+    from eneo.users import password
+
+    policy = replace(LOCAL_PASSWORD_POLICY, **{requirement: True})
+    monkeypatch.setattr(password, "LOCAL_PASSWORD_POLICY", policy)
+    with pytest.raises(PasswordPolicyViolationError):
+        validate_new_local_password(missing)
+    validate_new_local_password(accepted)
+
+
+@pytest.mark.parametrize("local_password", [None, "local-hash"])
+async def test_policy_endpoint_returns_canonical_rules_for_every_login_provider(
+    local_password,
+):
+    app = FastAPI()
+    app.include_router(user_router.router, prefix="/users")
+    app.dependency_overrides[user_router.auth_dependencies.get_current_active_user] = (
+        lambda: local_user(password=local_password)
+    )
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="https://test"
+    ) as client:
+        response = await client.get("/users/password-policy/")
+    assert response.status_code == 200
+    assert response.json() == asdict(LOCAL_PASSWORD_POLICY)
+
+
+async def test_policy_endpoint_requires_authentication():
+    app = FastAPI()
+    app.include_router(user_router.router, prefix="/users")
+
+    async def unauthenticated():
+        raise HTTPException(status_code=401)
+
+    app.dependency_overrides[user_router.auth_dependencies.get_current_active_user] = (
+        unauthenticated
+    )
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="https://test"
+    ) as client:
+        response = await client.get("/users/password-policy/")
+    assert response.status_code == 401
 
 
 async def test_change_local_password_verifies_hashes_and_increments_version(
@@ -255,6 +313,9 @@ async def test_current_user_capability_is_explicit_for_each_password_owner():
     assert local.password_change.source == "eneo"
     assert local.password_change.policy.min_length == 12
     assert local.password_change.policy.max_bytes == 72
+    assert local.model_dump()["password_change"]["policy"] == asdict(
+        LOCAL_PASSWORD_POLICY
+    )
     assert external.password_change.source == "external"
     assert external.password_change.policy is None
 

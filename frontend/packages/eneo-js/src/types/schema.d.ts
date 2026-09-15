@@ -533,6 +533,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/users/password-policy/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get the local password policy
+     * @description Return the policy enforced when creating or changing passwords stored in Eneo. Available to authenticated users regardless of their own login provider, so administrators can manage local accounts. Provider-managed passwords use their provider's policy instead.
+     */
+    get: operations["get_local_password_policy_api_v1_users_password_policy__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/users/me/": {
     parameters: {
       query?: never;
@@ -12462,7 +12482,7 @@ export interface components {
        * @enum {string}
        */
       source: "eneo";
-      policy?: components["schemas"]["LocalPasswordPolicyPublic"];
+      policy?: components["schemas"]["LocalPasswordPolicy"];
     };
     /**
      * EntityType
@@ -13874,8 +13894,8 @@ export interface components {
       info_blobs: components["schemas"]["InfoBlobLimits"];
       attachments: components["schemas"]["AttachmentLimits"];
     };
-    /** LocalPasswordPolicyPublic */
-    LocalPasswordPolicyPublic: {
+    /** LocalPasswordPolicy */
+    LocalPasswordPolicy: {
       /**
        * Min Length
        * @default 12
@@ -13886,6 +13906,26 @@ export interface components {
        * @default 72
        */
       max_bytes?: number;
+      /**
+       * Requires Uppercase
+       * @default false
+       */
+      requires_uppercase?: boolean;
+      /**
+       * Requires Lowercase
+       * @default false
+       */
+      requires_lowercase?: boolean;
+      /**
+       * Requires Number
+       * @default false
+       */
+      requires_number?: boolean;
+      /**
+       * Requires Symbol
+       * @default false
+       */
+      requires_symbol?: boolean;
     };
     /** LoggingDetailsPublic */
     LoggingDetailsPublic: {
@@ -20633,7 +20673,7 @@ export interface components {
       username?: string | null;
       /**
        * Password
-       * @description New local password. Must contain at least 12 characters and be at most 72 UTF-8 bytes.
+       * @description New local password. Must satisfy the policy returned by GET /api/v1/users/password-policy/.
        * @example Correct horse battery staple
        */
       password?: string | null;
@@ -20668,7 +20708,7 @@ export interface components {
       username?: string | null;
       /**
        * Password
-       * @description New local password. Must contain at least 12 characters and be at most 72 UTF-8 bytes.
+       * @description New local password. Must satisfy the policy returned by GET /api/v1/users/password-policy/.
        * @example Correct horse battery staple
        */
       password?: string | null;
@@ -21273,7 +21313,7 @@ export interface components {
       username?: string | null;
       /**
        * Password
-       * @description New local password. Must contain at least 12 characters and be at most 72 UTF-8 bytes.
+       * @description New local password. Must satisfy the policy returned by GET /api/v1/users/password-policy/.
        * @example Another correct horse battery staple
        */
       password?: string | null;
@@ -24400,6 +24440,44 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_local_password_policy_api_v1_users_password_policy__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LocalPasswordPolicy"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };

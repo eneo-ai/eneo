@@ -5,6 +5,7 @@ This module is the canonical owner of constraints for passwords stored in the
 external identity provider) deliberately do not use this policy.
 """
 
+import re
 from dataclasses import dataclass
 
 LOCAL_PASSWORD_MIN_LENGTH = 12
@@ -15,6 +16,10 @@ BCRYPT_MAX_PASSWORD_BYTES = 72
 class LocalPasswordPolicy:
     min_length: int = LOCAL_PASSWORD_MIN_LENGTH
     max_bytes: int = BCRYPT_MAX_PASSWORD_BYTES
+    requires_uppercase: bool = False
+    requires_lowercase: bool = False
+    requires_number: bool = False
+    requires_symbol: bool = False
 
 
 LOCAL_PASSWORD_POLICY = LocalPasswordPolicy()
@@ -78,3 +83,15 @@ def validate_new_local_password(password: str) -> None:
                 "actual_bytes": encoded_length,
             },
         )
+
+    for required, pattern, rule in (
+        (LOCAL_PASSWORD_POLICY.requires_uppercase, r"[A-Z]", "uppercase_required"),
+        (LOCAL_PASSWORD_POLICY.requires_lowercase, r"[a-z]", "lowercase_required"),
+        (LOCAL_PASSWORD_POLICY.requires_number, r"[0-9]", "number_required"),
+        (LOCAL_PASSWORD_POLICY.requires_symbol, r"[^A-Za-z0-9]", "symbol_required"),
+    ):
+        if required and re.search(pattern, password) is None:
+            raise PasswordPolicyViolationError(
+                "Password does not meet the local password policy.",
+                details={"rule": rule},
+            )

@@ -18,7 +18,6 @@
   import { toast } from "$lib/components/toast";
   import { toastError } from "$lib/core/errors";
   import {
-    ENEO_PASSWORD_POLICY,
     validateNewPasswordPair,
     type NewPasswordFieldErrors,
     type PasswordValidationError
@@ -48,7 +47,10 @@
   } = $props();
 
   const eneo = getEneo();
-  const { roles: allRoles, userGroups } = getAdminUserCtx();
+  const admin = getAdminUserCtx();
+  const allRoles = $derived(admin.roles);
+  const userGroups = $derived(admin.userGroups);
+  const capability = $derived(admin.passwordCapability);
   const id = $props.id();
   const userId = $derived(user.id);
   let username = $state("");
@@ -63,11 +65,7 @@
   let confirmationInput = $state<HTMLInputElement | null>(null);
   const busy = $derived(pending || groupPending);
   const passwordErrors: NewPasswordFieldErrors = $derived(
-    validateNewPasswordPair(
-      { newPassword, confirmPassword },
-      { source: "eneo", policy: ENEO_PASSWORD_POLICY },
-      mode === "create"
-    )
+    validateNewPasswordPair({ newPassword, confirmPassword }, capability, mode === "create")
   );
   const newPasswordError = $derived(submitted ? passwordErrors.newPassword : undefined);
   const confirmationError = $derived(
@@ -94,9 +92,13 @@
     if (error === "required") return m.password_field_required();
     if (error === "confirmation_mismatch") return m.passwords_dont_match();
     if (error === "too_long_bytes") {
-      return m.password_policy_max_bytes({ max: ENEO_PASSWORD_POLICY.maxBytes });
+      return m.password_policy_max_bytes({ max: capability.policy.maxBytes ?? 0 });
     }
-    return m.password_policy_min_length({ min: ENEO_PASSWORD_POLICY.minLength });
+    if (error === "uppercase_required") return m.password_policy_uppercase();
+    if (error === "lowercase_required") return m.password_policy_lowercase();
+    if (error === "number_required") return m.password_policy_number();
+    if (error === "symbol_required") return m.password_policy_symbol();
+    return m.password_policy_min_length({ min: capability.policy.minLength });
   }
 
   function handleOpenChange(next: boolean) {
@@ -216,7 +218,8 @@
                 id={`${id}-new-password`}
                 name="new-password"
                 type="password"
-                bind:value={newPassword}
+                value={newPassword}
+                oninput={(event) => (newPassword = event.currentTarget.value)}
                 autocomplete="new-password"
                 spellcheck={false}
                 aria-required={mode === "create" || !!confirmPassword}
@@ -236,12 +239,13 @@
                 id={`${id}-confirm-password`}
                 name="confirm-password"
                 type="password"
-                bind:value={confirmPassword}
+                value={confirmPassword}
+                oninput={(event) => (confirmPassword = event.currentTarget.value)}
                 autocomplete="new-password"
                 spellcheck={false}
                 aria-required={mode === "create" || !!newPassword}
                 aria-invalid={!!confirmationError}
-                aria-describedby={confirmationError ? `${id}-confirm-password-error` : undefined}
+                aria-describedby={`${id}-password-policy${confirmationError ? ` ${id}-confirm-password-error` : ""}`}
               />
               {#if confirmationError}
                 <Field.Error id={`${id}-confirm-password-error`}
@@ -253,7 +257,8 @@
           <PasswordPolicyChecklist
             id={`${id}-password-policy`}
             password={newPassword}
-            capability={{ source: "eneo", policy: ENEO_PASSWORD_POLICY }}
+            {confirmPassword}
+            {capability}
           />
         </Field.Set>
       </fieldset>

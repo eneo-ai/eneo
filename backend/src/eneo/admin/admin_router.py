@@ -328,7 +328,7 @@ async def register_user(
 
     Optional fields:
     - username: Unique identifier (if not provided, will use email prefix)
-    - password: Local password (minimum 12 characters, maximum 72 UTF-8 bytes)
+    - password: Local password (see GET /api/v1/users/password-policy/)
     - quota_limit: Storage limit in bytes (minimum 1000 bytes = 1KB)
     - roles: List of role IDs to assign (empty list by default)
 
@@ -481,7 +481,7 @@ async def update_user(
 
     Optional fields (only provided fields are updated):
     - email: New email address (must be unique within your tenant)
-    - password: New local password (minimum 12 characters, maximum 72 UTF-8 bytes)
+    - password: New local password (see GET /api/v1/users/password-policy/)
     - quota_limit: New storage limit in bytes (minimum 1000 bytes = 1KB)
     - state: User state (invited/active/inactive/deleted)
     - roles: List of role IDs (replaces existing roles)

@@ -1,4 +1,4 @@
-import { page } from "@vitest/browser/context";
+import { page, userEvent } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
 import { describe, expect, test, vi } from "vitest";
 import "../../../app.css";
@@ -32,6 +32,32 @@ const capability = {
 };
 
 describe("change password dialog", () => {
+  test("updates the checklist on every keystroke while the password field keeps focus", async () => {
+    render(ChangePasswordDialog, { capability, username: "person@example.com" });
+    await page.getByRole("button", { name: "change_password" }).click();
+    const next = page.getByLabelText("new_password", { exact: true });
+    const confirmation = page.getByLabelText("confirm_new_password");
+    const minimum = page.getByRole("listitem").filter({ hasText: "password_policy_min_length:12" });
+    const matching = page
+      .getByRole("listitem")
+      .filter({ hasText: "password_policy_confirmation_matches" });
+    await next.click();
+    await userEvent.keyboard("abcdefghijk");
+    await expect.element(minimum).toHaveTextContent("password_policy_pending");
+    await userEvent.keyboard("l");
+    await expect.element(next).toHaveFocus();
+    await expect.element(minimum).toHaveTextContent("password_policy_fulfilled");
+    await userEvent.keyboard("{Backspace}");
+    await expect.element(minimum).toHaveTextContent("password_policy_pending");
+    await userEvent.keyboard("l");
+    await confirmation.click();
+    await userEvent.keyboard("abcdefghijkl");
+    await expect.element(confirmation).toHaveFocus();
+    await expect.element(matching).toHaveTextContent("password_policy_fulfilled");
+    await userEvent.keyboard("{Backspace}");
+    await expect.element(matching).toHaveTextContent("password_policy_pending");
+  });
+
   test("provides password-manager metadata and three correctly typed password fields", async () => {
     render(ChangePasswordDialog, { capability, username: "person@example.com" });
 

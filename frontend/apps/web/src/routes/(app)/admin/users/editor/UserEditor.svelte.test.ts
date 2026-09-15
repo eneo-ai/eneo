@@ -1,8 +1,9 @@
-import { page } from "@vitest/browser/context";
+import { page, userEvent } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
 import UserEditor from "./UserEditor.svelte";
+import "../../../../../app.css";
 
 const user = {
   id: "user-1",
@@ -21,7 +22,23 @@ const api = vi.hoisted(() => ({
 vi.mock("$app/navigation", () => ({ invalidate: api.invalidate }));
 vi.mock("$lib/core/Eneo", () => ({ getEneo: () => ({ users: api }) }));
 vi.mock("$lib/core/errors", () => ({ toastError: api.toastError }));
-vi.mock("../ctx", () => ({ getAdminUserCtx: () => ({ roles: [], userGroups: [] }) }));
+vi.mock("../ctx", () => ({
+  getAdminUserCtx: () => ({
+    roles: [],
+    userGroups: [],
+    passwordCapability: {
+      source: "eneo",
+      policy: {
+        minLength: 12,
+        maxBytes: 72,
+        requiresUppercase: false,
+        requiresLowercase: false,
+        requiresNumber: false,
+        requiresSymbol: false
+      }
+    }
+  })
+}));
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -41,6 +58,31 @@ const emailInput = () => page.getByLabelText(m.email(), { exact: true });
 const saveButton = () => page.getByRole("button", { name: m.save_changes(), exact: true });
 
 describe("administrator user editor", () => {
+  test("updates length and matching checks while typing without blurring", async () => {
+    await openEditor();
+    const minimum = page
+      .getByRole("listitem")
+      .filter({ hasText: m.password_policy_min_length({ min: 12 }) });
+    const matching = page
+      .getByRole("listitem")
+      .filter({ hasText: m.password_policy_confirmation_matches() });
+    await nextInput().click();
+    await userEvent.keyboard("abcdefghijk");
+    await expect.element(minimum).toHaveTextContent(m.password_policy_pending());
+    await userEvent.keyboard("l");
+    await expect.element(nextInput()).toHaveFocus();
+    await expect.element(minimum).toHaveTextContent(m.password_policy_fulfilled());
+    await userEvent.keyboard("{Backspace}");
+    await expect.element(minimum).toHaveTextContent(m.password_policy_pending());
+    await userEvent.keyboard("l");
+    await confirmationInput().click();
+    await userEvent.keyboard("abcdefghijkl");
+    await expect.element(confirmationInput()).toHaveFocus();
+    await expect.element(matching).toHaveTextContent(m.password_policy_fulfilled());
+    await userEvent.keyboard("{Backspace}");
+    await expect.element(matching).toHaveTextContent(m.password_policy_pending());
+  });
+
   test("saves account edits with empty password fields and no current-password field", async () => {
     await openEditor();
     await expect.element(nextInput()).toBeVisible();

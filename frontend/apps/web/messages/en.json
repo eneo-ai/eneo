@@ -1179,6 +1179,8 @@
   "password_policy_within_maximum": "Within the allowed maximum length",
   "password_policy_fulfilled": "Met",
   "password_policy_pending": "Not met yet",
+  "password_policy_confirmation_matches": "Passwords match",
+  "password_policy_unavailable": "The password policy could not be loaded. Reload the page to try again.",
   "password_policy_intro": "The new password must meet these requirements:",
   "password_policy_lowercase": "Include a lowercase letter a–z",
   "password_policy_max_bytes": "Use at most {max} bytes (some characters use more than one byte)",

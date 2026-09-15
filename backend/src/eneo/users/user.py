@@ -21,7 +21,7 @@ from eneo.main.models import BaseModel, InDB, ModelId, partial_model
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleInDB, RolePublic
 from eneo.tenants.tenant import TenantInDB
-from eneo.users.password import LOCAL_PASSWORD_POLICY
+from eneo.users.password import LOCAL_PASSWORD_POLICY, LocalPasswordPolicy
 
 
 class UserState(str, Enum):
@@ -325,14 +325,9 @@ class UserPublicBase(InDB, UserBase):
     quota_used: int = 0
 
 
-class LocalPasswordPolicyPublic(BaseModel):
-    min_length: int = LOCAL_PASSWORD_POLICY.min_length
-    max_bytes: int = LOCAL_PASSWORD_POLICY.max_bytes
-
-
 class EneoPasswordChangeCapabilityPublic(BaseModel):
     source: Literal["eneo"] = "eneo"
-    policy: LocalPasswordPolicyPublic = Field(default_factory=LocalPasswordPolicyPublic)
+    policy: LocalPasswordPolicy = Field(default_factory=lambda: LOCAL_PASSWORD_POLICY)
 
 
 class ExternalPasswordChangeCapabilityPublic(BaseModel):
@@ -367,8 +362,8 @@ class UserAddAdmin(UserBase):
     password: Optional[str] = Field(
         default=None,
         description=(
-            "New local password. Must contain at least 12 characters and be at "
-            "most 72 UTF-8 bytes."
+            "New local password. Must satisfy the policy returned by "
+            "GET /api/v1/users/password-policy/."
         ),
         examples=["Correct horse battery staple"],
     )
@@ -413,8 +408,8 @@ class UserUpdatePublic(BaseModel):
     password: Optional[str] = Field(
         default=None,
         description=(
-            "New local password. Must contain at least 12 characters and be at "
-            "most 72 UTF-8 bytes."
+            "New local password. Must satisfy the policy returned by "
+            "GET /api/v1/users/password-policy/."
         ),
         examples=["Another correct horse battery staple"],
     )

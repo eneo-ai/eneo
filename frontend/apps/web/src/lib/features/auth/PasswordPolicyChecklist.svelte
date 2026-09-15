@@ -3,20 +3,30 @@
   import { m } from "$lib/paraglide/messages";
   import {
     getPasswordPolicyChecks,
+    newPasswordsMatch,
     type AvailablePasswordChangeCapability,
     type PasswordPolicyError
   } from "./passwordChange";
 
-  let { id, password, capability } = $props<{
+  let { id, password, confirmPassword, capability } = $props<{
     id: string;
     password: string;
+    confirmPassword: string;
     capability: AvailablePasswordChangeCapability;
   }>();
 
-  const checks = $derived(getPasswordPolicyChecks(password, capability));
+  const checks = $derived([
+    ...getPasswordPolicyChecks(password, capability),
+    {
+      error: "confirmation_mismatch" as const,
+      satisfied: newPasswordsMatch({ newPassword: password, confirmPassword })
+    }
+  ]);
 
-  function label(error: PasswordPolicyError): string {
+  function label(error: PasswordPolicyError | "confirmation_mismatch"): string {
     switch (error) {
+      case "confirmation_mismatch":
+        return m.password_policy_confirmation_matches();
       case "too_short":
         return m.password_policy_min_length({ min: capability.policy.minLength });
       case "too_short_bytes":

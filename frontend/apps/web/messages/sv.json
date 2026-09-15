@@ -1178,6 +1178,8 @@
   "password_policy_within_maximum": "Inom tillåten maxlängd",
   "password_policy_fulfilled": "Uppfyllt",
   "password_policy_pending": "Inte uppfyllt ännu",
+  "password_policy_confirmation_matches": "Lösenorden matchar",
+  "password_policy_unavailable": "Lösenordspolicyn kunde inte hämtas. Ladda om sidan för att försöka igen.",
   "password_policy_intro": "Det nya lösenordet måste uppfylla följande krav:",
   "password_policy_lowercase": "Inkludera en liten bokstav a–z",
   "password_policy_max_bytes": "Använd högst {max} byte (vissa tecken använder mer än en byte)",

@@ -59,15 +59,38 @@ export const UNAVAILABLE_PASSWORD_CHANGE: PasswordChangeCapability = Object.free
   policy: null
 });
 
-// Frontend/admin hint only. Backend enforcement and the self-user capability are canonical.
-export const ENEO_PASSWORD_POLICY = Object.freeze({
-  minLength: 12,
-  maxBytes: 72,
-  requiresUppercase: false,
-  requiresLowercase: false,
-  requiresNumber: false,
-  requiresSymbol: false
-} satisfies PasswordPolicy);
+/** Normalize the backend-owned local policy; never guess missing policy values. */
+export function normalizeLocalPasswordCapability(value: unknown): PasswordChangeCapability {
+  if (typeof value !== "object" || value === null) return UNAVAILABLE_PASSWORD_CHANGE;
+  const policy = value as Record<string, unknown>;
+  const minLength = policy.min_length;
+  const maxBytes = policy.max_bytes;
+  if (
+    typeof minLength !== "number" ||
+    !Number.isSafeInteger(minLength) ||
+    minLength < 1 ||
+    typeof maxBytes !== "number" ||
+    !Number.isSafeInteger(maxBytes) ||
+    maxBytes < 1 ||
+    typeof policy.requires_uppercase !== "boolean" ||
+    typeof policy.requires_lowercase !== "boolean" ||
+    typeof policy.requires_number !== "boolean" ||
+    typeof policy.requires_symbol !== "boolean"
+  ) {
+    return UNAVAILABLE_PASSWORD_CHANGE;
+  }
+  return {
+    source: "eneo",
+    policy: {
+      minLength,
+      maxBytes,
+      requiresUppercase: policy.requires_uppercase,
+      requiresLowercase: policy.requires_lowercase,
+      requiresNumber: policy.requires_number,
+      requiresSymbol: policy.requires_symbol
+    }
+  };
+}
 
 export type PasswordPolicyError = Extract<
   PasswordValidationError,
@@ -147,6 +170,10 @@ export function validatePasswordChange(
 export type NewPasswordValues = Pick<PasswordChangeValues, "newPassword" | "confirmPassword">;
 export type NewPasswordFieldErrors = Pick<PasswordFieldErrors, "newPassword" | "confirmPassword">;
 
+export function newPasswordsMatch(values: NewPasswordValues): boolean {
+  return values.newPassword.length > 0 && values.newPassword === values.confirmPassword;
+}
+
 /** Admin edits may leave both fields empty; setting a password always requires a matching pair. */
 export function validateNewPasswordPair(
   values: NewPasswordValues,
@@ -159,11 +186,7 @@ export function validateNewPasswordPair(
   if (!values.newPassword) errors.newPassword = "required";
   if (!values.confirmPassword) errors.confirmPassword = "required";
 
-  if (
-    values.newPassword &&
-    values.confirmPassword &&
-    values.confirmPassword !== values.newPassword
-  ) {
+  if (values.newPassword && values.confirmPassword && !newPasswordsMatch(values)) {
     errors.confirmPassword = "confirmation_mismatch";
   }
 

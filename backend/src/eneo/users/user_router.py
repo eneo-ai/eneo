@@ -49,7 +49,11 @@ from eneo.roles.permissions import Permission, validate_permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.tenants.tenant import TenantPublic
-from eneo.users.password import PasswordChangeError
+from eneo.users.password import (
+    LOCAL_PASSWORD_POLICY,
+    LocalPasswordPolicy,
+    PasswordChangeError,
+)
 from eneo.users.user import (
     EneoPasswordChangeCapabilityPublic,
     ExternalPasswordChangeCapabilityPublic,
@@ -757,6 +761,23 @@ async def get_tenant_users(
     )
 
     return public_paginated_users
+
+
+@router.get(
+    "/password-policy/",
+    response_model=LocalPasswordPolicy,
+    summary="Get the local password policy",
+    description=(
+        "Return the policy enforced when creating or changing passwords stored in Eneo. "
+        "Available to authenticated users regardless of their own login provider, "
+        "so administrators can manage local accounts. Provider-managed passwords "
+        "use their provider's policy instead."
+    ),
+    responses=responses.get_responses([401, 403]),
+    dependencies=[Depends(auth_dependencies.get_current_active_user)],
+)
+async def get_local_password_policy() -> LocalPasswordPolicy:
+    return LOCAL_PASSWORD_POLICY
 
 
 @router.get(

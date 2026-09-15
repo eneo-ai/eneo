@@ -1,8 +1,9 @@
 import { describe, expect, test } from "vitest";
 import {
-  ENEO_PASSWORD_POLICY,
   firstInvalidPasswordField,
   getPasswordPolicyChecks,
+  normalizeLocalPasswordCapability,
+  newPasswordsMatch,
   isCurrentPasswordChangeDialogSubmission,
   validateNewPassword,
   validateNewPasswordPair,
@@ -12,10 +13,67 @@ import {
 
 const eneoCapability: PasswordChangeCapability = {
   source: "eneo",
-  policy: ENEO_PASSWORD_POLICY
+  policy: {
+    minLength: 12,
+    maxBytes: 72,
+    requiresUppercase: false,
+    requiresLowercase: false,
+    requiresNumber: false,
+    requiresSymbol: false
+  }
 };
 
 describe("live password policy feedback", () => {
+  test("uses every policy value returned by the backend", () => {
+    const capability = normalizeLocalPasswordCapability({
+      min_length: 20,
+      max_bytes: 60,
+      requires_uppercase: true,
+      requires_lowercase: true,
+      requires_number: true,
+      requires_symbol: true
+    });
+    expect(capability).toEqual({
+      source: "eneo",
+      policy: {
+        minLength: 20,
+        maxBytes: 60,
+        requiresUppercase: true,
+        requiresLowercase: true,
+        requiresNumber: true,
+        requiresSymbol: true
+      }
+    });
+    if (capability.source !== "eneo") throw new Error("Expected the local policy");
+    expect(validateNewPassword("abcdefghijkl", capability)).toBe("too_short");
+    expect(validateNewPassword("a".repeat(20), capability)).toBe("uppercase_required");
+    expect(validateNewPassword("A" + "a".repeat(18) + "1!", capability)).toBeUndefined();
+  });
+
+  test.each([null, {}, { min_length: 12, max_bytes: 72 }, { min_length: -1, max_bytes: 72 }])(
+    "does not invent a policy when the response is incomplete: %j",
+    (policy) => {
+      expect(normalizeLocalPasswordCapability(policy)).toEqual({
+        source: "unavailable",
+        policy: null
+      });
+    }
+  );
+
+  test.each([
+    ["", "", false],
+    ["password", "", false],
+    ["", "password", false],
+    ["password", "password", true],
+    ["password", "Password", false],
+    ["password", "password ", false]
+  ])(
+    "only marks two nonempty, identical passwords as matching",
+    (newPassword, confirmPassword, expected) => {
+      expect(newPasswordsMatch({ newPassword, confirmPassword })).toBe(expected);
+    }
+  );
+
   test.each(["a", "å", "🔑"])(
     "updates the minimum at 12 Unicode characters for %s",
     (character) => {
@@ -194,7 +252,7 @@ describe("password change validation", () => {
     expect(
       validateNewPassword(password, {
         source: "zitadel",
-        policy: { ...ENEO_PASSWORD_POLICY, minLength: 15, maxBytes: null }
+        policy: { ...eneoCapability.policy, minLength: 15, maxBytes: null }
       })
     ).toBe(expected);
   });

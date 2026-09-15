@@ -4,7 +4,22 @@ import {
   discoverPasswordChangeCapability,
   PasswordChangeRequestError
 } from "./passwordChange.server";
-import { ENEO_PASSWORD_POLICY } from "./passwordChange";
+const policyFixture = {
+  min_length: 20,
+  max_bytes: 60,
+  requires_uppercase: true,
+  requires_lowercase: false,
+  requires_number: true,
+  requires_symbol: false
+};
+const expectedPolicy = {
+  minLength: 20,
+  maxBytes: 60,
+  requiresUppercase: true,
+  requiresLowercase: false,
+  requiresNumber: true,
+  requiresSymbol: false
+};
 
 const context = {
   backendUrl: "https://api.example",
@@ -31,13 +46,13 @@ describe("password change server adapter", () => {
       jsonResponse({
         password_change: {
           source: "eneo",
-          policy: { min_length: 12, max_bytes: 72 }
+          policy: policyFixture
         }
       })
     );
 
     await expect(discoverPasswordChangeCapability({ ...context, fetch: fetchFn })).resolves.toEqual(
-      { source: "eneo", policy: ENEO_PASSWORD_POLICY }
+      { source: "eneo", policy: expectedPolicy }
     );
     expect(fetchFn).toHaveBeenCalledWith(
       "https://api.example/api/v1/users/me/",
@@ -55,7 +70,7 @@ describe("password change server adapter", () => {
       return jsonResponse({
         password_change: {
           source: "eneo",
-          policy: { min_length: 12, max_bytes: 72 }
+          policy: policyFixture
         }
       });
     });
@@ -78,7 +93,7 @@ describe("password change server adapter", () => {
     await expect(
       changePassword(
         { ...context, fetch: fetchFn },
-        { source: "eneo", policy: ENEO_PASSWORD_POLICY },
+        { source: "eneo", policy: expectedPolicy },
         "current secret",
         "a sufficiently long new secret"
       )
@@ -103,7 +118,7 @@ describe("password change server adapter", () => {
     try {
       await changePassword(
         { ...context, fetch: fetchFn },
-        { source: "eneo", policy: ENEO_PASSWORD_POLICY },
+        { source: "eneo", policy: expectedPolicy },
         "do-not-retain-current",
         "do-not-retain-new-password"
       );
@@ -130,7 +145,7 @@ describe("password change server adapter", () => {
     await expect(
       changePassword(
         { ...context, fetch: fetchFn },
-        { source: "eneo", policy: ENEO_PASSWORD_POLICY },
+        { source: "eneo", policy: expectedPolicy },
         "current secret",
         "a sufficiently long new secret"
       )
