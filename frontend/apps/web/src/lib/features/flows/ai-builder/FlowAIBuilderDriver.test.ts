@@ -777,7 +777,16 @@ describe("FlowAIBuilderDriver", () => {
       models: [lowModel, highModel],
       default_model_id: "model-low"
     };
+    const otherHighModel = makeModel({
+      id: "model-other",
+      name: "Other high",
+      reasoning_effort_options: ["high"]
+    });
     const reviewListing: Listing = { models: [highModel], default_model_id: "model-high" };
+    const twoHighListing: Listing = {
+      models: [highModel, otherHighModel],
+      default_model_id: "model-high"
+    };
 
     function makeReviewDriver(
       listings: (query: unknown) => Promise<Listing> | Listing = (query) =>
@@ -865,16 +874,23 @@ describe("FlowAIBuilderDriver", () => {
       const held = new Promise<Listing>((resolve) => {
         releaseListing = resolve;
       });
-      const { driver } = makeReviewDriver((query) => (query ? reviewListing : held));
+      const { driver } = makeReviewDriver((query) => (query ? twoHighListing : held));
       await driver.openReviewListing(2);
+      expect(driver.effectiveModel?.id).toBe("model-high");
+      // While the listing is in flight the user moves to another model that
+      // the arriving list still carries; the move, not the listing, changed
+      // the model, so its effort stays.
       const closing = driver.closeReviewListing();
-      driver.selectModel("model-high");
+      driver.selectModel("model-other");
       driver.selectReasoningEffort("high");
 
-      releaseListing(conversationListing);
+      releaseListing({
+        models: [lowModel, highModel, otherHighModel],
+        default_model_id: "model-low"
+      });
       await closing;
 
-      expect(driver.state.selectedModelId).toBe("model-high");
+      expect(driver.state.selectedModelId).toBe("model-other");
       expect(driver.state.selectedReasoningEffort).toBe("high");
     });
 

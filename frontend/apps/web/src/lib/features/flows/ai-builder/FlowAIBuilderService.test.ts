@@ -573,19 +573,29 @@ describe("FlowAIBuilderService", () => {
 
     it("drops a review packet that arrives after the review closed", async () => {
       const { service, fetch } = makeReviewService();
+      // An active session with a listing; a review's packet would raise the
+      // listing's floor, so a discarded packet must leave it untouched.
+      const lowModel = { id: "model-low", name: "Low", provider: "openai" };
+      service.seedState({
+        session: makeSession({ session_id: "s-review", flow_id: "flow-1" }),
+        availableModels: [lowModel as never],
+        defaultModelId: "model-low",
+        modelLoadStatus: "loaded"
+      });
       const pending = deferred<object>();
       fetch.mockReturnValueOnce(pending.promise);
 
       const opened = service.openReview();
       expect(service.review.status).toBe("loading");
       service.closeReview();
-      pending.resolve(packet(1));
+      pending.resolve({ ...packet(1), evidence_classification_level: 2 });
       await opened;
 
       expect(service.review).toEqual({ status: "closed" });
       // A discarded packet leaves no listing behind: the only request made
-      // was the packet's own.
+      // was the packet's own, and the conversation's list still stands.
       expect(fetch).toHaveBeenCalledTimes(1);
+      expect(service.effectiveModel?.id).toBe("model-low");
     });
 
     it("drops suggestions that answer a review that was reopened on another version", async () => {
