@@ -7185,7 +7185,7 @@
   "flow_transcript_editor_confidence_low": "låg",
   "flow_transcript_editor_confidence": "förslag med {confidence} säkerhet",
   "flow_transcript_editor_no_suggestion": "inget förslag",
-  "flow_transcript_editor_inferred_name": " · namnet hörs i samtalet",
+  "flow_transcript_editor_inferred_name": " · AI-förslag utifrån samtalet",
   "flow_transcript_editor_why": "Varför?",
   "flow_transcript_editor_no_evidence": "Ingen ytterligare motivering.",
   "flow_transcript_editor_no_sample": "Inget tydligt ljudexempel för den här talaren.",

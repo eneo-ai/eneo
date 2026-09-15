@@ -36,6 +36,7 @@ from eneo.flows.output_modes import speaker_mapping_violation
 from eneo.flows.runtime.speaker_mapping_runtime import (
     SpeakerMappingValidationError,
     build_speaker_mapping_question,
+    ground_speaker_mapping_proposal,
     mapping_to_names,
     resolve_participants,
     speaker_mapping_instructions,
@@ -170,10 +171,11 @@ class SpeakerMappingStepHandler:
         # The model sees the speaker inventory (plus the conversation's opening
         # when it may infer names), not the whole transcript, and a fixed
         # instruction block; the frozen call is what activation records.
+        opening = build_opening_excerpt(source_text) if infer_names else None
         question = build_speaker_mapping_question(
             inventory=inventory,
             participants=participants,
-            opening=build_opening_excerpt(source_text) if infer_names else None,
+            opening=opening,
         )
         fixed_instructions = speaker_mapping_instructions(infer_names=infer_names)
         instructions = (
@@ -221,6 +223,12 @@ class SpeakerMappingStepHandler:
                 effective_prompt=instructions,
             ) from exc
 
+        mapping = ground_speaker_mapping_proposal(
+            mapping,
+            inventory=inventory,
+            participants=participants,
+            opening=opening,
+        )
         renamed = apply_speaker_names(source_text, mapping_to_names(mapping))
         max_bytes = activated.deps.max_inline_text_bytes
         if max_bytes is not None and len(renamed.encode("utf-8")) > max_bytes:

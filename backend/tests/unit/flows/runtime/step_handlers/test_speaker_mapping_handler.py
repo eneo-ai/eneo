@@ -315,7 +315,10 @@ async def test_name_inference_accepts_names_outside_the_list(harness) -> None:
             },
         ]
     }
-    handler, _ = _handler(activate)
+    handler, _ = _handler(
+        activate,
+        prepared_text=SOURCE.replace("Anna", "Maria").replace("Bo här", "Gunnar här"),
+    )
     state, _ = _state()
     run = SimpleNamespace(id=uuid4(), input_payload_json={"deltagare": "Bo"})
     step = _step(
@@ -337,10 +340,10 @@ async def test_name_inference_accepts_names_outside_the_list(harness) -> None:
     # The frozen call carries the conversation's opening and the inferring rules.
     question = json.loads(calls["question"])
     assert question["opening"] == [
-        "SPEAKER_00: Hej, jag heter Anna.",
-        "SPEAKER_01: Hej Anna, Bo här.",
+        "SPEAKER_00: Hej, jag heter Maria.",
+        "SPEAKER_01: Hej Maria, Gunnar här.",
     ]
-    assert "Never invent a name" not in calls["prompt"]
+    assert "Never invent a name" in calls["prompt"]
     assert "participant list never" in calls["prompt"]
 
 
@@ -417,3 +420,53 @@ async def test_unknown_review_speaker_passes_readable_words_without_naming(harne
     assert result.output.output_payload_extensions["speaker_mapping"][
         "source_step_id"
     ] == str(previous.step_id)
+
+
+@pytest.mark.parametrize("first_name", ["Agne", "Agne Hansson"])
+async def test_inferred_names_are_grounded_before_renaming_or_persisting(
+    harness, first_name
+):
+    calls, activate = harness
+    source = "\n".join(
+        [
+            "[00:00:00 - 00:00:04] SPEAKER_00: Nu har Stefan Löfven stått här och inte gett besked.",
+            "[00:00:05 - 00:00:09] SPEAKER_01: Behåll den där, Agne. Vi behöver en politisk överenskommelse.",
+        ]
+    )
+    calls["structured"] = {
+        "speakers": [
+            {
+                "label": "SPEAKER_00",
+                "name": first_name,
+                "confidence": "high",
+                "evidence": "Tilltalas som Agne.",
+            },
+            {
+                "label": "SPEAKER_01",
+                "name": "Ibrahim Baylan",
+                "confidence": "medium",
+                "evidence": "Talar som ansvarig politiker om energi.",
+            },
+        ]
+    }
+    handler, persist = _handler(activate, prepared_text=source)
+    state, _ = _state()
+    run = SimpleNamespace(id=uuid4(), input_payload_json={"transkribering": source})
+    result = await handler.execute(
+        step=_step(output_config={"speaker_mapping": {"infer_names": True}}),
+        run=run,
+        state=state,
+        version_metadata=None,
+        attempt_no=1,
+    )
+    output = result.output
+    assert [entry["name"] for entry in output.structured_output["speakers"]] == [
+        "Agne" if first_name == "Agne" else None,
+        None,
+    ]
+    assert "Ibrahim Baylan" not in output.full_text
+    assert "Agne Hansson" not in output.full_text
+    assert "SPEAKER_01: Behåll den där, Agne." in output.full_text
+    assert output.structured_output["speakers"][1]["confidence"] == "low"
+    assert output.structured_output["speakers"][1]["evidence"] == ""
+    persist.assert_awaited_once_with(run, output.full_text)

@@ -9,6 +9,7 @@ from eneo.flows.runtime.speaker_mapping_runtime import (
     SPEAKER_MAPPING_INSTRUCTIONS,
     SpeakerMappingValidationError,
     build_speaker_mapping_question,
+    ground_speaker_mapping_proposal,
     mapping_to_names,
     resolve_participants,
     speaker_mapping_instructions,
@@ -194,5 +195,78 @@ def test_instructions_switch_on_name_inference() -> None:
     assert fixed == SPEAKER_MAPPING_INSTRUCTIONS
     assert inferring == SPEAKER_MAPPING_INFER_INSTRUCTIONS
     assert "Never invent a name" in fixed
-    assert "Never invent a name" not in inferring
+    assert "Never invent a name" in inferring
     assert "participant list never" in inferring
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("Agne", "Agne"),
+        ("agne", "agne"),
+        ("Agne Hansson", None),
+        ("Ibrahim Baylan", None),
+        ("Agn", None),
+        ("ansvarig politiker", None),
+    ],
+)
+def test_proposals_require_names_or_roles_in_supplied_words(name, expected) -> None:
+    proposal = {
+        "speakers": [
+            {
+                "label": "SPEAKER_00",
+                "name": name,
+                "confidence": "high",
+                # The model's own explanation cannot supply missing name evidence.
+                "evidence": f'Introduces themselves as "{name}".',
+            }
+        ]
+    }
+    grounded = ground_speaker_mapping_proposal(
+        proposal,
+        inventory=[
+            {
+                "label": "SPEAKER_01",
+                "samples": [
+                    "Behåll den där, Agne.",
+                    "Vi behöver en politisk överenskommelse om energi.",
+                ],
+            }
+        ],
+        participants=[],
+    )
+    assert grounded["speakers"][0]["name"] == expected
+    assert proposal["speakers"][0]["name"] == name
+    if expected is None:
+        assert grounded["speakers"][0]["confidence"] == "low"
+        assert grounded["speakers"][0]["evidence"] == ""
+
+
+@pytest.mark.parametrize(
+    ("name", "participants", "samples", "opening", "expected"),
+    [
+        ("Ibrahim Baylan", ["Ibrahim Baylan"], [], [], "Ibrahim Baylan"),
+        ("Gunnar", [], ["Hej."], ["SPEAKER_01: Gunnar, välkommen hit."], "Gunnar"),
+        (
+            "socialsekreterare",
+            [],
+            ["Jag arbetar som socialsekreterare."],
+            [],
+            "socialsekreterare",
+        ),
+        ("Åsa", [], ["Jag heter A\u030asa."], [], "Åsa"),
+        ("Ann", [], ["Anna säger hej."], [], None),
+        ("Agne Hansson", [], ["Agne", "Hansson"], [], None),
+        ("Ibrahim Baylan", [], [], [], None),
+    ],
+)
+def test_proposal_grounding_sources_and_word_boundaries(
+    name, participants, samples, opening, expected
+) -> None:
+    mapping = ground_speaker_mapping_proposal(
+        {"speakers": [{"label": "SPEAKER_00", "name": name, "confidence": "high"}]},
+        inventory=[{"label": "SPEAKER_00", "samples": samples}],
+        participants=participants,
+        opening=opening,
+    )
+    assert mapping["speakers"][0]["name"] == expected

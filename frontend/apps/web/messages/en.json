@@ -7185,7 +7185,7 @@
   "flow_transcript_editor_confidence_low": "low",
   "flow_transcript_editor_confidence": "suggestion with {confidence} confidence",
   "flow_transcript_editor_no_suggestion": "no suggestion",
-  "flow_transcript_editor_inferred_name": " · the name is heard in the conversation",
+  "flow_transcript_editor_inferred_name": " · AI suggestion based on the conversation",
   "flow_transcript_editor_why": "Why?",
   "flow_transcript_editor_no_evidence": "No further explanation.",
   "flow_transcript_editor_no_sample": "No clear audio sample for this speaker.",

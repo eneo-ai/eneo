@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import re
+import unicodedata
 from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
@@ -40,8 +42,13 @@ SPEAKER_MAPPING_INFER_INSTRUCTIONS = (
     "Rules:\n"
     "- When the evidence matches a participant from the list, use that "
     "participant's name exactly as listed.\n"
-    "- Otherwise propose the name the conversation reveals: someone "
-    "introducing themselves, or being addressed or referred to by name.\n"
+    "- Otherwise propose only a name explicitly present in the supplied "
+    "conversation, exactly as transcribed. Never invent a name, add a surname, "
+    "correct a heard name, or identify a public figure from world knowledge, "
+    "politics, subject matter, or a role.\n"
+    "- Mentioning someone in the third person does not establish that they "
+    "are a speaker. Require a clear link between the named person and the "
+    "speaker label, such as an introduction or direct address and response.\n"
     "- People are usually named by others, not by themselves. Read the opening "
     "as a dialogue: when one speaker addresses or hands over to someone by name "
     "(for example 'Anna, du är på plats' or 'jag står här med Anna'), the "
@@ -50,14 +57,16 @@ SPEAKER_MAPPING_INFER_INSTRUCTIONS = (
     "- When only a role is evident (for example the person who says they work "
     "as a case officer), propose the role as the transcript words it, in the "
     "language of the transcript. The reviewer confirms every proposal.\n"
-    "- Use null only when nothing in the conversation identifies the speaker.\n"
+    "- Use null whenever the name or its connection to the speaker is "
+    "unsupported or ambiguous. A plausible identity is not evidence.\n"
     "- Two labels may map to the same person (for example when the same "
     "person appears in several recordings).\n"
     "- Confidence (low, medium, high) reflects how strongly the transcript "
     "supports the proposal. An empty or incomplete participant list never "
     "lowers it.\n"
     "- For every label give one short sentence of evidence in the language of "
-    "the transcript.\n"
+    "the transcript, quoting the supplied words that support the identity and "
+    "its link to the speaker. Do not invent a quote.\n"
     "Respond with JSON only, exactly in this shape:\n"
     '{"speakers": [{"label": "SPEAKER_00", "name": "<name, role or null>", '
     '"confidence": "low|medium|high", "evidence": "<short reason>"}]}'
@@ -167,6 +176,46 @@ def validate_speaker_mapping(
             f"Mapping is missing speaker labels: {', '.join(missing)}."
         )
     return {"speakers": [by_label[label] for label in known_labels]}
+
+
+def ground_speaker_mapping_proposal(
+    structured: Mapping[str, Any],
+    *,
+    inventory: Sequence[Mapping[str, Any]],
+    participants: Sequence[str],
+    opening: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """Discard machine-proposed identities absent from the actual model input.
+
+    Presence is necessary, not proof that a mentioned person is a speaker.
+    The prompt handles that relationship and a person reviews the result.
+    Human edits deliberately use validate_speaker_mapping without this gate.
+    """
+    passages = [
+        sample
+        for entry in inventory
+        for sample in entry.get("samples", [])
+        if isinstance(sample, str)
+    ]
+    passages.extend(line.partition(": ")[2] for line in opening or [])
+    normalized_passages = [_normalize_name_evidence(text) for text in passages]
+    speakers: list[dict[str, Any]] = []
+    for entry in structured["speakers"]:
+        proposed = dict(entry)
+        name = proposed["name"]
+        if name is not None and name not in participants:
+            pattern = re.compile(
+                r"(?<!\w)" + re.escape(_normalize_name_evidence(name)) + r"(?!\w)"
+            )
+            if not any(pattern.search(text) for text in normalized_passages):
+                # Do not retain the model's explanation of an unsupported identity.
+                proposed.update(name=None, confidence="low", evidence="")
+        speakers.append(proposed)
+    return {**structured, "speakers": speakers}
+
+
+def _normalize_name_evidence(text: str) -> str:
+    return " ".join(unicodedata.normalize("NFKC", text).casefold().split())
 
 
 def resolve_max_speakers(
