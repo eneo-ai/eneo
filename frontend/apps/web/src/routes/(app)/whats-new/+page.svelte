@@ -91,16 +91,17 @@
                   id={entry.id}
                   class="border-default bg-primary flex flex-col gap-2 rounded-lg border p-4"
                 >
-                  <div class="flex flex-wrap items-center gap-2">
+                  <div class="flex flex-wrap items-center gap-2 text-xs">
                     <Badge
                       variant="outline"
                       class="border-transparent {typeClass[entry.type] ?? ''}"
                     >
                       {labelFor(typeLabel, entry.type)}
                     </Badge>
-                    <Badge variant="outline">{labelFor(areaLabel, entry.area)}</Badge>
+                    <span class="text-muted">{labelFor(areaLabel, entry.area)}</span>
                     {#if entry.audience === "admin"}
-                      <Badge variant="secondary">{m.whats_new_admin_only()}</Badge>
+                      <span class="text-muted" aria-hidden="true">·</span>
+                      <span class="text-muted">{m.whats_new_admin_only()}</span>
                     {/if}
                   </div>
                   <h3 class="text-primary font-medium">{text(entry.title)}</h3>
