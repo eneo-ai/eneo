@@ -1,0 +1,876 @@
+{
+  "name": "Beslutsunderlag för markupplåtelse (30 steg)",
+  "description": "Läser inkomna ansökningar om markupplåtelse, sammanfattar vad som söks, bedömer ansökan mot tillhandahållna regler och tar fram ett beslutsdokument som levereras som PDF.",
+  "steps": [
+    {
+      "name": "Extrahera källfält",
+      "instructions": "Läs endast den aktuella källan. Bevara alla källgrundade uppgifter som behövs för efterföljande analys, inklusive exakta identifierare, datum, tider, tal, påståenden, saknade värden och osäkerheter. Dra inga slutsatser mellan källor och anta inte att den aktuella källan har ett visst format. Tillämpa det föreslagna extraktionskravet nedan endast där den aktuella källan stöder det.\n\nLäs varje ansökan om markupplåtelse och extrahera endast uppgifter som faktiskt framgår av källmaterialet. Sammanfatta vad som söks och identifiera ansökans relevanta fakta, inklusive sökande, plats, ändamål, omfattning, tidsperiod, villkor, bilagor och andra uppgifter som behövs för bedömningen. Markera uttryckligen när en uppgift saknas eller är oklar. Ange också vilket regel- eller referensmaterial som finns tillgängligt för bedömningen.\n\nDen här dokumentläsaren körs en gång per uppladdad källa. Extrahera bara fakta från det aktuella källdokumentet och returnera documents med ett dokumentobjekt.\n\nRequired JSON fields:\n- documents: Källgrundat rapportunderlag för det aktuella dokumentet.\nRuntime-managed fields for items of documents: extraction_warnings. These are added by the runtime; do not generate or remove them.\nAllowed fields for items of documents: vad_som_soks, ansokansfakta, saknade_eller_oklara_uppgifter, referensmaterial, summary, source_material. Do not emit other fields.\nAllowed fields for items of documents[].ansokansfakta: kategori, uppgift, kallstod. Do not emit other fields.\nAllowed fields for items of documents[].saknade_eller_oklara_uppgifter: uppgift, betydelse. Do not emit other fields.\nAllowed fields for items of documents[].referensmaterial: namn, omfattning. Do not emit other fields.",
+      "user_description": "Extrahera källfält",
+      "input_source": "flow_input",
+      "input_type": "document",
+      "input_contract": null,
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": [
+          "documents"
+        ],
+        "properties": {
+          "documents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "source_label",
+                "source_file_id",
+                "extraction_warnings",
+                "vad_som_soks",
+                "ansokansfakta",
+                "saknade_eller_oklara_uppgifter",
+                "referensmaterial",
+                "summary",
+                "source_material"
+              ],
+              "properties": {
+                "summary": {
+                  "type": "string",
+                  "title": "Summary",
+                  "description": "Kort sammanfattning grundad i källmaterialet."
+                },
+                "source_label": {
+                  "type": "string",
+                  "title": "Source label",
+                  "description": "Runtime-provided source label from uploaded file metadata."
+                },
+                "vad_som_soks": {
+                  "type": "string",
+                  "title": "Vad som soks",
+                  "description": "Sammanfattning av vad ansökan om markupplåtelse avser."
+                },
+                "ansokansfakta": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "kategori",
+                      "uppgift",
+                      "kallstod"
+                    ],
+                    "properties": {
+                      "uppgift": {
+                        "type": "string",
+                        "title": "Uppgift",
+                        "description": "Den faktiska uppgiften från källmaterialet."
+                      },
+                      "kallstod": {
+                        "type": "string",
+                        "title": "Kallstod",
+                        "description": "Var i källmaterialet uppgiften finns."
+                      },
+                      "kategori": {
+                        "type": "string",
+                        "title": "Kategori",
+                        "description": "Kategori för faktan, exempelvis sökande, plats, ändamål, omfattning, tidsperiod, villkor eller bilaga."
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "title": "Ansokansfakta",
+                  "description": "Viktiga fakta som uttryckligen framgår av ansökan eller dess bilagor."
+                },
+                "source_file_id": {
+                  "type": "string",
+                  "title": "Source file id",
+                  "description": "Runtime-provided file id for this source document."
+                },
+                "source_material": {
+                  "type": "string",
+                  "title": "Source material",
+                  "description": "Exakta källuppgifter som behövs senare, inklusive identifierare, datum, tider, tal, påståenden, saknade värden och osäkerheter."
+                },
+                "referensmaterial": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "namn",
+                      "omfattning"
+                    ],
+                    "properties": {
+                      "namn": {
+                        "type": "string",
+                        "title": "Namn",
+                        "description": "Namn eller identifiering av referensmaterialet."
+                      },
+                      "omfattning": {
+                        "type": "string",
+                        "title": "Omfattning",
+                        "description": "Vilka delar av ansökan eller vilka bedömningsfrågor materialet täcker."
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "title": "Referensmaterial",
+                  "description": "Regler, riktlinjer, checklistor eller annat referensmaterial som finns tillgängligt för bedömningen."
+                },
+                "extraction_warnings": {
+                  "type": "array",
+                  "items": {
+                    "enum": [
+                      "pdf_text_likely_reversed"
+                    ],
+                    "type": "string"
+                  },
+                  "title": "Extraction warnings",
+                  "description": "Runtime-provided extraction quality warning codes for this source."
+                },
+                "saknade_eller_oklara_uppgifter": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "uppgift",
+                      "betydelse"
+                    ],
+                    "properties": {
+                      "uppgift": {
+                        "type": "string",
+                        "title": "Uppgift",
+                        "description": "Vilken uppgift som saknas eller är oklar."
+                      },
+                      "betydelse": {
+                        "type": "string",
+                        "title": "Betydelse",
+                        "description": "Varför uppgiften påverkar bedömningen."
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "title": "Saknade eller oklara uppgifter",
+                  "description": "Uppgifter som behövs för bedömningen men saknas eller är oklara i ansökan."
+                }
+              },
+              "additionalProperties": false
+            },
+            "title": "Documents",
+            "description": "Källgrundat rapportunderlag för det aktuella dokumentet."
+          }
+        },
+        "additionalProperties": false
+      },
+      "input_bindings": {
+        "question": "{{ step_input.text }}"
+      },
+      "input_config": {
+        "runtime_input": {
+          "enabled": true,
+          "required": true,
+          "max_files": 99,
+          "description": "Ladda upp dokument som detta steg ska analysera.",
+          "input_format": "document",
+          "execution_mode": "per_source"
+        }
+      }
+    },
+    {
+      "name": "Bedöm ansökan mot reglerna",
+      "instructions": "Bedöm varje ansökan mot enbart det tillhandahållna regel- och referensmaterialet. Koppla varje bedömningspunkt till relevant ansökningsfakta och regelstöd. Redovisa vad som uppfylls, vad som inte uppfylls, vad som inte kan bedömas och vilka uppgifter eller underlag som saknas. Om referensmaterial saknas, gör det till ett tydligt hinder och avstå från att hitta på regler eller slutsatser. Formulera en preliminär rekommendation, men skilj tydligt mellan källbelagda fakta och bedömning.\n\nDet föregående materialet är den fullständiga normaliserade källuppsättningen. Använd varje relevant documents-post, bevara varje källmärkning, håll motstridiga värden åtskilda och låt inte stegets namn begränsa vilka källor som beaktas.\n\nRequired JSON fields:\n- bedomningspunkter: Individuella bedömningspunkter där ansökan jämförs med tillhandahållna regler eller checklistor.\n- viktiga_fakta: Viktiga källbelagda fakta som ska framgå separat i beslutsdokumentet.\n- hinder_och_kompletteringar: Hinder, avvikelser och kompletteringar som krävs för att kunna fatta beslut.\n- rekommendation: Preliminär rekommendation, exempelvis tillstyrk, avslå, begär komplettering eller kan inte bedömas, med tydlig motivering.\n- matches: Krav eller kontrollpunkter som uppfylls enligt jämförelsen.\n- recommended_action: Rekommenderad nästa åtgärd grundad i jämförelsen eller granskningen.\nAllowed fields for items of bedomningspunkter: regelstod, ansokansstod, status, motivering. Do not emit other fields.\nAllowed fields for items of viktiga_fakta: fakta, kallstod. Do not emit other fields.\nAllowed fields for items of hinder_och_kompletteringar: punkt, grund, prioritet. Do not emit other fields.",
+      "user_description": "Bedöm ansökan mot reglerna",
+      "input_source": "previous_step",
+      "input_type": "json",
+      "input_contract": {
+        "type": "object",
+        "required": [
+          "documents"
+        ],
+        "properties": {
+          "documents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "source_label",
+                "source_file_id",
+                "extraction_warnings",
+                "vad_som_soks",
+                "ansokansfakta",
+                "saknade_eller_oklara_uppgifter",
+                "referensmaterial",
+                "summary",
+                "source_material"
+              ],
+              "properties": {
+                "summary": {
+                  "type": "string",
+                  "title": "Summary",
+                  "description": "Kort sammanfattning grundad i källmaterialet."
+                },
+                "source_label": {
+                  "type": "string",
+                  "title": "Source label",
+                  "description": "Runtime-provided source label from uploaded file metadata."
+                },
+                "vad_som_soks": {
+                  "type": "string",
+                  "title": "Vad som soks",
+                  "description": "Sammanfattning av vad ansökan om markupplåtelse avser."
+                },
+                "ansokansfakta": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "kategori",
+                      "uppgift",
+                      "kallstod"
+                    ],
+                    "properties": {
+                      "uppgift": {
+                        "type": "string",
+                        "title": "Uppgift",
+                        "description": "Den faktiska uppgiften från källmaterialet."
+                      },
+                      "kallstod": {
+                        "type": "string",
+                        "title": "Kallstod",
+                        "description": "Var i källmaterialet uppgiften finns."
+                      },
+                      "kategori": {
+                        "type": "string",
+                        "title": "Kategori",
+                        "description": "Kategori för faktan, exempelvis sökande, plats, ändamål, omfattning, tidsperiod, villkor eller bilaga."
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "title": "Ansokansfakta",
+                  "description": "Viktiga fakta som uttryckligen framgår av ansökan eller dess bilagor."
+                },
+                "source_file_id": {
+                  "type": "string",
+                  "title": "Source file id",
+                  "description": "Runtime-provided file id for this source document."
+                },
+                "source_material": {
+                  "type": "string",
+                  "title": "Source material",
+                  "description": "Exakta källuppgifter som behövs senare, inklusive identifierare, datum, tider, tal, påståenden, saknade värden och osäkerheter."
+                },
+                "referensmaterial": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "namn",
+                      "omfattning"
+                    ],
+                    "properties": {
+                      "namn": {
+                        "type": "string",
+                        "title": "Namn",
+                        "description": "Namn eller identifiering av referensmaterialet."
+                      },
+                      "omfattning": {
+                        "type": "string",
+                        "title": "Omfattning",
+                        "description": "Vilka delar av ansökan eller vilka bedömningsfrågor materialet täcker."
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "title": "Referensmaterial",
+                  "description": "Regler, riktlinjer, checklistor eller annat referensmaterial som finns tillgängligt för bedömningen."
+                },
+                "extraction_warnings": {
+                  "type": "array",
+                  "items": {
+                    "enum": [
+                      "pdf_text_likely_reversed"
+                    ],
+                    "type": "string"
+                  },
+                  "title": "Extraction warnings",
+                  "description": "Runtime-provided extraction quality warning codes for this source."
+                },
+                "saknade_eller_oklara_uppgifter": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "uppgift",
+                      "betydelse"
+                    ],
+                    "properties": {
+                      "uppgift": {
+                        "type": "string",
+                        "title": "Uppgift",
+                        "description": "Vilken uppgift som saknas eller är oklar."
+                      },
+                      "betydelse": {
+                        "type": "string",
+                        "title": "Betydelse",
+                        "description": "Varför uppgiften påverkar bedömningen."
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "title": "Saknade eller oklara uppgifter",
+                  "description": "Uppgifter som behövs för bedömningen men saknas eller är oklara i ansökan."
+                }
+              },
+              "additionalProperties": false
+            },
+            "title": "Documents",
+            "description": "Källgrundat rapportunderlag för det aktuella dokumentet."
+          }
+        },
+        "additionalProperties": false
+      },
+      "output_mode": "pass_through",
+      "output_type": "json",
+      "output_contract": {
+        "type": "object",
+        "required": [
+          "bedomningspunkter",
+          "viktiga_fakta",
+          "hinder_och_kompletteringar",
+          "rekommendation",
+          "matches",
+          "recommended_action"
+        ],
+        "properties": {
+          "matches": {
+            "type": "string",
+            "title": "Matches",
+            "description": "Krav eller kontrollpunkter som uppfylls enligt jämförelsen."
+          },
+          "viktiga_fakta": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "fakta",
+                "kallstod"
+              ],
+              "properties": {
+                "fakta": {
+                  "type": "string",
+                  "title": "Fakta",
+                  "description": "Ett viktigt faktum från ansökan eller referensmaterialet."
+                },
+                "kallstod": {
+                  "type": "string",
+                  "title": "Kallstod",
+                  "description": "Källstöd för faktumet."
+                }
+              },
+              "additionalProperties": false
+            },
+            "title": "Viktiga fakta",
+            "description": "Viktiga källbelagda fakta som ska framgå separat i beslutsdokumentet."
+          },
+          "rekommendation": {
+            "type": "string",
+            "title": "Rekommendation",
+            "description": "Preliminär rekommendation, exempelvis tillstyrk, avslå, begär komplettering eller kan inte bedömas, med tydlig motivering."
+          },
+          "bedomningspunkter": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "regelstod",
+                "ansokansstod",
+                "status",
+                "motivering"
+              ],
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "title": "Status",
+                  "description": "Bedömningsstatus: uppfyllt, inte uppfyllt, delvis uppfyllt eller kan inte bedömas."
+                },
+                "regelstod": {
+                  "type": "string",
+                  "title": "Regelstod",
+                  "description": "Relevant regel, riktlinje, checklistepunkt eller angivelse att referensmaterial saknas."
+                },
+                "motivering": {
+                  "type": "string",
+                  "title": "Motivering",
+                  "description": "Kort motivering som skiljer källuppgifter från tolkning."
+                },
+                "ansokansstod": {
+                  "type": "string",
+                  "title": "Ansokansstod",
+                  "description": "Relevanta fakta från ansökan som bedömningen bygger på."
+                }
+              },
+              "additionalProperties": false
+            },
+            "title": "Bedomningspunkter",
+            "description": "Individuella bedömningspunkter där ansökan jämförs med tillhandahållna regler eller checklistor."
+          },
+          "recommended_action": {
+            "type": "string",
+            "title": "Recommended action",
+            "description": "Rekommenderad nästa åtgärd grundad i jämförelsen eller granskningen."
+          },
+          "hinder_och_kompletteringar": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "punkt",
+                "grund",
+                "prioritet"
+              ],
+              "properties": {
+                "grund": {
+                  "type": "string",
+                  "title": "Grund",
+                  "description": "Källbelagd grund för punkten."
+                },
+                "punkt": {
+                  "type": "string",
+                  "title": "Punkt",
+                  "description": "Hindret, avvikelsen eller efterfrågade kompletteringen."
+                },
+                "prioritet": {
+                  "type": "string",
+                  "title": "Prioritet",
+                  "description": "Prioritet eller betydelse för fortsatt handläggning."
+                }
+              },
+              "additionalProperties": false
+            },
+            "title": "Hinder och kompletteringar",
+            "description": "Hinder, avvikelser och kompletteringar som krävs för att kunna fatta beslut."
+          }
+        },
+        "additionalProperties": false
+      },
+      "input_bindings": {
+        "source_refs": [
+          {
+            "label": "documents",
+            "output": "structured",
+            "step_ref": "step_1",
+            "field_path": "documents"
+          }
+        ]
+      },
+      "input_config": null
+    },
+    {
+      "name": "Skriv beslutsdokument",
+      "instructions": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF.",
+      "user_description": "Skriv beslutsdokument",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_contract": null,
+      "output_mode": "pass_through",
+      "output_type": "text",
+      "output_contract": null,
+      "input_bindings": {
+        "source_refs": [
+          {
+            "label": "documents",
+            "output": "structured",
+            "step_ref": "step_1",
+            "field_path": "documents"
+          },
+          {
+            "label": "bedomningspunkter",
+            "output": "structured",
+            "step_ref": "step_2",
+            "field_path": "bedomningspunkter"
+          },
+          {
+            "label": "viktiga fakta",
+            "output": "structured",
+            "step_ref": "step_2",
+            "field_path": "viktiga_fakta"
+          },
+          {
+            "label": "hinder och kompletteringar",
+            "output": "structured",
+            "step_ref": "step_2",
+            "field_path": "hinder_och_kompletteringar"
+          },
+          {
+            "label": "rekommendation",
+            "output": "structured",
+            "step_ref": "step_2",
+            "field_path": "rekommendation"
+          },
+          {
+            "label": "matches",
+            "output": "structured",
+            "step_ref": "step_2",
+            "field_path": "matches"
+          },
+          {
+            "label": "recommended action",
+            "output": "structured",
+            "step_ref": "step_2",
+            "field_path": "recommended_action"
+          }
+        ]
+      },
+      "input_config": null
+    },
+    {
+      "name": "Granska avsnitt 1",
+      "instructions": "Du granskar ett utkast till beslutsdokument om markupplåtelse med avseende på tillgänglighet för personer med funktionsnedsättning. Läs hela texten. Om något i utkastet saknar en tydlig bedömning av denna aspekt, lägg till högst ett kort stycke under rätt rubrik med en saklig formulering. Ändra inget annat. Returnera hela dokumentet i sin helhet.",
+      "user_description": "Granska: tillgänglighet för personer med funktionsnedsättning",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_contract": null,
+      "output_mode": "pass_through",
+      "output_type": "text",
+      "output_contract": null,
+      "input_bindings": null,
+      "input_config": null
+    },
+    {
+      "name": "Granska avsnitt 2",
+      "instructions": "Du granskar ett utkast till beslutsdokument om markupplåtelse med avseende på buller och störningar för närboende. Läs hela texten. Om något i utkastet saknar en tydlig bedömning av denna aspekt, lägg till högst ett kort stycke under rätt rubrik med en saklig formulering. Ändra inget annat. Returnera hela dokumentet i sin helhet.",
+      "user_description": "Granska: buller och störningar för närboende",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_contract": null,
+      "output_mode": "pass_through",
+      "output_type": "text",
+      "output_contract": null,
+      "input_bindings": null,
+      "input_config": null
+    },
+    {
+      "name": "Granska avsnitt 3",
+      "instructions": "Du granskar ett utkast till beslutsdokument om markupplåtelse med avseende på trafiksäkerhet och framkomlighet. Läs hela texten. Om något i utkastet saknar en tydlig bedömning av denna aspekt, lägg till högst ett kort stycke under rätt rubrik med en saklig formulering. Ändra inget annat. Returnera hela dokumentet i sin helhet.",
+      "user_description": "Granska: trafiksäkerhet och framkomlighet",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_contract": null,
+      "output_mode": "pass_through",
+      "output_type": "text",
+      "output_contract": null,
+      "input_bindings": null,
+      "input_config": null
+    },
+    {
+      "name": "Granska avsnitt 4",
+      "instructions": "Du granskar ett utkast till beslutsdokument om markupplåtelse med avseende på räddningstjänstens framkomlighet. Läs hela texten. Om något i utkastet saknar en tydlig bedömning av denna aspekt, lägg till högst ett kort stycke under rätt rubrik med en saklig formulering. Ändra inget annat. Returnera hela dokumentet i sin helhet.",
+      "user_description": "Granska: räddningstjänstens framkomlighet",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_contract": null,
+      "output_mode": "pass_through",
+      "output_type": "text",
+      "output_contract": null,
+      "input_bindings": null,
+      "input_config": null
+    },
+    {
+      "name": "Granska avsnitt 5",
+      "instructions": "Du granskar ett utkast till beslutsdokument om markupplåtelse med avseende på renhållning och avfallshantering. Läs hela texten. Om något i utkastet saknar en tydlig bedömning av denna aspekt, lägg till högst ett kort stycke under rätt rubrik med en saklig formulering. Ändra inget annat. Returnera hela dokumentet i sin helhet.",
+      "user_description": "Granska: renhållning och avfallshantering",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_contract": null,
+      "output_mode": "pass_through",
+      "output_type": "text",
+      "output_contract": null,
+      "input_bindings": null,
+      "input_config": null
+    },
+    {
+      "name": "Granska avsnitt 6",
+      "instructions": "Du granskar ett utkast till beslutsdokument om markupplåtelse med avseende på tillstånd enligt ordningslagen. Läs hela texten. Om något i utkastet saknar en tydlig bedömning av denna aspekt, lägg till högst ett kort stycke under rätt rubrik med en saklig formulering. Ändra inget annat. Returnera hela dokumentet i sin helhet.",
+      "user_description": "Granska: tillstånd enligt ordningslagen",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_contract": null,
+      "output_mode": "pass_through",
+      "output_type": "text",
+      "output_contract": null,
+      "input_bindings": null,
+      "input_config": null
+    },
+    {
+      "name": "Granska avsnitt 7",
+      "instructions": "Du granskar ett utkast till beslutsdokument om markupplåtelse med avseende på avgifter och taxa. Läs hela texten. Om något i utkastet saknar en tydlig bedömning av denna aspekt, lägg till högst ett kort stycke under rätt rubrik med en saklig formulering. Ändra inget annat. Returnera hela dokumentet i sin helhet.",
+      "user_description": "Granska: avgifter och taxa",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_contract": null,
+      "output_mode": "pass_through",
+      "output_type": "text",
+      "output_contract": null,
+      "input_bindings": null,
+      "input_config": null
+    },
+    {
+      "name": "Granska avsnitt 8",
+      "instructions": "Du granskar ett utkast till beslutsdokument om markupplåtelse med avseende på tidsperiod och öppettider. Läs hela texten. Om något i utkastet saknar en tydlig bedömning av denna aspekt, lägg till högst ett kort stycke under rätt rubrik med en saklig formulering. Ändra inget annat. Returnera hela dokumentet i sin helhet.",
+      "user_description": "Granska: tidsperiod och öppettider",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_contract": null,
+      "output_mode": "pass_through",
+      "output_type": "text",
+      "output_contract": null,
+      "input_bindings": null,
+      "input_config": null
+    },
+    {
+      "name": "Granska avsnitt 9",
+      "instructions": "Du granskar ett utkast till beslutsdokument om markupplåtelse med avseende på återställning av platsen. Läs hela texten. Om något i utkastet saknar en tydlig bedömning av denna aspekt, lägg till högst ett kort stycke under rätt rubrik med en saklig formulering. Ändra inget annat. Returnera hela dokumentet i sin helhet.",
+      "user_description": "Granska: återställning av platsen",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_contract": null,
+      "output_mode": "pass_through",
+      "output_type": "text",
+      "output_contract": null,
+      "input_bindings": null,
+      "input_config": null
+    },
+    {
+      "name": "Granska avsnitt 10",
+      "instructions": "Du granskar ett utkast till beslutsdokument om markupplåtelse med avseende på ansvar och försäkring. Läs hela texten. Om något i utkastet saknar en tydlig bedömning av denna aspekt, lägg till högst ett kort stycke under rätt rubrik med en saklig formulering. Ändra inget annat. Returnera hela dokumentet i sin helhet.",
+      "user_description": "Granska: ansvar och försäkring",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_contract": null,
+      "output_mode": "pass_through",
+      "output_type": "text",
+      "output_contract": null,
+      "input_bindings": null,
+      "input_config": null
+    },
+    {
+      "name": "Granska avsnitt 11",
+      "instructions": "Du granskar ett utkast till beslutsdokument om markupplåtelse med avseende på elsäkerhet och tillfälliga installationer. Läs hela texten. Om något i utkastet saknar en tydlig bedömning av denna aspekt, lägg till högst ett kort stycke under rätt rubrik med en saklig formulering. Ändra inget annat. Returnera hela dokumentet i sin helhet.",
+      "user_description": "Granska: elsäkerhet och tillfälliga installationer",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_contract": null,
+      "output_mode": "pass_through",
+      "output_type": "text",
+      "output_contract": null,
+      "input_bindings": null,
+      "input_config": null
+    },
+    {
+      "name": "Granska avsnitt 12",
+      "instructions": "Du granskar ett utkast till beslutsdokument om markupplåtelse med avseende på brandsäkerhet. Läs hela texten. Om något i utkastet saknar en tydlig bedömning av denna aspekt, lägg till högst ett kort stycke under rätt rubrik med en saklig formulering. Ändra inget annat. Returnera hela dokumentet i sin helhet.",
+      "user_description": "Granska: brandsäkerhet",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_contract": null,
+      "output_mode": "pass_through",
+      "output_type": "text",
+      "output_contract": null,
+      "input_bindings": null,
+      "input_config": null
+    },
+    {
+      "name": "Granska avsnitt 13",
+      "instructions": "Du granskar ett utkast till beslutsdokument om markupplåtelse med avseende på skyltning och reklam. Läs hela texten. Om något i utkastet saknar en tydlig bedömning av denna aspekt, lägg till högst ett kort stycke under rätt rubrik med en saklig formulering. Ändra inget annat. Returnera hela dokumentet i sin helhet.",
+      "user_description": "Granska: skyltning och reklam",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_contract": null,
+      "output_mode": "pass_through",
+      "output_type": "text",
+      "output_contract": null,
+      "input_bindings": null,
+      "input_config": null
+    },
+    {
+      "name": "Granska avsnitt 14",
+      "instructions": "Du granskar ett utkast till beslutsdokument om markupplåtelse med avseende på alkoholservering. Läs hela texten. Om något i utkastet saknar en tydlig bedömning av denna aspekt, lägg till högst ett kort stycke under rätt rubrik med en saklig formulering. Ändra inget annat. Returnera hela dokumentet i sin helhet.",
+      "user_description": "Granska: alkoholservering",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_contract": null,
+      "output_mode": "pass_through",
+      "output_type": "text",
+      "output_contract": null,
+      "input_bindings": null,
+      "input_config": null
+    },
+    {
+      "name": "Granska avsnitt 15",
+      "instructions": "Du granskar ett utkast till beslutsdokument om markupplåtelse med avseende på livsmedelshantering. Läs hela texten. Om något i utkastet saknar en tydlig bedömning av denna aspekt, lägg till högst ett kort stycke under rätt rubrik med en saklig formulering. Ändra inget annat. Returnera hela dokumentet i sin helhet.",
+      "user_description": "Granska: livsmedelshantering",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_contract": null,
+      "output_mode": "pass_through",
+      "output_type": "text",
+      "output_contract": null,
+      "input_bindings": null,
+      "input_config": null
+    },
+    {
+      "name": "Granska avsnitt 16",
+      "instructions": "Du granskar ett utkast till beslutsdokument om markupplåtelse med avseende på ljud- och ljusanläggningar. Läs hela texten. Om något i utkastet saknar en tydlig bedömning av denna aspekt, lägg till högst ett kort stycke under rätt rubrik med en saklig formulering. Ändra inget annat. Returnera hela dokumentet i sin helhet.",
+      "user_description": "Granska: ljud- och ljusanläggningar",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_contract": null,
+      "output_mode": "pass_through",
+      "output_type": "text",
+      "output_contract": null,
+      "input_bindings": null,
+      "input_config": null
+    },
+    {
+      "name": "Granska avsnitt 17",
+      "instructions": "Du granskar ett utkast till beslutsdokument om markupplåtelse med avseende på markskador och grönytor. Läs hela texten. Om något i utkastet saknar en tydlig bedömning av denna aspekt, lägg till högst ett kort stycke under rätt rubrik med en saklig formulering. Ändra inget annat. Returnera hela dokumentet i sin helhet.",
+      "user_description": "Granska: markskador och grönytor",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_contract": null,
+      "output_mode": "pass_through",
+      "output_type": "text",
+      "output_contract": null,
+      "input_bindings": null,
+      "input_config": null
+    },
+    {
+      "name": "Granska avsnitt 18",
+      "instructions": "Du granskar ett utkast till beslutsdokument om markupplåtelse med avseende på påverkan på kollektivtrafik. Läs hela texten. Om något i utkastet saknar en tydlig bedömning av denna aspekt, lägg till högst ett kort stycke under rätt rubrik med en saklig formulering. Ändra inget annat. Returnera hela dokumentet i sin helhet.",
+      "user_description": "Granska: påverkan på kollektivtrafik",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_contract": null,
+      "output_mode": "pass_through",
+      "output_type": "text",
+      "output_contract": null,
+      "input_bindings": null,
+      "input_config": null
+    },
+    {
+      "name": "Granska avsnitt 19",
+      "instructions": "Du granskar ett utkast till beslutsdokument om markupplåtelse med avseende på parkering och angöring. Läs hela texten. Om något i utkastet saknar en tydlig bedömning av denna aspekt, lägg till högst ett kort stycke under rätt rubrik med en saklig formulering. Ändra inget annat. Returnera hela dokumentet i sin helhet.",
+      "user_description": "Granska: parkering och angöring",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_contract": null,
+      "output_mode": "pass_through",
+      "output_type": "text",
+      "output_contract": null,
+      "input_bindings": null,
+      "input_config": null
+    },
+    {
+      "name": "Granska avsnitt 20",
+      "instructions": "Du granskar ett utkast till beslutsdokument om markupplåtelse med avseende på tillsyn under upplåtelsen. Läs hela texten. Om något i utkastet saknar en tydlig bedömning av denna aspekt, lägg till högst ett kort stycke under rätt rubrik med en saklig formulering. Ändra inget annat. Returnera hela dokumentet i sin helhet.",
+      "user_description": "Granska: tillsyn under upplåtelsen",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_contract": null,
+      "output_mode": "pass_through",
+      "output_type": "text",
+      "output_contract": null,
+      "input_bindings": null,
+      "input_config": null
+    },
+    {
+      "name": "Granska avsnitt 21",
+      "instructions": "Du granskar ett utkast till beslutsdokument om markupplåtelse med avseende på samråd med berörda förvaltningar. Läs hela texten. Om något i utkastet saknar en tydlig bedömning av denna aspekt, lägg till högst ett kort stycke under rätt rubrik med en saklig formulering. Ändra inget annat. Returnera hela dokumentet i sin helhet.",
+      "user_description": "Granska: samråd med berörda förvaltningar",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_contract": null,
+      "output_mode": "pass_through",
+      "output_type": "text",
+      "output_contract": null,
+      "input_bindings": null,
+      "input_config": null
+    },
+    {
+      "name": "Granska avsnitt 22",
+      "instructions": "Du granskar ett utkast till beslutsdokument om markupplåtelse med avseende på kulturmiljö och stadsbild. Läs hela texten. Om något i utkastet saknar en tydlig bedömning av denna aspekt, lägg till högst ett kort stycke under rätt rubrik med en saklig formulering. Ändra inget annat. Returnera hela dokumentet i sin helhet.",
+      "user_description": "Granska: kulturmiljö och stadsbild",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_contract": null,
+      "output_mode": "pass_through",
+      "output_type": "text",
+      "output_contract": null,
+      "input_bindings": null,
+      "input_config": null
+    },
+    {
+      "name": "Granska avsnitt 23",
+      "instructions": "Du granskar ett utkast till beslutsdokument om markupplåtelse med avseende på tillfälliga byggnader och konstruktioner. Läs hela texten. Om något i utkastet saknar en tydlig bedömning av denna aspekt, lägg till högst ett kort stycke under rätt rubrik med en saklig formulering. Ändra inget annat. Returnera hela dokumentet i sin helhet.",
+      "user_description": "Granska: tillfälliga byggnader och konstruktioner",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_contract": null,
+      "output_mode": "pass_through",
+      "output_type": "text",
+      "output_contract": null,
+      "input_bindings": null,
+      "input_config": null
+    },
+    {
+      "name": "Granska avsnitt 24",
+      "instructions": "Du granskar ett utkast till beslutsdokument om markupplåtelse med avseende på vatten och avlopp. Läs hela texten. Om något i utkastet saknar en tydlig bedömning av denna aspekt, lägg till högst ett kort stycke under rätt rubrik med en saklig formulering. Ändra inget annat. Returnera hela dokumentet i sin helhet.",
+      "user_description": "Granska: vatten och avlopp",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_contract": null,
+      "output_mode": "pass_through",
+      "output_type": "text",
+      "output_contract": null,
+      "input_bindings": null,
+      "input_config": null
+    },
+    {
+      "name": "Granska avsnitt 25",
+      "instructions": "Du granskar ett utkast till beslutsdokument om markupplåtelse med avseende på dagvatten och avrinning. Läs hela texten. Om något i utkastet saknar en tydlig bedömning av denna aspekt, lägg till högst ett kort stycke under rätt rubrik med en saklig formulering. Ändra inget annat. Returnera hela dokumentet i sin helhet.",
+      "user_description": "Granska: dagvatten och avrinning",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_contract": null,
+      "output_mode": "pass_through",
+      "output_type": "text",
+      "output_contract": null,
+      "input_bindings": null,
+      "input_config": null
+    },
+    {
+      "name": "Granska avsnitt 26",
+      "instructions": "Du granskar ett utkast till beslutsdokument om markupplåtelse med avseende på dokumentation och diarieföring. Läs hela texten. Om något i utkastet saknar en tydlig bedömning av denna aspekt, lägg till högst ett kort stycke under rätt rubrik med en saklig formulering. Ändra inget annat. Returnera hela dokumentet i sin helhet.",
+      "user_description": "Granska: dokumentation och diarieföring",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_contract": null,
+      "output_mode": "pass_through",
+      "output_type": "text",
+      "output_contract": null,
+      "input_bindings": null,
+      "input_config": null
+    },
+    {
+      "name": "Rendera PDF",
+      "instructions": "Rendera PDF",
+      "user_description": "Rendera PDF",
+      "input_source": "previous_step",
+      "input_type": "text",
+      "input_contract": null,
+      "output_mode": "render_verbatim",
+      "output_type": "pdf",
+      "output_contract": null,
+      "input_bindings": null,
+      "input_config": null
+    }
+  ]
+}
