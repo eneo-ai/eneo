@@ -357,6 +357,11 @@ def _message_envelope_fields(error: BaseException) -> ProviderRejection:
     literal = message[start : end + 1]
     try:
         envelope: object = json.loads(literal)
+    except RecursionError:
+        # Nesting deep enough to exhaust the stack is malformed for our purpose;
+        # the literal fallback would exhaust it again. Never let it replace the
+        # provider failure this extractor was called to describe.
+        return ProviderRejection(source="message", status="malformed")
     except ValueError:
         try:
             envelope = ast.literal_eval(literal)

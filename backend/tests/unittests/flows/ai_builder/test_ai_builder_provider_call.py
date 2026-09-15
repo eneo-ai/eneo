@@ -14,6 +14,7 @@ from litellm.types import utils as litellm_types
 from openai import AsyncAzureOpenAI
 
 from eneo.flows.ai_builder.ai_builder_error_contract import (
+    classify_ai_builder_provider_failure,
     record_ai_builder_provider_failure,
 )
 from eneo.flows.ai_builder.ai_builder_provider_call import (
@@ -196,6 +197,16 @@ def test_an_envelope_the_sdk_kept_only_as_message_text_is_read(message: str) -> 
         ("Error code: 400", "response", "absent"),
         ("Error code: 400 - {not a literal}", "message", "malformed"),
         ("Error code: 400 - " + "{" * 70_000, "message", "suppressed"),
+        # Nesting deep enough to exhaust the parser's stack, well under the cap.
+        (
+            'Error code: 400 - {"error":{"extra":'
+            + "[" * 1500
+            + "0"
+            + "]" * 1500
+            + "}}",
+            "message",
+            "malformed",
+        ),
     ],
 )
 def test_message_text_without_a_readable_envelope_keeps_its_failure(
@@ -209,6 +220,30 @@ def test_message_text_without_a_readable_envelope_keeps_its_failure(
     assert rejection.parameter is None
     assert rejection.source == source
     assert rejection.status == status
+
+
+def test_unparsable_message_text_never_replaces_the_provider_failure() -> None:
+    """A message the parser cannot read must not change what the turn concluded.
+
+    The extractor is called from classification too, so an exception escaping it
+    would turn a committed 400 into an unknown outcome and lose the retry scope.
+    """
+
+    error = BadRequestError(
+        'Error code: 400 - {"error":{"extra":' + "[" * 1500 + "0" + "]" * 1500 + "}}",
+        model="test",
+        llm_provider="azure",
+        body=None,
+    )
+
+    failure = classify_ai_builder_provider_failure(error, stage="proposal")
+
+    assert failure.kind == "rejected"
+    assert failure.turn_state == "committed"
+    assert failure.retry_scope == "new_turn"
+    assert failure.rejection.status == "malformed"
+    assert failure.rejection.code is None
+    assert failure.rejection.parameter is None
 
 
 def test_a_readable_body_wins_over_the_message_text() -> None:
