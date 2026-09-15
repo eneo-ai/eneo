@@ -4,38 +4,34 @@ import { Callout, Steps, Tabs } from "nextra/components";
 
 ## TL;DR
 
-This upgrade consolidates File and Icon bytes, integrity checks, storage rules,
-and cleanup in the shared object-content module. It removes the need to maintain
-separate storage paths as Eneo grows. **Every installation with legacy File or
-Icon content needs this one-time migration, including PostgreSQL-only
-installations. S3-compatible storage is optional.**
+Older Eneo versions kept uploaded files and icons directly in database
+columns. Eneo 2.2 moves them into the shared content store, which checks every
+file's integrity and can later use S3-compatible storage if you want it.
+**Every installation that has files or icons from an older version needs this
+one-time migration, including installations that only use PostgreSQL.** S3 is
+not required.
 
-For an organization upgrading an existing installation:
+What happens, in order:
 
-1. **Prepare and test.** Run [preflight before downtime](#run-preflight-before-downtime)
-   with the intended release image. Restore a recent backup in a test environment
-   and follow this guide. Use the reported legacy bytes to
-   reserve additional PostgreSQL and WAL space, and test representative uploads
-   and downloads during adoption. Keep **PostgreSQL inline** selected for the
-   migration.
-2. **Take the recovery point and upgrade.** Drain jobs, stop all old backend and
-   worker processes, and take the coordinated backup. Deploy the new release and
-   let `db-init` finish while the API remains closed. This phase needs a
-   maintenance window; use the [deployment commands](/guides/deployment#updating-eneo).
-3. **Start Eneo and let the worker adopt old content.** New uploads use the shared
-   model immediately; existing files remain readable during the background copy.
-   Ready legacy payloads up to 5 GiB start automatically. Above that default,
-   [acknowledge the required capacity](#read-migration-status) after checking
-   disk and WAL headroom.
-4. **Monitor and verify.** Check [migration status](#read-migration-status), disk,
-   WAL, and API latency.
-   Pause adoption if needed. After completion, verify representative old and new
-   content and restore a backup of the new release before closing the recovery
-   window.
-5. **Choose optional storage changes later.** Once adoption is complete, you may
-   select S3-compatible storage and explicitly move existing content. Retain the
-   legacy columns until the separate contract release removes them; completion
-   alone does not reclaim filesystem space.
+1. **Before the maintenance window.** Run the read-only
+   [preflight](#run-preflight-before-downtime) with the new image. It tells you
+   how much data will be copied. Use the [disk-planning
+   section](#disk-use-the-affected-bytes-not-total-database-size) to reserve
+   space for the copied content, database overhead, WAL, and normal operation,
+   and rehearse the whole upgrade on a restored backup.
+2. **In the maintenance window.** Stop Eneo, take a backup, deploy 2.2, and let
+   `db-init` finish before opening the API. Use the commands in
+   [Deploy Eneo](/guides/deployment#updating-eneo).
+3. **After the start.** Eneo serves old files from the old columns while a
+   background worker copies them into the content store. Up to 5 GiB starts by
+   itself; a larger set waits until you [confirm the disk
+   capacity](#read-migration-status).
+4. **Watch and verify.** Follow [status](#read-migration-status), disk, and WAL.
+   When the status says `complete`, open a few old files and restore-test a
+   fresh backup.
+5. **Optional: clean up.** Run the [cleanup command](#verify-and-clean-up) to
+   remove the old columns, then reclaim disk with a table rewrite if it is
+   worth it. Eneo 2.2 runs fine with the old columns in place; you choose when.
 
 ## What this changes
 
@@ -62,7 +58,7 @@ flowchart LR
   expand --> online["Eneo starts\nlegacy files remain readable"]
   online --> adopt["Worker\nbounded copy · SHA-256 · reference"]
   adopt --> verify["Verification period\nfiles · backup · restore"]
-  verify --> contract["Later contract release\nlock · recheck · remove legacy schema"]
+  verify --> contract["Optional cleanup in 2.2\nlock · recheck · remove legacy columns"]
   contract --> reclaim["Optional maintenance\nreclaim filesystem space"]
 ```
 
@@ -207,7 +203,7 @@ WAL generated and recycled over time. Keep backup and replica capacity separate
 when they use another volume or host.
 
 Put simply, the affected file bytes are roughly doubled until the later
-contract release: existing `L` plus new `D`. Capacity planning asks how much
+cleanup and table rewrite: existing `L` plus new `D`. Capacity planning asks how much
 **additional** free space the new copy and simultaneous WAL growth need; it does
 not count the already allocated `L` a second time.
 
@@ -594,46 +590,188 @@ the expanded schema.
 
 ## Verify and clean up
 
-Worker completion opens a verification period; it does not delete the old
-bytes. This preserves a recovery source while operators test real files and a
-current restore.
+When the worker reports `complete`, Eneo keeps the old columns. They are your
+safety net while you check that the migrated content works. Nothing is deleted
+until you run the cleanup command yourself.
 
-Keep the bridge release running through this period. Existing installations must
-finish its online work before installing the later contraction release. The
-published bridge version, supported upgrade sources, and verification window
-must be part of that release's instructions.
+### Verify the migration
 
-1. Confirm campaign state `complete` and no `pending`, `ready`, `leased`, or
-   `failed` ledger rows.
-2. Download representative old text, PDF/image, audio/transcription, and Icon
-   content through normal product workflows.
-3. Create and restore-test a current backup. Use a paired PostgreSQL/object-store
-   restore when any authoritative content is remote.
-4. Keep the pre-upgrade recovery point until the restore succeeds and your
-   retention policy permits removal.
-5. Install the later contract release during a planned window. Its migration
-   must fence writers and verify every remaining legacy source and exact
-   surviving File/Icon reference in the same transaction that drops legacy
-   columns. Matching available content must cover the actual sources; ledger
-   completion alone is not enough. This closes direct rollback to the old image.
-6. Reclaim filesystem space only if measurements justify it.
+1. Confirm completion. `status` must show `state: complete` and `paused: false`,
+   and the [ledger query](#check-ledger-progress) must show zero `pending`,
+   `ready`, `leased`, and `failed` items.
+2. Open and download a few old files of each kind through the product: a text
+   document, a PDF or image, an audio file with its transcription, and an icon.
+3. Take a fresh backup and restore it in a test environment. If any content is
+   stored in S3-compatible storage, back up the database and the bucket together
+   and restore them together.
 
-Dropping legacy columns is metadata-only in PostgreSQL. It does not rewrite the
-existing rows, and ordinary `VACUUM` does not perform that rewrite or shrink the
-table files. Choose one tested physical rewrite after the contract release:
+Keep the pre-upgrade backup until that restore succeeds and your retention
+rules allow removing it.
+
+### Decide whether to clean up
+
+Cleanup removes the eight old payload columns from the `files` and `icons`
+tables. Run it when the verification above is done and you want the disk space
+back or want to close the fallback path. It is optional in 2.2, and it is
+permanent: after cleanup, the only way back to the old bytes is your backup.
+
+Before you later upgrade past 2.2, read that version's release notes. They say
+whether cleanup must be done first.
+
+### Run the cleanup
+
+Cleanup hashes every remaining old file and its PostgreSQL-inline copy, so it
+takes at least as long as reading all of those bytes from PostgreSQL. Do not
+estimate it from the adoption run: measure it on the restored copy from the
+verification step and plan a maintenance window of that length. For content
+stored in S3-compatible storage, cleanup checks the verification data recorded
+in the database; it does not read the objects. Verify that the object store is
+reachable and that the paired backup exists before you stop Eneo. Eneo must be
+stopped for the whole window.
+
+<Steps>
+### Stop Eneo
+
+Keep the database running. Stop every backend and worker replica; in split
+deployments that includes the maintenance worker. Use the same Compose files,
+profile, and settings as the deployment.
+
+```bash
+docker compose stop backend worker
+```
+
+### Run the command from the same 2.2 image
+
+```bash
+docker compose run --rm --no-deps -T --entrypoint python worker \
+  -m eneo.object_content.file_icon_migration cleanup
+```
+
+### Read the result
+
+A successful run prints:
+
+```json
+{
+  "legacy_cleaned": true,
+  "changed": true,
+  "detail": "Legacy columns removed"
+}
+```
+
+Running it again is harmless and prints `"changed": false`. If a check fails,
+the command changes nothing and prints why:
+
+```json
+{
+  "outcome": "blocked",
+  "detail": "File/Icon cleanup refused: adoption has unfinished or leased items. Legacy storage is preserved. ..."
+}
+```
+
+| Exit code | Meaning | What to do |
+| --- | --- | --- |
+| `0` | Cleanup finished, or was already done. | Start Eneo and verify. |
+| `2` | A prerequisite failed. Nothing was changed. | Fix the reported condition, for example finish adoption or restore the backup, then run it again. |
+| `3` | The database could not be reached, the credentials or settings are invalid, or a lock could not be taken within five seconds. | Check that every backend and worker is stopped and the database is up. Then run `status` (see below): if it reports `legacy_cleaned: true`, the cleanup had already committed; otherwise run cleanup again. |
+
+Exit `2` means nothing was changed. Exit `3`, an interrupted command, or missing
+output means the outcome is unknown until you check it: in the rare case that the
+connection drops while PostgreSQL confirms the commit, the cleanup is complete
+even though no result was printed. `status` settles it, and running cleanup
+again is always safe:
+
+```bash
+docker compose run --rm --no-deps -T --entrypoint python worker \
+  -m eneo.object_content.file_icon_migration status
+```
+
+Never drop the columns by hand in `psql`.
+
+### Start Eneo and check
+
+```bash
+docker compose start backend worker
+```
+
+`status` now shows `legacy_cleaned: true`. Download an old file and upload a new
+one. `preflight` reports schema state `cleaned`.
+</Steps>
+
+<Callout type="info">
+**How cleanup protects your data.** The command does all of its work in one
+database transaction. It locks the affected tables, refuses if adoption is
+paused or unfinished, and compares the size and SHA-256 of every remaining old
+file with its PostgreSQL-inline copy; for remote copies it checks the recorded
+verification data. Only if every file matches does it remove the columns and
+record the cleanup. If any check fails, or the command is
+interrupted before that point, the database is left exactly as it was. The one
+case where a printed failure and the real outcome can differ is a connection
+lost after PostgreSQL has already committed, which is why `status` is the
+final word.
+</Callout>
+
+### After cleanup
+
+- Eneo reads all content from the content store. The migration commands,
+  settings, and ledger stay in 2.2, so `status` keeps working.
+- A file that fails an integrity check later can no longer be repaired from the
+  old columns. Recover it forward, or restore the pre-cleanup backup, which
+  discards everything written after that backup.
+- An Alembic downgrade refuses to run after cleanup; the coordinated backup is
+  the only way back.
+
+### Reclaim disk space (optional)
+
+Dropping columns does not shrink the table files on disk. The old payload
+bytes stay inside the existing rows until the table is rewritten, and a normal
+`VACUUM` does not give that space back to the filesystem. First measure whether
+a rewrite is worth it:
+
+```sql
+SELECT pg_size_pretty(pg_total_relation_size('files')) AS files_total,
+       pg_size_pretty(pg_total_relation_size('icons')) AS icons_total;
+```
+
+If it is, choose one tested method:
 
 - [`pg_repack`](https://github.com/reorg/pg_repack/blob/master/doc/pg_repack.rst)
-  minimizes blocking but needs the extension, a short final lock, and temporary
-  free disk of roughly twice the target tables and indexes.
-- `VACUUM (FULL, ANALYZE) files;` and
-  `VACUUM (FULL, ANALYZE) icons;` are simpler but exclusively lock and rewrite
-  each table. Stop APIs and workers for that maintenance window.
+  keeps the table readable and writable during most of the rewrite. It still
+  needs an exclusive lock at the start and at the end, and by default it cancels
+  queries that hold up those locks and eventually terminates their connections.
+  Run it with `--no-kill-backend` and a tested `--wait-timeout` if Eneo must stay
+  up, or stop Eneo for the run. It needs the extension on the server and the
+  client, and temporary free disk of roughly twice the size of the target tables
+  and their indexes.
+- `VACUUM (FULL, ANALYZE) files;` and `VACUUM (FULL, ANALYZE) icons;` are
+  simpler but lock each table completely while it is rewritten and need
+  temporary disk for the copy. Stop Eneo for that window, and run the two
+  statements one at a time, outside a transaction.
 
-Physical reclamation stays manual because acceptable downtime and available
-working disk differ by installation. Eneo must not hide a long table rewrite in
-`db-init` or application startup.
+Eneo never runs this rewrite for you, because the acceptable downtime and the
+available working disk differ from one installation to the next.
 
 ## FAQ
+
+### Do we have to run cleanup?
+
+No. Eneo 2.2 works with the old columns in place. Cleanup gives the disk space
+back (after a table rewrite) and removes the fallback read path. Run it when
+you are confident in the migrated content and have a tested backup. Check the
+release notes before upgrading past 2.2.
+
+### Can Eneo keep running during cleanup?
+
+No. Every backend and worker must be stopped. The command takes exclusive locks
+on the affected tables, so a running replica would either block it or keep an
+outdated view of the schema until restarted.
+
+### What if cleanup says "blocked"?
+
+Nothing was changed. The message names the condition: adoption not finished,
+an item still leased or failed, admission paused, or an old file whose migrated
+copy does not match. Fix that condition, for example by finishing adoption or
+restoring the coordinated backup, and run the command again.
 
 ### Why is this required when we do not use S3?
 
@@ -693,10 +831,10 @@ stable estimate before copying.
 
 ### Why are old bytes not deleted immediately?
 
-They are the recovery source during verification. The later contract release
-performs the final locked live-reference check before it removes the columns.
-Filesystem space is reclaimed separately because a table rewrite has its own
-lock, time, and temporary-disk requirements.
+They are your recovery source while you verify the migrated content. The
+cleanup command removes them only after it has checked every remaining file
+against its migrated copy. The disk space comes back separately, because
+rewriting a table has its own lock, time, and temporary-disk cost.
 
 ## Related guides
 
