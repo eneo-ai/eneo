@@ -583,6 +583,9 @@ describe("FlowAIBuilderService", () => {
       await opened;
 
       expect(service.review).toEqual({ status: "closed" });
+      // A discarded packet leaves no listing behind: the only request made
+      // was the packet's own.
+      expect(fetch).toHaveBeenCalledTimes(1);
     });
 
     it("drops suggestions that answer a review that was reopened on another version", async () => {

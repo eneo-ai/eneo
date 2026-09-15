@@ -418,6 +418,8 @@ export class FlowAIBuilderService {
     try {
       const packet = await this.#driver.fetchFlowReviewPacket();
       if (generation !== this.#reviewGeneration) return;
+      await this.#driver.openReviewListing(packet.evidence_classification_level);
+      if (generation !== this.#reviewGeneration) return;
       this.review = { status: "ready", packet };
     } catch (error) {
       if (generation !== this.#reviewGeneration) return;

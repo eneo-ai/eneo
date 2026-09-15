@@ -789,13 +789,18 @@ export class FlowAIBuilderDriver {
       method: "get",
       params: { path: { flow_id: this.#flowId }, query: { space_id: this.#spaceId } }
     })) as AIBuilderFlowReviewPacket;
-    // Every judgement and turn over this packet is held to its evidence
-    // level; the review is ready only once the list at that level is, so no
-    // action sends a choice the floor refuses.
-    this.#reviewEvidenceLevel = packet.evidence_classification_level;
+    return packet;
+  }
+
+  /** Every judgement and turn over an open review's packet is held to its
+   *  evidence level. The review's owner calls this once it has accepted the
+   *  packet, so a review closed while its packet loaded leaves no listing
+   *  behind; it resolves once the list at that level is installed, so no
+   *  action of a ready review sends a choice the floor refuses. */
+  async openReviewListing(evidenceLevel: number): Promise<void> {
+    this.#reviewEvidenceLevel = evidenceLevel;
     const owner = this.#currentSessionOwner();
     if (owner) await this.#fetchModels(owner);
-    return packet;
   }
 
   /** One bounded model judgement over the flow's recent runs. Nothing is
@@ -1747,7 +1752,6 @@ export class FlowAIBuilderDriver {
     if (!this.#ownsSessionIdentity(owner)) return;
     const sequence = ++this.#modelListingSequence;
     const evidenceLevel = this.#reviewEvidenceLevel;
-    const modelBefore = this.effectiveModel?.id ?? null;
 
     try {
       const result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.sessionModels, {
@@ -1758,6 +1762,9 @@ export class FlowAIBuilderDriver {
         }
       })) as AIBuilderModelsResponse;
       if (!this.#ownsSessionIdentity(owner) || sequence !== this.#modelListingSequence) return;
+      // Only the change this listing makes counts: a choice made while it was
+      // in flight keeps its effort.
+      const modelBefore = this.effectiveModel?.id ?? null;
       this.#state.availableModels = result.models;
       // A choice the floor no longer lists would be refused on send; the
       // composer falls back to the default the server now advertises.

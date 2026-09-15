@@ -767,7 +767,11 @@ describe("FlowAIBuilderDriver", () => {
       name: "Low",
       reasoning_effort_options: ["high"]
     });
-    const highModel = makeModel({ id: "model-high", name: "High" });
+    const highModel = makeModel({
+      id: "model-high",
+      name: "High",
+      reasoning_effort_options: ["high"]
+    });
     type Listing = { models: AIBuilderModel[]; default_model_id: string | null };
     const conversationListing: Listing = {
       models: [lowModel, highModel],
@@ -802,7 +806,9 @@ describe("FlowAIBuilderDriver", () => {
       const { driver, modelQueries } = makeReviewDriver();
       driver.selectModel("model-low");
 
-      await driver.fetchFlowReviewPacket();
+      const packet = await driver.fetchFlowReviewPacket();
+      expect(modelQueries).toEqual([]);
+      await driver.openReviewListing(packet.evidence_classification_level);
 
       // Awaited, not eventually: an action taken as soon as the review is
       // ready already sees the list its judgement is held to.
@@ -814,7 +820,7 @@ describe("FlowAIBuilderDriver", () => {
 
     it("lists for the conversation alone again when the review closes", async () => {
       const { driver, modelQueries } = makeReviewDriver();
-      await driver.fetchFlowReviewPacket();
+      await driver.openReviewListing(2);
 
       await driver.closeReviewListing();
 
@@ -827,7 +833,7 @@ describe("FlowAIBuilderDriver", () => {
       driver.selectReasoningEffort("high");
       expect(driver.state.selectedModelId).toBeNull();
 
-      await driver.fetchFlowReviewPacket();
+      await driver.openReviewListing(2);
 
       expect(driver.effectiveModel?.id).toBe("model-high");
       expect(driver.state.selectedReasoningEffort).toBeNull();
@@ -838,19 +844,38 @@ describe("FlowAIBuilderDriver", () => {
       const held = new Promise<Listing>((resolve) => {
         releaseConversationListing = resolve;
       });
-      const { driver } = makeReviewDriver((query) => (query ? reviewListing : held));
-      driver.seedState({ modelLoadStatus: "loading" });
-      await driver.retryModelLoad();
-      // The conversation listing is pending when the review opens.
-      await driver.fetchFlowReviewPacket();
+      const { driver, modelQueries } = makeReviewDriver((query) => (query ? reviewListing : held));
+      driver.seedState({ modelLoadStatus: "failed" });
+      // A conversation listing is in flight when the review opens.
+      const pendingRetry = driver.retryModelLoad();
+      expect(modelQueries).toEqual([undefined]);
+      await driver.openReviewListing(2);
       expect(driver.effectiveModel?.id).toBe("model-high");
 
       releaseConversationListing(conversationListing);
-      await held;
-      await Promise.resolve();
+      await pendingRetry;
 
+      expect(modelQueries).toEqual([undefined, { evidence_level: 2 }]);
       expect(driver.state.availableModels).toEqual([highModel]);
       expect(driver.effectiveModel?.id).toBe("model-high");
+    });
+
+    it("keeps an effort chosen while a listing was in flight", async () => {
+      let releaseListing!: (listing: Listing) => void;
+      const held = new Promise<Listing>((resolve) => {
+        releaseListing = resolve;
+      });
+      const { driver } = makeReviewDriver((query) => (query ? reviewListing : held));
+      await driver.openReviewListing(2);
+      const closing = driver.closeReviewListing();
+      driver.selectModel("model-high");
+      driver.selectReasoningEffort("high");
+
+      releaseListing(conversationListing);
+      await closing;
+
+      expect(driver.state.selectedModelId).toBe("model-high");
+      expect(driver.state.selectedReasoningEffort).toBe("high");
     });
 
     it("retries a failed review listing at the review's level", async () => {
@@ -860,7 +885,7 @@ describe("FlowAIBuilderDriver", () => {
         return query ? reviewListing : conversationListing;
       });
 
-      await driver.fetchFlowReviewPacket();
+      await driver.openReviewListing(2);
       expect(driver.state.modelLoadStatus).toBe("failed");
 
       fail = false;
