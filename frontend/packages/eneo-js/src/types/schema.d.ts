@@ -6821,6 +6821,30 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/whats-new/seen/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Whats New Seen
+     * @description Get the newest release the current user has opened on the What's new page.
+     */
+    get: operations["get_whats_new_seen_api_v1_whats_new_seen__get"];
+    /**
+     * Mark Whats New Seen
+     * @description Record that the current user has opened the What's new page for a release.
+     */
+    put: operations["mark_whats_new_seen_api_v1_whats_new_seen__put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/integrations/sharepoint/webhook/": {
     parameters: {
       query?: never;
@@ -21592,6 +21616,25 @@ export interface components {
        * @description Password for HTTP Basic Authentication. Set to null to remove auth. Must be provided with username.
        */
       http_auth_password?: string | null;
+    };
+    /** WhatsNewSeenPublic */
+    WhatsNewSeenPublic: {
+      /**
+       * Version
+       * @description Newest release the user has seen, or null when they never opened the page.
+       */
+      version: string | null;
+      /** Seen At */
+      seen_at?: string | null;
+    };
+    /** WhatsNewSeenUpdate */
+    WhatsNewSeenUpdate: {
+      /**
+       * Version
+       * @description The newest release the user has opened on the What's new page.
+       * @example 2.2.0
+       */
+      version: string;
     };
     /**
      * WizardType
@@ -45206,6 +45249,77 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_whats_new_seen_api_v1_whats_new_seen__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WhatsNewSeenPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  mark_whats_new_seen_api_v1_whats_new_seen__put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WhatsNewSeenUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WhatsNewSeenPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
