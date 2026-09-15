@@ -10,6 +10,7 @@ from eneo.flows.step_lineage import (
     existing_step_order_from_ref,
     existing_step_ref_for_order,
     resolve_reference_step_orders,
+    resolve_step_upstream_orders,
     resolve_upstream_step_orders,
 )
 from eneo.flows.template_reference_analyzer import (
@@ -194,6 +195,32 @@ def test_resolve_upstream_step_orders_keeps_reference_only_dependencies() -> Non
         input_source="flow_input",
         step_order=3,
         binding_references=[_reference(1)],
+        max_prior_step_order=2,
+    )
+
+    assert orders == [1]
+
+
+def test_resolve_step_upstream_orders_adds_prompt_references_to_underlag() -> None:
+    orders = resolve_step_upstream_orders(
+        input_source="all_previous_steps",
+        step_order=4,
+        input_bindings={"question": "Samtal: {{ step_2.output.text }}"},
+        prompt_template="Bakgrund: {{ step_1.output.text }}",
+        step_ref_mapping={},
+        max_prior_step_order=3,
+    )
+
+    assert orders == [1, 2]
+
+
+def test_resolve_step_upstream_orders_prompt_only_reads_the_referenced_step() -> None:
+    orders = resolve_step_upstream_orders(
+        input_source="previous_step",
+        step_order=3,
+        input_bindings={"question": "Sammanfatta."},
+        prompt_template="Bakgrund: {{ step_1.output.text }}",
+        step_ref_mapping={},
         max_prior_step_order=2,
     )
 

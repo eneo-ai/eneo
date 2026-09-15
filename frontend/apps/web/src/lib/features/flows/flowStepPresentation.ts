@@ -1,5 +1,5 @@
 import type { FlowStep } from "@eneo/eneo-js";
-import { getFlowStepUnderlagStepOrders } from "./flowInputBindings";
+import { getFlowStepUnderlag } from "./flowInputBindings";
 import type { SelectableInputTypeOption } from "./flowStepTypes";
 
 type InputSource = FlowStep["input_source"];
@@ -251,12 +251,12 @@ export function buildFlowGraphTopology(steps: FlowGraphTopologyStepLike[]): {
 
   // Explicit underlag is the whole step input, so its step references decide
   // the edges alone; `input_source` describes only a step without underlag.
-  const underlagOrdersByStep = new Map(
-    orderedSteps.map((step) => [step.step_order, getFlowStepUnderlagStepOrders(step)])
+  const underlagByStep = new Map(
+    orderedSteps.map((step) => [step.step_order, getFlowStepUnderlag(step)])
   );
   const readsFlowInput = (step: FlowGraphTopologyStepLike): boolean => {
-    const underlagOrders = underlagOrdersByStep.get(step.step_order) ?? null;
-    if (underlagOrders !== null) return underlagOrders.length === 0;
+    const underlag = underlagByStep.get(step.step_order) ?? null;
+    if (underlag !== null) return underlag.readsFlowInput;
     return (
       step.input_source === "flow_input" ||
       (step.input_source === "previous_step" && !byOrder.has(step.step_order - 1))
@@ -292,9 +292,9 @@ export function buildFlowGraphTopology(steps: FlowGraphTopologyStepLike[]): {
       });
       continue;
     }
-    const underlagOrders = underlagOrdersByStep.get(step.step_order) ?? null;
-    if (underlagOrders !== null) {
-      if (underlagOrders.length === 0) {
+    const underlag = underlagByStep.get(step.step_order) ?? null;
+    if (underlag !== null) {
+      if (underlag.readsFlowInput) {
         edges.push({
           source: "input",
           target: id,
@@ -302,9 +302,8 @@ export function buildFlowGraphTopology(steps: FlowGraphTopologyStepLike[]): {
           sourceStepOrder: 0,
           targetStepOrder: step.step_order
         });
-        continue;
       }
-      for (const order of underlagOrders) {
+      for (const order of underlag.stepOrders) {
         const sourceStep = byOrder.get(order);
         if (!sourceStep || order >= step.step_order) continue;
         edges.push({

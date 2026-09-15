@@ -318,6 +318,11 @@ def test_normalize_ai_builder_spec_keeps_projection_contract_when_underlag_decid
                 output_type=OutputType.JSON,
             ),
             _step(
+                ref="step_middle",
+                name="Narrative",
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
+            _step(
                 ref="step_b",
                 name="Synthesize",
                 input_source=InputSource.ALL_PREVIOUS_STEPS,
@@ -333,7 +338,8 @@ def test_normalize_ai_builder_spec_keeps_projection_contract_when_underlag_decid
 
     normalized, changes = normalize_ai_builder_spec(spec)
 
-    assert normalized.steps[1].input_contract == contract
+    assert normalized.steps[2].input_source == InputSource.ALL_PREVIOUS_STEPS
+    assert normalized.steps[2].input_contract == contract
     assert not any(
         change.code == "all_previous_input_contract_cleared"
         for _step_spec, change in changes

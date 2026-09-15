@@ -83,7 +83,11 @@ def iter_step_chain_violations(
                 yield violation
                 first_global_yielded = True
 
-        if step.input_source == "previous_step" and step.step_order > 1:
+        if (
+            step.input_source == "previous_step"
+            and step.step_order > 1
+            and not has_explicit_underlag(step.input_bindings)
+        ):
             previous = steps_by_order.get(step.step_order - 1)
             if previous is None:
                 if not first_global_yielded:

@@ -436,6 +436,42 @@ def test_build_graph_underlag_without_step_references_reads_flow_input() -> None
     assert incoming == [("input", "flow_input")]
 
 
+def test_build_graph_fixed_text_underlag_reads_nothing() -> None:
+    steps = [
+        _step(step_order=1, input_source="flow_input"),
+        {
+            **_step(step_order=2, input_source="previous_step"),
+            "input_bindings": {"question": "Skriv en hälsning."},
+        },
+    ]
+
+    _, edges = build_graph_from_steps(steps)
+
+    assert [edge for edge in edges if edge.target == str(steps[1]["step_id"])] == []
+
+
+def test_build_graph_mixed_underlag_keeps_root_and_step_edges() -> None:
+    steps = [
+        _step(step_order=1, input_source="flow_input"),
+        _step(step_order=2, input_source="previous_step"),
+        {
+            **_step(step_order=3, input_source="all_previous_steps"),
+            "input_bindings": {
+                "question": "Namn: {{ flow_input.namn }} Samtal: {{ step_1.output.text }}"
+            },
+        },
+    ]
+
+    _, edges = build_graph_from_steps(steps)
+    incoming = [
+        (edge.source_step_order, edge.kind)
+        for edge in edges
+        if edge.target == str(steps[2]["step_id"])
+    ]
+
+    assert incoming == [(0, "flow_input"), (1, "input_bindings.question")]
+
+
 def test_build_graph_includes_display_label_dependency() -> None:
     steps = [
         {

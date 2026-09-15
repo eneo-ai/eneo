@@ -1,5 +1,9 @@
 import type { FlowStep } from "@eneo/eneo-js";
-import { collectTemplateStepReferenceOrders } from "./flowVariableTokens";
+import { m } from "$lib/paraglide/messages";
+import {
+  collectTemplateNonStepTokens,
+  collectTemplateStepReferenceOrders
+} from "./flowVariableTokens";
 
 const SOURCE_REFS_BINDING_KEY = "source_refs";
 const SUPPORTED_INPUT_BINDING_KEYS = new Set(["question", SOURCE_REFS_BINDING_KEY]);
@@ -214,14 +218,35 @@ export function getFlowInputMaterialOptions(
   return options;
 }
 
+/** Card and chapter copy for what an underlag reads. */
+export function describeUnderlag(underlag: FlowStepUnderlag): string {
+  if (underlag.stepOrders.length === 0) {
+    return underlag.readsFlowInput
+      ? m.flow_step_card_source_underlag_flow_input()
+      : m.flow_step_card_source_underlag_fixed_text();
+  }
+  return m.flow_step_card_source_underlag({
+    steps: underlag.stepOrders
+      .map((order) => m.flow_input_template_effective_step({ step: order }))
+      .join(", ")
+  });
+}
+
+export type FlowStepUnderlag = {
+  /** Prior steps the underlag reads, ascending. */
+  stepOrders: number[];
+  /** True when the underlag reads a form field or runtime upload. */
+  readsFlowInput: boolean;
+};
+
 /**
- * Step orders an explicit underlag reads, or null when the step has none.
- * Underlag is the whole step input, so its references decide alone;
- * `input_source` only describes a step without underlag.
+ * What an explicit underlag reads, or null when the step has none. Underlag
+ * is the whole step input, so its references decide alone; `input_source`
+ * only describes a step without underlag. Fixed text reads nothing.
  */
-export function getFlowStepUnderlagStepOrders(
+export function getFlowStepUnderlag(
   step: Pick<FlowStep, "input_bindings">
-): number[] | null {
+): FlowStepUnderlag | null {
   const state = parseFlowInputBindings(step.input_bindings);
   if (state.status === "invalid") return null;
   const question = state.question?.trim() ?? "";
@@ -231,7 +256,10 @@ export function getFlowStepUnderlagStepOrders(
     const order = getStepOrderFromStepRef(ref.stepRef);
     if (order !== null) orders.add(order);
   }
-  return [...orders].sort((a, b) => a - b);
+  return {
+    stepOrders: [...orders].sort((a, b) => a - b),
+    readsFlowInput: collectTemplateNonStepTokens(question).length > 0
+  };
 }
 
 export function getFlowStepEffectiveInputSources(

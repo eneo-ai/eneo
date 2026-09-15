@@ -337,16 +337,33 @@ describe("buildFlowGraphTopology", () => {
     expect(flowGraphLayoutKey([bound])).not.toEqual(flowGraphLayoutKey([base]));
   });
 
-  it("connects underlag without step references to the flow input", () => {
+  it("connects form-field underlag to the flow input and fixed text to nothing", () => {
     const t = buildFlowGraphTopology([
       step(1, "flow_input"),
       {
         ...step(2, "all_previous_steps"),
         input_bindings: { question: "Namn: {{ flow_input.namn }}" }
-      }
+      },
+      { ...step(3, "all_previous_steps"), input_bindings: { question: "Skriv en hälsning." } }
     ]);
     expect(t.edges.filter((e) => e.target === "s2")).toEqual([
       { source: "input", target: "s2", kind: "flow_input", sourceStepOrder: 0, targetStepOrder: 2 }
+    ]);
+    expect(t.edges.filter((e) => e.target === "s3")).toEqual([]);
+  });
+
+  it("keeps both the flow-input and the step edge for mixed underlag", () => {
+    const t = buildFlowGraphTopology([
+      step(1, "flow_input"),
+      step(2, "previous_step"),
+      {
+        ...step(3, "all_previous_steps"),
+        input_bindings: { question: "Namn: {{ flow_input.namn }} Samtal: {{ step_1.output.text }}" }
+      }
+    ]);
+    expect(t.edges.filter((e) => e.target === "s3").map((e) => [e.source, e.kind])).toEqual([
+      ["input", "flow_input"],
+      ["s1", "input_bindings"]
     ]);
   });
 

@@ -158,10 +158,15 @@ def build_completed_step_input_payload(output: StepExecutionOutput) -> JsonObjec
         payload["transcription"] = output.transcription_metadata
     if output.runtime_input_metadata is not None:
         payload["runtime_input"] = output.runtime_input_metadata
-    if output.rag_metadata is not None:
+    citation_state = build_step_result_citation_state(
+        output.rag_metadata,
+        inherited_sources=output.inherited_citation_sources or (),
+    )
+    if citation_state is not None:
         # Verbatim passages live only in attempt provenance; the step result
-        # keeps the source identity a later step needs to inherit citations.
-        payload["rag"] = build_step_result_citation_state(output.rag_metadata)
+        # keeps the source identity a later step needs to inherit citations,
+        # including the inherited sources this step cited itself.
+        payload["rag"] = citation_state
     if output.contract_validation is not None:
         payload["contract_validation"] = output.contract_validation
     if output.diagnostics:

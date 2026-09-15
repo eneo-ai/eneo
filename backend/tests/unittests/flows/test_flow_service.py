@@ -2039,6 +2039,7 @@ async def test_publish_flow_rejects_assistant_model_below_required_security_leve
     )
     service.assistant_service.get_assistant.return_value = (
         SimpleNamespace(
+            get_prompt_text=lambda: "",
             completion_model=SimpleNamespace(
                 security_classification=SimpleNamespace(security_level=2)
             ),
@@ -2118,6 +2119,7 @@ async def test_publish_flow_rejects_output_override_write_down(user):
     service.assistant_service.get_assistant.side_effect = [
         (
             SimpleNamespace(
+                get_prompt_text=lambda: "",
                 completion_model=SimpleNamespace(
                     security_classification=SimpleNamespace(security_level=3)
                 ),
@@ -2130,6 +2132,7 @@ async def test_publish_flow_rejects_output_override_write_down(user):
         ),
         (
             SimpleNamespace(
+                get_prompt_text=lambda: "",
                 completion_model=SimpleNamespace(
                     security_classification=SimpleNamespace(security_level=3)
                 ),

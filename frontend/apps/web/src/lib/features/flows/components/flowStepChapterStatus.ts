@@ -1,5 +1,6 @@
 import type { FlowStep, SecurityClassification } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
+import { describeUnderlag, getFlowStepUnderlag } from "$lib/features/flows/flowInputBindings";
 import { OUTPUT_MODES } from "$lib/features/flows/flowStepTypes";
 import {
   getEnkelAwareOutputTypeLabel,
@@ -67,21 +68,26 @@ export function getChapterInputStatus({
   hasKnowledge,
   hasAttachments
 }: {
-  step: Pick<FlowStep, "input_source" | "step_order">;
+  step: Pick<FlowStep, "input_source" | "step_order" | "input_bindings">;
   previousStep?: Pick<FlowStep, "step_order" | "user_description"> | null;
   hasKnowledge: boolean;
   hasAttachments: boolean;
 }): string {
+  // Explicit underlag is the whole step input; the input source describes
+  // only a step without it.
+  const underlag = getFlowStepUnderlag(step);
   const source =
-    step.input_source === "previous_step" && previousStep
-      ? `${m.flow_input_template_effective_step({ step: previousStep.step_order })}${
-          previousStep.user_description ? `: ${previousStep.user_description}` : ""
-        }`
-      : step.input_source === "all_previous_steps"
-        ? m.flow_input_source_all_previous_steps()
-        : step.input_source === "http_get"
-          ? m.flow_input_source_http_get()
-          : m.flow_input_source_flow_input();
+    underlag !== null
+      ? describeUnderlag(underlag)
+      : step.input_source === "previous_step" && previousStep
+        ? `${m.flow_input_template_effective_step({ step: previousStep.step_order })}${
+            previousStep.user_description ? `: ${previousStep.user_description}` : ""
+          }`
+        : step.input_source === "all_previous_steps"
+          ? m.flow_input_source_all_previous_steps()
+          : step.input_source === "http_get"
+            ? m.flow_input_source_http_get()
+            : m.flow_input_source_flow_input();
   const extra =
     hasKnowledge || hasAttachments
       ? m.flow_chapter_input_extra_active()

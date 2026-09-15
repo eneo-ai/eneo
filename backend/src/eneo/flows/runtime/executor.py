@@ -2372,12 +2372,15 @@ class FlowRunExecutor:
         assistant = await self._load_assistant(step.assistant_id, state)
         evaluation = evaluate_step_security_classification(
             step_order=step.step_order,
+            # Preflight runs before any step completes, so the definition
+            # boundary (not the completed set) bounds the references.
             upstream_step_orders=resolve_step_upstream_orders(
                 input_source=step.input_source,
                 step_order=step.step_order,
                 input_bindings=step.input_bindings,
+                prompt_template=assistant.get_prompt_text(),
                 step_ref_mapping=state.step_ref_mapping,
-                max_prior_step_order=max(state.completed_by_order, default=0),
+                max_prior_step_order=step.step_order - 1,
             ),
             output_mode=step.output_mode,
             output_classification_override=step.output_classification_override,

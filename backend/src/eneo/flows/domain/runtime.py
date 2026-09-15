@@ -118,6 +118,9 @@ class StepExecutionOutput:
     runtime_input_metadata: dict[str, Any] | None = None
     output_payload_extensions: dict[str, Any] | None = None
     citation_sidecar: dict[str, Any] | None = None
+    # Inherited sources the model cited, carried so the next consumer of this
+    # output inherits them as well.
+    inherited_citation_sources: list[dict[str, Any]] | None = None
     raw_completion_text: str | None = None
 
 

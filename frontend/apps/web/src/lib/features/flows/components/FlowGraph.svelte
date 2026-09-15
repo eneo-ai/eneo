@@ -365,8 +365,9 @@
         edge.kind !== "all_previous_steps" &&
         edge.kind !== "http_get" &&
         edge.kind !== "http_post" &&
-        (edge.kind !== "input_bindings" ||
-          edge.sourceStepOrder === (edge.targetStepOrder ?? 0) - 1) &&
+        // An inserted step would not feed a consumer whose underlag names
+        // its producer explicitly, so underlag edges offer no insertion.
+        edge.kind !== "input_bindings" &&
         edge.target !== "output";
 
       const markerColor = isViolation

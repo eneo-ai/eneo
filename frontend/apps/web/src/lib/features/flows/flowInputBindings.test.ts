@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { FlowStep } from "@eneo/eneo-js";
 import {
   getFlowStepEffectiveInputSources,
-  getFlowStepUnderlagStepOrders,
+  getFlowStepUnderlag,
   getFlowInputMaterialOptions,
   getInputBindingSourceRefs,
   hasDeletedInputBindingSourceRefs,
@@ -25,17 +25,15 @@ function makeStep(stepOrder: number, overrides: Partial<FlowStep> = {}): FlowSte
   };
 }
 
-describe("getFlowStepUnderlagStepOrders", () => {
+describe("getFlowStepUnderlag", () => {
   it("returns null for a step without underlag", () => {
-    expect(getFlowStepUnderlagStepOrders(makeStep(3))).toBeNull();
-    expect(
-      getFlowStepUnderlagStepOrders(makeStep(3, { input_bindings: { question: "  " } }))
-    ).toBeNull();
+    expect(getFlowStepUnderlag(makeStep(3))).toBeNull();
+    expect(getFlowStepUnderlag(makeStep(3, { input_bindings: { question: "  " } }))).toBeNull();
   });
 
   it("collects the steps a question and typed source refs read", () => {
     expect(
-      getFlowStepUnderlagStepOrders(
+      getFlowStepUnderlag(
         makeStep(4, {
           input_source: "all_previous_steps",
           input_bindings: {
@@ -44,15 +42,18 @@ describe("getFlowStepUnderlagStepOrders", () => {
           }
         })
       )
-    ).toEqual([1, 2]);
+    ).toEqual({ stepOrders: [1, 2], readsFlowInput: false });
   });
 
-  it("reads no step when the underlag only uses form fields", () => {
+  it("separates form-field reads from fixed text", () => {
     expect(
-      getFlowStepUnderlagStepOrders(
+      getFlowStepUnderlag(
         makeStep(2, { input_bindings: { question: "Namn: {{ flow_input.namn }}" } })
       )
-    ).toEqual([]);
+    ).toEqual({ stepOrders: [], readsFlowInput: true });
+    expect(
+      getFlowStepUnderlag(makeStep(2, { input_bindings: { question: "Skriv en hälsning." } }))
+    ).toEqual({ stepOrders: [], readsFlowInput: false });
   });
 });
 

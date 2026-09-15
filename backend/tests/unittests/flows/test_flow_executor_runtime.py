@@ -147,6 +147,7 @@ def _default_snapshot_assistant(assistant_id: UUID | str) -> SimpleNamespace:
         id=UUID(str(assistant_id)),
         origin="flow_managed",
         prompt=SimpleNamespace(text=_DEFAULT_SNAPSHOT_PROMPT),
+        get_prompt_text=lambda: _DEFAULT_SNAPSHOT_PROMPT,
         completion_model=SimpleNamespace(
             id=_DEFAULT_SNAPSHOT_MODEL_ID,
             name="gpt-5.4-nano",
@@ -4150,9 +4151,12 @@ async def test_execute_rejects_later_mcp_assistant_before_any_step_effect(user):
     executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
 
 
-def _security_assistant(assistant_id: UUID, *, model_level: int = 3) -> SimpleNamespace:
+def _security_assistant(
+    assistant_id: UUID, *, model_level: int = 3, prompt: str = ""
+) -> SimpleNamespace:
     return SimpleNamespace(
         id=assistant_id,
+        get_prompt_text=lambda: prompt,
         completion_model=SimpleNamespace(
             security_classification=SimpleNamespace(security_level=model_level)
         ),
@@ -4184,6 +4188,7 @@ def _security_step(
     step_order: int,
     assistant_id: UUID,
     input_source: str = "flow_input",
+    input_bindings: dict[str, object] | None = None,
 ) -> RuntimeStep:
     return RuntimeStep(
         step_id=uuid4(),
@@ -4191,7 +4196,7 @@ def _security_step(
         assistant_id=assistant_id,
         user_description=f"Step {step_order}",
         input_source=input_source,
-        input_bindings=None,
+        input_bindings=input_bindings,
         input_config=None,
         output_mode="pass_through",
         output_config=None,
@@ -4211,6 +4216,68 @@ async def _validate_security_steps(
             prior_output_levels_by_order=levels,
         )
     return levels
+
+
+@pytest.mark.asyncio
+async def test_runtime_preflight_classifies_bound_steps_before_anything_completes(user):
+    # Fresh run: nothing has completed yet, but step 2 binds step 1 whose
+    # override classifies its output at 3; a level-1 model must be rejected.
+    executor, _, _, _ = _build_executor(user)
+    strong = _security_assistant(uuid4(), model_level=3)
+    weak = _security_assistant(uuid4(), model_level=1)
+    space = _security_space(
+        space_id=uuid4(), assistants=[strong, weak], security_level=1
+    )
+    executor.space_repo.get_space_by_assistant = AsyncMock(return_value=space)
+    first = replace(
+        _security_step(step_order=1, assistant_id=strong.id),
+        output_classification_override=3,
+    )
+    bound = _security_step(
+        step_order=2,
+        assistant_id=weak.id,
+        input_source="previous_step",
+        input_bindings={"question": "Underlag: {{ step_1.output.text }}"},
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await executor._resolve_step_output_levels(
+            steps=[first, bound], state=_empty_execution_state()
+        )
+
+    assert exc_info.value.code == "flow_step_security_classification_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_runtime_preflight_reads_prompt_references_when_underlag_is_literal(user):
+    # The underlag reads no step, but the assistant prompt interpolates step 1:
+    # the model still receives classified content.
+    executor, _, _, _ = _build_executor(user)
+    strong = _security_assistant(uuid4(), model_level=3)
+    weak = _security_assistant(
+        uuid4(), model_level=1, prompt="Bakgrund: {{ step_1.output.text }}"
+    )
+    space = _security_space(
+        space_id=uuid4(), assistants=[strong, weak], security_level=1
+    )
+    executor.space_repo.get_space_by_assistant = AsyncMock(return_value=space)
+    first = replace(
+        _security_step(step_order=1, assistant_id=strong.id),
+        output_classification_override=3,
+    )
+    literal = _security_step(
+        step_order=2,
+        assistant_id=weak.id,
+        input_source="all_previous_steps",
+        input_bindings={"question": "Sammanfatta kort."},
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await executor._resolve_step_output_levels(
+            steps=[first, literal], state=_empty_execution_state()
+        )
+
+    assert exc_info.value.code == "flow_step_security_classification_mismatch"
 
 
 @pytest.mark.asyncio
@@ -4383,6 +4450,7 @@ def _assistant_for_snapshot(
         id=assistant_id,
         origin="flow_managed",
         prompt=SimpleNamespace(text=prompt),
+        get_prompt_text=lambda: prompt,
         completion_model=SimpleNamespace(
             id=model_id,
             name="gpt-5.4-nano",
@@ -6045,6 +6113,7 @@ async def test_validate_runtime_step_security_rejects_write_down(user):
         security_classification=SimpleNamespace(security_level=1),
     )
     assistant = SimpleNamespace(
+        get_prompt_text=lambda: "",
         completion_model=SimpleNamespace(
             security_classification=SimpleNamespace(security_level=3)
         ),

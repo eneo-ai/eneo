@@ -96,12 +96,16 @@ def resolve_step_upstream_orders(
     input_source: str | None,
     step_order: int,
     input_bindings: object,
+    prompt_template: str | None,
     step_ref_mapping: dict[str, int],
     max_prior_step_order: int,
 ) -> list[int]:
     """Resolve the prior steps a step definition reads.
 
-    Explicit underlag decides alone; without it the implicit source decides.
+    The step input is the explicit underlag when present, otherwise the
+    implicit source. The assistant prompt is a second input channel: its step
+    references are interpolated into the prompt regardless of the input, so
+    they always join the upstream set.
     """
     question_template = effective_question_binding(input_bindings)
     binding_references = (
@@ -113,12 +117,26 @@ def resolve_step_upstream_orders(
         if question_template is not None
         else None
     )
-    return resolve_upstream_step_orders(
-        input_source=input_source,
-        step_order=step_order,
-        binding_references=binding_references,
-        max_prior_step_order=max_prior_step_order,
+    orders = set(
+        resolve_upstream_step_orders(
+            input_source=input_source,
+            step_order=step_order,
+            binding_references=binding_references,
+            max_prior_step_order=max_prior_step_order,
+        )
     )
+    if prompt_template:
+        orders.update(
+            resolve_reference_step_orders(
+                references=analyze_template(
+                    prompt_template,
+                    step_refs=step_ref_mapping,
+                    form_field_names=set(),
+                ),
+                max_prior_step_order=max_prior_step_order,
+            )
+        )
+    return sorted(orders)
 
 
 def resolve_reference_step_orders(

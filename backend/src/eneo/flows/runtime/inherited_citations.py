@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, cast
 
 from eneo.flows.domain.rag_evidence import CITATION_SOURCES_KEY
@@ -17,15 +18,52 @@ ReferencePayload = dict[str, Any]
 SourceEntry = dict[str, Any]
 
 
+_STEP_LINEAGE_KEYS = frozenset(
+    {"source_step_orders", "source_step_labels", "display_title"}
+)
+
+
+def inherited_cited_sources(
+    *,
+    citation_sidecar: Mapping[str, Any] | None,
+    inherited_context: Mapping[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Inherited sources this step actually cited, as citation-source identity.
+
+    They are carried on the step result so a later consumer of this step's
+    output inherits them too; the sidecar validated the citations.
+    """
+    if not isinstance(citation_sidecar, Mapping) or not isinstance(
+        inherited_context, Mapping
+    ):
+        return []
+    cited_ids = citation_sidecar.get("inherited_cited_source_ids")
+    available = inherited_context.get("available_sources")
+    if not isinstance(cited_ids, list) or not isinstance(available, list):
+        return []
+    wanted = {item for item in cast(list[object], cited_ids) if isinstance(item, str)}
+    return [
+        {
+            key: value
+            for key, value in cast(dict[str, Any], source).items()
+            if key not in _STEP_LINEAGE_KEYS
+        }
+        for source in cast(list[object], available)
+        if isinstance(source, dict) and cast(dict[str, Any], source).get("id") in wanted
+    ]
+
+
 def collect_inherited_citation_context(
     *,
     step: RuntimeStep,
     state: RunExecutionState,
+    prompt_template: str | None,
 ) -> dict[str, Any]:
     upstream_orders = resolve_step_upstream_orders(
         input_source=step.input_source,
         step_order=step.step_order,
         input_bindings=step.input_bindings,
+        prompt_template=prompt_template,
         step_ref_mapping=state.step_ref_mapping,
         max_prior_step_order=max(state.completed_by_order, default=0),
     )

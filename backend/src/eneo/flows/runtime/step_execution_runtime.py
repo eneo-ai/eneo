@@ -52,6 +52,7 @@ from eneo.flows.flow_run_provenance import (
 from eneo.flows.runtime.inherited_citations import (
     build_inherited_citation_prompt_appendix,
     collect_inherited_citation_context,
+    inherited_cited_sources,
 )
 from eneo.flows.runtime.output_formats import resolve_format_spec
 from eneo.flows.runtime.output_formats.base import append_output_format_instructions
@@ -1234,7 +1235,11 @@ def effective_completion_prompt(
 ) -> str:
     citation_mode = citation_mode_for_step(step)
     inherited_citation_context = (
-        collect_inherited_citation_context(step=step, state=state)
+        collect_inherited_citation_context(
+            step=step,
+            state=state,
+            prompt_template=prepared.assistant.get_prompt_text(),
+        )
         if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR
         else None
     )
@@ -1424,7 +1429,11 @@ async def _complete_step_execution(
         prepared=prepared,
     )
     inherited_citation_context = (
-        collect_inherited_citation_context(step=step, state=state)
+        collect_inherited_citation_context(
+            step=step,
+            state=state,
+            prompt_template=prepared.assistant.get_prompt_text(),
+        )
         if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR
         else None
     )
@@ -1718,6 +1727,10 @@ async def _complete_step_execution(
         transcription_metadata=prepared.step_input.transcription_metadata,
         runtime_input_metadata=prepared.step_input.runtime_input_metadata,
         citation_sidecar=citation_sidecar,
+        inherited_citation_sources=inherited_cited_sources(
+            citation_sidecar=citation_sidecar,
+            inherited_context=inherited_citation_context,
+        ),
         raw_completion_text=(
             raw_full_text
             if citation_sidecar is not None

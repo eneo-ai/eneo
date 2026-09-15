@@ -205,6 +205,7 @@ async def test_prepare_step_execution_interpolates_prompt_and_records_contract_v
         }
     )
     assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
     assistant.get_prompt_text.return_value = "Review {{flow_input.text}}"
     step_input = StepInputValue(
         text='{"title":"A"}',
@@ -252,6 +253,7 @@ async def test_prepare_step_execution_reports_prompt_variable_miss_before_provid
     state = _state()
     step = _step()
     assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
     assistant.get_prompt_text.return_value = "Review {{flow_input.missing}}"
     assistant.get_response = AsyncMock()
     deps = StepExecutionRuntimeDeps(
@@ -306,6 +308,7 @@ async def test_prepare_step_execution_rejects_non_json_explicit_binding_before_p
         },
     )
     assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
     assistant.get_prompt_text.return_value = "Skapa slutresultatet."
     assistant.get_response = AsyncMock()
     step_input = StepInputValue(
@@ -356,6 +359,7 @@ async def test_prepare_step_execution_rejects_combined_interpolated_provider_inp
     state = _state()
     step = _step(step_order=2)
     assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
     assistant.get_prompt_text.return_value = (
         "Primary: {{flow_input.text}}\nSupporting: {{flow_input.supporting_context}}"
     )
@@ -413,6 +417,7 @@ async def test_prepare_step_execution_validates_json_binding_when_binding_is_jso
         },
     )
     assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
     assistant.get_prompt_text.return_value = "Skapa slutresultatet."
     step_input = StepInputValue(
         text='{"final_report":"Rapport från underlag"}',
@@ -684,6 +689,7 @@ async def test_complete_step_execution_falls_back_when_json_mode_rejected(
         response_format={"type": "stored_provider_format"},
     )
     assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
     assistant.completion_model = SimpleNamespace(
         id=None,
         litellm_model_name="openai/gpt-test",
@@ -782,6 +788,7 @@ async def test_prepared_model_parameters_equal_completion_adapter_kwargs() -> No
     )
     completion_model = _completion_model(supported_model_kwargs=supported_model_kwargs)
     assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
     assistant.completion_model = completion_model
     assistant.completion_model_kwargs = ModelKwargs(temperature=0.2, top_p=0.8)
     prepared = PreparedStepExecution(
@@ -849,6 +856,7 @@ async def test_complete_step_execution_strips_known_unsupported_stored_response_
         response_format={"type": "stored_provider_format"},
     )
     assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
     assistant.completion_model = SimpleNamespace(
         id=None,
         litellm_model_name="anthropic/claude-test",
@@ -937,6 +945,7 @@ async def test_completed_provider_call_is_observed_before_postprocessing_failure
     state = _state()
     step = _step(output_type="text")
     assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
     completion_model_id = uuid4()
     assistant.completion_model = SimpleNamespace(
         id=completion_model_id,
@@ -1072,6 +1081,7 @@ async def test_complete_step_execution_does_not_repeat_non_capability_error_with
     state = _state()
     step = _step(output_type="json")
     assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
     assistant.completion_model = SimpleNamespace(
         id=None,
         litellm_model_name="openai/gpt-test",
@@ -1131,6 +1141,7 @@ async def test_complete_step_execution_does_not_repeat_late_json_mode_rejection(
     state = _state()
     step = _step(output_type="json")
     assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
     assistant.completion_model = SimpleNamespace(
         id=None,
         litellm_model_name="openai/gpt-test",
@@ -1187,6 +1198,7 @@ async def test_complete_step_execution_translates_context_window_failure():
     state = _state()
     step = _step(output_type="text")
     assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
     assistant.completion_model_kwargs = MagicMock(name="model_kwargs")
     assistant.get_response = AsyncMock(
         side_effect=ContextWindowExceededError(
@@ -1271,6 +1283,7 @@ async def test_complete_step_execution_shares_deadline_across_json_mode_retry(
     original_kwargs = MagicMock(name="original_kwargs")
     json_mode_kwargs = MagicMock(name="json_mode_kwargs")
     assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
     assistant.completion_model_kwargs = original_kwargs
     assistant.completion_model_kwargs.model_copy.return_value = json_mode_kwargs
 
@@ -1359,6 +1372,7 @@ async def test_complete_step_execution_fast_fails_when_deadline_already_exhauste
     original_kwargs = MagicMock(name="original_kwargs")
     json_mode_kwargs = MagicMock(name="json_mode_kwargs")
     assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
     assistant.completion_model_kwargs = original_kwargs
     assistant.completion_model_kwargs.model_copy.return_value = json_mode_kwargs
 
@@ -1427,6 +1441,7 @@ async def test_complete_step_execution_times_out_llm_request():
         return SimpleNamespace(total_token_count=4, completion="too late")
 
     assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
     assistant.completion_model_kwargs = MagicMock(name="model_kwargs")
     assistant.get_response = AsyncMock(side_effect=slow_response)
     prepared = PreparedStepExecution(
@@ -1490,6 +1505,7 @@ async def test_complete_step_execution_cancels_llm_request_when_run_is_cancelled
         return SimpleNamespace(total_token_count=4, completion="too late")
 
     assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
     assistant.completion_model_kwargs = MagicMock(name="model_kwargs")
     assistant.get_response = AsyncMock(side_effect=blocked_response)
     prepared = PreparedStepExecution(
@@ -1560,6 +1576,7 @@ async def test_cancellation_survives_a_failing_cancel_probe():
         return SimpleNamespace(total_token_count=4, completion="too late")
 
     assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
     assistant.completion_model_kwargs = MagicMock(name="model_kwargs")
     assistant.get_response = AsyncMock(side_effect=blocked_response)
     prepared = PreparedStepExecution(
@@ -1649,6 +1666,7 @@ async def test_complete_step_execution_returns_when_cancelled_llm_suppresses_can
         return SimpleNamespace(total_token_count=4, completion="too late")
 
     assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
     assistant.completion_model_kwargs = MagicMock(name="model_kwargs")
     assistant.get_response = AsyncMock(side_effect=blocked_response)
     prepared = PreparedStepExecution(
@@ -1713,6 +1731,7 @@ async def test_complete_step_execution_logs_json_mode_kwargs_failures(
     step = _step(output_type="json")
     original_kwargs = MagicMock(name="original_kwargs")
     assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
     assistant.completion_model = SimpleNamespace(
         id=None,
         litellm_model_name="openai/gpt-4.1",
@@ -1789,6 +1808,7 @@ async def test_complete_step_execution_skips_native_json_mode_when_capability_is
     step = _step(output_type="json")
     original_kwargs = ModelKwargs()
     assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
     assistant.completion_model = SimpleNamespace(
         id=None,
         litellm_model_name=None,
@@ -1868,6 +1888,7 @@ async def test_complete_step_execution_does_not_force_json_object_for_array_docu
     )
     original_kwargs = MagicMock(name="original_kwargs")
     assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
     assistant.completion_model_kwargs = original_kwargs
     original_kwargs.filter_unsupported.return_value = original_kwargs
     assistant.get_response = AsyncMock(
@@ -1937,6 +1958,7 @@ async def test_complete_step_execution_prefers_provider_reported_usage(
     state = _state()
     step = _step(output_type="text")
     assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
     assistant.completion_model_kwargs = MagicMock(name="model_kwargs")
     assistant.get_response = AsyncMock(
         return_value=SimpleNamespace(
@@ -2004,6 +2026,7 @@ async def test_complete_step_execution_falls_back_to_estimated_usage_when_provid
     state = _state()
     step = _step(output_type="text")
     assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
     assistant.completion_model_kwargs = MagicMock(name="model_kwargs")
     assistant.get_response = AsyncMock(
         return_value=SimpleNamespace(
@@ -2079,6 +2102,7 @@ async def test_complete_step_execution_falls_back_per_usage_field(
     state = _state()
     step = _step(output_type="text")
     assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
     assistant.completion_model_kwargs = MagicMock(name="model_kwargs")
     assistant.get_response = AsyncMock(
         return_value=SimpleNamespace(
@@ -2141,6 +2165,7 @@ async def test_complete_step_execution_uses_version_2_and_strips_inline_refs_for
         output_config={"citation_mode": "inline_inref_sidecar"},
     )
     assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
     assistant.completion_model_kwargs = MagicMock(name="model_kwargs")
     assistant.get_response = AsyncMock(
         return_value=SimpleNamespace(
@@ -2239,6 +2264,7 @@ async def test_complete_step_execution_records_missing_citations_without_failing
         output_config={"citation_mode": "inline_inref_sidecar"},
     )
     assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
     assistant.completion_model_kwargs = MagicMock(name="model_kwargs")
     assistant.get_response = AsyncMock(
         return_value=SimpleNamespace(
@@ -2322,6 +2348,7 @@ async def test_complete_step_execution_does_not_expect_citations_when_no_knowled
         output_config={"citation_mode": "inline_inref_sidecar"},
     )
     assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
     assistant.completion_model_kwargs = MagicMock(name="model_kwargs")
     assistant.get_response = AsyncMock(
         return_value=SimpleNamespace(
@@ -2462,6 +2489,7 @@ async def test_complete_step_execution_tracks_inherited_citations_for_synthesis_
         input_bindings={"question": "{{step_2.output.text}}"},
     )
     assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
     assistant.completion_model_kwargs = MagicMock(name="model_kwargs")
     assistant.get_response = AsyncMock(
         return_value=SimpleNamespace(
@@ -2748,6 +2776,7 @@ async def test_document_report_citation_survives_compose_render_and_public_artif
         output_config={"citation_mode": "inline_inref_sidecar"},
     )
     assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
     assistant.completion_model_kwargs = MagicMock(name="model_kwargs")
     assistant.get_response = AsyncMock(
         return_value=SimpleNamespace(

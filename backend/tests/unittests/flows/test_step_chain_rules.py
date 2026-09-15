@@ -53,6 +53,23 @@ def test_underlag_lets_json_input_read_all_previous_source() -> None:
     )
 
 
+def test_underlag_skips_the_inactive_predecessor_type_check() -> None:
+    steps = [
+        _Step(step_order=1, output_type="json"),
+        _Step(step_order=2, input_source="previous_step", output_type="pdf"),
+        _Step(
+            step_order=3,
+            input_source="previous_step",
+            input_type="json",
+            input_bindings={
+                "source_refs": [{"step_ref": "step_1", "output": "structured"}]
+            },
+        ),
+    ]
+
+    assert find_first_step_chain_violation(steps) is None
+
+
 def test_rejects_underlag_on_http_source() -> None:
     violation = find_first_step_chain_violation(
         [

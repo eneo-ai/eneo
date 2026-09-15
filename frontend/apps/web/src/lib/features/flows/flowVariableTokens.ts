@@ -30,6 +30,10 @@ export function extractTemplateTokens(text: string): string[] {
   return [...tokens];
 }
 
+export function collectTemplateNonStepTokens(text: string): string[] {
+  return extractTemplateTokens(text).filter((token) => !STEP_ORDER_TOKEN_PATTERN.test(token));
+}
+
 export function collectTemplateStepReferenceOrders(text: string): number[] {
   const orders = new Set<number>();
   for (const token of extractTemplateTokens(text)) {

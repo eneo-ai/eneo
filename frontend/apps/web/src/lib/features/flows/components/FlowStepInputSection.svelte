@@ -25,7 +25,7 @@
     type FlowRuntimeInputConfigValue
   } from "$lib/features/flows/flowRuntimeInputConfig";
   import type { FlowSourceHintKind } from "$lib/features/flows/flowStepPresentation";
-  import { getFlowStepUnderlagStepOrders } from "$lib/features/flows/flowInputBindings";
+  import { getFlowStepUnderlag } from "$lib/features/flows/flowInputBindings";
   import HttpConfigPanel from "./http/HttpConfigPanel.svelte";
   import { parseHttpAuthoredConfig, type HttpAuthoredConfig } from "./http/httpConfigTypes";
   import { createDefaultHttpConfig } from "./http/httpConfigDefaults";
@@ -90,7 +90,7 @@
   const isHttpSource = $derived(step.input_source === "http_get");
   // Explicit underlag is the whole step input, so the source choice has no
   // effect until the underlag is removed.
-  const underlagDecidesInput = $derived(getFlowStepUnderlagStepOrders(step) !== null);
+  const underlagDecidesInput = $derived(getFlowStepUnderlag(step) !== null);
   const httpMethod = "GET" as const;
   const defaultHttpConfig = $derived(createDefaultHttpConfig("input", httpMethod));
   const httpConfig = $derived(

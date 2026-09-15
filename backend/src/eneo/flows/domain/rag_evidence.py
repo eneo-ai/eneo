@@ -652,15 +652,21 @@ def compact_citation_sources(
 
 def build_step_result_citation_state(
     rag_payload: Mapping[str, Any] | None,
+    *,
+    inherited_sources: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any] | None:
     """The step-result copy: source identity for later steps, never passages.
 
     Inherited-citation prompts name sources; they never quote passages. This
     copy therefore carries no ``references`` key at all — it does not pretend to
     be evidence — and points at the one place the verbatim text lives.
+    ``inherited_sources`` are the inherited sources this step cited; they join
+    the included sources so a consumer of this output inherits them too.
     """
     if not isinstance(rag_payload, Mapping):
-        return None
+        if not inherited_sources:
+            return None
+        rag_payload = {}
     citation_state: dict[str, Any] = {
         key: value
         for key, value in rag_payload.items()
@@ -684,8 +690,34 @@ def build_step_result_citation_state(
             continue
         seen_ids.add(source_id)
         sources.append(reference)
-    citation_state[CITATION_SOURCES_KEY] = compact_citation_sources(
+    citation_sources = compact_citation_sources(
         [RetrievedSource.model_validate(source) for source in sources]
     )
+    inherited_ids: list[str] = []
+    for inherited in inherited_sources:
+        inherited_id = inherited.get("id")
+        if not isinstance(inherited_id, str) or inherited_id in seen_ids:
+            continue
+        seen_ids.add(inherited_id)
+        inherited_ids.append(inherited_id)
+        citation_sources.append(dict(inherited))
+    if inherited_ids:
+        existing_context = citation_state.get("prompt_context")
+        prompt_context: dict[str, Any] = (
+            dict(cast(Mapping[str, Any], existing_context))
+            if isinstance(existing_context, Mapping)
+            else {"tracked": True}
+        )
+        included = prompt_context.get("included_source_ids")
+        included_ids = (
+            [item for item in cast(list[object], included) if isinstance(item, str)]
+            if isinstance(included, list)
+            else []
+        )
+        prompt_context["included_source_ids"] = included_ids + [
+            item for item in inherited_ids if item not in included_ids
+        ]
+        citation_state["prompt_context"] = prompt_context
+    citation_state[CITATION_SOURCES_KEY] = citation_sources
     citation_state[PASSAGE_EVIDENCE_LOCATION_KEY] = PASSAGE_EVIDENCE_LOCATION
     return citation_state

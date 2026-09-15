@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import cast
 
 from pydantic import BaseModel, ConfigDict
@@ -12,7 +13,10 @@ from eneo.flows.step_lineage import (
     build_step_ref_mapping,
     resolve_reference_step_orders,
 )
-from eneo.flows.template_reference_analyzer import analyze_template
+from eneo.flows.template_reference_analyzer import (
+    TemplateReferenceKind,
+    analyze_template,
+)
 from eneo.flows.transcription_config import (
     FlowTranscriptionConfigError,
     parse_transcription_config,
@@ -106,16 +110,16 @@ def build_graph_from_steps(
         step_id = str(step.get("step_id") or step.get("id"))
         step_order = int(step["step_order"])
         input_source = step.get("input_source")
-        binding_orders = _binding_upstream_orders(
+        binding_upstream = _binding_upstream(
             step=step,
             step_ref_mapping=step_ref_mapping,
         )
-        if binding_orders is not None:
+        if binding_upstream is not None:
             edges.extend(
                 _binding_edges(
                     step_id=step_id,
                     step_order=step_order,
-                    binding_orders=binding_orders,
+                    binding_upstream=binding_upstream,
                     sorted_steps=sorted_steps,
                 )
             )
@@ -215,12 +219,22 @@ def build_graph_from_steps(
     return nodes, edges
 
 
-def _binding_upstream_orders(
+@dataclass(frozen=True)
+class _BindingUpstream:
+    step_orders: list[int]
+    reads_root_input: bool
+
+
+def _binding_upstream(
     *,
     step: FlowPersistedJsonObject,
     step_ref_mapping: dict[str, int],
-) -> list[int] | None:
-    """Return the step orders read by explicit underlag, or None without it."""
+) -> _BindingUpstream | None:
+    """What explicit underlag reads, or None when the step has none.
+
+    Step references become step edges; any other reference (form field,
+    runtime upload) reads the flow input. Fixed text reads nothing.
+    """
     bindings = step.get("input_bindings")
     if not isinstance(bindings, dict):
         return None
@@ -235,9 +249,14 @@ def _binding_upstream_orders(
         step_refs=step_ref_mapping,
         form_field_names=set(),
     )
-    return resolve_reference_step_orders(
-        references=references,
-        max_prior_step_order=step_order - 1,
+    return _BindingUpstream(
+        step_orders=resolve_reference_step_orders(
+            references=references,
+            max_prior_step_order=step_order - 1,
+        ),
+        reads_root_input=any(
+            reference.kind is not TemplateReferenceKind.STEP for reference in references
+        ),
     )
 
 
@@ -245,16 +264,13 @@ def _binding_edges(
     *,
     step_id: str,
     step_order: int,
-    binding_orders: Sequence[int],
+    binding_upstream: _BindingUpstream,
     sorted_steps: Sequence[FlowPersistedJsonObject],
 ) -> list[GraphEdge]:
-    """Edges of a step whose explicit underlag is its whole input.
-
-    Every referenced step is an underlag edge; underlag that reads no step
-    (form fields or fixed text) reads the flow input.
-    """
-    if not binding_orders:
-        return [
+    """Edges of a step whose explicit underlag is its whole input."""
+    result: list[GraphEdge] = []
+    if binding_upstream.reads_root_input:
+        result.append(
             GraphEdge(
                 source="input",
                 target=step_id,
@@ -262,10 +278,9 @@ def _binding_edges(
                 source_step_order=0,
                 target_step_order=step_order,
             )
-        ]
+        )
     steps_by_order = {int(item["step_order"]): item for item in sorted_steps}
-    result: list[GraphEdge] = []
-    for upstream_order in binding_orders:
+    for upstream_order in binding_upstream.step_orders:
         upstream = steps_by_order.get(upstream_order)
         if upstream is None:
             continue

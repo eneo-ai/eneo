@@ -574,6 +574,7 @@ class FlowService:
                     input_source=str(step.input_source),
                     step_order=step.step_order,
                     input_bindings=step.input_bindings,
+                    prompt_template=assistant.get_prompt_text(),
                     step_ref_mapping=step_ref_mapping,
                     max_prior_step_order=step.step_order - 1,
                 ),
@@ -657,11 +658,16 @@ class FlowService:
                 for integration_knowledge_id in update.integration_knowledge_ids
             ]
 
+        prompt_text = assistant.get_prompt_text()
+        if update.is_set("prompt"):
+            prompt_text = update.prompt.text if update.prompt is not None else ""
+
         return SimpleNamespace(
             completion_model=completion_model,
             collections=collections,
             websites=websites,
             integration_knowledge_list=integration_knowledge_list,
+            get_prompt_text=lambda: prompt_text,
         )
 
     def _normalize_steps_for_tenant(self, steps: list[FlowStep]) -> list[FlowStep]:

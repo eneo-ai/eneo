@@ -82,6 +82,21 @@ describe("task and material chapter summaries", () => {
       })
     ).toBe("Steg 1: Transkribera ljud · Kunskap eller filer tillagda");
   });
+
+  it("names the underlag instead of an inactive all-previous source", () => {
+    expect(
+      getChapterInputStatus({
+        step: step({
+          step_order: 4,
+          input_source: "all_previous_steps",
+          input_bindings: { question: "Samtal: {{ step_2.output.text }}" }
+        }),
+        previousStep: step({ step_order: 3 }),
+        hasKnowledge: false,
+        hasAttachments: false
+      })
+    ).toBe("Underlag: Steg 2 · Ingen extra kunskap eller filer");
+  });
 });
 
 describe("getTechnicalSettingsCount", () => {
