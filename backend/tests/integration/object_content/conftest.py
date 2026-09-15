@@ -127,12 +127,16 @@ class RealObjectStore:
 
 # The store's readiness client keeps the production defaults of a 2 s timeout
 # and a single attempt, and binding create/verify calls go through it. CI runs
-# this module on four xdist workers with a throwaway store per worker, so a
-# correct binding round-trip can exceed 2 s on a loaded runner. Only the test
-# fixtures get this headroom; production settings are unchanged. The value is
-# bounded by the settings invariant that the default 30 s binding claim must
-# cover one readiness request budget (2 * timeout + 5 s).
-READINESS_WAIT_SECONDS = 10.0
+# this module on four xdist workers with a throwaway store per worker, and a
+# merge-queue run has shown a binding write on the freshly cleared bucket
+# taking longer than 10 s on a loaded runner, while ordinary object writes use
+# the 60 s SDK client and pass. Only the test fixtures get this headroom;
+# production settings are unchanged. The settings invariant requires the
+# binding claim to cover one readiness request budget (2 * timeout + 5 s), so
+# the test claim window grows with it; claim expiry tests read the value from
+# settings and do not sleep for it.
+READINESS_WAIT_SECONDS = 30.0
+BINDING_CLAIM_SECONDS = 120
 
 
 @pytest.fixture(scope="session")
@@ -293,6 +297,7 @@ async def _real_object_store_process(
                 deployment_id=UUID("a2d539af-fef0-42aa-a7f8-14376947be2c"),
                 allow_insecure_http=True,
                 readiness_timeout_seconds=READINESS_WAIT_SECONDS,
+                binding_claim_seconds=BINDING_CLAIM_SECONDS,
                 io_chunk_bytes=64 * 1024,
                 spool_memory_bytes=1024 * 1024,
                 multipart_part_bytes=5 * 1024 * 1024,
@@ -452,6 +457,7 @@ async def real_tls_object_store(
                 deployment_id=UUID("d2d69d7f-9ef1-443a-91ce-2541d49d14b7"),
                 ca_bundle=ca_path,
                 readiness_timeout_seconds=READINESS_WAIT_SECONDS,
+                binding_claim_seconds=BINDING_CLAIM_SECONDS,
                 io_chunk_bytes=64 * 1024,
                 spool_memory_bytes=1024 * 1024,
                 multipart_part_bytes=5 * 1024 * 1024,
