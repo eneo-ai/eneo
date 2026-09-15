@@ -236,7 +236,7 @@ def test_unparsable_message_text_never_replaces_the_provider_failure() -> None:
         body=None,
     )
 
-    failure = classify_ai_builder_provider_failure(error, stage="proposal")
+    failure = classify_ai_builder_provider_failure(error, stage="proposal_completion")
 
     assert failure.kind == "rejected"
     assert failure.turn_state == "committed"
