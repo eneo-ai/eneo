@@ -34,6 +34,25 @@ export function computeStepConfigValidationIssues(
         entries.set(`${prefix}template_fill_no_template:${step.step_order}`, [
           "template_fill_no_template"
         ]);
+      } else {
+        // A placeholder is mapped when it has an entry, even an explicit
+        // empty one (a deliberate leave-empty choice); a placeholder without
+        // an entry, or an entry for a placeholder the template no longer
+        // has, is a known problem the publish check will reject.
+        const placeholders = config.placeholders ?? [];
+        const bindings = config.bindings ?? {};
+        const mapped = (placeholder: string) =>
+          Object.prototype.hasOwnProperty.call(bindings, placeholder);
+        if (placeholders.some((placeholder) => !mapped(placeholder))) {
+          entries.set(`${prefix}template_fill_missing_mappings:${step.step_order}`, [
+            "template_fill_missing_mappings"
+          ]);
+        }
+        if (Object.keys(bindings).some((name) => !placeholders.includes(name))) {
+          entries.set(`${prefix}template_fill_orphaned_mappings:${step.step_order}`, [
+            "template_fill_orphaned_mappings"
+          ]);
+        }
       }
     }
     // With name inference on, the conversation is the name source and a

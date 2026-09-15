@@ -16,6 +16,8 @@ const CODE_TO_MESSAGE: Record<string, () => string> = {
   typed_io_missing_previous_step: () => m.flow_validation_msg_missing_previous_step(),
   typed_io_incompatible_type_chain: () => m.flow_validation_msg_incompatible_type_chain(),
   template_fill_no_template: () => m.flow_validation_msg_template_fill_no_template(),
+  template_fill_missing_mappings: () => m.flow_validation_msg_template_fill_missing_mappings(),
+  template_fill_orphaned_mappings: () => m.flow_validation_msg_template_fill_orphaned_mappings(),
   speaker_mapping_no_participants_field: () =>
     m.flow_validation_msg_speaker_mapping_no_participants_field(),
   output_mode_incompatible: () => m.flow_validation_msg_output_mode_incompatible(),

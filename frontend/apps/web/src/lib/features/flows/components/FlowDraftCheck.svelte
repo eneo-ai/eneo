@@ -34,6 +34,15 @@
   let checking = $state(false);
   let checkedRevision = $state<number | null>(null);
   let saveFailed = $state(false);
+  // Once the draft has moved past a clean result (a local edit, a pending or
+  // rejected save, a new revision), that result stays stale until the next
+  // check, even if the draft later saves at the same revision.
+  let invalidated = $state(false);
+  $effect(() => {
+    if (checkedRevision !== null && (saveStatus !== "saved" || draftRevision !== checkedRevision)) {
+      invalidated = true;
+    }
+  });
 
   type CheckState = "empty" | "idle" | "checking" | "save_failed" | "issues" | "stale" | "clean";
 
@@ -43,7 +52,9 @@
     if (saveFailed) return "save_failed";
     if (checkedRevision === null) return "idle";
     if (issueCount > 0) return "issues";
-    if (saveStatus !== "saved" || draftRevision !== checkedRevision) return "stale";
+    if (invalidated || saveStatus !== "saved" || draftRevision !== checkedRevision) {
+      return "stale";
+    }
     return "clean";
   });
 
@@ -52,6 +63,7 @@
     saveFailed = false;
     try {
       await onCheck();
+      invalidated = false;
       checkedRevision = draftRevision;
     } catch {
       checkedRevision = null;

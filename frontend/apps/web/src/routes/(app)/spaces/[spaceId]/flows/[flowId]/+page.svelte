@@ -75,16 +75,13 @@
    * toast. Returns false when the failure was not a routed rejection so the
    * caller can fall back to its own message.
    */
-  /**
-   * "Kontrollera flödet": flush pending saves so the server validates the
-   * draft. A validation rejection is routed into the banner and counts as a
-   * completed check with issues; only an unroutable save failure rejects.
-   */
-  async function checkDraft(): Promise<void> {
-    try {
-      await flowEditor.flushFlowSaves();
-    } catch (error) {
-      if (!surfaceRoutedSaveRejection(error)) throw error;
+  /** Opens whichever surface holds the issues the check counted. */
+  function showDraftIssues(): void {
+    if ($validationErrors.size > 0) validationBannerExpanded = true;
+    if (hasStepJsonValidationErrors) {
+      document
+        .getElementById("flow-step-json-errors")
+        ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
     }
   }
 
@@ -699,6 +696,7 @@
       />
       {#if hasStepJsonValidationErrors}
         <Alert.Root
+          id="flow-step-json-errors"
           class="border-warning-default/40 bg-warning-dimmer text-warning-stronger border-b px-4 py-2 text-sm"
           role="alert"
         >
@@ -1427,8 +1425,8 @@
                         issueCount={$validationErrors.size + (hasStepJsonValidationErrors ? 1 : 0)}
                         saveStatus={$saveStatus}
                         draftRevision={$resource.draft_revision}
-                        onCheck={checkDraft}
-                        onShowIssues={() => (validationBannerExpanded = true)}
+                        onCheck={flowEditor.checkDraft}
+                        onShowIssues={showDraftIssues}
                       />
                       <Button variant="outline" class="h-9" onclick={() => setActiveTab("history")}>
                         {m.flow_show_history()}

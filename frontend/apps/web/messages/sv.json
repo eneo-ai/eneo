@@ -5991,6 +5991,8 @@
   "flow_validation_msg_non_contiguous_step_order": "Stegordningen är inte sammanhängande.",
   "flow_validation_msg_output_mode_incompatible": "De valda resultatinställningarna fungerar inte tillsammans. Öppna Resultat och välj en kompatibel kombination.",
   "flow_validation_msg_template_fill_no_template": "Ingen mall vald för mallifyllningssteget.",
+  "flow_validation_msg_template_fill_missing_mappings": "Mallen har platshållare som saknar koppling.",
+  "flow_validation_msg_template_fill_orphaned_mappings": "Det finns kopplingar till platshållare som inte längre finns i mallen.",
   "flow_validation_msg_unsupported_type": "Indatatypen stöds inte.",
   "flow_validation_step_has_error": "Steget har ett fel",
   "flow_variable_alias_desc": "Stegets namnalias",

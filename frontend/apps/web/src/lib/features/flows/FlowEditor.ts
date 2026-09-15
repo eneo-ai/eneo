@@ -490,6 +490,24 @@ function createFlowEditor(data: FlowEditorInitData) {
     await flushAssistantSaves();
   }
 
+  /**
+   * "Kontrollera flödet": every pending flow and assistant save reaches the
+   * server, which validates the draft. A validation rejection, or a draft
+   * that cannot be saved because of issues the editor already shows, is a
+   * completed check whose issues are in the banner. A persistence failure
+   * is not a check outcome and propagates.
+   */
+  async function checkDraft(): Promise<void> {
+    try {
+      await flushSaves();
+    } catch (error) {
+      if (error instanceof FlowSaveRejectedError || error instanceof FlowSaveIncompleteError) {
+        return;
+      }
+      throw error;
+    }
+  }
+
   const unifiedSaveStatus = derived([saveStatus, assistantSaveStatus], ([$flow, $assistant]) => {
     return getUnifiedFlowSaveStatus($flow, $assistant);
   });
@@ -1095,6 +1113,7 @@ function createFlowEditor(data: FlowEditorInitData) {
     flushFlowSaves,
     flushAssistantSaves,
     flushSaves,
+    checkDraft,
     reportServerValidationError,
     scheduleAutoSave,
     destroy

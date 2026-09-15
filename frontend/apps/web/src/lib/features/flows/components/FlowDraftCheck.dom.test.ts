@@ -68,6 +68,10 @@ describe("FlowDraftCheck", () => {
 
     await rerender(props({ saveStatus: "saved", draftRevision: 4 }));
     expect(screen.getByRole("status").textContent).toContain(m.flow_check_result_stale());
+
+    // Back at the checked revision and saved: the result does not revive.
+    await rerender(props({ saveStatus: "saved", draftRevision: 3 }));
+    expect(screen.getByRole("status").textContent).toContain(m.flow_check_result_stale());
   });
 
   it("reports a save that could not complete instead of a result", async () => {

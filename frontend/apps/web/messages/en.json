@@ -5991,6 +5991,8 @@
   "flow_validation_msg_non_contiguous_step_order": "The step order is not contiguous.",
   "flow_validation_msg_output_mode_incompatible": "The selected result settings do not work together. Open Result and choose a compatible combination.",
   "flow_validation_msg_template_fill_no_template": "No template selected for the template fill step.",
+  "flow_validation_msg_template_fill_missing_mappings": "The template has placeholders without a mapping.",
+  "flow_validation_msg_template_fill_orphaned_mappings": "There are mappings to placeholders the template no longer has.",
   "flow_validation_msg_unsupported_type": "The input type is not supported.",
   "flow_validation_step_has_error": "This step has an error",
   "flow_variable_alias_desc": "Step name alias",

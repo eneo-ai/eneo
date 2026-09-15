@@ -1391,6 +1391,35 @@ describe("FlowEditor server validation routing", () => {
     expect(toast.error).toHaveBeenCalledTimes(1);
   });
 
+  it("checkDraft completes on a validation rejection and propagates a persistence failure", async () => {
+    const flow = makeFlow();
+    let failMode: "validation" | "generic" | null = "validation";
+    const flowUpdate = vi.fn(async () => {
+      if (failMode === "validation") throw makeValidationError();
+      if (failMode === "generic") throw new Error("db exploded");
+      return flow;
+    });
+    const editor = createFlowEditor({ flow, eneo: makeEneo({ flowUpdate }) });
+
+    // The server rejected the draft: the check is complete, the issues are
+    // in the banner, nothing was thrown at the caller.
+    editor.setName("Rejected");
+    await expect(editor.checkDraft()).resolves.toBeUndefined();
+    expect([...get(editor.state.validationErrors).keys()]).toContain(
+      "flow:server:flow_http_post_output_must_be_terminal:1"
+    );
+
+    // The draft could not be persisted: not a check outcome.
+    failMode = "generic";
+    editor.setName("Failing");
+    await expect(editor.checkDraft()).rejects.toBeInstanceOf(FlowSaveFailedError);
+
+    // Nothing pending: the check completes without a request.
+    failMode = null;
+    flowUpdate.mockClear();
+    await expect(editor.checkDraft()).resolves.toBeUndefined();
+  });
+
   it("classifies a flush queued behind a failing autosave by its own outcome", async () => {
     // Saves run one at a time, so a flush requested during an autosave waits
     // for it. The classification must still be invocation-local: the flush

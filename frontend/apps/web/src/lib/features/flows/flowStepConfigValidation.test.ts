@@ -27,6 +27,35 @@ describe("computeStepConfigValidationIssues", () => {
     expect([...issues.keys()]).toContain(`${PREFIX}template_fill_no_template:2`);
   });
 
+  it("flags template placeholders without a mapping and mappings without a placeholder", () => {
+    const step = (bindings: Record<string, unknown>) =>
+      makeStep({
+        output_mode: "template_fill",
+        output_type: "docx",
+        step_order: 3,
+        output_config: {
+          template_asset_id: "asset-1",
+          placeholders: ["namn", "datum"],
+          bindings
+        }
+      });
+    const missing = computeStepConfigValidationIssues(
+      [step({ namn: "{{ flow_input.namn }}" })],
+      PREFIX
+    );
+    expect([...missing.keys()]).toEqual([`${PREFIX}template_fill_missing_mappings:3`]);
+
+    const orphaned = computeStepConfigValidationIssues(
+      [step({ namn: "x", datum: "y", gammal: "z" })],
+      PREFIX
+    );
+    expect([...orphaned.keys()]).toEqual([`${PREFIX}template_fill_orphaned_mappings:3`]);
+
+    // An explicit empty mapping is a deliberate choice, not a missing one.
+    const complete = computeStepConfigValidationIssues([step({ namn: "x", datum: "" })], PREFIX);
+    expect([...complete.keys()]).toEqual([]);
+  });
+
   it("passes a plain step with no config requirements", () => {
     expect(computeStepConfigValidationIssues([makeStep({})], PREFIX).size).toBe(0);
   });
