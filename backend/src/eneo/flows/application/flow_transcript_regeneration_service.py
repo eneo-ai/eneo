@@ -238,7 +238,12 @@ class FlowTranscriptRegenerationService:
         steps = sorted(
             view.published_definition.runtime_steps(), key=lambda step: step.step_order
         )
-        stored = {step.step_id: step for step in view.step_results}
+        # The versioned view carries step annotations only; the prefix replay
+        # needs the persisted output payloads, so read the complete rows here.
+        step_results = await self.run_repo.list_step_results(
+            run_id=source.id, tenant_id=self.user.tenant_id
+        )
+        stored = {step.step_id: step for step in step_results}
         if not steps or steps[0].step_id != step_id:
             _invalid("transcription_must_be_first_step")
         # Reuse only the transcription and its immediate speaker naming checkpoint.
@@ -304,11 +309,11 @@ class FlowTranscriptRegenerationService:
         files = await self.run_repo.list_current_step_input_file_ids_by_step_result_id(
             run_id=source.id,
             tenant_id=self.user.tenant_id,
-            step_results=view.step_results,
+            step_results=step_results,
         )
         step_inputs = {
             step.step_id: FlowRunStepInputFiles(file_ids=tuple(files[step.id]))
-            for step in view.step_results
+            for step in step_results
             if step.id is not None and files.get(step.id)
         }
         created = await self.run_service.create_run(

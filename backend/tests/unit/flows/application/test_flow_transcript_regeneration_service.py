@@ -98,10 +98,16 @@ def context():
     run_repo.get_idempotent_run.return_value = None
     run_repo.get_step_result.return_value = results[0]
     run_repo.list_current_step_input_file_ids_by_step_result_id.return_value = {}
+    run_repo.list_step_results.return_value = results
     run_service = AsyncMock()
+    # The versioned view exposes step annotations only (no payloads); the
+    # service must read complete rows from the repository instead.
     run_service.get_run_versioned_view.return_value = SimpleNamespace(
         published_definition=SimpleNamespace(runtime_steps=lambda: steps),
-        step_results=results,
+        step_results=[
+            SimpleNamespace(step_id=result.step_id, status=result.status)
+            for result in results
+        ],
     )
     child = SimpleNamespace(id=uuid4(), revision=1)
     run_service.create_run.return_value = SimpleNamespace(run=child, created=True)
