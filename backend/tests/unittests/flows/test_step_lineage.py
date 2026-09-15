@@ -139,33 +139,50 @@ def test_resolve_reference_step_orders_keeps_completed_prior_references() -> Non
     assert orders == [1, 2]
 
 
-def test_resolve_upstream_step_orders_merges_source_and_explicit_references() -> None:
+def test_resolve_upstream_step_orders_lets_underlag_decide_alone() -> None:
     orders = resolve_upstream_step_orders(
         input_source="all_previous_steps",
         step_order=4,
-        references=[_reference(2), _reference(3)],
+        binding_references=[_reference(2), _reference(3)],
         max_prior_step_order=3,
     )
 
-    assert orders == [1, 2, 3]
+    assert orders == [2, 3]
 
 
-def test_resolve_upstream_step_orders_deduplicates_previous_step_reference() -> None:
+def test_resolve_upstream_step_orders_underlag_without_step_references_reads_no_step() -> (
+    None
+):
     orders = resolve_upstream_step_orders(
         input_source="previous_step",
         step_order=3,
-        references=[_reference(2)],
+        binding_references=[],
         max_prior_step_order=2,
     )
 
-    assert orders == [2]
+    assert orders == []
+
+
+def test_resolve_upstream_step_orders_uses_input_source_without_underlag() -> None:
+    assert resolve_upstream_step_orders(
+        input_source="previous_step",
+        step_order=3,
+        binding_references=None,
+        max_prior_step_order=2,
+    ) == [2]
+    assert resolve_upstream_step_orders(
+        input_source="all_previous_steps",
+        step_order=4,
+        binding_references=None,
+        max_prior_step_order=3,
+    ) == [1, 2, 3]
 
 
 def test_resolve_upstream_step_orders_does_not_reference_step_zero() -> None:
     orders = resolve_upstream_step_orders(
         input_source="previous_step",
         step_order=1,
-        references=[],
+        binding_references=None,
         max_prior_step_order=0,
     )
 
@@ -176,7 +193,7 @@ def test_resolve_upstream_step_orders_keeps_reference_only_dependencies() -> Non
     orders = resolve_upstream_step_orders(
         input_source="flow_input",
         step_order=3,
-        references=[_reference(1)],
+        binding_references=[_reference(1)],
         max_prior_step_order=2,
     )
 

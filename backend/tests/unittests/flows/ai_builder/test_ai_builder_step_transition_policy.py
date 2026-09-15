@@ -304,6 +304,42 @@ def test_normalize_ai_builder_spec_clears_all_previous_input_contract() -> None:
     )
 
 
+def test_normalize_ai_builder_spec_keeps_projection_contract_when_underlag_decides() -> (
+    None
+):
+    contract = {"type": "object", "properties": {"summary": {"type": "string"}}}
+    spec = FlowDraftSpecCore(
+        flow_name="Projected synthesis",
+        steps=[
+            _step(
+                ref="step_a",
+                name="Extract",
+                input_source=InputSource.FLOW_INPUT,
+                output_type=OutputType.JSON,
+            ),
+            _step(
+                ref="step_b",
+                name="Synthesize",
+                input_source=InputSource.ALL_PREVIOUS_STEPS,
+                input_type=InputType.JSON,
+                output_type=OutputType.JSON,
+                input_bindings={
+                    "source_refs": [{"step_ref": "step_a", "output": "structured"}]
+                },
+                input_contract=contract,
+            ),
+        ],
+    )
+
+    normalized, changes = normalize_ai_builder_spec(spec)
+
+    assert normalized.steps[1].input_contract == contract
+    assert not any(
+        change.code == "all_previous_input_contract_cleared"
+        for _step_spec, change in changes
+    )
+
+
 def test_normalize_ai_builder_spec_clears_explicit_question_input_contract() -> None:
     spec = FlowDraftSpecCore(
         flow_name="Explicit underlag",

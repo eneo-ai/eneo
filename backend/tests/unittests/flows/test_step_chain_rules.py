@@ -11,6 +11,7 @@ class _Step:
     input_source: str = "flow_input"
     input_type: str = "text"
     output_type: str = "text"
+    input_bindings: object | None = None
 
 
 def test_rejects_missing_previous_step_for_previous_step_source() -> None:
@@ -23,6 +24,50 @@ def test_rejects_missing_previous_step_for_previous_step_source() -> None:
 
     assert violation is not None
     assert violation.code == "typed_io_missing_previous_step"
+
+
+def test_underlag_lets_json_input_read_all_previous_source() -> None:
+    steps = [
+        _Step(step_order=1, output_type="json"),
+        _Step(
+            step_order=2,
+            input_source="all_previous_steps",
+            input_type="json",
+            input_bindings={
+                "source_refs": [{"step_ref": "step_1", "output": "structured"}]
+            },
+        ),
+    ]
+
+    assert find_first_step_chain_violation(steps) is None
+    assert (
+        find_first_step_chain_violation(
+            [
+                steps[0],
+                _Step(
+                    step_order=2, input_source="all_previous_steps", input_type="json"
+                ),
+            ]
+        )
+        is not None
+    )
+
+
+def test_rejects_underlag_on_http_source() -> None:
+    violation = find_first_step_chain_violation(
+        [
+            _Step(step_order=1),
+            _Step(
+                step_order=2,
+                input_source="http_get",
+                input_bindings={"question": "Svar: {{ step_1.output.text }}"},
+            ),
+        ]
+    )
+
+    assert violation is not None
+    assert violation.code == "typed_io_invalid_input_source_combination"
+    assert "cannot be combined with input_bindings" in violation.message
 
 
 def test_accepts_docx_to_text_previous_step_chain() -> None:

@@ -1,4 +1,5 @@
 import type { FlowStep } from "@eneo/eneo-js";
+import { getFlowStepUnderlagStepOrders } from "./flowInputBindings";
 import type { SelectableInputTypeOption } from "./flowStepTypes";
 
 type InputSource = FlowStep["input_source"];
@@ -129,7 +130,13 @@ export function getRecommendedDisplayedInputType(params: {
 }
 
 export type FlowEdgeKind =
-  "flow_input" | "previous_step" | "all_previous_steps" | "flow_output" | "http_get" | "http_post";
+  | "flow_input"
+  | "previous_step"
+  | "all_previous_steps"
+  | "input_bindings"
+  | "flow_output"
+  | "http_get"
+  | "http_post";
 
 export function getEdgePayloadKind(params: {
   edgeKind: FlowEdgeKind;
@@ -187,7 +194,7 @@ export function getStepSummaryModel(params: {
 
 export type FlowGraphTopologyStepLike = Pick<
   FlowStep,
-  "id" | "step_order" | "input_source" | "output_mode"
+  "id" | "step_order" | "input_source" | "output_mode" | "input_bindings"
 >;
 
 export type FlowGraphTopologyNode =
@@ -206,6 +213,26 @@ export type FlowGraphTopologyEdge = {
 };
 
 /**
+ * The step fields whose change must rebuild the graph layout. Underlag is
+ * part of it: a binding-only edit moves edges.
+ */
+export function flowGraphLayoutKey(steps: FlowStep[]): string {
+  return JSON.stringify(
+    steps.map((step) => ({
+      id: step.id,
+      step_order: step.step_order,
+      user_description: step.user_description,
+      input_source: step.input_source,
+      input_bindings: step.input_bindings ?? null,
+      input_type: step.input_type,
+      output_type: step.output_type,
+      output_mode: step.output_mode,
+      assistant_id: step.assistant_id
+    }))
+  );
+}
+
+/**
  * The pure node/edge contract behind Flödesvy. All HTTP endpoints share one
  * external-source and one external-receiver node: the graph answers "where
  * does data come from and go", while each step's own summary names its URL,
@@ -222,16 +249,24 @@ export function buildFlowGraphTopology(steps: FlowGraphTopologyStepLike[]): {
   const nodes: FlowGraphTopologyNode[] = [];
   const edges: FlowGraphTopologyEdge[] = [];
 
+  // Explicit underlag is the whole step input, so its step references decide
+  // the edges alone; `input_source` describes only a step without underlag.
+  const underlagOrdersByStep = new Map(
+    orderedSteps.map((step) => [step.step_order, getFlowStepUnderlagStepOrders(step)])
+  );
+  const readsFlowInput = (step: FlowGraphTopologyStepLike): boolean => {
+    const underlagOrders = underlagOrdersByStep.get(step.step_order) ?? null;
+    if (underlagOrders !== null) return underlagOrders.length === 0;
+    return (
+      step.input_source === "flow_input" ||
+      (step.input_source === "previous_step" && !byOrder.has(step.step_order - 1))
+    );
+  };
+
   // The flow-input node appears only when something actually consumes it
   // (or the flow is empty), so a flow fed purely by HTTP shows no orphan
   // input anchor.
-  const needsInputNode =
-    orderedSteps.length === 0 ||
-    orderedSteps.some(
-      (step) =>
-        step.input_source === "flow_input" ||
-        (step.input_source === "previous_step" && !byOrder.has(step.step_order - 1))
-    );
+  const needsInputNode = orderedSteps.length === 0 || orderedSteps.some(readsFlowInput);
   if (needsInputNode) {
     nodes.push({ id: "input", kind: "input" });
   }
@@ -255,6 +290,31 @@ export function buildFlowGraphTopology(steps: FlowGraphTopologyStepLike[]): {
         sourceStepOrder: 0,
         targetStepOrder: step.step_order
       });
+      continue;
+    }
+    const underlagOrders = underlagOrdersByStep.get(step.step_order) ?? null;
+    if (underlagOrders !== null) {
+      if (underlagOrders.length === 0) {
+        edges.push({
+          source: "input",
+          target: id,
+          kind: "flow_input",
+          sourceStepOrder: 0,
+          targetStepOrder: step.step_order
+        });
+        continue;
+      }
+      for (const order of underlagOrders) {
+        const sourceStep = byOrder.get(order);
+        if (!sourceStep || order >= step.step_order) continue;
+        edges.push({
+          source: stepId(sourceStep),
+          target: id,
+          kind: "input_bindings",
+          sourceStepOrder: order,
+          targetStepOrder: step.step_order
+        });
+      }
       continue;
     }
     if (step.input_source === "flow_input") {

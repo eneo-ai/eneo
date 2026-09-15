@@ -64,6 +64,10 @@ from eneo.flows.runtime.docx_template_runtime import (
     extract_docx_template_text_preview,
     inspect_docx_template_bytes,
 )
+from eneo.flows.step_lineage import (
+    build_step_ref_mapping,
+    resolve_step_upstream_orders,
+)
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.main.models import NOT_PROVIDED, NotProvided, ResourcePermission
 from eneo.settings.encryption_service import EncryptionService
@@ -558,11 +562,21 @@ class FlowService:
         space: Any,
     ) -> None:
         prior_output_levels: dict[int, int | None] = {}
+        step_ref_mapping = build_step_ref_mapping(
+            {"step_order": item.step_order, "user_description": item.user_description}
+            for item in steps
+        )
         for step in sorted(steps, key=lambda item: item.step_order):
             assistant = assistants_by_id[step.assistant_id]
             evaluation = evaluate_step_security_classification(
                 step_order=step.step_order,
-                input_source=str(step.input_source),
+                upstream_step_orders=resolve_step_upstream_orders(
+                    input_source=str(step.input_source),
+                    step_order=step.step_order,
+                    input_bindings=step.input_bindings,
+                    step_ref_mapping=step_ref_mapping,
+                    max_prior_step_order=step.step_order - 1,
+                ),
                 output_mode=step.output_mode,
                 output_classification_override=step.output_classification_override,
                 prior_output_levels_by_order=prior_output_levels,

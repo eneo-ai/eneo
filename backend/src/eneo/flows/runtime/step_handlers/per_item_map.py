@@ -29,6 +29,7 @@ from eneo.flows.flow_run_provenance import (
     build_resolved_input_edge,
     sum_complete_token_counts,
 )
+from eneo.flows.input_binding_contract_rules import has_explicit_underlag
 from eneo.flows.runtime.step_execution_result import StepExecutionResult
 from eneo.flows.runtime.step_execution_runtime import (
     StepExecutionRuntimeDeps,
@@ -86,6 +87,12 @@ async def execute_per_item_map(
             "Per-item map execution requires a JSON output contract shaped as "
             "exactly one top-level array of objects.",
             code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+        )
+    if has_explicit_underlag(step.input_bindings):
+        raise TypedIOValidationException(
+            f"Step {step.step_order}: item_map reads the previous step's items; "
+            "explicit input_bindings are not supported on a mapped step.",
+            code=FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION.value,
         )
     input_array_key = _single_array_key(step.input_contract)
     if input_array_key is None:

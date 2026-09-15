@@ -49,6 +49,7 @@ from eneo.flows.flow_run_provenance import (
 from eneo.flows.input_binding_contract_rules import (
     InputBindingContractError,
     effective_question_binding,
+    has_explicit_underlag,
     item_template_field_names,
     question_binding,
     source_ref_bindings,
@@ -143,7 +144,11 @@ async def resolve_step_input(
             "Step 1 cannot use previous_step/all_previous_steps input source. Use flow_input.",
             code=FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_POSITION.value,
         )
-    if step.input_type == "json" and step.input_source == "all_previous_steps":
+    if (
+        step.input_type == "json"
+        and step.input_source == "all_previous_steps"
+        and not has_explicit_underlag(step.input_bindings)
+    ):
         raise TypedIOValidationException(
             f"Step {step.step_order}: input_type 'json' is incompatible with input_source "
             f"'all_previous_steps' (concatenated text is not valid JSON).",
@@ -172,15 +177,11 @@ async def resolve_step_input(
         structured = http_resolution.structured
         http_edges = http_resolution.resolved_input_edges
     else:
-        source_text = resolve_input_source_text(
-            input_source=step.input_source,
-            input_type=step.input_type,
-            run=run,
-            step_order=step.step_order,
-            prior_results=prior_results,
-            state=state,
-            logger=deps.logger,
-        )
+        # Resolved below, once explicit underlag has been examined: underlag
+        # is the whole step input, so the implicit source is read only for a
+        # step without it and an unread prior output can neither fail the
+        # step nor be copied into its evidence.
+        source_text = ""
     input_text = source_text
     raw_extracted_text = ""
     used_question_binding = False
@@ -403,6 +404,20 @@ async def resolve_step_input(
                         code=FlowApiErrorCode.RUNTIME_INPUT_NOT_CONSUMED.value,
                     )
 
+    if not used_question_binding and step.input_source != "http_get":
+        # http_get resolved its text above; every other implicit source is
+        # read only now that no underlag replaced it.
+        source_text = resolve_input_source_text(
+            input_source=step.input_source,
+            input_type=step.input_type,
+            run=run,
+            step_order=step.step_order,
+            prior_results=prior_results,
+            state=state,
+            logger=deps.logger,
+        )
+        input_text = source_text
+
     runtime_input_replaces_chain = (
         runtime_input_metadata is not None
         and runtime_input_config.input_format == "audio"
@@ -447,13 +462,17 @@ async def resolve_step_input(
             except (json.JSONDecodeError, ValueError):
                 pass
 
-    implicit_edges = _implicit_input_source_edges(
-        step=step,
-        run=run,
-        prior_results=prior_results,
-        state=state,
-        source_text=source_text,
-        http_edges=http_edges,
+    implicit_edges = (
+        ()
+        if used_question_binding
+        else _implicit_input_source_edges(
+            step=step,
+            run=run,
+            prior_results=prior_results,
+            state=state,
+            source_text=source_text,
+            http_edges=http_edges,
+        )
     )
     if used_question_binding:
         resolved_edges = merge_resolved_input_edges(
@@ -480,7 +499,10 @@ async def resolve_step_input(
         max_inline_text_bytes=deps.max_inline_text_bytes,
     )
 
-    if step.input_source in ("previous_step", "all_previous_steps"):
+    if not used_question_binding and step.input_source in (
+        "previous_step",
+        "all_previous_steps",
+    ):
         has_substantive_input = False
         source_description = ""
         if step.input_source == "previous_step":
@@ -514,7 +536,7 @@ async def resolve_step_input(
                     ),
                 )
             )
-        elif not used_question_binding:
+        else:
             diagnostics.append(
                 StepDiagnostic(
                     code="flow_underlag_summary",

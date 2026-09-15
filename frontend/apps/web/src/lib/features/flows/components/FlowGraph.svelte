@@ -22,6 +22,7 @@
   import { getFlowEditor } from "$lib/features/flows/FlowEditor";
   import {
     buildFlowGraphTopology,
+    flowGraphLayoutKey,
     getEdgePayloadKind
   } from "$lib/features/flows/flowStepPresentation";
   import { IconDownload } from "@eneo/icons/download";
@@ -96,18 +97,7 @@
 
   $effect(() => {
     const orderedSteps = flow?.steps ?? [];
-    const stepsJson = JSON.stringify(
-      orderedSteps.map((s) => ({
-        id: s.id,
-        step_order: s.step_order,
-        user_description: s.user_description,
-        input_source: s.input_source,
-        input_type: s.input_type,
-        output_type: s.output_type,
-        output_mode: s.output_mode,
-        assistant_id: s.assistant_id
-      }))
-    );
+    const stepsJson = flowGraphLayoutKey(orderedSteps);
     const metaJson = JSON.stringify(
       orderedSteps.map((s) => ({
         assistant_id: s.assistant_id,
@@ -375,6 +365,8 @@
         edge.kind !== "all_previous_steps" &&
         edge.kind !== "http_get" &&
         edge.kind !== "http_post" &&
+        (edge.kind !== "input_bindings" ||
+          edge.sourceStepOrder === (edge.targetStepOrder ?? 0) - 1) &&
         edge.target !== "output";
 
       const markerColor = isViolation

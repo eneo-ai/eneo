@@ -54,7 +54,7 @@ def test_rejects_model_below_previous_step_classification() -> None:
     with pytest.raises(BadRequestException) as exc_info:
         evaluate_step_security_classification(
             step_order=2,
-            input_source="previous_step",
+            upstream_step_orders=[1],
             output_mode="pass_through",
             output_classification_override=None,
             prior_output_levels_by_order={1: 3},
@@ -69,7 +69,7 @@ def test_rejects_output_override_write_down() -> None:
     with pytest.raises(BadRequestException) as exc_info:
         evaluate_step_security_classification(
             step_order=2,
-            input_source="previous_step",
+            upstream_step_orders=[1],
             output_mode="pass_through",
             output_classification_override=1,
             prior_output_levels_by_order={1: 3},
@@ -83,7 +83,7 @@ def test_rejects_output_override_write_down() -> None:
 def test_returns_effective_output_level_when_security_is_compatible() -> None:
     evaluation = evaluate_step_security_classification(
         step_order=2,
-        input_source="previous_step",
+        upstream_step_orders=[1],
         output_mode="pass_through",
         output_classification_override=4,
         prior_output_levels_by_order={1: 3},
@@ -98,7 +98,7 @@ def test_returns_effective_output_level_when_security_is_compatible() -> None:
 def test_current_step_output_override_does_not_raise_same_step_input_floor() -> None:
     evaluation = evaluate_step_security_classification(
         step_order=1,
-        input_source="flow_input",
+        upstream_step_orders=[],
         output_mode="pass_through",
         output_classification_override=3,
         prior_output_levels_by_order={},
@@ -114,7 +114,7 @@ def test_all_previous_steps_uses_max_prior_effective_output_level() -> None:
     with pytest.raises(BadRequestException) as exc_info:
         evaluate_step_security_classification(
             step_order=4,
-            input_source="all_previous_steps",
+            upstream_step_orders=[1, 2, 3],
             output_mode="pass_through",
             output_classification_override=None,
             prior_output_levels_by_order={1: 1, 2: 3, 3: 2},
@@ -130,7 +130,7 @@ def test_deterministic_step_without_model_carries_input_classification() -> None
     # to the floor. Its output still inherits the classification of its input.
     evaluation = evaluate_step_security_classification(
         step_order=3,
-        input_source="all_previous_steps",
+        upstream_step_orders=[1, 2],
         output_mode="render_verbatim",
         output_classification_override=None,
         prior_output_levels_by_order={1: 1, 2: 3},
@@ -146,7 +146,7 @@ def test_deterministic_step_still_rejects_output_override_write_down() -> None:
     with pytest.raises(BadRequestException) as exc_info:
         evaluate_step_security_classification(
             step_order=2,
-            input_source="previous_step",
+            upstream_step_orders=[1],
             output_mode="render_verbatim",
             output_classification_override=1,
             prior_output_levels_by_order={1: 3},
@@ -157,11 +157,28 @@ def test_deterministic_step_still_rejects_output_override_write_down() -> None:
     assert exc_info.value.code == "flow_step_output_classification_write_down"
 
 
+def test_underlag_floor_reads_only_the_steps_it_binds() -> None:
+    # Declared all_previous_steps, but the underlag reads step 2 only: the
+    # higher classification of the unread step 1 is not the floor.
+    evaluation = evaluate_step_security_classification(
+        step_order=3,
+        upstream_step_orders=[2],
+        output_mode="pass_through",
+        output_classification_override=None,
+        prior_output_levels_by_order={1: 3, 2: 1},
+        assistant=_assistant(model_level=2),
+        space=_space(1),
+    )
+
+    assert evaluation.required_model_level == 1
+    assert evaluation.effective_output_level == 1
+
+
 def test_completion_step_without_model_is_rejected_when_floor_exists() -> None:
     with pytest.raises(BadRequestException) as exc_info:
         evaluate_step_security_classification(
             step_order=1,
-            input_source="flow_input",
+            upstream_step_orders=[],
             output_mode="pass_through",
             output_classification_override=None,
             prior_output_levels_by_order={},

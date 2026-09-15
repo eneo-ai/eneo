@@ -25,6 +25,7 @@
     type FlowRuntimeInputConfigValue
   } from "$lib/features/flows/flowRuntimeInputConfig";
   import type { FlowSourceHintKind } from "$lib/features/flows/flowStepPresentation";
+  import { getFlowStepUnderlagStepOrders } from "$lib/features/flows/flowInputBindings";
   import HttpConfigPanel from "./http/HttpConfigPanel.svelte";
   import { parseHttpAuthoredConfig, type HttpAuthoredConfig } from "./http/httpConfigTypes";
   import { createDefaultHttpConfig } from "./http/httpConfigDefaults";
@@ -87,6 +88,9 @@
   } = $props();
 
   const isHttpSource = $derived(step.input_source === "http_get");
+  // Explicit underlag is the whole step input, so the source choice has no
+  // effect until the underlag is removed.
+  const underlagDecidesInput = $derived(getFlowStepUnderlagStepOrders(step) !== null);
   const httpMethod = "GET" as const;
   const defaultHttpConfig = $derived(createDefaultHttpConfig("input", httpMethod));
   const httpConfig = $derived(
@@ -133,7 +137,7 @@
       <Select.Root
         type="single"
         value={step.input_source}
-        disabled={isPublished}
+        disabled={isPublished || underlagDecidesInput}
         onValueChange={(value) => onInputSourceChange?.({ value })}
       >
         <Select.Trigger class="w-full" aria-label={m.flow_step_section_input()}>
@@ -153,7 +157,9 @@
         </Select.Content>
       </Select.Root>
       <p class="text-muted text-xs leading-relaxed" aria-live="polite">
-        {getSourceHintText(sourceHintKind)}
+        {underlagDecidesInput
+          ? m.flow_step_input_source_underlag_decides()
+          : getSourceHintText(sourceHintKind)}
       </p>
       {#if sourceValidationMessage || inputSourceFeedback}
         <p class="text-warning-stronger text-xs leading-relaxed" aria-live="polite">

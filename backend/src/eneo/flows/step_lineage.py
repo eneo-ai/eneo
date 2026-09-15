@@ -3,7 +3,8 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Literal, Protocol, TypeAlias, TypeGuard
 
-from eneo.flows.template_reference_analyzer import TemplateReference
+from eneo.flows.input_binding_contract_rules import effective_question_binding
+from eneo.flows.template_reference_analyzer import TemplateReference, analyze_template
 
 
 class _StepReferenceFields(Protocol):
@@ -69,21 +70,55 @@ def resolve_upstream_step_orders(
     *,
     input_source: str | None,
     step_order: int,
-    references: Iterable[TemplateReference],
+    binding_references: Iterable[TemplateReference] | None,
     max_prior_step_order: int,
 ) -> list[int]:
-    orders: set[int] = set()
-    if input_source == "previous_step" and step_order > 1:
-        orders.add(step_order - 1)
-    elif input_source == "all_previous_steps" and step_order > 1:
-        orders.update(range(1, step_order))
-    orders.update(
-        resolve_reference_step_orders(
-            references=references,
+    """Return the prior step orders whose output the step reads.
+
+    Explicit underlag (``input_bindings``) is the whole step input, so its
+    step references decide alone; ``input_source`` describes the input only
+    for a step without underlag. ``None`` means the step has no underlag.
+    """
+    if binding_references is not None:
+        return resolve_reference_step_orders(
+            references=binding_references,
             max_prior_step_order=max_prior_step_order,
         )
+    if input_source == "previous_step" and step_order > 1:
+        return [step_order - 1]
+    if input_source == "all_previous_steps" and step_order > 1:
+        return list(range(1, step_order))
+    return []
+
+
+def resolve_step_upstream_orders(
+    *,
+    input_source: str | None,
+    step_order: int,
+    input_bindings: object,
+    step_ref_mapping: dict[str, int],
+    max_prior_step_order: int,
+) -> list[int]:
+    """Resolve the prior steps a step definition reads.
+
+    Explicit underlag decides alone; without it the implicit source decides.
+    """
+    question_template = effective_question_binding(input_bindings)
+    binding_references = (
+        analyze_template(
+            question_template,
+            step_refs=step_ref_mapping,
+            form_field_names=set(),
+        )
+        if question_template is not None
+        else None
     )
-    return sorted(orders)
+    return resolve_upstream_step_orders(
+        input_source=input_source,
+        step_order=step_order,
+        binding_references=binding_references,
+        max_prior_step_order=max_prior_step_order,
+    )
 
 
 def resolve_reference_step_orders(

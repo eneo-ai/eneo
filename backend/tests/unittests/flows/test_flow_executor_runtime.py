@@ -3353,6 +3353,61 @@ async def test_resolve_step_input_question_binding_overrides_source_text(user):
 
 
 @pytest.mark.asyncio
+async def test_resolve_step_input_underlag_ignores_unread_implicit_source(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    overflowed = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=1,
+        text="preview",
+    ).model_copy(
+        update={
+            "output_payload_json": {
+                "text": "preview",
+                OUTPUT_TEXT_OVERFLOW_KEY: {
+                    "generated_file_ids": [str(uuid4())],
+                    "inline_text_bytes": 7,
+                    "full_text_bytes": 20,
+                },
+            }
+        }
+    )
+    transcript = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=2,
+        text="HELLO WORLD",
+    )
+    prior = [overflowed, transcript]
+    step = _runtime_step(
+        step_order=3,
+        input_source="all_previous_steps",
+        input_bindings={"question": "Samtal: {{step_2.output.text}}"},
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=prior,
+    )
+
+    assert resolved.text == "Samtal: HELLO WORLD"
+    assert resolved.used_question_binding is True
+    assert resolved.source_text == ""
+    assert [
+        edge.source.source_step_id
+        for edge in resolved.edges
+        if edge.source.kind == "step_result"
+    ] == [transcript.step_id]
+    assert [item.code for item in resolved.diagnostics] == ["flow_underlag_summary"]
+
+
+@pytest.mark.asyncio
 async def test_resolve_step_input_source_refs_match_lowered_question(user):
     executor, _, _, _ = _build_executor(user)
     run = _run(status=FlowRunStatus.RUNNING, user=user)

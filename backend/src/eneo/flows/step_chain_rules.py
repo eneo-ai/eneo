@@ -7,6 +7,7 @@ from typing import Protocol, Sequence
 from eneo.flows.domain.flow_step_validation import FlowGraphIssueCode
 from eneo.flows.enums import FlowInputType, FlowOutputType
 from eneo.flows.flow_capability_manifest import is_chain_compatible
+from eneo.flows.input_binding_contract_rules import has_explicit_underlag
 
 
 class StepChainShape(Protocol):
@@ -21,6 +22,9 @@ class StepChainShape(Protocol):
 
     @property
     def output_type(self) -> str: ...
+
+    @property
+    def input_bindings(self) -> object: ...
 
 
 @dataclass(frozen=True)
@@ -156,12 +160,27 @@ def _first_global_step_chain_violation(
             ),
             code=FlowGraphIssueCode.TYPED_IO_FILE_SOURCE_UNSUPPORTED,
         )
-    if step.input_type == "json" and step.input_source == "all_previous_steps":
+    underlag = has_explicit_underlag(step.input_bindings)
+    if (
+        step.input_type == "json"
+        and step.input_source == "all_previous_steps"
+        and not underlag
+    ):
         return StepChainViolation(
             step_order=step.step_order,
             message=(
                 f"Step {step.step_order}: input_type 'json' is incompatible with input_source "
                 f"'all_previous_steps' (concatenated text is not valid JSON)."
+            ),
+            code=FlowGraphIssueCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION,
+        )
+    if step.input_source == "http_get" and underlag:
+        return StepChainViolation(
+            step_order=step.step_order,
+            message=(
+                f"Step {step.step_order}: input_source 'http_get' cannot be combined with "
+                "input_bindings because the underlag replaces the fetched response. "
+                "Fetch in its own step and bind that step's output."
             ),
             code=FlowGraphIssueCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION,
         )

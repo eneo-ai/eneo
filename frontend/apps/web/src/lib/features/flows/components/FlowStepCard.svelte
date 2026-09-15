@@ -6,6 +6,7 @@
   import { m } from "$lib/paraglide/messages";
   import { prefersReducedMotion } from "$lib/core/prefersReducedMotion";
   import { getDownstreamKindForOutput } from "$lib/features/flows/flowStepPresentation";
+  import { getFlowStepUnderlagStepOrders } from "$lib/features/flows/flowInputBindings";
   import {
     getTemplateFillOutputConfig,
     getTemplateFillReadiness,
@@ -127,9 +128,21 @@
         : m.flow_step_summary_next_channel_text_short()
   );
   const inputTypeLabel = $derived(INPUT_TYPE_LABELS[step.input_type]?.() ?? step.input_type);
+  // Explicit underlag is the whole step input; the input source describes
+  // only a step without it.
+  const underlagOrders = $derived(getFlowStepUnderlagStepOrders(step));
   const sourceSummary = $derived.by(() => {
     if (step.output_mode === "template_fill") {
       return getTemplateFillTemplateName(step) ?? m.flow_template_fill_card_secondary();
+    }
+    if (underlagOrders !== null) {
+      return underlagOrders.length === 0
+        ? m.flow_step_card_source_underlag_flow_input()
+        : m.flow_step_card_source_underlag({
+            steps: underlagOrders
+              .map((order) => m.flow_input_template_effective_step({ step: order }))
+              .join(", ")
+          });
     }
     switch (step.input_source) {
       case "flow_input":
@@ -148,7 +161,10 @@
   // every row. Show the source only when it carries real information — a
   // non-default source, the active row, a row needing attention, or advanced mode.
   const isDefaultSource = $derived(
-    step.input_source === "previous_step" && step.output_mode !== "template_fill"
+    step.output_mode !== "template_fill" &&
+      (underlagOrders !== null
+        ? underlagOrders.length === 1 && underlagOrders[0] === step.step_order - 1
+        : step.input_source === "previous_step")
   );
   const showSourceSummary = $derived(
     isPowerUser || isActive || hasValidationError || !isDefaultSource

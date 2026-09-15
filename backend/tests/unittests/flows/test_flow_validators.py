@@ -8,6 +8,7 @@ from eneo.flows.domain.flow import FlowStep
 from eneo.flows.domain.flow_step_validation import (
     FlowGraphIssueCode,
     FlowStepValidationError,
+    flow_step_validation_view_from_flow_step,
     flow_step_validation_views_from_flow_steps,
 )
 from eneo.flows.enums import FlowOutputMode, FlowOutputType
@@ -19,6 +20,7 @@ from eneo.flows.flow_review_policy import (
 )
 from eneo.flows.flow_validators import (
     FLOW_AUDIO_TRANSCRIPTION_REQUIRED,
+    _validate_step_mapped_execution,
     collect_step_graph_issues,
     validate_form_schema,
     validate_steps,
@@ -262,6 +264,18 @@ def test_validate_steps_fail_fast_prefers_duplicate_name_before_chain_violation(
         (
             [_step(1, output_type="docx"), _step(2, input_type="json")],
             "incompatible type chain",
+            2,
+        ),
+        (
+            [
+                _step(1),
+                _step(
+                    2,
+                    input_source="http_get",
+                    input_bindings={"question": "Svar: {{ step_1.output.text }}"},
+                ),
+            ],
+            "cannot be combined with input_bindings",
             2,
         ),
     ],
@@ -2310,4 +2324,26 @@ def test_validate_variable_alias_collisions_still_rejects_reserved_step_names():
                     ]
                 }
             },
+        )
+
+
+def test_mapped_per_item_step_rejects_explicit_underlag() -> None:
+    array_contract = {
+        "type": "object",
+        "properties": {"items": {"type": "array", "items": {"type": "object"}}},
+    }
+    step = _step(
+        2,
+        input_type="json",
+        input_contract=array_contract,
+        output_contract=array_contract,
+        input_config={"item_map": {"enabled": True, "max_items": 3}},
+        input_bindings={
+            "source_refs": [{"step_ref": "step_1", "output": "structured"}]
+        },
+    )
+
+    with pytest.raises(FlowStepValidationError, match="explicit input_bindings"):
+        _validate_step_mapped_execution(
+            step=flow_step_validation_view_from_flow_step(step)
         )

@@ -5,15 +5,13 @@ from typing import Any, cast
 from eneo.flows.domain.rag_evidence import CITATION_SOURCES_KEY
 from eneo.flows.domain.runtime import RunExecutionState, RuntimeStep
 from eneo.flows.flow_run_provenance import normalize_rag_payload
-from eneo.flows.input_binding_contract_rules import effective_question_binding
 from eneo.flows.source_display import (
     format_source_container_display_name,
     format_source_container_label,
     format_source_display_name,
     resolve_reference_title,
 )
-from eneo.flows.step_lineage import resolve_upstream_step_orders
-from eneo.flows.template_reference_analyzer import analyze_template
+from eneo.flows.step_lineage import resolve_step_upstream_orders
 
 ReferencePayload = dict[str, Any]
 SourceEntry = dict[str, Any]
@@ -24,23 +22,12 @@ def collect_inherited_citation_context(
     step: RuntimeStep,
     state: RunExecutionState,
 ) -> dict[str, Any]:
-    question_template = effective_question_binding(step.input_bindings)
-    references = (
-        analyze_template(
-            question_template,
-            step_refs=state.step_ref_mapping,
-            form_field_names=set(),
-        )
-        if question_template is not None
-        else []
-    )
-    upstream_orders = resolve_upstream_step_orders(
+    upstream_orders = resolve_step_upstream_orders(
         input_source=step.input_source,
         step_order=step.step_order,
-        references=references,
-        max_prior_step_order=max(
-            (order for order in state.completed_by_order), default=0
-        ),
+        input_bindings=step.input_bindings,
+        step_ref_mapping=state.step_ref_mapping,
+        max_prior_step_order=max(state.completed_by_order, default=0),
     )
     sources_by_id: dict[str, dict[str, Any]] = {}
     grounded_orders: list[int] = []

@@ -173,15 +173,6 @@ _GOLDEN_GRAPH_RESPONSE = {
             "label": None,
         },
         {
-            "source": str(_GOLDEN_STEP_3_ID),
-            "target": str(_GOLDEN_STEP_4_ID),
-            "kind": "previous_step",
-            "source_step_order": 3,
-            "target_step_order": 4,
-            "style": None,
-            "label": None,
-        },
-        {
             "source": str(_GOLDEN_STEP_1_ID),
             "target": str(_GOLDEN_STEP_4_ID),
             "kind": "input_bindings.question",
@@ -198,6 +189,15 @@ _GOLDEN_GRAPH_RESPONSE = {
             "target_step_order": 4,
             "style": "dashed",
             "label": "underlag",
+        },
+        {
+            "source": str(_GOLDEN_STEP_3_ID),
+            "target": "output",
+            "kind": "flow_output",
+            "source_step_order": 3,
+            "target_step_order": None,
+            "style": None,
+            "label": None,
         },
         {
             "source": str(_GOLDEN_STEP_4_ID),
@@ -394,6 +394,46 @@ def test_build_graph_includes_explicit_underlag_dependencies() -> None:
         and edge.target_step_order == 3
         for edge in edges
     )
+
+
+def test_build_graph_lets_underlag_replace_all_previous_fan_in() -> None:
+    steps = [
+        _step(step_order=1, input_source="flow_input"),
+        _step(step_order=2, input_source="previous_step"),
+        _step(step_order=3, input_source="previous_step"),
+        {
+            **_step(step_order=4, input_source="all_previous_steps"),
+            "input_bindings": {"question": "Samtal: {{ step_2.output.text }}"},
+        },
+    ]
+
+    _, edges = build_graph_from_steps(steps)
+    incoming = [
+        (edge.source_step_order, edge.kind)
+        for edge in edges
+        if edge.target == str(steps[3]["step_id"])
+    ]
+
+    assert incoming == [(2, "input_bindings.question")]
+
+
+def test_build_graph_underlag_without_step_references_reads_flow_input() -> None:
+    steps = [
+        _step(step_order=1, input_source="flow_input"),
+        {
+            **_step(step_order=2, input_source="all_previous_steps"),
+            "input_bindings": {"question": "Namn: {{ flow_input.namn }}"},
+        },
+    ]
+
+    _, edges = build_graph_from_steps(steps)
+    incoming = [
+        (edge.source, edge.kind)
+        for edge in edges
+        if edge.target == str(steps[1]["step_id"])
+    ]
+
+    assert incoming == [("input", "flow_input")]
 
 
 def test_build_graph_includes_display_label_dependency() -> None:

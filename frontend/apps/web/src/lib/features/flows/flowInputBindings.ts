@@ -1,4 +1,5 @@
 import type { FlowStep } from "@eneo/eneo-js";
+import { collectTemplateStepReferenceOrders } from "./flowVariableTokens";
 
 const SOURCE_REFS_BINDING_KEY = "source_refs";
 const SUPPORTED_INPUT_BINDING_KEYS = new Set(["question", SOURCE_REFS_BINDING_KEY]);
@@ -211,6 +212,26 @@ export function getFlowInputMaterialOptions(
     }
   }
   return options;
+}
+
+/**
+ * Step orders an explicit underlag reads, or null when the step has none.
+ * Underlag is the whole step input, so its references decide alone;
+ * `input_source` only describes a step without underlag.
+ */
+export function getFlowStepUnderlagStepOrders(
+  step: Pick<FlowStep, "input_bindings">
+): number[] | null {
+  const state = parseFlowInputBindings(step.input_bindings);
+  if (state.status === "invalid") return null;
+  const question = state.question?.trim() ?? "";
+  if (!question && state.sourceRefs.length === 0) return null;
+  const orders = new Set<number>(collectTemplateStepReferenceOrders(question));
+  for (const ref of state.sourceRefs) {
+    const order = getStepOrderFromStepRef(ref.stepRef);
+    if (order !== null) orders.add(order);
+  }
+  return [...orders].sort((a, b) => a - b);
 }
 
 export function getFlowStepEffectiveInputSources(

@@ -22,6 +22,7 @@ from eneo.flows.input_binding_contract_rules import (
     SOURCE_REFS_BINDING_KEY,
     dedupe_source_refs,
     effective_question_binding,
+    has_explicit_underlag,
     input_contract_binding_conflict,
     source_ref_bindings,
 )
@@ -525,6 +526,7 @@ def normalize_ai_builder_step(
     elif (
         step.input_source == InputSource.ALL_PREVIOUS_STEPS
         and step.input_contract is not None
+        and not has_explicit_underlag(step.input_bindings)
     ):
         updates["input_contract"] = None
         changes.append(

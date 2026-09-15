@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -38,24 +38,14 @@ def _knowledge_level(assistant: Any) -> int | None:
 
 def _input_floor_level(
     *,
-    step_order: int,
-    input_source: str,
+    upstream_step_orders: Sequence[int],
     prior_output_levels_by_order: dict[int, int | None],
     baseline_level: int | None,
 ) -> int | None:
-    if input_source == "previous_step":
-        return _max_level(
-            baseline_level,
-            prior_output_levels_by_order.get(step_order - 1),
-        )
-    if input_source == "all_previous_steps":
-        prior_levels = [
-            level
-            for order, level in prior_output_levels_by_order.items()
-            if order < step_order and level is not None
-        ]
-        return _max_level(baseline_level, max(prior_levels) if prior_levels else None)
-    return baseline_level
+    return _max_level(
+        baseline_level,
+        *(prior_output_levels_by_order.get(order) for order in upstream_step_orders),
+    )
 
 
 @dataclass(frozen=True)
@@ -67,7 +57,7 @@ class FlowStepClassificationEvaluation:
 def evaluate_step_security_classification(
     *,
     step_order: int,
-    input_source: str,
+    upstream_step_orders: Sequence[int],
     output_mode: FlowOutputMode | str,
     output_classification_override: int | None,
     prior_output_levels_by_order: dict[int, int | None],
@@ -76,17 +66,18 @@ def evaluate_step_security_classification(
 ) -> FlowStepClassificationEvaluation:
     """Check one step's classification and return its effective output level.
 
-    The model requirement applies only to output modes that run a completion
-    model. A deterministic step (rendering, template fill, compose) has no
-    model to clear the floor with, yet its output still carries the
-    classification of what flowed into it.
+    ``upstream_step_orders`` are the prior steps the step actually reads
+    (``step_lineage.resolve_step_upstream_orders``): explicit underlag decides
+    alone, otherwise the input source. The model requirement applies only to
+    output modes that run a completion model. A deterministic step (rendering,
+    template fill, compose) has no model to clear the floor with, yet its
+    output still carries the classification of what flowed into it.
     """
     baseline_level = _classification_level(
         getattr(space, "security_classification", None)
     )
     input_floor_level = _input_floor_level(
-        step_order=step_order,
-        input_source=input_source,
+        upstream_step_orders=upstream_step_orders,
         prior_output_levels_by_order=prior_output_levels_by_order,
         baseline_level=baseline_level,
     )

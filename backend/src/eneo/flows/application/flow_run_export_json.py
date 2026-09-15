@@ -1010,7 +1010,7 @@ def _build_input_lineage(
     upstream_orders = resolve_upstream_step_orders(
         input_source=step.get("input_source"),
         step_order=step_order,
-        references=references,
+        binding_references=references if question_template is not None else None,
         max_prior_step_order=max_prior_step_order,
     )
     return {

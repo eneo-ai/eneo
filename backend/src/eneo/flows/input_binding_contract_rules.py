@@ -172,6 +172,21 @@ def effective_question_binding(input_bindings: object) -> str | None:
     return question_binding(lowered)
 
 
+def has_explicit_underlag(input_bindings: object) -> bool:
+    """True when explicit underlag is the whole step input.
+
+    A step with underlag never reads its ``input_source``: the runtime
+    replaces the implicit input, so lineage, graph, classification and
+    validation must all read the underlag instead. Malformed bindings count
+    as no underlag here; ``validate_source_refs_binding`` owns that error.
+    """
+
+    try:
+        return effective_question_binding(input_bindings) is not None
+    except InputBindingContractError:
+        return False
+
+
 def input_contract_binding_conflict(
     *,
     input_bindings: object,

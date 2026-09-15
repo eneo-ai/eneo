@@ -1,3 +1,4 @@
+import type { FlowStep } from "@eneo/eneo-js";
 import { describe, expect, it } from "vitest";
 import {
   buildFlowGraphTopology,
@@ -8,7 +9,8 @@ import {
   getRuntimeFileOriginKind,
   getSourceHintKind,
   getStepSummaryModel,
-  sortSelectableInputTypeOptionsForDisplay
+  sortSelectableInputTypeOptionsForDisplay,
+  flowGraphLayoutKey
 } from "./flowStepPresentation";
 
 describe("getSourceHintKind", () => {
@@ -302,6 +304,50 @@ describe("buildFlowGraphTopology", () => {
       "s2"
     ]);
     expect(t.edges.filter((e) => e.target === "output").map((e) => e.source)).toEqual(["s3"]);
+  });
+
+  it("lets underlag decide the edges of an all-previous step", () => {
+    const t = buildFlowGraphTopology([
+      step(1, "flow_input"),
+      step(2, "previous_step"),
+      step(3, "previous_step"),
+      {
+        ...step(4, "all_previous_steps"),
+        input_bindings: { question: "Samtal: {{ step_2.output.text }}" }
+      }
+    ]);
+    expect(t.edges.filter((e) => e.target === "s4")).toEqual([
+      { source: "s2", target: "s4", kind: "input_bindings", sourceStepOrder: 2, targetStepOrder: 4 }
+    ]);
+    expect(t.edges.filter((e) => e.target === "output").map((e) => e.source)).toEqual(["s3", "s4"]);
+  });
+
+  it("rebuilds the layout when only the underlag changes", () => {
+    const base: FlowStep = {
+      id: "s2",
+      assistant_id: "a2",
+      step_order: 2,
+      user_description: "Summary",
+      input_source: "previous_step",
+      input_type: "text",
+      output_mode: "pass_through",
+      output_type: "text"
+    };
+    const bound = { ...base, input_bindings: { question: "{{ step_1.output.text }}" } };
+    expect(flowGraphLayoutKey([bound])).not.toEqual(flowGraphLayoutKey([base]));
+  });
+
+  it("connects underlag without step references to the flow input", () => {
+    const t = buildFlowGraphTopology([
+      step(1, "flow_input"),
+      {
+        ...step(2, "all_previous_steps"),
+        input_bindings: { question: "Namn: {{ flow_input.namn }}" }
+      }
+    ]);
+    expect(t.edges.filter((e) => e.target === "s2")).toEqual([
+      { source: "input", target: "s2", kind: "flow_input", sourceStepOrder: 0, targetStepOrder: 2 }
+    ]);
   });
 
   it("falls back to flow input when a previous-step reference has no predecessor", () => {

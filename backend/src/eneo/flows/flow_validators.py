@@ -72,6 +72,7 @@ from eneo.flows.input_binding_contract_rules import (
     InputBindingContractError,
     derive_structured_projection_contract,
     effective_question_binding,
+    has_explicit_underlag,
     input_contract_binding_conflict,
     is_structured_projection_binding,
     item_template_field_names,
@@ -1765,7 +1766,17 @@ def _validate_step_mapped_execution(*, step: FlowStepValidationView) -> None:
             step_order=step.step_order,
         ) from exc
 
-    if mapped_execution is None or mapped_execution.maximum_items is not None:
+    if mapped_execution is None:
+        return
+    if mapped_execution.execution_mode == "per_item" and has_explicit_underlag(
+        step.input_bindings
+    ):
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: item_map reads the previous step's items; "
+            "explicit input_bindings are not supported on a mapped step.",
+            step_order=step.step_order,
+        )
+    if mapped_execution.maximum_items is not None:
         return
     if mapped_execution.execution_mode == "per_source":
         raise FlowStepValidationError(

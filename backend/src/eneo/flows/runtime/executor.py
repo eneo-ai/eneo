@@ -191,6 +191,7 @@ from eneo.flows.runtime.template_fill_runtime import (
 from eneo.flows.runtime.transcription_runtime import (
     persist_transcription_on_run_input,
 )
+from eneo.flows.step_lineage import resolve_step_upstream_orders
 from eneo.flows.variable_resolver import FlowVariableContext, FlowVariableResolver
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from eneo.json_types import JsonObject
@@ -2371,7 +2372,13 @@ class FlowRunExecutor:
         assistant = await self._load_assistant(step.assistant_id, state)
         evaluation = evaluate_step_security_classification(
             step_order=step.step_order,
-            input_source=step.input_source,
+            upstream_step_orders=resolve_step_upstream_orders(
+                input_source=step.input_source,
+                step_order=step.step_order,
+                input_bindings=step.input_bindings,
+                step_ref_mapping=state.step_ref_mapping,
+                max_prior_step_order=max(state.completed_by_order, default=0),
+            ),
             output_mode=step.output_mode,
             output_classification_override=step.output_classification_override,
             prior_output_levels_by_order=prior_output_levels_by_order,

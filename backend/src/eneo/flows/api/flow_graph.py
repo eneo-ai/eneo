@@ -106,6 +106,20 @@ def build_graph_from_steps(
         step_id = str(step.get("step_id") or step.get("id"))
         step_order = int(step["step_order"])
         input_source = step.get("input_source")
+        binding_orders = _binding_upstream_orders(
+            step=step,
+            step_ref_mapping=step_ref_mapping,
+        )
+        if binding_orders is not None:
+            edges.extend(
+                _binding_edges(
+                    step_id=step_id,
+                    step_order=step_order,
+                    binding_orders=binding_orders,
+                    sorted_steps=sorted_steps,
+                )
+            )
+            continue
 
         if input_source in {"flow_input", "http_get"}:
             style = "dashed" if input_source != "flow_input" else None
@@ -164,41 +178,6 @@ def build_graph_from_steps(
                 )
             )
 
-        existing_upstream_orders = {
-            edge.source_step_order
-            for edge in edges
-            if edge.target == step_id
-            and edge.source_step_order is not None
-            and edge.source_step_order > 0
-        }
-        for upstream_order in _binding_upstream_orders(
-            step=step,
-            step_ref_mapping=step_ref_mapping,
-        ):
-            if upstream_order in existing_upstream_orders:
-                continue
-            upstream = next(
-                (
-                    item
-                    for item in sorted_steps
-                    if int(item["step_order"]) == upstream_order
-                ),
-                None,
-            )
-            if upstream is None:
-                continue
-            edges.append(
-                GraphEdge(
-                    source=str(upstream.get("step_id") or upstream.get("id")),
-                    target=step_id,
-                    kind="input_bindings.question",
-                    source_step_order=upstream_order,
-                    target_step_order=step_order,
-                    style="dashed",
-                    label="underlag",
-                )
-            )
-
     if sorted_steps:
         step_ids = {str(step.get("step_id") or step.get("id")) for step in sorted_steps}
         source_step_ids = {
@@ -240,15 +219,15 @@ def _binding_upstream_orders(
     *,
     step: FlowPersistedJsonObject,
     step_ref_mapping: dict[str, int],
-) -> list[int]:
-    """Return upstream orders referenced by explicit underlag."""
+) -> list[int] | None:
+    """Return the step orders read by explicit underlag, or None without it."""
     bindings = step.get("input_bindings")
     if not isinstance(bindings, dict):
-        return []
+        return None
     bindings_dict = cast(FlowPersistedJsonObject, bindings)
     question = effective_question_binding(bindings_dict)
     if question is None:
-        return []
+        return None
 
     step_order = int(step["step_order"])
     references = analyze_template(
@@ -260,6 +239,48 @@ def _binding_upstream_orders(
         references=references,
         max_prior_step_order=step_order - 1,
     )
+
+
+def _binding_edges(
+    *,
+    step_id: str,
+    step_order: int,
+    binding_orders: Sequence[int],
+    sorted_steps: Sequence[FlowPersistedJsonObject],
+) -> list[GraphEdge]:
+    """Edges of a step whose explicit underlag is its whole input.
+
+    Every referenced step is an underlag edge; underlag that reads no step
+    (form fields or fixed text) reads the flow input.
+    """
+    if not binding_orders:
+        return [
+            GraphEdge(
+                source="input",
+                target=step_id,
+                kind="flow_input",
+                source_step_order=0,
+                target_step_order=step_order,
+            )
+        ]
+    steps_by_order = {int(item["step_order"]): item for item in sorted_steps}
+    result: list[GraphEdge] = []
+    for upstream_order in binding_orders:
+        upstream = steps_by_order.get(upstream_order)
+        if upstream is None:
+            continue
+        result.append(
+            GraphEdge(
+                source=str(upstream.get("step_id") or upstream.get("id")),
+                target=step_id,
+                kind="input_bindings.question",
+                source_step_order=upstream_order,
+                target_step_order=step_order,
+                style="dashed",
+                label="underlag",
+            )
+        )
+    return result
 
 
 def enrich_nodes_with_run_results(

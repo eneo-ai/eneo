@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { FlowStep } from "@eneo/eneo-js";
 import {
   getFlowStepEffectiveInputSources,
+  getFlowStepUnderlagStepOrders,
   getFlowInputMaterialOptions,
   getInputBindingSourceRefs,
   hasDeletedInputBindingSourceRefs,
@@ -23,6 +24,37 @@ function makeStep(stepOrder: number, overrides: Partial<FlowStep> = {}): FlowSte
     ...overrides
   };
 }
+
+describe("getFlowStepUnderlagStepOrders", () => {
+  it("returns null for a step without underlag", () => {
+    expect(getFlowStepUnderlagStepOrders(makeStep(3))).toBeNull();
+    expect(
+      getFlowStepUnderlagStepOrders(makeStep(3, { input_bindings: { question: "  " } }))
+    ).toBeNull();
+  });
+
+  it("collects the steps a question and typed source refs read", () => {
+    expect(
+      getFlowStepUnderlagStepOrders(
+        makeStep(4, {
+          input_source: "all_previous_steps",
+          input_bindings: {
+            question: "Samtal: {{ step_2.output.text }}",
+            source_refs: [{ step_ref: "step_1", output: "text", label: "Intake" }]
+          }
+        })
+      )
+    ).toEqual([1, 2]);
+  });
+
+  it("reads no step when the underlag only uses form fields", () => {
+    expect(
+      getFlowStepUnderlagStepOrders(
+        makeStep(2, { input_bindings: { question: "Namn: {{ flow_input.namn }}" } })
+      )
+    ).toEqual([]);
+  });
+});
 
 describe("getInputBindingSourceRefs", () => {
   it("parses valid typed source refs from persisted input bindings", () => {

@@ -92,6 +92,36 @@ def _run_state(prior_result: FlowStepResult) -> RunExecutionState:
     )
 
 
+def test_inherited_citation_context_reads_only_underlag_steps() -> None:
+    first = _completed_grounded_result(step_order=1)
+    second = _completed_grounded_result(step_order=2)
+    step = RuntimeStep(
+        step_id=uuid4(),
+        step_order=3,
+        assistant_id=uuid4(),
+        user_description="Final report",
+        input_source="all_previous_steps",
+        input_bindings={"question": "Samtal: {{ step_2.output.text }}"},
+        input_config=None,
+        output_mode="pass_through",
+        output_config=None,
+    )
+    state = RunExecutionState(
+        completed_by_order={1: first, 2: second},
+        prior_results=[first, second],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+        step_ref_mapping={"step_1": 1, "step_2": 2},
+        step_names_by_order={1: "Grounded summary", 2: "Second summary"},
+    )
+
+    context = collect_inherited_citation_context(step=step, state=state)
+
+    assert context["upstream_step_orders"] == [2]
+    assert context["upstream_step_labels"] == ["Second summary"]
+
+
 def test_inherited_citation_context_reads_typed_source_refs() -> None:
     prior_result = _completed_grounded_result(step_order=1)
     context = collect_inherited_citation_context(
