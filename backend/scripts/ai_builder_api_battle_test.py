@@ -2362,6 +2362,17 @@ def _read_capacity_snapshot(
         return None, {"path": path, "kind": "malformed_response"}
 
 
+def _case_deletes_a_flow(case: BattleCase) -> bool:
+    """Whether one observation of this case ends with a DELETE the key must be allowed.
+
+    An applied plan creates a Flow; a saved-step edit seeds one before its first
+    turn. Both are removed by the observation itself, so the preflight has to
+    prove the key can delete before either is spent.
+    """
+
+    return case.apply_plan or case.edit is not None
+
+
 def _capacity_preflight(
     *,
     config: ApiConfig,
@@ -2398,7 +2409,7 @@ def _capacity_preflight(
         demand=demand,
         space_id=space_id,
         runtime_slots_required=slots_required,
-        flow_deletion_required=any(case.apply_plan for case in cases),
+        flow_deletion_required=any(_case_deletes_a_flow(case) for case in cases),
     )
     endpoint_failures = [
         failure for failure in (runtime_failure, request_failure) if failure is not None
@@ -3671,12 +3682,19 @@ def _run_case(
         raise ValueError(
             "a saved-step edit case always seeds its own flow and session."
         )
-    seeded_flow = _seed_edit_flow(config=config, space_id=args.space_id, edit=case.edit)
-    print(f"seeded flow {seeded_flow.flow_id} ({len(seeded_flow.step_ids)} steps)")
+    fixture = _selected_seed_flow_fixture(case.edit)
+    flow_id = _create_seed_flow(config=config, space_id=args.space_id, fixture=fixture)
     bundle: JsonObject | None = None
     primary_error: Exception | None = None
     cleanup_error: Exception | None = None
     try:
+        # The flow is owned from the moment it has an id: a refused assistant,
+        # a rejected steps response, a failed turn and an interrupt all reach
+        # the DELETE below.
+        seeded_flow = _seed_edit_flow(
+            config=config, flow_id=flow_id, fixture=fixture, edit=case.edit
+        )
+        print(f"seeded flow {flow_id} ({len(seeded_flow.step_ids)} steps)")
         bundle = _run_case_session(
             case=case,
             config=config,
@@ -3694,13 +3712,13 @@ def _run_case(
             _request_no_content(
                 config=config,
                 method="DELETE",
-                path=f"/flows/{seeded_flow.flow_id}/",
+                path=f"/flows/{flow_id}/",
             )
         except Exception as error:
             cleanup_error = error
     lifecycle: JsonObject = {
         "status": "cleanup_failed" if cleanup_error is not None else "deleted",
-        "flow_id": seeded_flow.flow_id,
+        "flow_id": flow_id,
     }
     if cleanup_error is not None:
         message = f"seeded Flow cleanup failed: {cleanup_error}"
@@ -3722,22 +3740,26 @@ def _run_case(
     return bundle
 
 
-def _seed_edit_flow(
-    *, config: ApiConfig, space_id: str, edit: SavedStepEditCase
-) -> SeededFlow:
-    """Provision the fixture as a real flow: empty flow, assistants, prompts, steps.
+def _selected_seed_flow_fixture(edit: SavedStepEditCase) -> JsonObject:
+    """The fixture the case selected, refused if it changed since selection."""
 
-    Each step's instructions live on a flow-managed assistant, which can only be
-    created once the flow exists and can only be referenced by a step once it
-    exists; the flow update at the end is what turns the fixture into steps.
-    A failure after the flow was created deletes it before re-raising.
-    """
-
-    fixture = _load_seed_flow_fixture(edit.seed_flow_fixture)
     if _seed_flow_fixture_sha256(edit.seed_flow_fixture) != edit.seed_flow_sha256:
         raise ValueError(
             f"seed flow fixture changed since selection: {edit.seed_flow_fixture}"
         )
+    return _load_seed_flow_fixture(edit.seed_flow_fixture)
+
+
+def _create_seed_flow(
+    *, config: ApiConfig, space_id: str, fixture: Mapping[str, Any]
+) -> str:
+    """Create the empty flow the seeded steps will hang off; returns its id.
+
+    Split from `_seed_edit_flow` so the caller owns the flow's lifetime from the
+    first moment it exists: everything after this call, seeding included, runs
+    under the caller's cleanup.
+    """
+
     created = _request_json(
         config=config,
         method="POST",
@@ -3749,60 +3771,66 @@ def _seed_edit_flow(
             "steps": [],
         },
     )
-    flow_id = _required_string(created, "id")
-    try:
-        step_payloads: list[JsonObject] = []
-        for step_order, step in enumerate(fixture["steps"], start=1):
-            assistant = _request_json(
-                config=config,
-                method="POST",
-                path=f"/flows/{flow_id}/assistants/",
-                payload={"name": step["name"]},
-            )
-            assistant_id = _required_string(assistant, "id")
-            _request_json(
-                config=config,
-                method="PATCH",
-                path=f"/flows/{flow_id}/assistants/{assistant_id}/",
-                payload={"prompt": {"text": step["instructions"]}},
-            )
-            step_payloads.append(
-                {
-                    "assistant_id": assistant_id,
-                    "step_order": step_order,
-                    "user_description": step.get("user_description") or step["name"],
-                    "input_source": step["input_source"],
-                    "input_type": step["input_type"],
-                    "input_contract": step.get("input_contract"),
-                    "output_mode": step["output_mode"],
-                    "output_type": step["output_type"],
-                    "output_contract": step.get("output_contract"),
-                    "input_bindings": step.get("input_bindings"),
-                    "input_config": step.get("input_config"),
-                }
-            )
-        updated = _request_json(
+    return _required_string(created, "id")
+
+
+def _seed_edit_flow(
+    *,
+    config: ApiConfig,
+    flow_id: str,
+    fixture: Mapping[str, Any],
+    edit: SavedStepEditCase,
+) -> SeededFlow:
+    """Turn the empty flow into the fixture: assistants, prompts, then steps.
+
+    Each step's instructions live on a flow-managed assistant, which can only be
+    created once the flow exists and can only be referenced by a step once it
+    exists; the flow update at the end is what turns the fixture into steps.
+    Deleting the flow on failure is the caller's job (`_run_case`), not this
+    function's, so a refusal here and a rejected response below are cleaned up
+    by the same owner.
+    """
+
+    step_payloads: list[JsonObject] = []
+    for step_order, step in enumerate(fixture["steps"], start=1):
+        assistant = _request_json(
+            config=config,
+            method="POST",
+            path=f"/flows/{flow_id}/assistants/",
+            payload={"name": step["name"]},
+        )
+        assistant_id = _required_string(assistant, "id")
+        _request_json(
             config=config,
             method="PATCH",
-            path=f"/flows/{flow_id}/",
-            payload={
-                "name": fixture["name"],
-                "description": fixture.get("description"),
-                "steps": step_payloads,
-            },
+            path=f"/flows/{flow_id}/assistants/{assistant_id}/",
+            payload={"prompt": {"text": step["instructions"]}},
         )
-    except Exception:
-        try:
-            _request_no_content(
-                config=config, method="DELETE", path=f"/flows/{flow_id}/"
-            )
-        except Exception as cleanup_error:
-            print(
-                f"seeded flow {flow_id} could not be deleted after a seeding "
-                f"failure: {cleanup_error}",
-                file=sys.stderr,
-            )
-        raise
+        step_payloads.append(
+            {
+                "assistant_id": assistant_id,
+                "step_order": step_order,
+                "user_description": step.get("user_description") or step["name"],
+                "input_source": step["input_source"],
+                "input_type": step["input_type"],
+                "input_contract": step.get("input_contract"),
+                "output_mode": step["output_mode"],
+                "output_type": step["output_type"],
+                "output_contract": step.get("output_contract"),
+                "input_bindings": step.get("input_bindings"),
+                "input_config": step.get("input_config"),
+            }
+        )
+    updated = _request_json(
+        config=config,
+        method="PATCH",
+        path=f"/flows/{flow_id}/",
+        payload={
+            "name": fixture["name"],
+            "description": fixture.get("description"),
+            "steps": step_payloads,
+        },
+    )
     steps = updated.get("steps")
     if not isinstance(steps, list) or len(steps) != len(step_payloads):
         raise ValueError(f"seeded flow {flow_id} did not return every step.")
@@ -3915,6 +3943,15 @@ def _run_case_session(
         case, provisioned_fixtures or {}
     )
     runtime_file_paths = _case_runtime_file_paths(case)
+    # The selected step is part of every turn the case sends, not only the
+    # first: a clarification answer without it would widen the planner's
+    # scope to the whole flow mid-observation. (The server restores an omitted
+    # context only for requirements confirmation.)
+    edit_context: JsonObject | None = (
+        {"kind": "saved_flow_step", "flow_step_id": seeded_flow.target_step_id}
+        if seeded_flow is not None
+        else None
+    )
     interactions: list[JsonObject] = []
     first = _send_and_fetch(
         config=config,
@@ -3924,11 +3961,7 @@ def _run_case_session(
         file_ids=file_ids,
         ui_language=args.ui_language,
         question_answer=None,
-        edit_context=(
-            {"kind": "saved_flow_step", "flow_step_id": seeded_flow.target_step_id}
-            if seeded_flow is not None
-            else None
-        ),
+        edit_context=edit_context,
     )
     interactions.append(first)
 
@@ -3974,6 +4007,7 @@ def _run_case_session(
                             requirements_summary=requirements_summary,
                             ui_language=args.ui_language,
                         ),
+                        edit_context=edit_context,
                     )
                 )
                 continue
@@ -3993,6 +4027,7 @@ def _run_case_session(
                     file_ids=(),
                     ui_language=args.ui_language,
                     question_answer=answer["question_answer"],
+                    edit_context=edit_context,
                 )
                 response["configured_answer_source"] = answer["answer_source"]
                 interactions.append(response)

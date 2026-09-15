@@ -89,7 +89,9 @@ def _allow_measurement_preflight(
                 cases=kwargs["cases"],
                 max_concurrency=kwargs["max_concurrency"],
             ),
-            flow_deletion_required=any(case.apply_plan for case in kwargs["cases"]),
+            flow_deletion_required=any(
+                harness._case_deletes_a_flow(case) for case in kwargs["cases"]
+            ),
         ),
     )
 
@@ -10471,7 +10473,13 @@ def test_seeding_provisions_the_flow_then_assistants_then_steps(
         step_count=10,
     )
 
-    seeded = harness._seed_edit_flow(config=object(), space_id="space-1", edit=edit)
+    fixture = harness._selected_seed_flow_fixture(edit)
+    flow_id = harness._create_seed_flow(
+        config=object(), space_id="space-1", fixture=fixture
+    )
+    seeded = harness._seed_edit_flow(
+        config=object(), flow_id=flow_id, fixture=fixture, edit=edit
+    )
 
     assert seeded.flow_id == "flow-1"
     assert seeded.step_ids == tuple(f"step-{n}" for n in range(1, 11))
@@ -10494,7 +10502,7 @@ def test_seeding_provisions_the_flow_then_assistants_then_steps(
 
 
 def test_a_seeding_failure_deletes_the_half_built_flow(
-    monkeypatch: MonkeyPatch,
+    monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:
     harness = _battle_harness()
     deleted: list[str] = []
@@ -10515,17 +10523,228 @@ def test_a_seeding_failure_deletes_the_half_built_flow(
 
     monkeypatch.setattr(harness, "_request_json", fake_request_json)
     monkeypatch.setattr(harness, "_request_no_content", fake_request_no_content)
-    edit = harness.SavedStepEditCase(
-        seed_flow_fixture="edit_chain_10.json",
-        seed_flow_sha256=harness._seed_flow_fixture_sha256("edit_chain_10.json"),
-        target_step_order=3,
-        step_count=10,
-    )
+    case = harness._cases_from_args(_edit_namespace())[0]
 
-    with raises(ValueError, match="step update refused"):
-        harness._seed_edit_flow(config=object(), space_id="space-1", edit=edit)
+    with raises(
+        harness.BattleFlowLifecycleError, match="step update refused"
+    ) as raised:
+        harness._run_case(
+            case=case,
+            config=object(),
+            args=SimpleNamespace(space_id="space-1"),
+            existing_session_id=None,
+            artifact_output_dir=tmp_path,
+        )
 
     assert deleted == ["DELETE /flows/flow-1/"]
+    assert raised.value.flow_lifecycle == {"status": "deleted", "flow_id": "flow-1"}
+
+
+def test_a_rejected_steps_response_deletes_the_seeded_flow(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    """Validation of the steps response runs under the same owner as the requests."""
+
+    harness = _battle_harness()
+    deleted: list[str] = []
+
+    def fake_request_json(
+        *, config: object, method: str, path: str, payload: object = None
+    ) -> dict[str, Any]:
+        if method == "POST" and path == "/flows/":
+            return {"id": "flow-1"}
+        if method == "POST":
+            return {"id": "asst-1"}
+        if method == "PATCH" and "/assistants/" in path:
+            return {}
+        return {"id": "flow-1", "steps": []}
+
+    monkeypatch.setattr(harness, "_request_json", fake_request_json)
+    monkeypatch.setattr(
+        harness,
+        "_request_no_content",
+        lambda *, config, method, path: deleted.append(f"{method} {path}"),
+    )
+    case = harness._cases_from_args(_edit_namespace())[0]
+
+    with raises(
+        harness.BattleFlowLifecycleError, match="did not return every step"
+    ) as raised:
+        harness._run_case(
+            case=case,
+            config=object(),
+            args=SimpleNamespace(space_id="space-1"),
+            existing_session_id=None,
+            artifact_output_dir=tmp_path,
+        )
+
+    assert deleted == ["DELETE /flows/flow-1/"]
+    assert raised.value.flow_lifecycle == {"status": "deleted", "flow_id": "flow-1"}
+
+
+def test_an_interrupted_edit_observation_still_deletes_its_seeded_flow(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    harness = _battle_harness()
+    deleted: list[str] = []
+    monkeypatch.setattr(harness, "_create_seed_flow", lambda **_kwargs: "flow-1")
+
+    def interrupted_seeding(**_kwargs: object) -> harness.SeededFlow:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(harness, "_seed_edit_flow", interrupted_seeding)
+    monkeypatch.setattr(
+        harness,
+        "_request_no_content",
+        lambda *, config, method, path: deleted.append(f"{method} {path}"),
+    )
+    case = harness._cases_from_args(_edit_namespace())[0]
+
+    with raises(KeyboardInterrupt):
+        harness._run_case(
+            case=case,
+            config=object(),
+            args=SimpleNamespace(space_id="space-1"),
+            existing_session_id=None,
+            artifact_output_dir=tmp_path,
+        )
+
+    assert deleted == ["DELETE /flows/flow-1/"]
+
+
+def test_a_seeding_failure_whose_cleanup_also_fails_keeps_both_in_the_receipt(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    harness = _battle_harness()
+    monkeypatch.setattr(harness, "_create_seed_flow", lambda **_kwargs: "flow-1")
+
+    def refused_seeding(**_kwargs: object) -> harness.SeededFlow:
+        raise ValueError("assistant refused")
+
+    def refused_delete(*, config: object, method: str, path: str) -> None:
+        raise ValueError("delete refused")
+
+    monkeypatch.setattr(harness, "_seed_edit_flow", refused_seeding)
+    monkeypatch.setattr(harness, "_request_no_content", refused_delete)
+    case = harness._cases_from_args(_edit_namespace())[0]
+
+    with raises(harness.BattleFlowLifecycleError) as raised:
+        harness._run_case(
+            case=case,
+            config=object(),
+            args=SimpleNamespace(space_id="space-1"),
+            existing_session_id=None,
+            artifact_output_dir=tmp_path,
+        )
+
+    assert str(raised.value) == (
+        "assistant refused; seeded Flow cleanup failed: delete refused"
+    )
+    assert harness._failure_error_fields(raised.value) == {
+        "error": "assistant refused; seeded Flow cleanup failed: delete refused",
+        "failure_class": "harness_configuration",
+        "flow_lifecycle": {"status": "cleanup_failed", "flow_id": "flow-1"},
+    }
+
+
+@mark.parametrize(
+    ("permission", "expected_refusals"),
+    [("admin", []), ("write", ["measurement_key_cannot_delete_flows"])],
+)
+def test_an_edit_only_suite_requires_a_key_that_can_delete_its_seeded_flows(
+    monkeypatch: MonkeyPatch, permission: str, expected_refusals: list[str]
+) -> None:
+    harness = _battle_harness()
+    request_capacity = {
+        "key_id": "00000000-0000-0000-0000-000000000030",
+        "scope_type": "space",
+        "scope_id": _SPACE_ID,
+        "permission": permission,
+        "limit_source": "explicit",
+        "limit": 20000,
+        "current_count": 10,
+        "remaining": 19990,
+        "window_seconds": 3600,
+        "fail_open": False,
+    }
+    monkeypatch.setattr(
+        harness,
+        "_read_capacity_snapshot",
+        lambda *, config, path: (request_capacity, None),
+    )
+    cases = harness._cases_from_args(_edit_namespace())
+    assert cases and all(not case.apply_plan for case in cases)
+
+    verdict = harness._capacity_preflight(
+        config=object(),
+        cases=cases,
+        repetitions=1,
+        timeout_seconds=300,
+        max_concurrency=1,
+        space_id=_SPACE_ID,
+    )
+
+    assert verdict["flow_deletion_required"] is True
+    assert verdict["refusals"] == expected_refusals
+
+
+def test_a_clarification_answer_keeps_the_saved_step_scope(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    """Every turn before the first proposal carries the selected step."""
+
+    harness = _battle_harness()
+    sent: list[dict[str, Any]] = []
+    seeded = harness.SeededFlow(
+        flow_id="flow-1", target_step_id="step-3", step_ids=("a", "b", "c")
+    )
+    monkeypatch.setattr(
+        harness, "_create_session", lambda **_kwargs: {"session_id": "session-1"}
+    )
+    monkeypatch.setattr(harness, "_request_json", lambda **_kwargs: {})
+
+    def send_and_fetch(**kwargs: Any) -> dict[str, Any]:
+        sent.append(kwargs)
+        if len(sent) == 1:
+            return {
+                "plan_id": None,
+                "events": [{"event": "question", "data": {"question_id": "q-1"}}],
+            }
+        raise RuntimeError("stop after the answer turn")
+
+    monkeypatch.setattr(harness, "_send_and_fetch", send_and_fetch)
+    monkeypatch.setattr(
+        harness,
+        "_configured_question_answer",
+        lambda **_kwargs: {
+            "message": "Bara steget.",
+            "question_answer": {"question_id": "q-1", "option_id": "o-1"},
+            "answer_source": "configured",
+        },
+    )
+    case = harness._cases_from_args(_edit_namespace())[0]
+
+    with raises(RuntimeError, match="stop after the answer turn"):
+        harness._run_case_session(
+            case=case,
+            config=object(),
+            args=SimpleNamespace(
+                space_id="space-1",
+                model_id=None,
+                ui_language="sv",
+                file_ids=None,
+                auto_confirm_requirements=False,
+            ),
+            existing_session_id=None,
+            artifact_output_dir=tmp_path,
+            cases_path=None,
+            provisioned_fixtures=None,
+            seeded_flow=seeded,
+        )
+
+    expected_context = {"kind": "saved_flow_step", "flow_step_id": "step-3"}
+    assert [call["edit_context"] for call in sent] == [expected_context] * 2
+    assert sent[1]["question_answer"] == {"question_id": "q-1", "option_id": "o-1"}
 
 
 def test_edit_evidence_reads_the_servers_own_diff() -> None:
@@ -10591,6 +10810,7 @@ def test_an_edit_case_deletes_its_seeded_flow_even_when_the_session_fails(
     seeded = harness.SeededFlow(
         flow_id="flow-1", target_step_id="step-3", step_ids=("a",)
     )
+    monkeypatch.setattr(harness, "_create_seed_flow", lambda **_kwargs: "flow-1")
     monkeypatch.setattr(harness, "_seed_edit_flow", lambda **_kwargs: seeded)
     monkeypatch.setattr(
         harness,

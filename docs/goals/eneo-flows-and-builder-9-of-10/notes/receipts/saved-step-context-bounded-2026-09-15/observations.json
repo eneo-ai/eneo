@@ -1,0 +1,615 @@
+{
+ "stacks": {
+  "parent": {
+   "port": 8146,
+   "git_commit": "8f575a957f2a",
+   "worktree": "/Users/ccimen/eneo/eneo-ai-builder-parent-20260913",
+   "db": "eneo_ai_builder_parent",
+   "space": "9fe65f26-b0dd-47e8-9aea-aa02a2e50014"
+  },
+  "candidate": {
+   "port": 8144,
+   "git_commit": "5d427fb8162d",
+   "worktree": "/Users/ccimen/eneo/eneo-ai-builder-candidate-341",
+   "db": "eneo_ai_builder_simplify",
+   "space": "6f18b073-ea64-4a5e-8236-778a25e72d8f"
+  }
+ },
+ "harness": "feat/ai-builder-harness-edit-case (fb4f9f8ab + gate fixes), one --case-id observation per invocation, 2026-09-15 07:31-07:41 CEST",
+ "models": {
+  "luna": "gpt-5.6-luna 69ea7ad9-19e1-4dac-bcbe-9eb715e12644 (OpenAI-compatible, strict tools)",
+  "gemma": "gemma4-31b-it cd1719c9-1223-4149-82da-feaa21674692 (tools=False, strict=False)"
+ },
+ "observations": [
+  {
+   "lane": "parent",
+   "source": "8f575a957",
+   "model": "luna",
+   "case": "edit_chain_10_instruction",
+   "seeded_step_count": 10,
+   "outcome_class": "plan_first_pass",
+   "planner_request_count": 1,
+   "repair_attempts_total": 0,
+   "prompt_tokens_total": 11325,
+   "completion_tokens_total": 610,
+   "token_usage_estimated": false,
+   "target_change_kind": "modified",
+   "target_changed_fields": [
+    "name",
+    "instructions"
+   ],
+   "unrelated_steps_unchanged": true,
+   "seeded_flow_lifecycle": {
+    "flow_id": "b5296c21-e2b6-4030-9cfe-6d4a8b52327a",
+    "status": "deleted"
+   },
+   "session_id": "b98cd989-f8a1-4927-8937-56cc65d8dc0d",
+   "plan_id": "7425c14e-ec23-4083-bad4-c6917f51dbc4",
+   "bundle": "ai-builder-api-battle-test-20260915T073217-edit_chain_10_instruction.json"
+  },
+  {
+   "lane": "parent",
+   "source": "8f575a957",
+   "model": "luna",
+   "case": "edit_chain_30_instruction",
+   "seeded_step_count": 30,
+   "outcome_class": "plan_first_pass",
+   "planner_request_count": 1,
+   "repair_attempts_total": 0,
+   "prompt_tokens_total": 12576,
+   "completion_tokens_total": 564,
+   "token_usage_estimated": false,
+   "target_change_kind": "modified",
+   "target_changed_fields": [
+    "name",
+    "instructions"
+   ],
+   "unrelated_steps_unchanged": true,
+   "seeded_flow_lifecycle": {
+    "flow_id": "1bac92b7-882c-42eb-8c7b-d557a8f7d13e",
+    "status": "deleted"
+   },
+   "session_id": "cef3a18b-cc1e-4c77-b9f6-c659eb03a42b",
+   "plan_id": "e63e12c2-5db6-487c-a6ff-87582d1e66df",
+   "bundle": "ai-builder-api-battle-test-20260915T073327-edit_chain_30_instruction.json"
+  },
+  {
+   "lane": "parent",
+   "source": "8f575a957",
+   "model": "luna",
+   "case": "edit_chain_10_instruction",
+   "seeded_step_count": 10,
+   "outcome_class": "plan_first_pass",
+   "planner_request_count": 1,
+   "repair_attempts_total": 0,
+   "prompt_tokens_total": 11353,
+   "completion_tokens_total": 613,
+   "token_usage_estimated": false,
+   "target_change_kind": "modified",
+   "target_changed_fields": [
+    "name",
+    "instructions"
+   ],
+   "unrelated_steps_unchanged": true,
+   "seeded_flow_lifecycle": {
+    "flow_id": "6440ea65-e5b5-4d70-b031-39ba588b475e",
+    "status": "deleted"
+   },
+   "session_id": "83792905-1b6e-413f-90b7-a87051bda467",
+   "plan_id": "1f188ccd-3968-4c86-9edf-c6af55b5703c",
+   "bundle": "ai-builder-api-battle-test-20260915T073358-edit_chain_10_instruction.json"
+  },
+  {
+   "lane": "parent",
+   "source": "8f575a957",
+   "model": "luna",
+   "case": "edit_chain_30_instruction",
+   "seeded_step_count": 30,
+   "outcome_class": "plan_first_pass",
+   "planner_request_count": 1,
+   "repair_attempts_total": 0,
+   "prompt_tokens_total": 12672,
+   "completion_tokens_total": 754,
+   "token_usage_estimated": false,
+   "target_change_kind": "modified",
+   "target_changed_fields": [
+    "name",
+    "instructions"
+   ],
+   "unrelated_steps_unchanged": true,
+   "seeded_flow_lifecycle": {
+    "flow_id": "953c2adf-a7bb-42ab-8e76-ccfb06daadf5",
+    "status": "deleted"
+   },
+   "session_id": "b1de5ab9-0bd7-400b-9947-24d3274edd90",
+   "plan_id": "775ea4c2-a83a-4f98-973f-c113d8c5335a",
+   "bundle": "ai-builder-api-battle-test-20260915T073506-edit_chain_30_instruction.json"
+  },
+  {
+   "lane": "parent",
+   "source": "8f575a957",
+   "model": "luna",
+   "case": "edit_chain_10_instruction",
+   "seeded_step_count": 10,
+   "outcome_class": "plan_first_pass",
+   "planner_request_count": 1,
+   "repair_attempts_total": 0,
+   "prompt_tokens_total": 11323,
+   "completion_tokens_total": 597,
+   "token_usage_estimated": false,
+   "target_change_kind": "modified",
+   "target_changed_fields": [
+    "name",
+    "instructions"
+   ],
+   "unrelated_steps_unchanged": true,
+   "seeded_flow_lifecycle": {
+    "flow_id": "ac3348ec-41f9-493e-93fd-23ec314c5305",
+    "status": "deleted"
+   },
+   "session_id": "e47e874e-ab28-48c3-9374-b89c10b8e362",
+   "plan_id": "4da9c317-8f8c-4d9d-a7e4-4e5f79634adf",
+   "bundle": "ai-builder-api-battle-test-20260915T073536-edit_chain_10_instruction.json"
+  },
+  {
+   "lane": "parent",
+   "source": "8f575a957",
+   "model": "luna",
+   "case": "edit_chain_30_instruction",
+   "seeded_step_count": 30,
+   "outcome_class": "plan_first_pass",
+   "planner_request_count": 1,
+   "repair_attempts_total": 0,
+   "prompt_tokens_total": 12534,
+   "completion_tokens_total": 610,
+   "token_usage_estimated": false,
+   "target_change_kind": "modified",
+   "target_changed_fields": [
+    "name",
+    "instructions"
+   ],
+   "unrelated_steps_unchanged": true,
+   "seeded_flow_lifecycle": {
+    "flow_id": "6a2b3e37-b08c-40e6-9370-464c5198a5a3",
+    "status": "deleted"
+   },
+   "session_id": "1916d8b8-1367-4d7a-840a-1726dafa3a73",
+   "plan_id": "70f09771-04ae-459d-a6c7-03c6a2294c05",
+   "bundle": "ai-builder-api-battle-test-20260915T073643-edit_chain_30_instruction.json"
+  },
+  {
+   "lane": "parent",
+   "source": "8f575a957",
+   "model": "gemma",
+   "case": "edit_chain_10_instruction",
+   "seeded_step_count": 10,
+   "outcome_class": "plan_first_pass",
+   "planner_request_count": 1,
+   "repair_attempts_total": 0,
+   "prompt_tokens_total": 8983,
+   "completion_tokens_total": 828,
+   "token_usage_estimated": false,
+   "target_change_kind": "modified",
+   "target_changed_fields": [
+    "name",
+    "instructions"
+   ],
+   "unrelated_steps_unchanged": true,
+   "seeded_flow_lifecycle": {
+    "flow_id": "52528aea-a03e-4b33-888b-8e38873cb41d",
+    "status": "deleted"
+   },
+   "session_id": "b95099d2-0890-4b12-b1f5-7d84d69b962a",
+   "plan_id": "c7ccd3e0-7937-4bd9-b2c7-f7e78e6f4745",
+   "bundle": "ai-builder-api-battle-test-20260915T073714-edit_chain_10_instruction.json"
+  },
+  {
+   "lane": "parent",
+   "source": "8f575a957",
+   "model": "gemma",
+   "case": "edit_chain_30_instruction",
+   "seeded_step_count": 30,
+   "outcome_class": "plan_first_pass",
+   "planner_request_count": 1,
+   "repair_attempts_total": 0,
+   "prompt_tokens_total": 10522,
+   "completion_tokens_total": 909,
+   "token_usage_estimated": false,
+   "target_change_kind": "modified",
+   "target_changed_fields": [
+    "name",
+    "instructions"
+   ],
+   "unrelated_steps_unchanged": true,
+   "seeded_flow_lifecycle": {
+    "flow_id": "419fe588-3f0b-4e87-92ac-3bffca2b2f9e",
+    "status": "deleted"
+   },
+   "session_id": "c089d36f-aad3-463f-803d-57e9ac0dce3e",
+   "plan_id": "aa832c41-e97c-4b12-8d77-2ec9cfc554d7",
+   "bundle": "ai-builder-api-battle-test-20260915T073823-edit_chain_30_instruction.json"
+  },
+  {
+   "lane": "parent",
+   "source": "8f575a957",
+   "model": "gemma",
+   "case": "edit_chain_10_instruction",
+   "seeded_step_count": 10,
+   "outcome_class": "plan_first_pass",
+   "planner_request_count": 1,
+   "repair_attempts_total": 0,
+   "prompt_tokens_total": 8977,
+   "completion_tokens_total": 825,
+   "token_usage_estimated": false,
+   "target_change_kind": "modified",
+   "target_changed_fields": [
+    "name",
+    "instructions"
+   ],
+   "unrelated_steps_unchanged": true,
+   "seeded_flow_lifecycle": {
+    "flow_id": "01f65cdd-dbc2-4c84-9b3b-6cca6c84c56f",
+    "status": "deleted"
+   },
+   "session_id": "25b00215-9019-4fa8-8ed7-aef2009252d1",
+   "plan_id": "bd1f19eb-0c5b-410f-942d-0ad3d70f62ff",
+   "bundle": "ai-builder-api-battle-test-20260915T073858-edit_chain_10_instruction.json"
+  },
+  {
+   "lane": "parent",
+   "source": "8f575a957",
+   "model": "gemma",
+   "case": null,
+   "failure": "HTTP Error 404: Not Found",
+   "failure_class": "harness_configuration",
+   "bundle": "ai-builder-api-battle-test-20260915T073916-failure.json"
+  },
+  {
+   "lane": "parent",
+   "source": "8f575a957",
+   "model": "gemma",
+   "case": "edit_chain_10_instruction",
+   "seeded_step_count": 10,
+   "outcome_class": "plan_first_pass",
+   "planner_request_count": 1,
+   "repair_attempts_total": 0,
+   "prompt_tokens_total": 8981,
+   "completion_tokens_total": 829,
+   "token_usage_estimated": false,
+   "target_change_kind": "modified",
+   "target_changed_fields": [
+    "name",
+    "instructions"
+   ],
+   "unrelated_steps_unchanged": true,
+   "seeded_flow_lifecycle": {
+    "flow_id": "9eae5c24-d76f-49df-8f6e-3bf9e26ecffd",
+    "status": "deleted"
+   },
+   "session_id": "b236ee0d-19df-4c22-9a02-8e312b70ff4d",
+   "plan_id": "861401e8-d16b-4f84-8b7d-f5e094271c2a",
+   "bundle": "ai-builder-api-battle-test-20260915T073938-edit_chain_10_instruction.json"
+  },
+  {
+   "lane": "parent",
+   "source": "8f575a957",
+   "model": "gemma",
+   "case": "edit_chain_30_instruction",
+   "seeded_step_count": 30,
+   "outcome_class": "plan_first_pass",
+   "planner_request_count": 1,
+   "repair_attempts_total": 0,
+   "prompt_tokens_total": 10524,
+   "completion_tokens_total": 907,
+   "token_usage_estimated": false,
+   "target_change_kind": "modified",
+   "target_changed_fields": [
+    "name",
+    "instructions"
+   ],
+   "unrelated_steps_unchanged": true,
+   "seeded_flow_lifecycle": {
+    "flow_id": "6b7db3ac-e05d-45af-8a39-5617c38821f9",
+    "status": "deleted"
+   },
+   "session_id": "59037c05-1ef0-44f3-af56-24332a9e169a",
+   "plan_id": "d70bb54d-bb72-4d45-8fc8-8c1ff8d41df8",
+   "bundle": "ai-builder-api-battle-test-20260915T074047-edit_chain_30_instruction.json"
+  },
+  {
+   "lane": "candidate",
+   "source": "5d427fb81",
+   "model": "luna",
+   "case": "edit_chain_10_instruction",
+   "seeded_step_count": 10,
+   "outcome_class": "plan_first_pass",
+   "planner_request_count": 1,
+   "repair_attempts_total": 0,
+   "prompt_tokens_total": 10976,
+   "completion_tokens_total": 675,
+   "token_usage_estimated": false,
+   "target_change_kind": "modified",
+   "target_changed_fields": [
+    "name",
+    "instructions"
+   ],
+   "unrelated_steps_unchanged": true,
+   "seeded_flow_lifecycle": {
+    "flow_id": "8512b08f-da40-4ff1-ad9d-4264171acbf3",
+    "status": "deleted"
+   },
+   "session_id": "f1102ba6-174b-42ef-bdd7-adcacd57d752",
+   "plan_id": "4a5a855a-f7d4-4ef6-a645-e657a6adb575",
+   "bundle": "ai-builder-api-battle-test-20260915T073217-edit_chain_10_instruction.json"
+  },
+  {
+   "lane": "candidate",
+   "source": "5d427fb81",
+   "model": "luna",
+   "case": "edit_chain_30_instruction",
+   "seeded_step_count": 30,
+   "outcome_class": "plan_first_pass",
+   "planner_request_count": 1,
+   "repair_attempts_total": 0,
+   "prompt_tokens_total": 10840,
+   "completion_tokens_total": 586,
+   "token_usage_estimated": false,
+   "target_change_kind": "modified",
+   "target_changed_fields": [
+    "name",
+    "instructions"
+   ],
+   "unrelated_steps_unchanged": true,
+   "seeded_flow_lifecycle": {
+    "flow_id": "348a871f-ffea-42e3-829b-9cf35bb3d120",
+    "status": "deleted"
+   },
+   "session_id": "1016ef34-43e7-4415-bc19-1e7cbb1c1b9e",
+   "plan_id": "05f56d97-ec4c-4ba5-9087-f1e2dfda8949",
+   "bundle": "ai-builder-api-battle-test-20260915T073327-edit_chain_30_instruction.json"
+  },
+  {
+   "lane": "candidate",
+   "source": "5d427fb81",
+   "model": "luna",
+   "case": "edit_chain_10_instruction",
+   "seeded_step_count": 10,
+   "outcome_class": "plan_first_pass",
+   "planner_request_count": 1,
+   "repair_attempts_total": 0,
+   "prompt_tokens_total": 10970,
+   "completion_tokens_total": 766,
+   "token_usage_estimated": false,
+   "target_change_kind": "modified",
+   "target_changed_fields": [
+    "name",
+    "instructions"
+   ],
+   "unrelated_steps_unchanged": true,
+   "seeded_flow_lifecycle": {
+    "flow_id": "f557708f-8405-462b-b03a-b5095feb14d3",
+    "status": "deleted"
+   },
+   "session_id": "013882c2-2167-4a9d-a7f4-424bd0ec99cb",
+   "plan_id": "1d3c0353-34ee-496e-a3c3-a717c2758b69",
+   "bundle": "ai-builder-api-battle-test-20260915T073358-edit_chain_10_instruction.json"
+  },
+  {
+   "lane": "candidate",
+   "source": "5d427fb81",
+   "model": "luna",
+   "case": "edit_chain_30_instruction",
+   "seeded_step_count": 30,
+   "outcome_class": "plan_first_pass",
+   "planner_request_count": 1,
+   "repair_attempts_total": 0,
+   "prompt_tokens_total": 10844,
+   "completion_tokens_total": 609,
+   "token_usage_estimated": false,
+   "target_change_kind": "modified",
+   "target_changed_fields": [
+    "name",
+    "instructions"
+   ],
+   "unrelated_steps_unchanged": true,
+   "seeded_flow_lifecycle": {
+    "flow_id": "a90fcb0b-d20a-46ca-aa17-e9a82112b86f",
+    "status": "deleted"
+   },
+   "session_id": "0c127fb5-40d0-463e-806c-f129469cac7f",
+   "plan_id": "798a8d0a-9106-4c2b-a2b6-a7e15482ba85",
+   "bundle": "ai-builder-api-battle-test-20260915T073509-edit_chain_30_instruction.json"
+  },
+  {
+   "lane": "candidate",
+   "source": "5d427fb81",
+   "model": "luna",
+   "case": "edit_chain_10_instruction",
+   "seeded_step_count": 10,
+   "outcome_class": "plan_first_pass",
+   "planner_request_count": 1,
+   "repair_attempts_total": 0,
+   "prompt_tokens_total": 10868,
+   "completion_tokens_total": 590,
+   "token_usage_estimated": false,
+   "target_change_kind": "modified",
+   "target_changed_fields": [
+    "name",
+    "instructions"
+   ],
+   "unrelated_steps_unchanged": true,
+   "seeded_flow_lifecycle": {
+    "flow_id": "75791172-0d36-4d34-8c5d-56184f79861d",
+    "status": "deleted"
+   },
+   "session_id": "fe9940e7-6b69-4d50-9c96-29252ed9e754",
+   "plan_id": "3dad96bd-f1fa-437c-9d32-b28ac12fe6c4",
+   "bundle": "ai-builder-api-battle-test-20260915T073539-edit_chain_10_instruction.json"
+  },
+  {
+   "lane": "candidate",
+   "source": "5d427fb81",
+   "model": "luna",
+   "case": "edit_chain_30_instruction",
+   "seeded_step_count": 30,
+   "outcome_class": "plan_first_pass",
+   "planner_request_count": 1,
+   "repair_attempts_total": 0,
+   "prompt_tokens_total": 10840,
+   "completion_tokens_total": 587,
+   "token_usage_estimated": false,
+   "target_change_kind": "modified",
+   "target_changed_fields": [
+    "name",
+    "instructions"
+   ],
+   "unrelated_steps_unchanged": true,
+   "seeded_flow_lifecycle": {
+    "flow_id": "04c68e6f-abc8-4845-8cf5-c9fbf04cf1a7",
+    "status": "deleted"
+   },
+   "session_id": "3f5509eb-44ce-46fd-9103-c12ade5e5630",
+   "plan_id": "f58448e1-42d8-47ba-9146-1ca4995b9cf3",
+   "bundle": "ai-builder-api-battle-test-20260915T073646-edit_chain_30_instruction.json"
+  },
+  {
+   "lane": "candidate",
+   "source": "5d427fb81",
+   "model": "gemma",
+   "case": "edit_chain_10_instruction",
+   "seeded_step_count": 10,
+   "outcome_class": "plan_first_pass",
+   "planner_request_count": 1,
+   "repair_attempts_total": 0,
+   "prompt_tokens_total": 8370,
+   "completion_tokens_total": 915,
+   "token_usage_estimated": false,
+   "target_change_kind": "modified",
+   "target_changed_fields": [
+    "name",
+    "instructions"
+   ],
+   "unrelated_steps_unchanged": true,
+   "seeded_flow_lifecycle": {
+    "flow_id": "a4ebf849-33b3-471f-97e8-30b9436ffd5e",
+    "status": "deleted"
+   },
+   "session_id": "29bfc0fe-6c5e-48a6-92ec-27201cfeb83f",
+   "plan_id": "a15bbf3b-41d8-46e0-a0a3-73564d3a4a32",
+   "bundle": "ai-builder-api-battle-test-20260915T073717-edit_chain_10_instruction.json"
+  },
+  {
+   "lane": "candidate",
+   "source": "5d427fb81",
+   "model": "gemma",
+   "case": "edit_chain_30_instruction",
+   "seeded_step_count": 30,
+   "outcome_class": "plan_first_pass",
+   "planner_request_count": 1,
+   "repair_attempts_total": 0,
+   "prompt_tokens_total": 8370,
+   "completion_tokens_total": 812,
+   "token_usage_estimated": false,
+   "target_change_kind": "modified",
+   "target_changed_fields": [
+    "name",
+    "instructions"
+   ],
+   "unrelated_steps_unchanged": true,
+   "seeded_flow_lifecycle": {
+    "flow_id": "a75d850e-e937-45b5-a6b0-9986f2ee5118",
+    "status": "deleted"
+   },
+   "session_id": "d3ac8802-5f6e-495f-b187-7d8797644b0d",
+   "plan_id": "56260407-b208-40a6-a0ac-68c96ca29bce",
+   "bundle": "ai-builder-api-battle-test-20260915T073827-edit_chain_30_instruction.json"
+  },
+  {
+   "lane": "candidate",
+   "source": "5d427fb81",
+   "model": "gemma",
+   "case": "edit_chain_10_instruction",
+   "seeded_step_count": 10,
+   "outcome_class": "plan_first_pass",
+   "planner_request_count": 1,
+   "repair_attempts_total": 0,
+   "prompt_tokens_total": 8368,
+   "completion_tokens_total": 903,
+   "token_usage_estimated": false,
+   "target_change_kind": "modified",
+   "target_changed_fields": [
+    "name",
+    "instructions"
+   ],
+   "unrelated_steps_unchanged": true,
+   "seeded_flow_lifecycle": {
+    "flow_id": "d8b5ad67-2a73-42dc-8541-960368f57b13",
+    "status": "deleted"
+   },
+   "session_id": "625bb7a1-8ebf-4079-bd35-529628456a5a",
+   "plan_id": "511b3d86-4abf-459e-8ced-b980d6b18905",
+   "bundle": "ai-builder-api-battle-test-20260915T073901-edit_chain_10_instruction.json"
+  },
+  {
+   "lane": "candidate",
+   "source": "5d427fb81",
+   "model": "gemma",
+   "case": null,
+   "failure": "HTTP Error 404: Not Found",
+   "failure_class": "harness_configuration",
+   "bundle": "ai-builder-api-battle-test-20260915T073920-failure.json"
+  },
+  {
+   "lane": "candidate",
+   "source": "5d427fb81",
+   "model": "gemma",
+   "case": "edit_chain_10_instruction",
+   "seeded_step_count": 10,
+   "outcome_class": "plan_first_pass",
+   "planner_request_count": 1,
+   "repair_attempts_total": 0,
+   "prompt_tokens_total": 8372,
+   "completion_tokens_total": 896,
+   "token_usage_estimated": false,
+   "target_change_kind": "modified",
+   "target_changed_fields": [
+    "name",
+    "instructions"
+   ],
+   "unrelated_steps_unchanged": true,
+   "seeded_flow_lifecycle": {
+    "flow_id": "a08ceb04-b926-4ca8-a3e4-6cff6796dbba",
+    "status": "deleted"
+   },
+   "session_id": "50514ab0-c35b-4179-a66f-80957976ff8e",
+   "plan_id": "0bc3b8f7-2226-493f-bcaa-3e5a7248f6f6",
+   "bundle": "ai-builder-api-battle-test-20260915T073942-edit_chain_10_instruction.json"
+  },
+  {
+   "lane": "candidate",
+   "source": "5d427fb81",
+   "model": "gemma",
+   "case": "edit_chain_30_instruction",
+   "seeded_step_count": 30,
+   "outcome_class": "plan_first_pass",
+   "planner_request_count": 1,
+   "repair_attempts_total": 0,
+   "prompt_tokens_total": 8370,
+   "completion_tokens_total": 742,
+   "token_usage_estimated": false,
+   "target_change_kind": "modified",
+   "target_changed_fields": [
+    "name",
+    "instructions"
+   ],
+   "unrelated_steps_unchanged": true,
+   "seeded_flow_lifecycle": {
+    "flow_id": "5b7cf6db-094e-4739-8632-96a1a75e8467",
+    "status": "deleted"
+   },
+   "session_id": "a174c62b-1a70-406d-99ca-52833cba81ca",
+   "plan_id": "32734510-8579-46d9-8b29-ed84597300c3",
+   "bundle": "ai-builder-api-battle-test-20260915T074050-edit_chain_30_instruction.json"
+  }
+ ]
+}
