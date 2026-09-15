@@ -220,16 +220,12 @@ export function getFlowInputMaterialOptions(
 
 /** Card and chapter copy for what an underlag reads. */
 export function describeUnderlag(underlag: FlowStepUnderlag): string {
-  if (underlag.stepOrders.length === 0) {
-    return underlag.readsFlowInput
-      ? m.flow_step_card_source_underlag_flow_input()
-      : m.flow_step_card_source_underlag_fixed_text();
-  }
-  return m.flow_step_card_source_underlag({
-    steps: underlag.stepOrders
-      .map((order) => m.flow_input_template_effective_step({ step: order }))
-      .join(", ")
-  });
+  const parts = [
+    ...(underlag.readsFlowInput ? [m.flow_input_source_flow_input()] : []),
+    ...underlag.stepOrders.map((order) => m.flow_input_template_effective_step({ step: order }))
+  ];
+  if (parts.length === 0) return m.flow_step_card_source_underlag_fixed_text();
+  return m.flow_step_card_source_underlag({ steps: parts.join(", ") });
 }
 
 export type FlowStepUnderlag = {

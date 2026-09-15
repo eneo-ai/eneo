@@ -66,6 +66,7 @@ from eneo.flows.enums import (
     FlowOutputMode,
     FlowOutputType,
     FlowRunLifecycleSource,
+    flow_output_mode_uses_completion_model,
 )
 from eneo.flows.flow_api_error_code import (
     FLOW_RUN_TERMINAL_ERROR_CODES,
@@ -2378,7 +2379,11 @@ class FlowRunExecutor:
                 input_source=step.input_source,
                 step_order=step.step_order,
                 input_bindings=step.input_bindings,
-                prompt_template=assistant.get_prompt_text(),
+                prompt_template=(
+                    assistant.get_prompt_text()
+                    if flow_output_mode_uses_completion_model(step.output_mode)
+                    else None
+                ),
                 step_ref_mapping=state.step_ref_mapping,
                 max_prior_step_order=step.step_order - 1,
             ),

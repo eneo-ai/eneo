@@ -26,6 +26,7 @@ from eneo.flows.domain.flow_invariant_exceptions import (
     FlowPublishedDefinitionInvalidError,
 )
 from eneo.flows.domain.flow_step_validation import FlowStepValidationError
+from eneo.flows.enums import flow_output_mode_uses_completion_model
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_metadata import (
     normalize_flow_metadata_for_write,
@@ -574,7 +575,11 @@ class FlowService:
                     input_source=str(step.input_source),
                     step_order=step.step_order,
                     input_bindings=step.input_bindings,
-                    prompt_template=assistant.get_prompt_text(),
+                    prompt_template=(
+                        assistant.get_prompt_text()
+                        if flow_output_mode_uses_completion_model(step.output_mode)
+                        else None
+                    ),
                     step_ref_mapping=step_ref_mapping,
                     max_prior_step_order=step.step_order - 1,
                 ),
@@ -596,7 +601,9 @@ class FlowService:
         if self.space_service is None:
             return
 
-        if not update.changed_security_field_names():
+        # The prompt is an input channel (it interpolates prior outputs), so a
+        # prompt-only edit can change which classified outputs the model reads.
+        if not update.changed_security_field_names() and not update.is_set("prompt"):
             return
 
         if not any(step.assistant_id == assistant.id for step in flow.steps):

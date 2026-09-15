@@ -696,11 +696,15 @@ def build_step_result_citation_state(
     inherited_ids: list[str] = []
     for inherited in inherited_sources:
         inherited_id = inherited.get("id")
-        if not isinstance(inherited_id, str) or inherited_id in seen_ids:
+        if not isinstance(inherited_id, str) or inherited_id in inherited_ids:
             continue
-        seen_ids.add(inherited_id)
+        # Membership (the source counts as included for the next consumer) is
+        # independent of identity: a source retrieved again but left out of
+        # this step's prompt is still listed once and still included.
         inherited_ids.append(inherited_id)
-        citation_sources.append(dict(inherited))
+        if inherited_id not in seen_ids:
+            seen_ids.add(inherited_id)
+            citation_sources.append(dict(inherited))
     if inherited_ids:
         existing_context = citation_state.get("prompt_context")
         prompt_context: dict[str, Any] = (

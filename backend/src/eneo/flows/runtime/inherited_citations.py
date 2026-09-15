@@ -37,7 +37,10 @@ def inherited_cited_sources(
         inherited_context, Mapping
     ):
         return []
-    cited_ids = citation_sidecar.get("inherited_cited_source_ids")
+    # Any validated citation of a source the step inherited counts, whether
+    # the sidecar resolved it through the inherited catalog or through a
+    # repeated retrieval of the same source.
+    cited_ids = citation_sidecar.get("cited_source_ids")
     available = inherited_context.get("available_sources")
     if not isinstance(cited_ids, list) or not isinstance(available, list):
         return []

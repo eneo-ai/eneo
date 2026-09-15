@@ -4189,6 +4189,7 @@ def _security_step(
     assistant_id: UUID,
     input_source: str = "flow_input",
     input_bindings: dict[str, object] | None = None,
+    output_mode: str = "pass_through",
 ) -> RuntimeStep:
     return RuntimeStep(
         step_id=uuid4(),
@@ -4198,7 +4199,7 @@ def _security_step(
         input_source=input_source,
         input_bindings=input_bindings,
         input_config=None,
-        output_mode="pass_through",
+        output_mode=output_mode,
         output_config=None,
     )
 
@@ -4278,6 +4279,39 @@ async def test_runtime_preflight_reads_prompt_references_when_underlag_is_litera
         )
 
     assert exc_info.value.code == "flow_step_security_classification_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_runtime_preflight_ignores_prompts_of_deterministic_steps(user):
+    # compose_text emits the resolved input and never sends the assistant
+    # prompt to a model, so a prompt reference to a classified step is not
+    # content the model receives.
+    executor, _, _, _ = _build_executor(user)
+    strong = _security_assistant(uuid4(), model_level=3)
+    weak = _security_assistant(
+        uuid4(), model_level=1, prompt="Bakgrund: {{ step_1.output.text }}"
+    )
+    space = _security_space(
+        space_id=uuid4(), assistants=[strong, weak], security_level=1
+    )
+    executor.space_repo.get_space_by_assistant = AsyncMock(return_value=space)
+    first = replace(
+        _security_step(step_order=1, assistant_id=strong.id),
+        output_classification_override=3,
+    )
+    compose = _security_step(
+        step_order=2,
+        assistant_id=weak.id,
+        input_source="previous_step",
+        input_bindings={"question": "Fast text."},
+        output_mode="compose_text",
+    )
+
+    levels = await executor._resolve_step_output_levels(
+        steps=[first, compose], state=_empty_execution_state()
+    )
+
+    assert levels == {1: 3, 2: 1}
 
 
 @pytest.mark.asyncio

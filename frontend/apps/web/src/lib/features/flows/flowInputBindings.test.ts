@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { FlowStep } from "@eneo/eneo-js";
 import {
+  describeUnderlag,
   getFlowStepEffectiveInputSources,
   getFlowStepUnderlag,
   getFlowInputMaterialOptions,
@@ -54,6 +55,15 @@ describe("getFlowStepUnderlag", () => {
     expect(
       getFlowStepUnderlag(makeStep(2, { input_bindings: { question: "Skriv en hälsning." } }))
     ).toEqual({ stepOrders: [], readsFlowInput: false });
+  });
+});
+
+describe("describeUnderlag", () => {
+  it("names every source category the underlag reads", () => {
+    expect(describeUnderlag({ stepOrders: [2], readsFlowInput: true })).toBe(
+      "Underlag: Flödets indata, Steg 2"
+    );
+    expect(describeUnderlag({ stepOrders: [], readsFlowInput: false })).toBe("Underlag: fast text");
   });
 });
 

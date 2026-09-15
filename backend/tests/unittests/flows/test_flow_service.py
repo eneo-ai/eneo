@@ -2630,6 +2630,65 @@ async def test_update_flow_assistant_validates_explicit_security_field_set_to_no
 
 
 @pytest.mark.asyncio
+async def test_update_flow_assistant_prompt_only_edit_is_classified(user):
+    # The prompt interpolates prior outputs, so a prompt-only edit that starts
+    # reading a classified predecessor must be validated like a model change.
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    assistant_service = AsyncMock()
+    space_service = AsyncMock()
+    service = FlowService(
+        user=user,
+        flow_repo=flow_repo,
+        flow_version_repo=version_repo,
+        assistant_service=assistant_service,
+        space_service=space_service,
+    )
+
+    flow_id = uuid4()
+    first = _step(step_order=1).model_copy(update={"output_classification_override": 3})
+    second = _step(step_order=2).model_copy(
+        update={"input_source": "previous_step", "assistant_id": first.assistant_id}
+    )
+    flow = Flow(
+        id=flow_id,
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[first, second],
+    )
+    flow_repo.get.return_value = flow
+    assistant = _build_assistant(flow_id=flow_id, space_id=flow.space_id, user=user)
+    assistant.id = first.assistant_id
+    assistant.completion_model = SimpleNamespace(
+        security_classification=_classification(1),
+        can_access=True,
+    )
+    assistant_service.get_assistant.return_value = (assistant, [])
+    assistant_service.update_assistant.return_value = (assistant, [])
+    space_service.get_space.return_value = _FlowSecuritySpaceStub()
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.update_flow_assistant(
+            flow_id=flow_id,
+            assistant_id=assistant.id,
+            update=AssistantUpdateCommand(
+                prompt=PromptCreate(text="Bakgrund: {{ step_1.output.text }}")
+            ),
+        )
+
+    assert exc_info.value.code == "flow_step_security_classification_mismatch"
+
+
+@pytest.mark.asyncio
 async def test_update_flow_assistant_security_validation_accepts_model_clear(user):
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
