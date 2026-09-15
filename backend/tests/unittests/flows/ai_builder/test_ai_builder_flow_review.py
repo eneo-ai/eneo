@@ -1170,7 +1170,11 @@ def test_an_investigation_is_held_to_the_rule_the_judge_was_held_to():
     from eneo.flows.ai_builder.ai_builder_flow_review import (
         AIBuilderSuggestionContext,
         FlowReviewSuggestionFocus,
+        render_review_evidence,
         resolve_suggestion_evidence,
+    )
+    from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
+        ReviewSampleExcerpt,
     )
 
     packet = _packet(version=2, checksum="sum")
@@ -1199,14 +1203,56 @@ def test_an_investigation_is_held_to_the_rule_the_judge_was_held_to():
         packet, _context("missing_check", failed_a), runs=only_failed
     )
     assert [run.run_id for run in evidence.sample_runs] == [failed_a]
-    # A completed run outside the cohort still carries a structural claim.
+
+    def _excerpt(run_id: UUID, availability: str, text: str | None):
+        return ReviewSampleExcerpt(
+            run_id=run_id,
+            step_order=1,
+            field="output",
+            availability=availability,  # type: ignore[arg-type]
+            text=text,
+        )
+
+    # A completed run outside the cohort still carries a structural claim,
+    # when the investigation can read its text at a named step.
     evidence = resolve_suggestion_evidence(
         packet,
         _context("duplicated_work", failed_a, completed),
         runs=[*only_failed, _run(completed, 2)],
+        excerpts=[_excerpt(completed, "included", "samma tre punkter")],
     )
     assert evidence.evidence_classification_level == 2
     assert evidence.admission == []
+    # Adding a completed run admits nothing by itself: when the reader omitted
+    # its text and only the failed run is readable, the failed-run material
+    # would be the whole support of a removal claim. The judge's parser would
+    # reject that citation; the investigation withholds the focus the same
+    # way, while a diagnosis of the failure still reads both runs and the
+    # planner is told which run is which.
+    mixed = [_run(failed_a, 1, "failed"), _run(completed, 2)]
+    mixed_excerpts = [
+        _excerpt(completed, "omitted_by_reader", None),
+        _excerpt(failed_a, "included", "Fel: fältet saknas"),
+    ]
+    with pytest.raises(AIBuilderBadRequestException) as unsupported:
+        resolve_suggestion_evidence(
+            packet,
+            _context("duplicated_work", failed_a, completed),
+            runs=mixed,
+            excerpts=mixed_excerpts,
+        )
+    assert unsupported.value.code == AIBuilderErrorCode.REVIEW_FINDING_UNKNOWN
+    assert unsupported.value.context == {"suggestion_kinds": ["duplicated_work"]}
+    diagnosis = resolve_suggestion_evidence(
+        packet,
+        _context("missing_check", failed_a, completed),
+        runs=mixed,
+        excerpts=mixed_excerpts,
+    )
+    rendered = render_review_evidence(diagnosis)
+    assert "- Körning 1 (misslyckad)." in rendered
+    assert "- Körning 2 (lyckad)." in rendered
+    assert "bara utdrag från lyckade körningar visa" in rendered
     # A run that has not finished is refused whatever the kind.
     with pytest.raises(AIBuilderBadRequestException) as unfinished:
         resolve_suggestion_evidence(
@@ -1284,9 +1330,9 @@ def test_what_a_sampled_run_had_withheld_reaches_the_investigating_model():
         "körningar med kvitto för alla steg)." in rendered
     )
     assert "- Tokenandelar utelämnade för 1 lyckade körningar" in rendered
-    assert "- Körning 1:" not in rendered
+    assert "- Körning 1 (lyckad)." in rendered
     assert (
-        "- Körning 2: tokenandel utelämnad, minst ett steg saknar kvitto "
+        "- Körning 2 (lyckad): tokenandel utelämnad, minst ett steg saknar kvitto "
         "från leverantören." in rendered
     )
 
