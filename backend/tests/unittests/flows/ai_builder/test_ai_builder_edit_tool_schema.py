@@ -614,6 +614,12 @@ def test_saved_step_schema_and_call_cost_are_flat_not_the_whole_request(strict):
             if step.existing_step_ref != "existing_step_4"
         )
         assert "kind=keep" not in json.dumps(schema)
+        # One target is permitted, so the array holds exactly one entry. The
+        # bound is one value regardless of flow size, so it does not scale.
+        # Cardinality only: an identity-only entry still validates here.
+        steps_schema = params["properties"]["steps"]
+        assert steps_schema["minItems"] == 1
+        assert steps_schema["maxItems"] == 1
         if strict:
             schema = build_native_strict_tool_schema(schema)
         arguments = {
@@ -632,6 +638,15 @@ def test_saved_step_schema_and_call_cost_are_flat_not_the_whole_request(strict):
             ],
         }
         jsonschema.validate(arguments, schema["function"]["parameters"])
+        # An empty submission and a duplicated target are refused on
+        # cardinality. A no-op modification is not a cardinality question and
+        # is still the scoped validator's to refuse.
+        for invalid_steps in ([], [arguments["steps"][0], arguments["steps"][0]]):
+            with pytest.raises(jsonschema.ValidationError):
+                jsonschema.validate(
+                    {**arguments, "steps": invalid_steps},
+                    schema["function"]["parameters"],
+                )
         for invalid_ref in ("existing_step_5", "existing_step_99", "step_4"):
             invalid_arguments = {
                 **arguments,

@@ -121,6 +121,10 @@ def build_edit_flow_tool_schema(
             },
         }
     elif saved_step_edit:
+        # Cardinality only: at least one entry, and never more than there are
+        # permitted steps. This says nothing about whether an entry changes
+        # anything - an identity-only modification still validates here, and
+        # the scoped edit validator remains the one owner of that refusal.
         properties["steps"] = {
             "type": "array",
             "description": (
@@ -129,6 +133,8 @@ def build_edit_flow_tool_schema(
                 "unchanged steps; the server preserves their identity and order."
             ),
             "items": modify_step_schema,
+            "minItems": 1,
+            "maxItems": len(modifiable_refs),
         }
     else:
         step_branches: list[dict[str, Any]] = [
