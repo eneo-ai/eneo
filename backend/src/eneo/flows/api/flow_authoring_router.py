@@ -45,8 +45,7 @@ router = APIRouter()
 # Mutations commit before the response is sent. With the default request scope
 # the transaction closes after the body has gone out, so a client that creates
 # a flow and immediately addresses it (the editor, the AI Builder harness) can
-# be told the flow does not exist: 3 of 42 seedings on 2026-09-15 failed with
-# 404/403 within 20 ms of a 201.
+# be told the flow does not exist.
 _MUTATING_CONTAINER = get_container(with_user=True, transaction_scope="function")
 
 _FLOW_AUTHORING_FORBIDDEN_DESCRIPTION = (

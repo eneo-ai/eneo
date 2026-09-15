@@ -68,15 +68,42 @@ reference case changes only the name, to exactly the requested value, on both mo
 reference case also answers the blocker on the earlier deletion candidate: with the name index the
 model resolves "steg 1" from the projection.
 
+## Did the instruction edits do what was asked?
+
+The message asks the step to always list the missing information in the application as a bullet
+list. Adjudicated from `target_field_changes` (previous and current instruction text) in every
+instruction-edit bundle, candidate and parent, by the presence of "punktlista" together with
+"saknas"/"saknade" in the new text and their absence in the old text:
+
+| Lane | Model | n | Requested behaviour present in the new instructions | Present in the old |
+| --- | --- | ---: | ---: | ---: |
+| candidate | luna | 6 | 6 | 0 |
+| candidate | gemma | 6 | 6 | 0 |
+| parent | luna | 6 | 6 | 0 |
+| parent | gemma | 6 | 6 | 0 |
+
+Examples of the added sentence (gemma, candidate): "Under rubriken 'Saknade uppgifter och
+kompletteringar' ska du alltid lista vilka uppgifter som saknas i ansökan i form av en punktlista."
+Luna folds the same requirement into a rewritten paragraph under that heading. In all 24 plans the
+model rewrote the instruction paragraph rather than appending a sentence, keeping the original
+headings and requirements; on the parent the boilerplate prefix is added on top. Per-plan text is
+in `observations.json` (`target_field_changes`).
+
 ## Acquisition failures
 
 Ten candidate invocations failed before the turn and were re-run (all re-runs succeeded, n = 3
-everywhere). The root cause is one event: at 08:20:40 a seeding `POST .../assistants/` was refused
-with 403 `insufficient_scope` 18 ms after the flow's 201, the cleanup `DELETE` was refused the same
-way, and the orphaned 10-step flow then made every later 10-step seeding fail on the flow-name
-uniqueness constraint (500) until it was deleted by hand. Together with round 1's two 404s on
-`PATCH .../assistants/{id}/` right after a 201, this is a read-after-write race: the flow authoring
-routes committed their transaction after the response was sent (FastAPI request-scoped yield
-dependency), so a client's immediate follow-up request could miss the row. Fixed on this branch by
-committing before the response (function-scoped container) on the mutating flow and flow-assistant
-routes; the harness itself does not retry.
+everywhere). Two distinct events, both the same defect, account for all ten:
+
+- 08:20:40, one 403: a seeding `POST .../assistants/` was refused with `insufficient_scope` 18 ms
+  after the flow's 201, the cleanup `DELETE` was refused the same way, and the orphaned 10-step
+  flow then made the next eight 10-step seedings (instruction and reference cases, both models)
+  fail on the flow-name uniqueness constraint (500) until it was deleted by hand at 08:27.
+- 08:23:06, one 404: a seeding `PATCH .../assistants/{id}/` on the 30-step fixture (gemma,
+  repetition 2) was refused right after the assistant's 201, the same shape as round 1's two 404s.
+
+Both are the read-after-write race: the flow authoring routes committed their transaction after the
+response was sent (FastAPI request-scoped yield dependency), so a client's immediate follow-up
+request could miss the row. Fixed on this branch by committing before the response (function-scoped
+container) on the mutating flow and flow-assistant routes; the harness itself does not retry. The
+parent stack, which serves the tidy tip without the fix, had no failure in 18 seedings this round;
+the race is timing-dependent (5 occurrences in 78 seedings across both rounds and stacks).
