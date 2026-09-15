@@ -802,8 +802,17 @@ class SessionModelsResponse(BaseModel):
         json_schema_extra={"example": AI_BUILDER_SESSION_MODELS_RESPONSE_EXAMPLE}
     )
 
-    models: list[SessionModelOption]
-    default_model_id: UUID | None = None
+    models: list[SessionModelOption] = Field(
+        description=(
+            "The models a turn of this session may run on: accessible, with an "
+            "active provider, and clearing the evidence floor the listing was "
+            "asked at."
+        )
+    )
+    default_model_id: UUID | None = Field(
+        default=None,
+        description="The model an omitted `model_id` resolves to at that floor.",
+    )
 
 
 class PlanResponse(BaseModel):

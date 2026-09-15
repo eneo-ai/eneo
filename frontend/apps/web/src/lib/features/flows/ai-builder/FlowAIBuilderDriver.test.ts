@@ -761,6 +761,44 @@ describe("FlowAIBuilderDriver", () => {
     expect(driver.state.currentPlan?.plan_id).toBe("plan-9");
   });
 
+  it("lists the models a review packet's evidence level allows and drops a choice below it", async () => {
+    // The listing at the packet's level is the one the judgement is held to;
+    // a model chosen before the floor rose would be refused on send.
+    const lowModel = makeModel({ id: "model-low", name: "Low" });
+    const highModel = makeModel({ id: "model-high", name: "High" });
+    const modelRequests: unknown[] = [];
+    const fetch = vi.fn(async (path: string, init?: { params?: { query?: unknown } }) => {
+      if (path.endsWith("/models")) {
+        modelRequests.push(init?.params?.query);
+        return init?.params?.query
+          ? { models: [highModel], default_model_id: "model-high" }
+          : { models: [lowModel, highModel], default_model_id: "model-low" };
+      }
+      if (path.endsWith("/review-packet")) {
+        return { evidence_classification_level: 2 };
+      }
+      if (path === "/api/v1/flows/ai-builder/sessions") return { sessions: [] };
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    driver.seedState({
+      session: makeSession(),
+      availableModels: [lowModel, highModel],
+      defaultModelId: "model-low",
+      modelLoadStatus: "loaded"
+    });
+    driver.selectModel("model-low");
+    expect(driver.effectiveModel?.id).toBe("model-low");
+
+    await driver.fetchFlowReviewPacket();
+    await vi.waitFor(() => expect(driver.state.modelLoadStatus).toBe("loaded"));
+    await vi.waitFor(() => expect(driver.state.availableModels).toEqual([highModel]));
+
+    expect(modelRequests).toEqual([{ evidence_level: 2 }]);
+    expect(driver.state.selectedModelId).toBeNull();
+    expect(driver.effectiveModel?.id).toBe("model-high");
+  });
+
   it("loads draft sessions and keeps them in state", async () => {
     const fetch = vi.fn().mockResolvedValueOnce({ sessions: [makeDraft()] });
     const { driver } = makeDriver({ fetchImpl: fetch });

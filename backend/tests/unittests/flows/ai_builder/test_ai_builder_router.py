@@ -1759,6 +1759,70 @@ class TestGetSessionModelsEndpoint:
         service.completion_service.resolve_model_route.assert_not_awaited()
 
     @pytest.mark.anyio
+    async def test_lists_only_models_that_clear_the_evidence_floor(self):
+        """A conversation that has read run evidence of level 2 runs its next
+        turn on a level-2 model whatever the space default is. The listing
+        follows the same rule, or the composer shows the organisation default
+        and the turn silently runs another model. A caller about to read a
+        packet raises the floor the same way; it can never lower it."""
+        container = _make_container()
+        session = _make_session_domain(actor_user_id=container.user.return_value.id)
+        container.ai_builder_service.return_value.get_session.return_value = session
+
+        def _model(name: str, *, level: int, org_default: bool) -> MagicMock:
+            model = MagicMock()
+            model.id = uuid4()
+            model.name = name
+            model.nickname = None
+            model.provider_type = "openai"
+            model.reasoning = False
+            model.model_kwargs_capabilities = None
+            model.get_model_route.return_value = f"openai/{name}"
+            model.supported_model_kwargs = SupportedModelKwargs()
+            model.security_classification = SimpleNamespace(security_level=level)
+            model.is_org_default = org_default
+            model.created_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+            return model
+
+        luna = _model("luna", level=1, org_default=True)
+        gemma = _model("gemma", level=2, org_default=False)
+        provider_id = uuid4()
+        luna.provider_id = gemma.provider_id = provider_id
+        container.model_provider_repository.return_value.all.return_value = [
+            SimpleNamespace(id=provider_id)
+        ]
+        space = container.space_service.return_value.get_space.return_value
+        space.completion_models = [luna, gemma]
+        _use_real_default_policy(space)
+
+        async def _listing(*, evidence_level: int = 0) -> SessionModelsResponse:
+            return await get_session_models(
+                request=MagicMock(),
+                session_id=session.id,
+                container=container,
+                evidence_level=evidence_level,
+            )
+
+        before = await _listing()
+        assert [m.id for m in before.models] == [luna.id, gemma.id]
+        assert before.default_model_id == luna.id
+
+        about_to_read = await _listing(evidence_level=2)
+        assert [m.id for m in about_to_read.models] == [gemma.id]
+        assert about_to_read.default_model_id == gemma.id
+
+        session.conversation = [
+            ConversationMessage(
+                role="user", content="Undersök", metadata={"evidence_floor": 2}
+            )
+        ]
+        after = await _listing()
+        assert [m.id for m in after.models] == [gemma.id]
+        assert after.default_model_id == gemma.id
+        # The caller's level only ever raises the floor.
+        assert (await _listing(evidence_level=1)).default_model_id == gemma.id
+
+    @pytest.mark.anyio
     async def test_omits_reasoning_choices_without_select_capability(self):
         container = _make_container()
         session = _make_session_domain(actor_user_id=container.user.return_value.id)

@@ -784,10 +784,14 @@ export class FlowAIBuilderDriver {
     if (!this.#flowId) {
       throw new Error("A flow review needs an edit session's flow.");
     }
-    return (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.flowReviewPacket, {
+    const packet = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.flowReviewPacket, {
       method: "get",
       params: { path: { flow_id: this.#flowId }, query: { space_id: this.#spaceId } }
     })) as AIBuilderFlowReviewPacket;
+    // Every judgement and turn over this packet is held to its evidence level.
+    const owner = this.#currentSessionOwner();
+    if (owner) void this.#fetchModels(owner, packet.evidence_classification_level);
+    return packet;
   }
 
   /** One bounded model judgement over the flow's recent runs. Nothing is
@@ -1119,6 +1123,16 @@ export class FlowAIBuilderDriver {
           !receivedDurableStreamEvent);
       if (shouldRefreshAfterStream && !abortController.signal.aborted) {
         await this.#refreshSession(owner, { attemptedClientTurnId: requestBody.client_turn_id });
+      }
+      // A turn that read run evidence raised the conversation's floor on the
+      // server; the composer's list follows it.
+      if (
+        requestBody.review_context &&
+        receivedDone &&
+        !receivedStreamError &&
+        ownsCurrentStream()
+      ) {
+        void this.#fetchModels(owner);
       }
       if (receivedDone && !receivedStreamError) {
         settledStreamState = "idle";
@@ -1704,17 +1718,33 @@ export class FlowAIBuilderDriver {
 
   // Model names are display data for the plan; the read belongs to the
   // session, not to any message stream, so a send in flight cannot discard it.
-  async #fetchModels(owner: SessionOperationOwner): Promise<void> {
+  // `evidenceLevel` is the level of run evidence the next call will read (a
+  // review packet's); the server lists at the higher of it and what the
+  // conversation has already read, so the composer shows the model the turn
+  // will actually run on.
+  async #fetchModels(owner: SessionOperationOwner, evidenceLevel = 0): Promise<void> {
     if (!this.#state.session) return;
     if (!this.#ownsSessionIdentity(owner)) return;
 
     try {
       const result = (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.sessionModels, {
         method: "get",
-        params: { path: { session_id: this.#state.session.session_id } }
+        params: {
+          path: { session_id: this.#state.session.session_id },
+          query: evidenceLevel > 0 ? { evidence_level: evidenceLevel } : undefined
+        }
       })) as AIBuilderModelsResponse;
       if (!this.#ownsSessionIdentity(owner)) return;
       this.#state.availableModels = result.models;
+      // A choice the floor no longer lists would be refused on send; the
+      // composer falls back to the default the server now advertises.
+      if (
+        this.#state.selectedModelId !== null &&
+        !result.models.some((model) => model.id === this.#state.selectedModelId)
+      ) {
+        this.#state.selectedModelId = null;
+        this.#state.selectedReasoningEffort = null;
+      }
       this.#state.defaultModelId = result.models.some(
         (model) => model.id === result.default_model_id
       )

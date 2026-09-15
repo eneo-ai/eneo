@@ -4304,7 +4304,7 @@ export interface paths {
     };
     /**
      * List Session Models
-     * @description Return the completion models available to the AI Builder in the session's space.
+     * @description Return the completion models a turn of this session may run on: the space's models with an active provider that clear the conversation's evidence floor, and the one an omitted `model_id` resolves to. Pass `evidence_level` with a review packet's level before reading it, so the listing is the one that judgement is held to.
      */
     get: operations["get_ai_builder_models"];
     put?: never;
@@ -30645,9 +30645,15 @@ export interface components {
      *     }
      */
     SessionModelsResponse: {
-      /** Default Model Id */
+      /**
+       * Default Model Id
+       * @description The model an omitted `model_id` resolves to at that floor.
+       */
       default_model_id?: string | null;
-      /** Models */
+      /**
+       * Models
+       * @description The models a turn of this session may run on: accessible, with an active provider, and clearing the evidence floor the listing was asked at.
+       */
       models: components["schemas"]["SessionModelOption"][];
     };
     /**
@@ -51531,7 +51537,10 @@ export interface operations {
   };
   get_ai_builder_models: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Evidence level the caller is about to read (a review packet's); raises the listing's floor, never lowers it. */
+        evidence_level?: number;
+      };
       header?: never;
       path: {
         /** @description Identifier of the AI Builder session whose planner models should be listed. */

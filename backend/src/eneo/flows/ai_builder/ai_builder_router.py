@@ -60,6 +60,7 @@ from eneo.flows.ai_builder.ai_builder_context import (
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     conversation_acts_on_a_review,
+    conversation_evidence_floor,
     named_content_fields_edit_from_metadata,
     question_answer_from_metadata,
     requirements_confirmation_from_metadata,
@@ -1810,7 +1811,13 @@ async def detach_session_attachment(
     response_model=SessionModelsResponse,
     operation_id="get_ai_builder_models",
     summary="List Session Models",
-    description="Return the completion models available to the AI Builder in the session's space.",
+    description=(
+        "Return the completion models a turn of this session may run on: the "
+        "space's models with an active provider that clear the conversation's "
+        "evidence floor, and the one an omitted `model_id` resolves to. Pass "
+        "`evidence_level` with a review packet's level before reading it, so "
+        "the listing is the one that judgement is held to."
+    ),
     responses={
         200: {"description": "Available completion models and default planner model."},
         403: _ai_builder_error_response(
@@ -1835,8 +1842,18 @@ async def get_session_models(
         ),
     ],
     container: ContainerWithUserDep,
+    evidence_level: Annotated[
+        int,
+        Query(
+            ge=0,
+            description=(
+                "Evidence level the caller is about to read (a review packet's); "
+                "raises the listing's floor, never lowers it."
+            ),
+        ),
+    ] = 0,
 ):
-    """Return the completion models available in the session's space."""
+    """Return the completion models a turn of this session may run on."""
     service = _get_ai_builder_service(container)
     session: BuilderSession = await service.get_session(session_id)
     authorization = await _authorize_ai_builder_request(
@@ -1850,9 +1867,15 @@ async def get_session_models(
     space = _authorized_space(authorization)
     # Eligibility is computed once and the default chosen from it, by the same
     # rule the send path applies, so the advertised default is the model an
-    # omitted `model_id` resolves to when nothing has changed in between.
+    # omitted `model_id` resolves to when nothing has changed in between. That
+    # rule includes the evidence floor: what the conversation has already read
+    # and what the caller is about to read. Without it the composer shows one
+    # model and the turn silently runs another.
+    floor = max(conversation_evidence_floor(session.conversation), evidence_level)
     models = eligible_planner_models(
-        space, active_provider_ids=await _active_provider_ids(container)
+        space,
+        active_provider_ids=await _active_provider_ids(container),
+        minimum_level=floor,
     )
     default_model = space.select_default_completion_model(models)
     default_model_id = default_model.id if default_model is not None else None
