@@ -2630,9 +2630,12 @@ async def test_update_flow_assistant_validates_explicit_security_field_set_to_no
 
 
 @pytest.mark.asyncio
-async def test_update_flow_assistant_prompt_only_edit_is_classified(user):
-    # The prompt interpolates prior outputs, so a prompt-only edit that starts
-    # reading a classified predecessor must be validated like a model change.
+async def test_update_flow_assistant_prompt_edit_is_classified_like_the_writer(user):
+    # A valid chain: step 1 (assistant A, classified output 3) feeds step 2
+    # (assistant B, level-1 model) through literal underlag only. A prompt
+    # edit on B that starts reading step 1 must be rejected before the writer
+    # runs; an unrelated prompt edit passes; and a null prompt keeps the stored
+    # prompt exactly as Assistant.update does.
     flow_repo = AsyncMock()
     version_repo = AsyncMock()
     assistant_service = AsyncMock()
@@ -2644,16 +2647,36 @@ async def test_update_flow_assistant_prompt_only_edit_is_classified(user):
         assistant_service=assistant_service,
         space_service=space_service,
     )
-
     flow_id = uuid4()
-    first = _step(step_order=1).model_copy(update={"output_classification_override": 3})
-    second = _step(step_order=2).model_copy(
-        update={"input_source": "previous_step", "assistant_id": first.assistant_id}
+    space_id = uuid4()
+    strong = _build_assistant(flow_id=flow_id, space_id=space_id, user=user)
+    strong.completion_model = SimpleNamespace(
+        security_classification=_classification(3), can_access=True
     )
-    flow = Flow(
+    weak = _build_assistant(flow_id=flow_id, space_id=space_id, user=user)
+    weak.completion_model = SimpleNamespace(
+        security_classification=_classification(1), can_access=True
+    )
+    assistants = {strong.id: strong, weak.id: weak}
+    assistant_service.get_assistant.side_effect = lambda assistant_id: (
+        assistants[assistant_id],
+        [],
+    )
+    assistant_service.update_assistant.return_value = (weak, [])
+    first = _step(step_order=1).model_copy(
+        update={"assistant_id": strong.id, "output_classification_override": 3}
+    )
+    second = _step(step_order=2).model_copy(
+        update={
+            "assistant_id": weak.id,
+            "input_source": "previous_step",
+            "input_bindings": {"question": "Fast text."},
+        }
+    )
+    flow_repo.get.return_value = Flow(
         id=flow_id,
         tenant_id=user.tenant_id,
-        space_id=uuid4(),
+        space_id=space_id,
         name="Flow",
         description=None,
         created_by_user_id=user.id,
@@ -2665,27 +2688,48 @@ async def test_update_flow_assistant_prompt_only_edit_is_classified(user):
         updated_at=datetime.now(timezone.utc),
         steps=[first, second],
     )
-    flow_repo.get.return_value = flow
-    assistant = _build_assistant(flow_id=flow_id, space_id=flow.space_id, user=user)
-    assistant.id = first.assistant_id
-    assistant.completion_model = SimpleNamespace(
-        security_classification=_classification(1),
-        can_access=True,
+    low_model = SimpleNamespace(
+        id=uuid4(), security_classification=_classification(1), can_access=True
     )
-    assistant_service.get_assistant.return_value = (assistant, [])
-    assistant_service.update_assistant.return_value = (assistant, [])
-    space_service.get_space.return_value = _FlowSecuritySpaceStub()
+    space_service.get_space.return_value = _FlowSecuritySpaceStub(
+        completion_models=[low_model]
+    )
+
+    await service.update_flow_assistant(
+        flow_id=flow_id,
+        assistant_id=weak.id,
+        update=AssistantUpdateCommand(prompt=PromptCreate(text="Skriv kort.")),
+    )
+    assert assistant_service.update_assistant.await_count == 1
 
     with pytest.raises(BadRequestException) as exc_info:
         await service.update_flow_assistant(
             flow_id=flow_id,
-            assistant_id=assistant.id,
+            assistant_id=weak.id,
             update=AssistantUpdateCommand(
                 prompt=PromptCreate(text="Bakgrund: {{ step_1.output.text }}")
             ),
         )
-
     assert exc_info.value.code == "flow_step_security_classification_mismatch"
+    assert assistant_service.update_assistant.await_count == 1
+
+    # Stored prompt on B reads step 1; B's model is raised to 3 so the flow is
+    # valid. A downgrade to the level-1 model with prompt=None must still see
+    # the stored prompt.
+    weak.completion_model = SimpleNamespace(
+        security_classification=_classification(3), can_access=True
+    )
+    weak.prompt = SimpleNamespace(text="Bakgrund: {{ step_1.output.text }}")
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.update_flow_assistant(
+            flow_id=flow_id,
+            assistant_id=weak.id,
+            update=AssistantUpdateCommand(
+                completion_model_id=low_model.id, prompt=None
+            ),
+        )
+    assert exc_info.value.code == "flow_step_security_classification_mismatch"
+    assert assistant_service.update_assistant.await_count == 1
 
 
 @pytest.mark.asyncio

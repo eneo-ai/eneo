@@ -665,9 +665,13 @@ class FlowService:
                 for integration_knowledge_id in update.integration_knowledge_ids
             ]
 
-        prompt_text = assistant.get_prompt_text()
-        if update.is_set("prompt"):
-            prompt_text = update.prompt.text if update.prompt is not None else ""
+        # Mirror Assistant.update: a null prompt keeps the stored prompt; an
+        # explicit PromptCreate (even empty text) replaces it.
+        prompt_text = (
+            update.prompt.text
+            if update.is_set("prompt") and update.prompt is not None
+            else assistant.get_prompt_text()
+        )
 
         return SimpleNamespace(
             completion_model=completion_model,
