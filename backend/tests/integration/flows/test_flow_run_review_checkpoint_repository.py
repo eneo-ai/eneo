@@ -73,6 +73,9 @@ from eneo.flows.infrastructure.flow_transcript_corrections_repo import (
 )
 from eneo.flows.principal import FlowPrincipal
 from eneo.flows.runtime import tasks as flow_runtime_tasks
+from tests.integration.flows.test_flow_run_listing_and_evidence_measurement import (
+    _capture_queries,
+)
 
 
 @pytest.mark.parametrize("folded", [False, True])
@@ -2948,6 +2951,79 @@ async def test_reject_review_checkpoint_does_not_add_cancelled_checkpoint_outbox
         "flow_run_review_checkpoint_rejected",
     ]
     assert terminal_outbox_source == FlowRunLifecycleSource.REVIEW_REJECTED.value
+
+
+async def test_checkpoint_edit_page_limits_loaded_payload_bytes(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_review_checkpoint_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        run_repo = FlowRunRepository(session=session)
+        repo = _review_checkpoint_repo(session=session, run_repo=run_repo)
+        principal = FlowPrincipal.from_user(admin_user)
+        await run_repo.mark_running_if_claimable(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+            expected_revision=scenario.run.revision,
+        )
+        await _complete_reviewed_step_result(session=session, scenario=scenario)
+        opened = await repo.open_review_checkpoint_for_completed_step(
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            step_id=scenario.step_ids[0],
+            step_order=1,
+            attempt_no=1,
+            requester_principal=principal,
+            next_step_ids=(scenario.step_ids[1],),
+            review_mode=FlowStepReviewMode.EDIT,
+            output_type=FlowOutputType.JSON,
+        )
+        for revision, text in enumerate(("small", "é" * 256, "last"), start=1):
+            await repo.edit_review_checkpoint_payload(
+                checkpoint_id=opened.checkpoint.id,
+                tenant_id=scenario.tenant_id,
+                flow_id=scenario.flow_id,
+                flow_run_id=scenario.flow_run_id,
+                expected_revision=revision,
+                current_payload_json={"text": text},
+                principal=principal,
+            )
+        bind = session.sync_session.bind
+        assert bind is not None
+        for after, limit, budget, expected, more in (
+            (None, 200, 32, [2], True),
+            (None, 200, 530, [2], True),
+            (None, 200, 541, [2, 3], True),
+            (None, 200, -1, [2], True),
+            (None, 1, 10_000, [2], True),
+            (None, 200, 10_000, [2, 3, 4], False),
+            (2, 200, 32, [3], True),
+            (3, 200, 32, [4], False),
+            (4, 200, 32, [], False),
+        ):
+            with _capture_queries(bind) as queries:
+                rows, has_more = await repo.list_review_checkpoint_edits(
+                    checkpoint_id=opened.checkpoint.id,
+                    tenant_id=scenario.tenant_id,
+                    after_revision=after,
+                    limit=limit,
+                    logical_byte_budget=budget,
+                )
+            assert [row.revision for row in rows] == expected
+            assert has_more is more
+            assert len(queries) == 1
 
 
 @pytest.mark.parametrize("folded", [False, True])

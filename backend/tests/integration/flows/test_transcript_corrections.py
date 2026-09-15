@@ -25,6 +25,9 @@ from eneo.flows.infrastructure.flow_transcript_corrections_repo import (
     FlowTranscriptCorrectionsRepository,
 )
 from eneo.flows.principal import FlowPrincipal
+from tests.integration.flows.test_flow_run_listing_and_evidence_measurement import (
+    _capture_queries,
+)
 from tests.integration.flows.test_flow_run_review_checkpoint_repository import (
     _create_service_principal_id,
 )
@@ -409,6 +412,66 @@ async def test_saves_and_revert_preserve_correction_revisions(
         )
         assert measurement.row_count == 2
         assert measurement.logical_json_bytes > 0
+
+
+async def test_correction_revision_page_limits_loaded_payload_bytes(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        repo = FlowTranscriptCorrectionsRepository(session=session)
+        saved = None
+        for occurrences, speakers in (
+            ([{"corrected": "small"}], []),
+            ([], [{"speaker": "é" * 256}]),
+            ([], []),
+        ):
+            saved = await repo.save(
+                tenant_id=scenario.tenant_id,
+                flow_id=scenario.flow_id,
+                run_id=scenario.flow_run_id,
+                step_id=scenario.transcription_step_id,
+                occurrences_json=occurrences,
+                speaker_edits_json=speakers,
+                segments_hash="a" * 64,
+                expected_revision=saved.revision if saved else None,
+                principal=FlowPrincipal.from_user(admin_user),
+            )
+        bind = session.sync_session.bind
+        assert bind is not None
+        for after, limit, budget, expected, more in (
+            (None, 200, 32, [1], True),
+            (None, 200, 540, [1], True),
+            (None, 200, -1, [1], True),
+            (None, 1, 10_000, [1], True),
+            (None, 200, 10_000, [1, 2, 3], False),
+            (1, 200, 32, [2], True),
+            (2, 200, 32, [3], False),
+            (3, 200, 32, [], False),
+        ):
+            with _capture_queries(bind) as queries:
+                rows, has_more = await repo.list_revisions(
+                    run_id=scenario.flow_run_id,
+                    step_id=scenario.transcription_step_id,
+                    tenant_id=scenario.tenant_id,
+                    after_revision=after,
+                    limit=limit,
+                    logical_byte_budget=budget,
+                )
+            assert [row.revision for row in rows] == expected
+            assert has_more is more
+            assert len(queries) == 1
 
 
 async def test_revision_compare_and_swap(

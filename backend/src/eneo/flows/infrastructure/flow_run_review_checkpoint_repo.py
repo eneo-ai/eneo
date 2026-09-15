@@ -294,9 +294,16 @@ class FlowRunReviewCheckpointRepository:
         tenant_id: UUID,
         after_revision: int | None,
         limit: int,
+        logical_byte_budget: int,
     ) -> tuple[list[FlowRunReviewCheckpointEdit], bool]:
-        rows = await self._read_edits(
-            self._edit_select()
+        candidates = (
+            sa.select(
+                FlowRunReviewCheckpointEdits.id,
+                FlowRunReviewCheckpointEdits.revision,
+                sa.func.octet_length(
+                    sa.cast(FlowRunReviewCheckpointEdits.payload_json, sa.Text)
+                ).label("logical"),
+            )
             .where(
                 FlowRunReviewCheckpointEdits.checkpoint_id == checkpoint_id,
                 FlowRunReviewCheckpointEdits.tenant_id == tenant_id,
@@ -304,8 +311,41 @@ class FlowRunReviewCheckpointRepository:
             )
             .order_by(FlowRunReviewCheckpointEdits.revision)
             .limit(limit + 1)
+            .subquery()
         )
-        return rows[:limit], len(rows) > limit
+        ranked = sa.select(
+            candidates.c.id,
+            sa.func.sum(candidates.c.logical)
+            .over(order_by=candidates.c.revision)
+            .label("cumulative"),
+            sa.func.row_number().over(order_by=candidates.c.revision).label("position"),
+            sa.func.count().over().label("candidate_count"),
+        ).subquery()
+        rows = (
+            await self.session.execute(
+                self._edit_select()
+                .add_columns(ranked.c.candidate_count)
+                .join(ranked, ranked.c.id == FlowRunReviewCheckpointEdits.id)
+                .where(
+                    ranked.c.position <= limit,
+                    sa.or_(
+                        ranked.c.position == 1,
+                        ranked.c.cumulative <= logical_byte_budget,
+                    ),
+                )
+                .order_by(FlowRunReviewCheckpointEdits.revision)
+            )
+        ).all()
+        edits = [
+            FlowRunReviewCheckpointEdit.model_validate(row).model_copy(
+                update={
+                    "correction_set_id": set_id,
+                    "corrections_revision": revision,
+                }
+            )
+            for row, set_id, revision, _ in rows
+        ]
+        return edits, bool(rows and rows[0].candidate_count > len(edits))
 
     async def _insert_edit(
         self,

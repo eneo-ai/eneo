@@ -327,6 +327,7 @@ class FlowRunEvidenceService:
                 tenant_id=self.user.tenant_id,
                 after_revision=after_revision - 1,
                 limit=1,
+                logical_byte_budget=0,
             )
             if not baseline_rows or baseline_rows[0].revision != after_revision:
                 raise NotFoundException(
@@ -336,6 +337,11 @@ class FlowRunEvidenceService:
                 )
             baseline_payload = baseline_rows[0].payload_json
             baseline_hash = baseline_rows[0].payload_sha256_after
+        baseline = FlowRunReviewCheckpointEditBaselinePublic(
+            revision=after_revision or 1,
+            payload_json=redact_payload(baseline_payload),
+            payload_sha256=baseline_hash,
+        )
         (
             rows,
             more,
@@ -344,13 +350,11 @@ class FlowRunEvidenceService:
             tenant_id=self.user.tenant_id,
             after_revision=after_revision,
             limit=limit,
+            logical_byte_budget=RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES
+            - len(canonical_json_bytes(baseline.model_dump(mode="json"))),
         )
         return FlowRunReviewCheckpointEditPagePublic(
-            baseline=FlowRunReviewCheckpointEditBaselinePublic(
-                revision=after_revision or 1,
-                payload_json=redact_payload(baseline_payload),
-                payload_sha256=baseline_hash,
-            ),
+            baseline=baseline,
             items=[
                 FlowRunReviewCheckpointEditPublic.model_validate(row).model_copy(
                     update={
@@ -384,6 +388,7 @@ class FlowRunEvidenceService:
                 tenant_id=self.user.tenant_id,
                 after_revision=after_revision - 1,
                 limit=1,
+                logical_byte_budget=0,
             )
             if not previous or previous[0].revision != after_revision:
                 raise NotFoundException(
@@ -402,6 +407,8 @@ class FlowRunEvidenceService:
             tenant_id=self.user.tenant_id,
             after_revision=after_revision,
             limit=limit,
+            logical_byte_budget=RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES
+            - len(canonical_json_bytes(baseline.model_dump(mode="json"))),
         )
         return FlowTranscriptCorrectionRevisionPagePublic(
             baseline=baseline,

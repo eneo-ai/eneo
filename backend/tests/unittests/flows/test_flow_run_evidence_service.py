@@ -35,6 +35,7 @@ from eneo.flows.application.flow_run_evidence_service import (
     RUN_VIEW_MAX_LOADED_PASSAGE_BYTES,
     FlowRunEvidenceService,
 )
+from eneo.flows.domain.canonical_json_hash import canonical_json_bytes
 from eneo.flows.domain.flow import FlowStepAttempt, FlowStepAttemptStatus
 from eneo.flows.domain.provider_call import (
     ProviderCallEvidence,
@@ -229,6 +230,70 @@ def _service_for_empty_run(
     )
     _seed_empty_evidence_measurements(service)
     return service, run
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("corrections", [False, True])
+@pytest.mark.parametrize("after_revision", [None, 2])
+@pytest.mark.parametrize("budget", [1, 1024])
+async def test_history_page_passes_budget_remaining_after_baseline(
+    user, monkeypatch, corrections, after_revision, budget
+):
+    service, run = _service_for_empty_run(
+        user=user, provider_call_repo=_provider_call_repo()
+    )
+    monkeypatch.setattr(
+        flow_run_evidence_service, "RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES", budget
+    )
+    checkpoint_id = uuid4()
+    step_id = uuid4()
+    if corrections:
+        reader = service.transcript_corrections_repo.list_revisions
+        previous = SimpleNamespace(
+            revision=2,
+            occurrences_json=[{"corrected": "é"}],
+            speaker_edits_json=[],
+        )
+    else:
+        repo = service.flow_run_review_checkpoint_repo
+        repo.get_review_checkpoint.return_value = SimpleNamespace(
+            original_payload_json={"text": "original é"},
+        )
+        reader = repo.list_review_checkpoint_edits
+        previous = SimpleNamespace(
+            revision=2,
+            payload_json={"text": "edited é"},
+            payload_sha256_after="a" * 64,
+        )
+    reader.side_effect = (
+        [([previous], True), ([], False)]
+        if after_revision is not None
+        else [([], False)]
+    )
+    if corrections:
+        page = await service.list_transcript_correction_revisions(
+            run=run, step_id=step_id, after_revision=after_revision, limit=200
+        )
+        scope = {"run_id": run.id, "step_id": step_id}
+    else:
+        page = await service.list_review_checkpoint_edits(
+            run=run,
+            checkpoint_id=checkpoint_id,
+            after_revision=after_revision,
+            limit=200,
+        )
+        scope = {"checkpoint_id": checkpoint_id}
+    reader.assert_awaited_with(
+        **scope,
+        tenant_id=user.tenant_id,
+        after_revision=after_revision,
+        limit=200,
+        logical_byte_budget=budget
+        - len(canonical_json_bytes(page.baseline.model_dump(mode="json"))),
+    )
+    if after_revision is not None:
+        assert reader.await_args_list[0].kwargs["logical_byte_budget"] == 0
+        assert reader.await_args_list[0].kwargs["limit"] == 1
 
 
 @pytest.mark.asyncio

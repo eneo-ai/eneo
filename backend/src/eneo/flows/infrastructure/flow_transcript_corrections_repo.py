@@ -119,23 +119,62 @@ class FlowTranscriptCorrectionsRepository:
         tenant_id: UUID,
         after_revision: int | None,
         limit: int,
+        logical_byte_budget: int,
     ) -> tuple[list[FlowTranscriptCorrectionRevision], bool]:
+        candidates = (
+            sa.select(
+                FlowTranscriptCorrectionRevisions.id,
+                FlowTranscriptCorrectionRevisions.revision,
+                (
+                    sa.func.octet_length(
+                        sa.cast(
+                            FlowTranscriptCorrectionRevisions.occurrences_json, sa.Text
+                        )
+                    )
+                    + sa.func.octet_length(
+                        sa.cast(
+                            FlowTranscriptCorrectionRevisions.speaker_edits_json,
+                            sa.Text,
+                        )
+                    )
+                ).label("logical"),
+            )
+            .where(
+                FlowTranscriptCorrectionRevisions.flow_run_id == run_id,
+                FlowTranscriptCorrectionRevisions.step_id == step_id,
+                FlowTranscriptCorrectionRevisions.tenant_id == tenant_id,
+                FlowTranscriptCorrectionRevisions.revision > (after_revision or 0),
+            )
+            .order_by(FlowTranscriptCorrectionRevisions.revision)
+            .limit(limit + 1)
+            .subquery()
+        )
+        ranked = sa.select(
+            candidates.c.id,
+            sa.func.sum(candidates.c.logical)
+            .over(order_by=candidates.c.revision)
+            .label("cumulative"),
+            sa.func.row_number().over(order_by=candidates.c.revision).label("position"),
+            sa.func.count().over().label("candidate_count"),
+        ).subquery()
         rows = (
-            await self.session.scalars(
-                sa.select(FlowTranscriptCorrectionRevisions)
+            await self.session.execute(
+                sa.select(FlowTranscriptCorrectionRevisions, ranked.c.candidate_count)
+                .join(ranked, ranked.c.id == FlowTranscriptCorrectionRevisions.id)
                 .where(
-                    FlowTranscriptCorrectionRevisions.flow_run_id == run_id,
-                    FlowTranscriptCorrectionRevisions.step_id == step_id,
-                    FlowTranscriptCorrectionRevisions.tenant_id == tenant_id,
-                    FlowTranscriptCorrectionRevisions.revision > (after_revision or 0),
+                    ranked.c.position <= limit,
+                    sa.or_(
+                        ranked.c.position == 1,
+                        ranked.c.cumulative <= logical_byte_budget,
+                    ),
                 )
                 .order_by(FlowTranscriptCorrectionRevisions.revision)
-                .limit(limit + 1)
             )
         ).all()
-        return [
-            FlowTranscriptCorrectionRevision.model_validate(row) for row in rows[:limit]
-        ], len(rows) > limit
+        revisions = [
+            FlowTranscriptCorrectionRevision.model_validate(row) for row, _ in rows
+        ]
+        return revisions, bool(rows and rows[0].candidate_count > len(revisions))
 
     async def _insert_revision(self, row: FlowTranscriptCorrections) -> None:
         await self.session.execute(

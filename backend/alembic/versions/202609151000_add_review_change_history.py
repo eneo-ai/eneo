@@ -1,7 +1,7 @@
 """add review change history
 
 Revision ID: 202609151000
-Revises: 202609131200
+Revises: 202609151030
 Create Date: 2026-09-15 10:00:00.000000
 """
 
@@ -13,7 +13,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from alembic import op
 
 revision: str = "202609151000"
-down_revision: str | None = "202609131200"
+down_revision: str | None = "202609151030"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
