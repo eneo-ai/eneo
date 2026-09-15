@@ -9,6 +9,11 @@
 
 - Task: Fixes #
 
+## User-facing
+<!-- One or two sentences from the user's point of view, or "No".
+     Feeds the What's new page at release time — see frontend/packages/whats-new/PLAYBOOK.md.
+     Add the `user-facing` label and a data-tour="..." anchor if there is something to point at. -->
+
 ## Testing
 <!-- How did you test this? -->
 
