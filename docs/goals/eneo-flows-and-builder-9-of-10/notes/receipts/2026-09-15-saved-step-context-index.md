@@ -86,8 +86,11 @@ Examples of the added sentence (gemma, candidate): "Under rubriken 'Saknade uppg
 kompletteringar' ska du alltid lista vilka uppgifter som saknas i ansökan i form av en punktlista."
 Luna folds the same requirement into a rewritten paragraph under that heading. In all 24 plans the
 model rewrote the instruction paragraph rather than appending a sentence, keeping the original
-headings and requirements; on the parent the boilerplate prefix is added on top. Per-plan text is
-in `observations.json` (`target_field_changes`).
+headings and requirements; on the parent the boilerplate prefix is added on top. Every observation
+in `observations.json` carries `target_field_changes` with the full previous and current value of
+each changed field, and the instruction observations carry `instruction_check` (the rule above
+applied to both texts); the reference observations carry `reference_check` (expected name, name
+after the edit, exact match, only the name changed).
 
 ## Acquisition failures
 
@@ -106,4 +109,12 @@ response was sent (FastAPI request-scoped yield dependency), so a client's immed
 request could miss the row. Fixed on this branch by committing before the response (function-scoped
 container) on the mutating flow and flow-assistant routes; the harness itself does not retry. The
 parent stack, which serves the tidy tip without the fix, had no failure in 18 seedings this round;
-the race is timing-dependent (5 occurrences in 78 seedings across both rounds and stacks).
+the race is timing-dependent. Tracked population across both receipts: 70 seeding attempts (24 in
+round 1, 46 in round 2), 4 primary failures (two 404s in round 1, one 403 and one 404 in round 2)
+and 8 consequent 500s; smoke runs outside the receipts are not counted.
+
+## Suite results on the branch
+
+`backend/tests/unittests/flows/ai_builder`: 4533 passed. `backend/tests/integration/flows` on
+`8f7f931d6`: 468 passed, 1 failed (`test_hard_exited_worker_stale_recovery_converges`, the
+known worker-startup timing test), which passed on re-run alone on an idle host (2 passed, exit 0).

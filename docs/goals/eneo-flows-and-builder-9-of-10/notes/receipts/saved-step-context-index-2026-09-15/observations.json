@@ -39,7 +39,24 @@
    "session": "14e06d1d-7bbd-429c-9263-903619c41938",
    "plan": "efb54870-dd94-40df-be00-7d73f4f5bc7f",
    "bundle": "ai-builder-api-battle-test-20260915T081804-edit_chain_10_instruction.json",
-   "source": "07eb1c172"
+   "source": "07eb1c172",
+   "target_field_changes": [
+    {
+     "current": "Förbered PDF-innehåll",
+     "field": "name",
+     "previous": "Skriv beslutsdokument"
+    },
+    {
+     "current": "Förbered textinnehållet som terminalsteget ska rendera till PDF. Terminalsteget skapar själva PDF-filen.\n\nSkriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Under rubriken Saknade uppgifter och kompletteringar ska du alltid lista varje uppgift som saknas eller är oklar i ansökan som en separat punkt i en punktlista. Om inga uppgifter saknas eller är oklara ska detta anges uttryckligen. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF.",
+     "field": "instructions",
+     "previous": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF."
+    }
+   ],
+   "instruction_check": {
+    "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
+    "requested_in_previous": false,
+    "requested_in_current": true
+   }
   },
   {
    "lane": "parent",
@@ -61,7 +78,19 @@
    "session": "ae2d46b6-a3de-4a00-9b08-f0b23b505ccf",
    "plan": "fb789f0e-e429-44ba-81d7-14f3297c9550",
    "bundle": "ai-builder-api-battle-test-20260915T081855-edit_chain_30_instruction.json",
-   "source": "07eb1c172"
+   "source": "07eb1c172",
+   "target_field_changes": [
+    {
+     "current": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Under rubriken Saknade uppgifter och kompletteringar ska du alltid lista vilka uppgifter som saknas eller är oklara i ansökan som en tydlig punktlista. Om inga uppgifter saknas eller är oklara ska punktlistan ändå finnas och innehålla en uttrycklig uppgift om att inga saknade eller oklara uppgifter har identifierats i det tillgängliga underlaget. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF.",
+     "field": "instructions",
+     "previous": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF."
+    }
+   ],
+   "instruction_check": {
+    "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
+    "requested_in_previous": false,
+    "requested_in_current": true
+   }
   },
   {
    "lane": "parent",
@@ -83,7 +112,25 @@
    "session": "3bb3c46c-de19-45a6-8daa-92b8ba310108",
    "plan": "c0311783-25cb-485d-bcb1-8458486bba1b",
    "bundle": "ai-builder-api-battle-test-20260915T081920-edit_chain_10_reference.json",
-   "source": "07eb1c172"
+   "source": "07eb1c172",
+   "target_field_changes": [
+    {
+     "current": "Förbered PDF-innehåll",
+     "field": "name",
+     "previous": "Skriv beslutsdokument"
+    },
+    {
+     "current": "Förbered textinnehållet som terminalsteget ska rendera till PDF. Terminalsteget skapar själva PDF-filen.\n\nSkriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF.",
+     "field": "instructions",
+     "previous": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF."
+    }
+   ],
+   "reference_check": {
+    "expected_name": "Extrahera källfält - kontroll",
+    "name_after": "Förbered PDF-innehåll",
+    "exact": false,
+    "only_name_changed": false
+   }
   },
   {
    "lane": "parent",
@@ -105,7 +152,24 @@
    "session": "75da3e7b-5acb-4dac-b4ac-a598af38e1ca",
    "plan": "84bc118f-39cf-4ea8-9c44-9ec599df899f",
    "bundle": "ai-builder-api-battle-test-20260915T081940-edit_chain_10_instruction.json",
-   "source": "07eb1c172"
+   "source": "07eb1c172",
+   "target_field_changes": [
+    {
+     "current": "Förbered PDF-innehåll",
+     "field": "name",
+     "previous": "Skriv beslutsdokument"
+    },
+    {
+     "current": "Förbered textinnehållet som terminalsteget ska rendera till PDF. Terminalsteget skapar själva PDF-filen.\n\nSkriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Under rubriken \"Saknade uppgifter och kompletteringar\" ska du alltid lista varje uppgift som saknas eller är oklar i ansökan som en tydlig punktlista. Om inga uppgifter saknas eller är oklara ska du uttryckligen ange det. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF.",
+     "field": "instructions",
+     "previous": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF."
+    }
+   ],
+   "instruction_check": {
+    "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
+    "requested_in_previous": false,
+    "requested_in_current": true
+   }
   },
   {
    "lane": "parent",
@@ -127,7 +191,19 @@
    "session": "aef58078-dc2a-4666-816b-cd35862f4113",
    "plan": "2250fd0e-fb89-4bc4-9055-42d4c4b45969",
    "bundle": "ai-builder-api-battle-test-20260915T082029-edit_chain_30_instruction.json",
-   "source": "07eb1c172"
+   "source": "07eb1c172",
+   "target_field_changes": [
+    {
+     "current": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Under rubriken Saknade uppgifter och kompletteringar ska du alltid lista samtliga uppgifter som saknas eller är oklara i ansökan som en tydlig punktlista. Om inga uppgifter saknas eller är oklara ska du uttryckligen ange det. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF.",
+     "field": "instructions",
+     "previous": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF."
+    }
+   ],
+   "instruction_check": {
+    "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
+    "requested_in_previous": false,
+    "requested_in_current": true
+   }
   },
   {
    "lane": "parent",
@@ -149,7 +225,25 @@
    "session": "46f9649c-814a-4479-9326-ffcd0d804583",
    "plan": "aefa083b-6011-475f-a516-b26110231f5e",
    "bundle": "ai-builder-api-battle-test-20260915T082054-edit_chain_10_reference.json",
-   "source": "07eb1c172"
+   "source": "07eb1c172",
+   "target_field_changes": [
+    {
+     "current": "Förbered PDF-innehåll",
+     "field": "name",
+     "previous": "Skriv beslutsdokument"
+    },
+    {
+     "current": "Förbered textinnehållet som terminalsteget ska rendera till PDF. Terminalsteget skapar själva PDF-filen.\n\nSkriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF.",
+     "field": "instructions",
+     "previous": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF."
+    }
+   ],
+   "reference_check": {
+    "expected_name": "Extrahera källfält - kontroll",
+    "name_after": "Förbered PDF-innehåll",
+    "exact": false,
+    "only_name_changed": false
+   }
   },
   {
    "lane": "parent",
@@ -171,7 +265,24 @@
    "session": "69b52f37-8a3b-42b0-bc15-d71778c5a4c6",
    "plan": "d6722b8c-2457-4970-a60e-80eb8bc0bb05",
    "bundle": "ai-builder-api-battle-test-20260915T082116-edit_chain_10_instruction.json",
-   "source": "07eb1c172"
+   "source": "07eb1c172",
+   "target_field_changes": [
+    {
+     "current": "Förbered PDF-innehåll",
+     "field": "name",
+     "previous": "Skriv beslutsdokument"
+    },
+    {
+     "current": "Förbered textinnehållet som terminalsteget ska rendera till PDF. Terminalsteget skapar själva PDF-filen.\n\nSkriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Under rubriken Saknade uppgifter och kompletteringar ska du alltid lista varje uppgift som saknas eller är oklar i ansökan som en tydlig punktlista. Om inga uppgifter saknas eller är oklara ska detta anges uttryckligen. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF.",
+     "field": "instructions",
+     "previous": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF."
+    }
+   ],
+   "instruction_check": {
+    "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
+    "requested_in_previous": false,
+    "requested_in_current": true
+   }
   },
   {
    "lane": "parent",
@@ -193,7 +304,24 @@
    "session": "1a3e3b6f-4ec8-454e-b3e7-8f9de43c6286",
    "plan": "7341464b-c088-4d33-b9bd-ef8918b69e68",
    "bundle": "ai-builder-api-battle-test-20260915T082208-edit_chain_30_instruction.json",
-   "source": "07eb1c172"
+   "source": "07eb1c172",
+   "target_field_changes": [
+    {
+     "current": "Förbered PDF-innehåll",
+     "field": "name",
+     "previous": "Skriv beslutsdokument"
+    },
+    {
+     "current": "Förbered textinnehållet som terminalsteget ska rendera till PDF. Terminalsteget skapar själva PDF-filen.\n\nSkriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Under rubriken Saknade uppgifter och kompletteringar ska du alltid lista varje uppgift som saknas eller är oklar i ansökan som en tydlig punktlista. Om inga uppgifter saknas eller är oklara ska detta anges uttryckligen. För varje punkt ska det framgå vilken uppgift som saknas eller är oklar och, när underlaget medger det, varför den behövs för bedömningen. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF.",
+     "field": "instructions",
+     "previous": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF."
+    }
+   ],
+   "instruction_check": {
+    "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
+    "requested_in_previous": false,
+    "requested_in_current": true
+   }
   },
   {
    "lane": "parent",
@@ -215,7 +343,25 @@
    "session": "2f1a9677-f862-48fa-bdf5-81e68fca3c58",
    "plan": "f44d4072-88cb-4da7-b14e-b2d238da2fa1",
    "bundle": "ai-builder-api-battle-test-20260915T082230-edit_chain_10_reference.json",
-   "source": "07eb1c172"
+   "source": "07eb1c172",
+   "target_field_changes": [
+    {
+     "current": "Förbered PDF-innehåll",
+     "field": "name",
+     "previous": "Skriv beslutsdokument"
+    },
+    {
+     "current": "Förbered textinnehållet som terminalsteget ska rendera till PDF. Terminalsteget skapar själva PDF-filen.\n\nSkriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF.",
+     "field": "instructions",
+     "previous": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF."
+    }
+   ],
+   "reference_check": {
+    "expected_name": "Extrahera källfält - kontroll",
+    "name_after": "Förbered PDF-innehåll",
+    "exact": false,
+    "only_name_changed": false
+   }
   },
   {
    "lane": "parent",
@@ -237,7 +383,24 @@
    "session": "68c5ba91-9af6-47e4-8e14-ace2e1836d63",
    "plan": "798ee731-3d97-4168-bee1-70ecc6c88f50",
    "bundle": "ai-builder-api-battle-test-20260915T082253-edit_chain_10_instruction.json",
-   "source": "07eb1c172"
+   "source": "07eb1c172",
+   "target_field_changes": [
+    {
+     "current": "Förbered PDF-innehåll",
+     "field": "name",
+     "previous": "Skriv beslutsdokument"
+    },
+    {
+     "current": "Förbered textinnehållet som terminalsteget ska rendera till PDF. Terminalsteget skapar själva PDF-filen.\n\nSkriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. \n\nUnder rubriken 'Saknade uppgifter och kompletteringar' ska alla uppgifter som saknas i ansökan alltid listas tydligt som en punktlista.\n\nRedovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF.",
+     "field": "instructions",
+     "previous": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF."
+    }
+   ],
+   "instruction_check": {
+    "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
+    "requested_in_previous": false,
+    "requested_in_current": true
+   }
   },
   {
    "lane": "parent",
@@ -259,7 +422,24 @@
    "session": "4a4ec553-2fe9-421e-a873-97afa2b844e5",
    "plan": "94735b18-4fe4-48a9-9e7c-eab1ca6ba914",
    "bundle": "ai-builder-api-battle-test-20260915T082345-edit_chain_30_instruction.json",
-   "source": "07eb1c172"
+   "source": "07eb1c172",
+   "target_field_changes": [
+    {
+     "current": "Förbered PDF-innehåll",
+     "field": "name",
+     "previous": "Skriv beslutsdokument"
+    },
+    {
+     "current": "Förbered textinnehållet som terminalsteget ska rendera till PDF. Terminalsteget skapar själva PDF-filen.\n\nSkriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Under rubriken 'Saknade uppgifter och kompletteringar' ska alla uppgifter som saknas i ansökan alltid listas som en punktlista. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF.",
+     "field": "instructions",
+     "previous": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF."
+    }
+   ],
+   "instruction_check": {
+    "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
+    "requested_in_previous": false,
+    "requested_in_current": true
+   }
   },
   {
    "lane": "parent",
@@ -281,7 +461,25 @@
    "session": "76a169db-c655-44bd-9f87-7599414d07da",
    "plan": "dec99062-e244-4373-8bfb-3cc66f3c5d0d",
    "bundle": "ai-builder-api-battle-test-20260915T082409-edit_chain_10_reference.json",
-   "source": "07eb1c172"
+   "source": "07eb1c172",
+   "target_field_changes": [
+    {
+     "current": "Förbered PDF-innehåll",
+     "field": "name",
+     "previous": "Skriv beslutsdokument"
+    },
+    {
+     "current": "Förbered textinnehållet som terminalsteget ska rendera till PDF. Terminalsteget skapar själva PDF-filen.\n\nSkriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF.",
+     "field": "instructions",
+     "previous": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF."
+    }
+   ],
+   "reference_check": {
+    "expected_name": "Extrahera källfält - kontroll",
+    "name_after": "Förbered PDF-innehåll",
+    "exact": false,
+    "only_name_changed": false
+   }
   },
   {
    "lane": "parent",
@@ -303,7 +501,24 @@
    "session": "eca03725-4f3a-4d4f-9bf5-4db01904cc98",
    "plan": "2eafae91-1516-4e6e-b86f-1a6f416c5d70",
    "bundle": "ai-builder-api-battle-test-20260915T082429-edit_chain_10_instruction.json",
-   "source": "07eb1c172"
+   "source": "07eb1c172",
+   "target_field_changes": [
+    {
+     "current": "Förbered PDF-innehåll",
+     "field": "name",
+     "previous": "Skriv beslutsdokument"
+    },
+    {
+     "current": "Förbered textinnehållet som terminalsteget ska rendera till PDF. Terminalsteget skapar själva PDF-filen.\n\nSkriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Under rubriken 'Saknade uppgifter och kompletteringar' ska alla uppgifter som saknas i ansökan alltid listas som en punktlista. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF.",
+     "field": "instructions",
+     "previous": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF."
+    }
+   ],
+   "instruction_check": {
+    "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
+    "requested_in_previous": false,
+    "requested_in_current": true
+   }
   },
   {
    "lane": "parent",
@@ -325,7 +540,24 @@
    "session": "525bd88b-0490-4ec3-8063-c87450db7f64",
    "plan": "a5a1ee96-e69b-42d2-be8b-3adb4d4589a0",
    "bundle": "ai-builder-api-battle-test-20260915T082516-edit_chain_30_instruction.json",
-   "source": "07eb1c172"
+   "source": "07eb1c172",
+   "target_field_changes": [
+    {
+     "current": "Förbered PDF-innehåll",
+     "field": "name",
+     "previous": "Skriv beslutsdokument"
+    },
+    {
+     "current": "Förbered textinnehållet som terminalsteget ska rendera till PDF. Terminalsteget skapar själva PDF-filen.\n\nSkriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. \n\nUnder rubriken 'Saknade uppgifter och kompletteringar' ska alla uppgifter som saknas i ansökan alltid listas som en tydlig punktlista.\n\nRedovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF.",
+     "field": "instructions",
+     "previous": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF."
+    }
+   ],
+   "instruction_check": {
+    "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
+    "requested_in_previous": false,
+    "requested_in_current": true
+   }
   },
   {
    "lane": "parent",
@@ -347,7 +579,25 @@
    "session": "64ac4957-be21-4783-bdc9-4ac6a3b4e1a0",
    "plan": "700610db-1347-48c3-b13f-015a79954c7a",
    "bundle": "ai-builder-api-battle-test-20260915T082539-edit_chain_10_reference.json",
-   "source": "07eb1c172"
+   "source": "07eb1c172",
+   "target_field_changes": [
+    {
+     "current": "Förbered PDF-innehåll",
+     "field": "name",
+     "previous": "Skriv beslutsdokument"
+    },
+    {
+     "current": "Förbered textinnehållet som terminalsteget ska rendera till PDF. Terminalsteget skapar själva PDF-filen.\n\nSkriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF.",
+     "field": "instructions",
+     "previous": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF."
+    }
+   ],
+   "reference_check": {
+    "expected_name": "Extrahera källfält - kontroll",
+    "name_after": "Förbered PDF-innehåll",
+    "exact": false,
+    "only_name_changed": false
+   }
   },
   {
    "lane": "parent",
@@ -369,7 +619,24 @@
    "session": "65e30900-f510-4f5d-ae77-eeb253198022",
    "plan": "a90936a8-fd8d-4283-8cf6-898dac378768",
    "bundle": "ai-builder-api-battle-test-20260915T082558-edit_chain_10_instruction.json",
-   "source": "07eb1c172"
+   "source": "07eb1c172",
+   "target_field_changes": [
+    {
+     "current": "Förbered PDF-innehåll",
+     "field": "name",
+     "previous": "Skriv beslutsdokument"
+    },
+    {
+     "current": "Förbered textinnehållet som terminalsteget ska rendera till PDF. Terminalsteget skapar själva PDF-filen.\n\nSkriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. \n\nUnder rubriken 'Saknade uppgifter och kompletteringar' ska alla uppgifter som saknas i ansökan alltid listas tydligt som en punktlista.\n\nRedovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF.",
+     "field": "instructions",
+     "previous": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF."
+    }
+   ],
+   "instruction_check": {
+    "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
+    "requested_in_previous": false,
+    "requested_in_current": true
+   }
   },
   {
    "lane": "parent",
@@ -391,7 +658,24 @@
    "session": "c00985ec-2fa7-423b-a1c7-4ae165b1cddc",
    "plan": "c592ab9a-18a8-462c-8c40-92a40d0c8428",
    "bundle": "ai-builder-api-battle-test-20260915T082643-edit_chain_30_instruction.json",
-   "source": "07eb1c172"
+   "source": "07eb1c172",
+   "target_field_changes": [
+    {
+     "current": "Förbered PDF-innehåll",
+     "field": "name",
+     "previous": "Skriv beslutsdokument"
+    },
+    {
+     "current": "Förbered textinnehållet som terminalsteget ska rendera till PDF. Terminalsteget skapar själva PDF-filen.\n\nSkriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. \n\nUnder rubriken 'Saknade uppgifter och kompletteringar' ska du alltid lista vilka uppgifter som saknas i ansökan i form av en tydlig punktlista.\n\nRedovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF.",
+     "field": "instructions",
+     "previous": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF."
+    }
+   ],
+   "instruction_check": {
+    "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
+    "requested_in_previous": false,
+    "requested_in_current": true
+   }
   },
   {
    "lane": "parent",
@@ -413,7 +697,25 @@
    "session": "8eed2296-403b-4e19-901e-e8d00aeced9d",
    "plan": "d68a884e-2f01-4917-a20d-6a22bf04a20b",
    "bundle": "ai-builder-api-battle-test-20260915T082708-edit_chain_10_reference.json",
-   "source": "07eb1c172"
+   "source": "07eb1c172",
+   "target_field_changes": [
+    {
+     "current": "Förbered PDF-innehåll",
+     "field": "name",
+     "previous": "Skriv beslutsdokument"
+    },
+    {
+     "current": "Förbered textinnehållet som terminalsteget ska rendera till PDF. Terminalsteget skapar själva PDF-filen.\n\nSkriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF.",
+     "field": "instructions",
+     "previous": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF."
+    }
+   ],
+   "reference_check": {
+    "expected_name": "Extrahera källfält - kontroll",
+    "name_after": "Förbered PDF-innehåll",
+    "exact": false,
+    "only_name_changed": false
+   }
   },
   {
    "lane": "candidate",
@@ -434,7 +736,19 @@
    "session": "00677640-2cc1-4ac3-bc56-8985beb78a80",
    "plan": "fb0e300e-e62e-4e95-a33a-9e3b93eb3f35",
    "bundle": "ai-builder-api-battle-test-20260915T081805-edit_chain_10_instruction.json",
-   "source": "5b7418e2f"
+   "source": "5b7418e2f",
+   "target_field_changes": [
+    {
+     "current": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Under rubriken Saknade uppgifter och kompletteringar ska du alltid lista vilka uppgifter som saknas eller är oklara i ansökan som en tydlig punktlista. Om inga uppgifter saknas eller är oklara ska du uttryckligen ange detta. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF.",
+     "field": "instructions",
+     "previous": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF."
+    }
+   ],
+   "instruction_check": {
+    "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
+    "requested_in_previous": false,
+    "requested_in_current": true
+   }
   },
   {
    "lane": "candidate",
@@ -455,7 +769,19 @@
    "session": "398d451f-64bc-4672-b810-e87aed4df3e4",
    "plan": "8f475b41-e67b-4466-9c2a-e02428e44221",
    "bundle": "ai-builder-api-battle-test-20260915T081855-edit_chain_30_instruction.json",
-   "source": "5b7418e2f"
+   "source": "5b7418e2f",
+   "target_field_changes": [
+    {
+     "current": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Under rubriken Saknade uppgifter och kompletteringar ska du alltid lista vilka uppgifter som saknas eller är oklara i ansökan som en tydlig punktlista. Om inga uppgifter saknas eller är oklara ska punktlistan ändå finnas och innehålla en uttrycklig uppgift om att inga saknade eller oklara uppgifter har identifierats i det tillgängliga underlaget. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF.",
+     "field": "instructions",
+     "previous": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF."
+    }
+   ],
+   "instruction_check": {
+    "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
+    "requested_in_previous": false,
+    "requested_in_current": true
+   }
   },
   {
    "lane": "candidate",
@@ -476,7 +802,20 @@
    "session": "767d8c57-695b-499c-b84d-f07b861c810c",
    "plan": "c907d3f2-324a-44bf-b3ff-e7d2eb57ade9",
    "bundle": "ai-builder-api-battle-test-20260915T081919-edit_chain_10_reference.json",
-   "source": "5b7418e2f"
+   "source": "5b7418e2f",
+   "target_field_changes": [
+    {
+     "current": "Extrahera källfält - kontroll",
+     "field": "name",
+     "previous": "Skriv beslutsdokument"
+    }
+   ],
+   "reference_check": {
+    "expected_name": "Extrahera källfält - kontroll",
+    "name_after": "Extrahera källfält - kontroll",
+    "exact": true,
+    "only_name_changed": true
+   }
   },
   {
    "lane": "candidate",
@@ -497,7 +836,19 @@
    "session": "91f59910-5643-41f2-8955-6abe750c21f7",
    "plan": "6865ffa8-1d08-4c59-8e53-e422b0b124cf",
    "bundle": "ai-builder-api-battle-test-20260915T081941-edit_chain_10_instruction.json",
-   "source": "5b7418e2f"
+   "source": "5b7418e2f",
+   "target_field_changes": [
+    {
+     "current": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Hitta inte på fakta, regler, villkor eller beslut.\n\nUnder rubriken Saknade uppgifter och kompletteringar ska du alltid lista samtliga uppgifter som saknas eller är oklara i ansökan som en punktlista. Ange för varje punkt vad som saknas eller är oklart och, när det framgår av underlaget, varför uppgiften behövs eller vilken betydelse den har för bedömningen. Om inga uppgifter saknas eller är oklara ska detta uttryckligen anges.\n\nOm regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF.",
+     "field": "instructions",
+     "previous": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF."
+    }
+   ],
+   "instruction_check": {
+    "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
+    "requested_in_previous": false,
+    "requested_in_current": true
+   }
   },
   {
    "lane": "candidate",
@@ -518,7 +869,19 @@
    "session": "1fac7e73-7d73-4d3e-beda-4b1b177ad989",
    "plan": "879e957a-bec6-49ba-a440-b9e374e76594",
    "bundle": "ai-builder-api-battle-test-20260915T082029-edit_chain_30_instruction.json",
-   "source": "5b7418e2f"
+   "source": "5b7418e2f",
+   "target_field_changes": [
+    {
+     "current": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Under rubriken Saknade uppgifter och kompletteringar ska du alltid lista samtliga uppgifter som saknas eller är oklara i ansökan som en tydlig punktlista. Om inga uppgifter saknas eller är oklara ska du uttryckligen ange det. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF.",
+     "field": "instructions",
+     "previous": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF."
+    }
+   ],
+   "instruction_check": {
+    "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
+    "requested_in_previous": false,
+    "requested_in_current": true
+   }
   },
   {
    "lane": "candidate",
@@ -539,7 +902,19 @@
    "session": "1207c977-e283-47e4-a62e-53b565b520b7",
    "plan": "d55edcac-d770-484e-a4dd-ecc478a03774",
    "bundle": "ai-builder-api-battle-test-20260915T082126-edit_chain_30_instruction.json",
-   "source": "5b7418e2f"
+   "source": "5b7418e2f",
+   "target_field_changes": [
+    {
+     "current": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Under rubriken \"Saknade uppgifter och kompletteringar\" ska du alltid lista alla uppgifter som saknas eller är oklara i ansökan som en tydlig punktlista. Om inga uppgifter saknas eller är oklara ska du uttryckligen ange det. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF.",
+     "field": "instructions",
+     "previous": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF."
+    }
+   ],
+   "instruction_check": {
+    "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
+    "requested_in_previous": false,
+    "requested_in_current": true
+   }
   },
   {
    "lane": "candidate",
@@ -560,7 +935,19 @@
    "session": "9744bc42-d40c-4dfd-8d9a-ceede9b6f22d",
    "plan": "3080be2c-eb38-42db-bfc0-81be452720be",
    "bundle": "ai-builder-api-battle-test-20260915T082907-edit_chain_10_instruction.json",
-   "source": "5b7418e2f"
+   "source": "5b7418e2f",
+   "target_field_changes": [
+    {
+     "current": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Under rubriken \"Saknade uppgifter och kompletteringar\" ska du alltid lista varje uppgift som saknas eller är oklar i ansökan som en punktlista. Om inga uppgifter saknas eller är oklara ska detta anges uttryckligen. Ange även varför varje saknad eller oklar uppgift har betydelse när sådan information finns i underlaget. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF.",
+     "field": "instructions",
+     "previous": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF."
+    }
+   ],
+   "instruction_check": {
+    "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
+    "requested_in_previous": false,
+    "requested_in_current": true
+   }
   },
   {
    "lane": "candidate",
@@ -581,7 +968,20 @@
    "session": "5c2a1014-d357-4f24-a63e-a5a8d89beea2",
    "plan": "b40a39d6-6262-4648-a513-b718d4288959",
    "bundle": "ai-builder-api-battle-test-20260915T082928-edit_chain_10_reference.json",
-   "source": "5b7418e2f"
+   "source": "5b7418e2f",
+   "target_field_changes": [
+    {
+     "current": "Extrahera källfält - kontroll",
+     "field": "name",
+     "previous": "Skriv beslutsdokument"
+    }
+   ],
+   "reference_check": {
+    "expected_name": "Extrahera källfält - kontroll",
+    "name_after": "Extrahera källfält - kontroll",
+    "exact": true,
+    "only_name_changed": true
+   }
   },
   {
    "lane": "candidate",
@@ -602,7 +1002,20 @@
    "session": "a875b287-139f-4690-a141-8d7540a2b28b",
    "plan": "fec06dd0-532e-4eab-9447-1664e78aeec0",
    "bundle": "ai-builder-api-battle-test-20260915T082948-edit_chain_10_reference.json",
-   "source": "5b7418e2f"
+   "source": "5b7418e2f",
+   "target_field_changes": [
+    {
+     "current": "Extrahera källfält - kontroll",
+     "field": "name",
+     "previous": "Skriv beslutsdokument"
+    }
+   ],
+   "reference_check": {
+    "expected_name": "Extrahera källfält - kontroll",
+    "name_after": "Extrahera källfält - kontroll",
+    "exact": true,
+    "only_name_changed": true
+   }
   },
   {
    "lane": "candidate",
@@ -623,7 +1036,19 @@
    "session": "8c95fc3c-cfa1-4d71-a4d5-6c78d0610963",
    "plan": "43400a0a-7022-4329-9cee-82f86748ed25",
    "bundle": "ai-builder-api-battle-test-20260915T082223-edit_chain_30_instruction.json",
-   "source": "5b7418e2f"
+   "source": "5b7418e2f",
+   "target_field_changes": [
+    {
+     "current": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. \n\nUnder rubriken 'Saknade uppgifter och kompletteringar' ska du alltid lista vilka uppgifter som saknas i ansökan i form av en punktlista.\n\nRedovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF.",
+     "field": "instructions",
+     "previous": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF."
+    }
+   ],
+   "instruction_check": {
+    "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
+    "requested_in_previous": false,
+    "requested_in_current": true
+   }
   },
   {
    "lane": "candidate",
@@ -644,7 +1069,19 @@
    "session": "fc4586b5-e105-45f3-864b-272127c51546",
    "plan": "b37dfe80-1bd3-4d5e-963e-8874e346960f",
    "bundle": "ai-builder-api-battle-test-20260915T082355-edit_chain_30_instruction.json",
-   "source": "5b7418e2f"
+   "source": "5b7418e2f",
+   "target_field_changes": [
+    {
+     "current": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. \n\nUnder rubriken 'Saknade uppgifter och kompletteringar' ska du alltid lista vilka uppgifter som saknas i ansökan i form av en punktlista.\n\nRedovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF.",
+     "field": "instructions",
+     "previous": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF."
+    }
+   ],
+   "instruction_check": {
+    "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
+    "requested_in_previous": false,
+    "requested_in_current": true
+   }
   },
   {
    "lane": "candidate",
@@ -665,7 +1102,19 @@
    "session": "8f2443d6-b92a-495a-a67c-a2bc410d64a2",
    "plan": "365ce8bf-3070-48da-9e71-a1c1ef19e436",
    "bundle": "ai-builder-api-battle-test-20260915T083007-edit_chain_10_instruction.json",
-   "source": "5b7418e2f"
+   "source": "5b7418e2f",
+   "target_field_changes": [
+    {
+     "current": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. \n\nUnder rubriken 'Saknade uppgifter och kompletteringar' ska alla uppgifter som saknas i ansökan alltid listas tydligt som en punktlista.\n\nRedovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF.",
+     "field": "instructions",
+     "previous": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF."
+    }
+   ],
+   "instruction_check": {
+    "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
+    "requested_in_previous": false,
+    "requested_in_current": true
+   }
   },
   {
    "lane": "candidate",
@@ -686,7 +1135,19 @@
    "session": "5e345674-fe3a-4a95-88d8-7408b6c8ad24",
    "plan": "98db97e2-5572-44bc-be4d-dd72eb9f0046",
    "bundle": "ai-builder-api-battle-test-20260915T083032-edit_chain_10_instruction.json",
-   "source": "5b7418e2f"
+   "source": "5b7418e2f",
+   "target_field_changes": [
+    {
+     "current": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. \n\nUnder rubriken 'Saknade uppgifter och kompletteringar' ska du alltid lista vilka uppgifter som saknas i ansökan i form av en tydlig punktlista.\n\nRedovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF.",
+     "field": "instructions",
+     "previous": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF."
+    }
+   ],
+   "instruction_check": {
+    "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
+    "requested_in_previous": false,
+    "requested_in_current": true
+   }
   },
   {
    "lane": "candidate",
@@ -707,7 +1168,19 @@
    "session": "5d75b468-0d34-437a-980c-41b247e79bfe",
    "plan": "cef8a3b0-6331-4fe5-8215-7cb957a6fc81",
    "bundle": "ai-builder-api-battle-test-20260915T083056-edit_chain_10_instruction.json",
-   "source": "5b7418e2f"
+   "source": "5b7418e2f",
+   "target_field_changes": [
+    {
+     "current": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Under rubriken 'Saknade uppgifter och kompletteringar' ska du alltid lista vilka uppgifter som saknas i ansökan i form av en punktlista. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF.",
+     "field": "instructions",
+     "previous": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF."
+    }
+   ],
+   "instruction_check": {
+    "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
+    "requested_in_previous": false,
+    "requested_in_current": true
+   }
   },
   {
    "lane": "candidate",
@@ -728,7 +1201,19 @@
    "session": "e9cc60db-7b9f-440c-898f-1a2557f88fb6",
    "plan": "5d3b622e-d95b-4ae8-b3ae-251edaac73c1",
    "bundle": "ai-builder-api-battle-test-20260915T083144-edit_chain_30_instruction.json",
-   "source": "5b7418e2f"
+   "source": "5b7418e2f",
+   "target_field_changes": [
+    {
+     "current": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. \n\nUnder rubriken 'Saknade uppgifter och kompletteringar' ska alla uppgifter som saknas i ansökan alltid listas tydligt som en punktlista.\n\nOm regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF.",
+     "field": "instructions",
+     "previous": "Skriv det kompletta beslutsdokumentet på svenska utifrån den strukturerade ansökningsinformationen och regelbedömningen. Dokumentet ska innehålla rubrikerna Sammanfattning, Vad som söks, Viktiga fakta, Bedömningsgrund, Överensstämmelser, brister eller avvikelser, Saknade uppgifter och kompletteringar, Rekommendation samt Handlingsbar slutsats. Redovisa tydligt vad som kommer från ansökan, vad som följer av reglerna och vad som är bedömning. Om regler eller referensmaterial saknas ska detta anges som ett uttryckligt hinder. Hitta inte på fakta, regler, villkor eller beslut. Skriv ett komplett dokument med tillräckligt innehåll för direkt PDF-rendering och utan kommentarer om arbetsprocessen.\n\nSkriv resultatet som löpande läsbar text med rubriker — aldrig som JSON eller namngivna fält. Texten ska täcka: Komplett färdig text för beslutsdokumentet som ska renderas till PDF."
+    }
+   ],
+   "instruction_check": {
+    "rule": "'punktlista' and ('saknas' or 'saknade') in the text",
+    "requested_in_previous": false,
+    "requested_in_current": true
+   }
   },
   {
    "lane": "candidate",
@@ -749,7 +1234,20 @@
    "session": "deeb7289-9aa8-4ebc-8c72-bd3585491e40",
    "plan": "1cabfcaf-531e-42e5-8d75-34a0be0e9dd2",
    "bundle": "ai-builder-api-battle-test-20260915T083208-edit_chain_10_reference.json",
-   "source": "5b7418e2f"
+   "source": "5b7418e2f",
+   "target_field_changes": [
+    {
+     "current": "Extrahera källfält - kontroll",
+     "field": "name",
+     "previous": "Skriv beslutsdokument"
+    }
+   ],
+   "reference_check": {
+    "expected_name": "Extrahera källfält - kontroll",
+    "name_after": "Extrahera källfält - kontroll",
+    "exact": true,
+    "only_name_changed": true
+   }
   },
   {
    "lane": "candidate",
@@ -770,7 +1268,20 @@
    "session": "8ea63b02-8676-4073-8665-5a2c506b758c",
    "plan": "53e39619-6641-41fa-863e-d46718b1ee58",
    "bundle": "ai-builder-api-battle-test-20260915T083226-edit_chain_10_reference.json",
-   "source": "5b7418e2f"
+   "source": "5b7418e2f",
+   "target_field_changes": [
+    {
+     "current": "Extrahera källfält - kontroll",
+     "field": "name",
+     "previous": "Skriv beslutsdokument"
+    }
+   ],
+   "reference_check": {
+    "expected_name": "Extrahera källfält - kontroll",
+    "name_after": "Extrahera källfält - kontroll",
+    "exact": true,
+    "only_name_changed": true
+   }
   },
   {
    "lane": "candidate",
@@ -791,7 +1302,20 @@
    "session": "0b850678-9df5-44b3-9f18-9cc14da60852",
    "plan": "ec173c21-98d2-4c68-b631-8b872ea5c90b",
    "bundle": "ai-builder-api-battle-test-20260915T083243-edit_chain_10_reference.json",
-   "source": "5b7418e2f"
+   "source": "5b7418e2f",
+   "target_field_changes": [
+    {
+     "current": "Extrahera källfält - kontroll",
+     "field": "name",
+     "previous": "Skriv beslutsdokument"
+    }
+   ],
+   "reference_check": {
+    "expected_name": "Extrahera källfält - kontroll",
+    "name_after": "Extrahera källfält - kontroll",
+    "exact": true,
+    "only_name_changed": true
+   }
   }
  ],
  "acquisition_failures": [
@@ -865,5 +1389,6 @@
    "error": "HTTP Error 500: Internal Server Error",
    "bundle": "ai-builder-api-battle-test-20260915T082410-failure.json"
   }
- ]
+ ],
+ "population_note": "Tracked seedings: round 1 (2026-09-15-saved-step-context-bounded) 24 attempts with 2 primary failures (404 on PATCH assistants); round 2 (this file) 46 attempts with 2 primary failures (one 403 on POST assistants, one 404 on PATCH assistants) and 8 consequent 500s caused by the orphaned flow of the 403. Combined: 70 attempts, 4 primary failures. Smoke runs outside the receipts are not counted."
 }
