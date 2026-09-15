@@ -976,21 +976,22 @@ _BRIDGED_AZURE_TOOL_REQUEST = {
 
 
 @pytest.mark.asyncio
-async def test_a_bridged_azure_tool_call_refusing_temperature_is_retried(
+async def test_a_bridged_azure_tool_call_refusal_keeps_its_envelope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # LiteLLM sends Azure gpt-5.4+ requests with function tools over its
     # Responses-API bridge, where a provider 400 surfaces with the envelope
     # only in the exception message. The classifier (no tools) stays on Chat
-    # Completions, so only the proposal turn used to lose the retry.
+    # Completions, so only the proposal turn used to lose the envelope. Since
+    # litellm 1.101 a recognised gpt-5.x name never carries temperature over
+    # the bridge (drop_params removes it before the request), so the refused
+    # control here is the tools parameter itself; the temperature retry for a
+    # deployment name litellm does not recognise stays covered by
+    # test_a_provider_refusing_temperature_gets_the_call_without_it.
     sent: list[dict[str, object]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         sent.append(json.loads(request.content))
-        if "temperature" in sent[-1]:
-            return httpx.Response(
-                400, json=_UNSUPPORTED_TEMPERATURE, headers={"apim-request-id": "req-1"}
-            )
         return httpx.Response(
             400, json={"error": {"param": "tools", "code": "unsupported_value"}}
         )
@@ -1013,10 +1014,9 @@ async def test_a_bridged_azure_tool_call_refusing_temperature_is_retried(
             retry_without_refused_control=_admit,
         )
 
-    # Both requests went over the bridge (Responses wire shape), the second
-    # without the refused control; the second refusal names something else.
+    # One request went over the bridge (Responses wire shape) without the
+    # dropped control, and its refusal envelope survived the bridge.
     assert [("temperature" in body, "input" in body) for body in sent] == [
-        (True, True),
         (False, True),
     ]
     rejection = provider_error_fields(raised.value)

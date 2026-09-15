@@ -139,4 +139,34 @@ IGNORED_WARNINGS: list[WarningFilter] = [
             "then delete this entry."
         ),
     ),
+    WarningFilter(
+        pattern=r"Item '\w+' on TypedDict class '\w+' is using the `ReadOnly` qualifier.*",
+        category="UserWarning",
+        reason=(
+            "litellm >=1.101 marks TypedDict items (ChatCompletionReasoningItem.summary "
+            "and friends in litellm/types/llms/openai.py) as ReadOnly; pydantic 2.13 "
+            "warns once when it builds the Message schema that embeds them, which is "
+            "the first ModelResponse constructed in a process."
+        ),
+        resolution=(
+            "Bump litellm once upstream drops ReadOnly from the TypedDicts pydantic "
+            "consumes (grep `ReadOnly[` in litellm/types/llms/openai.py), or once "
+            "pydantic stops warning about it, then delete this entry."
+        ),
+    ),
+    WarningFilter(
+        pattern=r"The @wait_container_is_ready decorator is deprecated.*",
+        category="DeprecationWarning",
+        module="testcontainers.redis",
+        reason=(
+            "testcontainers 4.14.2 still emits this at import time from its "
+            "RedisContainer module, before our integration fixtures can switch "
+            "container wait strategy usage."
+        ),
+        resolution=(
+            "Upgrade testcontainers once RedisContainer no longer imports the "
+            "deprecated decorator, or replace the integration Redis fixture with "
+            "a custom DockerContainer wired to structured wait strategies."
+        ),
+    ),
 ]
