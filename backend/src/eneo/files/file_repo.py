@@ -24,6 +24,19 @@ from eneo.files.file_models import (
 )
 from eneo.main.exceptions import NotFoundException
 from eneo.object_content.content import ByteRange, ContentAccessClass, ContentState
+from eneo.object_content.file_icon_cleanup import file_icon_legacy_is_cleaned
+
+_FILE_METADATA_COLUMNS = (
+    Files.id,
+    Files.created_at,
+    Files.updated_at,
+    Files.name,
+    Files.file_type,
+    Files.mimetype,
+    Files.user_id,
+    Files.tenant_id,
+    Files.parent_file_id,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -324,13 +337,17 @@ class FileRepository:
             matches=True,
         )
 
-    @staticmethod
-    def _visible_family(file: type[Files] = Files):
+    async def _visible_family(self, file: type[Files] = Files):
         root_id = sa.case(
             (file.parent_file_id.is_(None), file.id),
             else_=file.parent_file_id,
         )
         root_has_content = sa.exists().where(FileContentReferences.file_id == root_id)
+        if await file_icon_legacy_is_cleaned(self.session):
+            return sa.and_(
+                root_has_content.correlate(file),
+                ~self._family_has_unavailable_content(file),
+            )
         legacy_root = aliased(Files)
         root_has_legacy = sa.exists().where(
             legacy_root.id == root_id,
@@ -347,7 +364,7 @@ class FileRepository:
             ~FileRepository._family_has_unavailable_content(file),
         )
 
-    def _visible_children_query(
+    async def _visible_children_query(
         self,
         *,
         parent_ids: list[UUID],
@@ -363,7 +380,7 @@ class FileRepository:
                 Files.parent_file_id.in_(parent_ids),
                 Files.user_id == parent.user_id,
                 Files.tenant_id == parent.tenant_id,
-                self._visible_family(),
+                await self._visible_family(),
             )
         )
         if user_id is not None:
@@ -375,9 +392,15 @@ class FileRepository:
         return query.order_by(Files.created_at, Files.id)
 
     async def add_metadata(self, file: FileMetadataCreate) -> FileMetadata:
-        row = Files(**file.model_dump())
-        self.session.add(row)
-        await self.session.flush()
+        # Explicit metadata columns keep INSERT and RETURNING valid after cleanup;
+        # the deferred legacy mappings remain available for pre-cleanup readers.
+        row = (
+            await self.session.execute(
+                sa.insert(Files)
+                .values(**file.model_dump())
+                .returning(*_FILE_METADATA_COLUMNS)
+            )
+        ).one()
         return FileMetadata.model_validate(row)
 
     async def add_content_reference(
@@ -416,7 +439,7 @@ class FileRepository:
             .where(
                 Files.id.in_(ids),
                 Files.user_id == user_id,
-                self._visible_family(),
+                await self._visible_family(),
             )
             .order_by(Files.created_at)
         )
@@ -427,7 +450,7 @@ class FileRepository:
             return []
         rows = await self.session.scalars(
             sa.select(Files)
-            .where(Files.id.in_(ids), self._visible_family())
+            .where(Files.id.in_(ids), await self._visible_family())
             .order_by(Files.created_at)
         )
         return [FileMetadata.model_validate(row) for row in rows]
@@ -440,7 +463,7 @@ class FileRepository:
         if not parent_ids:
             return []
         rows = await self.session.scalars(
-            self._visible_children_query(
+            await self._visible_children_query(
                 parent_ids=parent_ids,
                 user_id=user_id,
             )
@@ -501,7 +524,7 @@ class FileRepository:
 
     async def get_by_id(self, file_id: UUID) -> FileMetadata:
         row = await self.session.scalar(
-            sa.select(Files).where(Files.id == file_id, self._visible_family())
+            sa.select(Files).where(Files.id == file_id, await self._visible_family())
         )
         if row is None:
             raise NotFoundException()
@@ -510,7 +533,7 @@ class FileRepository:
     async def get_by_id_for_update(self, file_id: UUID) -> FileMetadata:
         row = await self.session.scalar(
             sa.select(Files)
-            .where(Files.id == file_id, self._visible_family())
+            .where(Files.id == file_id, await self._visible_family())
             .with_for_update()
         )
         if row is None:
@@ -539,7 +562,7 @@ class FileRepository:
             .where(
                 Files.user_id == user_id,
                 Files.parent_file_id.is_(None),
-                self._visible_family(),
+                await self._visible_family(),
             )
             .order_by(Files.created_at)
         )
@@ -604,6 +627,8 @@ class FileRepository:
         requests: Mapping[UUID, Collection[FileContentVariant]],
     ) -> list[LegacyFileContentRecord]:
         """Load only the frozen variants whose object references are missing."""
+        if not requests or await file_icon_legacy_is_cleaned(self.session):
+            return []
         ids_by_variant: defaultdict[FileContentVariant, list[UUID]] = defaultdict(list)
         for file_id, variants in requests.items():
             for variant in variants:
@@ -666,7 +691,7 @@ class FileRepository:
         file_ids: list[UUID],
     ) -> list[LegacyFileInfoRecord]:
         """Read legacy integrity metadata without materializing TOAST payloads."""
-        if not file_ids:
+        if not file_ids or await file_icon_legacy_is_cleaned(self.session):
             return []
         rows = (
             await self.session.execute(
@@ -716,6 +741,8 @@ class FileRepository:
         file_id: UUID,
         selected_range: ByteRange | None,
     ) -> LegacyAudioSlice | None:
+        if await file_icon_legacy_is_cleaned(self.session):
+            return None
         payload = (
             Files.legacy_blob
             if selected_range is None
@@ -777,7 +804,7 @@ class FileRepository:
                     Files.user_id == user_id,
                     Files.tenant_id == tenant_id,
                 )
-                .returning(Files)
+                .returning(*_FILE_METADATA_COLUMNS)
             )
-        ).scalar_one_or_none()
+        ).one_or_none()
         return None if row is None else FileMetadata.model_validate(row)

@@ -11,6 +11,7 @@ from eneo.database.tables.object_content_table import (
 )
 from eneo.icons.icon import IconMetadata, IconMetadataCreate
 from eneo.object_content.content import ContentAccessClass, ContentState
+from eneo.object_content.file_icon_cleanup import file_icon_legacy_is_cleaned
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,9 +36,18 @@ class IconRepository:
         self.session = session
 
     async def add_metadata(self, icon: IconMetadataCreate) -> IconMetadata:
-        row = Icons(**icon.model_dump())
-        self.session.add(row)
-        await self.session.flush()
+        row = (
+            await self.session.execute(
+                sa.insert(Icons)
+                .values(**icon.model_dump())
+                .returning(
+                    Icons.id,
+                    Icons.created_at,
+                    Icons.updated_at,
+                    Icons.tenant_id,
+                )
+            )
+        ).one()
         return IconMetadata.model_validate(row)
 
     async def add_primary_reference(
@@ -67,10 +77,13 @@ class IconRepository:
                 ObjectContents.state == ContentState.AVAILABLE.value,
             )
         )
+        visible = available_reference
+        if not await file_icon_legacy_is_cleaned(self.session):
+            visible = sa.or_(visible, Icons.legacy_blob.is_not(None))
         row = await self.session.scalar(
             sa.select(Icons).where(
                 Icons.id == icon_id,
-                sa.or_(available_reference, Icons.legacy_blob.is_not(None)),
+                visible,
             )
         )
         return None if row is None else IconMetadata.model_validate(row)
@@ -116,6 +129,8 @@ class IconRepository:
         self,
         icon_id: UUID,
     ) -> LegacyIconContentRecord | None:
+        if await file_icon_legacy_is_cleaned(self.session):
+            return None
         row = (
             await self.session.execute(
                 sa.select(
