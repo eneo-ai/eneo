@@ -125,11 +125,12 @@ AssertionError: Disposable Flow worker did not report its exact owned queue with
 WARNING:root:OIDC_REDIRECT_GRACE_PERIOD_SECONDS (900) exceeds state TTL (600). ...
 ```
 
-The disposable worker the test boots did not announce its queue inside the fixture's 30 s budget; the
-run's first assertion (`create_response.status_code == 201`) was never reached. The suite ran while
-both lane stacks were acquiring and an Astra gate was running on the same host. The file re-run alone
-on the idle host passed (2 passed). This is the same startup-budget failure the program has on record
-as its one known integration flake; nothing in this branch touches worker startup, dispatch or
+The test creates and reads back a queued run first (those assertions passed), then starts the
+disposable worker, which did not announce its queue inside the readiness helper's 30 s budget. The
+suite ran while both lane stacks were acquiring and an Astra gate was running on the same host;
+host contention is the inferred cause, not a proven one. The file re-run alone on the idle host
+passed (2 passed). This matches the startup-budget failure the program has on record as its one
+known integration flake; nothing in this branch touches worker startup, dispatch or
 reconciliation.
 
 Ledger provenance: `observations.json` was re-extracted with lane-qualified bundle paths after a
