@@ -1256,3 +1256,62 @@ def test_rejected_internal_call_keeps_external_sibling_dispatchable():
         "tool_call_id": "invalid",
         "content": '{"activated": false, "unavailable": true}',
     }
+
+
+def test_provider_round_reports_an_outcome_per_activation_call():
+    runtime = SkillActivationRuntime.create(
+        base_instructions="Base",
+        skills=(
+            _skill(
+                key="skill-1",
+                name="Skill 1",
+                description="Procedure 1",
+                position=0,
+                instructions="Body 1",
+                initially_active=False,
+            ),
+        ),
+        blocked_keys=frozenset(),
+        selective_activation_enabled=True,
+        max_activations_per_turn=MAX_SKILL_ACTIVATIONS_PER_TURN,
+        context_share_percent=100,
+        model_route="openai/gpt-4o",
+        max_input_tokens=1_000,
+        supports_tool_calling=True,
+    )
+    messages: list[dict[str, object]] = [
+        {"role": "system", "content": "Base"},
+        {"role": "user", "content": "Question"},
+    ]
+    calls = (
+        ProviderToolCall(
+            call_id="activate-1",
+            name=SKILL_ACTIVATION_TOOL_NAME,
+            arguments=json.dumps({"skill_key": "skill-1"}),
+        ),
+        ProviderToolCall(
+            call_id="activate-2",
+            name=SKILL_ACTIVATION_TOOL_NAME,
+            arguments=json.dumps({"skill_key": "missing"}),
+        ),
+    )
+
+    with patch(
+        "eneo.completion_models.domain.skill_activation.measure_provider_input_tokens",
+        return_value=TokenCount(tokens=900, source=TokenCountSource.LITELLM),
+    ):
+        application = runtime.apply_provider_tool_calls(calls=calls, messages=messages)
+
+    assert [
+        (o.call_id, o.activation_key, o.display_name, o.status, o.reason)
+        for o in application.outcomes
+    ] == [
+        ("activate-1", "skill-1", "Skill 1", "activated", None),
+        (
+            "activate-2",
+            "missing",
+            None,
+            "rejected",
+            SkillActivationRejectionReason.UNKNOWN_KEY,
+        ),
+    ]

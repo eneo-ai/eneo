@@ -76,6 +76,7 @@
           variant="destructive"
           href={localizeHref("/logout")}
           padding="icon-leading"
+          data-sveltekit-preload-data="false"
         >
           <IconLogout />
           {m.logout()}</Button

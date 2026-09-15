@@ -10,9 +10,10 @@
 
   type Props = {
     model: CompletionModel;
+    class?: string;
   };
 
-  let { model }: Props = $props();
+  let { model, class: className }: Props = $props();
 
   // Org admins can hide model prices from users; default to showing them.
   const {
@@ -35,7 +36,10 @@
 </script>
 
 <aside
-  class="bg-popover/95 ring-foreground/10 no-scrollbar hidden max-h-[22.25rem] w-80 flex-col overflow-y-auto rounded-xl p-4 shadow-lg ring-1 backdrop-blur-xl sm:flex"
+  class={[
+    "no-scrollbar hidden max-h-[22.25rem] w-80 flex-col overflow-y-auto p-4 sm:flex",
+    className
+  ]}
   aria-label={`${m.model_info_for()} ${model.nickname ?? model.name}`}
 >
   <div class="flex items-center gap-2.5">
@@ -50,7 +54,7 @@
 
   <p class="text-muted-foreground mt-3 text-[13px] leading-5">{description}</p>
 
-  <dl class="mt-3 divide-y text-xs">
+  <dl class="divide-border mt-3 divide-y text-xs">
     <div class="flex items-center justify-between gap-4 py-2.5">
       <dt class="text-muted-foreground">{m.model_context_label()}</dt>
       <dd class="text-right text-[13px] font-medium tabular-nums">{contextWindow}</dd>
@@ -81,7 +85,7 @@
 
   {#if model.vision || model.reasoning || model.supports_tool_calling}
     <div class="mt-3">
-      <p class="text-muted-foreground mb-2 text-[10px] font-semibold tracking-wider uppercase">
+      <p class="text-muted-foreground mb-2 text-[11px] font-semibold tracking-wider uppercase">
         {m.model_detail_capabilities()}
       </p>
       <div class="flex flex-wrap gap-1.5">

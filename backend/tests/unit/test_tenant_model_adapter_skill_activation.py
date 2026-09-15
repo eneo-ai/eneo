@@ -742,6 +742,19 @@ async def test_streaming_activates_skill_without_mcp_proxy() -> None:
     follow_up_messages = completion_call.await_args.kwargs["messages"]
     assert "Use the exact payroll procedure." in follow_up_messages[0]["content"]
     assert follow_up_messages[-2]["content"] == ("I will load the payroll procedure.")
+    # The activation is surfaced to the chat as a step on the built-in
+    # ``skills`` server so the UI can show which Skill was loaded.
+    activation_steps = [
+        metadata
+        for completion in output
+        if completion.response_type is ResponseType.TOOL_CALL
+        for metadata in completion.tool_calls_metadata or []
+        if metadata.server_name == "skills"
+    ]
+    assert [
+        (s.tool_call_id, s.tool_name, s.result_status, s.mcp_tool_name)
+        for s in activation_steps
+    ] == [("activation-1", "skill-1", "completed", SKILL_ACTIVATION_TOOL_NAME)]
 
 
 @pytest.mark.asyncio
@@ -1246,4 +1259,77 @@ def test_reserved_activation_tool_collision_is_dropped_during_fallback() -> None
     assert tools == []
     assert runtime.snapshot().rejected[0].reason is (
         SkillActivationRejectionReason.RESERVED_TOOL_COLLISION
+    )
+
+
+@pytest.mark.asyncio
+async def test_streaming_reports_always_active_skills_as_steps() -> None:
+    adapter = _adapter()
+    runtime = SkillActivationRuntime.create(
+        base_instructions="Base instructions",
+        skills=(
+            FrozenSkillInstruction(
+                activation_key="skill-1",
+                binding=ResolvedSkillBinding(
+                    skill_id=uuid4(),
+                    skill_revision_id=uuid4(),
+                    current_revision_id=uuid4(),
+                    skill_space_id=uuid4(),
+                    slug="payroll",
+                    revision_number=2,
+                    current_revision_number=2,
+                    display_name="Payroll",
+                    description="Use for payroll questions",
+                    instructions="Use the exact payroll procedure.",
+                    content_digest="a" * 64,
+                    position=0,
+                    source=SkillBindingSource.SPACE,
+                ),
+                initially_active=True,
+            ),
+        ),
+        blocked_keys=frozenset(),
+        selective_activation_enabled=False,
+        max_activations_per_turn=2,
+        context_share_percent=100,
+        model_route="openai/test-model",
+        max_input_tokens=128_000,
+        supports_tool_calling=True,
+    )
+    prepared = PreparedModelStream(
+        stream=_AsyncChunkStream([_text_chunk("Payroll answer")]),
+        messages=[
+            {"role": "system", "content": "Base instructions"},
+            {"role": "user", "content": "Help with payroll"},
+        ],
+        kwargs={"tools": []},
+        mcp_proxy=None,
+        skill_runtime=runtime,
+        has_tools=False,
+    )
+
+    output = [
+        completion
+        async for completion in adapter.iterate_stream(stream=prepared, model_kwargs={})
+    ]
+
+    steps = [
+        metadata
+        for completion in output
+        if completion.response_type is ResponseType.TOOL_CALL
+        for metadata in completion.tool_calls_metadata or []
+        if metadata.server_name == "skills"
+    ]
+    expected = runtime.initially_active_skills()
+    assert expected
+    assert [
+        (s.tool_name, s.title, s.result_status, s.mcp_tool_name) for s in steps
+    ] == [
+        (key, name, "completed", SKILL_ACTIVATION_TOOL_NAME) for key, name in expected
+    ]
+    assert (
+        output.index(
+            next(c for c in output if c.response_type is ResponseType.TOOL_CALL)
+        )
+        == 0
     )

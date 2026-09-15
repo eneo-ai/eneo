@@ -1,4 +1,5 @@
 import type { ConversationMessage } from "@eneo/eneo-js";
+import { m } from "$lib/paraglide/messages";
 
 export type DebugTurnOption = {
   messageId: string;
@@ -102,8 +103,13 @@ export function projectTurnDebugDetails(
   const streamingToolCalls = (message as StreamingConversationMessage).mcp_tool_calls;
   const tools = (streamingToolCalls ?? message.tool_calls ?? []).map((tool, index) => ({
     order: index + 1,
-    serverName: tool.server_name,
-    toolName: tool.mcp_tool_name ?? tool.tool_name,
+    serverName: tool.server_name === "skills" ? m.skills() : tool.server_name,
+    // A Skill activation is more useful by Skill name than by the internal
+    // activation tool identifier.
+    toolName:
+      tool.server_name === "skills"
+        ? `Skill · ${tool.title ?? tool.tool_name}`
+        : (tool.mcp_tool_name ?? tool.tool_name),
     status:
       tool.result_status ??
       (tool.approved === false ? "rejected" : tool.approved === true ? "approved" : null),

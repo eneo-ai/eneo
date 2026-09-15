@@ -14,7 +14,8 @@
   import { getChatService } from "../../ChatService.svelte";
   import { chatCapabilityAvailable } from "../../chatCapabilities";
   import { getAppContext } from "$lib/core/AppContext";
-  import type { Snippet } from "svelte";
+  import { untrack, type Snippet } from "svelte";
+  import { track } from "$lib/core/helpers/track";
   import { m } from "$lib/paraglide/messages";
 
   type Props = {
@@ -81,6 +82,23 @@
 
   $effect(() => {
     updateScroll(chat.currentConversation);
+  });
+
+  // Keep the streaming answer in view and settle on the finished result,
+  // unless the reader has scrolled up (then the "scroll to bottom" button
+  // stays as the opt-in).
+  $effect(() => {
+    const last = chat.currentConversation.messages?.at(-1);
+    const streaming = chat.askQuestion.isLoading;
+    track(last?.answer?.length ?? 0);
+    untrack(() => {
+      if (!scrollContainer || showScrollToBottom) return;
+      if (streaming) {
+        scrollContainer.scrollTop = scrollContainer.scrollHeight;
+      } else {
+        scrollToBottom();
+      }
+    });
   });
 
   let isDragging = $state(false);

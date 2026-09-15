@@ -75,8 +75,13 @@
 
 <div class="bg-tertiary fixed inset-x-0 h-[8.275rem] transition-all duration-700 ease-in-out"></div>
 
+<!-- Hover preloading is scoped to the authenticated shell: its navigation
+     loads are reads, so a hovered link fetches the next page's data early.
+     Public pages keep the tap default because their loads (logout, login with
+     clear_cookies) change cookies. In-shell links to those pages opt out. -->
 <div
   class="bg-secondary mx-auto flex min-h-[100svh] w-full max-w-[2000px] flex-col p-0 md:px-4 md:pt-3"
+  data-sveltekit-preload-data="hover"
 >
   <header
     class:max-h-0={!$showHeader}

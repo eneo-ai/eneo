@@ -12846,6 +12846,18 @@ export interface components {
       /** Blockers */
       blockers: components["schemas"]["FileUsageSummary"][];
     };
+    /** FilePolicyInput */
+    FilePolicyInput: {
+      /** Inline File Text */
+      inline_file_text: boolean;
+    };
+    /** FilePolicyPublic */
+    FilePolicyPublic: {
+      /** Configured */
+      configured: boolean;
+      /** Inline File Text */
+      inline_file_text: boolean | null;
+    };
     /** FilePublic */
     FilePublic: {
       /** Created At */
@@ -12932,6 +12944,7 @@ export interface components {
       mcp_restriction: components["schemas"]["McpRestrictionPublic"];
       prompt_enforcement: components["schemas"]["PromptEnforcementPublic"];
       reasoning_policy: components["schemas"]["ReasoningPolicyPublic"];
+      file_policy: components["schemas"]["FilePolicyPublic"];
       skills: components["schemas"]["SkillsPolicyPublic"];
       /** Updated At */
       updated_at: string | null;
@@ -12944,6 +12957,7 @@ export interface components {
       mcp_restriction?: components["schemas"]["McpRestrictionInput"] | null;
       prompt_enforcement?: components["schemas"]["PromptEnforcementInput"] | null;
       reasoning_policy?: components["schemas"]["ReasoningPolicyInput"] | null;
+      file_policy?: components["schemas"]["FilePolicyInput"] | null;
       skills?: components["schemas"]["SkillsPolicyInput"] | null;
     };
     /** GroupChatAssistantPublic */

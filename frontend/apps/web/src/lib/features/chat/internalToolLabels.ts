@@ -149,9 +149,17 @@ function capabilityPurpose(purpose: string | null | undefined): CapabilityPurpos
   return purpose && purpose in CAPABILITY_STEPS ? (purpose as CapabilityPurpose) : null;
 }
 
+/**
+ * Skill activations arrive as steps on this pseudo-server: the tool name is
+ * the activation key and the title is the Skill's display name. The chat
+ * renders them with their own pill (SkillActivationStep); these helpers only
+ * cover the labels shared with other built-in steps.
+ */
+export const SKILLS_SERVER = "skills";
+
 /** Whether a server name refers to one of Eneo's built-in loopback servers. */
 export function isInternalServer(serverName: string): boolean {
-  return serverName in INTERNAL_SERVERS;
+  return serverName === SKILLS_SERVER || serverName in INTERNAL_SERVERS;
 }
 
 /**
@@ -192,6 +200,9 @@ export function toolDisplayName(
   args?: ToolArgs,
   purpose?: string | null
 ): string {
+  if (serverName === SKILLS_SERVER) {
+    return m.tool_activate_skill({ name: title ?? toolName });
+  }
   const internal = INTERNAL_SERVERS[serverName]?.tools[toolName]?.running(args);
   if (internal) return internal;
   const capability = capabilityPurpose(purpose);
@@ -204,6 +215,7 @@ export function toolDisplayName(
  * capabilities by their localized name, external general servers by name.
  */
 export function serverDisplayName(serverName: string, purpose?: string | null): string {
+  if (serverName === SKILLS_SERVER) return m.skills();
   const internal = INTERNAL_SERVERS[serverName]?.label();
   if (internal) return internal;
   const capability = capabilityPurpose(purpose);

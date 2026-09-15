@@ -4,6 +4,7 @@
   import McpImageAttachments from "./McpImageAttachments.svelte";
   import ReasoningTrace from "./ReasoningTrace.svelte";
   import InternalToolStep from "./InternalToolStep.svelte";
+  import SkillActivationStep from "./SkillActivationStep.svelte";
   import { dynamicColour } from "$lib/core/colours";
   import { IconSpeechBubble } from "@eneo/icons/speech-bubble";
   import { formatEmojiTitle } from "$lib/core/formatting/formatEmojiTitle";
@@ -14,7 +15,8 @@
     internalToolDoneLabel,
     isBuiltinToolCall,
     serverDisplayName,
-    toolDisplayName
+    toolDisplayName,
+    SKILLS_SERVER
   } from "../../internalToolLabels";
   import { getAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte";
   import { getMessageContext } from "../../MessageContext.svelte";
@@ -142,6 +144,7 @@
           internalToolDoneLabel(tc.tool_name, tc.server_name, tc.arguments, tc.purpose) ?? toolName,
         serverName: serverDisplayName(tc.server_name, tc.purpose),
         detail: readFileDetail(tc) ?? capabilityProviderDetail(tc),
+        skillName: tc.server_name === SKILLS_SERVER ? (tc.title ?? tc.tool_name) : null,
         args: tc.arguments,
         toolCallId: tc.tool_call_id,
         status,
@@ -317,18 +320,27 @@
         {#if !folded || openInternalRuns.has(runIndex)}
           <div class="flex flex-col gap-0.5 {folded ? 'pl-7' : ''}">
             {#each visibleSteps as step, i (step.toolCallId ?? i)}
-              <InternalToolStep
-                runningLabel={step.toolName}
-                doneLabel={step.doneLabel}
-                serverName={step.serverName}
-                detail={step.detail}
-                args={step.args}
-                toolCallId={step.toolCallId}
-                status={step.status}
-                onLoadResult={step.toolCallId
-                  ? () => chat.getToolCallResult(step.toolCallId!)
-                  : undefined}
-              />
+              {#if step.skillName !== null}
+                <SkillActivationStep
+                  name={step.skillName}
+                  live={isStreamingTurn}
+                  args={step.args}
+                  status={step.status}
+                />
+              {:else}
+                <InternalToolStep
+                  runningLabel={step.toolName}
+                  doneLabel={step.doneLabel}
+                  serverName={step.serverName}
+                  detail={step.detail}
+                  args={step.args}
+                  toolCallId={step.toolCallId}
+                  status={step.status}
+                  onLoadResult={step.toolCallId
+                    ? () => chat.getToolCallResult(step.toolCallId!)
+                    : undefined}
+                />
+              {/if}
             {/each}
           </div>
         {/if}

@@ -5,7 +5,7 @@
 </script>
 
 {#if token.tokens}
-  {#each token.tokens as child (child)}
+  {#each token.tokens as child, i (i)}
     <Self token={child}></Self>
   {/each}
 {:else}

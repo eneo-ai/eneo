@@ -898,13 +898,13 @@ export class ChatService {
         }
       } finally {
         if (this.#streamGen === streamGen) {
+          // Flush the frame-buffered text first, then anything still held back
+          // as a possible <inref>, so the answer keeps its arrival order.
+          this.#finalizeStream();
           if (ref && inrefBuffer) {
             ref.answer += inrefBuffer;
             inrefBuffer = "";
           }
-
-          // Flush any remaining buffered content after stream completes
-          this.#finalizeStream();
           this.#activeDiagnosticsStreamGeneration = null;
           if (this.debugPanelOpen) {
             void this.#confirmPendingDiagnosticsMessages();
