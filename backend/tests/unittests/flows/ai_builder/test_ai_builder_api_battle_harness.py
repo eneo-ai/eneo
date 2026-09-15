@@ -9121,9 +9121,10 @@ def test_suite_demand_for_the_frozen_corpus_exceeds_the_default_ceilings() -> No
         cases=cases, repetitions=3, timeout_seconds=900
     )
 
-    # 2026-09-15: the two saved-step edit cases add their seeding requests
-    # (3 fixed + 2 per seeded step) on top of the shared per-observation cost.
-    assert demand["total"] == 11_926
+    # 2026-09-15: the saved-step edit cases add their seeding requests
+    # (3 fixed + 2 per seeded step) on top of the shared per-observation cost;
+    # the reference-rename case on the 10-step fixture added 120 (3 reps).
+    assert demand["total"] == 12_046
     assert demand["total"] > 10_000
 
 

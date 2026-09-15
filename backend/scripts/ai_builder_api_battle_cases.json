@@ -11122,6 +11122,14 @@
       "domain": "municipal_permit",
       "cohorts": ["edit_chain"],
       "edit": {"seed_flow_fixture": "edit_chain_30.json", "target_step_order": 3}
+    },
+    {
+      "id": "edit_chain_10_reference",
+      "prompt": "Döp om det här steget till samma namn som steg 1 följt av \" - kontroll\". Ändra inget annat.",
+      "complexity": "saved_step_edit",
+      "domain": "municipal_permit",
+      "cohorts": ["edit_reference"],
+      "edit": {"seed_flow_fixture": "edit_chain_10.json", "target_step_order": 3}
     }
   ]
 }
