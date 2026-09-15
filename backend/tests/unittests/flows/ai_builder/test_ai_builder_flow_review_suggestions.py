@@ -805,6 +805,67 @@ def test_a_differing_recorded_instruction_keeps_its_own_run_row(investigation):
     )
 
 
+def test_structural_claims_need_a_completed_run_but_a_missing_check_may_cite_a_failure():
+    sample = _sample()
+    failed_run = sample.packet.cohort.failed_run_ids[0]
+    completed_run = sample.packet.cohort.completed_run_ids[0]
+    # The failed run recorded step 1 whole (prompt and output): its evidence
+    # is complete for what it shows, it is only not a working run.
+    sample = sample.model_copy(
+        update={
+            "excerpts": [
+                *(e for e in sample.excerpts if e.run_id != failed_run),
+                ReviewSampleExcerpt(
+                    run_id=failed_run,
+                    step_order=1,
+                    field="prompt",
+                    availability="included",
+                    text="Sammanfatta ärendet.",
+                    recorded_chars=20,
+                ),
+                ReviewSampleExcerpt(
+                    run_id=failed_run,
+                    step_order=1,
+                    field="output",
+                    availability="included",
+                    text="Fel: tomt underlag.",
+                    recorded_chars=19,
+                ),
+            ]
+        }
+    )
+    failed_index = (
+        sample.runs.index(next(r for r in sample.runs if r.run_id == failed_run)) + 1
+    )
+    completed_index = (
+        sample.runs.index(next(r for r in sample.runs if r.run_id == completed_run)) + 1
+    )
+    only_failed = dict(
+        kind="duplicated_work",
+        step_orders=[1, 2],
+        rationale="Samma arbete.",
+        sources=[
+            {"source_id": f"run{failed_index}.step1.prompt", "quote": "Sammanfatta"}
+        ],
+    )
+    assert parse_review_suggestions(_answer(only_failed), sample=sample).problems == (
+        "suggestion_1:optimization_claim_cites_only_failed_runs",
+    )
+    with_completed = dict(
+        only_failed,
+        sources=[
+            {"source_id": f"run{completed_index}.step2.prompt", "quote": "Sammanfatta"},
+        ],
+    )
+    assert (
+        parse_review_suggestions(_answer(with_completed), sample=sample).problems == ()
+    )
+    missing_check = dict(only_failed, kind="missing_check", step_orders=[1])
+    assert (
+        parse_review_suggestions(_answer(missing_check), sample=sample).problems == ()
+    )
+
+
 def test_shared_recorded_instructions_keep_per_run_citation_grounding():
     sample = _repeated_instruction_sample()
     prompt = 'Citera "ärendet".\nNästa rad\u2028slut'

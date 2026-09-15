@@ -58,6 +58,8 @@ ExcerptAvailability = Literal[
     "omitted_by_reader",
     "not_recorded",
     "unavailable_mapped_prompt",
+    # A mapped step stores a summary of its calls where the input text goes.
+    "unavailable_mapped_input",
     "unavailable_template_fill",
 ]
 
@@ -208,9 +210,7 @@ def excerpts_for_run(
         if step_orders is not None and step.step_order not in step_orders:
             continue
         record = records_by_order.get(step.step_order)
-        mapped = record is not None and _is_mapped_output(
-            record.get("output_payload_json")
-        )
+        mapped = record is not None and _is_mapped_record(record)
         for field in ("prompt", "input", "output"):
             excerpts.append(
                 _excerpt(
@@ -251,6 +251,8 @@ def _excerpt(
             return unavailable("unavailable_template_fill")
         if mapped:
             return unavailable("unavailable_mapped_prompt")
+    if field == "input" and mapped:
+        return unavailable("unavailable_mapped_input")
     if record is None:
         return unavailable(missing_record_availability)
     recorded = _recorded_text(record, field)
@@ -427,11 +429,23 @@ def quoted_excerpt(text: str | None) -> str:
     return quoted
 
 
-def _is_mapped_output(payload: object) -> bool:
-    if not isinstance(payload, dict):
-        return False
-    mapping = cast(dict[str, object], payload)
-    return mapping.get("item_map_execution_mode") == "per_item"
+def _is_mapped_record(record: Mapping[str, Any]) -> bool:
+    """Whether the step ran as several provider calls (per item or per source).
+
+    A mapped step records only its first call's instruction and a summary in
+    place of the input text; neither is the evidence of any one call.
+    """
+    output = record.get("output_payload_json")
+    if isinstance(output, dict):
+        output_mapping = cast(dict[str, object], output)
+        if output_mapping.get("item_map_execution_mode") == "per_item":
+            return True
+    parameters = record.get("model_parameters_json")
+    if isinstance(parameters, dict):
+        parameters_mapping = cast(dict[str, object], parameters)
+        if parameters_mapping.get("runtime_input_execution_mode") == "per_source":
+            return True
+    return False
 
 
 def _recorded_text(

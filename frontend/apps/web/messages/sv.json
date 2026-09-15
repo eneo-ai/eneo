@@ -6982,6 +6982,8 @@
   "ai_builder_review_prepare_message": "Förbered en ändring som åtgärdar: {finding}",
   "ai_builder_review_completeness": "{incomplete} körningar saknade resultat för något steg.",
   "ai_builder_review_completeness_one": "1 körning saknade resultat för något steg.",
+  "ai_builder_review_usage_withheld_one": "1 körning saknade kvitto på tokenförbrukning för något steg; andelar av tokens beräknades inte för den.",
+  "ai_builder_review_usage_withheld": "{count} körningar saknade kvitto på tokenförbrukning för något steg; andelar av tokens beräknades inte för dem.",
   "ai_builder_review_omitted": "{count} körningar lästes inte (utanför urvalet, äldre än spårningen eller utan behörighet).",
   "ai_builder_review_step": "steg {number}",
   "ai_builder_review_step_labelled": "steg {number} ({label})",

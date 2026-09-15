@@ -6982,6 +6982,8 @@
   "ai_builder_review_prepare_message": "Prepare a change that addresses: {finding}",
   "ai_builder_review_completeness": "{incomplete} runs were missing results for some step.",
   "ai_builder_review_completeness_one": "1 run was missing results for some step.",
+  "ai_builder_review_usage_withheld_one": "1 run had no provider receipt for some step's token usage; token shares were not computed for it.",
+  "ai_builder_review_usage_withheld": "{count} runs had no provider receipt for some step's token usage; token shares were not computed for them.",
   "ai_builder_review_omitted": "{count} runs were not read (outside the selection, older than tracking, or not permitted).",
   "ai_builder_review_step": "step {number}",
   "ai_builder_review_step_labelled": "step {number} ({label})",

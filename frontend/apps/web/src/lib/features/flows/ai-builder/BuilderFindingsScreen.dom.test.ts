@@ -112,6 +112,29 @@ describe("BuilderFindingsScreen", () => {
     });
   });
 
+  it("explains withheld token measurements in the completeness footer", () => {
+    const packet = makePacket();
+    render(BuilderFindingsScreen, {
+      review: {
+        status: "ready",
+        packet: {
+          ...packet,
+          facts: packet.facts.map((fact) =>
+            fact.kind === "evidence_completeness"
+              ? { ...fact, runs_missing_step_results: 0, runs_with_usage_withheld: 2 }
+              : fact
+          )
+        }
+      },
+      onprepare: vi.fn(),
+      onclose: vi.fn(),
+      onretry: vi.fn()
+    });
+    const footer = screen.getByRole("contentinfo").textContent ?? "";
+    expect(footer).toContain(m.ai_builder_review_usage_withheld({ count: "2" }));
+    expect(footer).not.toContain(m.ai_builder_review_completeness_one());
+  });
+
   it("hides a finding for this flow and offers to show it again", async () => {
     const { unmount } = render(BuilderFindingsScreen, {
       review: { status: "ready", packet: makePacket() },

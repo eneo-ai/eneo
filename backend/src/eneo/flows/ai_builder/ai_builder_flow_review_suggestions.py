@@ -281,6 +281,7 @@ _AVAILABILITY_SV = {
     "omitted_by_reader": "inte läst av bevisläsaren – inte bevis",
     "not_recorded": "inte inspelad i körningen",
     "unavailable_mapped_prompt": "stegets prompt gäller bara första posten – inte bevis",
+    "unavailable_mapped_input": "stegets indata är en sammanfattning av flera anrop – inte bevis",
     "unavailable_template_fill": "mallfyllning spelar inte in någon prompt",
 }
 
@@ -384,6 +385,10 @@ class ParsedReviewSuggestions:
 
 
 ABSENCE_KINDS: frozenset[str] = frozenset({"missing_check", "step_not_useful"})
+# Claims about the structure of a working flow: a failed run cannot carry them
+# alone. A drift claim is about one step's own complete output and is admitted
+# wherever that output is complete, so it is not listed here.
+OPTIMIZATION_KINDS: frozenset[str] = frozenset({"duplicated_work", "step_not_useful"})
 
 
 def parse_review_suggestions(
@@ -432,6 +437,9 @@ class _SampleIndex:
     fact_ids: frozenset[str]
     excerpts_by_source_id: dict[str, ReviewSampleExcerpt]
     complete_outputs: frozenset[tuple[UUID, int]]
+    # Runs admitted as evidence of how the flow behaves when it succeeds. A
+    # failed run is evidence for what failed, never for what could be cut.
+    completed_run_ids: frozenset[UUID]
 
     @classmethod
     def build(cls, sample: FlowReviewSample) -> "_SampleIndex":
@@ -454,6 +462,12 @@ class _SampleIndex:
                 for excerpt in sample.excerpts
                 if excerpt.field == "output" and excerpt.availability == "included"
             ),
+            completed_run_ids=frozenset(
+                item.run_id
+                for item in sample.packet.cohort.admission
+                if item.status == "completed"
+            )
+            | frozenset(sample.packet.cohort.completed_run_ids),
         )
 
 
@@ -543,6 +557,13 @@ def _parse_suggestion(
             return "drift_claim_without_output_source"
         if output != "included":
             return "drift_claim_cites_incomplete_output"
+    if kind in OPTIMIZATION_KINDS and not any(
+        source.run_id in index.completed_run_ids for source in sources
+    ):
+        # A failed run is evidence for what failed. A claim about what a
+        # working flow does twice or does not use needs at least one run that
+        # completed; a quote from a failed run cannot carry it alone.
+        return "optimization_claim_cites_only_failed_runs"
     return FlowReviewSuggestion(
         kind=cast(FlowReviewSuggestionKind, kind),
         step_orders=sorted(set(steps)),

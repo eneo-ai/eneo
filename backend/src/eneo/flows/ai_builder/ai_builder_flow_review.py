@@ -118,12 +118,43 @@ class FlowReviewOmittedRuns(BaseModel):
     overflow: int = 0
 
 
+TokenShareAdmission = Literal[
+    "admitted", "withheld_usage_not_measured", "not_applicable"
+]
+LatencyShareAdmission = Literal["admitted", "withheld_timing_missing", "not_applicable"]
+ConsumptionAdmission = Literal[
+    "admitted", "withheld_lineage_untracked", "not_applicable"
+]
+ErrorFactsAdmission = Literal["admitted", "not_applicable"]
+
+
+class FlowReviewRunAdmission(BaseModel):
+    """What one read run may prove, decided once from persisted metadata.
+
+    The reducers, the judge's prompt, the source validation of suggestions
+    and the investigation rereads all read this one result. A withheld
+    family names why; ``not_applicable`` means the run's status never
+    supports that family (a failed run has no token share, a completed run
+    has no error facts).
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    run_id: UUID
+    status: Literal["completed", "failed"]
+    token_share: TokenShareAdmission
+    latency_share: LatencyShareAdmission
+    consumption: ConsumptionAdmission
+    error_facts: ErrorFactsAdmission
+
+
 class FlowReviewCohort(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     completed_run_ids: list[UUID]
     failed_run_ids: list[UUID]
     omitted: FlowReviewOmittedRuns
+    admission: list[FlowReviewRunAdmission] = []
 
 
 class _FlowReviewFact(BaseModel):
@@ -164,6 +195,9 @@ class EvidenceCompletenessFact(_FlowReviewFact):
     runs_with_all_step_results: int
     runs_missing_step_results: int
     runs_without_lineage: int
+    # Completed runs whose token share was withheld because at least one
+    # step's spend has no provider-reported receipt.
+    runs_with_usage_withheld: int = 0
 
 
 FlowReviewFact = Annotated[
@@ -329,6 +363,7 @@ _EXCERPT_AVAILABILITY_SV: dict[str, str] = {
     "omitted_by_reader": "inte läst av bevisläsaren, inte bevis",
     "not_recorded": "inte inspelad i körningen",
     "unavailable_mapped_prompt": "instruktionen gäller bara första posten, inte bevis",
+    "unavailable_mapped_input": "indatan är en sammanfattning av flera anrop, inte bevis",
     "unavailable_template_fill": "mallfyllning spelar inte in någon instruktion",
 }
 _RENDERED_WITH_TEXT: frozenset[str] = frozenset(
@@ -888,6 +923,12 @@ def render_review_evidence(
                 f"(medel över {fact.run_count} körningar)."
             )
         else:
+            if fact.runs_with_usage_withheld:
+                lines.append(
+                    f"- Tokenandelar utelämnade för {fact.runs_with_usage_withheld} "
+                    "lyckade körningar: minst ett stegs förbrukning saknar kvitto "
+                    "från leverantören. Ingen slutsats om tokens för dem."
+                )
             lines.append(
                 f"- Underlag: {fact.runs_with_all_step_results} körningar med "
                 f"resultat för alla steg, {fact.runs_missing_step_results} utan, "
@@ -987,6 +1028,81 @@ def finding_id(
     return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
 
 
+def review_run_admission(
+    *,
+    steps: Sequence[RuntimeStep],
+    completed_run_ids: Sequence[UUID],
+    failed_run_ids: Sequence[UUID],
+    metrics: Sequence[FlowStepResultMetrics],
+    lineage: Sequence[FlowStepLineage],
+) -> list[FlowReviewRunAdmission]:
+    """Decide once, per read run, which fact families it may support.
+
+    Token share needs a measured spend for every step: a provider-reported
+    receipt for the current attempt, or a known zero for a step that never
+    calls a completion model. Latency share needs timing for every step.
+    Consumption needs tracked lineage for every step. Error facts belong to
+    failed runs only.
+    """
+    ordered_steps = sorted(steps, key=lambda step: step.step_order)
+    step_ids = {step.step_id for step in ordered_steps}
+    metrics_by_run: dict[UUID, dict[UUID, FlowStepResultMetrics]] = defaultdict(dict)
+    for metric in metrics:
+        if metric.step_id in step_ids:
+            metrics_by_run[metric.flow_run_id][metric.step_id] = metric
+    tracked_steps_by_run: dict[UUID, set[UUID]] = defaultdict(set)
+    for item in lineage:
+        if item.edges.status == "tracked" and item.edges.aggregate is not None:
+            tracked_steps_by_run[item.flow_run_id].add(item.step_id)
+
+    admission: list[FlowReviewRunAdmission] = []
+    for status, run_ids in (
+        ("completed", completed_run_ids),
+        ("failed", failed_run_ids),
+    ):
+        for run_id in run_ids:
+            per_step = metrics_by_run.get(run_id, {})
+            if status == "failed":
+                admission.append(
+                    FlowReviewRunAdmission(
+                        run_id=run_id,
+                        status="failed",
+                        token_share="not_applicable",
+                        latency_share="not_applicable",
+                        consumption="not_applicable",
+                        error_facts="admitted",
+                    )
+                )
+                continue
+            tokens_measured = all(
+                _tokens(per_step.get(step.step_id), step) is not None
+                for step in ordered_steps
+            )
+            timing_measured = all(
+                _seconds(per_step.get(step.step_id)) is not None
+                for step in ordered_steps
+            )
+            admission.append(
+                FlowReviewRunAdmission(
+                    run_id=run_id,
+                    status="completed",
+                    token_share=(
+                        "admitted" if tokens_measured else "withheld_usage_not_measured"
+                    ),
+                    latency_share=(
+                        "admitted" if timing_measured else "withheld_timing_missing"
+                    ),
+                    consumption=(
+                        "admitted"
+                        if step_ids <= tracked_steps_by_run.get(run_id, set())
+                        else "withheld_lineage_untracked"
+                    ),
+                    error_facts="not_applicable",
+                )
+            )
+    return admission
+
+
 def review_facts(
     *,
     flow_id: UUID,
@@ -996,17 +1112,24 @@ def review_facts(
     failed_run_ids: Sequence[UUID],
     metrics: Sequence[FlowStepResultMetrics],
     lineage: Sequence[FlowStepLineage],
+    admission: Sequence[FlowReviewRunAdmission],
 ) -> list[
     OutputNotObservedConsumedFact
     | RepeatedErrorCodeFact
     | StepShareFact
     | EvidenceCompletenessFact
 ]:
-    """The deterministic facts, in a fixed order, from persisted metadata alone."""
+    """The deterministic facts, in a fixed order, from persisted metadata alone.
+
+    ``admission`` (from ``review_run_admission`` over the same inputs) decides
+    which runs each fact family reduces over.
+    """
     ordered_steps = sorted(steps, key=lambda step: step.step_order)
     step_ids = {step.step_id for step in ordered_steps}
     completed = set(completed_run_ids)
     failed = set(failed_run_ids)
+    admission_by_run = {item.run_id: item for item in admission}
+    steps_by_id = {step.step_id: step for step in ordered_steps}
 
     def _id(
         kind: str, step_id: UUID | None = None, error_code: str | None = None
@@ -1047,7 +1170,12 @@ def review_facts(
         for run_id, tracked in tracked_steps_by_run.items()
         if step_ids <= tracked
     }
-    observed_for_consumption = completed & runs_with_lineage
+    observed_for_consumption = {
+        run_id
+        for run_id in completed
+        if (item := admission_by_run.get(run_id)) is not None
+        and item.consumption == "admitted"
+    }
     if observed_for_consumption and len(ordered_steps) > 1:
         consumed_step_ids: set[UUID] = set()
         for run_id in observed_for_consumption:
@@ -1091,27 +1219,36 @@ def review_facts(
                     )
                 )
 
-    # Token and latency share over completed runs with a measurable total.
+    # Token and latency share over the completed runs admitted for each.
     if len(ordered_steps) > 1:
-        for kind, measure in (
-            ("token_share", _tokens),
-            ("latency_share", _seconds),
+        for kind, family in (
+            ("token_share", "token_share"),
+            ("latency_share", "latency_share"),
         ):
             shares: dict[UUID, list[float]] = defaultdict(list)
             for run_id in completed:
-                per_step = {
-                    step_id: measure(metric)
-                    for step_id, metric in metrics_by_run.get(run_id, {}).items()
-                }
-                # Only a run measured on every step yields a share; a missing
-                # measurement would otherwise hand its share to the others.
-                if any(per_step.get(step.step_id) is None for step in ordered_steps):
+                item = admission_by_run.get(run_id)
+                if item is None or getattr(item, family) != "admitted":
                     continue
-                total = sum(value for value in per_step.values() if value is not None)
+                per_step = metrics_by_run.get(run_id, {})
+                measured = {
+                    step.step_id: (
+                        _tokens(per_step.get(step.step_id), step)
+                        if kind == "token_share"
+                        else _seconds(per_step.get(step.step_id))
+                    )
+                    for step in ordered_steps
+                }
+                # Admission guarantees every step is measured; a run that
+                # spent nothing measurable has no shares to hand out.
+                values = [value for value in measured.values() if value is not None]
+                if len(values) != len(ordered_steps):
+                    continue
+                total = sum(values)
                 if total <= 0:
                     continue
                 for step in ordered_steps:
-                    shares[step.step_id].append((per_step[step.step_id] or 0.0) / total)
+                    shares[step.step_id].append((measured[step.step_id] or 0.0) / total)
             for step in ordered_steps:
                 samples = shares.get(step.step_id)
                 if not samples:
@@ -1142,19 +1279,41 @@ def review_facts(
             runs_with_all_step_results=runs_with_all,
             runs_missing_step_results=len(read_runs) - runs_with_all,
             runs_without_lineage=len(read_runs - runs_with_lineage),
+            runs_with_usage_withheld=sum(
+                1
+                for run_id in completed
+                if (item := admission_by_run.get(run_id)) is not None
+                and item.token_share == "withheld_usage_not_measured"
+            ),
         )
     )
+    del steps_by_id
     return facts
 
 
-def _tokens(metric: FlowStepResultMetrics) -> float | None:
-    if metric.num_tokens_input is None and metric.num_tokens_output is None:
+def _tokens(metric: FlowStepResultMetrics | None, step: RuntimeStep) -> float | None:
+    """The step's measured token spend in one run, or None when not measured.
+
+    A provider-reported receipt of the current attempt is the measurement.
+    A step that never calls a completion model spent a known zero. Anything
+    else (no receipt, an estimated or unreported count, an unresolved call)
+    is not a measurement; the runtime's own counters are never used here
+    because they fall back to local tokenization.
+    """
+    if metric is None:
         return None
-    return float((metric.num_tokens_input or 0) + (metric.num_tokens_output or 0))
+    receipt = metric.usage_receipt
+    if receipt is not None:
+        if not receipt.measured:
+            return None
+        return float(receipt.num_tokens_input + receipt.num_tokens_output)
+    if not step.may_call_completion_provider:
+        return 0.0
+    return None
 
 
-def _seconds(metric: FlowStepResultMetrics) -> float | None:
-    if metric.started_at is None or metric.finished_at is None:
+def _seconds(metric: FlowStepResultMetrics | None) -> float | None:
+    if metric is None or metric.started_at is None or metric.finished_at is None:
         return None
     return max((metric.finished_at - metric.started_at).total_seconds(), 0.0)
 
@@ -1500,6 +1659,13 @@ class AIBuilderFlowReviewService:
         lineage = await self.flow_run_repo.list_current_attempt_lineage(
             tenant_id=tenant_id, run_ids=run_ids
         )
+        admission = review_run_admission(
+            steps=steps,
+            completed_run_ids=completed,
+            failed_run_ids=failed,
+            metrics=metrics,
+            lineage=lineage,
+        )
         facts = review_facts(
             flow_id=flow_id,
             definition_checksum=definition_checksum,
@@ -1508,6 +1674,7 @@ class AIBuilderFlowReviewService:
             failed_run_ids=failed,
             metrics=metrics,
             lineage=lineage,
+            admission=admission,
         )
         return FlowReviewPacket(
             flow_id=flow_id,
@@ -1527,6 +1694,7 @@ class AIBuilderFlowReviewService:
                 completed_run_ids=completed,
                 failed_run_ids=failed,
                 omitted=FlowReviewOmittedRuns(**omitted),
+                admission=admission,
             ),
             facts=list(facts),
         )

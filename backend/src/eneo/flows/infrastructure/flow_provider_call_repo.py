@@ -15,6 +15,7 @@ from eneo.database.tables.flow_tables import (
     FlowProviderCalls,
     FlowStepAttemptResolvedInputs,
     FlowStepAttempts,
+    FlowStepResults,
 )
 from eneo.flows.domain.flow import FlowRunTokenUsage, FlowRunTranscriptionUsage
 from eneo.flows.domain.provider_call import (
@@ -99,11 +100,125 @@ def _provider_call_evidence_logical_bytes() -> ColumnElement[int]:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class FlowStepUsageReceipt:
+    """What one step's current attempt was billed, from provider receipts.
+
+    Token counts are summed over completed completion calls only; a rejected
+    call contributes nothing. ``provider_reported`` is true only when every
+    completed call reported both counts itself: an estimated, mixed or
+    unreported count is not a measurement. ``unresolved_call_count`` counts
+    started or outcome-unknown calls, whose spend is not yet known.
+    """
+
+    completion_call_count: int
+    completed_call_count: int
+    num_tokens_input: int
+    num_tokens_output: int
+    provider_reported: bool
+    unresolved_call_count: int
+
+    @property
+    def measured(self) -> bool:
+        """True when the receipt can stand in for the step's token spend."""
+        return (
+            self.completed_call_count > 0
+            and self.provider_reported
+            and self.unresolved_call_count == 0
+        )
+
+
 class FlowProviderCallRepository:
     """Owns ordered provider-call lifecycle rows under a Flow step attempt."""
 
     def __init__(self, session: AsyncSession):
         self.session = session
+
+    async def list_step_usage_receipts(
+        self,
+        *,
+        run_ids: Sequence[UUID],
+        tenant_id: UUID,
+    ) -> dict[tuple[UUID, UUID], FlowStepUsageReceipt]:
+        """Completion receipts of every step result's CURRENT attempt, by run and step.
+
+        One statement over the live call rows, no payloads. A step whose current
+        attempt recorded no completion call has no entry: whether that is a
+        known zero (a deterministic step) or a missing receipt is the caller's
+        knowledge of the step, not this projection's.
+        """
+        if not run_ids:
+            return {}
+        is_completion = FlowProviderCalls.call_kind == ProviderCallKind.COMPLETION.value
+        contributing = sa.and_(is_completion, FlowProviderCalls.status != "rejected")
+        completed = sa.and_(is_completion, FlowProviderCalls.status == "completed")
+        unresolved = sa.and_(
+            is_completion, FlowProviderCalls.status.in_(("started", "outcome_unknown"))
+        )
+        not_provider_reported = sa.and_(
+            completed,
+            sa.or_(
+                FlowProviderCalls.input_source.is_(None),
+                FlowProviderCalls.output_source.is_(None),
+                FlowProviderCalls.input_source != "provider",
+                FlowProviderCalls.output_source != "provider",
+            ),
+        )
+        stmt = (
+            sa.select(
+                FlowStepAttempts.flow_run_id.label("run_id"),
+                FlowStepAttempts.step_id.label("step_id"),
+                sa.func.count(FlowProviderCalls.id)
+                .filter(contributing)
+                .label("completion_call_count"),
+                sa.func.count(FlowProviderCalls.id)
+                .filter(completed)
+                .label("completed_call_count"),
+                sa.func.coalesce(
+                    sa.func.sum(FlowProviderCalls.num_tokens_input).filter(completed), 0
+                ).label("num_tokens_input"),
+                sa.func.coalesce(
+                    sa.func.sum(FlowProviderCalls.num_tokens_output).filter(completed),
+                    0,
+                ).label("num_tokens_output"),
+                sa.func.coalesce(
+                    sa.func.bool_or(not_provider_reported).filter(completed), False
+                ).label("not_provider_reported"),
+                sa.func.count(FlowProviderCalls.id)
+                .filter(unresolved)
+                .label("unresolved_call_count"),
+            )
+            .select_from(FlowProviderCalls)
+            .join(
+                FlowStepAttempts,
+                FlowStepAttempts.id == FlowProviderCalls.flow_step_attempt_id,
+            )
+            .join(
+                FlowStepResults,
+                sa.and_(
+                    FlowStepResults.flow_run_id == FlowStepAttempts.flow_run_id,
+                    FlowStepResults.step_id == FlowStepAttempts.step_id,
+                    FlowStepResults.current_attempt_no == FlowStepAttempts.attempt_no,
+                ),
+            )
+            .where(FlowStepAttempts.flow_run_id.in_(tuple(run_ids)))
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+            .where(FlowStepResults.tenant_id == tenant_id)
+            .group_by(FlowStepAttempts.flow_run_id, FlowStepAttempts.step_id)
+            .having(sa.func.count(FlowProviderCalls.id).filter(contributing) > 0)
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return {
+            (row.run_id, row.step_id): FlowStepUsageReceipt(
+                completion_call_count=int(row.completion_call_count),
+                completed_call_count=int(row.completed_call_count),
+                num_tokens_input=int(row.num_tokens_input),
+                num_tokens_output=int(row.num_tokens_output),
+                provider_reported=not bool(row.not_provider_reported),
+                unresolved_call_count=int(row.unresolved_call_count),
+            )
+            for row in rows
+        }
 
     async def list_usage_for_runs(
         self,

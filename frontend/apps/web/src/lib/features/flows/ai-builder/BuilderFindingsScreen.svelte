@@ -519,13 +519,22 @@
             completeness && completeness.kind === "evidence_completeness"
               ? completeness.runs_missing_step_results
               : 0}
-          {#if incompleteCount > 0 || omittedCount > 0 || hiddenCount > 0}
+          {@const usageWithheldCount =
+            completeness && completeness.kind === "evidence_completeness"
+              ? (completeness.runs_with_usage_withheld ?? 0)
+              : 0}
+          {#if incompleteCount > 0 || usageWithheldCount > 0 || omittedCount > 0 || hiddenCount > 0}
             <footer class="border-default mt-4 border-t pt-3 text-[0.8125rem]">
               <p class="text-secondary text-pretty">
                 {#if incompleteCount === 1}
                   {m.ai_builder_review_completeness_one()}
                 {:else if incompleteCount > 1}
                   {m.ai_builder_review_completeness({ incomplete: String(incompleteCount) })}
+                {/if}
+                {#if usageWithheldCount === 1}
+                  {m.ai_builder_review_usage_withheld_one()}
+                {:else if usageWithheldCount > 1}
+                  {m.ai_builder_review_usage_withheld({ count: String(usageWithheldCount) })}
                 {/if}
                 {#if omittedCount > 0}
                   {m.ai_builder_review_omitted({ count: String(omittedCount) })}

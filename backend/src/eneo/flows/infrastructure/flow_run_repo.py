@@ -88,6 +88,10 @@ from eneo.flows.flow_run_step_result_file import (
     FlowRunStepResultFileSource,
     FlowStepResultFileReference,
 )
+from eneo.flows.infrastructure.flow_provider_call_repo import (
+    FlowProviderCallRepository,
+    FlowStepUsageReceipt,
+)
 from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
     FlowRunAuditOutboxRepository,
 )
@@ -227,10 +231,15 @@ class FlowStepResultMetrics:
     step_order: int
     status: str
     error_code: str | None
+    # The runtime's own counters, which fall back to local tokenization when
+    # the provider reported nothing; display them, never measure with them.
     num_tokens_input: int | None
     num_tokens_output: int | None
     started_at: datetime | None
     finished_at: datetime | None
+    # Provider receipts of the current attempt; None when it recorded no
+    # completion call at all.
+    usage_receipt: FlowStepUsageReceipt | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1160,7 +1169,24 @@ class FlowRunRepository:
                 .order_by(FlowStepResults.flow_run_id, FlowStepResults.step_order)
             )
         ).all()
-        return [FlowStepResultMetrics(*row) for row in rows]
+        receipts = await FlowProviderCallRepository(
+            self.session
+        ).list_step_usage_receipts(run_ids=run_ids, tenant_id=tenant_id)
+        return [
+            FlowStepResultMetrics(
+                flow_run_id=row.flow_run_id,
+                step_id=row.step_id,
+                step_order=row.step_order,
+                status=row.status,
+                error_code=row.error_code,
+                num_tokens_input=row.num_tokens_input,
+                num_tokens_output=row.num_tokens_output,
+                started_at=row.started_at,
+                finished_at=row.finished_at,
+                usage_receipt=receipts.get((row.flow_run_id, row.step_id)),
+            )
+            for row in rows
+        ]
 
     async def list_current_attempt_lineage(
         self, *, tenant_id: UUID, run_ids: Sequence[UUID]

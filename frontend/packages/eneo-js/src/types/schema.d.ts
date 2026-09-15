@@ -15609,6 +15609,11 @@ export interface components {
       runs_missing_step_results: number;
       /** Runs With All Step Results */
       runs_with_all_step_results: number;
+      /**
+       * Runs With Usage Withheld
+       * @default 0
+       */
+      runs_with_usage_withheld?: number;
       /** Runs Without Lineage */
       runs_without_lineage: number;
     };
@@ -18264,6 +18269,11 @@ export interface components {
     };
     /** FlowReviewCohort */
     FlowReviewCohort: {
+      /**
+       * Admission
+       * @default []
+       */
+      admission?: components["schemas"]["FlowReviewRunAdmission"][];
       /** Completed Run Ids */
       completed_run_ids: string[];
       /** Failed Run Ids */
@@ -18324,6 +18334,48 @@ export interface components {
       generated_at: string;
       /** Steps */
       steps: components["schemas"]["FlowReviewStep"][];
+    };
+    /**
+     * FlowReviewRunAdmission
+     * @description What one read run may prove, decided once from persisted metadata.
+     *
+     *     The reducers, the judge's prompt, the source validation of suggestions
+     *     and the investigation rereads all read this one result. A withheld
+     *     family names why; ``not_applicable`` means the run's status never
+     *     supports that family (a failed run has no token share, a completed run
+     *     has no error facts).
+     */
+    FlowReviewRunAdmission: {
+      /**
+       * Consumption
+       * @enum {string}
+       */
+      consumption: "admitted" | "withheld_lineage_untracked" | "not_applicable";
+      /**
+       * Error Facts
+       * @enum {string}
+       */
+      error_facts: "admitted" | "not_applicable";
+      /**
+       * Latency Share
+       * @enum {string}
+       */
+      latency_share: "admitted" | "withheld_timing_missing" | "not_applicable";
+      /**
+       * Run Id
+       * Format: uuid
+       */
+      run_id: string;
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "completed" | "failed";
+      /**
+       * Token Share
+       * @enum {string}
+       */
+      token_share: "admitted" | "withheld_usage_not_measured" | "not_applicable";
     };
     /** FlowReviewStep */
     FlowReviewStep: {

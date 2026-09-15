@@ -159,6 +159,30 @@ def _record(order: int, **fields) -> dict:
     return {"step_order": order, **fields}
 
 
+def test_per_source_mapped_steps_hide_their_first_call_prompt_and_summary_input() -> (
+    None
+):
+    run_id = uuid4()
+    records = (
+        _record(
+            1,
+            effective_prompt="Läs källan.",
+            input_payload_json={"text": "[per-source runtime input: 3 source calls]"},
+            output_payload_json={"text": "Ut"},
+            model_parameters_json={"runtime_input_execution_mode": "per_source"},
+        ),
+    )
+
+    excerpts = excerpts_for_run(
+        run_id=run_id, steps=[_step(1)], step_result_records=records
+    )
+
+    by_field = {excerpt.field: excerpt for excerpt in excerpts}
+    assert by_field["prompt"].availability == "unavailable_mapped_prompt"
+    assert by_field["input"].availability == "unavailable_mapped_input"
+    assert by_field["output"].availability == "included"
+
+
 def test_excerpts_mark_what_was_not_recorded_or_cannot_be_read() -> None:
     run_id = uuid4()
     steps = [_step(1), _step(2, output_mode="template_fill"), _step(3)]
@@ -186,7 +210,9 @@ def test_excerpts_mark_what_was_not_recorded_or_cannot_be_read() -> None:
     }
     # A mapped step recorded only its first item's prompt: not evidence of the prompt.
     assert by_key[(1, "prompt")].availability == "unavailable_mapped_prompt"
-    assert by_key[(1, "input")].text == "Underlag"
+    # A mapped step stores a summary of its calls as its input text: not the
+    # input of any one call, so not evidence.
+    assert by_key[(1, "input")].availability == "unavailable_mapped_input"
     assert by_key[(1, "output")].availability == "included"
     # A template fill records no prompt; empty recorded fields are not recorded.
     assert by_key[(2, "prompt")].availability == "unavailable_template_fill"

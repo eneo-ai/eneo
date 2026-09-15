@@ -28,8 +28,10 @@ from eneo.flows.domain.provider_call import (
     ProviderCall,
     ProviderCallCompletion,
     ProviderCallKind,
+    ProviderCallRejectionReason,
     ProviderCallRequest,
     ProviderCallResponseFormat,
+    ProviderCallUnknownReason,
     TranscriptionCallCompletion,
     TranscriptionProviderCallRequest,
 )
@@ -1371,3 +1373,113 @@ async def test_a_retried_transcription_is_durable_from_the_adapter_to_the_run_to
     # was never learned makes the total a lower bound.
     assert usage.transcription_usage.audio_seconds == 12.5
     assert usage.transcription_usage.completeness == "incomplete"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_step_usage_receipts_measure_only_provider_reported_completed_calls(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    """The review's per-step receipt: completed provider-reported calls count,
+    a rejected call contributes nothing, an estimated count is not a
+    measurement, an unresolved call withholds, and another tenant sees nothing."""
+    async with db_container() as container:
+        session = container.session()
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        repo = FlowProviderCallRepository(session)
+
+        def request(digit: str) -> CompletionProviderCallRequest:
+            return CompletionProviderCallRequest(
+                provider_request_hash=digit * 64,
+                requested_model="openai/gpt-4o-mini",
+                requested_capabilities=(),
+            )
+
+        reported = await _start_provider_call(
+            repo=repo, context=context, request=request("1")
+        )
+        await repo.complete_call(
+            call_id=reported.id,
+            receipt=ProviderCallCompletion(
+                response_model="gpt-4o-mini-2026-07-01",
+                provider_response_id="reported",
+                num_tokens_input=21,
+                num_tokens_output=8,
+                input_source="provider",
+                output_source="provider",
+            ),
+        )
+        rejected = await _start_provider_call(
+            repo=repo, context=context, request=request("2")
+        )
+        await repo.reject_call(
+            call_id=rejected.id,
+            reason=ProviderCallRejectionReason.RESPONSE_FORMAT_REJECTED,
+        )
+        measured = await repo.list_step_usage_receipts(
+            run_ids=[context.run_id], tenant_id=context.tenant_id
+        )
+        assert set(measured) == {(context.run_id, context.step_id)}
+        receipt = measured[(context.run_id, context.step_id)]
+        assert (receipt.num_tokens_input, receipt.num_tokens_output) == (21, 8)
+        assert receipt.completion_call_count == 1
+        assert receipt.completed_call_count == 1
+        assert receipt.measured is True
+
+        estimated = await _start_provider_call(
+            repo=repo, context=context, request=request("3")
+        )
+        await repo.complete_call(
+            call_id=estimated.id,
+            receipt=ProviderCallCompletion(
+                response_model="gpt-4o-mini-2026-07-01",
+                provider_response_id="estimated",
+                num_tokens_input=5,
+                num_tokens_output=5,
+                input_source="estimated",
+                output_source="provider",
+            ),
+        )
+        with_estimate = (
+            await repo.list_step_usage_receipts(
+                run_ids=[context.run_id], tenant_id=context.tenant_id
+            )
+        )[(context.run_id, context.step_id)]
+        assert with_estimate.completed_call_count == 2
+        assert with_estimate.provider_reported is False
+        assert with_estimate.measured is False
+
+        unresolved = await _start_provider_call(
+            repo=repo, context=context, request=request("4")
+        )
+        await repo.mark_outcome_unknown(
+            call_id=unresolved.id, reason=ProviderCallUnknownReason.REQUEST_TIMEOUT
+        )
+        with_unresolved = (
+            await repo.list_step_usage_receipts(
+                run_ids=[context.run_id], tenant_id=context.tenant_id
+            )
+        )[(context.run_id, context.step_id)]
+        assert with_unresolved.unresolved_call_count == 1
+        assert with_unresolved.measured is False
+
+        assert (
+            await repo.list_step_usage_receipts(
+                run_ids=[context.run_id], tenant_id=uuid4()
+            )
+            == {}
+        )
+        assert (
+            await repo.list_step_usage_receipts(run_ids=[], tenant_id=context.tenant_id)
+            == {}
+        )

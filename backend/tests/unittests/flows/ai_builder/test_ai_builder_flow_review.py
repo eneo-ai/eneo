@@ -37,6 +37,7 @@ from eneo.flows.ai_builder.ai_builder_flow_review import (
     FlowReviewEvidence,
     FlowReviewOmittedRuns,
     FlowReviewPacket,
+    FlowReviewRunAdmission,
     FlowReviewStep,
     FlowReviewSuggestionFocus,
     OutputNotObservedConsumedFact,
@@ -47,6 +48,7 @@ from eneo.flows.ai_builder.ai_builder_flow_review import (
     render_review_evidence,
     resolve_review_evidence,
     review_facts,
+    review_run_admission,
 )
 from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
     ReviewSampleExcerpt,
@@ -64,6 +66,7 @@ from eneo.flows.flow_run_provenance import (
     FlowResolvedInputStepResultSource,
     parse_resolved_input_edges,
 )
+from eneo.flows.infrastructure.flow_provider_call_repo import FlowStepUsageReceipt
 from eneo.flows.infrastructure.flow_run_repo import (
     FlowStepLineage,
     FlowStepResultMetrics,
@@ -74,7 +77,11 @@ _T0 = datetime(2026, 9, 4, 12, 0, tzinfo=timezone.utc)
 
 
 def _step(
-    order: int, *, input_source: str = "previous_step", step_id: UUID | None = None
+    order: int,
+    *,
+    input_source: str = "previous_step",
+    step_id: UUID | None = None,
+    output_mode: str = "pass_through",
 ) -> RuntimeStep:
     return RuntimeStep(
         step_id=step_id or uuid4(),
@@ -84,8 +91,21 @@ def _step(
         input_source="flow_input" if order == 1 else input_source,
         input_bindings=None,
         input_config=None,
-        output_mode="pass_through",
+        output_mode=output_mode,
         output_config=None,
+    )
+
+
+def _receipt(
+    tokens: int, *, provider_reported: bool = True, unresolved: int = 0
+) -> FlowStepUsageReceipt:
+    return FlowStepUsageReceipt(
+        completion_call_count=1 + unresolved,
+        completed_call_count=1,
+        num_tokens_input=tokens,
+        num_tokens_output=0,
+        provider_reported=provider_reported,
+        unresolved_call_count=unresolved,
     )
 
 
@@ -97,7 +117,14 @@ def _metric(
     error_code: str | None = None,
     tokens: int = 100,
     seconds: float = 1.0,
+    receipt: FlowStepUsageReceipt | None | str = "reported",
 ) -> FlowStepResultMetrics:
+    """A step's metrics; by default with a provider-reported receipt of ``tokens``.
+
+    ``receipt=None`` models a step whose current attempt recorded no
+    completion call; the runtime counters stay populated to prove the review
+    never measures with them.
+    """
     return FlowStepResultMetrics(
         flow_run_id=run_id,
         step_id=step.step_id,
@@ -108,6 +135,17 @@ def _metric(
         num_tokens_output=0,
         started_at=_T0,
         finished_at=_T0 + timedelta(seconds=seconds),
+        usage_receipt=_receipt(tokens) if receipt == "reported" else receipt,
+    )
+
+
+def _admission(**kwargs: Any) -> list[FlowReviewRunAdmission]:
+    return review_run_admission(
+        steps=kwargs["steps"],
+        completed_run_ids=kwargs["completed_run_ids"],
+        failed_run_ids=kwargs["failed_run_ids"],
+        metrics=kwargs["metrics"],
+        lineage=kwargs["lineage"],
     )
 
 
@@ -137,7 +175,7 @@ def _lineage(run_id: UUID, step: RuntimeStep, *sources: RuntimeStep) -> FlowStep
 
 def _facts(**overrides: Any):
     keys = dict(flow_id=uuid4(), definition_checksum="abc", **overrides)
-    return review_facts(**keys)
+    return review_facts(admission=_admission(**overrides), **keys)
 
 
 def test_facts_name_the_unconsumed_output_the_repeated_error_and_the_dominant_step():
@@ -204,6 +242,94 @@ def test_facts_name_the_unconsumed_output_the_repeated_error_and_the_dominant_st
     ) == (2, 2, 2)
 
 
+def test_token_share_is_withheld_without_a_provider_receipt_but_latency_stays():
+    # Step 2's current attempt recorded no completion call although the
+    # runtime counter says 900 tokens (a local fallback): the run's token
+    # share is withheld and explained; its timing is still measured.
+    s1, s2 = _step(1), _step(2)
+    run_id = uuid4()
+    facts = _facts(
+        steps=[s1, s2],
+        completed_run_ids=[run_id],
+        failed_run_ids=[],
+        metrics=[
+            _metric(run_id, s1, tokens=100, seconds=1.0),
+            _metric(run_id, s2, tokens=900, seconds=9.0, receipt=None),
+        ],
+        lineage=[],
+    )
+    kinds = {(fact.kind, getattr(fact, "step_id", None)) for fact in facts}
+    assert ("token_share", s2.step_id) not in kinds
+    assert ("latency_share", s2.step_id) in kinds
+    completeness = next(fact for fact in facts if fact.kind == "evidence_completeness")
+    assert completeness.runs_with_usage_withheld == 1
+
+
+def test_estimated_or_unresolved_receipts_are_not_measurements():
+    s1, s2 = _step(1), _step(2)
+    for receipt in (
+        _receipt(900, provider_reported=False),
+        _receipt(900, unresolved=1),
+    ):
+        run_id = uuid4()
+        admission = review_run_admission(
+            steps=[s1, s2],
+            completed_run_ids=[run_id],
+            failed_run_ids=[],
+            metrics=[_metric(run_id, s1), _metric(run_id, s2, receipt=receipt)],
+            lineage=[],
+        )
+        assert [item.token_share for item in admission] == [
+            "withheld_usage_not_measured"
+        ]
+
+
+def test_a_deterministic_step_without_calls_is_a_known_zero():
+    s1 = _step(1)
+    s2 = _step(2, output_mode="compose_text")
+    run_id = uuid4()
+    facts = _facts(
+        steps=[s1, s2],
+        completed_run_ids=[run_id],
+        failed_run_ids=[],
+        metrics=[
+            _metric(run_id, s1, tokens=900),
+            _metric(run_id, s2, tokens=50, receipt=None),
+        ],
+        lineage=[],
+    )
+    token_shares = {
+        fact.step_id: fact.share for fact in facts if fact.kind == "token_share"
+    }
+    assert token_shares == {s1.step_id: 1.0}
+    completeness = next(fact for fact in facts if fact.kind == "evidence_completeness")
+    assert completeness.runs_with_usage_withheld == 0
+
+
+def test_admission_names_what_each_run_may_prove():
+    s1, s2 = _step(1), _step(2)
+    completed, failed = uuid4(), uuid4()
+    admission = review_run_admission(
+        steps=[s1, s2],
+        completed_run_ids=[completed],
+        failed_run_ids=[failed],
+        metrics=[
+            _metric(completed, s1),
+            _metric(completed, s2),
+            _metric(failed, s1),
+            _metric(failed, s2, status="failed", error_code="x"),
+        ],
+        lineage=[_lineage(completed, s1)],
+    )
+    by_run = {item.run_id: item for item in admission}
+    assert by_run[completed].token_share == "admitted"
+    assert by_run[completed].latency_share == "admitted"
+    assert by_run[completed].consumption == "withheld_lineage_untracked"
+    assert by_run[completed].error_facts == "not_applicable"
+    assert by_run[failed].token_share == "not_applicable"
+    assert by_run[failed].error_facts == "admitted"
+
+
 def test_finding_ids_are_stable_for_a_definition_and_change_with_it():
     """An identical republish allocates a new version number but the same
     definition; the ids a screen already showed must still resolve."""
@@ -217,6 +343,7 @@ def test_finding_ids_are_stable_for_a_definition_and_change_with_it():
         metrics=[_metric(run_id, s1), _metric(run_id, s2)],
         lineage=[],
     )
+    kwargs["admission"] = _admission(**kwargs)
     first = review_facts(flow_id=flow_id, definition_checksum="a", **kwargs)
     again = review_facts(flow_id=flow_id, definition_checksum="a", **kwargs)
     other = review_facts(flow_id=flow_id, definition_checksum="b", **kwargs)
@@ -491,14 +618,19 @@ _PACKET_STEP_IDS = {1: uuid4(), 2: uuid4()}
 def _packet(*, version: int = 2, checksum: str = "sum") -> FlowReviewPacket:
     s1, s2 = (_step(order, step_id=_PACKET_STEP_IDS[order]) for order in (1, 2))
     run_id = uuid4()
-    facts = review_facts(
-        flow_id=_PACKET_FLOW_ID,
-        definition_checksum=checksum,
+    evidence = dict(
         steps=[s1, s2],
         completed_run_ids=[run_id],
         failed_run_ids=[],
         metrics=[_metric(run_id, s1, tokens=900), _metric(run_id, s2, tokens=100)],
         lineage=[_lineage(run_id, s1), _lineage(run_id, s2)],
+    )
+    admission = _admission(**evidence)
+    facts = review_facts(
+        flow_id=_PACKET_FLOW_ID,
+        definition_checksum=checksum,
+        admission=admission,
+        **evidence,
     )
     return FlowReviewPacket(
         flow_id=_PACKET_FLOW_ID,
@@ -516,6 +648,7 @@ def _packet(*, version: int = 2, checksum: str = "sum") -> FlowReviewPacket:
             completed_run_ids=[run_id],
             failed_run_ids=[],
             omitted=FlowReviewOmittedRuns(),
+            admission=admission,
         ),
         facts=list(facts),
     )
