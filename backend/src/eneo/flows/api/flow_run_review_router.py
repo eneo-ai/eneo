@@ -86,6 +86,13 @@ router = APIRouter()
     operation_id="list_flow_run_review_checkpoint_edits",
     response_model=FlowRunReviewCheckpointEditPagePublic,
     summary="List review checkpoint edits",
+    description=(
+        "Page through the changes a reviewer made at this checkpoint, newest "
+        "first: the edited output before and after each change, or the "
+        "correction set that was folded in. The first page's baseline is the "
+        "step's original output. Reading history is an audited evidence view; "
+        "the same authorization as the run's evidence applies."
+    ),
     responses={
         403: error_response(
             description=FLOW_RUN_FORBIDDEN_DESCRIPTION,

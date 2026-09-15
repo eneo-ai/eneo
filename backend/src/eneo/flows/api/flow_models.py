@@ -290,6 +290,7 @@ FLOW_SPARSE_PUBLIC_EXAMPLE: dict[str, Any] = {
 
 FLOW_PUBLIC_EXAMPLE: dict[str, Any] = {
     **FLOW_SPARSE_PUBLIC_EXAMPLE,
+    "draft_revision": 3,
     "steps": [
         FLOW_STEP_PUBLIC_EXAMPLE,
         {
@@ -670,6 +671,7 @@ class FlowUpdateRequest(BaseModel):
                     }
                 ],
                 "metadata_json": {"wizard": {"transcription_enabled": True}},
+                "expected_revision": 3,
             }
         },
     )
@@ -678,6 +680,16 @@ class FlowUpdateRequest(BaseModel):
     description: str | None
     steps: list[FlowStepUpdateRequest]
     metadata_json: dict[str, Any] | None | NotProvided = Field(default=NOT_PROVIDED)
+    expected_revision: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "The `draft_revision` the editor read before making these changes. "
+            "When set, the update is refused with `400` and code `stale_revision` "
+            "if the draft has moved on since; when omitted the write is fenced on "
+            "the revision read at the start of this request."
+        ),
+    )
 
 
 class FlowStepPublic(BaseModel):
@@ -746,6 +758,13 @@ class FlowPublic(FlowSparsePublic):
     )
 
     steps: list[FlowStepPublic]
+    draft_revision: int = Field(
+        description=(
+            "Compare token for the next draft edit. Send it back as "
+            "`expected_revision` on `PATCH /flows/{id}/`; a stale value returns "
+            "`400` with code `stale_revision` instead of overwriting a newer draft."
+        ),
+    )
 
 
 class StepRunInput(BaseModel):
@@ -1963,10 +1982,18 @@ class FlowStepAttemptPublic(BaseModel):
 
 
 class FlowRunReviewCheckpointEditPublic(FlowRunReviewCheckpointEdit):
+    # Nullable identities carry a default so the schema example can omit
+    # them: the OpenAPI pipeline drops null example values, and a required
+    # nullable field would then fail example validation.
+    corrections_revision_id: UUID | None = None
+    edited_by_user_id: UUID | None = None
+    edited_by_service_id: UUID | None = None
     edited_by_service_principal: FlowServicePrincipalActorPublic | None = None
 
 
 class FlowTranscriptCorrectionRevisionPublic(FlowTranscriptCorrectionRevision):
+    edited_by_user_id: UUID | None = None
+    edited_by_service_id: UUID | None = None
     edited_by_service_principal: FlowServicePrincipalActorPublic | None = None
 
 
@@ -1982,17 +2009,86 @@ class FlowTranscriptCorrectionRevisionBaselinePublic(BaseModel):
     speaker_edits_json: list[dict[str, Any]]
 
 
+FLOW_RUN_REVIEW_CHECKPOINT_EDIT_PAGE_EXAMPLE: dict[str, Any] = {
+    "baseline": {
+        "revision": 0,
+        "payload_json": {"text": '{"answer": "Original answer."}'},
+        "payload_sha256": "5c2d1f0e4b6a7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d",
+    },
+    "items": [
+        {
+            "id": "00000000-0000-0000-0000-000000000901",
+            "tenant_id": "00000000-0000-0000-0000-000000000010",
+            "flow_id": "00000000-0000-0000-0000-000000000001",
+            "flow_run_id": "00000000-0000-0000-0000-000000000301",
+            "checkpoint_id": "00000000-0000-0000-0000-000000000501",
+            "revision": 1,
+            "cause": "reviewer_edit",
+            "corrections_revision_id": None,
+            "correction_set_id": None,
+            "corrections_revision": None,
+            "payload_json": {"text": '{"answer": "Edited answer."}'},
+            "payload_sha256_before": "5c2d1f0e4b6a7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d",
+            "payload_sha256_after": "9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+            "edited_by_user_id": "00000000-0000-0000-0000-000000000042",
+            "edited_by_service_id": None,
+            "edited_by_principal_type": "user",
+            "created_at": "2026-09-15T10:15:00Z",
+            "edited_by_service_principal": None,
+        }
+    ],
+    "next_after_revision": None,
+    "truncated": False,
+}
+
+
 class FlowRunReviewCheckpointEditPagePublic(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"example": FLOW_RUN_REVIEW_CHECKPOINT_EDIT_PAGE_EXAMPLE}
+    )
+
     baseline: FlowRunReviewCheckpointEditBaselinePublic
     items: list[FlowRunReviewCheckpointEditPublic]
-    next_after_revision: int | None
+    next_after_revision: int | None = None
     truncated: bool
 
 
+FLOW_TRANSCRIPT_CORRECTION_REVISION_PAGE_EXAMPLE: dict[str, Any] = {
+    "baseline": {"revision": 0, "occurrences_json": [], "speaker_edits_json": []},
+    "items": [
+        {
+            "id": "00000000-0000-0000-0000-000000000911",
+            "tenant_id": "00000000-0000-0000-0000-000000000010",
+            "correction_set_id": "00000000-0000-0000-0000-000000000801",
+            "flow_id": "00000000-0000-0000-0000-000000000001",
+            "flow_run_id": "00000000-0000-0000-0000-000000000301",
+            "step_id": "00000000-0000-0000-0000-000000000101",
+            "revision": 1,
+            "occurrences_json": [
+                {"segment_index": 3, "start": 12, "end": 17, "replacement": "Sundsvall"}
+            ],
+            "speaker_edits_json": [],
+            "segments_hash": "3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f",
+            "edited_by_user_id": "00000000-0000-0000-0000-000000000042",
+            "edited_by_service_id": None,
+            "edited_by_principal_type": "user",
+            "created_at": "2026-09-15T10:15:00Z",
+            "edited_by_service_principal": None,
+        }
+    ],
+    "next_after_revision": None,
+    "truncated": False,
+}
+
+
 class FlowTranscriptCorrectionRevisionPagePublic(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"example": FLOW_TRANSCRIPT_CORRECTION_REVISION_PAGE_EXAMPLE}
+    )
+
     baseline: FlowTranscriptCorrectionRevisionBaselinePublic
     items: list[FlowTranscriptCorrectionRevisionPublic]
-    next_after_revision: int | None
+    next_after_revision: int | None = None
     truncated: bool
 
 

@@ -464,6 +464,7 @@ async def update_flow(
         description=payload.get("description", NOT_PROVIDED),
         steps=steps,
         metadata_json=payload.get("metadata_json", NOT_PROVIDED),
+        expected_revision=flow_in.expected_revision,
     )
 
     updated_flow_id = updated.require_persisted_id()

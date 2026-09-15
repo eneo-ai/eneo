@@ -85,6 +85,16 @@ export interface FlowStepCreationSeed {
   prompt?: string;
 }
 
+/**
+ * The saved counterpart of a step the editor still knows by its temporary id.
+ * Each step owns one hidden assistant created before the step is first saved,
+ * so the assistant id identifies it even when steps were inserted or moved
+ * while the save was in flight.
+ */
+function findSavedStep(savedSteps: FlowStep[], step: FlowStep): FlowStep | undefined {
+  return savedSteps.find((saved) => saved.assistant_id === step.assistant_id);
+}
+
 function createFlowEditor(data: FlowEditorInitData) {
   type LoadedAssistant = Awaited<ReturnType<typeof data.eneo.flows.assistants.get>>;
   const assistantRevision = writable(0);
@@ -102,6 +112,9 @@ function createFlowEditor(data: FlowEditorInitData) {
       if (cleanChanges.steps && Array.isArray(cleanChanges.steps)) {
         cleanChanges.steps = (cleanChanges.steps as FlowStep[]).map(stripTemporaryStepId);
       }
+      // Fence the write on the draft the editor read, so a draft that moved
+      // on elsewhere is refused instead of overwritten.
+      cleanChanges.expected_revision = resource.draft_revision;
       const updated = (await data.eneo.flows.update({
         flow: resource,
         update: cleanChanges
@@ -112,9 +125,7 @@ function createFlowEditor(data: FlowEditorInitData) {
         const currentSteps = get(editor.state.update).steps ?? [];
         const activeStep = currentSteps.find((s: FlowStep) => s.id === currentActiveId);
         if (activeStep) {
-          const realStep = updated.steps?.find(
-            (s: FlowStep) => s.step_order === activeStep.step_order
-          );
+          const realStep = findSavedStep(updated.steps ?? [], activeStep);
           if (realStep?.id) {
             // Re-pointed once the editor state carries the real step (see the
             // subscription below): pointing at it before then renders one
@@ -150,7 +161,17 @@ function createFlowEditor(data: FlowEditorInitData) {
       ],
       metadata_json: true
     },
-    manageAttachements: false
+    manageAttachements: false,
+    // Steps edited while their save was in flight keep the local shape, with
+    // the ids the server assigned to the steps created by that save.
+    mergeUnsavedField: (field, local, saved) => {
+      if (field !== "steps" || !Array.isArray(local) || !Array.isArray(saved)) return local;
+      return (local as FlowStep[]).map((step) => {
+        if (!step.id?.startsWith("_temp_")) return step;
+        const realStep = findSavedStep(saved as FlowStep[], step);
+        return realStep?.id ? { ...step, id: realStep.id } : step;
+      });
+    }
   });
 
   const activeStepId = writable<string | null>(null);

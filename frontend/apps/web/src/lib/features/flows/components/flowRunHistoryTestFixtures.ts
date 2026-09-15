@@ -93,6 +93,7 @@ export function makeTestFlow(): Flow {
     tenant_id: "tenant-1",
     space_id: "space-1",
     step_count: 1,
+    draft_revision: 0,
     steps: [],
     run_history_retention: {
       source: "none",

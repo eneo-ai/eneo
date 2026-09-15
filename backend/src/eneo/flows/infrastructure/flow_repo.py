@@ -788,9 +788,14 @@ class FlowRepository:
             )
             if existing_id is not None:
                 raise BadRequestException(
-                    "Flödet ändrades av en annan användare. "
-                    "Dina ändringar beräknas mot den nya versionen.",
+                    "Flödet har ändrats sedan det lästes in, till exempel i en "
+                    "annan flik eller av en kollega. Ladda om sidan och gör om "
+                    "din senaste ändring.",
                     code="stale_revision",
+                    context={
+                        "flow_id": str(flow_id),
+                        "expected_revision": fenced_revision,
+                    },
                 )
             raise NotFoundException("Flow not found.")
 

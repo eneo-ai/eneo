@@ -2786,6 +2786,27 @@ def test_openapi_flow_retention_days_documents_public_range(
         assert "data_retention_days" not in properties
 
 
+def test_openapi_flow_draft_revision_round_trips_through_update(
+    openapi_spec: dict,
+) -> None:
+    # The editor reads `draft_revision` from FlowPublic and returns it as
+    # `expected_revision` on PATCH, so the write is fenced on what the editor
+    # saw rather than on what the server read at request start.
+    schemas = openapi_spec["components"]["schemas"]
+    public_properties = schemas["FlowPublic"]["properties"]
+    assert public_properties["draft_revision"]["type"] == "integer"
+    assert "draft_revision" in schemas["FlowPublic"]["required"]
+
+    update_properties = schemas["PartialFlowUpdateRequest"]["properties"]
+    expected_revision = update_properties["expected_revision"]
+    assert _schema_allows_null(expected_revision)
+    assert any(
+        isinstance(option, dict) and option.get("type") == "integer"
+        for option in expected_revision.get("anyOf", [])
+    )
+    assert "stale_revision" in expected_revision["description"]
+
+
 def test_openapi_flow_read_models_expose_discriminated_retention_projection(
     openapi_spec: dict,
 ) -> None:
@@ -3551,6 +3572,7 @@ def test_openapi_flow_evidence_export_documents_single_typed_summary(
     assert set(review_impact_properties) == {
         "checkpoint_count",
         "any_edited",
+        "any_corrections_edited",
         "any_resumed",
         "any_output_changed",
         "last_event",
@@ -3567,6 +3589,7 @@ def test_openapi_flow_evidence_export_documents_single_typed_summary(
         "state",
         "decision",
         "edited",
+        "corrections_edited",
         "resumed",
         "attempt_no",
         "revision",

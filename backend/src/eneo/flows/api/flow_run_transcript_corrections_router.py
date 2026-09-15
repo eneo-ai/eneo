@@ -60,6 +60,13 @@ router = APIRouter()
     operation_id="list_flow_run_transcript_correction_revisions",
     response_model=FlowTranscriptCorrectionRevisionPagePublic,
     summary="List transcript correction revisions",
+    description=(
+        "Page through the committed correction sets of one transcription step, "
+        "newest first, each with the revision it replaced so a reviewer can see "
+        "what changed between saves. Reverts appear as revisions of their own. "
+        "Reading history is an audited evidence view; the same authorization "
+        "as the run's evidence applies."
+    ),
     responses={
         403: error_response(
             description=FLOW_RUN_FORBIDDEN_DESCRIPTION,

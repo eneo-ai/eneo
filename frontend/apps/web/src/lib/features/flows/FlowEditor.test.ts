@@ -34,6 +34,7 @@ function makeFlow(metadataJson: Flow["metadata_json"] = null, overrides: Partial
     name: "Flow",
     description: null,
     published_version: null,
+    draft_revision: 0,
     step_count: 0,
     metadata_json: metadataJson,
     run_history_retention: {
@@ -998,7 +999,7 @@ describe("FlowEditor save flushing", () => {
 
       expect(flowUpdate).toHaveBeenCalledTimes(1);
       const [{ update }] = flowUpdate.mock.calls[0] as [{ update: { steps?: FlowStep[] } }];
-      expect(update).toEqual({ name: "Renamed flow" });
+      expect(update).toEqual({ name: "Renamed flow", expected_revision: 0 });
       expect(update.steps).toBeUndefined();
     } finally {
       editor.destroy();
@@ -1389,25 +1390,27 @@ describe("FlowEditor server validation routing", () => {
     expect(toast.error).toHaveBeenCalledTimes(1);
   });
 
-  it("classifies each overlapping save by its own outcome, in both completion orders", async () => {
-    // The regression this guards: a shared classification flag let a flush
-    // inherit a CONCURRENT autosave's outcome. The classification must be
-    // invocation-local — the flush observes only its own request's failure,
-    // whichever request completes first.
+  it("classifies a flush queued behind a failing autosave by its own outcome", async () => {
+    // Saves run one at a time, so a flush requested during an autosave waits
+    // for it. The classification must still be invocation-local: the flush
+    // observes only its own request's failure, never the autosave's.
     vi.useFakeTimers();
     try {
       const cases = [
-        // Old-bug case: the autosave's routed validation rejection must not
-        // make the generic flush failure look typed…
-        { flushError: () => new Error("db exploded"), typed: false, order: "autosave-first" },
-        { flushError: () => new Error("db exploded"), typed: false, order: "flush-first" },
-        // …and a generic autosave failure must not strip the flush's typing.
-        { flushError: makeValidationError, typed: true, order: "autosave-first" }
+        {
+          autosaveError: makeValidationError,
+          flushError: () => new Error("db exploded"),
+          typed: false
+        },
+        {
+          autosaveError: () => new Error("db exploded"),
+          flushError: makeValidationError,
+          typed: true
+        }
       ] as const;
 
-      for (const { flushError, typed, order } of cases) {
+      for (const { autosaveError, flushError, typed } of cases) {
         const flow = makeFlow();
-        const autosaveError = typed ? new Error("db exploded") : makeValidationError();
         const pending: Array<(reason: unknown) => void> = [];
         const flowUpdate = vi.fn(
           () =>
@@ -1417,30 +1420,129 @@ describe("FlowEditor server validation routing", () => {
         );
         const editor = createFlowEditor({ flow, eneo: makeEneo({ flowUpdate }) });
 
-        editor.setName(`Overlap ${order}`);
+        editor.setName("Overlap");
         await vi.advanceTimersByTimeAsync(600);
         expect(flowUpdate).toHaveBeenCalledTimes(1);
 
         const flush = editor.flushSaves();
         await vi.advanceTimersByTimeAsync(0);
-        expect(flowUpdate).toHaveBeenCalledTimes(2);
+        // The flush is queued, not sent, while the autosave is in flight.
+        expect(flowUpdate).toHaveBeenCalledTimes(1);
         const flushOutcome = typed
           ? expect(flush).rejects.toBeInstanceOf(FlowSaveRejectedError)
           : expect(flush).rejects.toBeInstanceOf(FlowSaveFailedError);
 
-        if (order === "autosave-first") {
-          pending[0](autosaveError);
-          await vi.advanceTimersByTimeAsync(0);
-          pending[1](flushError());
-        } else {
-          pending[1](flushError());
-          await vi.advanceTimersByTimeAsync(0);
-          pending[0](autosaveError);
-        }
+        pending[0](autosaveError());
+        await vi.advanceTimersByTimeAsync(0);
+        expect(flowUpdate).toHaveBeenCalledTimes(2);
+        pending[1](flushError());
         await flushOutcome;
+        editor.destroy();
       }
     } finally {
       vi.useRealTimers();
+    }
+  });
+
+  it("sends the draft revision it read as expected_revision and follows the server's next one", async () => {
+    let revision = 4;
+    const flowUpdate = vi.fn(async ({ flow, update }) => {
+      revision += 1;
+      return { ...(flow as Flow), ...(update as Partial<Flow>), draft_revision: revision };
+    });
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { draft_revision: 4 }),
+      eneo: makeEneo({ flowUpdate })
+    });
+    try {
+      editor.setName("First");
+      await editor.flushFlowSaves();
+      editor.setName("Second");
+      await editor.flushFlowSaves();
+
+      const sent = flowUpdate.mock.calls.map(
+        ([{ update }]: [{ update: { expected_revision?: number; name?: string } }]) => update
+      );
+      expect(sent).toEqual([
+        { name: "First", expected_revision: 4 },
+        { name: "Second", expected_revision: 5 }
+      ]);
+      expect(get(editor.state.resource).draft_revision).toBe(6);
+    } finally {
+      editor.destroy();
+    }
+  });
+
+  it("keeps a step added while a save was in flight and gives the saved one its real id", async () => {
+    // The colleague's case: several quick edits, each starting an autosave.
+    // Nothing edited during a save may be lost, and the step the server just
+    // created must carry its real id so the next save does not create it again.
+    vi.useFakeTimers();
+    let resolveSave!: (value: Flow) => void;
+    const flowUpdate = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<Flow>((resolve) => {
+            resolveSave = resolve;
+          })
+      )
+      .mockImplementation(async ({ flow, update }) => ({
+        ...(flow as Flow),
+        ...(update as Partial<Flow>)
+      }));
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps: [makeStep(1)] }),
+      eneo: makeEneo({ flowUpdate })
+    });
+    try {
+      const addTempStep = (order: number) =>
+        editor.state.update.update((resource) => ({
+          ...resource,
+          steps: [
+            ...resource.steps,
+            makeStep(order, {
+              id: `_temp_${order}`,
+              assistant_id: `assistant-${order}`,
+              input_source: "previous_step"
+            })
+          ]
+        }));
+
+      addTempStep(2);
+      await vi.advanceTimersByTimeAsync(600);
+      expect(flowUpdate).toHaveBeenCalledTimes(1);
+
+      addTempStep(3);
+      await vi.advanceTimersByTimeAsync(600);
+      // Queued behind the in-flight save, not sent alongside it.
+      expect(flowUpdate).toHaveBeenCalledTimes(1);
+
+      resolveSave({
+        ...makeFlow(null, { draft_revision: 1 }),
+        steps: [makeStep(1), makeStep(2, { id: "step-real-2", input_source: "previous_step" })]
+      });
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(flowUpdate).toHaveBeenCalledTimes(2);
+      const [, [{ update: second }]] = flowUpdate.mock.calls as [
+        unknown,
+        [{ update: { steps: FlowStep[]; expected_revision: number } }]
+      ];
+      expect(second.expected_revision).toBe(1);
+      expect(second.steps.map((step) => step.id)).toEqual(["step-1", "step-real-2", undefined]);
+      expect(second.steps[2].assistant_id).toBe("assistant-3");
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(get(editor.state.update).steps.map((step) => step.assistant_id)).toEqual([
+        "assistant-1",
+        "assistant-2",
+        "assistant-3"
+      ]);
+      expect(get(editor.state.saveStatus)).toBe("saved");
+    } finally {
+      vi.useRealTimers();
+      editor.destroy();
     }
   });
 

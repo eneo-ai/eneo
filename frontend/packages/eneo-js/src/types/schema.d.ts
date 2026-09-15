@@ -5087,7 +5087,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List review checkpoint edits */
+    /**
+     * List review checkpoint edits
+     * @description Page through the changes a reviewer made at this checkpoint, newest first: the edited output before and after each change, or the correction set that was folded in. The first page's baseline is the step's original output. Reading history is an audited evidence view; the same authorization as the run's evidence applies.
+     */
     get: operations["list_flow_run_review_checkpoint_edits"];
     put?: never;
     post?: never;
@@ -5381,7 +5384,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List transcript correction revisions */
+    /**
+     * List transcript correction revisions
+     * @description Page through the committed correction sets of one transcription step, newest first, each with the revision it replaced so a reviewer can see what changed between saves. Reverts appear as revisions of their own. Reading history is an audited evidence view; the same authorization as the run's evidence applies.
+     */
     get: operations["list_flow_run_transcript_correction_revisions"];
     put?: never;
     post?: never;
@@ -17808,6 +17814,7 @@ export interface components {
      *       "created_at": "2026-03-17T09:30:00Z",
      *       "created_by_user_id": "00000000-0000-0000-0000-000000000030",
      *       "description": "Transcribe a review conversation and return a PDF summary.",
+     *       "draft_revision": 3,
      *       "id": "00000000-0000-0000-0000-000000000001",
      *       "input_type": "audio",
      *       "metadata_json": {
@@ -17878,6 +17885,11 @@ export interface components {
       created_by_user_id?: string | null;
       /** Description */
       description?: string | null;
+      /**
+       * Draft Revision
+       * @description Compare token for the next draft edit. Send it back as `expected_revision` on `PATCH /flows/{id}/`; a stale value returns `400` with code `stale_revision` instead of overwriting a newer draft.
+       */
+      draft_revision: number;
       /**
        * Id
        * Format: uuid
@@ -21148,13 +21160,44 @@ export interface components {
      * @enum {string}
      */
     FlowRunReviewCheckpointEditCause: "reviewer_edit" | "corrections_folded";
-    /** FlowRunReviewCheckpointEditPagePublic */
+    /**
+     * FlowRunReviewCheckpointEditPagePublic
+     * @example {
+     *       "baseline": {
+     *         "payload_json": {
+     *           "text": "{\"answer\": \"Original answer.\"}"
+     *         },
+     *         "payload_sha256": "5c2d1f0e4b6a7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d",
+     *         "revision": 0
+     *       },
+     *       "items": [
+     *         {
+     *           "cause": "reviewer_edit",
+     *           "checkpoint_id": "00000000-0000-0000-0000-000000000501",
+     *           "created_at": "2026-09-15T10:15:00Z",
+     *           "edited_by_principal_type": "user",
+     *           "edited_by_user_id": "00000000-0000-0000-0000-000000000042",
+     *           "flow_id": "00000000-0000-0000-0000-000000000001",
+     *           "flow_run_id": "00000000-0000-0000-0000-000000000301",
+     *           "id": "00000000-0000-0000-0000-000000000901",
+     *           "payload_json": {
+     *             "text": "{\"answer\": \"Edited answer.\"}"
+     *           },
+     *           "payload_sha256_after": "9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+     *           "payload_sha256_before": "5c2d1f0e4b6a7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d",
+     *           "revision": 1,
+     *           "tenant_id": "00000000-0000-0000-0000-000000000010"
+     *         }
+     *       ],
+     *       "truncated": false
+     *     }
+     */
     FlowRunReviewCheckpointEditPagePublic: {
       baseline: components["schemas"]["FlowRunReviewCheckpointEditBaselinePublic"];
       /** Items */
       items: components["schemas"]["FlowRunReviewCheckpointEditPublic"][];
       /** Next After Revision */
-      next_after_revision: number | null;
+      next_after_revision?: number | null;
       /** Truncated */
       truncated: boolean;
     };
@@ -21171,7 +21214,7 @@ export interface components {
       /** Corrections Revision */
       corrections_revision?: number | null;
       /** Corrections Revision Id */
-      corrections_revision_id: string | null;
+      corrections_revision_id?: string | null;
       /**
        * Created At
        * Format: date-time
@@ -21179,10 +21222,10 @@ export interface components {
       created_at: string;
       edited_by_principal_type: components["schemas"]["PrincipalType"];
       /** Edited By Service Id */
-      edited_by_service_id: string | null;
+      edited_by_service_id?: string | null;
       edited_by_service_principal?: components["schemas"]["FlowServicePrincipalActorPublic"] | null;
       /** Edited By User Id */
-      edited_by_user_id: string | null;
+      edited_by_user_id?: string | null;
       /**
        * Flow Id
        * Format: uuid
@@ -23514,13 +23557,47 @@ export interface components {
         [key: string]: unknown;
       }[];
     };
-    /** FlowTranscriptCorrectionRevisionPagePublic */
+    /**
+     * FlowTranscriptCorrectionRevisionPagePublic
+     * @example {
+     *       "baseline": {
+     *         "occurrences_json": [],
+     *         "revision": 0,
+     *         "speaker_edits_json": []
+     *       },
+     *       "items": [
+     *         {
+     *           "correction_set_id": "00000000-0000-0000-0000-000000000801",
+     *           "created_at": "2026-09-15T10:15:00Z",
+     *           "edited_by_principal_type": "user",
+     *           "edited_by_user_id": "00000000-0000-0000-0000-000000000042",
+     *           "flow_id": "00000000-0000-0000-0000-000000000001",
+     *           "flow_run_id": "00000000-0000-0000-0000-000000000301",
+     *           "id": "00000000-0000-0000-0000-000000000911",
+     *           "occurrences_json": [
+     *             {
+     *               "end": 17,
+     *               "replacement": "Sundsvall",
+     *               "segment_index": 3,
+     *               "start": 12
+     *             }
+     *           ],
+     *           "revision": 1,
+     *           "segments_hash": "3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f",
+     *           "speaker_edits_json": [],
+     *           "step_id": "00000000-0000-0000-0000-000000000101",
+     *           "tenant_id": "00000000-0000-0000-0000-000000000010"
+     *         }
+     *       ],
+     *       "truncated": false
+     *     }
+     */
     FlowTranscriptCorrectionRevisionPagePublic: {
       baseline: components["schemas"]["FlowTranscriptCorrectionRevisionBaselinePublic"];
       /** Items */
       items: components["schemas"]["FlowTranscriptCorrectionRevisionPublic"][];
       /** Next After Revision */
-      next_after_revision: number | null;
+      next_after_revision?: number | null;
       /** Truncated */
       truncated: boolean;
     };
@@ -23538,10 +23615,10 @@ export interface components {
       created_at: string;
       edited_by_principal_type: components["schemas"]["PrincipalType"];
       /** Edited By Service Id */
-      edited_by_service_id: string | null;
+      edited_by_service_id?: string | null;
       edited_by_service_principal?: components["schemas"]["FlowServicePrincipalActorPublic"] | null;
       /** Edited By User Id */
-      edited_by_user_id: string | null;
+      edited_by_user_id?: string | null;
       /**
        * Flow Id
        * Format: uuid
@@ -27987,6 +28064,7 @@ export interface components {
      * PartialFlowUpdateRequest
      * @example {
      *       "description": "Transcribe, redact, and summarize citizen audio submissions.",
+     *       "expected_revision": 3,
      *       "metadata_json": {
      *         "wizard": {
      *           "transcription_enabled": true
@@ -28010,6 +28088,11 @@ export interface components {
     PartialFlowUpdateRequest: {
       /** Description */
       description?: string | null;
+      /**
+       * Expected Revision
+       * @description The `draft_revision` the editor read before making these changes. When set, the update is refused with `400` and code `stale_revision` if the draft has moved on since; when omitted the write is fenced on the revision read at the start of this request.
+       */
+      expected_revision?: number | null;
       /** Metadata Json */
       metadata_json?: {
         [key: string]: unknown;

@@ -752,6 +752,40 @@ async def test_update_flow_allows_space_owner_to_override_draft_owner():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("expected_revision", [None, 7])
+async def test_update_flow_forwards_the_editor_revision_to_the_service(
+    expected_revision,
+):
+    # The editor fences its own writes on the revision it read; the route
+    # must hand that token through unchanged (None keeps the request-time
+    # fence in the repository).
+    container = MagicMock()
+    user = _user()
+    flow_id = uuid4()
+    flow = _flow(flow_id)
+    flow.owner_user_id = user.id
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = flow
+    flow_service.update_flow.return_value = flow
+    container.flow_service.return_value = flow_service
+    container.audit_service.return_value = AsyncMock()
+    container.user.return_value = user
+    _enable_space_access(container, can_edit=True)
+
+    await definition_update_flow(
+        id=flow_id,
+        request=_request(),
+        flow_in=FlowUpdateRequest(name="Renamed", expected_revision=expected_revision),
+        container=container,
+    )
+
+    assert (
+        flow_service.update_flow.await_args.kwargs["expected_revision"]
+        == expected_revision
+    )
+
+
+@pytest.mark.asyncio
 async def test_update_flow_pins_audit_entity_ids():
     container = MagicMock()
     user = _user()
