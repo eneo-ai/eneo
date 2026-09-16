@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any, cast
 from uuid import UUID
@@ -415,23 +416,16 @@ class FlowService:
         )
         definition = await self._build_definition(flow_with_normalized_metadata)
 
-        # Allocating the next version is the part two publishers cannot do at
-        # once: both would read the same latest, compute the same next, and the
-        # loser would collide on the version uniqueness constraint — an opaque
-        # 500 instead of the conflict the revision check below reports. The lock
-        # is taken here, after the flow was read, so the loser still holds the
-        # revision it saw and fails that check; and it is taken this late so it
-        # does not also block new runs, which take the same Flow lock, for the
-        # whole of validation and definition building.
+        # Lock after reading the draft so a concurrent publisher retains its
+        # stale revision and gets the revision conflict when updating the pointer.
         await self.flow_repo.lock_publication_pointer(
             flow_id=flow_id,
             tenant_id=self.user.tenant_id,
         )
-        latest = await self.flow_version_repo.get_latest(
+        next_version = await self.flow_repo.allocate_next_version(
             flow_id=flow_id,
             tenant_id=self.user.tenant_id,
         )
-        next_version = 1 if latest is None else latest.version + 1
         self._validate_published_definition_snapshot(
             definition,
             flow_id=flow_id,
@@ -442,6 +436,8 @@ class FlowService:
             version=next_version,
             definition_json=definition,
             tenant_id=self.user.tenant_id,
+            first_published_at=datetime.now(timezone.utc),
+            source_draft_revision=flow.draft_revision,
         )
 
         updated = flow_with_normalized_metadata.model_copy(

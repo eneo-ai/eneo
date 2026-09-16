@@ -441,8 +441,8 @@ async def test_concurrent_publish_reports_a_conflict_rather_than_a_server_error(
 
     The winner is held inside its transaction just after it takes the
     publication lock, so the loser meets that lock rather than a lucky
-    interleaving. Serialized, the loser then reads the version the winner
-    actually created and fails the revision check instead.
+    interleaving. Serialized, the loser allocates a distinct number and fails the revision
+    check; its transaction rolls back the allocation and snapshot.
     """
     async with db_container() as setup_container:
         flow_id = await _create_unpublished_flow(
@@ -453,19 +453,21 @@ async def test_concurrent_publish_reports_a_conflict_rather_than_a_server_error(
 
     winner_holds_lock = asyncio.Event()
     release_winner = asyncio.Event()
-    original_get_latest = FlowVersionRepository.get_latest
+    original_allocate = FlowRepository.allocate_next_version
     paused_once = False
 
     async def _pause_the_first_publisher(self, **kwargs):
         nonlocal paused_once
-        latest = await original_get_latest(self, **kwargs)
+        version = await original_allocate(self, **kwargs)
         if not paused_once:
             paused_once = True
             winner_holds_lock.set()
             await asyncio.wait_for(release_winner.wait(), timeout=15)
-        return latest
+        return version
 
-    monkeypatch.setattr(FlowVersionRepository, "get_latest", _pause_the_first_publisher)
+    monkeypatch.setattr(
+        FlowRepository, "allocate_next_version", _pause_the_first_publisher
+    )
 
     async def _publish(session: AsyncSession) -> Exception | None:
         container = Container(
@@ -531,5 +533,41 @@ async def test_concurrent_publish_reports_a_conflict_rather_than_a_server_error(
             )
         )
 
+        allocation_mark = await verification_session.scalar(
+            sa.select(Flows.snapshot_allocation_high_water_mark).where(
+                Flows.id == flow_id
+            )
+        )
+
     assert published_version == 1
     assert version_count == 1
+    assert allocation_mark == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_publish_never_reuses_deleted_snapshot_number(
+    db_container, admin_user, object_content_runtime_ready
+) -> None:
+    async with db_container() as container:
+        flow_id = await _create_unpublished_flow(
+            container=container, admin_user=admin_user
+        )
+        service = container.flow_service()
+        first = await service.publish_flow(flow_id=flow_id)
+        second = await service.publish_flow(flow_id=flow_id)
+        assert (first.published_version, second.published_version) == (1, 2)
+        version_repo = FlowVersionRepository(container.session())
+        published = await version_repo.get(flow_id, 2, admin_user.tenant_id)
+        assert published.first_published_at is not None
+        assert published.source_draft_revision == first.draft_revision
+        await service.unpublish_flow(flow_id=flow_id)
+        unpublished = await version_repo.get(flow_id, 2, admin_user.tenant_id)
+        assert unpublished.first_published_at == published.first_published_at
+        await container.session().execute(
+            sa.delete(FlowVersions).where(
+                FlowVersions.flow_id == flow_id, FlowVersions.version == 2
+            )
+        )
+        third = await service.publish_flow(flow_id=flow_id)
+        assert third.published_version == 3

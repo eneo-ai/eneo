@@ -19347,6 +19347,7 @@ export interface components {
      *         "employee_name": "Alex Example"
      *       },
      *       "job_id": "00000000-0000-0000-0000-000000000401",
+     *       "purpose": "production",
      *       "result_files": [],
      *       "revision": 1,
      *       "status": "queued",
@@ -19450,6 +19451,12 @@ export interface components {
       job_id?: string | null;
       /** @description Principal kind that created the run, once resolved. Service-key callers only see runs their own key created. */
       principal_type?: components["schemas"]["PrincipalType"] | null;
+      /**
+       * Purpose
+       * @description Immutable purpose recorded when the run was created.
+       * @enum {string}
+       */
+      purpose: "production" | "test";
       /**
        * Result
        * @description Typed successful final result. Null while the run is incomplete or when it ended without a successful final result.
@@ -19893,6 +19900,7 @@ export interface components {
      *             "employee_name": "Alex Example"
      *           },
      *           "job_id": "00000000-0000-0000-0000-000000000401",
+     *           "purpose": "production",
      *           "result_files": [],
      *           "revision": 1,
      *           "status": "queued",
@@ -20602,6 +20610,7 @@ export interface components {
      *           "employee_name": "Alex Example"
      *         },
      *         "job_id": "00000000-0000-0000-0000-000000000401",
+     *         "purpose": "production",
      *         "result_files": [],
      *         "revision": 1,
      *         "status": "queued",
@@ -20772,6 +20781,7 @@ export interface components {
      *         "employee_name": "Alex Example"
      *       },
      *       "job_id": "00000000-0000-0000-0000-000000000401",
+     *       "purpose": "production",
      *       "result_files": [],
      *       "revision": 1,
      *       "status": "queued",
@@ -20863,6 +20873,12 @@ export interface components {
       /** @description Principal kind that created the run, once resolved. Service-key callers only see runs their own key created. */
       principal_type?: components["schemas"]["PrincipalType"] | null;
       /**
+       * Purpose
+       * @description Immutable purpose recorded when the run was created.
+       * @enum {string}
+       */
+      purpose: "production" | "test";
+      /**
        * Result
        * @description Typed successful final result. Null while the run is incomplete or when it ended without a successful final result.
        */
@@ -20946,6 +20962,7 @@ export interface components {
      *           "employee_name": "Alex Example"
      *         },
      *         "job_id": "00000000-0000-0000-0000-000000000401",
+     *         "purpose": "production",
      *         "result_files": [],
      *         "revision": 1,
      *         "status": "queued",
@@ -21836,6 +21853,7 @@ export interface components {
      *           "employee_name": "Alex Example"
      *         },
      *         "job_id": "00000000-0000-0000-0000-000000000401",
+     *         "purpose": "production",
      *         "result_files": [],
      *         "revision": 2,
      *         "status": "queued",
@@ -22295,6 +22313,7 @@ export interface components {
      *       "flow_version": 3,
      *       "id": "00000000-0000-0000-0000-000000000301",
      *       "job_id": "00000000-0000-0000-0000-000000000401",
+     *       "purpose": "production",
      *       "revision": 1,
      *       "status": "queued",
      *       "tenant_id": "00000000-0000-0000-0000-000000000010",
@@ -22375,6 +22394,12 @@ export interface components {
       job_id?: string | null;
       /** @description Principal kind that created the run, once resolved. Service-key callers only see runs their own key created. */
       principal_type?: components["schemas"]["PrincipalType"] | null;
+      /**
+       * Purpose
+       * @description Immutable purpose recorded when the run was created.
+       * @enum {string}
+       */
+      purpose: "production" | "test";
       /**
        * Revision
        * @description Monotonic run lifecycle compare token.
@@ -53121,6 +53146,7 @@ export interface operations {
            *           "flow_version": 3,
            *           "id": "00000000-0000-0000-0000-000000000301",
            *           "job_id": "00000000-0000-0000-0000-000000000401",
+           *           "purpose": "production",
            *           "revision": 1,
            *           "status": "queued",
            *           "tenant_id": "00000000-0000-0000-0000-000000000010",
@@ -54768,6 +54794,7 @@ export interface operations {
            *           "employee_name": "Alex Example"
            *         },
            *         "job_id": "00000000-0000-0000-0000-000000000401",
+           *         "purpose": "production",
            *         "result_files": [],
            *         "revision": 2,
            *         "status": "queued",

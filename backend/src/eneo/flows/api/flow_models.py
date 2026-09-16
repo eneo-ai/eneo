@@ -313,6 +313,7 @@ FLOW_RUN_SUMMARY_PUBLIC_EXAMPLE: dict[str, Any] = {
     "id": "00000000-0000-0000-0000-000000000301",
     "flow_id": "00000000-0000-0000-0000-000000000001",
     "flow_version": 3,
+    "purpose": "production",
     "principal_type": None,
     "tenant_id": "00000000-0000-0000-0000-000000000010",
     "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -1004,6 +1005,9 @@ class FlowRunSummaryPublic(BaseModel):
     )
     revision: int = Field(
         description=("Monotonic run lifecycle compare token."),
+    )
+    purpose: Literal["production", "test"] = Field(
+        description="Immutable purpose recorded when the run was created.",
     )
     status: FlowRunStatus = Field(
         description=(

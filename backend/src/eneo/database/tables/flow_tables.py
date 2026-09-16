@@ -21,6 +21,7 @@ from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.base_class import (
     BaseCrossReference,
     BasePublic,
+    BaseWithTableName,
 )
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.job_table import Jobs
@@ -49,6 +50,7 @@ from eneo.flows.enums import (
     FLOW_INPUT_TYPE_VALUES,
     FLOW_OUTPUT_MODE_VALUES,
     FLOW_OUTPUT_TYPE_VALUES,
+    FLOW_RUN_PURPOSE_VALUES,
     RECONCILABLE_REVIEW_CHECKPOINT_STATES,
     TERMINAL_FLOW_RUN_STATUS_VALUES,
     FlowRunLifecycleSource,
@@ -192,6 +194,9 @@ class Flows(BasePublic):
     )
     flow_run_history_retention_days: Mapped[Optional[int]] = mapped_column(
         nullable=True
+    )
+    snapshot_allocation_high_water_mark: Mapped[int] = mapped_column(
+        nullable=False, server_default="0"
     )
     draft_revision: Mapped[int] = mapped_column(nullable=False, server_default="0")
     deleted_at: Mapped[Optional[datetime]] = mapped_column(sa.DateTime(timezone=True))
@@ -342,7 +347,11 @@ class FlowSteps(BasePublic):
 
 
 class FlowVersions(BaseCrossReference):
-    """Stores immutable published Flow definitions. Writer: FlowRepository. Purpose: provide checksummed runtime snapshots for every run."""
+    """Stores immutable Flow snapshots, published or not yet.
+
+    Writer: FlowVersionRepository. Publication history is write-once by application
+    contract; database constraints do not yet enforce snapshot immutability.
+    """
 
     flow_id: Mapped[UUID] = mapped_column(
         ForeignKey(Flows.id, ondelete="CASCADE"),
@@ -354,6 +363,10 @@ class FlowVersions(BaseCrossReference):
         nullable=False,
         index=True,
     )
+    first_published_at: Mapped[datetime | None] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    source_draft_revision: Mapped[int | None] = mapped_column(nullable=True)
     definition_checksum: Mapped[str] = mapped_column(nullable=False)
     definition_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
 
@@ -365,6 +378,43 @@ class FlowVersions(BaseCrossReference):
             name="fk_flow_versions_flow_tenant",
         ),
         UniqueConstraint("flow_id", "version", name="uq_flow_versions_flow_version"),
+    )
+
+
+class FlowVersionFileReferences(BaseWithTableName):
+    """Protect frozen snapshot files. FlowVersionRepository owns these links.
+
+    Snapshot creation does not populate them yet; only explicit repository calls
+    write links. Immutability of the reference set is an application contract.
+    """
+
+    flow_id: Mapped[UUID] = mapped_column(primary_key=True)
+    version: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(nullable=False)
+    file_id: Mapped[UUID] = mapped_column(primary_key=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["flow_id", "version"],
+            ["flow_versions.flow_id", "flow_versions.version"],
+            ondelete="CASCADE",
+            name="fk_flow_version_file_references_version",
+        ),
+        ForeignKeyConstraint(
+            ["flow_id", "tenant_id"],
+            ["flows.id", "flows.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_flow_version_file_references_flow_tenant",
+        ),
+        ForeignKeyConstraint(
+            ["file_id", "tenant_id"],
+            ["files.id", "files.tenant_id"],
+            ondelete="RESTRICT",
+            name="fk_flow_version_file_references_file_tenant",
+        ),
     )
 
 
@@ -734,6 +784,7 @@ class FlowRuns(BasePublic):
             "queued identifies the dispatch epoch."
         ),
     )
+    purpose: Mapped[str] = mapped_column(nullable=False, server_default="production")
     status: Mapped[str] = mapped_column(
         sa.String(32),
         nullable=False,
@@ -782,6 +833,10 @@ class FlowRuns(BasePublic):
     )
 
     __table_args__ = (
+        CheckConstraint(
+            f"purpose IN ({_check_values(FLOW_RUN_PURPOSE_VALUES)})",
+            name="ck_flow_runs_purpose",
+        ),
         CheckConstraint(
             f"principal_type IN ({_check_values(FLOW_RUN_PRINCIPAL_TYPE_VALUES)})",
             name="ck_flow_runs_principal_type",

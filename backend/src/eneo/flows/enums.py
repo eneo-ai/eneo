@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from enum import Enum
+from enum import Enum, StrEnum
 from types import MappingProxyType
 from typing import Mapping
 
@@ -153,6 +153,14 @@ FLOW_INPUT_SOURCE_VALUES = tuple(item.value for item in FlowInputSource)
 FLOW_INPUT_TYPE_VALUES = tuple(item.value for item in FlowInputType)
 FLOW_OUTPUT_MODE_VALUES = tuple(item.value for item in FlowOutputMode)
 FLOW_OUTPUT_TYPE_VALUES = tuple(item.value for item in FlowOutputType)
+
+
+class FlowRunPurpose(StrEnum):
+    PRODUCTION = "production"
+    TEST = "test"
+
+
+FLOW_RUN_PURPOSE_VALUES = tuple(item.value for item in FlowRunPurpose)
 
 
 class FlowRunStatus(str, Enum):

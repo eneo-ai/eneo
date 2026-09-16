@@ -233,3 +233,50 @@ async def test_flow_step_attempts_reject_non_positive_ordinals(
                 else "ck_flow_step_attempts_attempt_no_positive"
             ),
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_run_purpose_is_checked_and_defaults_to_production(
+    db_container, admin_user, completion_model_factory, space_factory, assistant_factory
+) -> None:
+    from eneo.flows.api.flow_assembler import FlowAssembler
+    from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
+
+    async with db_container() as container:
+        session = container.session()
+        flow, legacy_run, _ = await _runtime_parent_rows(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        assert legacy_run.purpose == "production"
+        repo = FlowRunRepository(session)
+        run = await repo.create(
+            flow_id=flow.id,
+            flow_version=1,
+            tenant_id=admin_user.tenant_id,
+            principal_user_id=admin_user.id,
+            input_payload_json={},
+            preseed_steps=[],
+        )
+        assert run.purpose == "production"
+        assert FlowAssembler.to_run_summary_public(run).purpose == "production"
+        assert (
+            await repo.get_status(run_id=run.id, tenant_id=admin_user.tenant_id)
+        ).purpose == "production"
+        await _assert_integrity_error(
+            session,
+            FlowRuns(
+                flow_id=flow.id,
+                flow_version=1,
+                tenant_id=admin_user.tenant_id,
+                principal_type="user",
+                principal_user_id=admin_user.id,
+                status="queued",
+                purpose="other",
+            ),
+            constraint_name="ck_flow_runs_purpose",
+        )

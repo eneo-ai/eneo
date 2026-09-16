@@ -181,12 +181,14 @@ async def _create_template_asset(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+@pytest.mark.parametrize("source_revision", [None, 7])
 async def test_create_derives_definition_checksum_from_stored_definition(
     db_container,
     completion_model_factory,
     space_factory,
     assistant_factory,
     admin_user,
+    source_revision,
 ) -> None:
     async with db_container() as container:
         session = container.session()
@@ -230,11 +232,14 @@ async def test_create_derives_definition_checksum_from_stored_definition(
             ],
         )
 
+        published_at = datetime.now(timezone.utc)
         await version_repo.create(
             flow_id=flow.id,
             version=1,
             definition_json=definition_json,
             tenant_id=admin_user.tenant_id,
+            first_published_at=published_at,
+            source_draft_revision=source_revision,
         )
 
         stored_version = await version_repo.get(
@@ -243,6 +248,11 @@ async def test_create_derives_definition_checksum_from_stored_definition(
             tenant_id=admin_user.tenant_id,
         )
 
+        assert stored_version.first_published_at == published_at
+        assert stored_version.source_draft_revision == source_revision
+        assert (
+            stored_version.model_validate(stored_version.model_dump()) == stored_version
+        )
         assert stored_version.definition_checksum == published_definition_checksum(
             definition_json
         )
@@ -432,3 +442,142 @@ async def test_template_identity_readiness_audit_scans_versions_and_active_asset
             blocker_counts[PublishedTemplateIdentityBlockerReason.ASSET_NOT_LIVE] == 1
         )
         assert result.samples[0].version == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_snapshot_file_references_are_idempotent_and_protect_files(
+    db_container, completion_model_factory, space_factory, admin_user
+) -> None:
+    import sqlalchemy as sa
+    from sqlalchemy.exc import IntegrityError
+
+    from eneo.database.tables.flow_tables import Flows, FlowVersions
+
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "snapshot-file-model")
+        space = await space_factory(session, "Snapshot files", [model.id])
+        flow = Flows(
+            name="Snapshot files", tenant_id=admin_user.tenant_id, space_id=space.id
+        )
+        file = Files(
+            name="frozen.txt",
+            mimetype="text/plain",
+            file_type="text",
+            owner_type="user",
+            owner_user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+        )
+        session.add_all([flow, file])
+        await session.flush()
+        repo = FlowVersionRepository(session)
+        for version in (1, 2):
+            candidate = await repo.create(
+                flow_id=flow.id,
+                version=version,
+                tenant_id=admin_user.tenant_id,
+                definition_json={"steps": []},
+            )
+            assert candidate.first_published_at is None
+            assert candidate.source_draft_revision is None
+        assert (
+            await repo.file_ids_referenced_by_versions(flow.id, admin_user.tenant_id)
+            == set()
+        )
+        for version in (1, 1, 2):
+            await repo.add_file_references(
+                flow.id, version, admin_user.tenant_id, [file.id, file.id]
+            )
+        await repo.add_file_references(flow.id, 1, admin_user.tenant_id, [])
+        assert await repo.file_ids_referenced_by_versions(
+            flow.id, admin_user.tenant_id
+        ) == {file.id}
+        assert await repo.file_ids_referenced_by_versions(flow.id, uuid4()) == set()
+        count = await session.scalar(
+            sa.text(
+                "SELECT count(*) FROM flow_version_file_references WHERE flow_id = :flow_id"
+            ),
+            {"flow_id": flow.id},
+        )
+        assert count == 2
+        with pytest.raises(IntegrityError):
+            async with session.begin_nested():
+                await session.execute(sa.delete(Files).where(Files.id == file.id))
+        await session.execute(
+            sa.delete(FlowVersions).where(
+                FlowVersions.flow_id == flow.id, FlowVersions.version == 2
+            )
+        )
+        assert await repo.file_ids_referenced_by_versions(
+            flow.id, admin_user.tenant_id
+        ) == {file.id}
+        await session.execute(
+            sa.delete(FlowVersions).where(FlowVersions.flow_id == flow.id)
+        )
+        assert (
+            await repo.file_ids_referenced_by_versions(flow.id, admin_user.tenant_id)
+            == set()
+        )
+        await session.execute(sa.delete(Files).where(Files.id == file.id))
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_snapshot_file_references_reject_cross_tenant_file(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    tenant_factory,
+    user_factory,
+    admin_user,
+) -> None:
+    from sqlalchemy.exc import IntegrityError
+
+    from eneo.database.tables.flow_tables import Flows
+
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "snapshot-file-tenant-model")
+        space = await space_factory(
+            session, "Snapshot file tenant isolation", [model.id]
+        )
+        flow = Flows(
+            name="Snapshot file tenant isolation",
+            tenant_id=admin_user.tenant_id,
+            space_id=space.id,
+        )
+        other_tenant = await tenant_factory(
+            session, name=f"Snapshot file owner {uuid4().hex}"
+        )
+        other_user = await user_factory(session, tenant_id=other_tenant.id)
+        other_file = Files(
+            name="other-tenant.txt",
+            mimetype="text/plain",
+            file_type="text",
+            owner_type="user",
+            owner_user_id=other_user.id,
+            tenant_id=other_tenant.id,
+        )
+        session.add_all([flow, other_file])
+        await session.flush()
+        repo = FlowVersionRepository(session)
+        await repo.create(
+            flow_id=flow.id,
+            version=1,
+            tenant_id=admin_user.tenant_id,
+            definition_json={"steps": []},
+        )
+
+        with pytest.raises(
+            IntegrityError, match="fk_flow_version_file_references_file_tenant"
+        ):
+            async with session.begin_nested():
+                await repo.add_file_references(
+                    flow.id, 1, admin_user.tenant_id, [other_file.id]
+                )
+
+        assert (
+            await repo.file_ids_referenced_by_versions(flow.id, admin_user.tenant_id)
+            == set()
+        )

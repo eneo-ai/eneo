@@ -416,7 +416,6 @@ async def test_publish_flow_creates_version_and_updates_published_version(user):
         updated_at=datetime.now(timezone.utc),
         steps=[_step(step_order=1), _step(step_order=2)],
     )
-    latest_version = None
     created_version = FlowVersion(
         flow_id=flow_id,
         version=1,
@@ -429,13 +428,17 @@ async def test_publish_flow_creates_version_and_updates_published_version(user):
     updated_flow = source_flow.model_copy(update={"published_version": 1})
 
     flow_repo.get.return_value = source_flow
-    version_repo.get_latest.return_value = latest_version
+    flow_repo.allocate_next_version.return_value = 1
     version_repo.create.return_value = created_version
     flow_repo.update.return_value = updated_flow
 
     result = await service.publish_flow(flow_id=flow_id)
 
     assert result.published_version == 1
+    assert version_repo.create.await_args.kwargs["source_draft_revision"] == 7
+    assert (
+        version_repo.create.await_args.kwargs["first_published_at"].tzinfo is not None
+    )
     version_repo.create.assert_awaited_once()
     flow_repo.update.assert_awaited_once()
     assert flow_repo.update.await_args.kwargs["expected_revision"] == 7
@@ -466,7 +469,7 @@ async def test_publish_flow_rejects_snapshot_missing_stable_step_id(user):
     )
 
     flow_repo.get.return_value = source_flow
-    version_repo.get_latest.return_value = None
+    flow_repo.allocate_next_version.return_value = 1
 
     with pytest.raises(FlowPublishedDefinitionInvalidError) as exc_info:
         await service.publish_flow(flow_id=flow_id)
@@ -589,7 +592,7 @@ async def test_publish_flow_uses_normalized_metadata_in_snapshot(user):
         steps=[_step(step_order=1)],
     )
     flow_repo.get.return_value = flow
-    version_repo.get_latest.return_value = None
+    flow_repo.allocate_next_version.return_value = 1
     flow_repo.update.return_value = flow.model_copy(update={"published_version": 1})
 
     await service.publish_flow(flow_id=flow_id)
@@ -631,7 +634,7 @@ async def test_publish_flow_omits_default_review_expiry_from_definition(user):
         steps=[review_step],
     )
     flow_repo.get.return_value = flow
-    version_repo.get_latest.return_value = None
+    flow_repo.allocate_next_version.return_value = 1
     flow_repo.update.return_value = flow.model_copy(update={"published_version": 1})
 
     await service.publish_flow(flow_id=flow_id)
@@ -664,7 +667,7 @@ async def test_publish_flow_rejects_mcp_assistant_before_version_creation(user):
         steps=[step],
     )
     flow_repo.get.return_value = flow
-    version_repo.get_latest.return_value = None
+    flow_repo.allocate_next_version.return_value = 1
     flow_repo.update.return_value = flow.model_copy(update={"published_version": 1})
     service.assistant_service.get_assistant.return_value = (
         SimpleNamespace(
@@ -1039,7 +1042,7 @@ async def test_publish_flow_pins_template_metadata_for_template_fill(user):
         ],
     )
     flow_repo.get.return_value = source_flow
-    version_repo.get_latest.return_value = None
+    flow_repo.allocate_next_version.return_value = 1
     flow_repo.update.return_value = source_flow.model_copy(
         update={"published_version": 1}
     )
@@ -1107,7 +1110,7 @@ async def test_publish_flow_preserves_template_placeholder_order(user):
         ],
     )
     flow_repo.get.return_value = source_flow
-    version_repo.get_latest.return_value = None
+    flow_repo.allocate_next_version.return_value = 1
     flow_repo.update.return_value = source_flow.model_copy(
         update={"published_version": 1}
     )
@@ -1279,7 +1282,7 @@ async def test_publish_flow_allows_explicit_empty_template_binding(user):
         ],
     )
     flow_repo.get.return_value = source_flow
-    version_repo.get_latest.return_value = None
+    flow_repo.allocate_next_version.return_value = 1
     flow_repo.update.return_value = source_flow.model_copy(
         update={"published_version": 1}
     )
@@ -3046,7 +3049,7 @@ async def test_publish_flow_rejects_unencrypted_stored_http_secret(user):
     flow_repo = AsyncMock()
     flow_repo.get.return_value = stored
     version_repo = AsyncMock()
-    version_repo.get_latest.return_value = None
+    flow_repo.allocate_next_version.return_value = 1
     service = _service(
         user=user,
         flow_repo=flow_repo,
@@ -3076,7 +3079,7 @@ async def test_publish_flow_rejects_stored_secret_the_key_cannot_decrypt(user):
     flow_repo = AsyncMock()
     flow_repo.get.return_value = stored
     version_repo = AsyncMock()
-    version_repo.get_latest.return_value = None
+    flow_repo.allocate_next_version.return_value = 1
     service = _service(
         user=user,
         flow_repo=flow_repo,
@@ -3099,7 +3102,7 @@ async def test_publish_flow_allows_encrypted_stored_http_secret(user):
     flow_repo.get.return_value = stored
     flow_repo.update.side_effect = lambda flow, **kwargs: flow
     version_repo = AsyncMock()
-    version_repo.get_latest.return_value = None
+    flow_repo.allocate_next_version.return_value = 1
     service = _service(
         user=user,
         flow_repo=flow_repo,

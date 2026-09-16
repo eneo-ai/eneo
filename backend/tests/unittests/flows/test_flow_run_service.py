@@ -1045,6 +1045,9 @@ def test_create_run_idempotency_fingerprint_shape_is_stable(user):
         ],
     )
 
+    # This digest predates the run purpose. A production request must keep
+    # producing it, so a request accepted before that upgrade and retried
+    # after it replays its own run instead of conflicting and running twice.
     assert fingerprint == (
         "7c11e7738bb53084971053e6719133e2acb33a18c6a5ade511735406a8f21910"
     )
@@ -4879,3 +4882,33 @@ async def test_get_run_artifact_file_rejects_cross_tenant(user):
             file_id=file_id,
         )
     assert exc_info.value.code == "forbidden_action"
+
+
+def test_create_run_idempotency_fingerprint_separates_purposes(user):
+    from eneo.flows.enums import FlowRunPurpose
+
+    service = _flow_run_service(
+        user=user,
+        flow_repo=_flow_repo(),
+        flow_run_repo=AsyncMock(),
+        flow_version_repo=AsyncMock(),
+        runtime_upload_repo=_runtime_upload_repo(),
+        max_concurrent_runs=5,
+    )
+    inputs = dict(
+        tenant_id=user.tenant_id,
+        principal=FlowPrincipal.from_user(user),
+        flow_id=uuid4(),
+        flow_version=1,
+        input_payload_json={"text": "same input"},
+    )
+    production = service._build_idempotency_fingerprint(
+        **inputs, purpose=FlowRunPurpose.PRODUCTION
+    )
+    test = service._build_idempotency_fingerprint(**inputs, purpose=FlowRunPurpose.TEST)
+    assert production != test
+    assert service._build_idempotency_fingerprint(**inputs) == production
+
+    # The unchanged pre-purpose digest is pinned by
+    # test_create_run_idempotency_fingerprint_shape_is_stable: production
+    # identity did not move, so a cross-upgrade retry still replays its run.

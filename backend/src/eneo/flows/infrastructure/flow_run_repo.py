@@ -62,6 +62,7 @@ from eneo.flows.enums import (
     CANCELLABLE_FLOW_RUN_STATUSES,
     OPEN_FLOW_STEP_ATTEMPT_STATUS_VALUES,
     TERMINAL_FLOW_RUN_STATUSES,
+    FlowRunPurpose,
 )
 from eneo.flows.flow_run_error import (
     FlowRunDispatchError,
@@ -405,6 +406,7 @@ _FLOW_RUN_STATUS_COLUMNS = (
     FlowRuns.tenant_id,
     FlowRuns.trace_id,
     FlowRuns.revision,
+    FlowRuns.purpose,
     FlowRuns.status,
     FlowRuns.dispatch_pending_since,
     FlowRuns.dispatch_attempt_count,
@@ -424,7 +426,10 @@ _FLOW_RUN_STATUS_COLUMNS = (
 
 
 class FlowRunRepository:
-    """Tenant-scoped repository for flow run lifecycle and run evidence."""
+    """Tenant-scoped repository for flow run lifecycle and run evidence.
+
+    Purpose is written only at creation; readers do not yet filter by purpose.
+    """
 
     _ACTIVE_STATUSES = tuple(status.value for status in ACTIVE_FLOW_RUN_STATUSES)
 
@@ -454,6 +459,7 @@ class FlowRunRepository:
         step_input_files: Sequence[FlowRunStepInputFileProjection] | None = None,
         idempotency_key: str | None = None,
         request_fingerprint: str | None = None,
+        purpose: FlowRunPurpose = FlowRunPurpose.PRODUCTION,
     ) -> FlowRun:
         now_utc = datetime.now(timezone.utc)
         principal = FlowPrincipal(
@@ -480,6 +486,7 @@ class FlowRunRepository:
                 trace_id=uuid4(),
                 idempotency_key=idempotency_key,
                 request_fingerprint=request_fingerprint,
+                purpose=purpose.value,
                 status=FlowRunStatus.QUEUED.value,
                 **start_flow_dispatch_epoch(now_utc),
                 input_payload_json=input_payload_json,

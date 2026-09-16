@@ -27,6 +27,7 @@ from eneo.flows.enums import (
     FlowInputType,
     FlowOutputMode,
     FlowOutputType,
+    FlowRunPurpose,
     FlowRunReviewCheckpointEditCause,
     FlowRunReviewCheckpointState,
     FlowRunStatus,
@@ -227,6 +228,8 @@ class FlowVersion(BaseModel):
     flow_id: UUID
     version: int
     tenant_id: UUID
+    first_published_at: datetime | None = None
+    source_draft_revision: int | None = None
     definition_checksum: str
     definition_json: FlowPersistedJsonObject
     created_at: datetime
@@ -247,6 +250,7 @@ class FlowRunStatusSnapshot(BaseModel):
     tenant_id: UUID
     trace_id: UUID
     revision: int = 1
+    purpose: FlowRunPurpose = FlowRunPurpose.PRODUCTION
     status: FlowRunStatus
     dispatch_pending_since: Optional[datetime] = None
     dispatch_attempt_count: int = Field(default=0, ge=0)

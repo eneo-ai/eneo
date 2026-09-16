@@ -27,6 +27,7 @@ export function makeFlowRun(overrides: Partial<FlowRun> = {}): FlowRun {
     created_at: "2026-08-25T09:00:00Z",
     updated_at: "2026-08-25T09:00:00Z",
     flow_version: 1,
+    purpose: "production",
     input_payload_json: { arende: "Bygglov Storgatan 5" }
   };
   return { ...base, ...overrides };

@@ -41,7 +41,11 @@ from eneo.flows.domain.runtime_invariant_exceptions import (
     FlowPublishedDefinitionWithoutExecutableStepsError,
 )
 from eneo.flows.domain.transcript_regeneration import TranscriptRegenerationSeed
-from eneo.flows.enums import FlowRunLifecycleSource, is_terminal_flow_run_status
+from eneo.flows.enums import (
+    FlowRunLifecycleSource,
+    FlowRunPurpose,
+    is_terminal_flow_run_status,
+)
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_input_limits import (
@@ -292,6 +296,7 @@ class FlowRunService:
         step_inputs: FlowRunStepInputs | None = None,
         idempotency_key: str | None = None,
         transcript_seed: TranscriptRegenerationSeed | None = None,
+        purpose: FlowRunPurpose = FlowRunPurpose.PRODUCTION,
     ) -> CreateRunResult:
         idempotency_key = self._validate_idempotency_key(idempotency_key)
         principal = self._principal()
@@ -307,6 +312,7 @@ class FlowRunService:
             principal=principal,
             input_payload_json=input_payload_json,
             step_inputs=step_inputs,
+            purpose=purpose,
         )
         if transcript_seed is not None:
             payload = {
@@ -327,6 +333,7 @@ class FlowRunService:
                     flow_version=published.flow_version,
                     input_payload_json=payload,
                     step_input_files=prepared.step_input_files,
+                    purpose=purpose,
                 ),
             )
         existing_run = await self._find_idempotent_run_or_enforce_creation_limits(
@@ -344,6 +351,7 @@ class FlowRunService:
             principal=principal,
             prepared=prepared,
             idempotency_key=idempotency_key,
+            purpose=purpose,
         )
         if transcript_seed is not None:
             await self.flow_run_repo.seed_reviewed_transcript(
@@ -402,6 +410,7 @@ class FlowRunService:
         principal: FlowPrincipal,
         input_payload_json: FlowPersistedJsonObject | None,
         step_inputs: FlowRunStepInputs | None,
+        purpose: FlowRunPurpose,
     ) -> _PreparedRunCreation:
         normalized_inline_payload = normalize_and_validate_flow_run_payload(
             metadata=definition.metadata(),
@@ -463,6 +472,7 @@ class FlowRunService:
             flow_version=flow_version,
             input_payload_json=prepared_payload,
             step_input_files=step_input_file_projections,
+            purpose=purpose,
         )
 
         ensure_inline_payload_size_allowed(
@@ -540,6 +550,7 @@ class FlowRunService:
         principal: FlowPrincipal,
         prepared: _PreparedRunCreation,
         idempotency_key: str | None,
+        purpose: FlowRunPurpose,
     ) -> FlowRun:
         flow_id = flow.require_persisted_id()
         try:
@@ -557,6 +568,7 @@ class FlowRunService:
                 step_input_files=prepared.step_input_files,
                 idempotency_key=idempotency_key,
                 request_fingerprint=prepared.request_fingerprint,
+                purpose=purpose,
             )
         except FlowRunRuntimeUploadBindingRaceError as exc:
             raise runtime_file_not_bound_to_flow_error(
@@ -576,9 +588,21 @@ class FlowRunService:
         flow_version: int,
         input_payload_json: FlowPersistedJsonObject | None,
         step_input_files: Sequence[FlowRunStepInputFileProjection] | None = None,
+        purpose: FlowRunPurpose = FlowRunPurpose.PRODUCTION,
     ) -> str:
+        # A production request fingerprints exactly as it did before purpose
+        # existed, so an accepted request retried across this upgrade still
+        # replays its run instead of conflicting and being run a second time.
+        # A test request carries its purpose and therefore never matches a
+        # production request's fingerprint: reusing one key for both is the
+        # conflict it has always been, never a silent replay of the other.
         normalized = {
             "request_fingerprint_algo_version": 3,
+            **(
+                {"purpose": purpose.value}
+                if purpose is not FlowRunPurpose.PRODUCTION
+                else {}
+            ),
             "tenant_id": str(tenant_id),
             "principal_type": principal.principal_type.value,
             "principal_user_id": (

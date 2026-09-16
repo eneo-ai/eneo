@@ -9,6 +9,7 @@ import {
 } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
 
+import { makeFlowRun } from "./flowRunHistoryTestFixtures";
 import FlowRunReviewCheckpointPanel from "./FlowRunReviewCheckpointPanel.svelte";
 
 vi.mock("$lib/components/toast", () => ({
@@ -74,19 +75,15 @@ function buildCheckpoint(
 }
 
 function buildRun(status: FlowRun["status"]): FlowRun {
-  return {
-    id: "run-1",
-    flow_id: "flow-1",
-    flow_version: 1,
-    tenant_id: "tenant-1",
-    trace_id: "trace-1",
+  // The canonical fixture carries every field the generated contract requires,
+  // so a grown contract fails here at compile time instead of at runtime.
+  return makeFlowRun({
     revision: 2,
     status,
-    dispatch_attempt_count: 1,
     result_files: [],
     created_at: "2026-03-17T10:05:00Z",
     updated_at: "2026-03-17T10:05:00Z"
-  };
+  });
 }
 
 const emptyHistory: FlowRunReviewCheckpointEditPage = {

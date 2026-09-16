@@ -349,6 +349,27 @@ class FlowRepository:
             flow_days=flow_days,
         )
 
+    async def allocate_next_version(self, *, flow_id: UUID, tenant_id: UUID) -> int:
+        """Allocate with the publication pointer lock held in this transaction.
+
+        Numbers come from the high-water mark, never surviving snapshot rows,
+        so deleting the highest snapshot cannot let its number identify another.
+        """
+        version = await self.session.scalar(
+            sa.update(Flows)
+            .where(Flows.id == flow_id)
+            .where(Flows.tenant_id == tenant_id)
+            .where(Flows.deleted_at.is_(None))
+            .values(
+                snapshot_allocation_high_water_mark=Flows.snapshot_allocation_high_water_mark
+                + 1
+            )
+            .returning(Flows.snapshot_allocation_high_water_mark)
+        )
+        if version is None:
+            raise NotFoundException("Flow not found.")
+        return version
+
     async def lock_publication_pointer(
         self,
         *,

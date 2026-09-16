@@ -2,13 +2,19 @@ from __future__ import annotations
 
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.tables.files_table import Files
-from eneo.database.tables.flow_tables import FlowTemplateAssets, FlowVersions
+from eneo.database.tables.flow_tables import (
+    FlowTemplateAssets,
+    FlowVersionFileReferences,
+    FlowVersions,
+)
 from eneo.files.file_repo import FileRepository
 from eneo.flows.domain.flow import FlowPersistedJsonObject, FlowVersion
 from eneo.flows.published_definition import (
@@ -185,6 +191,8 @@ class FlowVersionRepository:
         version: int,
         definition_json: FlowPersistedJsonObject,
         tenant_id: UUID,
+        first_published_at: datetime | None = None,
+        source_draft_revision: int | None = None,
     ) -> FlowVersion:
         """Persist a snapshot with checksum derived from the exact inserted payload."""
         definition_checksum = published_definition_checksum(definition_json)
@@ -194,6 +202,8 @@ class FlowVersionRepository:
                 flow_id=flow_id,
                 version=version,
                 tenant_id=tenant_id,
+                first_published_at=first_published_at,
+                source_draft_revision=source_draft_revision,
                 definition_checksum=definition_checksum,
                 definition_json=definition_json,
             )
@@ -203,6 +213,41 @@ class FlowVersionRepository:
         if version_in_db is None:
             raise NotFoundException("Could not create flow version.")
         return FlowVersion.model_validate(version_in_db)
+
+    async def add_file_references(
+        self, flow_id: UUID, version: int, tenant_id: UUID, file_ids: Collection[UUID]
+    ) -> None:
+        """Retain snapshot files idempotently; snapshot writers do not call this yet."""
+        if not file_ids:
+            return
+        await self.session.execute(
+            pg_insert(FlowVersionFileReferences).on_conflict_do_nothing(
+                index_elements=["flow_id", "version", "file_id"]
+            ),
+            [
+                {
+                    "flow_id": flow_id,
+                    "version": version,
+                    "tenant_id": tenant_id,
+                    "file_id": file_id,
+                }
+                for file_id in sorted(set(file_ids))
+            ],
+        )
+
+    async def file_ids_referenced_by_versions(
+        self, flow_id: UUID, tenant_id: UUID
+    ) -> set[UUID]:
+        return set(
+            (
+                await self.session.scalars(
+                    sa.select(FlowVersionFileReferences.file_id)
+                    .where(FlowVersionFileReferences.flow_id == flow_id)
+                    .where(FlowVersionFileReferences.tenant_id == tenant_id)
+                    .distinct()
+                )
+            ).all()
+        )
 
     async def get(self, flow_id: UUID, version: int, tenant_id: UUID) -> FlowVersion:
         stmt = (

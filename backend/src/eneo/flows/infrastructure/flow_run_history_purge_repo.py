@@ -27,6 +27,7 @@ from eneo.database.tables.flow_tables import (
     FlowRuntimeUploadedFiles,
     FlowRunWebhookDeliveries,
     FlowTemplateAssets,
+    FlowVersionFileReferences,
 )
 from eneo.database.tables.questions_table import QuestionsFiles
 from eneo.database.tables.tenant_table import Tenants
@@ -814,6 +815,15 @@ def _question_file_exists() -> sa.Exists:
     )
 
 
+def _flow_version_file_exists() -> sa.Exists:
+    return (
+        sa.select(sa.literal(1))
+        .select_from(FlowVersionFileReferences)
+        .where(FlowVersionFileReferences.file_id == Files.id)
+        .exists()
+    )
+
+
 def _assistant_file_exists() -> sa.Exists:
     return (
         sa.select(sa.literal(1))
@@ -848,6 +858,7 @@ _FILE_REFERENCE_EXISTS_BY_TABLE: Mapping[str, Callable[[], sa.Exists]] = (
         {
             Files.__tablename__: _child_file_exists,
             FlowTemplateAssets.__tablename__: _flow_template_asset_file_exists,
+            FlowVersionFileReferences.__tablename__: _flow_version_file_exists,
             FlowRuntimeUploadedFiles.__tablename__: _flow_runtime_upload_file_exists,
             FlowRunStepInputFiles.__tablename__: _flow_run_step_input_file_exists,
             FlowRunStepResultFiles.__tablename__: _flow_run_step_result_file_exists,
