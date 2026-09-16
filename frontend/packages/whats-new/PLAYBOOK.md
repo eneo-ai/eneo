@@ -21,7 +21,16 @@ anything a user can see or do differently after the change:
 - If the feature has a natural place to point at, give the element a
   `data-tour="<kebab-case-anchor>"` attribute in the same PR. That is what the
   **Show me** button spotlights. Put the attribute on the row or section, not
-  on the button inside it — it survives redesigns better.
+  on the button inside it — it survives redesigns better. For a whole page,
+  pass `tour="<anchor>"` to its `<Page.Title>`; the check script recognises
+  both spellings.
+
+**When does an entry deserve Show me?** When the user would otherwise ask
+"where is that?": a new admin page, a new section on a settings page, a
+setting the entry tells them to change. Not for changes they meet in the
+flow anyway (a better sign-in page, a chat behaviour, a fix), and not when
+the target needs an id from the user's own data (a specific assistant or
+space) — `href` must be a fixed path.
 
 When an assistant opens the PR it fills this in from the diff; the author
 corrects it. Context is cheap at PR time and expensive at release time.

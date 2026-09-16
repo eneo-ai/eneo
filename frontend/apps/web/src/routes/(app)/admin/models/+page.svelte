@@ -25,7 +25,7 @@
 
 <Page.Root>
   <Page.Header>
-    <Page.Title title={m.models()} />
+    <Page.Title title={m.models()} tour="admin-models" />
     <Page.Tabbar>
       <Page.TabTrigger tab="completion_models">{m.completion_models()}</Page.TabTrigger>
       <Page.TabTrigger tab="embedding_models">{m.embedding_models()}</Page.TabTrigger>

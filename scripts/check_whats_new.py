@@ -186,8 +186,10 @@ def _segments_match(pattern: list[str], wanted: list[str]) -> bool:
 
 
 def _collect_anchors(web_src: Path) -> set[str]:
+    """Literal data-tour attributes plus the `tour` prop that Page.Title
+    renders as one."""
     anchors: set[str] = set()
-    pattern = re.compile(r"""data-tour=["']([a-z0-9-]+)["']""")
+    pattern = re.compile(r"""\b(?:data-tour|tour)=["']([a-z0-9-]+)["']""")
     if not web_src.is_dir():
         return anchors
     for path in web_src.rglob("*.svelte"):

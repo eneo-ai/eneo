@@ -109,6 +109,12 @@ class CheckWhatsNewTests(unittest.TestCase):
                 data["releases"][0]["entries"][0]["body"]["en"] = text
                 self.assert_rejected(data, label)
 
+    def test_accepts_page_title_tour_prop(self) -> None:
+        root = self.make_repo(VALID, anchors="other")
+        page = root / "frontend" / "apps" / "web" / "src" / "routes" / "(app)" / "account" / "+page.svelte"
+        page.write_text('<Page.Title title="x" tour="account-password" />\n', encoding="utf-8")
+        self.assertEqual(self.run_check(root).returncode, 0)
+
     def test_rejects_unknown_anchor(self) -> None:
         self.assert_rejected(VALID, 'no element with data-tour="account-password"', anchors="other")
 

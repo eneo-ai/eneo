@@ -104,7 +104,7 @@
 <svelte:head><title>Eneo.ai – {m.admin()} – {m.tools()}</title></svelte:head>
 <Page.Root {tabController}>
   <Page.Header>
-    <Page.Title title={m.tools()} />
+    <Page.Title title={m.tools()} tour="admin-tools" />
     <Page.Tabbar>
       <Page.TabTrigger tab="mcp-servers">{m.mcp_servers()}</Page.TabTrigger>
       <Page.TabTrigger tab="functions">{m.tools_functions()}</Page.TabTrigger>

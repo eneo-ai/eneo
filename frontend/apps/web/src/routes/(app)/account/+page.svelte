@@ -128,6 +128,7 @@
       <SelectLanguage></SelectLanguage>
     </div>
     <div
+      data-tour="account-copy-format"
       class="border-dimmer hover:bg-hover-dimmer flex flex-col gap-3 border-b pt-4 pr-4 pb-4 pl-2"
     >
       <div class="flex flex-col gap-1">
