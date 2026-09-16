@@ -14,10 +14,10 @@
   import { Switch } from "$lib/components/ui/switch";
   import { areaLabel, labelFor, typeClass, typeLabel } from "$lib/features/whats-new/labels";
   import {
-    applyFilters,
     areasPresent,
     countEntries,
-    hasUnreadRelease,
+    filterEntries,
+    isReadRelease,
     type WhatsNewFilters
   } from "$lib/features/whats-new/filters";
   import { releases } from "@eneo/whats-new";
@@ -34,20 +34,34 @@
   // Snapshot before this visit marks the newest release as seen, so "read"
   // means read before today, not "read because the page just opened".
   const seenAtOpen = get(seenVersion);
-  const hasUnread = hasUnreadRelease(releases, seenAtOpen);
-  const areas = areasPresent(releases, isAdmin);
-  const total = countEntries(releases, isAdmin);
 
-  let filters = $state<WhatsNewFilters>({ area: null, showMeOnly: false, showRead: !hasUnread });
-  const filtered = $derived(applyFilters(releases, filters, seenAtOpen, isAdmin));
-  const shown = $derived(filtered.reduce((sum, release) => sum + release.entries.length, 0));
+  // One release at a time, newest by default; older ones via the picker.
+  let selectedVersion = $state<string | null>(releases[0]?.version ?? null);
+  const current = $derived(releases.find((r) => r.version === selectedVersion) ?? null);
+  const currentRead = $derived(current ? isReadRelease(current, seenAtOpen) : false);
+  const areas = $derived(current ? areasPresent([current], isAdmin) : []);
+  const total = $derived(current ? countEntries([current], isAdmin) : 0);
+
+  let filters = $state<WhatsNewFilters>({ area: null, showMeOnly: false });
+  const entries = $derived(current ? filterEntries(current, filters, isAdmin) : []);
+
+  function selectRelease(version: string) {
+    selectedVersion = version;
+    // An area from the previous release may not exist in this one.
+    if (
+      filters.area &&
+      !areasPresent([releases.find((r) => r.version === version)!], isAdmin).includes(filters.area)
+    ) {
+      filters.area = null;
+    }
+  }
 
   function selectArea(area: EntryArea | null) {
     filters.area = area;
   }
 
   function clearFilters() {
-    filters = { area: null, showMeOnly: false, showRead: true };
+    filters = { area: null, showMeOnly: false };
   }
 
   function text(value: Localized): string {
@@ -116,81 +130,55 @@
       <div class="flex max-w-3xl flex-col gap-10 py-6 pr-6">
         <p class="text-secondary">{m.whats_new_intro()}</p>
 
-        {#if total > 0}
-          <div
-            role="group"
-            aria-label={m.whats_new_filters_label()}
-            class="border-default flex flex-col gap-3 border-b pb-4"
-          >
-            <div class="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                aria-pressed={filters.area === null}
-                onclick={() => selectArea(null)}
-                class="border-default text-secondary hover:bg-hover-dimmer aria-pressed:bg-accent-default aria-pressed:text-on-fill aria-pressed:border-transparent h-7 rounded-full border px-3 text-[0.8rem] font-medium transition-colors"
-              >
-                {m.whats_new_filter_all()}
-              </button>
-              {#each areas as area (area)}
-                <button
-                  type="button"
-                  aria-pressed={filters.area === area}
-                  onclick={() => selectArea(area)}
-                  class="border-default text-secondary hover:bg-hover-dimmer aria-pressed:bg-accent-default aria-pressed:text-on-fill aria-pressed:border-transparent h-7 rounded-full border px-3 text-[0.8rem] font-medium transition-colors"
-                >
-                  {labelFor(areaLabel, area)}
-                </button>
-              {/each}
-            </div>
-            <div class="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
-              <div class="flex items-center gap-2">
-                <Switch id="whats-new-show-me" size="sm" bind:checked={filters.showMeOnly} />
-                <Label for="whats-new-show-me" class="font-normal"
-                  >{m.whats_new_filter_show_me()}</Label
-                >
-              </div>
-              <div class="flex items-center gap-2">
-                <Switch id="whats-new-show-read" size="sm" bind:checked={filters.showRead} />
-                <Label for="whats-new-show-read" class="font-normal"
-                  >{m.whats_new_filter_show_read()}</Label
-                >
-              </div>
-              <span class="text-muted ml-auto text-xs" aria-live="polite">
-                {m.whats_new_count({ shown, total })}
-              </span>
-            </div>
-          </div>
-        {/if}
-
-        {#if total === 0}
+        {#if releases.length === 0}
           <div class="text-muted flex items-center gap-2">
             <Sparkles class="size-4" aria-hidden="true" />
             {m.whats_new_empty()}
           </div>
-        {:else if filtered.length === 0}
-          <div class="text-muted flex flex-wrap items-center gap-3">
-            <span>{m.whats_new_no_match()}</span>
-            <Button variant="outline" size="sm" onclick={clearFilters}>
-              {m.whats_new_clear_filters()}
-            </Button>
+        {:else if current}
+          <div class="flex flex-col gap-3">
+            <span id="whats-new-release-picker" class="text-secondary text-sm font-medium">
+              {m.whats_new_release_picker()}
+            </span>
+            <div
+              role="group"
+              aria-labelledby="whats-new-release-picker"
+              class="flex flex-wrap items-center gap-2"
+            >
+              {#each releases as release (release.version)}
+                <button
+                  type="button"
+                  aria-pressed={release.version === selectedVersion}
+                  onclick={() => selectRelease(release.version)}
+                  class="border-default text-secondary hover:bg-hover-dimmer aria-pressed:bg-accent-default aria-pressed:text-on-fill aria-pressed:border-transparent inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors"
+                >
+                  {release.version}
+                  {#if !release.date}
+                    <span class="text-xs opacity-80">{m.whats_new_upcoming()}</span>
+                  {/if}
+                  {#if seenAtOpen !== null && !isReadRelease(release, seenAtOpen)}
+                    <span class="bg-positive-default size-2 rounded-full" aria-hidden="true"></span>
+                    <span class="sr-only">{m.whats_new_new_for_you()}</span>
+                  {/if}
+                </button>
+              {/each}
+            </div>
           </div>
-        {/if}
 
-        {#each filtered as release (release.version)}
-          <section aria-labelledby="release-{release.version}" class="flex flex-col gap-5">
+          <section aria-labelledby="release-{current.version}" class="flex flex-col gap-5">
             <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <h2 id="release-{release.version}" class="text-primary text-xl font-semibold">
-                {m.whats_new_release({ version: release.version })}
+              <h2 id="release-{current.version}" class="text-primary text-xl font-semibold">
+                {m.whats_new_release({ version: current.version })}
               </h2>
               <span class="text-muted text-sm">
-                {#if release.date}
-                  {formatDate(release.date)}
+                {#if current.date}
+                  {formatDate(current.date)}
                 {:else}
                   {m.whats_new_upcoming()}
                 {/if}
               </span>
               {#if seenAtOpen !== null}
-                {#if release.read}
+                {#if currentRead}
                   <span class="text-muted text-xs">{m.whats_new_read()}</span>
                 {:else}
                   <Badge
@@ -201,20 +189,74 @@
                   </Badge>
                 {/if}
               {/if}
-              {#if tourLength(release) > 0}
+              {#if tourLength(current) > 0}
                 <Button
-                  variant={release.read ? "outline" : "default"}
+                  variant={currentRead ? "outline" : "default"}
                   size="sm"
                   class="ml-auto"
-                  onclick={() => handleTour(release)}
+                  onclick={() => handleTour(current)}
                 >
-                  {m.whats_new_tour_start({ count: tourLength(release) })}
+                  {m.whats_new_tour_start({ count: tourLength(current) })}
                 </Button>
               {/if}
             </div>
 
+            {#if total > 0}
+              <div
+                role="group"
+                aria-label={m.whats_new_filters_label()}
+                class="border-default flex flex-col gap-3 border-b pb-4"
+              >
+                <div class="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    aria-pressed={filters.area === null}
+                    onclick={() => selectArea(null)}
+                    class="border-default text-secondary hover:bg-hover-dimmer aria-pressed:bg-accent-default aria-pressed:text-on-fill aria-pressed:border-transparent h-7 rounded-full border px-3 text-[0.8rem] font-medium transition-colors"
+                  >
+                    {m.whats_new_filter_all()}
+                  </button>
+                  {#each areas as area (area)}
+                    <button
+                      type="button"
+                      aria-pressed={filters.area === area}
+                      onclick={() => selectArea(area)}
+                      class="border-default text-secondary hover:bg-hover-dimmer aria-pressed:bg-accent-default aria-pressed:text-on-fill aria-pressed:border-transparent h-7 rounded-full border px-3 text-[0.8rem] font-medium transition-colors"
+                    >
+                      {labelFor(areaLabel, area)}
+                    </button>
+                  {/each}
+                </div>
+                <div class="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+                  <div class="flex items-center gap-2">
+                    <Switch id="whats-new-show-me" size="sm" bind:checked={filters.showMeOnly} />
+                    <Label for="whats-new-show-me" class="font-normal">
+                      {m.whats_new_filter_show_me()}
+                    </Label>
+                  </div>
+                  <span class="text-muted ml-auto text-xs" aria-live="polite">
+                    {m.whats_new_count({ shown: entries.length, total })}
+                  </span>
+                </div>
+              </div>
+            {/if}
+
+            {#if total === 0}
+              <div class="text-muted flex items-center gap-2">
+                <Sparkles class="size-4" aria-hidden="true" />
+                {m.whats_new_empty()}
+              </div>
+            {:else if entries.length === 0}
+              <div class="text-muted flex flex-wrap items-center gap-3">
+                <span>{m.whats_new_no_match()}</span>
+                <Button variant="outline" size="sm" onclick={clearFilters}>
+                  {m.whats_new_clear_filters()}
+                </Button>
+              </div>
+            {/if}
+
             <ul class="flex flex-col gap-4">
-              {#each release.entries as entry (entry.id)}
+              {#each entries as entry (entry.id)}
                 <li
                   id={entry.id}
                   class="border-default bg-primary flex flex-col gap-2 rounded-lg border p-4"
@@ -245,7 +287,7 @@
               {/each}
             </ul>
           </section>
-        {/each}
+        {/if}
 
         {#if developerTools}
           <div

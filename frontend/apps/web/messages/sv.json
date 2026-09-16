@@ -4780,7 +4780,7 @@
   "usage_user_search": "Sök användarnamn eller e-post i alla användares användning",
   "whats_new": "Nyheter",
   "whats_new_unseen": "Nya uppdateringar",
-  "whats_new_intro": "Vad som har ändrats i Eneo, senaste först.",
+  "whats_new_intro": "Vad som har ändrats i Eneo, en version i taget. Den senaste är vald.",
   "whats_new_empty": "Inga nyheter ännu.",
   "whats_new_release": "Version {version}",
   "whats_new_upcoming": "Kommande",
@@ -4802,7 +4802,6 @@
   "whats_new_filters_label": "Filtrera nyheter",
   "whats_new_filter_all": "Alla",
   "whats_new_filter_show_me": "Med Visa mig",
-  "whats_new_filter_show_read": "Visa lästa",
   "whats_new_count": "{shown} av {total} nyheter",
   "whats_new_no_match": "Inga nyheter matchar filtret.",
   "whats_new_clear_filters": "Rensa filter",
@@ -4823,5 +4822,6 @@
   "whats_new_announcement_intro_count": "{count} nyheter sedan du var här senast. De viktigaste ser du här – resten finns under Nyheter.",
   "whats_new_announcement_tour": "Visa mig de nya funktionerna",
   "whats_new_announcement_all": "Alla {count} nyheter",
-  "whats_new_announcement_list_label": "Höjdpunkter i den här versionen"
+  "whats_new_announcement_list_label": "Höjdpunkter i den här versionen",
+  "whats_new_release_picker": "Version"
 }

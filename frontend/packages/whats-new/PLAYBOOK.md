@@ -179,6 +179,8 @@ places listed above.
   and an entry without `showMe` is simply not a stop. A stop whose anchor is
   missing is skipped. Order in `releases.json` is the walkthrough order, so
   put the entries a user should meet first at the top.
+- The page shows one release at a time (newest selected; older ones via the
+  version picker) with area and Show me filters within it.
 - Release notes on docs.eneo.ai render the English text from the same file.
 
 ## Backports

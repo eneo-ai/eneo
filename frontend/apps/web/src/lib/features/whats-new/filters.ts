@@ -6,12 +6,6 @@ export interface WhatsNewFilters {
   area: EntryArea | null;
   /** Only entries with a Show me target. */
   showMeOnly: boolean;
-  /** Include releases the user had already seen when they opened the page. */
-  showRead: boolean;
-}
-
-export interface FilteredRelease extends Release {
-  read: boolean;
 }
 
 /**
@@ -24,31 +18,17 @@ export function isReadRelease(release: Release, seenAtOpen: string | null): bool
   return compareVersions(release.version, seenAtOpen) <= 0;
 }
 
-export function hasUnreadRelease(releases: Release[], seenAtOpen: string | null): boolean {
-  return releases.some((release) => !isReadRelease(release, seenAtOpen));
-}
-
-/** Filters an audience may see, with `read` stamped per release; empty releases drop out. */
-export function applyFilters(
-  releases: Release[],
+/** Entries of one release this audience may see, narrowed by the filters. */
+export function filterEntries(
+  release: Release,
   filters: WhatsNewFilters,
-  seenAtOpen: string | null,
   isAdmin: boolean
-): FilteredRelease[] {
-  return releases
-    .map((release) => ({ ...release, read: isReadRelease(release, seenAtOpen) }))
-    .filter((release) => filters.showRead || !release.read)
-    .map((release) => ({
-      ...release,
-      entries: visibleEntries(release, isAdmin).filter((entry) => matches(entry, filters))
-    }))
-    .filter((release) => release.entries.length > 0);
-}
-
-function matches(entry: ReleaseEntry, filters: WhatsNewFilters): boolean {
-  if (filters.area && entry.area !== filters.area) return false;
-  if (filters.showMeOnly && !entry.showMe) return false;
-  return true;
+): ReleaseEntry[] {
+  return visibleEntries(release, isAdmin).filter((entry) => {
+    if (filters.area && entry.area !== filters.area) return false;
+    if (filters.showMeOnly && !entry.showMe) return false;
+    return true;
+  });
 }
 
 /** Areas that occur in what this audience may see, in first-seen order. */
