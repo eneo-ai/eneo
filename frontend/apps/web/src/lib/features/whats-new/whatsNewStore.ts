@@ -78,7 +78,15 @@ function createWhatsNewStore(data: WhatsNewInit) {
       });
   }
 
+  /** Development only: forget both markers so the announcement and the dot return. */
+  async function resetState(): Promise<void> {
+    await eneo.whatsNew.resetState();
+    seenVersion.set(null);
+    announcedVersion.set(null);
+  }
+
   return {
+    resetState,
     seenVersion: { subscribe: seenVersion.subscribe },
     announcedVersion: { subscribe: announcedVersion.subscribe },
     hasUnseen,

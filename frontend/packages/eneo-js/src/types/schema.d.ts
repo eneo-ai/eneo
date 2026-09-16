@@ -6835,7 +6835,11 @@ export interface paths {
     get: operations["get_whats_new_state_api_v1_whats_new_state__get"];
     put?: never;
     post?: never;
-    delete?: never;
+    /**
+     * Reset Whats New State
+     * @description Development only: forget the current user's What's new markers so the announcement and dot return.
+     */
+    delete: operations["reset_whats_new_state_api_v1_whats_new_state__delete"];
     options?: never;
     head?: never;
     patch?: never;
@@ -18104,6 +18108,11 @@ export interface components {
        * @default false
        */
       sharepoint_fixture_mode_available?: boolean;
+      /**
+       * Developer Tools Available
+       * @default false
+       */
+      developer_tools_available?: boolean;
     };
     /** SharePointFixturePreviewResponse */
     SharePointFixturePreviewResponse: {
@@ -45326,6 +45335,44 @@ export interface operations {
       };
       /** @description Forbidden */
       403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  reset_whats_new_state_api_v1_whats_new_state__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WhatsNewStatePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
         headers: {
           [name: string]: unknown;
         };

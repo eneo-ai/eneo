@@ -33,3 +33,22 @@ def test_version_pattern_matches_the_release_notes_schema():
     schema_pattern = schema["$defs"]["release"]["properties"]["version"]["pattern"]
     # The schema uses a non-capturing-free form; normalise both to compare intent.
     assert schema_pattern.replace("(-", "(?:-") == RELEASE_VERSION_PATTERN
+
+
+@pytest.mark.parametrize(
+    ("environment", "expected"),
+    [
+        ("development", True),
+        ("local", True),
+        ("DEV ", True),
+        ("test", False),
+        ("staging", False),
+        ("production", False),
+    ],
+)
+def test_is_development_follows_the_environment_setting(
+    environment: str, expected: bool
+):
+    from eneo.main.config import Settings
+
+    assert Settings(environment=environment).is_development is expected  # type: ignore[call-arg]

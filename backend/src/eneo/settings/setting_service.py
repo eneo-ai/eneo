@@ -394,6 +394,7 @@ class SettingService:
             sharepoint_fixture_mode_available=(
                 app_settings.sharepoint_fixture_mode_active
             ),
+            developer_tools_available=app_settings.is_development,
         )
 
     async def get_settings(self) -> SettingsPublic:

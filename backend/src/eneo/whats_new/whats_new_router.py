@@ -46,3 +46,15 @@ async def mark_whats_new_announced(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     return await container.whats_new_service().mark_announced(data.version)
+
+
+@router.delete(
+    "/state/",
+    response_model=WhatsNewStatePublic,
+    description="Development only: forget the current user's What's new markers so the announcement and dot return.",
+    responses=responses.get_responses([403, 404]),
+)
+async def reset_whats_new_state(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    return await container.whats_new_service().reset_state()

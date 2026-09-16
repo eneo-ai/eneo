@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { toastError } from "$lib/core/errors";
   import { Page } from "$lib/components/layout";
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
@@ -24,8 +25,9 @@
   import { Sparkles } from "lucide-svelte";
   import { get } from "svelte/store";
 
-  const { user } = getAppContext();
-  const { markLatestSeen, seenVersion } = getWhatsNewStore();
+  const { user, settings } = getAppContext();
+  const { markLatestSeen, seenVersion, resetState } = getWhatsNewStore();
+  const developerTools = settings.developer_tools_available === true;
   const isAdmin = user.hasPermission("admin");
   const locale = getLocale();
 
@@ -77,6 +79,21 @@
 
   function tourLength(release: Release): number {
     return tourSteps(release, isAdmin, locale).length;
+  }
+
+  let resetting = $state(false);
+
+  // The announcement runs on app load, so a full reload is what brings it
+  // back after the markers are forgotten.
+  async function resetAndReload() {
+    resetting = true;
+    try {
+      await resetState();
+      window.location.reload();
+    } catch (error) {
+      resetting = false;
+      toastError(error, m.whats_new_dev_reset_failed());
+    }
   }
 
   onMount(() => {
@@ -229,6 +246,20 @@
             </ul>
           </section>
         {/each}
+
+        {#if developerTools}
+          <div
+            class="border-warning-default/40 bg-warning-default/5 flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4"
+          >
+            <div class="flex flex-col gap-0.5">
+              <span class="text-primary text-sm font-medium">{m.whats_new_dev_title()}</span>
+              <span class="text-secondary text-xs">{m.whats_new_dev_description()}</span>
+            </div>
+            <Button variant="outline" size="sm" disabled={resetting} onclick={resetAndReload}>
+              {m.whats_new_dev_reset()}
+            </Button>
+          </div>
+        {/if}
 
         <p class="text-muted text-sm">
           <a

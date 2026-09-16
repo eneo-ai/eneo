@@ -4816,5 +4816,9 @@
   "whats_new_tour_progress": "{current} of {total}",
   "whats_new_announcement_intro": "Here is what changed since you were last here.",
   "whats_new_announcement_rest": "…and {count} more on the What's new page.",
-  "whats_new_announcement_later": "Later"
+  "whats_new_announcement_later": "Later",
+  "whats_new_dev_title": "Developer mode",
+  "whats_new_dev_description": "Forget that you have seen and been told about the newest release, then reload so the announcement and the dot return.",
+  "whats_new_dev_reset": "Reset and reload",
+  "whats_new_dev_reset_failed": "Could not reset the What's new state."
 }

@@ -28,6 +28,12 @@ class WhatsNewRepository:
     async def mark_announced(self, user_id: UUID, version: str) -> WhatsNewStatePublic:
         return await self._set(user_id, announced_version=version)
 
+    async def reset(self, user_id: UUID) -> WhatsNewStatePublic:
+        await self.session.execute(
+            sa.delete(WhatsNewState).where(WhatsNewState.user_id == user_id)
+        )
+        return WhatsNewStatePublic(seen_version=None, announced_version=None)
+
     async def _set(self, user_id: UUID, **column: str) -> WhatsNewStatePublic:
         stmt = (
             pg_insert(WhatsNewState)

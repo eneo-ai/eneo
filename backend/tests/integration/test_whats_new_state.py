@@ -75,3 +75,40 @@ async def test_markers_are_session_only(api_client, admin_user_api_key):
     for path in ("/api/v1/whats-new/seen/", "/api/v1/whats-new/announced/"):
         write = await api_client.put(path, headers=headers, json={"version": "2.2.0"})
         assert write.status_code == 403
+
+
+@pytest.mark.integration
+async def test_reset_forgets_both_markers_in_development(
+    api_client, bearer_token, monkeypatch
+):
+    from eneo.main.config import get_settings
+
+    headers = {"Authorization": f"Bearer {bearer_token}"}
+    await api_client.put(
+        "/api/v1/whats-new/announced/", headers=headers, json={"version": "2.2.0"}
+    )
+    await api_client.put(
+        "/api/v1/whats-new/seen/", headers=headers, json={"version": "2.2.0"}
+    )
+
+    monkeypatch.setattr(get_settings(), "environment", "development")
+    reset = await api_client.delete("/api/v1/whats-new/state/", headers=headers)
+    assert reset.status_code == 200
+    assert reset.json() == {"seen_version": None, "announced_version": None}
+
+    state = await api_client.get("/api/v1/whats-new/state/", headers=headers)
+    assert state.json() == {"seen_version": None, "announced_version": None}
+
+
+@pytest.mark.integration
+async def test_reset_is_hidden_outside_development(
+    api_client, bearer_token, monkeypatch
+):
+    from eneo.main.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "environment", "production")
+    response = await api_client.delete(
+        "/api/v1/whats-new/state/", headers={"Authorization": f"Bearer {bearer_token}"}
+    )
+    assert response.status_code == 404
+    assert "developer_tools_disabled" in response.text

@@ -4816,5 +4816,9 @@
   "whats_new_tour_progress": "{current} av {total}",
   "whats_new_announcement_intro": "Det här har ändrats sedan du var här senast.",
   "whats_new_announcement_rest": "…och {count} nyheter till på Nyheter-sidan.",
-  "whats_new_announcement_later": "Senare"
+  "whats_new_announcement_later": "Senare",
+  "whats_new_dev_title": "Utvecklarläge",
+  "whats_new_dev_description": "Glöm att du sett och fått besked om den senaste versionen, och ladda om så att annonseringen och pricken kommer tillbaka.",
+  "whats_new_dev_reset": "Återställ och ladda om",
+  "whats_new_dev_reset_failed": "Kunde inte återställa nyhetsstatusen."
 }

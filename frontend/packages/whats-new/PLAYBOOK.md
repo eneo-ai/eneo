@@ -135,6 +135,12 @@ retention schedule.
 at the last N releases) when the file passes a few hundred entries; the
 docs page should always show the full history.
 
+**Trying it locally.** In a development environment (`ENVIRONMENT=development`)
+the page shows a Developer mode box with "Reset and reload": it forgets
+both markers for your own user (`DELETE /api/v1/whats-new/state/`, 404
+anywhere else) so the announcement and the dot come back. The same thing
+by hand: `truncate whats_new_state`.
+
 **Ownership.** The release owner reviews the entry; the PR author owns the
 `User-facing` section and anchors; anyone changing the schema owns the four
 places listed above.

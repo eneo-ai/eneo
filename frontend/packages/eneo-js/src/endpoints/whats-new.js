@@ -42,6 +42,16 @@ export function initWhatsNew(client) {
         requestBody: { "application/json": { version } }
       });
       return res;
+    },
+
+    /**
+     * Development only: forget both markers so the announcement and the dot return.
+     * @returns {Promise<WhatsNewState>}
+     * @throws {EneoError} 404 developer_tools_disabled outside development
+     */
+    resetState: async () => {
+      const res = await client.fetch("/api/v1/whats-new/state/", { method: "delete" });
+      return res;
     }
   };
 }
