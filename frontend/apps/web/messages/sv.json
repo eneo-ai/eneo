@@ -4798,5 +4798,14 @@
   "whats_new_area_skills": "Skills",
   "whats_new_area_account": "Konto",
   "whats_new_area_admin": "Administration",
-  "whats_new_area_platform": "Plattform"
+  "whats_new_area_platform": "Plattform",
+  "whats_new_filters_label": "Filtrera nyheter",
+  "whats_new_filter_all": "Alla",
+  "whats_new_filter_show_me": "Med Visa mig",
+  "whats_new_filter_show_read": "Visa lästa",
+  "whats_new_count": "{shown} av {total} nyheter",
+  "whats_new_no_match": "Inga nyheter matchar filtret.",
+  "whats_new_clear_filters": "Rensa filter",
+  "whats_new_read": "Läst",
+  "whats_new_new_for_you": "Nytt för dig"
 }
