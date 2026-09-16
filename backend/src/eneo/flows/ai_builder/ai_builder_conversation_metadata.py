@@ -46,10 +46,8 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
 from eneo.flows.ai_builder.ai_builder_field_identity import fold_result_field_name
 from eneo.flows.ai_builder.ai_builder_flow_review import (
     AIBuilderReviewReference,
-    AIBuilderSuggestionContext,
-    PersistedReviewContext,
+    AIBuilderRunFailureContext,
     PersistedReviewReference,
-    PersistedSuggestionContext,
     ReviewEditScope,
     review_edit_scope,
 )
@@ -128,7 +126,7 @@ UI_LANGUAGE_METADATA_KEY = "ui_language"
 FILE_IDS_METADATA_KEY = "file_ids"
 EDIT_CONTEXT_METADATA_KEY = "edit_context"
 REVIEW_CONTEXT_METADATA_KEY = "review_context"
-_REVIEW_REFERENCE_KINDS = ("flow_review", "flow_review_suggestion")
+_REVIEW_REFERENCE_KINDS = ("flow_review", "flow_review_suggestion", "run_failure")
 EVIDENCE_FLOOR_METADATA_KEY = "evidence_floor"
 # Written on every accepted turn of a session that acts on a review, the way
 # the evidence floor is: the review reference lives on one message that
@@ -2327,7 +2325,7 @@ def review_reference_kind(metadata: object) -> str | None:
 
 
 def names_a_review(metadata: object) -> bool:
-    """Whether this message acts on a flow review, of either kind."""
+    """Whether this message names a review reference."""
 
     return review_reference_kind(metadata) is not None
 
@@ -2460,13 +2458,15 @@ def review_edit_scope_for_turn(
     """The edit scope bounding the turn now being answered, if it is a handoff.
 
     Read before any projection, because the projection removes the very
-    message that carries the reference. Only the turn that IS the handoff is
-    bounded: once the user has typed something of their own, the edit is
-    theirs and takes the ordinary route. The tool schema and the admission
+    message that carries the reference. Suggestion scope bounds the handoff turn alone. A failure repair keeps
+    its single-step scope on inherited turns until a different review is named. The tool schema and the admission
     checks read the same scope, so the model is offered exactly what it may
     change and refused nothing it was invited to write.
     """
 
+    reference = latest_user_review_context(conversation)
+    if isinstance(reference, AIBuilderRunFailureContext):
+        return review_edit_scope(reference)
     if not latest_turn_is_review_command(conversation):
         return None
     return review_edit_scope(latest_user_review_context(conversation))
@@ -2529,16 +2529,11 @@ def metadata_for_user_message(
     if edit_context is not None:
         metadata[EDIT_CONTEXT_METADATA_KEY] = edit_context.to_metadata()
     if review_context is not None:
-        persisted: PersistedReviewContext | PersistedSuggestionContext = (
-            PersistedSuggestionContext(
-                **review_context.model_dump(),
-                evidence_classification_level=review_evidence_level or 0,
-            )
-            if isinstance(review_context, AIBuilderSuggestionContext)
-            else PersistedReviewContext(
-                **review_context.model_dump(),
-                evidence_classification_level=review_evidence_level or 0,
-            )
+        persisted = _REVIEW_CONTEXT_ADAPTER.validate_python(
+            {
+                **review_context.to_metadata(),
+                "evidence_classification_level": review_evidence_level or 0,
+            }
         )
         metadata[REVIEW_CONTEXT_METADATA_KEY] = persisted.to_metadata()
     if evidence_floor:

@@ -4091,6 +4091,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/flows/ai-builder/flows/{flow_id}/run-failures/{run_id}/steps/{step_order}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Resolve an instruction repair for a failed step */
+    get: operations["get_ai_builder_run_failure_launch"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/flows/ai-builder/plans/{plan_id}": {
     parameters: {
       query?: never;
@@ -10756,6 +10773,43 @@ export interface components {
        * @enum {string}
        */
       kind: "flow_review";
+    };
+    /**
+     * AIBuilderRunFailureContext
+     * @description Name one failed attempt of one step of one run; the server resolves
+     *     the latest attempt and requires it still to be FAILED.
+     */
+    AIBuilderRunFailureContext: {
+      /** Definition Checksum */
+      definition_checksum: string;
+      /** Flow Version */
+      flow_version: number;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "run_failure";
+      /**
+       * Run Id
+       * Format: uuid
+       */
+      run_id: string;
+      /** Step Order */
+      step_order: number;
+    };
+    /** AIBuilderRunFailureLaunchResponse */
+    AIBuilderRunFailureLaunchResponse: {
+      /** Attempt No */
+      attempt_no: number;
+      /** Error Code */
+      error_code: string;
+      /** Evidence Classification Level */
+      evidence_classification_level: number;
+      reference: components["schemas"]["AIBuilderRunFailureContext"];
+      /** Step Name */
+      step_name: string | null;
+      /** Step Number */
+      step_number: number;
     };
     /**
      * AIBuilderSavedFlowStepEditContext
@@ -30346,6 +30400,7 @@ export interface components {
         | (
             | components["schemas"]["AIBuilderReviewContext"]
             | components["schemas"]["AIBuilderSuggestionContext"]
+            | components["schemas"]["AIBuilderRunFailureContext"]
           )
         | null;
       /** Ui Language */
@@ -50398,6 +50453,93 @@ export interface operations {
            *       },
            *       "eneo_error_code": 9001,
            *       "message": "API key space scope does not match requested AI builder resource.",
+           *       "phase": "router",
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "schema_version": 2
+           *     }
+           */
+          "application/json": components["schemas"]["AIBuilderPublicError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_ai_builder_run_failure_launch: {
+    parameters: {
+      query: {
+        space_id: string;
+      };
+      header?: never;
+      path: {
+        flow_id: string;
+        run_id: string;
+        step_order: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AIBuilderRunFailureLaunchResponse"];
+        };
+      };
+      /** @description REVIEW_STALE, FLOW_NOT_PUBLISHED, or REVIEW_FINDING_UNKNOWN. Unavailable reasons: step_unknown, no_failed_attempt, output_not_retained, output_masked */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "category": "bad_request",
+           *       "code": "review_finding_unknown",
+           *       "diagnostic_context": {
+           *         "error_category": "bad_request",
+           *         "error_code": "review_finding_unknown",
+           *         "error_phase": "router",
+           *         "request_id": "req_01HZYXEXAMPLE"
+           *       },
+           *       "eneo_error_code": 9007,
+           *       "message": "The failed step is unavailable for instruction repair.",
+           *       "phase": "router",
+           *       "request_id": "req_01HZYXEXAMPLE",
+           *       "schema_version": 2
+           *     }
+           */
+          "application/json": components["schemas"]["AIBuilderPublicError"];
+        };
+      };
+      /** @description Caller lacks flow review permission, space permission, or run evidence access. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "category": "unauthorized",
+           *       "code": "insufficient_scope",
+           *       "diagnostic_context": {
+           *         "error_category": "unauthorized",
+           *         "error_code": "insufficient_scope",
+           *         "error_phase": "router",
+           *         "request_id": "req_01HZYXEXAMPLE"
+           *       },
+           *       "eneo_error_code": 9001,
+           *       "message": "The caller cannot review this flow run.",
            *       "phase": "router",
            *       "request_id": "req_01HZYXEXAMPLE",
            *       "schema_version": 2

@@ -1510,6 +1510,14 @@
               await aiBuilderHost?.openReview();
             }
           : undefined}
+        onrepair={canReviewWithAIBuilder && $resource.published_version != null
+          ? async (target) => {
+              ensureAIBuilder();
+              setActiveTab("ai-builder");
+              await tick();
+              await aiBuilderHost?.launchFailureRepair(target);
+            }
+          : undefined}
       />
     </div>
   </Page.Main>

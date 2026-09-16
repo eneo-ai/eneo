@@ -15,6 +15,8 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
     BuilderSession,
     ConversationMessage,
+    FlowBuilderProposal,
+    FlowBuilderProposalContent,
     TargetKind,
 )
 from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderBadRequestException
@@ -1462,3 +1464,119 @@ def _edit_step(
         input_config=None,
         output_config=None,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("has_plan", [False, True])
+@pytest.mark.parametrize("client_target", [None, "same", "other"])
+async def test_failure_repair_scope_tracks_saved_step_across_plan_turns(
+    has_plan, client_target
+):
+    session = _edit_session(latest_plan_id=uuid4() if has_plan else None)
+    step_id = uuid4()
+    flow = _saved_flow(session=session, step_id=step_id)
+    other = flow.steps[0].model_copy(update={"id": uuid4(), "step_order": 2})
+    flow = flow.model_copy(update={"steps": [*flow.steps, other]})
+    spec = _spec(existing_step_ref="existing_step_1")
+    spec = spec.model_copy(
+        update={
+            "steps": [
+                *spec.steps,
+                spec.steps[0].model_copy(
+                    update={
+                        "plan_step_ref": "step_b",
+                        "existing_step_ref": "existing_step_2",
+                    }
+                ),
+            ]
+        }
+    )
+    plan = BuilderPlan(
+        id=session.latest_plan_id or uuid4(),
+        tenant_id=session.tenant_id,
+        session_id=session.id,
+        proposal=FlowBuilderProposal(content=FlowBuilderProposalContent(spec=spec)),
+    )
+    repo = SimpleNamespace(get_plan=AsyncMock(return_value=plan))
+    context = None
+    if client_target is not None:
+        if has_plan:
+            context = AIBuilderPlanEditContext(
+                plan_id=plan.id,
+                scope="step",
+                target_plan_step_ref="step_b" if client_target == "other" else "step_a",
+            )
+        else:
+            context = AIBuilderSavedFlowStepEditContext(
+                flow_step_id=other.id if client_target == "other" else step_id
+            )
+    if client_target == "other":
+        with pytest.raises(AIBuilderBadRequestException) as caught:
+            await resolve_plan_edit_context(
+                repo=repo,
+                tenant_id=session.tenant_id,
+                session=session,
+                flow=flow,
+                context=context,
+                failure_step_order=1,
+                failure_step_id=step_id,
+            )
+        assert caught.value.code == "invalid_existing_step_ref"
+        assert caught.value.context["reason"] == "repair_scope_mismatch"
+        return
+    resolved, previous = await resolve_plan_edit_context(
+        repo=repo,
+        tenant_id=session.tenant_id,
+        session=session,
+        flow=flow,
+        context=context,
+        failure_step_order=1,
+        failure_step_id=step_id,
+    )
+    assert resolved is not None and resolved.preserve_output_contract
+    assert resolved.target_existing_step_ref == "existing_step_1"
+    assert resolved.request.kind == ("proposed_plan" if has_plan else "saved_flow_step")
+    assert (previous is not None) == has_plan
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("instructions", "Return precisely one JSON object."),
+        ("output_type", OutputType.JSON),
+        ("output_mode", OutputMode.COMPOSE_TEXT),
+        ("output_contract", {"type": "object"}),
+        ("output_config", {"filename": "result.txt"}),
+    ],
+)
+def test_failure_repair_keeps_all_compiled_output_contract_fields(field, value):
+    prior = _spec(existing_step_ref="existing_step_1")
+    target = prior.steps[0]
+    if field == "instructions":
+        target = target.model_copy(
+            update={
+                "assistant_spec": target.assistant_spec.model_copy(
+                    update={"instructions": value}
+                )
+            }
+        )
+    else:
+        target = target.model_copy(update={field: value})
+    proposed = prior.model_copy(update={"steps": [target]})
+    context = ResolvedAIBuilderEditContext(
+        request=AIBuilderSavedFlowStepEditContext(flow_step_id=uuid4()),
+        scope="step",
+        target_existing_step_ref="existing_step_1",
+        preserve_output_contract=True,
+    )
+    rejection = validate_scoped_plan_revision(
+        context=context,
+        prior_spec=prior,
+        proposed_spec=proposed,
+        target_kind=TargetKind.EDIT,
+        saved_step_revision=True,
+    )
+    if field == "instructions":
+        assert rejection is None
+    else:
+        assert rejection is not None and rejection.reason == "output_contract_changed"

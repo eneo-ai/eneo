@@ -6,6 +6,7 @@
   import FlowAIBuilder from "./FlowAIBuilder.svelte";
   import { initAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
   import type { AIBuilderSavedFlowStepScope } from "./protocol";
+  import type { FlowRunFailureRepairTarget } from "$lib/features/flows/flowRunFailureRepair";
 
   interface Props {
     eneo: Eneo;
@@ -37,6 +38,12 @@
     // flushes when the user opens the tab for the first time.
     await tick();
     await builder?.focusSavedFlowStep(scope);
+  }
+
+  /** Hand a failed step of a run to the Builder (from the run history). */
+  export async function launchFailureRepair(target: FlowRunFailureRepairTarget) {
+    await tick();
+    await builder?.launchFailureRepair(target);
   }
 
   onDestroy(() => {

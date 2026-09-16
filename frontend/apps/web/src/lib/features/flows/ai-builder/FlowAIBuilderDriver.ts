@@ -1,3 +1,4 @@
+import type { FlowRunFailureRepairTarget } from "$lib/features/flows/flowRunFailureRepair";
 import { m } from "$lib/paraglide/messages";
 import { getLocale } from "$lib/paraglide/runtime";
 import type { EneoFetchFunction, EneoStreamFunction } from "@eneo/eneo-js";
@@ -45,6 +46,7 @@ import type {
   RecoverableAIBuilderDraftSession,
   TargetKind,
   AIBuilderFlowReviewPacket,
+  AIBuilderRunFailureLaunch,
   AIBuilderReviewReference,
   AIBuilderFlowReviewSuggestions
 } from "./protocol";
@@ -69,6 +71,8 @@ const FLOW_AI_BUILDER_ROUTES = {
   clientErrors: "/api/v1/flows/ai-builder/client-errors",
   flowReviewPacket: "/api/v1/flows/ai-builder/flows/{flow_id}/review-packet",
   flowReviewSuggestions: "/api/v1/flows/ai-builder/flows/{flow_id}/review-suggestions",
+  runFailureLaunch:
+    "/api/v1/flows/ai-builder/flows/{flow_id}/run-failures/{run_id}/steps/{step_order}",
   flowUnpublish: "/api/v1/flows/{id}/unpublish/"
 } as const;
 
@@ -790,6 +794,25 @@ export class FlowAIBuilderDriver {
       params: { path: { flow_id: this.#flowId }, query: { space_id: this.#spaceId } }
     })) as AIBuilderFlowReviewPacket;
     return packet;
+  }
+
+  /** Whether one failed step can be handed to the Builder, decided by the
+   *  server: which attempt it is, that the published flow is still the one
+   *  that ran, and that the model's rejected answer was kept. Identity and
+   *  evidence level only; the text is read on the turn, under audit. */
+  async fetchRunFailureLaunch(
+    target: FlowRunFailureRepairTarget
+  ): Promise<AIBuilderRunFailureLaunch> {
+    if (!this.#flowId) {
+      throw new Error("A failure repair needs an edit session's flow.");
+    }
+    return (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.runFailureLaunch, {
+      method: "get",
+      params: {
+        path: { flow_id: this.#flowId, run_id: target.runId, step_order: target.stepOrder },
+        query: { space_id: this.#spaceId }
+      }
+    })) as AIBuilderRunFailureLaunch;
   }
 
   /** Every judgement and turn over an open review's packet is held to its

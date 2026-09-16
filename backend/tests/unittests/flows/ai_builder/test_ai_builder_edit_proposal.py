@@ -5340,3 +5340,44 @@ async def test_saved_step_implicit_json_consumer_contract_is_preserved(field_nam
     else:
         assert isinstance(result, CorrectableFailure), result
         assert "input_contract_type_mismatch" in result.codes
+
+
+@pytest.mark.parametrize("change_contract", [False, True])
+async def test_failure_repair_compilation_accepts_instructions_but_refuses_contract_change(
+    change_contract,
+):
+    from dataclasses import replace
+
+    flow, snapshots, catalog, context, prior = _saved_step_large_flow_fixture(4)
+    context = replace(context, preserve_output_contract=True)
+    change = {
+        "kind": "modify",
+        "existing_step_ref": "existing_step_4",
+        "assistant_spec": {"instructions": "Explain the evidence clearly."},
+    }
+    if change_contract:
+        change["output_type"] = "json"
+        change["output_fields"] = [
+            {"name": "summary", "field_type": "string", "description": "Summary"}
+        ]
+    result = await _process(
+        flow=flow,
+        assistant_snapshots=snapshots,
+        resource_catalog=catalog,
+        plan_edit_context=context,
+        prior_spec_for_revision=prior,
+        arguments={"plan_rationale": "Repair the instruction", "steps": [change]},
+    )
+    if change_contract:
+        assert isinstance(result, CorrectableFailure), result
+        assert "failed output contract" in result.feedback
+    else:
+        assert isinstance(result, ProposalReady), result
+        assert (
+            result.compiled.content.spec.steps[3].assistant_spec.instructions
+            == "Explain the evidence clearly."
+        )
+        assert (
+            result.compiled.content.spec.steps[3].output_type
+            == prior.steps[3].output_type
+        )

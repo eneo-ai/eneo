@@ -22,6 +22,25 @@ function runError(overrides: Partial<FlowRunError> = {}): FlowRunError {
 }
 
 describe("FlowRunErrorAlert", () => {
+  it("offers the AI Builder repair only when a handler is given", () => {
+    const withRepair = render(FlowRunErrorAlert, {
+      props: {
+        errorCode: FLOW_API_ERROR_CODE.TYPED_IO_OUTPUT_PARSE_FAILED,
+        message: "Step 2: output parse failed.",
+        onrepair: () => undefined
+      }
+    }).body;
+    expect(withRepair).toContain(m.flow_run_error_repair_action());
+
+    const without = render(FlowRunErrorAlert, {
+      props: {
+        errorCode: FLOW_API_ERROR_CODE.TYPED_IO_OUTPUT_PARSE_FAILED,
+        message: "Step 2: output parse failed."
+      }
+    }).body;
+    expect(without).not.toContain(m.flow_run_error_repair_action());
+  });
+
   it("renders the localized catalog message for known run error codes", () => {
     const { body } = render(FlowRunErrorAlert, {
       props: {

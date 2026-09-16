@@ -213,6 +213,7 @@ async def test_prepare_step_execution_interpolates_prompt_and_records_contract_v
         input_source="flow_input",
     )
     deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1_000_000,
         variable_resolver=FlowVariableResolver(),
         completion_service=object(),
         load_assistant=AsyncMock(return_value=assistant),
@@ -257,6 +258,7 @@ async def test_prepare_step_execution_reports_prompt_variable_miss_before_provid
     assistant.get_prompt_text.return_value = "Review {{flow_input.missing}}"
     assistant.get_response = AsyncMock()
     deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1_000_000,
         variable_resolver=FlowVariableResolver(),
         completion_service=object(),
         load_assistant=AsyncMock(return_value=assistant),
@@ -318,6 +320,7 @@ async def test_prepare_step_execution_rejects_non_json_explicit_binding_before_p
         used_question_binding=True,
     )
     deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1_000_000,
         variable_resolver=FlowVariableResolver(),
         completion_service=object(),
         load_assistant=AsyncMock(return_value=assistant),
@@ -427,6 +430,7 @@ async def test_prepare_step_execution_validates_json_binding_when_binding_is_jso
         used_question_binding=True,
     )
     deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1_000_000,
         variable_resolver=FlowVariableResolver(),
         completion_service=object(),
         load_assistant=AsyncMock(return_value=assistant),
@@ -729,6 +733,7 @@ async def test_complete_step_execution_falls_back_when_json_mode_rejected(
         llm_files=[],
     )
     deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1_000_000,
         variable_resolver=FlowVariableResolver(),
         completion_service=object(),
         load_assistant=AsyncMock(),
@@ -888,6 +893,7 @@ async def test_complete_step_execution_strips_known_unsupported_stored_response_
         llm_files=[],
     )
     deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1_000_000,
         variable_resolver=FlowVariableResolver(),
         completion_service=object(),
         load_assistant=AsyncMock(),
@@ -1036,6 +1042,7 @@ async def test_completed_provider_call_is_observed_before_postprocessing_failure
         raise RuntimeError("postprocessing failed")
 
     deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1_000_000,
         variable_resolver=FlowVariableResolver(),
         completion_service=object(),
         load_assistant=AsyncMock(),
@@ -1108,6 +1115,7 @@ async def test_complete_step_execution_does_not_repeat_non_capability_error_with
         llm_files=[],
     )
     deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1_000_000,
         variable_resolver=FlowVariableResolver(),
         completion_service=object(),
         load_assistant=AsyncMock(),
@@ -1171,6 +1179,7 @@ async def test_complete_step_execution_does_not_repeat_late_json_mode_rejection(
         llm_files=[],
     )
     deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1_000_000,
         variable_resolver=FlowVariableResolver(),
         completion_service=object(),
         load_assistant=AsyncMock(),
@@ -1226,6 +1235,7 @@ async def test_complete_step_execution_translates_context_window_failure():
         llm_files=[],
     )
     deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1_000_000,
         variable_resolver=FlowVariableResolver(),
         completion_service=object(),
         load_assistant=AsyncMock(),
@@ -1246,6 +1256,7 @@ async def test_complete_step_execution_translates_context_window_failure():
             deps=deps,
         )
 
+    assert getattr(exc_info.value, "rejected_output", None) is None
     assert (
         exc_info.value.code
         == FlowApiErrorCode.TYPED_IO_INPUT_EXCEEDS_MODEL_WINDOW.value
@@ -1321,6 +1332,7 @@ async def test_complete_step_execution_shares_deadline_across_json_mode_retry(
         llm_files=[],
     )
     deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1_000_000,
         variable_resolver=FlowVariableResolver(),
         completion_service=object(),
         load_assistant=AsyncMock(),
@@ -1342,6 +1354,7 @@ async def test_complete_step_execution_shares_deadline_across_json_mode_retry(
             deps=deps,
         )
 
+    assert getattr(exc_info.value, "rejected_output", None) is None
     assert exc_info.value.code == "flow_llm_request_timeout"
     assert assistant.get_response.await_count == 2
 
@@ -1401,6 +1414,7 @@ async def test_complete_step_execution_fast_fails_when_deadline_already_exhauste
         llm_files=[],
     )
     deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1_000_000,
         variable_resolver=FlowVariableResolver(),
         completion_service=object(),
         load_assistant=AsyncMock(),
@@ -1422,6 +1436,7 @@ async def test_complete_step_execution_fast_fails_when_deadline_already_exhauste
             deps=deps,
         )
 
+    assert getattr(exc_info.value, "rejected_output", None) is None
     assert exc_info.value.code == "flow_llm_request_timeout"
     assert assistant.get_response.await_count == 1, (
         "Retry must not dispatch a second LLM call when the deadline "
@@ -1462,6 +1477,7 @@ async def test_complete_step_execution_times_out_llm_request():
         llm_files=[],
     )
     deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1_000_000,
         variable_resolver=FlowVariableResolver(),
         completion_service=object(),
         load_assistant=AsyncMock(),
@@ -1483,6 +1499,7 @@ async def test_complete_step_execution_times_out_llm_request():
             deps=deps,
         )
 
+    assert getattr(exc_info.value, "rejected_output", None) is None
     assert exc_info.value.code == "flow_llm_request_timeout"
     assert getattr(exc_info.value, "effective_prompt") == "Prompt"
     failed_input_payload = getattr(exc_info.value, "input_payload_json")
@@ -1526,6 +1543,7 @@ async def test_complete_step_execution_cancels_llm_request_when_run_is_cancelled
         llm_files=[],
     )
     deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1_000_000,
         variable_resolver=FlowVariableResolver(),
         completion_service=object(),
         load_assistant=AsyncMock(),
@@ -1612,6 +1630,7 @@ async def test_cancellation_survives_a_failing_cancel_probe():
 
     watch_logger = MagicMock()
     deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1_000_000,
         variable_resolver=FlowVariableResolver(),
         completion_service=object(),
         load_assistant=AsyncMock(),
@@ -1687,6 +1706,7 @@ async def test_complete_step_execution_returns_when_cancelled_llm_suppresses_can
         llm_files=[],
     )
     deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1_000_000,
         variable_resolver=FlowVariableResolver(),
         completion_service=object(),
         load_assistant=AsyncMock(),
@@ -1765,6 +1785,7 @@ async def test_complete_step_execution_logs_json_mode_kwargs_failures(
         llm_files=[],
     )
     deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1_000_000,
         variable_resolver=FlowVariableResolver(),
         completion_service=object(),
         load_assistant=AsyncMock(),
@@ -1838,6 +1859,7 @@ async def test_complete_step_execution_skips_native_json_mode_when_capability_is
         llm_files=[],
     )
     deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1_000_000,
         variable_resolver=FlowVariableResolver(),
         completion_service=object(),
         load_assistant=AsyncMock(),
@@ -1915,6 +1937,7 @@ async def test_complete_step_execution_does_not_force_json_object_for_array_docu
         llm_files=[],
     )
     deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1_000_000,
         variable_resolver=FlowVariableResolver(),
         completion_service=object(),
         load_assistant=AsyncMock(),
@@ -1987,6 +2010,7 @@ async def test_complete_step_execution_prefers_provider_reported_usage(
         llm_files=[],
     )
     deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1_000_000,
         variable_resolver=FlowVariableResolver(),
         completion_service=object(),
         load_assistant=AsyncMock(),
@@ -2054,6 +2078,7 @@ async def test_complete_step_execution_falls_back_to_estimated_usage_when_provid
         llm_files=[],
     )
     deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1_000_000,
         variable_resolver=FlowVariableResolver(),
         completion_service=object(),
         load_assistant=AsyncMock(),
@@ -2131,6 +2156,7 @@ async def test_complete_step_execution_falls_back_per_usage_field(
         llm_files=[],
     )
     deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1_000_000,
         variable_resolver=FlowVariableResolver(),
         completion_service=object(),
         load_assistant=AsyncMock(),
@@ -2220,6 +2246,7 @@ async def test_complete_step_execution_uses_version_2_and_strips_inline_refs_for
         "passage_evidence_location": "attempt_provenance",
     }
     deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1_000_000,
         variable_resolver=FlowVariableResolver(),
         completion_service=object(),
         load_assistant=AsyncMock(),
@@ -2311,6 +2338,7 @@ async def test_complete_step_execution_records_missing_citations_without_failing
         ],
     }
     deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1_000_000,
         variable_resolver=FlowVariableResolver(),
         completion_service=object(),
         load_assistant=AsyncMock(),
@@ -2390,6 +2418,7 @@ async def test_complete_step_execution_does_not_expect_citations_when_no_knowled
         "references": [],
     }
     deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1_000_000,
         variable_resolver=FlowVariableResolver(),
         completion_service=object(),
         load_assistant=AsyncMock(),
@@ -2518,6 +2547,7 @@ async def test_complete_step_execution_tracks_inherited_citations_for_synthesis_
         llm_files=[],
     )
     deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1_000_000,
         variable_resolver=FlowVariableResolver(),
         completion_service=object(),
         load_assistant=AsyncMock(),
@@ -2826,6 +2856,7 @@ async def test_document_report_citation_survives_compose_render_and_public_artif
     }
     provider_call_counter = AsyncMock(return_value=("Material claim", []))
     deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1_000_000,
         variable_resolver=FlowVariableResolver(),
         completion_service=object(),
         load_assistant=AsyncMock(),
@@ -2868,3 +2899,110 @@ async def test_document_report_citation_survives_compose_render_and_public_artif
     # Compose and render are deterministic: the only provider-facing call
     # in this chain was the producer itself.
     assert assistant.get_response.await_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", ["", "invalid å JSON"])
+async def test_rejected_completion_attaches_exact_text_without_output_artifact(text):
+    assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
+    assistant.completion_model_kwargs = MagicMock()
+    assistant.get_response = AsyncMock(
+        return_value=SimpleNamespace(
+            total_token_count=4,
+            completion=text,
+        )
+    )
+    prepared = PreparedStepExecution(
+        assistant=assistant,
+        step_input=StepInputValue(
+            text="input", source_text="input", input_source="flow_input"
+        ),
+        effective_prompt="Return JSON",
+        input_payload_for_result={"text": "input"},
+        contract_validation=None,
+        diagnostics=[],
+        llm_files=[],
+    )
+    cap = AsyncMock()
+    deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1_000_000,
+        variable_resolver=FlowVariableResolver(),
+        completion_service=object(),
+        load_assistant=AsyncMock(),
+        resolve_step_input=AsyncMock(),
+        retrieve_rag_chunks=AsyncMock(
+            return_value=([], {"status": "skipped_no_service"}, [])
+        ),
+        process_typed_output=AsyncMock(
+            side_effect=TypedIOValidationException(
+                "Invalid JSON", code="typed_io_output_parse_failed"
+            )
+        ),
+        apply_output_cap=cap,
+    )
+    with pytest.raises(TypedIOValidationException) as caught:
+        await complete_step_execution(
+            step=_step(output_type="json"),
+            run=_run(),
+            state=_state(),
+            prepared=prepared,
+            deps=deps,
+        )
+    assert getattr(caught.value, "rejected_output", None) == text
+    assert caught.value.effective_prompt == "Return JSON"
+    cap.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_failed_rejected_output_is_unavailable_to_later_step_variables():
+    from eneo.flows.domain.step_output import build_rejected_output_payload
+    from eneo.main.exceptions import TypedIOValidationException
+
+    run, state = _run(), _state()
+    now = datetime.now(timezone.utc)
+    state.prior_results.append(
+        FlowStepResult(
+            id=uuid4(),
+            flow_run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_id=uuid4(),
+            step_order=1,
+            assistant_id=uuid4(),
+            status=FlowStepResultStatus.FAILED,
+            output_payload_json=build_rejected_output_payload(
+                "private rejected", max_inline_bytes=100
+            ),
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    assistant = MagicMock()
+    assistant.get_prompt_text.return_value = "Use {{step1.output}}"
+    provider = AsyncMock()
+    deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1000,
+        variable_resolver=FlowVariableResolver(),
+        completion_service=provider,
+        load_assistant=AsyncMock(return_value=assistant),
+        resolve_step_input=AsyncMock(
+            return_value=StepInputValue(
+                text="input", source_text="input", input_source="flow_input"
+            )
+        ),
+        retrieve_rag_chunks=AsyncMock(),
+        process_typed_output=AsyncMock(),
+        apply_output_cap=AsyncMock(),
+    )
+    with pytest.raises(TypedIOValidationException) as caught:
+        await prepare_step_execution(
+            step=_step(step_order=2),
+            run=run,
+            state=state,
+            version_metadata=None,
+            requested_file_ids=(),
+            deps=deps,
+        )
+    assert caught.value.code == "typed_io_variable_resolution_failed"
+    provider.assert_not_called()

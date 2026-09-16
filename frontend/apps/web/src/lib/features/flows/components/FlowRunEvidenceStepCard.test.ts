@@ -22,13 +22,15 @@ const result: FlowRunStep = {
 function renderCard(
   currentEvidenceNotLoaded: boolean,
   stepResult: FlowRunStep = result,
-  transcriptContext: FlowRunTranscriptContext | null = null
+  transcriptContext: FlowRunTranscriptContext | null = null,
+  onRepairFailure: ((stepOrder: number) => void) | null = null
 ): string {
   return render(FlowRunEvidenceStepCard, {
     props: {
       result: stepResult,
       transcriptContext,
       currentEvidenceNotLoaded,
+      onRepairFailure,
       stepDef: undefined,
       duration: null,
       transcription: null,
@@ -52,6 +54,27 @@ function renderCard(
 }
 
 describe("FlowRunEvidenceStepCard", () => {
+  it("offers the AI Builder repair for a rejected-output failure and not for other failures", () => {
+    const failed = (error_code: FlowRunStep["error_code"]): FlowRunStep => ({
+      ...result,
+      status: "failed",
+      error_code,
+      error_message: `Step 1: ${error_code}.`
+    });
+    const repair = () => undefined;
+    expect(renderCard(false, failed("typed_io_output_parse_failed"), null, repair)).toContain(
+      m.flow_run_error_repair_action()
+    );
+    // A candidate code without a handler (no Builder permission) offers nothing.
+    expect(renderCard(false, failed("typed_io_output_parse_failed"), null, null)).not.toContain(
+      m.flow_run_error_repair_action()
+    );
+    // A failure that happened before the model answered is not a repair.
+    expect(
+      renderCard(false, failed("typed_io_input_exceeds_model_window"), null, repair)
+    ).not.toContain(m.flow_run_error_repair_action());
+  });
+
   it("shows when the current attempt's evidence was not loaded", () => {
     expect(renderCard(true)).toContain('data-testid="current-evidence-not-loaded"');
   });

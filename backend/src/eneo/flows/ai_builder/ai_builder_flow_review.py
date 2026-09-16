@@ -25,10 +25,11 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 from collections import Counter, defaultdict
-from collections.abc import Awaitable, Callable, Collection
+from collections.abc import Awaitable, Callable, Collection, Mapping
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Annotated, Literal, Protocol, Sequence
+from typing import TYPE_CHECKING, Annotated, Literal, Protocol, Sequence, cast, get_args
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -39,6 +40,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
 )
 from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
     READ_DEADLINE_SECONDS,
+    ExcerptAvailability,
     FlowReviewSample,
     ReviewPromptGroups,
     ReviewSampleExcerpt,
@@ -62,8 +64,10 @@ from eneo.flows.ai_builder.ai_builder_plan_edit_context import EditOperationPerm
 from eneo.flows.application.flow_run_access_policy import FlowRunAccessKind
 from eneo.flows.application.flow_run_evidence_bundle import RedactedEvidenceBundle
 from eneo.flows.domain.flow import Flow, FlowRun, FlowRunStatusSnapshot, FlowVersion
+from eneo.flows.domain.flow_step_attempt_input import parse_flow_step_attempt_input
 from eneo.flows.domain.runtime import RuntimeStep
-from eneo.flows.enums import FlowRunStatus
+from eneo.flows.domain.step_output import RejectedOutput, interpret_rejected_output
+from eneo.flows.enums import FlowRunStatus, FlowStepAttemptStatus
 from eneo.flows.infrastructure.flow_run_repo import (
     FlowStepLineage,
     FlowStepResultMetrics,
@@ -72,6 +76,8 @@ from eneo.flows.published_definition import parse_published_runtime_steps
 from eneo.flows.step_lineage import existing_step_ref_for_order
 from eneo.main.exceptions import NotFoundException, UnauthorizedException
 from eneo.users.user import UserInDB
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from eneo.flows.ai_builder.ai_builder_edit_preview_models import (
@@ -327,18 +333,62 @@ class PersistedSuggestionContext(AIBuilderSuggestionContext):
     evidence_classification_level: int = Field(default=0, ge=0)
 
 
+class AIBuilderRunFailureContext(BaseModel):
+    """Name one failed attempt of one step of one run; the server resolves
+    the latest attempt and requires it still to be FAILED.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["run_failure"] = "run_failure"
+    flow_version: int = Field(ge=1)
+    definition_checksum: str = Field(min_length=1, max_length=128)
+    run_id: UUID
+    step_order: int = Field(ge=1)
+
+    def to_metadata(self) -> dict[str, object]:
+        return self.model_dump(mode="json")
+
+
+class PersistedRunFailureContext(AIBuilderRunFailureContext):
+    evidence_classification_level: int = Field(default=0, ge=0)
+
+
 AIBuilderReviewReference = Annotated[
-    AIBuilderReviewContext | AIBuilderSuggestionContext,
+    AIBuilderReviewContext | AIBuilderSuggestionContext | AIBuilderRunFailureContext,
     Field(discriminator="kind"),
 ]
 PersistedReviewReference = Annotated[
-    PersistedReviewContext | PersistedSuggestionContext,
+    PersistedReviewContext | PersistedSuggestionContext | PersistedRunFailureContext,
     Field(discriminator="kind"),
 ]
 
 
+RunFailureUnavailableReason = Literal[
+    "step_unknown", "no_failed_attempt", "output_not_retained", "output_masked"
+]
+RUN_FAILURE_UNAVAILABLE_REASONS: tuple[RunFailureUnavailableReason, ...] = get_args(
+    RunFailureUnavailableReason
+)
+
+
+class FlowReviewFailureFact(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    run_id: UUID
+    step_order: int
+    attempt_no: int
+    error_code: str
+    error_message: str
+    effective_prompt: str | None
+    rejected_output: RejectedOutput
+    requested_model: str | None
+    effective_prompt_availability: ExcerptAvailability = "included"
+    rejected_output_availability: ExcerptAvailability = "included"
+
+
 class FlowReviewEvidence(BaseModel):
-    """The named findings of one review, resolved for one turn."""
+    """Review findings or one failed attempt, resolved for one turn."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -349,6 +399,7 @@ class FlowReviewEvidence(BaseModel):
     failed_run_count: int
     steps: list[FlowReviewStep]
     facts: list[FlowReviewFact]
+    failure: FlowReviewFailureFact | None = None
     suggestions: list[FlowReviewSuggestionFocus] = []
     sample_runs: list[ReviewSampleRun] = []
     excerpts: list[ReviewSampleExcerpt] = []
@@ -665,12 +716,19 @@ class ReviewEditScope(EditOperationPermissions):
 def review_edit_scope(
     context: AIBuilderReviewReference | None,
 ) -> ReviewEditScope | None:
-    """The scope a suggestion reference implies, or nothing for other turns.
+    """The steps a suggestion or failure reference permits changing.
 
     A review that names deterministic findings is a discussion, not a bounded
-    edit; only a suggestion handoff carries steps and kinds to bound one.
+    edit; suggestions bound operations by kind, while a failure permits only
+    modification of its named step.
     """
 
+    if isinstance(context, AIBuilderRunFailureContext):
+        return ReviewEditScope(
+            step_refs=frozenset({existing_step_ref_for_order(context.step_order)}),
+            removable_step_refs=frozenset(),
+            may_add=False,
+        )
     if not isinstance(context, AIBuilderSuggestionContext):
         return None
     step_refs: set[str] = set()
@@ -916,15 +974,57 @@ def fit_review_evidence(
     fits: Callable[[FlowReviewEvidence], bool],
     prompt_groups: ReviewPromptGroups | None = None,
 ) -> FlowReviewEvidence:
-    """The evidence with as much excerpt text as the prompt can carry.
+    """Fit excerpts and failure text together, marking budget omissions.
 
-    The facts and the suggestions always travel; the excerpts are fitted the
-    way the sample's are, and marked when they did not fit.
+    Runtime truncation remains independent of how much of that retained
+    prefix the planner's request budget can carry.
     """
+    excerpts = list(evidence.excerpts)
+    failure = evidence.failure
+    if failure is not None:
+        excerpts.extend(
+            [
+                ReviewSampleExcerpt(
+                    run_id=failure.run_id,
+                    step_order=failure.step_order,
+                    field="prompt",
+                    availability=failure.effective_prompt_availability,
+                    text=failure.effective_prompt,
+                ),
+                ReviewSampleExcerpt(
+                    run_id=failure.run_id,
+                    step_order=failure.step_order,
+                    field="output",
+                    availability=failure.rejected_output_availability,
+                    text=failure.rejected_output.text,
+                ),
+            ]
+        )
+
+    def render(fitted: list[ReviewSampleExcerpt]) -> FlowReviewEvidence:
+        if failure is None:
+            return evidence.model_copy(update={"excerpts": fitted})
+        prompt, output = fitted[-2:]
+        return evidence.model_copy(
+            update={
+                "excerpts": fitted[:-2],
+                "failure": failure.model_copy(
+                    update={
+                        "effective_prompt": prompt.text,
+                        "effective_prompt_availability": prompt.availability,
+                        "rejected_output": RejectedOutput(
+                            text=output.text or "",
+                            truncated_by_runtime=failure.rejected_output.truncated_by_runtime,
+                        ),
+                        "rejected_output_availability": output.availability,
+                    }
+                ),
+            }
+        )
 
     return fit_excerpts(
-        evidence.excerpts,
-        render=lambda excerpts: evidence.model_copy(update={"excerpts": excerpts}),
+        excerpts,
+        render=render,
         fits=fits,
         prompt_groups=prompt_groups,
     )
@@ -948,6 +1048,41 @@ def render_review_evidence(
         f"{evidence.failed_run_count} misslyckade körningar av samma "
         "flödesdefinition gav fakta.",
     ]
+    if evidence.failure is not None:
+        failure = evidence.failure
+        lines.extend(
+            [
+                f"### Misslyckat steg {failure.step_order}, försök {failure.attempt_no}",
+                f"Felkod: {failure.error_code}",
+                f"Felmeddelande: {failure.error_message}",
+                "--- Körningens instruktion ---",
+                failure.effective_prompt
+                if failure.effective_prompt is not None
+                else (
+                    ""
+                    if failure.effective_prompt_availability == "omitted_by_budget"
+                    else "(inte inspelad)"
+                ),
+                "--- Slut på instruktionen ---",
+                "--- Avvisad utdata ---",
+                failure.rejected_output.text,
+                "--- Slut på avvisad utdata ---",
+            ]
+        )
+        for label, availability in (
+            ("Instruktionen", failure.effective_prompt_availability),
+            ("Avvisad utdata", failure.rejected_output_availability),
+        ):
+            if availability == "truncated":
+                lines.append(f"({label}: kortad av utrymmesskäl, bara början visas)")
+            elif availability == "omitted_by_budget":
+                lines.append(f"({label}: {_EXCERPT_AVAILABILITY_SV[availability]})")
+        if failure.rejected_output.truncated_by_runtime:
+            lines.append("(kortad av flödet vid körningen, bara början sparades)")
+        lines.append(
+            "Utdata ovan är vad modellen svarade och vad som avvisades; kontraktet "
+            "för stegets utdata ligger fast — ändra instruktionen så att svaret uppfyller det."
+        )
     # A run was read only if some text of it is rendered below; a placeholder
     # (omitted, not recorded, unavailable) is not a read.
     read_runs = len(
@@ -1480,6 +1615,151 @@ class AIBuilderFlowReviewService:
         self.flow_version_repo = flow_version_repo
         self.access_policy = access_policy
         self.evidence_service = evidence_service
+
+    async def build_failure_reference(
+        self,
+        *,
+        flow_id: UUID,
+        space_id: UUID,
+        run_id: UUID,
+        step_order: int,
+    ) -> AIBuilderRunFailureContext:
+        """Name a launch against the current published definition, without run content."""
+        _, version = await self._published(flow_id=flow_id, space_id=space_id)
+        return AIBuilderRunFailureContext(
+            flow_version=version.version,
+            definition_checksum=version.definition_checksum,
+            run_id=run_id,
+            step_order=step_order,
+        )
+
+    async def resolve_failure_evidence(
+        self,
+        *,
+        flow_id: UUID,
+        space_id: UUID,
+        reference: AIBuilderRunFailureContext,
+        audit: ReviewSampleAudit | None,
+    ) -> FlowReviewEvidence:
+        """Resolve the named step's latest attempt, only while it is FAILED.
+
+        The reference is inherited until another review is named or a new
+        session starts; each turn resolves the evidence and repair scope again.
+        """
+        _, version = await self._published(flow_id=flow_id, space_id=space_id)
+        if version.definition_checksum != reference.definition_checksum:
+            raise AIBuilderBadRequestException(
+                "The flow's definition changed after this failure; run it anew.",
+                code=AIBuilderErrorCode.REVIEW_STALE,
+                context={
+                    "reviewed_version": reference.flow_version,
+                    "published_version": version.version,
+                },
+            )
+        run = await self.evidence_service.get_run(
+            run_id=reference.run_id, flow_id=flow_id, access_kind="evidence_view"
+        )
+        _require_run_of_definition(
+            run,
+            await self._versions_of_definition(
+                flow_id=flow_id,
+                definition_checksum=version.definition_checksum,
+                versions={run.flow_version},
+            ),
+        )
+        if run.evidence_classification_level is None:
+            raise AIBuilderBadRequestException(
+                "The run no longer carries an evidence level.",
+                code=AIBuilderErrorCode.REVIEW_STALE,
+            )
+        if audit is not None:
+            await audit(run)
+        bundle = await self.evidence_service.get_redacted_evidence_bundle(
+            run_id=run.id, run=run
+        )
+        steps = parse_published_runtime_steps(
+            version.definition_json, flow_version=version.version
+        )
+        step = next(
+            (step for step in steps if step.step_order == reference.step_order), None
+        )
+
+        def unavailable(
+            reason: RunFailureUnavailableReason,
+        ) -> AIBuilderBadRequestException:
+            logger.info(
+                "ai_builder.run_failure_unavailable run_id=%s step_order=%s reason=%s",
+                run.id,
+                reference.step_order,
+                reason,
+            )
+            return AIBuilderBadRequestException(
+                "The failed step is unavailable for instruction repair.",
+                code=AIBuilderErrorCode.REVIEW_FINDING_UNKNOWN,
+                context={
+                    "reason": reason,
+                    "run_id": str(run.id),
+                    "step_order": reference.step_order,
+                },
+            )
+
+        if step is None:
+            raise unavailable("step_unknown")
+        attempts = [
+            (index, attempt)
+            for index, attempt in enumerate(bundle.step_attempts)
+            if attempt.get("step_order") == reference.step_order
+        ]
+        if not attempts:
+            raise unavailable("no_failed_attempt")
+        index, attempt = max(attempts, key=lambda item: item[1]["attempt_no"])
+        if attempt.get("status") != FlowStepAttemptStatus.FAILED.value:
+            raise unavailable("no_failed_attempt")
+        output_path = f"bundle.step_attempts[{index}].output_payload_json"
+        if any(
+            path == output_path
+            or path.startswith(output_path + ".")
+            or output_path.startswith(path + ".")
+            for path in bundle.masked_paths
+        ):
+            raise unavailable("output_masked")
+        payload = attempt.get("output_payload_json")
+        rejected = interpret_rejected_output(
+            cast(Mapping[str, object], payload) if isinstance(payload, dict) else None
+        )
+        if rejected is None:
+            raise unavailable("output_not_retained")
+        attempt_input = parse_flow_step_attempt_input(
+            attempt.get("input_payload_json")
+        ).attempt_input
+        execution_inputs = attempt_input.execution_inputs if attempt_input else None
+        return FlowReviewEvidence(
+            flow_version=version.version,
+            definition_checksum=version.definition_checksum,
+            evidence_classification_level=run.evidence_classification_level,
+            completed_run_count=0,
+            failed_run_count=1,
+            facts=[],
+            steps=[
+                FlowReviewStep(
+                    step_id=step.step_id,
+                    step_order=step.step_order,
+                    label=step.user_description,
+                )
+            ],
+            failure=FlowReviewFailureFact(
+                run_id=run.id,
+                step_order=step.step_order,
+                attempt_no=attempt["attempt_no"],
+                error_code=attempt.get("error_code") or "",
+                error_message=attempt.get("error_message") or "",
+                effective_prompt=execution_inputs[0].effective_prompt
+                if execution_inputs and len(execution_inputs) == 1
+                else None,
+                rejected_output=rejected,
+                requested_model=attempt.get("requested_model"),
+            ),
+        )
 
     async def build_review_sample(
         self,

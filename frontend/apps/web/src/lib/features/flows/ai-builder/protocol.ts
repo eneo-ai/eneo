@@ -59,6 +59,8 @@ export type AIBuilderTurnRecoveryState = Extract<
   "failed_before_provider" | "provider_outcome_unknown"
 >;
 
+import type { FlowRunFailureRepairTarget } from "$lib/features/flows/flowRunFailureRepair";
+
 export type AIBuilderEditContext = NonNullable<AIBuilderSendMessageRequest["edit_context"]>;
 export type AIBuilderReviewReference = NonNullable<AIBuilderSendMessageRequest["review_context"]>;
 export type AIBuilderReviewContext = Extract<AIBuilderReviewReference, { kind: "flow_review" }>;
@@ -82,6 +84,18 @@ export type AIBuilderFlowReviewState =
   | { status: "loading" }
   | { status: "ready"; packet: AIBuilderFlowReviewPacket }
   | { status: "failed"; error: AIBuilderError };
+export type AIBuilderRunFailureReference = Extract<
+  AIBuilderReviewReference,
+  { kind: "run_failure" }
+>;
+export type AIBuilderRunFailureLaunch = components["schemas"]["AIBuilderRunFailureLaunchResponse"];
+/** The failed step handed to the Builder: closed, loading, what the server
+ *  resolved it to, or why the server refused it. */
+export type AIBuilderFailureRepairState =
+  | { status: "closed" }
+  | { status: "loading"; target: FlowRunFailureRepairTarget }
+  | { status: "ready"; launch: AIBuilderRunFailureLaunch }
+  | { status: "failed"; target: FlowRunFailureRepairTarget; error: AIBuilderError };
 
 export type AIBuilderPlanEditContext = Extract<AIBuilderEditContext, { kind: "proposed_plan" }>;
 

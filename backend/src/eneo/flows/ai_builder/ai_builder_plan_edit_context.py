@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias
 from uuid import UUID
 
@@ -32,6 +32,7 @@ PlanEditScope = Literal["whole_plan", "step"]
 
 
 ScopedRevisionRejectionReason = Literal[
+    "output_contract_changed",
     "target_step_missing",
     "target_step_unchanged",
     "runtime_form_fields_changed",
@@ -135,6 +136,7 @@ class ResolvedAIBuilderEditContext:
     target_step_name: str | None = None
     target_step_number: int | None = None
     plan_id: UUID | None = None
+    preserve_output_contract: bool = False
 
     def to_metadata(self) -> dict[str, object]:
         return self.request.to_metadata()
@@ -214,8 +216,82 @@ async def resolve_plan_edit_context(
     session: BuilderSession,
     flow: "Flow | None",
     context: AIBuilderEditContext | None,
+    failure_step_order: int | None = None,
+    failure_step_id: UUID | None = None,
 ) -> tuple[ResolvedAIBuilderEditContext | None, BuilderPlan | None]:
-    """Validate an edit context against the session's latest proposed plan."""
+    """Resolve scope against the saved flow or the latest plan.
+
+    A resolved failure keeps its step and output contract across inherited
+    turns, until a different review reference is named or a new session starts.
+    """
+
+    if failure_step_order is not None:
+        saved = (
+            next(
+                (
+                    step
+                    for step in flow.steps
+                    if step.step_order == failure_step_order
+                    and step.id == failure_step_id
+                ),
+                None,
+            )
+            if flow is not None and failure_step_id is not None
+            else None
+        )
+        if saved is None:
+            raise AIBuilderBadRequestException(
+                "The draft no longer contains the failed Flow step at its recorded position.",
+                code=AIBuilderErrorCode.INVALID_EXISTING_STEP_REF,
+                context={
+                    "reason": "draft_diverged",
+                    "step_order": failure_step_order,
+                    "step_id": str(failure_step_id)
+                    if failure_step_id is not None
+                    else None,
+                },
+            )
+        target_ref = existing_step_ref_for_order(failure_step_order)
+        derived: AIBuilderEditContext
+        if session.latest_plan_id is not None:
+            derived = AIBuilderPlanEditContext(
+                plan_id=session.latest_plan_id,
+                scope="step",
+                target_existing_step_ref=target_ref,
+            )
+        else:
+            assert saved.id is not None
+            derived = AIBuilderSavedFlowStepEditContext(flow_step_id=saved.id)
+        resolved, prior = await resolve_plan_edit_context(
+            repo=repo,
+            tenant_id=tenant_id,
+            session=session,
+            flow=flow,
+            context=derived,
+        )
+        assert resolved is not None
+        if context is not None:
+            client, _ = await resolve_plan_edit_context(
+                repo=repo,
+                tenant_id=tenant_id,
+                session=session,
+                flow=flow,
+                context=context,
+            )
+            if (
+                client is None
+                or client.scope != "step"
+                or client.target_existing_step_ref != target_ref
+            ):
+                raise AIBuilderBadRequestException(
+                    "The repair must target the failed Flow step.",
+                    code=AIBuilderErrorCode.INVALID_EXISTING_STEP_REF,
+                    context={
+                        "reason": "repair_scope_mismatch",
+                        "step_order": failure_step_order,
+                    },
+                )
+        return replace(resolved, preserve_output_contract=True), prior
 
     if context is None:
         return None, None
@@ -538,6 +614,24 @@ def validate_scoped_plan_revision(
                 f"Scoped plan edit target `{target_ref}` disappeared from the revised plan. "
                 "Keep the selected step ref and revise that step instead of replacing it with an unrelated step.",
             )
+        if (
+            isinstance(context, ResolvedAIBuilderEditContext)
+            and context.preserve_output_contract
+        ):
+            if any(
+                getattr(proposed_target, field) != getattr(prior_target, field)
+                for field in (
+                    "output_type",
+                    "output_mode",
+                    "output_contract",
+                    "output_config",
+                )
+            ):
+                return ScopedRevisionRejection(
+                    "output_contract_changed",
+                    f"Step `{target_ref}` must keep its failed output contract during instruction repair. "
+                    "Preserve output_type, output_mode, output_contract and output_config.",
+                )
         if _step_dump_for_context(proposed_target, context) == _step_dump_for_context(
             prior_target, context
         ) and not _server_owned_renderer_changed(

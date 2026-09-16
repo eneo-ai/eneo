@@ -559,3 +559,24 @@ def test_runtime_tool_calls_land_in_attempt_provenance_not_step_result() -> None
     assert provenance_payload["llm"]["tool_calls"]["preview"] == [
         {"name": "lookup", "arguments": {"q": "case"}}
     ]
+
+
+@pytest.mark.parametrize("text", [None, "", "aåö"])
+def test_typed_failure_retains_only_rejected_evidence(text: str | None) -> None:
+    from eneo.flows.domain.step_output import interpret_rejected_output
+
+    plan = build_typed_failure_plan(
+        claimed=_claimed_result(),
+        error_code=FlowApiErrorCode.TYPED_IO_OUTPUT_PARSE_FAILED,
+        error_message="Invalid JSON",
+        rejected_output=text,
+        max_inline_text_bytes=4,
+    )
+    assert plan.failed_result.status == FlowStepResultStatus.FAILED
+    rejected = interpret_rejected_output(plan.failed_result.output_payload_json)
+    if text is None:
+        assert plan.failed_result.output_payload_json is None
+    else:
+        assert rejected is not None
+        assert rejected.text == ("aå" if text else "")
+        assert rejected.truncated_by_runtime is bool(text)

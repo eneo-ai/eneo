@@ -657,6 +657,7 @@ async def test_prepared_execution_adds_only_actual_prompt_substitutions(
     assistant = MagicMock()
     assistant.get_prompt_text.return_value = prompt
     deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1_000_000,
         variable_resolver=FlowVariableResolver(),
         completion_service=object(),
         load_assistant=AsyncMock(return_value=assistant),

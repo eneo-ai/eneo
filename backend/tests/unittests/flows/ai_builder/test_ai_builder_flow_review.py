@@ -4,7 +4,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -2637,3 +2637,319 @@ def test_the_evidence_header_claims_reads_only_of_runs_whose_content_travels():
         }
     )
     assert read_lines(preview_only) == ["Utdrag ur 1 körning lästes."]
+
+
+def _failure_review_service(user, *, attempt_status="failed", retained="aåö"):
+    from eneo.flows.application.flow_run_evidence_bundle import RedactedEvidenceBundle
+    from eneo.flows.domain.flow import Flow, FlowRun, FlowStepAttempt, FlowVersion
+    from eneo.flows.domain.flow_step_attempt_input import (
+        FlowStepAttemptCompletionConfiguration,
+        FlowStepAttemptExecutionInput,
+        FlowStepAttemptInput,
+    )
+    from eneo.flows.domain.provider_call import ProviderCallEvidencePage
+    from eneo.flows.domain.step_output import build_rejected_output_payload
+    from eneo.flows.published_definition import (
+        PublishedDefinitionIntegrity,
+        PublishedDefinitionIntegrityStatus,
+        build_published_definition_json,
+    )
+
+    flow = Flow(
+        id=uuid4(),
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Repair",
+        published_version=1,
+    )
+    from pydantic import TypeAdapter
+
+    step = _step(1)
+    version = FlowVersion(
+        flow_id=flow.id,
+        version=1,
+        tenant_id=user.tenant_id,
+        definition_checksum="sum",
+        created_at=_T0,
+        updated_at=_T0,
+        definition_json=build_published_definition_json(
+            flow_id=flow.id,
+            name=flow.name,
+            description=None,
+            metadata_json=None,
+            steps=[TypeAdapter(RuntimeStep).dump_python(step, mode="json")],
+        ),
+    )
+    run = FlowRun(
+        id=uuid4(),
+        flow_id=flow.id,
+        flow_version=1,
+        tenant_id=user.tenant_id,
+        trace_id=uuid4(),
+        status="failed",
+        evidence_classification_level=3,
+        created_at=_T0,
+        updated_at=_T0,
+    )
+    attempt = FlowStepAttempt(
+        id=uuid4(),
+        flow_run_id=run.id,
+        flow_id=flow.id,
+        tenant_id=user.tenant_id,
+        step_id=step.step_id,
+        step_order=1,
+        attempt_no=2,
+        status=attempt_status,
+        error_code="typed_io_input_exceeds_model_window"
+        if retained is None
+        else "typed_io_output_parse_failed",
+        error_message="Invalid JSON",
+        requested_model="model",
+        started_at=_T0,
+        created_at=_T0,
+        updated_at=_T0,
+        input_payload_json=FlowStepAttemptInput(
+            completion_configuration=FlowStepAttemptCompletionConfiguration(
+                preferred_model_parameters={}
+            ),
+            execution_inputs=(
+                FlowStepAttemptExecutionInput(
+                    question="input",
+                    effective_prompt="Return JSON",
+                    assistant_context_version=1,
+                ),
+            ),
+        ).to_payload(),
+        output_payload_json=(
+            build_rejected_output_payload(retained, max_inline_bytes=4)
+            if retained is not None
+            else None
+        ),
+    )
+    bundle = RedactedEvidenceBundle(
+        run=run.model_dump(mode="json"),
+        definition_integrity=PublishedDefinitionIntegrity(
+            status=PublishedDefinitionIntegrityStatus.VERIFIED,
+            expected_checksum="sum",
+            current_checksum="sum",
+        ),
+        final_output=None,
+        definition_snapshot=version.definition_json,
+        step_results=(),
+        step_attempts=(attempt.model_dump(mode="json"),),
+        result_files=(),
+        review_checkpoints=(),
+        webhook_deliveries=(),
+        provider_calls=ProviderCallEvidencePage(
+            items=(), count=0, total_count=0, has_more=False, next_after_event_id=None
+        ),
+        debug_export={},
+        masked_paths=(),
+        masked_fields=(),
+    )
+    reader = SimpleNamespace(
+        get_run=AsyncMock(return_value=run),
+        get_redacted_evidence_bundle=AsyncMock(return_value=bundle),
+    )
+    service, repo = _service(
+        user, flow=flow, version=version, snapshots=[], denied=set(), evidence=reader
+    )
+    return service, flow, run, reader, repo
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("retained", ["", "aåö"])
+async def test_failure_review_reads_only_named_run_and_preserves_empty_and_truncation(
+    user, retained
+):
+    from eneo.flows.ai_builder.ai_builder_flow_review import AIBuilderRunFailureContext
+
+    service, flow, run, reader, repo = _failure_review_service(user, retained=retained)
+    audit = AsyncMock()
+    evidence = await service.resolve_failure_evidence(
+        flow_id=flow.id,
+        space_id=flow.space_id,
+        reference=AIBuilderRunFailureContext(
+            flow_version=1, definition_checksum="sum", run_id=run.id, step_order=1
+        ),
+        audit=audit,
+    )
+    assert evidence.failure is not None
+    assert evidence.failure.attempt_no == 2
+    assert evidence.failure.rejected_output.text == ("aå" if retained else "")
+    assert evidence.failure.rejected_output.truncated_by_runtime is bool(retained)
+    assert evidence.failure.effective_prompt == "Return JSON"
+    assert evidence.evidence_classification_level == 3
+    assert (
+        evidence.facts == [] and evidence.sample_runs == [] and evidence.excerpts == []
+    )
+    assert [step.step_order for step in evidence.steps] == [1]
+    repo.list_statuses.assert_not_called()
+    audit.assert_awaited_once_with(run)
+    reader.get_run.assert_awaited_once_with(
+        run_id=run.id, flow_id=flow.id, access_kind="evidence_view"
+    )
+    assert "Utdata ovan är vad modellen svarade" in render_review_evidence(evidence)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "step_unknown",
+        "no_failed_attempt",
+        "output_not_retained",
+        "output_masked",
+        "stale",
+        "unpublished",
+        "other_definition",
+        "denied",
+    ],
+)
+async def test_failure_review_refuses_before_planner_work(user, reason):
+    from dataclasses import replace
+
+    from eneo.flows.ai_builder.ai_builder_flow_review import AIBuilderRunFailureContext
+
+    service, flow, run, reader, repo = _failure_review_service(
+        user,
+        attempt_status="completed" if reason == "no_failed_attempt" else "failed",
+        retained=None if reason == "output_not_retained" else "bad",
+    )
+    ref = AIBuilderRunFailureContext(
+        flow_version=1,
+        definition_checksum="stale" if reason == "stale" else "sum",
+        run_id=run.id,
+        step_order=9 if reason == "step_unknown" else 1,
+    )
+    if reason == "unpublished":
+        service.flow_repo.get.return_value = flow.model_copy(
+            update={"published_version": None}
+        )
+    if reason == "other_definition":
+        service.flow_version_repo.versions_with_checksum.return_value = frozenset()
+    if reason == "denied":
+        reader.get_run.side_effect = UnauthorizedException("Denied")
+    if reason == "output_masked":
+        reader.get_redacted_evidence_bundle.return_value = replace(
+            reader.get_redacted_evidence_bundle.return_value,
+            masked_paths=(
+                "bundle.step_attempts[0].output_payload_json.rejected_output",
+            ),
+        )
+    builder, _ = _builder_service(user, _packet())
+    builder.flow_review_service = service
+    session = _edit_session(user, review_metadata=None).model_copy(
+        update={"flow_id": flow.id, "space_id": flow.space_id}
+    )
+    audit = AsyncMock()
+    with pytest.raises(
+        UnauthorizedException if reason == "denied" else AIBuilderBadRequestException
+    ) as caught:
+        await builder.prepare_message_context(
+            session=session,
+            space=SimpleNamespace(id=flow.space_id),
+            model_id=None,
+            active_provider_ids=set(),
+            tenant_flow_settings=None,
+            review_context=ref,
+            review_evidence_audit=audit,
+        )
+    if reason not in {"denied", "stale", "unpublished", "other_definition"}:
+        assert caught.value.context["reason"] == reason
+    else:
+        audit.assert_not_awaited()
+        reader.get_redacted_evidence_bundle.assert_not_awaited()
+    builder.completion_service.get_response.assert_not_called()
+    repo.list_statuses.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_failure_review_inherited_reference_refuses_stale_before_proposal(
+    user, monkeypatch
+):
+    from eneo.flows.ai_builder.ai_builder_flow_review import AIBuilderRunFailureContext
+
+    service, flow, run, reader, repo = _failure_review_service(user)
+    ref = AIBuilderRunFailureContext(
+        flow_version=1, definition_checksum="sum", run_id=run.id, step_order=1
+    )
+    builder, _ = _builder_service(user, _packet())
+    builder.flow_review_service = service
+    session = _edit_session(user, review_metadata=ref.to_metadata()).model_copy(
+        update={"flow_id": flow.id, "space_id": flow.space_id}
+    )
+    evidence = await builder._resolve_review_evidence(
+        session=session, review_context=None, audit=AsyncMock()
+    )
+    assert evidence is not None and evidence.failure is not None
+    service.flow_version_repo.get.return_value = (
+        service.flow_version_repo.get.return_value.model_copy(
+            update={"definition_checksum": "changed"}
+        )
+    )
+    prepare_planner = MagicMock(
+        side_effect=AssertionError("Repair continued without evidence")
+    )
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_service.build_planner_context",
+        prepare_planner,
+    )
+    with pytest.raises(AIBuilderBadRequestException) as caught:
+        await builder.prepare_message_context(
+            session=session,
+            space=SimpleNamespace(id=flow.space_id),
+            model_id=None,
+            active_provider_ids=set(),
+            tenant_flow_settings=None,
+            message="Change the failed step output type to JSON",
+            review_context=None,
+            review_evidence_audit=AsyncMock(),
+        )
+    assert caught.value.code == "review_stale"
+    prepare_planner.assert_not_called()
+    builder.completion_service.get_response.assert_not_called()
+    assert reader.get_redacted_evidence_bundle.await_count == 1
+    repo.list_statuses.assert_not_called()
+
+
+@pytest.mark.parametrize("runtime_truncated", [False, True])
+@pytest.mark.parametrize("budget", [2000, 4000])
+def test_failure_text_fits_budget_with_explicit_shortening(runtime_truncated, budget):
+    from eneo.flows.ai_builder.ai_builder_flow_review import FlowReviewFailureFact
+    from eneo.flows.domain.step_output import RejectedOutput
+
+    evidence = FlowReviewEvidence(
+        flow_version=1,
+        definition_checksum="sum",
+        evidence_classification_level=3,
+        completed_run_count=0,
+        failed_run_count=1,
+        steps=[],
+        facts=[],
+        failure=FlowReviewFailureFact(
+            run_id=uuid4(),
+            step_order=2,
+            attempt_no=3,
+            error_code="typed_io_output_parse_failed",
+            error_message="Invalid JSON",
+            effective_prompt="Return JSON. " * 10000,
+            rejected_output=RejectedOutput("avvisad åäö " * 20000, runtime_truncated),
+            requested_model=None,
+        ),
+    )
+    fits = lambda candidate: len(render_review_evidence(candidate)) <= budget
+    fitted = fit_review_evidence(evidence, fits=fits)
+    assert fits(fitted)
+    assert fitted.failure is not None
+    assert fitted.failure.run_id == evidence.failure.run_id
+    assert fitted.failure.attempt_no == 3
+    assert fitted.failure.rejected_output.truncated_by_runtime == runtime_truncated
+    rendered = render_review_evidence(fitted)
+    assert "Instruktionen: kortad av utrymmesskäl" in rendered
+    assert "Avvisad utdata: kortad av utrymmesskäl" in rendered
+    assert ("kortad av flödet vid körningen" in rendered) == runtime_truncated
+    omitted = fit_review_evidence(evidence, fits=lambda candidate: False)
+    omitted_block = render_review_evidence(omitted)
+    assert "Instruktionen: utelämnad av utrymmesskäl, inte läst" in omitted_block
+    assert "Avvisad utdata: utelämnad av utrymmesskäl, inte läst" in omitted_block

@@ -827,6 +827,30 @@ describe("FlowAIBuilderDriver", () => {
       expect(driver.effectiveModel?.id).toBe("model-high");
     });
 
+    it("asks the server whether a failed step can be repaired, by run and step", async () => {
+      const calls: unknown[] = [];
+      const fetch = vi.fn(async (path: string, init?: unknown) => {
+        calls.push([path, init]);
+        return { evidence_classification_level: 1 };
+      });
+      const { driver } = makeDriver({ fetchImpl: fetch });
+
+      await driver.fetchRunFailureLaunch({ runId: "run-1", stepOrder: 3 });
+
+      expect(calls).toEqual([
+        [
+          "/api/v1/flows/ai-builder/flows/{flow_id}/run-failures/{run_id}/steps/{step_order}",
+          {
+            method: "get",
+            params: {
+              path: { flow_id: "flow-1", run_id: "run-1", step_order: 3 },
+              query: { space_id: "space-1" }
+            }
+          }
+        ]
+      ]);
+    });
+
     it("lists for the conversation alone again when the review closes", async () => {
       const { driver, modelQueries } = makeReviewDriver();
       await driver.openReviewListing(2);

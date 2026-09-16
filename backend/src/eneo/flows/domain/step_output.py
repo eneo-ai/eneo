@@ -6,6 +6,8 @@ from typing import Final, TypeAlias, cast
 from uuid import UUID
 
 OUTPUT_TEXT_OVERFLOW_KEY: Final = "text_overflow"
+REJECTED_OUTPUT_KEY: Final = "rejected_output"
+REJECTED_OUTPUT_TRUNCATED_KEY: Final = "rejected_output_truncated"
 _OVERFLOW_FIELDS = frozenset(
     {"generated_file_ids", "inline_text_bytes", "full_text_bytes"}
 )
@@ -13,6 +15,37 @@ _OVERFLOW_FIELDS = frozenset(
 
 class StepOutputMetadataError(ValueError):
     """Persisted step text metadata is incomplete or internally inconsistent."""
+
+
+@dataclass(frozen=True)
+class RejectedOutput:
+    text: str
+    truncated_by_runtime: bool
+
+
+def utf8_prefix(text: str, *, max_bytes: int) -> str:
+    return text.encode("utf-8")[: max(0, max_bytes)].decode("utf-8", errors="ignore")
+
+
+def build_rejected_output_payload(
+    text: str, *, max_inline_bytes: int
+) -> dict[str, object]:
+    return {
+        REJECTED_OUTPUT_KEY: utf8_prefix(text, max_bytes=max_inline_bytes),
+        REJECTED_OUTPUT_TRUNCATED_KEY: len(text.encode("utf-8")) > max_inline_bytes,
+    }
+
+
+def interpret_rejected_output(
+    payload: Mapping[str, object] | None,
+) -> RejectedOutput | None:
+    if payload is None or REJECTED_OUTPUT_KEY not in payload:
+        return None
+    text = payload[REJECTED_OUTPUT_KEY]
+    truncated = payload.get(REJECTED_OUTPUT_TRUNCATED_KEY)
+    if not isinstance(text, str) or not isinstance(truncated, bool):
+        return None
+    return RejectedOutput(text=text, truncated_by_runtime=truncated)
 
 
 @dataclass(frozen=True)

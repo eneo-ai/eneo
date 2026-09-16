@@ -20,6 +20,8 @@
   import BuilderSessionStatus from "./BuilderSessionStatus.svelte";
   import BuilderReviewScreen from "./BuilderReviewScreen.svelte";
   import BuilderFindingsScreen from "./BuilderFindingsScreen.svelte";
+  import BuilderRepairScreen from "./BuilderRepairScreen.svelte";
+  import type { FlowRunFailureRepairTarget } from "$lib/features/flows/flowRunFailureRepair";
   import FlowAIBuilderModelSelect from "./FlowAIBuilderModelSelect.svelte";
   import FlowAIBuilderReasoningSelect from "./FlowAIBuilderReasoningSelect.svelte";
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
@@ -301,7 +303,11 @@
       if (service.conversationOpen) return "conversation";
       // The run review is opened on purpose and closes itself when a finding
       // becomes a message; while open it owns the first phase's screen.
-      if (service.review.status !== "closed" && viewingPhase === 0) return "findings";
+      if (
+        (service.review.status !== "closed" || service.failureRepair.status !== "closed") &&
+        viewingPhase === 0
+      )
+        return "findings";
       if (viewingPhase === 2) return "review";
       if (viewingPhase === 1) return "build";
       // Changing an earlier answer happens on the confirmation, above the card
@@ -735,22 +741,66 @@
     await launchSavedFlowStep(scope);
   }
 
+  // Handing a failed step over is the review's transition with a target: it
+  // waits for the session, asks before replacing an ongoing edit, drops any
+  // saved-step scope, and lands on the first phase where the launch renders.
+  let pendingFailureRepairLaunch = $state<FlowRunFailureRepairTarget | null>(null);
+  let pendingFailureRepairTarget = $state<FlowRunFailureRepairTarget | null>(null);
+  $effect(() => {
+    const target = pendingFailureRepairLaunch;
+    if (target && service.hasSession && !service.isInitializing) {
+      pendingFailureRepairLaunch = null;
+      void launchFailureRepairNow(target);
+    }
+  });
+
+  async function launchFailureRepairNow(target: FlowRunFailureRepairTarget) {
+    if (
+      service.messages.length > 0 ||
+      service.currentPlan !== null ||
+      service.session?.latest_plan_id != null
+    ) {
+      pendingFailureRepairTarget = target;
+      showReplaceEditSessionDialog = true;
+      return;
+    }
+    await activateFailureRepair(target);
+  }
+
+  async function activateFailureRepair(target: FlowRunFailureRepairTarget) {
+    service.clearActiveStepScope();
+    peekPhase = null;
+    await service.openFailureRepair(target);
+  }
+
+  /** Hand a failed step of a run to the Builder from outside it. */
+  export async function launchFailureRepair(target: FlowRunFailureRepairTarget) {
+    if (!service.hasSession || service.isInitializing) {
+      pendingFailureRepairLaunch = target;
+      return;
+    }
+    await launchFailureRepairNow(target);
+  }
+
   function cancelSavedFlowStepReplacement() {
     showReplaceEditSessionDialog = false;
     pendingSavedFlowStepScope = null;
     pendingReviewReplacement = false;
+    pendingFailureRepairTarget = null;
   }
 
   async function confirmSavedFlowStepReplacement() {
     const scope = pendingSavedFlowStepScope;
     const review = pendingReviewReplacement;
-    if (scope === null && !review) return;
+    const repair = pendingFailureRepairTarget;
+    if (scope === null && !review && repair === null) return;
     // Close the question before the replacement runs: the fresh session
     // takes a moment, and a dialog left open across it re-reads its state
     // and asks again, about a step that was never named.
     showReplaceEditSessionDialog = false;
     pendingSavedFlowStepScope = null;
     pendingReviewReplacement = false;
+    pendingFailureRepairTarget = null;
     // The driver skips the replacement while work is in flight (the old
     // session stays, and the next launch asks again) and rejects when the
     // create fails (the session it had is kept, carrying the driver's own
@@ -766,6 +816,8 @@
     if (!replaced) return;
     if (scope !== null) {
       await activateSavedFlowStep(scope);
+    } else if (repair !== null) {
+      await activateFailureRepair(repair);
     } else {
       await activateReview();
     }
@@ -901,6 +953,14 @@
           bind:this={conversationRef}
           oneditanswer={handleEditAnswer}
           onclose={() => service.closeConversation()}
+        />
+      {:else if screen === "findings" && service.failureRepair.status !== "closed"}
+        <BuilderRepairScreen
+          repair={service.failureRepair}
+          disabled={!service.canSendMessage}
+          onprepare={prepareChangeFromFinding}
+          onclose={() => service.closeFailureRepair()}
+          onretry={(target) => void service.openFailureRepair(target)}
         />
       {:else if screen === "findings"}
         <BuilderFindingsScreen
@@ -1052,9 +1112,13 @@
       <AlertDialog.Description>
         {pendingReviewReplacement
           ? m.ai_builder_replace_edit_description_review()
-          : m.ai_builder_replace_edit_description({
-              stepName: pendingSavedFlowStepScope?.stepName ?? m.flow_step_unnamed()
-            })}
+          : pendingFailureRepairTarget !== null
+            ? m.ai_builder_replace_edit_description_repair({
+                step: String(pendingFailureRepairTarget.stepOrder)
+              })
+            : m.ai_builder_replace_edit_description({
+                stepName: pendingSavedFlowStepScope?.stepName ?? m.flow_step_unnamed()
+              })}
       </AlertDialog.Description>
     </AlertDialog.Header>
     <AlertDialog.Footer>

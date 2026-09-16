@@ -62,6 +62,7 @@ from eneo.flows.domain.runtime import (
 )
 from eneo.flows.domain.runtime_input import build_runtime_input_config
 from eneo.flows.domain.runtime_invariant_exceptions import FlowRuntimeInvariantError
+from eneo.flows.domain.step_output import utf8_prefix
 from eneo.flows.enums import (
     FlowOutputMode,
     FlowOutputType,
@@ -295,10 +296,6 @@ def _flow_api_error_code_or_default(
         default_code.value,
     )
     return default_code
-
-
-def _utf8_prefix(text: str, *, max_bytes: int) -> str:
-    return text.encode("utf-8")[: max(0, max_bytes)].decode("utf-8", errors="ignore")
 
 
 @dataclass(frozen=True)
@@ -1759,6 +1756,8 @@ class FlowRunExecutor:
             input_payload_json=failed_input_payload,
             effective_prompt=failed_prompt if isinstance(failed_prompt, str) else None,
             run_error_message=run_error_message,
+            rejected_output=getattr(typed_exc, "rejected_output", None),
+            max_inline_text_bytes=self.max_inline_text_bytes,
         )
         await self._rollback()
         attempt_start = _attempt_start_for_step(state=state, step=step)
@@ -2474,7 +2473,7 @@ class FlowRunExecutor:
             mimetype="text/plain",
             file_type=FileType.TEXT,
         )
-        return _utf8_prefix(text, max_bytes=self.max_inline_text_bytes), [file_row.id]
+        return utf8_prefix(text, max_bytes=self.max_inline_text_bytes), [file_row.id]
 
     @staticmethod
     def _requires_assistant_snapshots(definition_json: dict[str, Any]) -> bool:

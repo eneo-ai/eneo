@@ -1,6 +1,8 @@
 <script lang="ts">
   import { Badge } from "$lib/components/ui/badge/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import IconSparkles from "@lucide/svelte/icons/sparkles";
   import { m } from "$lib/paraglide/messages";
   import {
     getFlowRuntimeErrorMessageByCode,
@@ -17,12 +19,15 @@
     error = null,
     errorCode = null,
     message,
-    steps = []
+    steps = [],
+    onrepair = null
   }: {
     error?: FlowRunError | null;
     errorCode?: string | null;
     message: string;
     steps?: readonly FlowReviewPolicyErrorStep[];
+    /** Offered when the AI Builder may be asked to repair this step. */
+    onrepair?: (() => void) | null;
   } = $props();
 
   const isReviewPolicyError = $derived(isReviewPolicyInvalidRunError(error));
@@ -71,6 +76,18 @@
       <span>{localizedErrorMessage}</span>
     {:else}
       <span>{m.flow_run_error_desc()}</span>
+    {/if}
+
+    {#if onrepair}
+      <Button
+        variant="outline"
+        size="sm"
+        class="w-fit gap-1.5 border-current text-current hover:text-current"
+        onclick={onrepair}
+      >
+        <IconSparkles class="size-3.5" aria-hidden="true" />
+        {m.flow_run_error_repair_action()}
+      </Button>
     {/if}
 
     <details class="group">

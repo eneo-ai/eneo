@@ -231,7 +231,7 @@ class SpeakerMappingStepHandler:
         )
         renamed = apply_speaker_names(source_text, mapping_to_names(mapping))
         max_bytes = activated.deps.max_inline_text_bytes
-        if max_bytes is not None and len(renamed.encode("utf-8")) > max_bytes:
+        if len(renamed.encode("utf-8")) > max_bytes:
             # A file-backed output could not be review-edited afterwards.
             raise attach_typed_failure_context(
                 TypedIOValidationException(

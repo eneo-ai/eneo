@@ -2030,3 +2030,54 @@ def test_compaction_replays_a_placed_field_at_its_parent_path() -> None:
         segments=("reports",)
     )
     assert rebuilt == expected
+
+
+@pytest.mark.parametrize("limit", ["count", "bytes"])
+def test_compaction_retains_active_failure_reference_and_repair_scope(limit):
+    from uuid import uuid4
+
+    from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+        latest_user_review_context,
+        metadata_for_user_message,
+        review_edit_scope_for_turn,
+    )
+    from eneo.flows.ai_builder.ai_builder_flow_review import AIBuilderRunFailureContext
+
+    reference = AIBuilderRunFailureContext(
+        flow_version=1, definition_checksum="sum", run_id=uuid4(), step_order=2
+    )
+    handoff = ConversationMessage(
+        role="user",
+        content="Repair the failed instruction",
+        metadata=metadata_for_user_message(
+            review_context=reference, review_evidence_level=3
+        ),
+    )
+    conversation = [handoff]
+    for index in range(32):
+        conversation.extend(
+            [
+                ConversationMessage(
+                    role="user",
+                    content=f"Follow up {index} " * 20,
+                    metadata=metadata_for_user_message(
+                        acts_on_review=True, evidence_floor=3
+                    ),
+                ),
+                ConversationMessage(role="assistant", content="Continue"),
+            ]
+        )
+    compacted = compact_ai_builder_conversation(
+        conversation,
+        max_messages=60 if limit == "count" else 100,
+        max_conversation_bytes=1024 * 1024 if limit == "count" else 2000,
+    )
+    assert len(compacted) < len(conversation)
+    assert handoff in compacted
+    inherited = latest_user_review_context(compacted)
+    assert inherited is not None and inherited.kind == "run_failure"
+    assert inherited.run_id == reference.run_id
+    scope = review_edit_scope_for_turn(compacted)
+    assert scope is not None
+    assert scope.step_refs == frozenset({"existing_step_2"})
+    assert not scope.may_add

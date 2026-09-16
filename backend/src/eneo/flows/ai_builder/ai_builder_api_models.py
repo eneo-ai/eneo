@@ -46,6 +46,7 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
 )
 from eneo.flows.ai_builder.ai_builder_flow_review import (
     AIBuilderReviewReference,
+    AIBuilderRunFailureContext,
     AIBuilderSuggestionContext,
     investigation_language,
     investigation_message,
@@ -268,6 +269,17 @@ def _default_conversation() -> list["AIBuilderConversationMessage"]:
 
 def _default_admission_normalization_hits() -> dict[AdmissionNormalizerFamily, int]:
     return {}
+
+
+class AIBuilderRunFailureLaunchResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    reference: AIBuilderRunFailureContext
+    evidence_classification_level: int
+    step_number: int
+    step_name: str | None
+    attempt_no: int
+    error_code: str
 
 
 class AIBuilderConversationMessage(BaseModel):

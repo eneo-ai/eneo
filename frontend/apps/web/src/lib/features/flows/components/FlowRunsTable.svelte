@@ -17,6 +17,7 @@
   import { IconChevronDown } from "@eneo/icons/chevron-down";
   import FlowRunEvidence from "./FlowRunEvidence.svelte";
   import FlowRunProgressPanel from "./FlowRunProgressPanel.svelte";
+  import type { FlowRunFailureRepairTarget } from "$lib/features/flows/flowRunFailureRepair";
   import FlowRunReviewCheckpointPanel from "./FlowRunReviewCheckpointPanel.svelte";
   import FlowRunStatusBadge from "./FlowRunStatusBadge.svelte";
   import { getLocale } from "$lib/paraglide/runtime";
@@ -67,7 +68,8 @@
     optimisticRuns = [],
     reloadTrigger = 0,
     onOptimisticRunsConfirmed,
-    onreview
+    onreview,
+    onrepair
   }: {
     flow: Flow;
     careDataPolicy?: FlowCareDataPolicy;
@@ -78,6 +80,8 @@
     onOptimisticRunsConfirmed?: (runIds: string[]) => void;
     /** Offered when the AI builder can review these runs; opens it. */
     onreview?: () => void;
+    /** Offered when the AI builder can repair a failed step; opens it on that step. */
+    onrepair?: (target: FlowRunFailureRepairTarget) => void;
   } = $props();
 
   let history = $state(createFlowRunHistoryState());
@@ -339,6 +343,7 @@
       sensitiveCareDataFlow={careDataPolicy?.sensitive === true}
       {eneo}
       runStatus={run.status}
+      onRepairFailure={onrepair ?? null}
     />
   {/if}
 {/snippet}

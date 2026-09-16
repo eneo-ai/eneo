@@ -34,6 +34,7 @@ from eneo.flows.ai_builder.ai_builder_api_models import (
     AIBuilderProposalTelemetryDiagnosticsResponse,
     AIBuilderProposalTurnDiagnostic,
     AIBuilderProviderCallDiagnostic,
+    AIBuilderRunFailureLaunchResponse,
     AIBuilderTurnLifecycleResponse,
     ApplyPlanRequest,
     ApplyResultResponse,
@@ -109,6 +110,7 @@ from eneo.flows.ai_builder.ai_builder_events import (
     encode_ai_builder_stream_event,
 )
 from eneo.flows.ai_builder.ai_builder_flow_review import (
+    RUN_FAILURE_UNAVAILABLE_REASONS,
     FlowReviewPacket,
     ReviewSampleAudit,
 )
@@ -994,6 +996,70 @@ async def get_flow_review_packet(
             flow_id=flow_id, space_id=space_id
         )
     return packet
+
+
+@router.get(
+    "/flows/{flow_id}/run-failures/{run_id}/steps/{step_order}",
+    response_model=AIBuilderRunFailureLaunchResponse,
+    operation_id="get_ai_builder_run_failure_launch",
+    summary="Resolve an instruction repair for a failed step",
+    responses={
+        400: _ai_builder_error_response(
+            description=(
+                "REVIEW_STALE, FLOW_NOT_PUBLISHED, or REVIEW_FINDING_UNKNOWN. "
+                "Unavailable reasons: " + ", ".join(RUN_FAILURE_UNAVAILABLE_REASONS)
+            ),
+            message="The failed step is unavailable for instruction repair.",
+            code=AIBuilderErrorCode.REVIEW_FINDING_UNKNOWN,
+        ),
+        403: _ai_builder_error_response(
+            description="Caller lacks flow review permission, space permission, or run evidence access.",
+            message="The caller cannot review this flow run.",
+            code=AIBuilderErrorCode.INSUFFICIENT_SCOPE,
+        ),
+    },
+)
+async def get_run_failure_launch(
+    request: Request,
+    flow_id: UUID,
+    run_id: UUID,
+    step_order: Annotated[int, Path(ge=1)],
+    space_id: UUID,
+    container: ContainerWithUserExplicitTransactionDep,
+) -> AIBuilderRunFailureLaunchResponse:
+    async with audited_evidence_snapshot(
+        container, container.user(), evidence_detail="ai_builder_failure_repair_launch"
+    ) as audit:
+        authorization = await _authorize_ai_builder_request(
+            request,
+            container,
+            action=FlowApiAction.BUILDER_REVIEW,
+            space_id=space_id,
+        )
+        _authorized_space(authorization)
+        service = container.ai_builder_flow_review_service()
+        reference = await service.build_failure_reference(
+            flow_id=flow_id,
+            space_id=space_id,
+            run_id=run_id,
+            step_order=step_order,
+        )
+        evidence = await service.resolve_failure_evidence(
+            flow_id=flow_id,
+            space_id=space_id,
+            reference=reference,
+            audit=audit,
+        )
+        assert evidence.failure is not None
+        failure = evidence.failure
+        return AIBuilderRunFailureLaunchResponse(
+            reference=reference,
+            evidence_classification_level=evidence.evidence_classification_level,
+            step_number=failure.step_order,
+            step_name=evidence.steps[0].label,
+            attempt_no=failure.attempt_no,
+            error_code=failure.error_code,
+        )
 
 
 @router.post(

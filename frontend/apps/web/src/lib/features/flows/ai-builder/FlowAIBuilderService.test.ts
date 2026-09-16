@@ -630,6 +630,87 @@ describe("FlowAIBuilderService", () => {
       expect(service.suggestions).toEqual({ status: "closed" });
     });
 
+    it("opens a failure repair at its evidence level and drops a launch that answers after it closed", async () => {
+      const { service, fetch } = makeReviewService();
+      const lowModel = { id: "model-low", name: "Low", provider: "openai" };
+      service.seedState({
+        session: makeSession({ session_id: "s-repair", flow_id: "flow-1" }),
+        availableModels: [lowModel as never],
+        defaultModelId: "model-low",
+        modelLoadStatus: "loaded"
+      });
+      const launch = {
+        reference: {
+          kind: "run_failure",
+          flow_version: 1,
+          definition_checksum: "sum-1",
+          run_id: "run-1",
+          step_order: 2
+        },
+        evidence_classification_level: 2,
+        step_number: 2,
+        step_name: "Sammanfatta",
+        attempt_no: 1,
+        error_code: "typed_io_output_parse_failed"
+      };
+      const pending = deferred<object>();
+      fetch.mockReturnValueOnce(pending.promise);
+
+      const opened = service.openFailureRepair({ runId: "run-1", stepOrder: 2 });
+      expect(service.failureRepair.status).toBe("loading");
+      service.closeFailureRepair();
+      pending.resolve(launch);
+      await opened;
+
+      expect(service.failureRepair).toEqual({ status: "closed" });
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(service.activeStepScope).toBeNull();
+
+      // Opened and kept: the listing is asked for at the failure's level. A
+      // launch that is closed unsent names no step in the composer.
+      fetch
+        .mockResolvedValueOnce(launch)
+        .mockResolvedValueOnce({ models: [], default_model_id: null });
+      await service.openFailureRepair({ runId: "run-1", stepOrder: 2 });
+      expect(service.failureRepair).toEqual({ status: "ready", launch });
+      expect(fetch.mock.calls[2]?.[1]).toMatchObject({
+        params: { query: { evidence_level: 2 } }
+      });
+      expect(service.activeStepScope).toBeNull();
+      service.closeFailureRepair();
+      expect(service.activeStepScope).toBeNull();
+    });
+
+    it("closes the review when a repair opens, and the repair when a review opens", async () => {
+      const { service, fetch } = makeReviewService();
+      fetch.mockResolvedValueOnce(packet(1));
+      await service.openReview();
+      expect(service.review.status).toBe("ready");
+
+      fetch.mockResolvedValueOnce({
+        reference: {
+          kind: "run_failure",
+          flow_version: 1,
+          definition_checksum: "sum-1",
+          run_id: "r",
+          step_order: 1
+        },
+        evidence_classification_level: 0,
+        step_number: 1,
+        step_name: null,
+        attempt_no: 1,
+        error_code: "typed_io_output_parse_failed"
+      });
+      await service.openFailureRepair({ runId: "r", stepOrder: 1 });
+      expect(service.review).toEqual({ status: "closed" });
+      expect(service.failureRepair.status).toBe("ready");
+
+      fetch.mockResolvedValueOnce(packet(1));
+      await service.openReview();
+      expect(service.failureRepair).toEqual({ status: "closed" });
+      expect(service.review.status).toBe("ready");
+    });
+
     it("keeps suggestions that answer the review still open", async () => {
       const { service, fetch } = makeReviewService();
       fetch.mockResolvedValueOnce(packet(1)).mockResolvedValueOnce(judged(1));

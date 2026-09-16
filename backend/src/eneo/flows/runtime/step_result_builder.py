@@ -15,6 +15,7 @@ from eneo.flows.domain.rag_evidence import (
     build_step_result_citation_state,
 )
 from eneo.flows.domain.runtime import RuntimeStep, StepExecutionOutput
+from eneo.flows.domain.step_output import build_rejected_output_payload
 from eneo.flows.flow_run_provenance import (
     CitationsProvenance,
     FlowAttemptProvenance,
@@ -134,9 +135,20 @@ def build_failed_step_result(
     error_message: str,
     input_payload_json: dict[str, Any] | None = None,
     effective_prompt: str | None = None,
+    rejected_output: str | None = None,
+    max_inline_text_bytes: int | None = None,
 ) -> FlowStepResult:
+    if rejected_output is not None and max_inline_text_bytes is None:
+        raise ValueError("Retaining rejected output requires an inline byte cap.")
     updates: dict[str, Any] = {
         "status": FlowStepResultStatus.FAILED,
+        "output_payload_json": (
+            build_rejected_output_payload(
+                rejected_output, max_inline_bytes=max_inline_text_bytes
+            )
+            if rejected_output is not None and max_inline_text_bytes is not None
+            else None
+        ),
         "error_code": error_code,
         "error_message": error_message,
     }

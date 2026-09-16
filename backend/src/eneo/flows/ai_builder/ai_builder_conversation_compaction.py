@@ -11,10 +11,12 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     metadata_has_requirements_summary,
     metadata_with_slot_classification,
     named_content_fields_edit_from_metadata,
+    names_a_review,
     question_interaction_id_from_metadata,
     requirements_confirmation_from_metadata,
     requirements_summary_from_metadata,
     requirements_version_from_metadata,
+    review_context_from_metadata,
     slot_classification_from_metadata,
     tool_call_ids,
     tool_calls_from_message,
@@ -293,13 +295,18 @@ def _required_message_indices(
     latest_field_edit_index = _latest_named_content_fields_edit_index(conversation)
     if latest_field_edit_index is not None:
         required_indices.add(latest_field_edit_index)
-    # The review permission is decided from the retained conversation. The
-    # review reference itself may go (every accepted turn since re-wrote the
-    # session's marker), but the latest marker must stay under both limits,
-    # or the session silently falls back to ordinary Builder authorization.
+    # Permission and repair scope are recovered from retained messages under
+    # both limits. A failure reference also owns the output-contract restriction.
     latest_review_marker_index = _latest_review_session_marker_index(conversation)
     if latest_review_marker_index is not None:
         required_indices.add(latest_review_marker_index)
+    for index in range(len(conversation) - 1, -1, -1):
+        message = conversation[index]
+        if message.role == "user" and names_a_review(message.metadata):
+            reference = review_context_from_metadata(message.metadata)
+            if reference is not None and reference.kind == "run_failure":
+                required_indices.add(index)
+            break
     required_indices.update(_latest_question_interaction_indices(conversation))
     required_indices.update(_latest_tool_trace_indices(conversation))
     required_indices.update(_classifier_semantic_indices(conversation))

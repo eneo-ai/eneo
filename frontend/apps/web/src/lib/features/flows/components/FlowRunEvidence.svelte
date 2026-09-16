@@ -41,19 +41,23 @@
     type TranscriptCorrectionsController
   } from "$lib/features/flows/transcriptCorrectionsController.svelte";
   import { getReviewPolicyErrorStepsFromDefinitionSnapshot } from "$lib/features/flows/flowRuntimeErrorMapping";
+  import type { FlowRunFailureRepairTarget } from "$lib/features/flows/flowRunFailureRepair";
 
   let {
     runId,
     flowId,
     sensitiveCareDataFlow = false,
     eneo,
-    runStatus
+    runStatus,
+    onRepairFailure = null
   }: {
     runId: string;
     flowId: string;
     sensitiveCareDataFlow?: boolean;
     eneo: Eneo;
     runStatus: FlowRunSummary["status"];
+    /** Offered when the AI Builder may repair a failed step of this run. */
+    onRepairFailure?: ((target: FlowRunFailureRepairTarget) => void) | null;
   } = $props();
 
   type EvidencePayload = FlowRunEvidenceWithTypedSteps;
@@ -542,6 +546,9 @@
         stepRag={getStepRag(result.step_order)}
         stepAttempts={getStepAttempts(result.step_order)}
         runError={evidence.run.error ?? null}
+        onRepairFailure={onRepairFailure
+          ? (stepOrder) => onRepairFailure({ runId, stepOrder })
+          : null}
         {reviewPolicyDefinitionSteps}
         {transcriptContext}
         {correctionsController}

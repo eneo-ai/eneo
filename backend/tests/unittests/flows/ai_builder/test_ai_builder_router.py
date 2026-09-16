@@ -3812,3 +3812,124 @@ class TestReviewSuggestionsEndpoint:
         assert judge_kwargs["prepared"] is prepared
         assert judge_kwargs["sample"] is sample
         assert judge_kwargs["ui_language"] == "sv"
+
+
+@pytest.mark.anyio
+async def test_failure_launch_requires_review_permission_without_audit():
+    from eneo.flows.ai_builder.ai_builder_router import get_run_failure_launch
+
+    container = _review_container(session=_SnapshotSession())
+    container.user.return_value.permissions = [Permission.FLOWS]
+    with pytest.raises(UnauthorizedException):
+        await get_run_failure_launch(
+            request=_make_request(),
+            flow_id=uuid4(),
+            run_id=uuid4(),
+            step_order=1,
+            space_id=uuid4(),
+            container=container,
+        )
+    container.audit_service.return_value.log.assert_not_called()
+    container.ai_builder_flow_review_service.return_value.resolve_failure_evidence.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_failure_launch_returns_identity_and_level_without_text():
+    from eneo.flows.ai_builder.ai_builder_flow_review import (
+        AIBuilderRunFailureContext,
+        FlowReviewEvidence,
+        FlowReviewFailureFact,
+        FlowReviewStep,
+    )
+    from eneo.flows.ai_builder.ai_builder_router import get_run_failure_launch
+    from eneo.flows.domain.step_output import RejectedOutput
+
+    container = _review_container(session=_SnapshotSession())
+    flow_id, run_id, space_id = uuid4(), uuid4(), uuid4()
+    reference = AIBuilderRunFailureContext(
+        flow_version=1, definition_checksum="sum", run_id=run_id, step_order=1
+    )
+    review = container.ai_builder_flow_review_service.return_value
+    review.build_failure_reference = AsyncMock(return_value=reference)
+    evidence = FlowReviewEvidence(
+        flow_version=1,
+        definition_checksum="sum",
+        evidence_classification_level=2,
+        completed_run_count=0,
+        failed_run_count=1,
+        facts=[],
+        steps=[FlowReviewStep(step_id=uuid4(), step_order=1, label="Summarize")],
+        failure=FlowReviewFailureFact(
+            run_id=run_id,
+            step_order=1,
+            attempt_no=2,
+            error_code="typed_io_output_parse_failed",
+            error_message="private error",
+            effective_prompt="private prompt",
+            rejected_output=RejectedOutput("private output", False),
+            requested_model=None,
+        ),
+    )
+
+    async def resolve(*, flow_id, space_id, reference, audit):
+        await audit(SimpleNamespace(id=run_id, flow_id=flow_id))
+        return evidence
+
+    review.resolve_failure_evidence = resolve
+    result = await get_run_failure_launch(
+        request=_make_request(),
+        flow_id=flow_id,
+        run_id=run_id,
+        step_order=1,
+        space_id=space_id,
+        container=container,
+    )
+    assert result.model_dump(mode="json") == {
+        "reference": reference.to_metadata(),
+        "evidence_classification_level": 2,
+        "step_number": 1,
+        "step_name": "Summarize",
+        "attempt_no": 2,
+        "error_code": "typed_io_output_parse_failed",
+    }
+    container.audit_service.return_value.log.assert_awaited_once()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "reason",
+    ["step_unknown", "no_failed_attempt", "output_not_retained", "output_masked"],
+)
+async def test_failure_launch_surfaces_typed_unavailable_reason(reason):
+    from eneo.flows.ai_builder.ai_builder_flow_review import AIBuilderRunFailureContext
+    from eneo.flows.ai_builder.ai_builder_router import get_run_failure_launch
+
+    container = _review_container(session=_SnapshotSession())
+    reference = AIBuilderRunFailureContext(
+        flow_version=1, definition_checksum="sum", run_id=uuid4(), step_order=1
+    )
+    review = container.ai_builder_flow_review_service.return_value
+    review.build_failure_reference = AsyncMock(return_value=reference)
+    review.resolve_failure_evidence = AsyncMock(
+        side_effect=AIBuilderBadRequestException(
+            "Unavailable",
+            code=AIBuilderErrorCode.REVIEW_FINDING_UNKNOWN,
+            context={
+                "reason": reason,
+                "run_id": str(reference.run_id),
+                "step_order": 1,
+            },
+        )
+    )
+    with pytest.raises(AIBuilderBadRequestException) as caught:
+        await get_run_failure_launch(
+            request=_make_request(),
+            flow_id=uuid4(),
+            run_id=reference.run_id,
+            step_order=1,
+            space_id=uuid4(),
+            container=container,
+        )
+    assert caught.value.code == AIBuilderErrorCode.REVIEW_FINDING_UNKNOWN
+    assert caught.value.context["reason"] == reason
+    container.ai_builder_service.return_value.prepare_review_judgement.assert_not_called()

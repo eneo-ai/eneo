@@ -13,6 +13,7 @@
   import { readAttachedCitationSummary } from "./flowCitationSummary";
   import FlowJsonViewer from "./FlowJsonViewer.svelte";
   import FlowRunErrorAlert from "./FlowRunErrorAlert.svelte";
+  import { isFailureRepairCandidate } from "$lib/features/flows/flowRunFailureRepair";
   import FlowRunResultFileButton from "./FlowRunResultFileButton.svelte";
   import FlowRunStatusBadge from "./FlowRunStatusBadge.svelte";
   import TranscriptPlayer, { type SignedAudio } from "./TranscriptPlayer.svelte";
@@ -78,6 +79,7 @@
     stepRag,
     stepAttempts,
     runError = null,
+    onRepairFailure = null,
     reviewPolicyDefinitionSteps = [],
     transcriptContext = null,
     correctionsController = null,
@@ -104,6 +106,8 @@
     stepRag: Record<string, unknown> | null;
     stepAttempts: Record<string, unknown>[];
     runError?: FlowRunError | null;
+    /** Offered for a failure the AI Builder may repair; called with the step order. */
+    onRepairFailure?: ((stepOrder: number) => void) | null;
     reviewPolicyDefinitionSteps?: readonly FlowReviewPolicyErrorStep[];
     transcriptContext?: FlowRunTranscriptContext | null;
     /** Shared transcript-corrections lifecycle; null disables editing. */
@@ -563,6 +567,9 @@
             steps={reviewPolicyDefinitionSteps.filter(
               (step) => step.step_order === result.step_order
             )}
+            onrepair={onRepairFailure && isFailureRepairCandidate(result.error_code)
+              ? () => onRepairFailure(result.step_order)
+              : null}
           />
         {/if}
       </Card.Content>

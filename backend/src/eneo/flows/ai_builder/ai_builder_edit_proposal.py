@@ -406,6 +406,7 @@ async def process_edit_arguments(
         }
     )
 
+    # The baseline is the saved step on the first turn and the prior plan thereafter.
     scoped_rejection = validate_scoped_plan_revision(
         target_kind=TargetKind.EDIT,
         saved_step_revision=saved_step_revision,

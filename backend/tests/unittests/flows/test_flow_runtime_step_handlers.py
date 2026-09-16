@@ -137,6 +137,7 @@ def _prepared_assistant_step(
         llm_files=[],
     )
     deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1_000_000,
         variable_resolver=FlowVariableResolver(),
         completion_service=object(),
         load_assistant=AsyncMock(),

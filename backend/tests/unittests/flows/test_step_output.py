@@ -7,9 +7,27 @@ import pytest
 from eneo.flows.domain.step_output import (
     FileBackedStepText,
     InlineStepText,
+    RejectedOutput,
     StepOutputMetadataError,
+    build_rejected_output_payload,
+    interpret_rejected_output,
     interpret_step_text,
 )
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [("", RejectedOutput("", False)), ("aåö", RejectedOutput("aå", True))],
+)
+def test_rejected_output_is_bounded_evidence_not_step_text(
+    text: str, expected: RejectedOutput
+) -> None:
+    payload = build_rejected_output_payload(text, max_inline_bytes=4)
+    assert interpret_rejected_output(payload) == expected
+    assert interpret_rejected_output(None) is None
+    assert interpret_rejected_output({"text": "completed"}) is None
+    with pytest.raises(StepOutputMetadataError):
+        interpret_step_text(payload)
 
 
 def test_interpret_step_text_accepts_complete_inline_text() -> None:

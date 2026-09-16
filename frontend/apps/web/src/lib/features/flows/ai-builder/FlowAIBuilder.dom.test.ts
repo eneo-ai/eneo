@@ -32,6 +32,21 @@ const SESSIONS_ROUTE = "/api/v1/flows/ai-builder/sessions";
 const CLIENT_ERRORS_ROUTE = "/api/v1/flows/ai-builder/client-errors";
 // A published version with one run and nothing to point at: enough for the
 // findings screen to own the phase.
+const RUN_FAILURE_LAUNCH = {
+  reference: {
+    kind: "run_failure",
+    flow_version: 2,
+    definition_checksum: "sum-2",
+    run_id: "run-1",
+    step_order: 1
+  },
+  evidence_classification_level: 0,
+  step_number: 1,
+  step_name: "Steg",
+  attempt_no: 1,
+  error_code: "typed_io_output_parse_failed"
+};
+
 const REVIEW_PACKET = {
   flow_id: "flow-1",
   flow_version: 2,
@@ -319,6 +334,7 @@ function makeFetch(options: FetchOptions = {}) {
     ) => {
       if (path.endsWith("/models")) return DEFAULT_MODEL_RESPONSE;
       if (path.endsWith("/review-packet")) return REVIEW_PACKET;
+      if (path.includes("/run-failures/")) return RUN_FAILURE_LAUNCH;
       if (path === SESSIONS_ROUTE && init?.method === "get") return { sessions: [] };
       if (path === SESSIONS_ROUTE && init?.method === "post") {
         posts.push(init.requestBody!["application/json"]);
@@ -457,6 +473,7 @@ function renderShell({ fetch, stream, ...props }: ShellProps) {
     | {
         focusSavedFlowStep: (scope: AIBuilderSavedFlowStepScope) => Promise<void>;
         openReview: () => Promise<void>;
+        launchFailureRepair: (target: { runId: string; stepOrder: number }) => Promise<void>;
       }
     | undefined;
   render(FlowAIBuilderHarness, {
@@ -3262,6 +3279,110 @@ describe("FlowAIBuilder edit host contract", () => {
     const heading = await screen.findByRole("heading", { name: m.ai_builder_review_title() });
     await waitFor(() => expect(document.activeElement).toBe(heading));
     expect(await screen.findByTestId("findings-none")).toBeTruthy();
+  });
+
+  it("hands a failed step over from a cold launch and sends the server's reference with the fix request", async () => {
+    let releaseCreate!: () => void;
+    const held = new Promise<void>((resolve) => {
+      releaseCreate = resolve;
+    });
+    const { fetch } = makeFetch({ created: editSession() });
+    const baseFetch = fetch.getMockImplementation()!;
+    fetch.mockImplementation(async (path, init) => {
+      if (path === SESSIONS_ROUTE && init?.method === "post") await held;
+      return baseFetch(path, init);
+    });
+    const { stream, calls } = makeStream();
+    const { builder, service } = renderShell({
+      fetch,
+      stream,
+      targetKind: "edit",
+      flowId: "flow-1"
+    });
+    await waitFor(() => expect(builder()).toBeDefined());
+    const launched = builder().launchFailureRepair({ runId: "run-1", stepOrder: 1 });
+    releaseCreate();
+    await launched;
+    const heading = await screen.findByRole("heading", { name: m.ai_builder_repair_title() });
+    await waitFor(() => expect(document.activeElement).toBe(heading));
+    // A launch on screen is not yet a repair: the composer names no step.
+    expect(service().activeStepScope).toBeNull();
+
+    await fireEvent.click(await screen.findByTestId("repair-prepare"));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    // Once the fix request is sent the step is the conversation's scope label.
+    expect(service().activeStepScope).toEqual({ stepName: "Steg", stepNumber: 1 });
+    expect(calls[0]!.body).toMatchObject({
+      message: m.ai_builder_repair_message({ step: "1", name: "Steg" }),
+      review_context: RUN_FAILURE_LAUNCH.reference
+    });
+    expect(calls[0]!.body).not.toHaveProperty("edit_context");
+    await waitFor(() => expect(service().failureRepair).toEqual({ status: "closed" }));
+  });
+
+  it("keeps a refused repair launch on screen and names no step", async () => {
+    const { fetch } = makeFetch({ created: editSession() });
+    const { stream } = makeStream(() => new Error("The flow is no longer published."));
+    const { builder, service } = renderShell({
+      fetch,
+      stream,
+      targetKind: "edit",
+      flowId: "flow-1"
+    });
+    await waitFor(() => expect(service().hasSession).toBe(true));
+    await waitFor(() => expect(builder()).toBeDefined());
+    await builder().launchFailureRepair({ runId: "run-1", stepOrder: 1 });
+    await screen.findByRole("heading", { name: m.ai_builder_repair_title() });
+
+    await fireEvent.click(await screen.findByTestId("repair-prepare"));
+    await waitFor(() => expect(service().streamState).not.toBe("streaming"));
+
+    // The server recorded no repair: the launch is still there to retry and
+    // the composer does not claim a scope the conversation does not have.
+    expect(service().failureRepair.status).toBe("ready");
+    expect(screen.getByRole("heading", { name: m.ai_builder_repair_title() })).toBeTruthy();
+    expect(service().activeStepScope).toBeNull();
+  });
+
+  it("asks before a failure repair replaces an ongoing edit", async () => {
+    const ongoing = makeSession({
+      session_id: "e-ongoing",
+      target_kind: "edit",
+      flow_id: "flow-1",
+      conversation: [
+        userMessage("u1", "Byt rubrik på rapporten"),
+        assistantMessage("a1", "Vad ska rubriken vara?")
+      ]
+    });
+    const fresh = editSession();
+    let posts = 0;
+    const { fetch } = makeFetch({ sessions: [ongoing, fresh] });
+    const baseFetch = fetch.getMockImplementation()!;
+    fetch.mockImplementation(async (path, init) => {
+      if (path === SESSIONS_ROUTE && init?.method === "post") {
+        posts += 1;
+        return posts === 1 ? ongoing : fresh;
+      }
+      return baseFetch(path, init);
+    });
+    const { stream } = makeStream();
+    const { service, builder } = renderShell({
+      fetch,
+      stream,
+      targetKind: "edit",
+      flowId: "flow-1"
+    });
+    await waitFor(() => expect(service().hasSession).toBe(true));
+    await waitFor(() => expect(builder()).toBeDefined());
+    await builder().launchFailureRepair({ runId: "run-1", stepOrder: 1 });
+    expect(
+      await screen.findByText(m.ai_builder_replace_edit_description_repair({ step: "1" }))
+    ).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: m.ai_builder_repair_title() })).toBeNull();
+    await fireEvent.click(button(m.ai_builder_replace_edit_action()));
+    expect(await screen.findByRole("heading", { name: m.ai_builder_repair_title() })).toBeTruthy();
+    expect(posts).toBe(2);
+    await waitFor(() => expect(screen.queryByText(m.ai_builder_replace_edit_title())).toBeNull());
   });
 
   it("asks before a run review replaces an ongoing edit and clears the saved-step scope", async () => {

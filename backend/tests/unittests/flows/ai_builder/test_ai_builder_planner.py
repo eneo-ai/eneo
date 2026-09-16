@@ -5862,3 +5862,101 @@ def test_saved_step_context_is_required_before_request_budget_admission():
             max_input_tokens=small_window,
             extra_instructions=" full target instructions" * 5000,
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("change", "has_plan"),
+    [
+        ("client_scope", False),
+        ("reordered", False),
+        ("replaced", False),
+        ("reordered", True),
+        ("replaced", True),
+    ],
+)
+async def test_failure_repair_scope_mismatch_stops_before_provider_and_turn_write(
+    change, has_plan
+):
+    from eneo.flows.ai_builder.ai_builder_domain_models import (
+        BuilderSession,
+        TargetKind,
+    )
+    from eneo.flows.ai_builder.ai_builder_flow_review import (
+        FlowReviewEvidence,
+        FlowReviewFailureFact,
+        FlowReviewStep,
+    )
+    from eneo.flows.domain.flow import Flow
+    from eneo.flows.domain.step_output import RejectedOutput
+
+    planner = _make_planner()
+    flow_id = uuid4()
+    flow = Flow(
+        id=flow_id,
+        tenant_id=planner.user.tenant_id,
+        space_id=uuid4(),
+        name="Repair",
+        published_version=1,
+        steps=[_reviewed_step(flow_id, 1), _reviewed_step(flow_id, 2)],
+    )
+    session = BuilderSession(
+        id=uuid4(),
+        tenant_id=planner.user.tenant_id,
+        space_id=flow.space_id,
+        flow_id=flow_id,
+        target_kind=TargetKind.EDIT,
+    )
+    planner.repo.get_session.return_value = session
+    evidence = FlowReviewEvidence(
+        flow_version=1,
+        definition_checksum="sum",
+        evidence_classification_level=1,
+        completed_run_count=0,
+        failed_run_count=1,
+        facts=[],
+        steps=[FlowReviewStep(step_id=flow.steps[0].id, step_order=1, label="Failed")],
+        failure=FlowReviewFailureFact(
+            run_id=uuid4(),
+            step_order=1,
+            attempt_no=1,
+            error_code="typed_io_output_parse_failed",
+            error_message="Invalid JSON",
+            effective_prompt="Return JSON",
+            rejected_output=RejectedOutput("invalid", False),
+            requested_model=None,
+        ),
+    )
+    if change == "reordered":
+        flow.steps[0].step_order = 2
+        flow.steps[1].step_order = 1
+    elif change == "replaced":
+        flow.steps[0].id = uuid4()
+    if has_plan:
+        session.latest_plan_id = uuid4()
+    with pytest.raises(AIBuilderBadRequestException) as caught:
+        async for _ in planner.send_message(
+            session_id=session.id,
+            client_turn_id=uuid4(),
+            request_fingerprint="a" * 64,
+            request_snapshot={},
+            message="Repair the instruction",
+            completion_model_route=_route(),
+            flow=flow,
+            max_input_tokens=4096,
+            max_output_tokens=1024,
+            review_evidence=evidence,
+            edit_context=AIBuilderSavedFlowStepEditContext(
+                flow_step_id=flow.steps[1].id
+            ),
+        ):
+            pass
+    assert caught.value.code == "invalid_existing_step_ref"
+    assert caught.value.context["reason"] == (
+        "repair_scope_mismatch" if change == "client_scope" else "draft_diverged"
+    )
+    if change != "client_scope":
+        assert caught.value.context["step_order"] == 1
+        assert caught.value.context["step_id"] == str(evidence.steps[0].step_id)
+    planner.litellm_client.acompletion.assert_not_awaited()
+    planner.repo.accept_session_turn.assert_not_awaited()

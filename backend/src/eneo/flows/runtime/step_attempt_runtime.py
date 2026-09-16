@@ -113,6 +113,8 @@ def build_typed_failure_plan(
     error_message: str,
     input_payload_json: dict[str, Any] | None = None,
     effective_prompt: str | None = None,
+    rejected_output: str | None = None,
+    max_inline_text_bytes: int | None = None,
     run_error_message: str | None = None,
 ) -> StepFailurePlan:
     public_error = run_error_message or error_message
@@ -126,6 +128,8 @@ def build_typed_failure_plan(
             error_message=error_message,
             input_payload_json=input_payload_json,
             effective_prompt=effective_prompt,
+            rejected_output=rejected_output,
+            max_inline_text_bytes=max_inline_text_bytes,
         ),
         run_error_message=public_error,
         return_result={"status": "failed", "error": public_error},

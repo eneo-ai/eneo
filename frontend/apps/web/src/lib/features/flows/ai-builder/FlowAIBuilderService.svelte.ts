@@ -1,3 +1,4 @@
+import type { FlowRunFailureRepairTarget } from "$lib/features/flows/flowRunFailureRepair";
 import { m } from "$lib/paraglide/messages";
 import { createClassContext } from "$lib/core/helpers/createClassContext";
 import type { Eneo } from "@eneo/eneo-js";
@@ -41,6 +42,7 @@ import type {
   SessionStatus,
   TargetKind,
   AIBuilderFlowReviewState,
+  AIBuilderFailureRepairState,
   AIBuilderReviewReference,
   AIBuilderFlowReviewSuggestionsState
 } from "./protocol";
@@ -162,6 +164,23 @@ export class FlowAIBuilderService {
     return owned.sessionId === sessionId ? owned.scope : null;
   }
 
+  /** The step of an ACCEPTED failure repair, shown as the composer's scope
+   *  while the repair conversation lasts. Set only once a repair turn was
+   *  sent: a launch that is closed unsent leaves no label behind. The server
+   *  derives the edit scope from the failure itself, so nothing is sent for
+   *  it. Bound to the session like the saved-step scope, and cleared with it. */
+  #failureRepairScope: {
+    sessionId: string | null;
+    scope: AIBuilderStepScopePresentation;
+  } | null = null;
+
+  get failureRepairScope(): AIBuilderStepScopePresentation | null {
+    const owned = this.#failureRepairScope;
+    if (owned === null) return null;
+    const sessionId = this.#state.session?.session_id ?? null;
+    return owned.sessionId === sessionId ? owned.scope : null;
+  }
+
   get activeStepScope(): AIBuilderStepScopePresentation | null {
     const context = this.activeStepTransportContext;
     if (
@@ -174,7 +193,7 @@ export class FlowAIBuilderService {
         stepNumber: context.target_step_number
       };
     }
-    return this.savedFlowStepScope;
+    return this.savedFlowStepScope ?? this.failureRepairScope;
   }
 
   get activeStepTransportContext(): AIBuilderEditContext | null {
@@ -230,6 +249,7 @@ export class FlowAIBuilderService {
 
   clearActiveStepScope(): void {
     this.#savedFlowStepScope = null;
+    this.#failureRepairScope = null;
     const sessionId = this.#state.session?.session_id;
     const planId = this.#state.currentPlan?.plan_id;
     this.#suppressedPlanStepScope = sessionId && planId ? { sessionId, planId } : null;
@@ -415,6 +435,7 @@ export class FlowAIBuilderService {
     const generation = ++this.#reviewGeneration;
     this.review = { status: "loading" };
     this.suggestions = { status: "closed" };
+    this.failureRepair = { status: "closed" };
     try {
       const packet = await this.#driver.fetchFlowReviewPacket();
       if (generation !== this.#reviewGeneration) return;
@@ -438,6 +459,43 @@ export class FlowAIBuilderService {
     this.#reviewGeneration += 1;
     this.review = { status: "closed" };
     this.suggestions = { status: "closed" };
+    void this.#driver.closeReviewListing();
+  }
+
+  /** The failed step handed over from the run history. It shares the
+   *  review's generation: opening either closes the other, and an answer that
+   *  arrives after its launch closed is dropped rather than shown. */
+  failureRepair: AIBuilderFailureRepairState = $state({ status: "closed" });
+
+  async openFailureRepair(target: FlowRunFailureRepairTarget): Promise<void> {
+    const generation = ++this.#reviewGeneration;
+    this.review = { status: "closed" };
+    this.suggestions = { status: "closed" };
+    this.failureRepair = { status: "loading", target };
+    try {
+      const launch = await this.#driver.fetchRunFailureLaunch(target);
+      if (generation !== this.#reviewGeneration) return;
+      await this.#driver.openReviewListing(launch.evidence_classification_level);
+      if (generation !== this.#reviewGeneration) return;
+      this.failureRepair = { status: "ready", launch };
+    } catch (error) {
+      if (generation !== this.#reviewGeneration) return;
+      this.failureRepair = {
+        status: "failed",
+        target,
+        error: parseAIBuilderError({
+          transport: "apply",
+          payload: error,
+          fallbackMessage: m.ai_builder_repair_load_failed()
+        })
+      };
+    }
+  }
+
+  closeFailureRepair(): void {
+    if (this.failureRepair.status === "closed") return;
+    this.#reviewGeneration += 1;
+    this.failureRepair = { status: "closed" };
     void this.#driver.closeReviewListing();
   }
 
@@ -480,7 +538,26 @@ export class FlowAIBuilderService {
       reviewContext
     );
     if (outcome !== "not_started" && reviewContext) {
-      this.closeReview();
+      if (reviewContext.kind === "run_failure") {
+        // Only a delivered turn is a repair the server recorded: it carries
+        // the reference from here on and its step becomes the composer's
+        // label. A refused send keeps the launch on screen and names no step.
+        const repair = this.failureRepair;
+        if (outcome === "delivered") {
+          if (repair.status === "ready") {
+            this.#failureRepairScope = {
+              sessionId: this.#state.session?.session_id ?? null,
+              scope: {
+                stepName: repair.launch.step_name?.trim() || m.flow_step_unnamed(),
+                stepNumber: repair.launch.step_number
+              }
+            };
+          }
+          this.closeFailureRepair();
+        }
+      } else {
+        this.closeReview();
+      }
     }
     if (this.#state.error?.code === "invalid_existing_step_ref") {
       this.clearSavedFlowStepScope();

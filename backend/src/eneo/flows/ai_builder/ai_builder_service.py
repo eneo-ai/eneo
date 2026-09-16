@@ -72,6 +72,7 @@ from eneo.flows.ai_builder.ai_builder_events import (
 from eneo.flows.ai_builder.ai_builder_flow_review import (
     AIBuilderFlowReviewService,
     AIBuilderReviewReference,
+    AIBuilderRunFailureContext,
     AIBuilderSuggestionContext,
     FlowReviewEvidence,
     ReviewSampleAudit,
@@ -554,6 +555,8 @@ class AIBuilderService:
         turn simply proceeds without evidence, and without reading any run of
         the old definition, rather than failing a conversation mid-way. An
         identical republish is neither: the review carries on.
+        Failure repairs propagate inherited refusals too: continuing without
+        their evidence would withdraw the output-contract restriction.
         A suggestion reference is held to the runs it was judged on, and
         those runs are read again now, through ``audit``, so the turn tests
         the suggestions against what the runs say rather than repeating what
@@ -567,6 +570,13 @@ class AIBuilderService:
             return None
         if self.flow_review_service is None:
             raise RuntimeError("AIBuilderFlowReviewService is required for reviews.")
+        if isinstance(review_context, AIBuilderRunFailureContext):
+            return await self.flow_review_service.resolve_failure_evidence(
+                flow_id=session.flow_id,
+                space_id=session.space_id,
+                reference=review_context,
+                audit=audit,
+            )
         packet = await self.flow_review_service.build_packet(
             flow_id=session.flow_id, space_id=session.space_id
         )

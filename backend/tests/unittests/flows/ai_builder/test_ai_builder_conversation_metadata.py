@@ -1502,3 +1502,28 @@ def _source_hits(pattern: re.Pattern[str], *, exclude: set[str]) -> list[str]:
             if pattern.search(line):
                 hits.append(f"{path.name}:{line_number}:{line.strip()}")
     return hits
+
+
+def test_run_failure_reference_is_inherited_with_floor_and_step_scope():
+    from eneo.flows.ai_builder.ai_builder_flow_review import AIBuilderRunFailureContext
+
+    reference = AIBuilderRunFailureContext(
+        flow_version=1, definition_checksum="sum", run_id=uuid4(), step_order=2
+    )
+    metadata = metadata_for_user_message(
+        review_context=reference, review_evidence_level=3
+    )
+    conversation = [
+        ConversationMessage(role="user", content="Repair", metadata=metadata),
+        ConversationMessage(role="user", content="Try a shorter instruction"),
+    ]
+    restored = metadata_module.latest_user_review_context(conversation)
+    assert restored is not None and restored.kind == "run_failure"
+    assert restored.run_id == reference.run_id
+    assert metadata_module.conversation_acts_on_a_review(conversation)
+    assert metadata_module.conversation_evidence_floor(conversation) == 3
+    scope = metadata_module.review_edit_scope_for_turn(conversation)
+    assert scope is not None
+    assert scope.step_refs == frozenset({"existing_step_2"})
+    assert scope.removable_step_refs == frozenset()
+    assert not scope.may_add

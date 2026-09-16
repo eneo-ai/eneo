@@ -344,6 +344,25 @@ class AIBuilderPlanner:
                 session=session,
                 flow=flow,
                 context=edit_context,
+                failure_step_id=(
+                    next(
+                        (
+                            step.step_id
+                            for step in review_evidence.steps
+                            if step.step_order == review_evidence.failure.step_order
+                        ),
+                        None,
+                    )
+                    if review_evidence is not None
+                    and review_evidence.failure is not None
+                    else None
+                ),
+                failure_step_order=(
+                    review_evidence.failure.step_order
+                    if review_evidence is not None
+                    and review_evidence.failure is not None
+                    else None
+                ),
             )
         except ValidationError as exc:
             raise_persisted_flow_mcp_plan_error(exc)
