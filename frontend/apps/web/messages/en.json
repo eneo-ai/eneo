@@ -4810,5 +4810,9 @@
   "whats_new_new_for_you": "New for you",
   "whats_new_announcement_title": "New in Eneo {version}",
   "whats_new_announcement_more": "{titles} and {count} more",
-  "whats_new_announcement_action": "See what's new"
+  "whats_new_announcement_action": "See what's new",
+  "whats_new_tour_start": "Walk me through the new features ({count})",
+  "whats_new_tour_next": "Next",
+  "whats_new_tour_previous": "Previous",
+  "whats_new_tour_progress": "{current} of {total}"
 }

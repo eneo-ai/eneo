@@ -160,6 +160,12 @@ places listed above.
 - **Show me** navigates to `href` and spotlights `[data-tour=anchor]` with a
   single driver.js step. If the anchor is not on the page (permissions,
   feature flags) the button only navigates.
+- **Walk me through** on a release header runs every visible Show me entry
+  of that release as one walkthrough (1 of N, next/previous), page by page.
+  It is derived from the entries — there is no tour definition to maintain,
+  and an entry without `showMe` is simply not a stop. A stop whose anchor is
+  missing is skipped. Order in `releases.json` is the walkthrough order, so
+  put the entries a user should meet first at the top.
 - Release notes on docs.eneo.ai render the English text from the same file.
 
 ## Backports

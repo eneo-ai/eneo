@@ -4810,5 +4810,9 @@
   "whats_new_new_for_you": "Nytt för dig",
   "whats_new_announcement_title": "Nytt i Eneo {version}",
   "whats_new_announcement_more": "{titles} och {count} till",
-  "whats_new_announcement_action": "Visa nyheterna"
+  "whats_new_announcement_action": "Visa nyheterna",
+  "whats_new_tour_start": "Visa mig de nya funktionerna ({count})",
+  "whats_new_tour_next": "Nästa",
+  "whats_new_tour_previous": "Föregående",
+  "whats_new_tour_progress": "{current} av {total}"
 }

@@ -6,6 +6,7 @@
   import { getAppContext } from "$lib/core/AppContext";
   import { getWhatsNewStore } from "$lib/features/whats-new/whatsNewStore";
   import { showMe } from "$lib/features/whats-new/spotlight";
+  import { startTour, tourSteps } from "$lib/features/whats-new/tour";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import { Label } from "$lib/components/ui/label";
@@ -19,7 +20,7 @@
     type WhatsNewFilters
   } from "$lib/features/whats-new/filters";
   import { releases } from "@eneo/whats-new";
-  import type { EntryArea, Localized, ReleaseEntry } from "@eneo/whats-new";
+  import type { EntryArea, Localized, Release, ReleaseEntry } from "@eneo/whats-new";
   import { Sparkles } from "lucide-svelte";
   import { get } from "svelte/store";
 
@@ -55,15 +56,27 @@
     return new Intl.DateTimeFormat(locale, { dateStyle: "long" }).format(new Date(date));
   }
 
-  // Navigates away; when the anchor is missing on the target page the user
+  // Both navigate away; when an anchor is missing on its page the user
   // still lands on the right screen, which is the documented fallback.
   function handleShowMe(entry: ReleaseEntry) {
     if (!entry.showMe) return;
-    void showMe(entry.showMe, {
-      title: text(entry.title),
-      description: text(entry.body),
-      doneLabel: m.whats_new_spotlight_done()
+    void showMe(
+      { ...entry.showMe, title: text(entry.title), description: text(entry.body) },
+      { done: m.whats_new_spotlight_done() }
+    );
+  }
+
+  function handleTour(release: Release) {
+    void startTour(tourSteps(release, isAdmin, locale), {
+      done: m.whats_new_spotlight_done(),
+      next: m.whats_new_tour_next(),
+      previous: m.whats_new_tour_previous(),
+      progress: m.whats_new_tour_progress({ current: "{{current}}", total: "{{total}}" })
     });
+  }
+
+  function tourLength(release: Release): number {
+    return tourSteps(release, isAdmin, locale).length;
   }
 
   onMount(() => {
@@ -170,6 +183,16 @@
                     {m.whats_new_new_for_you()}
                   </Badge>
                 {/if}
+              {/if}
+              {#if tourLength(release) > 0}
+                <Button
+                  variant={release.read ? "outline" : "default"}
+                  size="sm"
+                  class="ml-auto"
+                  onclick={() => handleTour(release)}
+                >
+                  {m.whats_new_tour_start({ count: tourLength(release) })}
+                </Button>
               {/if}
             </div>
 
