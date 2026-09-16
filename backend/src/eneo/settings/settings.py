@@ -44,6 +44,10 @@ class SettingsPublic(SettingsBase):
     api_key_expiry_notifications: bool = (
         True  # Per-tenant API key expiry notifications toggle
     )
+    # Per-tenant toggle for the What's new page, release announcement and
+    # menu indicator. Opt-out: organisations that do not want release
+    # communication in the product turn it off.
+    whats_new_enabled: bool = True
     # Read-only: whether signed file-reference URLs can be minted (a reference
     # base URL or public origin is configured). Gates UI that only makes sense
     # with them (e.g. the assistant inline-file-text toggle). Computed from
@@ -58,6 +62,10 @@ class SettingsPublic(SettingsBase):
     # this deployment. Lets the UI expose local test controls without relying
     # on a manually entered query parameter.
     sharepoint_fixture_mode_available: bool = False
+    # Read-only: whether the deployment runs in a development environment.
+    # Gates UI-only developer conveniences (e.g. resetting one's own What's
+    # new state); the endpoints behind them check the same setting.
+    developer_tools_available: bool = False
 
 
 class GetModelsResponse(BaseModel):

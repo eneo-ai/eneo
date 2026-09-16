@@ -30,7 +30,7 @@
 
 <div class="flex h-full min-w-0 flex-grow flex-col overflow-hidden">
   <div class="border-default bg-primary border-b">
-    <div class="px-6 pt-5 pb-3">
+    <div class="px-6 pt-5 pb-3" data-tour="admin-personal-assistant">
       <h1 class="text-primary text-xl font-bold">{m.governance_title()}</h1>
       <p class="text-secondary mt-0.5 text-sm">
         {m.governance_subtitle()}

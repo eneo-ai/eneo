@@ -23,7 +23,7 @@
 
 <Page.Root>
   <Page.Header>
-    <Page.Title title={m.roles()}></Page.Title>
+    <Page.Title title={m.roles()} tour="admin-roles"></Page.Title>
     <RoleEditor mode="create" permissions={data.permissions} templates={data.templates}
     ></RoleEditor>
   </Page.Header>
