@@ -87,8 +87,13 @@ class ApiKeysV2Repository:
     async def list_relaxed_tenant_public_key_origin_patterns(self) -> list[str]:
         """Return active public-key CORS patterns for tenants that opted in."""
         query = (
-            sa.select(self.table.allowed_origins, Tenants.api_key_policy)
+            sa.select(self.table.allowed_origins)
             .join(Tenants, Tenants.id == self.table.tenant_id)
+            .where(
+                Tenants.api_key_policy["require_tenant_allowed_origin"]
+                .as_boolean()
+                .is_(False)
+            )
             .where(self.table.key_type == ApiKeyType.PK.value)
             .where(self.table.revoked_at.is_(None))
             .where(self.table.suspended_at.is_(None))
@@ -106,21 +111,16 @@ class ApiKeysV2Repository:
             )
             .where(self.table.allowed_origins.is_not(None))
         )
-        records = (await self.session.execute(query)).all()
-        origin_patterns: list[str] = []
-        for raw_patterns, raw_policy in records:
-            if not isinstance(raw_policy, dict):
-                continue
-            policy = cast(dict[str, object], raw_policy)
-            if policy.get("require_tenant_allowed_origin", True) is not False:
-                continue
+        records = await self.session.scalars(query)
+        origin_patterns: set[str] = set()
+        for raw_patterns in records:
             if not isinstance(raw_patterns, list):
                 continue
             patterns = cast(list[object], raw_patterns)
-            origin_patterns.extend(
+            origin_patterns.update(
                 pattern for pattern in patterns if isinstance(pattern, str)
             )
-        return origin_patterns
+        return sorted(origin_patterns)
 
     async def list_by_scope(
         self,
