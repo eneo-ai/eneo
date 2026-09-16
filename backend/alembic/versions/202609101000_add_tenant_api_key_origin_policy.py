@@ -1,7 +1,7 @@
 """Add tenant policy for API-key CORS origins.
 
 Revision ID: 202609101000
-Revises: 202609071000
+Revises: 202608271000
 """
 
 from collections.abc import Sequence
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "202609101000"
-down_revision: str | None = "202609071000"
+down_revision: str | None = "202608271000"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
