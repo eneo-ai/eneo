@@ -60,9 +60,11 @@ export async function spotlight(step: SpotlightStep, options: SpotlightOptions):
     disableButtons: isFirst ? ["previous"] : [],
     showProgress: Boolean(progress),
     progressText: labels.progress ?? "{{current}} / {{total}}",
+    // Each stop is its own one-step drive(), so driver.js always renders the
+    // "done" text; choose it by the walkthrough's position instead.
     nextBtnText: labels.next ?? labels.done,
     prevBtnText: labels.previous ?? "",
-    doneBtnText: labels.done,
+    doneBtnText: isLast ? labels.done : (labels.next ?? labels.done),
     popoverClass: "eneo-spotlight",
     steps: [
       {
@@ -70,13 +72,22 @@ export async function spotlight(step: SpotlightStep, options: SpotlightOptions):
         popover: {
           title: step.title,
           description: step.description,
-          // driver.js counts steps within one drive(); report the walkthrough's.
+          // driver.js counts steps within one drive(); report the walkthrough's
+          // position instead, and re-enable "previous" past the first stop
+          // (driver.js greys it on what it sees as the first step).
           ...(progress
             ? {
-                onPopoverRender: (popover: { progress: HTMLElement }) => {
+                onPopoverRender: (popover: {
+                  progress: HTMLElement;
+                  previousButton: HTMLButtonElement;
+                }) => {
                   popover.progress.textContent = (labels.progress ?? "{{current}} / {{total}}")
                     .replace("{{current}}", String(progress.index + 1))
                     .replace("{{total}}", String(progress.total));
+                  if (!isFirst) {
+                    popover.previousButton.disabled = false;
+                    popover.previousButton.classList.remove("driver-popover-btn-disabled");
+                  }
                 }
               }
             : {})

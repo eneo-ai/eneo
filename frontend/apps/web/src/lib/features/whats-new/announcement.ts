@@ -1,7 +1,7 @@
 import { visibleEntries } from "@eneo/whats-new";
 import type { Release, ReleaseEntry } from "@eneo/whats-new";
 
-export const ANNOUNCEMENT_ENTRIES = 5;
+export const ANNOUNCEMENT_ENTRIES = 4;
 
 /**
  * What the one-time announcement shows: the first few entries this user may

@@ -4814,11 +4814,14 @@
   "whats_new_tour_next": "Nästa",
   "whats_new_tour_previous": "Föregående",
   "whats_new_tour_progress": "{current} av {total}",
-  "whats_new_announcement_intro": "Det här har ändrats sedan du var här senast.",
-  "whats_new_announcement_rest": "…och {count} nyheter till på Nyheter-sidan.",
   "whats_new_announcement_later": "Senare",
   "whats_new_dev_title": "Utvecklarläge",
   "whats_new_dev_description": "Glöm att du sett och fått besked om den senaste versionen, och ladda om så att annonseringen och pricken kommer tillbaka.",
   "whats_new_dev_reset": "Återställ och ladda om",
-  "whats_new_dev_reset_failed": "Kunde inte återställa nyhetsstatusen."
+  "whats_new_dev_reset_failed": "Kunde inte återställa nyhetsstatusen.",
+  "whats_new_announcement_heading": "Nytt i Eneo",
+  "whats_new_announcement_intro_count": "{count} nyheter sedan du var här senast. De viktigaste ser du här – resten finns under Nyheter.",
+  "whats_new_announcement_tour": "Visa mig de nya funktionerna",
+  "whats_new_announcement_all": "Alla {count} nyheter",
+  "whats_new_announcement_list_label": "Höjdpunkter i den här versionen"
 }

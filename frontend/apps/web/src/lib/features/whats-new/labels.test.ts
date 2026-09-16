@@ -1,6 +1,6 @@
 import { ENTRY_AREAS, ENTRY_TYPES } from "@eneo/whats-new";
 import { describe, expect, it } from "vitest";
-import { areaLabel, labelFor, typeClass, typeLabel } from "./labels";
+import { areaIcon, areaLabel, labelFor, typeClass, typeLabel } from "./labels";
 
 describe("what's new labels", () => {
   it("cover every entry type in the schema", () => {
@@ -10,6 +10,7 @@ describe("what's new labels", () => {
 
   it("cover every area in the schema", () => {
     expect(Object.keys(areaLabel).sort()).toEqual([...ENTRY_AREAS].sort());
+    expect(Object.keys(areaIcon).sort()).toEqual([...ENTRY_AREAS].sort());
   });
 
   it("fall back to the raw value for a vocabulary this build does not know", () => {

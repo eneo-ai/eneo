@@ -21,13 +21,13 @@ const release: Release = {
 describe("announcement summary", () => {
   it("shows the first visible entries and counts the rest", () => {
     const user = announcementSummary(release, false);
-    expect(user.entries.map((e) => e.id)).toEqual(["a", "c", "d", "e", "f"]);
-    expect(user).toMatchObject({ more: 1, total: 6 });
+    expect(user.entries.map((e) => e.id)).toEqual(["a", "c", "d", "e"]);
+    expect(user).toMatchObject({ more: 2, total: 6 });
 
     const admin = announcementSummary(release, true);
     expect(admin.entries).toHaveLength(ANNOUNCEMENT_ENTRIES);
     expect(admin.entries.map((e) => e.id)).toContain("b");
-    expect(admin).toMatchObject({ more: 2, total: 7 });
+    expect(admin).toMatchObject({ more: 3, total: 7 });
   });
 
   it("never reports a negative remainder", () => {

@@ -1,5 +1,16 @@
 import { m } from "$lib/paraglide/messages";
 import type { EntryArea, EntryType } from "@eneo/whats-new";
+import type { Component } from "svelte";
+import {
+  BookOpen,
+  Bot,
+  LayoutGrid,
+  Layers,
+  MessageSquare,
+  Settings,
+  Sparkles,
+  User
+} from "lucide-svelte";
 
 // Both maps are typed exhaustively against the package's unions, and
 // labels.test.ts asserts they cover the schema's runtime vocabularies, so a
@@ -33,3 +44,14 @@ export function labelFor<K extends string>(map: Record<K, () => string>, key: K)
   const label = map[key];
   return label ? label() : key;
 }
+
+export const areaIcon: Record<EntryArea, Component> = {
+  chat: MessageSquare as unknown as Component,
+  assistants: Bot as unknown as Component,
+  knowledge: BookOpen as unknown as Component,
+  spaces: LayoutGrid as unknown as Component,
+  skills: Sparkles as unknown as Component,
+  account: User as unknown as Component,
+  admin: Settings as unknown as Component,
+  platform: Layers as unknown as Component
+};
