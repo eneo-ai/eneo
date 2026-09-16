@@ -1,16 +1,17 @@
 import { visibleEntries } from "@eneo/whats-new";
-import type { Locale, Release } from "@eneo/whats-new";
+import type { Release, ReleaseEntry } from "@eneo/whats-new";
 
-export const ANNOUNCEMENT_HEADLINES = 3;
+export const ANNOUNCEMENT_ENTRIES = 5;
 
 /**
- * The titles to name in the one-time announcement and how many entries it
- * leaves unnamed, restricted to what this user may see.
+ * What the one-time announcement shows: the first few entries this user may
+ * see and how many the page holds beyond them.
  */
-export function announcementSummary(release: Release, isAdmin: boolean, locale: Locale) {
-  const entries = visibleEntries(release, isAdmin);
-  const headlines = entries
-    .slice(0, ANNOUNCEMENT_HEADLINES)
-    .map((entry) => entry.title[locale] ?? entry.title.en);
-  return { headlines, more: Math.max(0, entries.length - headlines.length), total: entries.length };
+export function announcementSummary(
+  release: Release,
+  isAdmin: boolean
+): { entries: ReleaseEntry[]; more: number; total: number } {
+  const all = visibleEntries(release, isAdmin);
+  const entries = all.slice(0, ANNOUNCEMENT_ENTRIES);
+  return { entries, more: all.length - entries.length, total: all.length };
 }

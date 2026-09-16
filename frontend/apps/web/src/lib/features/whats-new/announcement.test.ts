@@ -1,38 +1,37 @@
 import type { Release } from "@eneo/whats-new";
 import { describe, expect, it } from "vitest";
-import { announcementSummary } from "./announcement";
+import { ANNOUNCEMENT_ENTRIES, announcementSummary } from "./announcement";
 
 const entry = (id: string, extra = {}) => ({
   id,
   type: "new" as const,
   area: "chat" as const,
-  title: { en: `${id} en`, sv: `${id} sv` },
+  title: { en: id, sv: id },
   body: { en: id, sv: id },
   ...extra
 });
 
 const release: Release = {
   version: "2.2.0",
-  entries: [entry("a"), entry("b", { audience: "admin" }), entry("c"), entry("d"), entry("e")]
+  entries: ["a", "b", "c", "d", "e", "f", "g"].map((id) =>
+    entry(id, id === "b" ? { audience: "admin" } : {})
+  )
 };
 
 describe("announcement summary", () => {
-  it("names the first visible titles in the user's language and counts the rest", () => {
-    expect(announcementSummary(release, false, "sv")).toEqual({
-      headlines: ["a sv", "c sv", "d sv"],
-      more: 1,
-      total: 4
-    });
-    expect(announcementSummary(release, true, "en")).toEqual({
-      headlines: ["a en", "b en", "c en"],
-      more: 2,
-      total: 5
-    });
+  it("shows the first visible entries and counts the rest", () => {
+    const user = announcementSummary(release, false);
+    expect(user.entries.map((e) => e.id)).toEqual(["a", "c", "d", "e", "f"]);
+    expect(user).toMatchObject({ more: 1, total: 6 });
+
+    const admin = announcementSummary(release, true);
+    expect(admin.entries).toHaveLength(ANNOUNCEMENT_ENTRIES);
+    expect(admin.entries.map((e) => e.id)).toContain("b");
+    expect(admin).toMatchObject({ more: 2, total: 7 });
   });
 
   it("never reports a negative remainder", () => {
-    expect(announcementSummary({ version: "1.0.0", entries: [entry("x")] }, false, "sv")).toEqual({
-      headlines: ["x sv"],
+    expect(announcementSummary({ version: "1.0.0", entries: [entry("x")] }, false)).toMatchObject({
       more: 0,
       total: 1
     });
