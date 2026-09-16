@@ -17,6 +17,8 @@
   import { untrack } from "svelte";
   import { isSupportedWebsiteUrl } from "./websiteForm";
 
+  import WebsiteWebhook from "./WebsiteWebhook.svelte";
+
   type EditableWebsite = Omit<Website, "embedding_model"> & {
     embedding_model?: { id: string } | null;
   };
@@ -68,6 +70,15 @@
   let httpAuthPassword = $state("");
   let showPassword = $state(false);
   let isProcessing = $state(false);
+  let createdInDialog = $state(false);
+  $effect(() => {
+    if (createdInDialog && !showDialog) {
+      createdInDialog = false;
+      mode = "create";
+      website = emptyWebsite();
+      resetCreateForm();
+    }
+  });
   let duplicateCheckPending = $state(false);
   let urlTouched = $state(false);
   let formError = $state("");
@@ -80,6 +91,7 @@
   function setCrawlType(value: string) {
     crawlType = value as Website["crawl_type"];
     if (crawlType === "sitemap") downloadFiles = false;
+    else if (updateInterval === "webhook") updateInterval = "never";
   }
 
   function credentialsAreInvalid(): boolean {
@@ -176,10 +188,16 @@
         embedding_model: { id: selectedEmbeddingModel.id },
         ...authFields()
       };
-      await eneo.websites.create(payload);
+      const created = await eneo.websites.create(payload);
       showDuplicateWarning = false;
-      resetCreateForm();
-      closeDialog();
+      if (created.update_interval === "webhook") {
+        website = created;
+        mode = "update";
+        createdInDialog = true;
+      } else {
+        resetCreateForm();
+        closeDialog();
+      }
       await refreshCurrentSpace("knowledge");
     } catch (error) {
       formError = m.website_form_create_failed();
@@ -201,8 +219,10 @@
         download_files: downloadFiles,
         ...authFields()
       };
-      await eneo.websites.update({ website: { id: website.id }, update });
-      closeDialog();
+      const updated = await eneo.websites.update({ website: { id: website.id }, update });
+      const newlyEnabledWebhook = website.update_interval !== "webhook" && updated.update_interval === "webhook";
+      website = updated;
+      if (!newlyEnabledWebhook) closeDialog();
       await refreshCurrentSpace("knowledge");
     } catch (error) {
       formError = m.website_form_update_failed();
@@ -218,6 +238,8 @@
         return m.every_day();
       case "every_other_day":
         return m.every_other_day();
+      case "webhook":
+        return m.website_webhook();
       case "weekly":
         return m.every_week();
       default:
@@ -338,6 +360,9 @@
                     <Select.Item value="every_other_day" label={m.every_other_day()}>
                       {m.every_other_day()}
                     </Select.Item>
+                    {#if crawlType === "sitemap"}
+                      <Select.Item value="webhook" label={m.website_webhook()}>{m.website_webhook()}</Select.Item>
+                    {/if}
                     <Select.Item value="weekly" label={m.every_week()}>{m.every_week()}</Select.Item
                     >
                   </Select.Content>
@@ -432,6 +457,15 @@
               />
             </Field.Field>
 
+            {#if updateInterval === "webhook"}
+              {#if showDialog && website.id && website.update_interval === "webhook"}
+                {#key website.id}
+                  <WebsiteWebhook websiteId={website.id} nextRetryAt={website.next_retry_at} />
+                {/key}
+              {:else}
+                <p>{m.website_webhook_save()}</p>
+              {/if}
+            {/if}
             {#if mode === "create"}
               <SelectEmbeddingModel
                 hideWhenNoOptions

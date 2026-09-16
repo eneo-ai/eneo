@@ -4896,5 +4896,18 @@
   "crawl_not_indexed": "Kunde inte indexeras:",
   "crawl_failed_pages_count": "Sidor: {count}",
   "crawl_failed_files_count": "Filer: {count}",
-  "crawl_content_has_missing": "Några adresser kunde inte hittas"
+  "crawl_content_has_missing": "Några adresser kunde inte hittas",
+  "website_webhook": "Webhook",
+  "website_webhook_description": "Skicka ett POST-anrop för att uppdatera webbplatsen. Anrop under en pågående crawl ger högst en omkörning.",
+  "website_webhook_save": "Spara webbplatsen för att skapa en webhook-token.",
+  "website_webhook_generate": "Skapa token",
+  "website_webhook_rotate": "Rotera token",
+  "website_webhook_rotate_hint": "Rotation gör den gamla token ogiltig direkt.",
+  "website_webhook_secret": "Kopiera token nu. Den visas bara denna gång och ska förvaras på servern.",
+  "website_webhook_copy": "Kopiera POST-exempel",
+  "website_webhook_pending": "En uppdatering väntar.",
+  "website_webhook_ready": "Webhook är aktiv. Använd din sparade token eller skapa en ny.",
+  "website_webhook_backoff": "Nästa uppdatering kan starta efter {date}.",
+  "website_webhook_url": "Webhook-URL",
+  "website_webhook_copied": "Kopierat"
 }

@@ -138,6 +138,9 @@ class WebsiteSparse(ResourcePermissionsMixin, WebsiteBase, InDB):
 
 
 class WebsitePublic(ResourcePermissionsMixin, BaseResponse):
+    webhook_enabled: bool = False
+    webhook_pending: bool = False
+
     name: Optional[str]
     url: str
     space_id: UUID
@@ -192,6 +195,8 @@ class WebsitePublic(ResourcePermissionsMixin, BaseResponse):
             metadata=WebsiteMetadata(size=website.size),
             permissions=website.permissions,
             requires_http_auth=website.requires_auth,
+            webhook_enabled=website.webhook_enabled,
+            webhook_pending=website.webhook_pending,
             consecutive_failures=website.consecutive_failures,
             next_retry_at=website.next_retry_at,
             is_auto_disabled=website.is_auto_disabled,

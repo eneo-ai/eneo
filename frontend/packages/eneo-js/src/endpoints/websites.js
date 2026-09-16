@@ -12,6 +12,18 @@
  */
 export function initWebsites(client) {
   return {
+    /** @param {{id: string}} website */
+    webhook: async (website) =>
+      client.fetch("/api/v1/websites/{id}/webhook/", {
+        method: "get",
+        params: { path: { id: website.id } }
+      }),
+    /** @param {{id: string}} website */
+    rotateWebhookToken: async (website) =>
+      client.fetch("/api/v1/websites/{id}/webhook/token/", {
+        method: "post",
+        params: { path: { id: website.id } }
+      }),
     /**
      * Lists all configured websites on this tenant.
      * @param {{includeTenant?: boolean} | undefined} [options]  Include all websites of this tenant?

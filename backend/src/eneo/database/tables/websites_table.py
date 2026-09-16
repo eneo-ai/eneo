@@ -32,6 +32,8 @@ from eneo.websites.domain.crawl_run import CrawlType, project_crawl_status
 
 
 class CrawlRuns(BasePublic):
+    webhook_dispatch: Mapped[Optional[dict[str, object]]] = mapped_column(JSONB, nullable=True)
+
     __table_args__ = (
         UniqueConstraint("job_id", name="uq_crawl_runs_job_id"),
         CheckConstraint(
@@ -322,6 +324,12 @@ class CrawlRunFailures(BasePublic):
 
 
 class Websites(BasePublic):
+    webhook_token_hash: Mapped[Optional[str]] = mapped_column(String(64))
+    webhook_pending: Mapped[bool] = mapped_column(
+        Boolean, server_default="false", default=False
+    )
+    webhook_started_job_id: Mapped[Optional[UUID]] = mapped_column()
+
     name: Mapped[Optional[str]] = mapped_column()
     url: Mapped[str] = mapped_column()
     download_files: Mapped[bool] = mapped_column()

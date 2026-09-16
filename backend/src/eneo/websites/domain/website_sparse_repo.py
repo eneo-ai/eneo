@@ -125,7 +125,13 @@ class WebsiteSparseRepository:
             List of websites with DAILY, EVERY_OTHER_DAY, or WEEKLY intervals
         """
         stmt = sa.select(WebsitesTable).where(
-            WebsitesTable.update_interval != UpdateInterval.NEVER
+            WebsitesTable.update_interval.in_(
+                [
+                    UpdateInterval.DAILY,
+                    UpdateInterval.EVERY_OTHER_DAY,
+                    UpdateInterval.WEEKLY,
+                ]
+            )
         )
 
         websites_db = await self.session.scalars(stmt)

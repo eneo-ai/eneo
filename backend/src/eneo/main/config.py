@@ -423,6 +423,8 @@ class Settings(BaseSettings):
     # extend past handoff + this ceiling; after that the module must run a new
     # login handoff (cheap while the Eneo session is alive).
     module_auth_max_session_hours: int = Field(default=8, gt=0)
+    crawl_webhook_rate_limit_per_minute: int = Field(default=60, ge=1)
+
     api_key_rate_limit_window_seconds: int = 3600
     api_key_rate_limit_fail_open: bool = False
     api_key_rate_limit_tenant_default: int = 10000

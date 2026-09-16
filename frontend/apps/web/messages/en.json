@@ -4896,5 +4896,18 @@
   "crawl_not_indexed": "Not indexed:",
   "crawl_failed_pages_count": "Pages: {count}",
   "crawl_failed_files_count": "Files: {count}",
-  "crawl_content_has_missing": "Some addresses could not be found"
+  "crawl_content_has_missing": "Some addresses could not be found",
+  "website_webhook": "Webhook",
+  "website_webhook_description": "Send a POST request to update this website. Requests during a running crawl schedule at most one follow-up crawl.",
+  "website_webhook_save": "Save the website to create a webhook token.",
+  "website_webhook_generate": "Create token",
+  "website_webhook_rotate": "Rotate token",
+  "website_webhook_rotate_hint": "Rotation immediately invalidates the old token.",
+  "website_webhook_secret": "Copy the token now. It is shown only once and must be stored on your server.",
+  "website_webhook_copy": "Copy POST example",
+  "website_webhook_pending": "An update is pending.",
+  "website_webhook_ready": "Webhook is active. Use your saved token or create a new one.",
+  "website_webhook_backoff": "The next update can start after {date}.",
+  "website_webhook_url": "Webhook URL",
+  "website_webhook_copied": "Copied"
 }

@@ -153,9 +153,13 @@ from eneo.transcription_models.presentation.transcription_models_router import (
 from eneo.user_groups.user_groups_router import router as user_groups_router
 from eneo.users.user_router import router as users_router
 from eneo.users.user_router import users_admin_router
+from eneo.websites.presentation.crawl_webhook_router import (
+    router as crawl_webhook_router,
+)
 from eneo.websites.presentation.website_router import router as website_router
 
 router = APIRouter()
+router.include_router(crawl_webhook_router, prefix="/webhooks", tags=["webhooks"])
 
 TENANT_ADMIN_SCOPE_GUARDS = (
     Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),

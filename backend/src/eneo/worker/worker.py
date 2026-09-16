@@ -1,3 +1,4 @@
+import asyncio
 from __future__ import annotations
 
 import inspect
@@ -255,8 +256,19 @@ class Worker:
         settings = get_settings()
         _log_startup_diagnostics(settings)
 
+        from eneo.worker.crawl_webhook_dispatch import run_forever
+
+        ctx["crawl_webhook_task"] = asyncio.create_task(run_forever())
+
     async def shutdown(self, ctx: ARQContext) -> None:
-        del ctx
+        task = ctx.get("crawl_webhook_task")
+        if task is not None:
+            task = cast(asyncio.Task[Any], task)
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
         await lifespan.shutdown()
 
     def function(self, with_user: bool = True, *, keep_result: int | None = None):

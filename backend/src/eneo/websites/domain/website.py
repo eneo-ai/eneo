@@ -28,6 +28,7 @@ class UpdateInterval(str, Enum):
     Why: Provides flexible scheduling options for automated crawling.
     """
 
+    WEBHOOK = "webhook"
     NEVER = "never"
     DAILY = "daily"  # Crawl every day at 1:00 UTC (2 AM Swedish winter / 3 AM summer)
     EVERY_OTHER_DAY = "every_other_day"  # Crawl every 2 days at 1:00 UTC (2 AM Swedish winter / 3 AM summer)
@@ -58,6 +59,8 @@ class Website(Entity):
         consecutive_failures: int = 0,
         next_retry_at: Optional["datetime"] = None,
         last_indexed_at: Optional["datetime"] = None,
+        webhook_enabled: bool = False,
+        webhook_pending: bool = False,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.space_id = space_id
@@ -76,6 +79,18 @@ class Website(Entity):
         self.consecutive_failures = consecutive_failures
         self.next_retry_at = next_retry_at
         self.last_indexed_at = last_indexed_at
+        self.webhook_enabled = webhook_enabled
+        self.webhook_pending = webhook_pending
+        self._validate_webhook()
+
+    def _validate_webhook(self) -> None:
+        if (
+            self.update_interval == UpdateInterval.WEBHOOK
+            and self.crawl_type != CrawlType.SITEMAP
+        ):
+            from eneo.main.exceptions import BadRequestException
+
+            raise BadRequestException("Webhook updates require a sitemap crawler")
 
     @property
     def requires_auth(self) -> bool:
@@ -290,6 +305,8 @@ class Website(Entity):
             http_auth=http_auth,
             consecutive_failures=record.consecutive_failures,
             next_retry_at=record.next_retry_at,
+            webhook_enabled=bool(record.webhook_token_hash),
+            webhook_pending=record.webhook_pending,
         )
 
     def update(
@@ -317,6 +334,8 @@ class Website(Entity):
             if self.consecutive_failures >= 10:
                 self.consecutive_failures = 0
                 self.next_retry_at = None
+
+        self._validate_webhook()
 
         # Handle auth updates (both must be provided together or both None)
         if is_provided(http_auth_username) or is_provided(http_auth_password):

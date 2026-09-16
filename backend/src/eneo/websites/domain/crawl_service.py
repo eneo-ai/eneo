@@ -40,6 +40,14 @@ class CrawlService:
         *,
         reconcile_after_commit: bool = True,
     ) -> CrawlRun:
+        from eneo.main.exceptions import NotFoundException
+        from eneo.websites.application.crawl_webhook import lock_website
+        from eneo.websites.domain.website import WebsiteSparse
+
+        locked = await lock_website(self.repo.session, website.id)
+        if locked is None:
+            raise NotFoundException()
+        website = WebsiteSparse.to_domain(locked)
         run, created = await self.repo.add_or_get_active(
             CrawlRun.create(website=website, origin=origin)
         )

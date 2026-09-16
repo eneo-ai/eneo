@@ -1,7 +1,10 @@
-from typing import Annotated
+from datetime import datetime
+from typing import Annotated, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # Audit logging - module level imports for consistency
 from eneo.audit.application.audit_metadata import AuditMetadata
@@ -513,4 +516,64 @@ async def get_info_blob_page(
         limit=limit,
         next_cursor=str(page.next_cursor) if page.next_cursor is not None else None,
         total_count=page.total_count,
+    )
+
+
+class WebsiteWebhookToken(BaseModel):
+    token: str
+    url: str
+
+
+@router.post("/{id}/webhook/token/", response_model=WebsiteWebhookToken)
+async def rotate_webhook_token(
+    id: UUID,
+    request: Request,
+    response: Response,
+    container: Annotated[
+        Container, Depends(get_container(with_user=True, transaction_scope="function"))
+    ],
+):
+    from eneo.websites.application.crawl_webhook import issue_token, lock_website
+    from eneo.websites.domain.website import UpdateInterval
+
+    # Resolve the owning space and enforce the same permission as settings edits.
+    service = container.website_crud_service()
+    space = await service.space_service.get_space_by_website(id)
+    actor = service.actor_manager.get_space_actor_from_space(space=space)
+    if not actor.can_edit_websites():
+        raise HTTPException(403, "Not allowed to edit this website")
+    website = await lock_website(cast(AsyncSession, container.session()), id)
+    if website is None:
+        raise HTTPException(404, "Website not found")
+    if website.update_interval != UpdateInterval.WEBHOOK:
+        raise HTTPException(409, "Save webhook update mode before issuing a token")
+    token, digest = issue_token()
+    website.webhook_token_hash = digest
+    response.headers["Cache-Control"] = "no-store"
+    from eneo.main.logging import get_logger
+
+    get_logger(__name__).info(
+        "Crawl webhook token rotated",
+        extra={"website_id": str(id), "user_id": str(container.user().id)},
+    )
+    return WebsiteWebhookToken(
+        token=token, url=str(request.url_for("trigger_crawl", website_id=id))
+    )
+
+
+class WebsiteWebhookSettings(BaseModel):
+    url: str
+    enabled: bool
+    pending: bool
+    next_retry_at: datetime | None
+
+
+@router.get("/{id}/webhook/", response_model=WebsiteWebhookSettings)
+async def get_webhook_settings(id: UUID, request: Request, container: ContainerDep):
+    website = await container.website_crud_service().get_website(id)
+    return WebsiteWebhookSettings(
+        url=str(request.url_for("trigger_crawl", website_id=id)),
+        enabled=website.webhook_enabled,
+        pending=website.webhook_pending,
+        next_retry_at=website.next_retry_at,
     )

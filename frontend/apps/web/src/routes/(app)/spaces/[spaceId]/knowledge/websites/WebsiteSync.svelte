@@ -19,6 +19,7 @@
   $: dayjs.locale(getLocale());
 
   const intervalLabels: Record<string, { label: string; color: Label.LabelColor }> = {
+    webhook: { color: "green", label: m.website_webhook() },
     daily: {
       color: "green",
       label: m.every_day()

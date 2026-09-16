@@ -140,7 +140,26 @@ class WebsiteCRUDService:
         if not actor.can_edit_websites():
             raise UnauthorizedException()
 
+        from eneo.websites.application.crawl_webhook import (
+            cancel_unstarted_webhook_runs,
+            lock_website,
+            revoke,
+        )
+
+        locked = await lock_website(self.crawl_run_repo.session, id)
         website = space.get_website(website_id=id)
+        if locked is not None:
+            # The aggregate was read before acquiring the lock. Refresh fields
+            # that may have changed while this settings edit waited.
+            website.name = locked.name
+            website.url = locked.url
+            website.crawl_type = locked.crawl_type
+            website.update_interval = UpdateInterval(locked.update_interval)
+            website.download_files = locked.download_files
+            website.consecutive_failures = locked.consecutive_failures
+            website.next_retry_at = locked.next_retry_at
+            website.webhook_enabled = bool(locked.webhook_token_hash)
+            website.webhook_pending = locked.webhook_pending
 
         website.update(
             name=name,
@@ -152,6 +171,21 @@ class WebsiteCRUDService:
             http_auth_password=http_auth_password,
         )
 
+        if locked is not None and website.update_interval != UpdateInterval.WEBHOOK:
+            revoke(locked)
+            await cancel_unstarted_webhook_runs(self.crawl_run_repo.session, id)
+            website.webhook_enabled = False
+            website.webhook_pending = False
+        if locked is not None:
+            # Only an explicit reactivation may reset the failure breaker. An
+            # unrelated edit must not overwrite a concurrently completed crawl.
+            from eneo.main.models import is_provided
+
+            if is_provided(update_interval) and locked.consecutive_failures >= 10:
+                locked.consecutive_failures = 0
+                locked.next_retry_at = None
+                website.consecutive_failures = 0
+                website.next_retry_at = None
         await self.space_repo.update(space=space)
 
         return website

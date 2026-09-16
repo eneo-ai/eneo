@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+  "/api/v1/webhooks/websites/{website_id}/crawl": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Trigger Crawl */
+    post: operations["trigger_crawl_api_v1_webhooks_websites__website_id__crawl_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/crawl-runs/{id}/": {
     parameters: {
       query?: never;
@@ -5130,6 +5147,40 @@ export interface paths {
     };
     /** Get Info Blob Page */
     get: operations["get_info_blob_page_api_v1_websites__id__info_blobs_page__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/websites/{id}/webhook/token/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Rotate Webhook Token */
+    post: operations["rotate_webhook_token_api_v1_websites__id__webhook_token__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/websites/{id}/webhook/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Webhook Settings */
+    get: operations["get_webhook_settings_api_v1_websites__id__webhook__get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -11821,6 +11872,14 @@ export interface components {
      * @enum {string}
      */
     CrawlType: "crawl" | "sitemap";
+    /** CrawlWebhookResponse */
+    CrawlWebhookResponse: {
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "queued" | "pending" | "coalesced";
+    };
     /**
      * CrawlerCapacityHealth
      * @description Configured cluster-wide crawl admission capacity.
@@ -20928,7 +20987,7 @@ export interface components {
      *     Why: Provides flexible scheduling options for automated crawling.
      * @enum {string}
      */
-    UpdateInterval: "never" | "daily" | "every_other_day" | "weekly";
+    UpdateInterval: "webhook" | "never" | "daily" | "every_other_day" | "weekly";
     /** UpdateSpaceDryRunResponse */
     UpdateSpaceDryRunResponse: {
       /** Capabilities */
@@ -21837,6 +21896,16 @@ export interface components {
        * @default []
        */
       permissions?: components["schemas"]["ResourcePermission"][];
+      /**
+       * Webhook Enabled
+       * @default false
+       */
+      webhook_enabled?: boolean;
+      /**
+       * Webhook Pending
+       * @default false
+       */
+      webhook_pending?: boolean;
       /** Name */
       name: string | null;
       /** Url */
@@ -21902,6 +21971,24 @@ export interface components {
        * @description Password for HTTP Basic Authentication. Set to null to remove auth. Must be provided with username.
        */
       http_auth_password?: string | null;
+    };
+    /** WebsiteWebhookSettings */
+    WebsiteWebhookSettings: {
+      /** Url */
+      url: string;
+      /** Enabled */
+      enabled: boolean;
+      /** Pending */
+      pending: boolean;
+      /** Next Retry At */
+      next_retry_at: string | null;
+    };
+    /** WebsiteWebhookToken */
+    WebsiteWebhookToken: {
+      /** Token */
+      token: string;
+      /** Url */
+      url: string;
     };
     /**
      * WizardType
@@ -22377,6 +22464,39 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+  trigger_crawl_api_v1_webhooks_websites__website_id__crawl_post: {
+    parameters: {
+      query?: never;
+      header?: {
+        authorization?: string | null;
+      };
+      path: {
+        website_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CrawlWebhookResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   get_crawl_run_api_v1_crawl_runs__id___get: {
     parameters: {
       query?: never;
@@ -40212,6 +40332,68 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  rotate_webhook_token_api_v1_websites__id__webhook_token__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WebsiteWebhookToken"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_webhook_settings_api_v1_websites__id__webhook__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WebsiteWebhookSettings"];
         };
       };
       /** @description Validation Error */
