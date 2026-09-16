@@ -4825,5 +4825,7 @@
   "whats_new_announcement_list_label": "Highlights in this release",
   "whats_new_release_picker": "Release",
   "whats_new_tour_failed": "The walkthrough could not continue.",
-  "whats_new_show_me_unavailable": "This feature is not part of your permissions."
+  "whats_new_show_me_unavailable": "This feature is not part of your permissions.",
+  "enable_whats_new": "What's new",
+  "enable_whats_new_description": "Show users release notes in the product: the What's new page, a one-time announcement after each release and an indicator in the account menu."
 }

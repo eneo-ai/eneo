@@ -44,6 +44,10 @@ class SettingsPublic(SettingsBase):
     api_key_expiry_notifications: bool = (
         True  # Per-tenant API key expiry notifications toggle
     )
+    # Per-tenant toggle for the What's new page, release announcement and
+    # menu indicator. Opt-out: organisations that do not want release
+    # communication in the product turn it off.
+    whats_new_enabled: bool = True
     # Read-only: whether signed file-reference URLs can be minted (a reference
     # base URL or public origin is configured). Gates UI that only makes sense
     # with them (e.g. the assistant inline-file-text toggle). Computed from

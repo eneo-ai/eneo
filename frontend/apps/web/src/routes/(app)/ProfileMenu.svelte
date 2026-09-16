@@ -19,7 +19,7 @@
     user,
     state: { userInfo }
   } = getAppContext();
-  const { hasUnseen } = getWhatsNewStore();
+  const { hasUnseen, enabled: whatsNewEnabled } = getWhatsNewStore();
 
   const displayName = $derived(
     $userInfo.displayName?.trim() || `${$userInfo.firstName} ${$userInfo.lastName}`.trim()
@@ -95,18 +95,21 @@
       {/snippet}
     </DropdownMenu.Item>
 
-    <DropdownMenu.Item>
-      {#snippet child({ props })}
-        <a {...props} href={localizeHref("/whats-new")}>
-          <Sparkles />
-          {m.whats_new()}
-          {#if $hasUnseen}
-            <span aria-hidden="true" class="bg-positive-default ml-auto size-2 rounded-full"></span>
-            <span class="sr-only">{m.whats_new_unseen()}</span>
-          {/if}
-        </a>
-      {/snippet}
-    </DropdownMenu.Item>
+    {#if whatsNewEnabled}
+      <DropdownMenu.Item>
+        {#snippet child({ props })}
+          <a {...props} href={localizeHref("/whats-new")}>
+            <Sparkles />
+            {m.whats_new()}
+            {#if $hasUnseen}
+              <span aria-hidden="true" class="bg-positive-default ml-auto size-2 rounded-full"
+              ></span>
+              <span class="sr-only">{m.whats_new_unseen()}</span>
+            {/if}
+          </a>
+        {/snippet}
+      </DropdownMenu.Item>
+    {/if}
     <!-- eslint-enable svelte/no-navigation-without-resolve -->
 
     {#if tenantFederationEnabled}

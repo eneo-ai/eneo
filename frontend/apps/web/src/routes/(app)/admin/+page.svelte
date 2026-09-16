@@ -20,10 +20,12 @@
   let usingTemplates = $state<boolean | undefined>(undefined);
   let auditLoggingEnabled = $state<boolean | undefined>(undefined);
   let provisioningEnabled = $state(false);
+  let whatsNewEnabled = $state(true);
   $effect.pre(() => {
     usingTemplates = data.settings.using_templates;
     auditLoggingEnabled = data.settings.audit_logging_enabled;
     provisioningEnabled = data.settings.provisioning ?? false;
+    whatsNewEnabled = data.settings.whats_new_enabled ?? true;
   });
 
   // Org-wide model pricing visibility lives on the tenant (not settings).
@@ -104,6 +106,21 @@
     }
   }
 
+  // Opt-out of the What's new page, announcement and menu indicator.
+  async function handleToggleWhatsNew({ next }: { current: boolean; next: boolean }) {
+    const previousValue = whatsNewEnabled;
+    whatsNewEnabled = next;
+
+    try {
+      const updatedSettings = await eneo.settings.updateWhatsNew(next);
+      whatsNewEnabled = updatedSettings.whats_new_enabled ?? true;
+      await invalidateAll();
+    } catch (error) {
+      console.error("[Admin] Error updating What's new setting:", error);
+      whatsNewEnabled = previousValue;
+    }
+  }
+
   // Toggle whether model input/output prices are shown to regular users.
   async function handleToggleModelPricing({ next }: { current: boolean; next: boolean }) {
     const previousValue = showModelPricing;
@@ -146,6 +163,9 @@
           description={m.enable_provisioning_description()}
         >
           <Input.Switch bind:value={provisioningEnabled} sideEffect={handleToggleProvisioning} />
+        </Settings.Row>
+        <Settings.Row title={m.enable_whats_new()} description={m.enable_whats_new_description()}>
+          <Input.Switch bind:value={whatsNewEnabled} sideEffect={handleToggleWhatsNew} />
         </Settings.Row>
       </Settings.Group>
       <Settings.Group title={m.model_pricing()}>

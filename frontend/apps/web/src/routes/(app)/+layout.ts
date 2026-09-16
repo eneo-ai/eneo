@@ -82,6 +82,7 @@ export const load = async (event) => {
     settings,
     // undefined = could not be read (older backend, transient error): show
     // neither the dot nor the announcement rather than treating it as "never".
+    whatsNewEnabled: settings.whats_new_enabled !== false,
     whatsNewSeenVersion: whatsNewState ? whatsNewState.seen_version : undefined,
     whatsNewAnnouncedVersion: whatsNewState ? whatsNewState.announced_version : undefined,
     featureFlags,

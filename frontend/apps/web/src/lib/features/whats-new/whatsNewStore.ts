@@ -10,6 +10,8 @@ export type Marker = string | null | undefined;
 
 export interface WhatsNewInit {
   eneo: Eneo;
+  /** Tenant opt-out (admin setting): off hides the page, dot and announcement. */
+  whatsNewEnabled: boolean;
   whatsNewSeenVersion: Marker;
   whatsNewAnnouncedVersion: Marker;
 }
@@ -23,10 +25,11 @@ function initWhatsNewStore(data: WhatsNewInit) {
 
 function createWhatsNewStore(data: WhatsNewInit) {
   const { eneo } = data;
+  const enabled = data.whatsNewEnabled;
   const seenVersion = writable<Marker>(data.whatsNewSeenVersion);
   const announcedVersion = writable<Marker>(data.whatsNewAnnouncedVersion);
   const hasUnseen = derived(seenVersion, ($seen) =>
-    $seen === undefined ? false : hasUnseenRelease($seen)
+    !enabled || $seen === undefined ? false : hasUnseenRelease($seen)
   );
 
   let inFlight: Promise<void> | null = null;
@@ -61,7 +64,7 @@ function createWhatsNewStore(data: WhatsNewInit) {
    */
   function pendingAnnouncement() {
     const latest = latestRelease();
-    if (!latest) return null;
+    if (!enabled || !latest) return null;
     const announced = get(announcedVersion);
     if (announced === undefined) return null;
     if (announced && compareVersions(latest.version, announced) <= 0) return null;
@@ -93,6 +96,7 @@ function createWhatsNewStore(data: WhatsNewInit) {
   }
 
   return {
+    enabled,
     resetState,
     seenVersion: { subscribe: seenVersion.subscribe },
     announcedVersion: { subscribe: announcedVersion.subscribe },

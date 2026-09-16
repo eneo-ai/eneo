@@ -18,6 +18,7 @@ function makeStore(
   return {
     store: createWhatsNewStore({
       eneo,
+      whatsNewEnabled: true,
       whatsNewSeenVersion: seen,
       whatsNewAnnouncedVersion: announced
     }),
@@ -95,6 +96,7 @@ describe("whatsNewStore", () => {
       eneo: { whatsNew: { markSeen, markAnnounced } } as unknown as Parameters<
         typeof createWhatsNewStore
       >[0]["eneo"],
+      whatsNewEnabled: true,
       whatsNewSeenVersion: undefined,
       whatsNewAnnouncedVersion: undefined
     });
@@ -104,5 +106,17 @@ describe("whatsNewStore", () => {
     await store.markLatestAnnounced();
     expect(markSeen).not.toHaveBeenCalled();
     expect(markAnnounced).not.toHaveBeenCalled();
+  });
+
+  it("shows nothing when the organisation has turned the feature off", () => {
+    const store = createWhatsNewStore({
+      eneo: {} as Parameters<typeof createWhatsNewStore>[0]["eneo"],
+      whatsNewEnabled: false,
+      whatsNewSeenVersion: null,
+      whatsNewAnnouncedVersion: null
+    });
+    expect(store.enabled).toBe(false);
+    expect(get(store.hasUnseen)).toBe(false);
+    expect(store.pendingAnnouncement()).toBeNull();
   });
 });

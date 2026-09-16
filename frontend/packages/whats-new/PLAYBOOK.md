@@ -152,6 +152,16 @@ by hand: `truncate whats_new_state`.
 `User-facing` section and anchors; anyone changing the schema owns the four
 places listed above.
 
+## Turning it off
+
+The whole surface — page, menu entry with its dot, and the release
+announcement — is a per-organisation setting: **Administration › Overview ›
+What's new** (`whats_new_enabled`, a tenant feature flag seeded on; the
+`PATCH /api/v1/settings/whats-new` endpoint behind it is audited like the
+other tenant toggles). Off means the page redirects home and nothing is
+shown to that organisation's users; docs.eneo.ai is unaffected. New
+tenants follow the global default (on).
+
 ## How the app uses this file
 
 - The backend keeps two markers per user (`GET /api/v1/whats-new/state/`):

@@ -4825,5 +4825,7 @@
   "whats_new_announcement_list_label": "Höjdpunkter i den här versionen",
   "whats_new_release_picker": "Version",
   "whats_new_tour_failed": "Genomgången kunde inte fortsätta.",
-  "whats_new_show_me_unavailable": "Den här funktionen ingår inte i dina behörigheter."
+  "whats_new_show_me_unavailable": "Den här funktionen ingår inte i dina behörigheter.",
+  "enable_whats_new": "Nyheter",
+  "enable_whats_new_description": "Visa användarna versionsnyheter i produkten: Nyheter-sidan, ett engångsmeddelande efter varje release och en markering i kontomenyn."
 }
