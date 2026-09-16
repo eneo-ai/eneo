@@ -276,7 +276,37 @@ jobs:
           node .github/scripts/ensure-project-fields.mjs --self-test
           node .github/scripts/project-intake.mjs --self-test
           node .github/scripts/ci-change-scope.mjs --self-test
+          node .github/scripts/check-user-facing.mjs --self-test
           node scripts/export_github_roadmap.mjs --self-test
+
+  # A PR that changes what users see must fill in the template's
+  # "## User-facing" section (a sentence or "No"); release notes are drafted
+  # from it. See frontend/packages/whats-new/PLAYBOOK.md.
+  user-facing:
+    name: User-facing section
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check the User-facing section
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$RUNNER_TEMP/changed-files.txt"
+          printf '%s' "$PR_BODY" > "$RUNNER_TEMP/pr-body.md"
+          node .github/scripts/check-user-facing.mjs \
+            --files "$RUNNER_TEMP/changed-files.txt" \
+            --body-file "$RUNNER_TEMP/pr-body.md" \
+            --labels "$PR_LABELS"
 
   route-metadata:
     name: Route metadata
@@ -621,6 +651,7 @@ jobs:
       - backend-tests
       - script-tests
       - route-metadata
+      - user-facing
       - no-intric
       - frontend
       - frontend-e2e
@@ -636,6 +667,7 @@ jobs:
           BACKEND_TESTS_RESULT: ${{ needs.backend-tests.result }}
           SCRIPT_TESTS_RESULT: ${{ needs.script-tests.result }}
           ROUTE_METADATA_RESULT: ${{ needs.route-metadata.result }}
+          USER_FACING_RESULT: ${{ needs.user-facing.result }}
           NO_INTRIC_RESULT: ${{ needs.no-intric.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           FRONTEND_E2E_RESULT: ${{ needs.frontend-e2e.result }}
@@ -665,6 +697,7 @@ jobs:
           check_result "Backend tests" "$BACKEND_TESTS_RESULT"
           check_result "Script tests" "$SCRIPT_TESTS_RESULT"
           check_result "Route metadata" "$ROUTE_METADATA_RESULT"
+          check_result "User-facing section" "$USER_FACING_RESULT"
           check_result "No intric references" "$NO_INTRIC_RESULT"
           check_result "Frontend" "$FRONTEND_RESULT"
           check_result "Frontend E2E" "$FRONTEND_E2E_RESULT"
