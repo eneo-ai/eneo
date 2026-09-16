@@ -7,9 +7,9 @@ const latest = latestRelease();
 if (!latest) throw new Error("releases.json must contain at least one release for these tests");
 
 function makeStore(
-  seen: string | null,
+  seen: string | null | undefined,
   markSeen = vi.fn(async () => ({ seen_version: "", announced_version: null })),
-  announced: string | null = null,
+  announced: string | null | undefined = null,
   markAnnounced = vi.fn(async () => ({ seen_version: null, announced_version: "" }))
 ) {
   const eneo = { whatsNew: { markSeen, markAnnounced } } as unknown as Parameters<
@@ -85,5 +85,24 @@ describe("whatsNewStore", () => {
     expect(makeStore(null, undefined, "0.0.1").store.pendingAnnouncement()?.version).toBe(
       latest.version
     );
+  });
+
+  it("stays quiet when the state could not be read", async () => {
+    // Built directly: passing undefined to makeStore would hit its defaults.
+    const markSeen = vi.fn();
+    const markAnnounced = vi.fn();
+    const store = createWhatsNewStore({
+      eneo: { whatsNew: { markSeen, markAnnounced } } as unknown as Parameters<
+        typeof createWhatsNewStore
+      >[0]["eneo"],
+      whatsNewSeenVersion: undefined,
+      whatsNewAnnouncedVersion: undefined
+    });
+    expect(get(store.hasUnseen)).toBe(false);
+    expect(store.pendingAnnouncement()).toBeNull();
+    await store.markLatestSeen();
+    await store.markLatestAnnounced();
+    expect(markSeen).not.toHaveBeenCalled();
+    expect(markAnnounced).not.toHaveBeenCalled();
   });
 });

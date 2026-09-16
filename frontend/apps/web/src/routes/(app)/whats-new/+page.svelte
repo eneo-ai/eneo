@@ -33,7 +33,7 @@
 
   // Snapshot before this visit marks the newest release as seen, so "read"
   // means read before today, not "read because the page just opened".
-  const seenAtOpen = get(seenVersion);
+  const seenAtOpen = get(seenVersion) ?? null;
 
   // One release at a time, newest by default; older ones via the picker.
   let selectedVersion = $state<string | null>(releases[0]?.version ?? null);
@@ -69,7 +69,11 @@
   }
 
   function formatDate(date: string): string {
-    return new Intl.DateTimeFormat(locale, { dateStyle: "long" }).format(new Date(date));
+    // "YYYY-MM-DD" via new Date() is UTC midnight and shifts a day west of UTC.
+    const [year, month, day] = date.split("-").map(Number);
+    return new Intl.DateTimeFormat(locale, { dateStyle: "long" }).format(
+      new Date(year, month - 1, day)
+    );
   }
 
   // Both navigate away; when an anchor is missing on its page the user
@@ -83,12 +87,12 @@
   }
 
   function handleTour(release: Release) {
-    void startTour(tourSteps(release, isAdmin, locale), {
+    startTour(tourSteps(release, isAdmin, locale), {
       done: m.whats_new_spotlight_done(),
       next: m.whats_new_tour_next(),
       previous: m.whats_new_tour_previous(),
       progress: m.whats_new_tour_progress({ current: "{{current}}", total: "{{total}}" })
-    });
+    }).catch((error: unknown) => toastError(error, m.whats_new_tour_failed()));
   }
 
   function tourLength(release: Release): number {

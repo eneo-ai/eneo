@@ -80,8 +80,10 @@ export const load = async (event) => {
     versions,
     limits,
     settings,
-    whatsNewSeenVersion: whatsNewState?.seen_version ?? null,
-    whatsNewAnnouncedVersion: whatsNewState?.announced_version ?? null,
+    // undefined = could not be read (older backend, transient error): show
+    // neither the dot nor the announcement rather than treating it as "never".
+    whatsNewSeenVersion: whatsNewState ? whatsNewState.seen_version : undefined,
+    whatsNewAnnouncedVersion: whatsNewState ? whatsNewState.announced_version : undefined,
     featureFlags,
     environment
   };

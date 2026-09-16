@@ -82,4 +82,13 @@ describe("what's new walkthrough", () => {
     await startTour([], labels);
     expect(spotlight).not.toHaveBeenCalled();
   });
+
+  it("rejects when a stop throws instead of hanging", async () => {
+    spotlight.mockImplementation(async () => {
+      throw new Error("driver failed to load");
+    });
+    await expect(startTour(tourSteps(release, true, "en"), labels)).rejects.toThrow(
+      "driver failed to load"
+    );
+  });
 });

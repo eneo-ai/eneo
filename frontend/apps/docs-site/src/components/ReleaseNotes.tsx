@@ -31,15 +31,19 @@ const AREA_LABEL: Record<ReleaseEntry["area"], string> = {
 };
 
 function formatDate(date: string): string {
+  // "YYYY-MM-DD" via new Date() is UTC midnight; build as a local date.
+  const [year, month, day] = date.split("-").map(Number);
   return new Intl.DateTimeFormat("en-GB", { dateStyle: "long" }).format(
-    new Date(date),
+    new Date(year, month - 1, day),
   );
 }
 
-function Entry({ entry }: { entry: ReleaseEntry }) {
+function Entry({ entry, version }: { entry: ReleaseEntry; version: string }) {
+  // Ids are unique within a release only; every release shares this page.
+  const anchor = `v${version}-${entry.id}`;
   return (
     <li
-      id={entry.id}
+      id={anchor}
       className="rounded-lg border border-gray-200 p-4 dark:border-neutral-800"
     >
       <div className="flex flex-wrap items-center gap-2 text-xs font-medium">
@@ -58,7 +62,7 @@ function Entry({ entry }: { entry: ReleaseEntry }) {
         )}
       </div>
       <h3 className="mt-2 text-base font-semibold">
-        <a href={`#${entry.id}`} className="no-underline hover:underline">
+        <a href={`#${anchor}`} className="no-underline hover:underline">
           {entry.title.en}
         </a>
       </h3>
@@ -85,7 +89,7 @@ function ReleaseSection({ release }: { release: Release }) {
       </div>
       <ul className="mt-4 flex list-none flex-col gap-4 p-0">
         {release.entries.map((entry) => (
-          <Entry key={entry.id} entry={entry} />
+          <Entry key={entry.id} entry={entry} version={release.version} />
         ))}
       </ul>
     </section>

@@ -6,6 +6,7 @@
   import { Button } from "$lib/components/ui/button";
   import * as Dialog from "$lib/components/ui/dialog";
   import { getAppContext } from "$lib/core/AppContext";
+  import { toastError } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
   import { getLocale, localizeHref } from "$lib/paraglide/runtime";
   import type { Localized, Release } from "@eneo/whats-new";
@@ -38,10 +39,22 @@
     const pending = pendingAnnouncement();
     if (!pending) return;
     if (announcementSummary(pending, isAdmin).entries.length === 0) return;
+    // An account created after the release shipped was never "here" before
+    // it: record the release as announced without showing "since you were
+    // last here". Undated (upcoming) releases announce to everyone.
+    if (pending.date && user.created_at && new Date(user.created_at) > releaseDate(pending.date)) {
+      void markLatestAnnounced();
+      return;
+    }
     release = pending;
     open = true;
     void markLatestAnnounced();
   });
+
+  function releaseDate(date: string): Date {
+    const [year, month, day] = date.split("-").map(Number);
+    return new Date(year, month - 1, day);
+  }
 
   function openWhatsNew() {
     open = false;
@@ -54,12 +67,12 @@
   function primary() {
     if (steps.length === 0) return openWhatsNew();
     open = false;
-    void startTour(steps, {
+    startTour(steps, {
       done: m.whats_new_spotlight_done(),
       next: m.whats_new_tour_next(),
       previous: m.whats_new_tour_previous(),
       progress: m.whats_new_tour_progress({ current: "{{current}}", total: "{{total}}" })
-    });
+    }).catch((error: unknown) => toastError(error, m.whats_new_tour_failed()));
   }
 </script>
 

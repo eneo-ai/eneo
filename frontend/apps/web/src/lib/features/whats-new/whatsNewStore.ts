@@ -5,10 +5,13 @@ import { derived, get, writable } from "svelte/store";
 
 export { getWhatsNewStore, initWhatsNewStore, createWhatsNewStore };
 
+/** `null` = never; `undefined` = unknown (state could not be read). */
+export type Marker = string | null | undefined;
+
 export interface WhatsNewInit {
   eneo: Eneo;
-  whatsNewSeenVersion: string | null;
-  whatsNewAnnouncedVersion: string | null;
+  whatsNewSeenVersion: Marker;
+  whatsNewAnnouncedVersion: Marker;
 }
 
 const [getWhatsNewStore, setWhatsNewStore] =
@@ -20,16 +23,19 @@ function initWhatsNewStore(data: WhatsNewInit) {
 
 function createWhatsNewStore(data: WhatsNewInit) {
   const { eneo } = data;
-  const seenVersion = writable<string | null>(data.whatsNewSeenVersion);
-  const announcedVersion = writable<string | null>(data.whatsNewAnnouncedVersion);
-  const hasUnseen = derived(seenVersion, ($seen) => hasUnseenRelease($seen));
+  const seenVersion = writable<Marker>(data.whatsNewSeenVersion);
+  const announcedVersion = writable<Marker>(data.whatsNewAnnouncedVersion);
+  const hasUnseen = derived(seenVersion, ($seen) =>
+    $seen === undefined ? false : hasUnseenRelease($seen)
+  );
 
   let inFlight: Promise<void> | null = null;
 
   /** Record the newest bundled release as seen. Safe to call repeatedly. */
   function markLatestSeen(): Promise<void> {
     const latest = latestRelease();
-    if (!latest || !hasUnseenRelease(get(seenVersion))) return Promise.resolve();
+    const seen = get(seenVersion);
+    if (!latest || seen === undefined || !hasUnseenRelease(seen)) return Promise.resolve();
     if (inFlight) return inFlight;
 
     // Optimistic: the dot disappears immediately; a failed write only means
@@ -57,6 +63,7 @@ function createWhatsNewStore(data: WhatsNewInit) {
     const latest = latestRelease();
     if (!latest) return null;
     const announced = get(announcedVersion);
+    if (announced === undefined) return null;
     if (announced && compareVersions(latest.version, announced) <= 0) return null;
     return latest;
   }

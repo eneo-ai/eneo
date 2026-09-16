@@ -22,3 +22,17 @@ class WhatsNewStatePublic(BaseModel):
     announced_version: str | None = Field(
         description="Newest release the user has been shown the announcement for; null before the first one.",
     )
+
+
+def release_order_key(
+    version: str,
+) -> tuple[int, int, int, int, tuple[tuple[int, object], ...]]:
+    """Semver order for release ids; a pre-release sorts before its final."""
+    core, _, pre = version.partition("-")
+    major, minor, patch = (int(part) for part in core.split("."))
+    identifiers = tuple(
+        (0, int(part)) if part.isdigit() else (1, part)
+        for part in pre.split(".")
+        if part
+    )
+    return (major, minor, patch, 0 if identifiers else 1, identifiers)

@@ -51,6 +51,12 @@ async def test_seen_and_announced_are_tracked_independently(api_client, bearer_t
     )
     assert later.json() == {"seen_version": "2.3.0", "announced_version": "2.2.0"}
 
+    # An older frontend build cannot move a marker backwards.
+    older = await api_client.put(
+        "/api/v1/whats-new/seen/", headers=headers, json={"version": "2.2.0"}
+    )
+    assert older.json()["seen_version"] == "2.3.0"
+
     final = await api_client.get("/api/v1/whats-new/state/", headers=headers)
     assert final.json() == {"seen_version": "2.3.0", "announced_version": "2.2.0"}
 

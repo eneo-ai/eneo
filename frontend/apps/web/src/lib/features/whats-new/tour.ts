@@ -30,7 +30,7 @@ export function tourSteps(release: Release, isAdmin: boolean, locale: Locale): S
  */
 export function startTour(steps: SpotlightStep[], labels: SpotlightLabels): Promise<void> {
   if (steps.length === 0) return Promise.resolve();
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let active = true;
     const finish = () => {
       if (!active) return;
@@ -41,13 +41,22 @@ export function startTour(steps: SpotlightStep[], labels: SpotlightLabels): Prom
     const run = async (index: number, direction: 1 | -1) => {
       if (!active) return;
       if (index < 0 || index >= steps.length) return finish();
-      const shown = await spotlight(steps[index], {
-        labels,
-        progress: { index, total: steps.length },
-        onNext: () => void run(index + 1, 1),
-        onPrevious: () => void run(index - 1, -1),
-        onClose: finish
-      });
+      let shown: boolean;
+      try {
+        shown = await spotlight(steps[index], {
+          labels,
+          progress: { index, total: steps.length },
+          onNext: () => void run(index + 1, 1),
+          onPrevious: () => void run(index - 1, -1),
+          onClose: finish
+        });
+      } catch (error) {
+        // A stop that throws (navigation failure, driver.js not loadable)
+        // ends the walkthrough with an error the caller can show.
+        active = false;
+        reject(error);
+        return;
+      }
       if (!shown) void run(index + direction, direction);
     };
 

@@ -5,7 +5,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from eneo.database.database import AsyncSession
 from eneo.database.tables.whats_new_table import WhatsNewState
-from eneo.whats_new.whats_new_models import WhatsNewStatePublic
+from eneo.whats_new.whats_new_models import WhatsNewStatePublic, release_order_key
 
 
 class WhatsNewRepository:
@@ -35,6 +35,15 @@ class WhatsNewRepository:
         return WhatsNewStatePublic(seen_version=None, announced_version=None)
 
     async def _set(self, user_id: UUID, **column: str) -> WhatsNewStatePublic:
+        # Markers only move forward: an older frontend build (e.g. a pod that
+        # has not been rolled yet) must not undo what a newer one recorded.
+        current = await self.get_state(user_id)
+        ((name, version),) = column.items()
+        stored = getattr(current, name)
+        if stored is not None and release_order_key(stored) >= release_order_key(
+            version
+        ):
+            return current
         stmt = (
             pg_insert(WhatsNewState)
             .values(user_id=user_id, **column)
