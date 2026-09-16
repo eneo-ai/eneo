@@ -105,7 +105,22 @@ class CORSMiddleware:
             await response(scope, receive, send)
             return
 
-        await self.simple_response(scope, receive, send, request_headers=headers)
+        if not await self.is_allowed_origin(origin=origin, request_headers=headers):
+            response = PlainTextResponse(
+                "Disallowed CORS origin",
+                status_code=400,
+                headers={"Vary": "Origin"},
+            )
+            await response(scope, receive, send)
+            return
+
+        await self.simple_response(
+            scope,
+            receive,
+            send,
+            request_headers=headers,
+            origin_allowed=True,
+        )
 
     async def is_allowed_origin(
         self, origin: str, request_headers: Headers | None = None
@@ -176,13 +191,27 @@ class CORSMiddleware:
         return PlainTextResponse("OK", status_code=200, headers=headers)
 
     async def simple_response(
-        self, scope: Scope, receive: Receive, send: Send, request_headers: Headers
+        self,
+        scope: Scope,
+        receive: Receive,
+        send: Send,
+        request_headers: Headers,
+        origin_allowed: bool,
     ) -> None:
-        send = functools.partial(self.send, send=send, request_headers=request_headers)
+        send = functools.partial(
+            self.send,
+            send=send,
+            request_headers=request_headers,
+            origin_allowed=origin_allowed,
+        )
         await self.app(scope, receive, send)
 
     async def send(
-        self, message: Message, send: Send, request_headers: Headers
+        self,
+        message: Message,
+        send: Send,
+        request_headers: Headers,
+        origin_allowed: bool,
     ) -> None:
         if message["type"] != "http.response.start":
             await send(message)
@@ -200,9 +229,7 @@ class CORSMiddleware:
 
         # If we only allow specific origins, then we have to mirror back
         # the Origin header in the response.
-        elif not self.allow_all_origins and await self.is_allowed_origin(
-            origin=origin, request_headers=request_headers
-        ):
+        elif not self.allow_all_origins and origin_allowed:
             self.allow_explicit_origin(headers, origin)
 
         await send(message)

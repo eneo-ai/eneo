@@ -1,3 +1,6 @@
+import asyncio
+import time
+from collections.abc import Iterable
 from urllib.parse import urlparse
 
 from starlette.datastructures import Headers
@@ -20,18 +23,56 @@ from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
 
+_PREFLIGHT_KEY_ORIGIN_CACHE_TTL_SECONDS = 30.0
+_preflight_key_origin_patterns: tuple[str, ...] = ()
+_preflight_key_origin_cache_expires_at = 0.0
+_preflight_key_origin_cache_lock = asyncio.Lock()
 
-def _matches(origin: str, patterns: list[str]) -> bool:
+
+def _matches(origin: str, patterns: Iterable[str]) -> bool:
     return any(origin_matches_pattern(origin, pattern) for pattern in patterns)
 
 
 def _preflight_requests_api_key(headers: Headers, header_name: str) -> bool:
     if "access-control-request-method" not in headers:
         return False
-    requested = headers.get("access-control-request-headers", "")
-    return header_name.lower() in {
-        value.strip().lower() for value in requested.split(",") if value.strip()
+    requested_headers = headers.get("access-control-request-headers", "")
+    requested = {
+        value.strip().lower() for value in requested_headers.split(",") if value.strip()
     }
+    normalized_header_name = header_name.lower()
+    if normalized_header_name not in requested:
+        return False
+    return normalized_header_name == "authorization" or "authorization" not in requested
+
+
+def _has_bearer_token(headers: Headers) -> bool:
+    authorization = headers.get("authorization", "")
+    scheme, separator, credential = authorization.partition(" ")
+    return bool(separator) and scheme.lower() == "bearer" and bool(credential.strip())
+
+
+async def _get_preflight_key_origin_patterns(
+    repo: ApiKeysV2Repository,
+) -> tuple[str, ...]:
+    global _preflight_key_origin_patterns
+    global _preflight_key_origin_cache_expires_at
+
+    now = time.monotonic()
+    if now < _preflight_key_origin_cache_expires_at:
+        return _preflight_key_origin_patterns
+
+    async with _preflight_key_origin_cache_lock:
+        now = time.monotonic()
+        if now < _preflight_key_origin_cache_expires_at:
+            return _preflight_key_origin_patterns
+
+        patterns = await repo.list_relaxed_tenant_public_key_origin_patterns()
+        _preflight_key_origin_patterns = tuple(patterns)
+        _preflight_key_origin_cache_expires_at = (
+            now + _PREFLIGHT_KEY_ORIGIN_CACHE_TTL_SECONDS
+        )
+        return _preflight_key_origin_patterns
 
 
 async def get_origin(origin: str, request_headers: Headers | None = None) -> bool:
@@ -53,12 +94,14 @@ async def get_origin(origin: str, request_headers: Headers | None = None) -> boo
         # checked against its specific key below and by API-key authentication.
         if _preflight_requests_api_key(headers, settings.api_key_header_name):
             if not matches:
-                patterns = (
-                    await api_key_repo.list_relaxed_tenant_public_key_origin_patterns()
-                )
+                patterns = await _get_preflight_key_origin_patterns(api_key_repo)
                 matches = _matches(origin, patterns)
         else:
-            plain_key = headers.get(settings.api_key_header_name)
+            plain_key = (
+                None
+                if _has_bearer_token(headers)
+                else headers.get(settings.api_key_header_name)
+            )
             if plain_key:
                 try:
                     resolved = await ApiKeyAuthResolver(api_key_repo).resolve(plain_key)
