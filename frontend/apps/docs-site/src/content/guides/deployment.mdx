@@ -293,6 +293,7 @@ value and a comment.
     | `JWT_SECRET` | empty | Token signing key (32+ chars). Generate: `openssl rand -hex 32` |
     | `URL_SIGNING_KEY` | empty | URL signing key. Generate: `openssl rand -hex 32` |
     | `PUBLIC_ORIGIN` | empty | External URL, e.g. `https://eneo.example.com`. Used to build the OIDC redirect URI `{PUBLIC_ORIGIN}/login/callback` |
+    | `FILE_REFERENCE_BASE_URL` | unset (falls back to `PUBLIC_ORIGIN`) | Base URL written into the signed file links handed to MCP tools. Set it when MCP servers reach the backend on another host than browsers do. See [Signed file references](#signed-file-references). |
     | `API_PREFIX` | `/api/v1` | Prefix for all API routes |
     | `API_KEY_HEADER_NAME` | `X-API-Key` | Header that carries API keys (including `ENEO_SUPER_API_KEY`) |
 
@@ -472,6 +473,46 @@ value and a comment.
 </Tabs>
 
 ---
+
+## Signed file references
+
+When an assistant may open attached files itself (the "Låt assistenten öppna
+bifogade filer själv" switch, `inline_file_text=false`), or when a tool
+edits an attached or generated image, the model receives each file as a
+signed link instead of its content:
+
+```text
+{FILE_REFERENCE_BASE_URL}/api/v1/files/{file_id}/original/download/?token=...
+```
+
+Both Eneo's built-in file tool and external MCP servers receive the same
+link. The built-in tool verifies the token locally and never makes an HTTP
+request. An external MCP server redeems the link over HTTP, so **the Eneo
+backend must be reachable from the network where that MCP server runs**.
+This is independent of where the file bytes live: originals stored in
+PostgreSQL and originals stored in object storage are served through the
+same endpoint.
+
+The download endpoint accepts no session cookie or API key. The signed token
+is the only credential: it names the file and tenant, is signed with
+`URL_SIGNING_KEY`, and expires after `FILE_REFERENCE_URL_EXPIRY_SECONDS`
+(default one hour). Anyone holding an unexpired link can download the file.
+Treat every MCP server that receives file links as a recipient of the file
+contents, and enable such servers only where that data flow is acceptable.
+
+Choose `FILE_REFERENCE_BASE_URL` by where the MCP servers run:
+
+| MCP servers run | `FILE_REFERENCE_BASE_URL` | Notes |
+| --- | --- | --- |
+| Nowhere, or only Eneo's built-in tools | leave unset | Built-in tools never fetch the link. `PUBLIC_ORIGIN` is used and is not contacted. |
+| On the same private network as the backend | an internal address the servers can resolve, e.g. `http://eneo-backend:8000` or `https://eneo.intra.example.se` | Plain `http` and internal hostnames are allowed. The address only needs to resolve from the MCP servers' network; browsers never see it. |
+| On the internet, outside the private network | the public origin, e.g. `https://eneo.example.com` | The backend must be reachable from the internet on the `/api/v1/files/*/original/download/` route. If the deployment is otherwise private, this is the one route that needs to be exposed, and only signed requests succeed on it. |
+
+On a private network with no route from the MCP server to the backend, the
+tool call fails. The model is told the link is valid, so it reports that the
+tool cannot reach the file rather than asking the user to upload it again.
+The fix is always network reachability or a corrected base URL, never a
+re-upload.
 
 ## Object Content Storage
 
