@@ -37,6 +37,7 @@ from eneo.files.file_repo import (
     original_download_variants,
     primary_file_variants,
     project_file_info,
+    readable_original_reference,
     select_file_content_variant,
     select_primary_file_content,
 )
@@ -276,6 +277,7 @@ class FileService:
                     metadata.id,
                     entry,
                     content_id=stored.id,
+                    storage_kind=stored.storage_kind,
                 )
             )
         return _PersistedCapturedFile(
@@ -324,6 +326,7 @@ class FileService:
                 file_metadata.id,
                 entry,
                 content_id=content.id,
+                storage_kind=content.storage_kind,
             )
             if file_metadata.id == root_metadata.id:
                 root_references.append(reference)
@@ -375,6 +378,7 @@ class FileService:
         entry: _CapturedPendingContent,
         *,
         content_id: UUID,
+        storage_kind: StorageKind,
     ) -> FileContentReferenceRecord:
         pending = entry.pending
         captured = entry.captured
@@ -401,6 +405,7 @@ class FileService:
             size_bytes=captured.size_bytes,
             media_type=captured.verified_media_type,
             access_class=ContentAccessClass.PRIVATE_RESOURCE,
+            storage_kind=storage_kind,
         )
 
     @staticmethod
@@ -997,12 +1002,18 @@ class FileService:
                 FilePublic(
                     **info.model_dump(),
                     transcription=transcription,
+                    # Same readability rule as the loader's
+                    # ``original_available``: a stored original counts only
+                    # while this deployment can serve its bytes.
                     has_download_reference=(
                         file.file_type is FileType.TEXT
                         and (
-                            self._first_reference(
+                            readable_original_reference(
+                                file.file_type,
                                 file_references,
-                                FileContentVariant.ORIGINAL,
+                                object_store_configured=(
+                                    self._object_content.object_store_configured
+                                ),
                             )
                             is not None
                             or (

@@ -32,6 +32,7 @@ from eneo.object_content.content import (
     ContentAccessClass,
     ContentRead,
     ObjectContentUnavailableError,
+    StorageKind,
 )
 from eneo.server.exception_handlers import add_exception_handlers
 from tests.fixtures import TEST_USER
@@ -534,6 +535,7 @@ async def test_interrupted_download_closes_content_context_once(
         size_bytes=6,
         media_type="application/pdf",
         access_class=ContentAccessClass.PRIVATE_RESOURCE,
+        storage_kind=StorageKind.POSTGRES_INLINE,
     )
 
     async def chunks() -> AsyncGenerator[bytes]:
