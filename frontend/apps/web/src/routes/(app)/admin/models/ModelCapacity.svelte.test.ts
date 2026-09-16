@@ -20,14 +20,17 @@ import ModelDetailDialog from "./ModelDetailDialog.svelte";
 import { setLocale } from "$lib/paraglide/runtime";
 import { m } from "$lib/paraglide/messages";
 
-function model(window: number | null): CompletionModel {
+function model(
+  window: number | null,
+  ceilings: { input?: number | null; output?: number | null } = {}
+): CompletionModel {
   return {
     id: "m1",
     name: "custom",
     nickname: "Custom",
     hosting: "swe",
-    max_input_tokens: 272000,
-    max_output_tokens: 128000,
+    max_input_tokens: ceilings.input === undefined ? 272000 : ceilings.input,
+    max_output_tokens: ceilings.output === undefined ? 128000 : ceilings.output,
     context_window_tokens: window,
     vision: false,
     reasoning: false,
@@ -121,3 +124,36 @@ it.each([false, true])(
     );
   }
 );
+
+it("saves an ordinary edit of a model whose capacity is undeclared", async () => {
+  render(EditModelDialog, {
+    openController: writable(true),
+    model: model(null, { input: null, output: null }),
+    type: "completionModel"
+  });
+  await page.getByRole("textbox", { name: new RegExp(m.display_name()) }).fill("Nytt visningsnamn");
+  await page.getByRole("button", { name: m.save(), exact: true }).click();
+  await expect.poll(() => updateCompletion.mock.calls.length).toBe(1);
+  // Nothing about capacity is stated, so an undeclared model stays undeclared.
+  const patch = updateCompletion.mock.calls[0][1];
+  expect(patch).not.toHaveProperty("max_input_tokens");
+  expect(patch).not.toHaveProperty("max_output_tokens");
+  expect(patch).toMatchObject({ display_name: "Nytt visningsnamn" });
+});
+
+it("withdraws both ceilings when the model identifier changes", async () => {
+  render(EditModelDialog, {
+    openController: writable(true),
+    model: model(400000),
+    type: "completionModel"
+  });
+  await page.getByRole("textbox", { name: new RegExp(m.model_identifier()) }).fill("route-b");
+  await page.getByRole("button", { name: m.save(), exact: true }).click();
+  await expect.poll(() => updateCompletion.mock.calls.length).toBe(1);
+  expect(updateCompletion.mock.calls[0][1]).toMatchObject({
+    name: "route-b",
+    max_input_tokens: null,
+    max_output_tokens: null,
+    context_window_tokens: null
+  });
+});

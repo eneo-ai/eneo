@@ -2,6 +2,7 @@
 
 from collections.abc import Sequence
 
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.infrastructure.context_builder import (
     count_attachment_tokens,
     count_tokens,
@@ -11,16 +12,19 @@ from eneo.main.config import get_settings
 from eneo.main.exceptions import BadRequestException
 
 
-def attachment_token_ceiling(max_input_tokens: int) -> int:
+def attachment_token_ceiling(max_input_tokens: int | None) -> int:
     """The most tokens the system prompt + attachments may use and still leave
     room to ask a question: the model's input window minus a small reserve."""
+    max_input_tokens = ModelCapacity(
+        max_input_tokens, None, None
+    ).require_input_tokens()
     reserve = get_settings().attachment_context_reserve_tokens
     return max(max_input_tokens - reserve, 0)
 
 
 def assert_prompt_and_files_fit_context(
     *,
-    max_input_tokens: int,
+    max_input_tokens: int | None,
     model_name: str,
     prompt_text: str,
     files: Sequence[File],

@@ -349,6 +349,8 @@ class TenantCompletionModelService:
         if renames_route:
             model.supports_strict_tool_schema = False
             model.context_window_tokens = None
+            model.max_input_tokens = None
+            model.max_output_tokens = None
         if payload.display_name is not None:
             await _validate_unique_display_name(
                 self.session,
@@ -361,9 +363,9 @@ class TenantCompletionModelService:
             model.nickname = payload.display_name
         if "description" in provided:
             model.description = payload.description
-        if payload.max_input_tokens is not None:
+        if "max_input_tokens" in provided:
             model.max_input_tokens = payload.max_input_tokens
-        if payload.max_output_tokens is not None:
+        if "max_output_tokens" in provided:
             model.max_output_tokens = payload.max_output_tokens
         if "context_window_tokens" in provided:
             model.context_window_tokens = payload.context_window_tokens

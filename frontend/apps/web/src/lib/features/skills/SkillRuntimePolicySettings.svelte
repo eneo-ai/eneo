@@ -292,12 +292,19 @@
                   {/if}
                 </Table.Cell>
                 <Table.Cell class="text-right tabular-nums">
-                  {m.skills_runtime_tokens({ count: model.max_input_tokens.toLocaleString() })}
+                  {model.max_input_tokens === null || model.max_input_tokens === undefined
+                    ? m.context_window_unknown()
+                    : m.skills_runtime_tokens({
+                        count: model.max_input_tokens.toLocaleString()
+                      })}
                 </Table.Cell>
                 <Table.Cell class="text-right tabular-nums">
-                  {m.skills_runtime_tokens({
-                    count: model.skill_context_token_allowance.toLocaleString()
-                  })}
+                  {model.skill_context_token_allowance === null ||
+                  model.skill_context_token_allowance === undefined
+                    ? m.context_window_unknown()
+                    : m.skills_runtime_tokens({
+                        count: model.skill_context_token_allowance.toLocaleString()
+                      })}
                 </Table.Cell>
                 <Table.Cell>
                   <Badge variant={model.supports_tool_calling ? "secondary" : "outline"}>

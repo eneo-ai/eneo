@@ -36,6 +36,7 @@ from eneo.ai_models.completion_models.completion_model import (
     ToolCallMetadata,
     function_definition_to_tool,
 )
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.domain.skill_activation import (
     SKILL_ACTIVATION_TOOL_NAME,
     InvalidSkillToolCallError,
@@ -524,7 +525,9 @@ class TenantModelAdapter(CompletionModelAdapter):
         self.provider_type = provider_type
 
     def resolve_litellm_params(self) -> tuple[str, dict[str, object]]:
-        return self.litellm_model, self._prepare_kwargs()
+        return self.litellm_model, build_litellm_provider_kwargs(
+            self.credential_resolver
+        )
 
     def resolve_structured_output_capability(
         self,
@@ -1151,7 +1154,11 @@ class TenantModelAdapter(CompletionModelAdapter):
                 and "reasoning_effort" in model_kwargs_dict
                 and not has_explicit_output_cap
             )
-            if not has_explicit_output_cap and not should_defer_to_litellm:
+            if (
+                not has_explicit_output_cap
+                and not should_defer_to_litellm
+                and self.model.max_output_tokens is not None
+            ):
                 model_kwargs_dict["max_tokens"] = self.model.max_output_tokens
                 logger.debug(f"Added default max_tokens={self.model.max_output_tokens}")
 
@@ -1163,6 +1170,11 @@ class TenantModelAdapter(CompletionModelAdapter):
 
         # Merge with additional kwargs
         kwargs.update(additional_kwargs)
+        if self.model.max_output_tokens is None and not any(
+            kwargs.get(name) is not None
+            for name in ("max_tokens", "max_completion_tokens")
+        ):
+            ModelCapacity(None, None, None).require_output_tokens()
 
         return kwargs
 
@@ -1193,6 +1205,7 @@ class TenantModelAdapter(CompletionModelAdapter):
             APIKeyNotConfiguredException: If credentials are invalid
             OpenAIException: For API errors, rate limits, network issues
         """
+        self.get_token_limit_of_model()
         # Prepare LiteLLM kwargs with credentials and provider-specific handling
         litellm_kwargs = self._prepare_kwargs(model_kwargs=model_kwargs, **kwargs)
 
@@ -1272,7 +1285,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                     self._always_active_skill_metadata(skill_runtime)
                 )
                 result_budget = _ToolResultBudget(
-                    token_limit=self.model.token_limit,
+                    token_limit=self.get_token_limit_of_model(),
                     litellm_model=self.litellm_model,
                 )
                 activation_available = (
@@ -1661,6 +1674,7 @@ class TenantModelAdapter(CompletionModelAdapter):
             APIKeyNotConfiguredException: If credentials are invalid
             OpenAIException: For API errors, rate limits, network issues
         """
+        self.get_token_limit_of_model()
         # Prepare LiteLLM kwargs with credentials and provider-specific handling
         litellm_kwargs = self._prepare_kwargs(model_kwargs=model_kwargs, **kwargs)
 
@@ -2051,7 +2065,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 )
 
                 result_budget = _ToolResultBudget(
-                    token_limit=self.model.token_limit,
+                    token_limit=self.get_token_limit_of_model(),
                     litellm_model=self.litellm_model,
                 )
 
@@ -2737,7 +2751,7 @@ class TenantModelAdapter(CompletionModelAdapter):
         Returns:
             int: Maximum tokens available for input context
         """
-        return self.model.max_input_tokens
+        return ModelCapacity(self.model.token_limit, None, None).require_input_tokens()
 
     @override
     def get_logging_details(

@@ -9,7 +9,6 @@ from eneo.completion_models.domain.model_kwargs_capabilities import (
     coerce_model_kwargs_capabilities,
     resolve_supported_model_kwargs,
 )
-from eneo.model_providers.domain.model_defaults import lookup_model_defaults
 from eneo.model_providers.domain.model_route import resolve_model_route
 from eneo.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
@@ -25,11 +24,7 @@ if TYPE_CHECKING:
 
 
 class CompletionModel(AIModel):
-    """C alone may be unknown in storage during capacity preparation.
-
-    Input/output limits retain integer resolution until consumer admission
-    supports unknown dimensions.
-    """
+    """Declared capacity and capabilities for one model route."""
 
     def __init__(
         self,
@@ -94,31 +89,6 @@ class CompletionModel(AIModel):
             security_classification=security_classification,
         )
 
-        defaults = lookup_model_defaults(
-            litellm_model_name, name, provider_type=provider_type
-        )
-        resolved_max_input_tokens = (
-            max_input_tokens
-            if max_input_tokens is not None
-            else token_limit
-            if token_limit is not None
-            else defaults.max_input_tokens
-            if defaults
-            else None
-        )
-        if resolved_max_input_tokens is None:
-            raise ValueError("Completion model is missing max_input_tokens")
-
-        resolved_max_output_tokens = (
-            max_output_tokens
-            if max_output_tokens is not None
-            else defaults.max_output_tokens
-            if defaults and defaults.max_output_tokens is not None
-            else None
-        )
-        if resolved_max_output_tokens is None:
-            raise ValueError("Completion model is missing max_output_tokens")
-
         self.base_url = base_url
         self.litellm_model_name = litellm_model_name
         self.model_kwargs_capabilities = coerce_model_kwargs_capabilities(
@@ -131,8 +101,8 @@ class CompletionModel(AIModel):
         self.vision = vision
         self.supports_tool_calling = supports_tool_calling
         self.supports_strict_tool_schema = supports_strict_tool_schema
-        self.max_input_tokens = resolved_max_input_tokens
-        self.max_output_tokens = resolved_max_output_tokens
+        self.max_input_tokens = max_input_tokens
+        self.max_output_tokens = max_output_tokens
         self.context_window_tokens = context_window_tokens
         self.deployment_name = deployment_name
         self.nr_billion_parameters = nr_billion_parameters
@@ -160,8 +130,8 @@ class CompletionModel(AIModel):
         )
 
     @property
-    def token_limit(self) -> int:
-        """Backward-compat alias: returns max_input_tokens."""
+    def token_limit(self) -> int | None:
+        """Backward-compatible input ceiling alias; may be unknown."""
         return self.max_input_tokens
 
     def get_model_route(self, *, provider_type: str | None = None) -> str:
@@ -204,13 +174,6 @@ class CompletionModel(AIModel):
         provider_name: Optional[str] = None,
         provider_type: Optional[str] = None,
     ) -> "CompletionModel":
-        token_limit = getattr(completion_model_db, "token_limit", None)
-        max_input_tokens = getattr(completion_model_db, "max_input_tokens", None)
-        if max_input_tokens is None:
-            max_input_tokens = token_limit
-
-        max_output_tokens = getattr(completion_model_db, "max_output_tokens", None)
-        # Settings are now directly on the model table
         return cls(
             tenant=tenant,
             id=completion_model_db.id,
@@ -218,8 +181,8 @@ class CompletionModel(AIModel):
             updated_at=completion_model_db.updated_at,
             nickname=completion_model_db.nickname,
             name=completion_model_db.name,
-            max_input_tokens=max_input_tokens,
-            max_output_tokens=max_output_tokens,
+            max_input_tokens=completion_model_db.max_input_tokens,
+            max_output_tokens=completion_model_db.max_output_tokens,
             context_window_tokens=completion_model_db.context_window_tokens,
             vision=completion_model_db.vision,
             family=completion_model_db.family,
@@ -237,7 +200,6 @@ class CompletionModel(AIModel):
             reasoning=completion_model_db.reasoning,
             supports_tool_calling=completion_model_db.supports_tool_calling,
             supports_strict_tool_schema=completion_model_db.supports_strict_tool_schema,
-            token_limit=token_limit,
             base_url=completion_model_db.base_url,
             litellm_model_name=completion_model_db.litellm_model_name,
             model_kwargs_capabilities=completion_model_db.model_kwargs_capabilities,

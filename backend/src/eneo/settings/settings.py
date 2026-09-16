@@ -940,9 +940,9 @@ class SkillRuntimeModelProjection(BaseModel):
     completion_model_id: UUID
     name: str
     nickname: str | None
-    max_input_tokens: int
+    max_input_tokens: int | None
     supports_tool_calling: bool
-    skill_context_token_allowance: int
+    skill_context_token_allowance: int | None
 
 
 class SkillRuntimeModelProjections(BaseModel):

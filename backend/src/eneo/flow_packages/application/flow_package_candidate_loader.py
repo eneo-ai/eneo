@@ -94,7 +94,7 @@ def _completion_model_candidate(
         model_kind=FlowPackageModelKind.COMPLETION_MODEL,
         identity=_completion_model_identity(model),
         security_level=_security_level(model.security_classification),
-        max_context_tokens=model.max_input_tokens,
+        max_input_tokens=model.max_input_tokens,
         supports_vision=model.vision,
         supports_reasoning=model.reasoning,
         supports_tool_calling=model.supports_tool_calling,

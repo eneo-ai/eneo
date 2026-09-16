@@ -38,7 +38,7 @@
     name: string;
     nickname?: string | null;
     description?: string | null;
-    token_limit?: number;
+    token_limit?: number | null;
     org?: string | null;
   };
 

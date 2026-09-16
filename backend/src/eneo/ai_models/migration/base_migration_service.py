@@ -299,7 +299,11 @@ class BaseModelMigrationService:
                 self._is_blocker_code(code) for code in validation_result.warning_codes
             )
 
-            if has_blockers and not force_override:
+            has_unknown_capacity = any(
+                code.startswith("unknown_model_capacity:")
+                for code in validation_result.warning_codes
+            )
+            if has_unknown_capacity or (has_blockers and not force_override):
                 duration = (datetime.now(timezone.utc) - start_time).total_seconds()
                 await self.history_repo.update_migration_history(
                     migration_id=migration_id,
@@ -313,7 +317,7 @@ class BaseModelMigrationService:
                     warnings=validation_result.warnings,
                 )
                 raise ValidationException(
-                    f"Migration blocked by security classification: {', '.join(validation_result.warnings)}"
+                    f"Migration blocked: {', '.join(validation_result.warnings)}"
                 )
 
             if has_blockers and force_override:

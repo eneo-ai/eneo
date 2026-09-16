@@ -101,7 +101,7 @@ def test_completion_model_candidate_carries_matching_metadata() -> None:
         model="gpt-4o",
     )
     assert candidate.security_level == 0
-    assert candidate.max_context_tokens == 128_000
+    assert candidate.max_input_tokens == 128_000
     assert candidate.supports_vision is True
     assert candidate.supports_reasoning is True
     assert candidate.supports_tool_calling is True

@@ -4,6 +4,7 @@
 
 from typing import TYPE_CHECKING, Optional
 
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.infrastructure.context_builder import (
     count_attachment_tokens,
     count_tokens,
@@ -258,7 +259,7 @@ class ConversationService:
             file_tokens=file_tokens,
             excluded_file_count=excluded_file_count,
             model_name=model.name,
-            context_window=model.token_limit,
+            max_input_tokens=model.token_limit,
             context_reserve_tokens=get_settings().attachment_context_reserve_tokens,
             assistant_attachment_tokens=assistant_attachment_tokens,
             prompt_tokens=prompt_tokens,
@@ -455,7 +456,12 @@ class ConversationService:
             group_chat.assistants
         )
         if selector_model is None:
-            return min(models, key=lambda model: model.token_limit), 0
+            return min(
+                models,
+                key=lambda model: ModelCapacity(
+                    model.token_limit, None, None
+                ).require_input_tokens(),
+            ), 0
 
         selection_prompt = self.group_chat_service.create_assistant_selection_prompt(
             question, group_chat.assistants
@@ -463,7 +469,12 @@ class ConversationService:
         selector_tokens = count_tokens(
             selection_prompt, _litellm_token_counter_name(selector_model)
         )
-        return min(models, key=lambda model: model.token_limit), selector_tokens
+        return min(
+            models,
+            key=lambda model: ModelCapacity(
+                model.token_limit, None, None
+            ).require_input_tokens(),
+        ), selector_tokens
 
     async def set_title_of_conversation(
         self, session_id: "UUID"

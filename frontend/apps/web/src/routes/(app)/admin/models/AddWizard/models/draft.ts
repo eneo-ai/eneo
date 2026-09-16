@@ -33,6 +33,8 @@ export interface ModelDraftState {
   maxInputTokensStr: string;
   maxOutputTokensStr: string;
   contextWindowTokensStr: string;
+  maxInputTokensTouched: boolean;
+  maxOutputTokensTouched: boolean;
   contextWindowTouched: boolean;
   vision: boolean;
   reasoning: boolean;
@@ -73,6 +75,8 @@ export function createEmptyDraft(modelType: ModelType, providerType: string): Mo
     maxInputTokensStr: "",
     maxOutputTokensStr: "",
     contextWindowTokensStr: "",
+    maxInputTokensTouched: false,
+    maxOutputTokensTouched: false,
     contextWindowTouched: false,
     vision: false,
     reasoning: false,
@@ -160,9 +164,21 @@ export function hasValidCompletionTokenBudgets(draft: ModelDraftState): boolean 
     parseInt(draft.maxInputTokensStr, 10) > 0 &&
     draft.maxOutputTokensStr !== "" &&
     parseInt(draft.maxOutputTokensStr, 10) > 0 &&
-    (!draft.contextWindowTokensStr ||
-      (Number.isInteger(Number(draft.contextWindowTokensStr)) &&
-        Number(draft.contextWindowTokensStr) > 0))
+    hasValidDeclaredCapacity(draft)
+  );
+}
+
+/** Every capacity field a draft states must be a positive whole number. A
+ *  blank field states nothing: the model's capacity in that dimension is
+ *  simply not declared, which an edit may leave alone or withdraw. */
+export function hasValidDeclaredCapacity(draft: ModelDraftState): boolean {
+  const declared = [
+    draft.maxInputTokensStr,
+    draft.maxOutputTokensStr,
+    draft.contextWindowTokensStr
+  ];
+  return declared.every(
+    (value) => !value || (Number.isInteger(Number(value)) && Number(value) > 0)
   );
 }
 
@@ -214,6 +230,10 @@ export function setDraftModelName(draft: ModelDraftState, name: string): void {
     // stored window can never differ from the blank field the admin sees.
     draft.contextWindowTokensStr = "";
     draft.contextWindowTouched = true;
+    draft.maxInputTokensStr = "";
+    draft.maxInputTokensTouched = true;
+    draft.maxOutputTokensStr = "";
+    draft.maxOutputTokensTouched = true;
   }
   draft.name = name;
 }
@@ -264,6 +284,46 @@ export function completionUpdateCapabilities(
       ? { supports_strict_tool_schema: isStrictToolSchemaDeclared(draft) }
       : {})
   };
+}
+
+/** Apply a catalogue answer's ceilings to a draft.
+ *
+ *  A dimension the catalogue does not state is not a declaration: that field
+ *  keeps whatever the admin left there and stays untouched, so a later save
+ *  says nothing about it and cannot restore a ceiling a route change withdrew.
+ */
+export function applyCatalogueCeilings(
+  draft: ModelDraftState,
+  answer: { max_input_tokens?: number | null; max_output_tokens?: number | null }
+): void {
+  if (answer.max_input_tokens != null) {
+    draft.maxInputTokensStr = String(answer.max_input_tokens);
+    draft.maxInputTokensTouched = true;
+  }
+  if (answer.max_output_tokens != null) {
+    draft.maxOutputTokensStr = String(answer.max_output_tokens);
+    draft.maxOutputTokensTouched = true;
+  }
+}
+
+/** The ceilings a save states. An untouched field is omitted so an unrelated
+ *  edit never redeclares a number for a route it was not measured on; a
+ *  cleared field is submitted as null, which withdraws the declaration. */
+export function completionUpdateCeilings(
+  draft: ModelDraftState
+): Pick<TenantCompletionModelUpdate, "max_input_tokens" | "max_output_tokens"> {
+  return {
+    ...(draft.maxInputTokensTouched
+      ? {
+          max_input_tokens: draft.maxInputTokensStr ? Number(draft.maxInputTokensStr) : null
+        }
+      : {}),
+    ...(draft.maxOutputTokensTouched
+      ? {
+          max_output_tokens: draft.maxOutputTokensStr ? Number(draft.maxOutputTokensStr) : null
+        }
+      : {})
+  } satisfies Pick<TenantCompletionModelUpdate, "max_input_tokens" | "max_output_tokens">;
 }
 
 export function completionUpdateCapacity(
@@ -344,6 +404,8 @@ export function modelToDraft(model: AnyCatalogModel, modelType: ModelType): Mode
     maxInputTokensStr: "",
     maxOutputTokensStr: "",
     contextWindowTokensStr: "",
+    maxInputTokensTouched: false,
+    maxOutputTokensTouched: false,
     contextWindowTouched: false,
     vision: false,
     reasoning: false,

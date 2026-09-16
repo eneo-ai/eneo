@@ -239,8 +239,12 @@ class CompletionModelBase(BaseModel):
     name: str
     nickname: Optional[str] = None
     family: Optional[str] = None
-    max_input_tokens: int
-    max_output_tokens: int
+    max_input_tokens: int | None = Field(
+        gt=0, description="Max input tokens; null means not declared for this route."
+    )
+    max_output_tokens: int | None = Field(
+        gt=0, description="Max output tokens; null means not declared for this route."
+    )
     context_window_tokens: int | None = Field(
         default=None,
         gt=0,
@@ -302,7 +306,7 @@ class CompletionModelBase(BaseModel):
 
     @computed_field  # type: ignore[prop-decorator]
     @property
-    def token_limit(self) -> int:
+    def token_limit(self) -> int | None:
         """Backward-compat: exposed in JSON responses for frontend."""
         return self.max_input_tokens
 

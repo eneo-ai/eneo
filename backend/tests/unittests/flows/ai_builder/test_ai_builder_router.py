@@ -3933,3 +3933,41 @@ async def test_failure_launch_surfaces_typed_unavailable_reason(reason):
     assert caught.value.code == AIBuilderErrorCode.REVIEW_FINDING_UNKNOWN
     assert caught.value.context["reason"] == reason
     container.ai_builder_service.return_value.prepare_review_judgement.assert_not_called()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "dimension,code",
+    [
+        ("max_input_tokens", AIBuilderErrorCode.PLANNER_MODEL_MISSING_CONTEXT_WINDOW),
+        ("max_output_tokens", AIBuilderErrorCode.PLANNER_MODEL_MISSING_OUTPUT_TOKENS),
+    ],
+)
+async def test_streams_unknown_capacity_as_configuration_error(dimension, code):
+    from eneo.completion_models.domain.model_capacity import UnknownModelCapacityError
+
+    container = _make_container()
+    _configure_space_with_planner_model(container)
+    session = _make_session_domain(actor_user_id=container.user.return_value.id)
+    service = container.ai_builder_service.return_value
+    service.get_session.return_value = session
+
+    async def rejected_events():
+        raise UnknownModelCapacityError((dimension,))
+        yield
+
+    service.send_message.return_value = rejected_events()
+    result = await send_message(
+        request=_make_request(),
+        session_id=session.id,
+        body=_send_message_request("Build a flow"),
+        container=container,
+    )
+    events = await _read_sse_events(result)
+    assert [event["event"] for event in events] == ["error", "done"]
+    error = events[0]["data"]
+    assert error["code"] == code.value
+    assert error["category"] == "bad_request"
+    assert error["phase"] == "planner"
+    assert error["details"]["missing_dimensions"] == dimension
+    assert "try again" not in error["message"].lower()

@@ -51,6 +51,7 @@ class FlowPackagePolicyStatus(StrEnum):
 
 
 class FlowPackageModelMatchIssue(StrEnum):
+    MODEL_CAPACITY_UNKNOWN = "model_capacity_unknown"
     MODEL_CONTEXT_TOO_SMALL = "model_context_too_small"
     MODEL_IDENTITY_NOT_PREFERRED = "model_identity_not_preferred"
     MODEL_KIND_MISMATCH = "model_kind_mismatch"
@@ -79,7 +80,7 @@ class FlowPackageModelCandidate(FlowPackageLocalCandidate):
     model_kind: FlowPackageModelKind
     identity: FlowPackageModelIdentity
     security_level: int | None = Field(default=None, ge=0)
-    max_context_tokens: int | None = Field(default=None, ge=1)
+    max_input_tokens: int | None = Field(default=None, ge=1)
     supports_vision: bool = False
     supports_reasoning: bool = False
     supports_tool_calling: bool = False

@@ -20,6 +20,7 @@ from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.auth_dependencies import get_scope_filter
+from eneo.completion_models.domain.model_capacity import UnknownModelCapacityError
 from eneo.completion_models.infrastructure.tenant_model_capabilities import (
     enrich_reasoning_effort_capability,
 )
@@ -91,6 +92,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     build_ai_builder_error_event,
     coerce_ai_builder_error_code,
     split_ai_builder_error_context,
+    translate_unknown_model_capacity,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import (
     AIBuilderDoneEvent,
@@ -227,7 +229,9 @@ class AIBuilderPublicErrorRoute(APIRoute):
         async def ai_builder_route_handler(request: Request) -> Response:
             try:
                 return await original_route_handler(request)
-            except BadRequestException as error:
+            except (BadRequestException, UnknownModelCapacityError) as error:
+                if isinstance(error, UnknownModelCapacityError):
+                    error = translate_unknown_model_capacity(error)
                 request_id = extract_request_id(request)
                 raise AIBuilderEnvelopedError(
                     _ai_builder_json_error_response(
@@ -1581,7 +1585,9 @@ async def send_message(
                     data=wire_done_event["data"],
                     event=wire_done_event["event"],
                 )
-        except BadRequestException as error:
+        except (BadRequestException, UnknownModelCapacityError) as error:
+            if isinstance(error, UnknownModelCapacityError):
+                error = translate_unknown_model_capacity(error)
             message = str(error) or "The AI Builder request could not be processed."
             request_id = extract_request_id(request)
             code = _public_error_code_from_exception(

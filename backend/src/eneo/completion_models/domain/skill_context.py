@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.tokens.token_utils import (
     TokenCountSource,
     measure_message_token_delta,
@@ -16,9 +17,12 @@ class SkillContextMeasurement:
 
 def skill_context_token_allowance(
     *,
-    max_input_tokens: int,
+    max_input_tokens: int | None,
     context_share_percent: int,
 ) -> int:
+    max_input_tokens = ModelCapacity(
+        max_input_tokens, None, None
+    ).require_input_tokens()
     return max_input_tokens * context_share_percent // 100
 
 
@@ -33,7 +37,7 @@ def measure_skill_context(
     base_instructions: str,
     composed_instructions: str,
     model_name: str,
-    max_input_tokens: int,
+    max_input_tokens: int | None,
     context_share_percent: int,
     tools: list[dict[str, object]] | None = None,
 ) -> SkillContextMeasurement:

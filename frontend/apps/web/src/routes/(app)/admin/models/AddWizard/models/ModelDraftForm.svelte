@@ -40,7 +40,8 @@
     perMillionFromTokenCost,
     setDraftModelName,
     type ModelDraftState,
-    type ModelType
+    type ModelType,
+    applyCatalogueCeilings
   } from "./draft";
 
   let {
@@ -115,10 +116,7 @@
         return;
       }
       if (modelType === "completion") {
-        if (result.max_input_tokens != null)
-          draft.maxInputTokensStr = String(result.max_input_tokens);
-        if (result.max_output_tokens != null)
-          draft.maxOutputTokensStr = String(result.max_output_tokens);
+        applyCatalogueCeilings(draft, result);
         draft.vision = result.supports_vision ?? false;
         draft.reasoning = result.supports_reasoning ?? false;
         draft.supportsToolCalling = result.supports_function_calling ?? false;
@@ -212,7 +210,11 @@
       <Input
         id="max-input-tokens"
         type="number"
-        bind:value={draft.maxInputTokensStr}
+        value={draft.maxInputTokensStr}
+        oninput={(event) => {
+          draft.maxInputTokensStr = event.currentTarget.value;
+          draft.maxInputTokensTouched = true;
+        }}
         placeholder={m.max_input_tokens()}
         min="1024"
         max="10000000"
@@ -228,7 +230,11 @@
       <Input
         id="max-output-tokens"
         type="number"
-        bind:value={draft.maxOutputTokensStr}
+        value={draft.maxOutputTokensStr}
+        oninput={(event) => {
+          draft.maxOutputTokensStr = event.currentTarget.value;
+          draft.maxOutputTokensTouched = true;
+        }}
         placeholder={m.max_output_tokens()}
         min="1"
         max="10000000"

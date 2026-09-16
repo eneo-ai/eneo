@@ -169,7 +169,7 @@ def test_required_model_without_eligible_candidate_blocks_publish() -> None:
     candidate = _completion_model(
         "66666666-6666-4666-8666-666666666666",
         "Small Model",
-        max_context_tokens=16000,
+        max_input_tokens=16000,
     )
 
     resolution = resolve_model_requirement(
@@ -202,7 +202,7 @@ def test_completion_constraints_create_deterministic_rejection_reasons() -> None
     candidate = _completion_model(
         "77777777-7777-4777-8777-777777777777",
         "Small Model",
-        max_context_tokens=16000,
+        max_input_tokens=16000,
         supports_vision=False,
         supports_reasoning=False,
         supports_tool_calling=False,
@@ -228,14 +228,14 @@ def test_ranking_is_deterministic_for_equal_tested_candidates() -> None:
         "Alpha",
         provider="openai",
         model="gpt-5.4-mini",
-        max_context_tokens=32000,
+        max_input_tokens=32000,
     )
     second = _completion_model(
         "99999999-9999-4999-8999-999999999999",
         "Beta",
         provider="openai",
         model="gpt-5.4-mini",
-        max_context_tokens=32000,
+        max_input_tokens=32000,
     )
 
     first_resolution = resolve_model_requirement(
@@ -340,12 +340,12 @@ def test_model_resolution_round_trip_preserves_model_specific_fields() -> None:
     eligible_candidate = _completion_model(
         "abababab-abab-4aba-8aba-abababababab",
         "Unknown but eligible",
-        max_context_tokens=256000,
+        max_input_tokens=256000,
     )
     rejected_candidate = _completion_model(
         "bcbcbcbc-bcbc-4bcb-8bcb-bcbcbcbcbcbc",
         "Small",
-        max_context_tokens=16000,
+        max_input_tokens=16000,
         supports_vision=False,
     )
 
@@ -360,7 +360,7 @@ def test_model_resolution_round_trip_preserves_model_specific_fields() -> None:
     assert reparsed.status is FlowPackageImportPlanStatus.REQUIRES_HUMAN_CONFIRMATION
     assert reparsed.auto_select_allowed is False
     assert reparsed.eligible_candidate_count == 1
-    assert reparsed.suggestions[0].max_context_tokens == 256000
+    assert reparsed.suggestions[0].max_input_tokens == 256000
     assert reparsed.selection_warnings == [
         FlowPackageModelMatchIssue.MODEL_IDENTITY_NOT_PREFERRED
     ]
@@ -434,7 +434,7 @@ def _completion_model(
     provider: str = "local",
     model: str = "completion",
     security_level: int | None = 3,
-    max_context_tokens: int | None = 64000,
+    max_input_tokens: int | None = 64000,
     supports_vision: bool = True,
     supports_reasoning: bool = True,
     supports_tool_calling: bool = True,
@@ -446,7 +446,7 @@ def _completion_model(
         model_kind=FlowPackageModelKind.COMPLETION_MODEL,
         identity=_identity(provider, model),
         security_level=security_level,
-        max_context_tokens=max_context_tokens,
+        max_input_tokens=max_input_tokens,
         supports_vision=supports_vision,
         supports_reasoning=supports_reasoning,
         supports_tool_calling=supports_tool_calling,
@@ -481,3 +481,35 @@ def _slot_ref() -> ResourceSlotRef:
 
 def _identity(provider: str, model: str) -> FlowPackageModelIdentity:
     return FlowPackageModelIdentity(provider=provider, model=model)
+
+
+@pytest.mark.parametrize("minimum", [None, 32000])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_unknown_capacity_rejects_only_its_candidate(minimum, reverse):
+    unknown = _completion_model(
+        "11111111-1111-4111-8111-111111111111", "Unknown", max_input_tokens=None
+    )
+    known = _completion_model(
+        "22222222-2222-4222-8222-222222222222", "Known", max_input_tokens=64000
+    )
+    requirement = _requirement(
+        tested_with=[known.identity],
+        completion_constraints=(
+            FlowPackageCompletionModelConstraints(minimum_context_tokens=minimum)
+            if minimum is not None
+            else None
+        ),
+    )
+    candidates = (unknown, known) if reverse else (known, unknown)
+    result = resolve_model_requirement(requirement=requirement, candidates=candidates)
+    assert result.status is FlowPackageImportPlanStatus.RESOLVED_EXACT
+    assert result.suggestions == [known]
+    assert result.eligible_candidate_count == 1
+    assert result.total_candidate_count == 2
+    assert result.rejected_candidates[0].candidate == unknown
+    assert [reason.value for reason in result.rejected_candidates[0].reasons] == [
+        "model_capacity_unknown"
+    ]
+    rejected = resolve_model_requirement(requirement=requirement, candidates=(unknown,))
+    assert rejected.status is FlowPackageImportPlanStatus.UNRESOLVED_REQUIRED
+    assert rejected.suggestions == []

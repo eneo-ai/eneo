@@ -17,7 +17,10 @@ import {
   isDraftComplete,
   isStrictToolSchemaDeclared,
   modelToDraft,
-  setDraftModelName
+  setDraftModelName,
+  completionUpdateCeilings,
+  hasValidDeclaredCapacity,
+  applyCatalogueCeilings
 } from "./draft";
 
 function completionModel(
@@ -305,5 +308,78 @@ describe("shared context window declarations", () => {
     const draft = modelToDraft(completionModel(), "completion");
     draft.contextWindowTokensStr = raw;
     expect(isDraftComplete(draft, "completion")).toBe(false);
+  });
+});
+
+it("states only the ceilings the admin touched, and withdraws a cleared one", () => {
+  const draft = modelToDraft(completionModel(), "completion");
+  // An unrelated edit says nothing about capacity the admin never opened.
+  expect(completionUpdateCeilings(draft)).toEqual({});
+
+  draft.maxInputTokensStr = "400000";
+  draft.maxInputTokensTouched = true;
+  expect(completionUpdateCeilings(draft)).toEqual({ max_input_tokens: 400000 });
+
+  draft.maxOutputTokensStr = "";
+  draft.maxOutputTokensTouched = true;
+  expect(completionUpdateCeilings(draft)).toEqual({
+    max_input_tokens: 400000,
+    max_output_tokens: null
+  });
+});
+
+it("withdraws every capacity declaration when the route changes", () => {
+  const draft = modelToDraft(completionModel(), "completion");
+  draft.contextWindowTokensStr = "400000";
+  draft.contextWindowTouched = true;
+
+  setDraftModelName(draft, "another-route");
+
+  // A declaration was measured on the route being left, so none of the three
+  // survives it, and the blank fields are what a save stores.
+  expect(draft.maxInputTokensStr).toBe("");
+  expect(draft.maxOutputTokensStr).toBe("");
+  expect(draft.contextWindowTokensStr).toBe("");
+  expect(completionUpdateCeilings(draft)).toEqual({
+    max_input_tokens: null,
+    max_output_tokens: null
+  });
+  expect(completionUpdateCapacity(draft)).toEqual({ context_window_tokens: null });
+});
+
+it("holds an edit only to the capacity it states", () => {
+  const draft = modelToDraft(completionModel(), "completion");
+  draft.maxInputTokensStr = "";
+  draft.maxOutputTokensStr = "";
+  draft.contextWindowTokensStr = "";
+  // Undeclared capacity is a state a model may be in, so an ordinary edit of
+  // such a model is allowed; a stated value still has to be a positive whole.
+  expect(hasValidDeclaredCapacity(draft)).toBe(true);
+  draft.maxInputTokensStr = "0";
+  expect(hasValidDeclaredCapacity(draft)).toBe(false);
+  draft.maxInputTokensStr = "-5";
+  expect(hasValidDeclaredCapacity(draft)).toBe(false);
+  draft.maxInputTokensStr = "1000";
+  expect(hasValidDeclaredCapacity(draft)).toBe(true);
+});
+
+it("declares only the ceilings a catalogue answer actually states", () => {
+  const draft = modelToDraft(completionModel(), "completion");
+  draft.maxInputTokensStr = "32000";
+  draft.maxOutputTokensStr = "4000";
+
+  // The catalogue knows this route's output ceiling but not its input one.
+  applyCatalogueCeilings(draft, { max_input_tokens: null, max_output_tokens: 8000 });
+
+  expect(draft.maxOutputTokensStr).toBe("8000");
+  expect(draft.maxInputTokensStr).toBe("32000");
+  // The unstated dimension is not a declaration, so a save stays silent about
+  // it and cannot restore a ceiling a route change withdrew.
+  expect(completionUpdateCeilings(draft)).toEqual({ max_output_tokens: 8000 });
+
+  applyCatalogueCeilings(draft, { max_input_tokens: 64000 });
+  expect(completionUpdateCeilings(draft)).toEqual({
+    max_input_tokens: 64000,
+    max_output_tokens: 8000
   });
 });

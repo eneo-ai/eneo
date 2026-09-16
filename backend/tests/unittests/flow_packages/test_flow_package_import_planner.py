@@ -650,6 +650,9 @@ def _model_candidate(
         label=label,
         model_kind=model_kind,
         identity=_identity(provider, model),
+        max_input_tokens=64000
+        if model_kind is FlowPackageModelKind.COMPLETION_MODEL
+        else None,
     )
 
 

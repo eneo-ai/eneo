@@ -382,7 +382,7 @@ export class ChatService {
           this.assistantSkillTokens = 0;
         }
         this.pendingModelName = res.model_name;
-        this.pendingContextWindow = res.context_window;
+        this.pendingContextWindow = res.max_input_tokens ?? 0;
       } catch {
         // Silent failure — preflight is best-effort, not a blocker
         if (gen === this.#preflightGen) {

@@ -145,7 +145,13 @@ class CompletionModelsRepository:
         }
         if (
             not provided
-            or {"supports_strict_tool_schema", "context_window_tokens"} <= written
+            or {
+                "supports_strict_tool_schema",
+                "context_window_tokens",
+                "max_input_tokens",
+                "max_output_tokens",
+            }
+            <= written
         ):
             return model
 
@@ -179,6 +185,9 @@ class CompletionModelsRepository:
             withdrawn["supports_strict_tool_schema"] = False
         if "context_window_tokens" not in written:
             withdrawn["context_window_tokens"] = None
+        for dimension in ("max_input_tokens", "max_output_tokens"):
+            if dimension not in written:
+                withdrawn[dimension] = None
         return model.model_copy(update=withdrawn)
 
     async def delete_model(self, id: UUID) -> None:

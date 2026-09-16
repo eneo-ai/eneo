@@ -87,6 +87,7 @@ class ErrorCodes(int, Enum):
     SKILL_RUNTIME_POLICY_CHANGED = 9055
     INVALID_FILENAME = 9058
     INFO_BLOB_ORIGINAL_UNAVAILABLE = 9059
+    UNKNOWN_MODEL_CAPACITY = 9060
 
 
 class NotFoundException(Exception):

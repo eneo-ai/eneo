@@ -171,7 +171,7 @@ class AppService:
     def _assert_context_fits(
         *,
         model_name: str,
-        max_input_tokens: int,
+        max_input_tokens: int | None,
         prompt_text: str,
         files: Sequence[File],
     ) -> None:

@@ -365,3 +365,20 @@ def test_a_declared_output_ceiling_at_or_above_the_window_is_not_refused(
     )
     assert context.max_input_tokens == 128_000
     assert context.max_output_tokens == output_tokens
+
+
+@pytest.mark.parametrize("dimension", ["max_input_tokens", "max_output_tokens"])
+def test_planner_boundary_refuses_undeclared_capacity_even_for_catalogue_model(
+    dimension,
+):
+    provider_id = uuid4()
+    model = _model(provider_id=provider_id, name="gpt-4o")
+    setattr(model, dimension, None)
+    with pytest.raises(AIBuilderBadRequestException) as error:
+        build_planner_context(_space([model]), active_provider_ids={provider_id})
+    assert error.value.code is (
+        AIBuilderErrorCode.PLANNER_MODEL_MISSING_CONTEXT_WINDOW
+        if dimension == "max_input_tokens"
+        else AIBuilderErrorCode.PLANNER_MODEL_MISSING_OUTPUT_TOKENS
+    )
+    assert error.value.context == {"missing_dimensions": dimension}

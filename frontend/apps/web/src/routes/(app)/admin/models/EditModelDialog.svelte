@@ -42,7 +42,8 @@
     completionUpdateCapacity,
     createEmptyDraft,
     findDraftCostOverflow,
-    hasValidCompletionTokenBudgets,
+    hasValidDeclaredCapacity,
+    completionUpdateCeilings,
     modelToDraft,
     rawCostToNumber,
     submittedModelName,
@@ -132,8 +133,7 @@
       description: draft.description.trim() || null,
       hosting: draft.hosting,
       open_source: openSource,
-      max_input_tokens: draft.maxInputTokensStr ? parseInt(draft.maxInputTokensStr, 10) : null,
-      max_output_tokens: draft.maxOutputTokensStr ? parseInt(draft.maxOutputTokensStr, 10) : null,
+      ...completionUpdateCeilings(draft),
       ...completionUpdateCapabilities(draft),
       ...completionUpdateCapacity(draft),
       input_cost_per_token: tokenCostFromPerMillion(draft.inputCostPerTokenStr),
@@ -191,10 +191,10 @@
       error = m.display_name_required();
       return;
     }
-    // Mirror the AddWizard guard: completion models cannot persist with
-    // null/0 token budgets — the backend rejects them and downstream code
-    // would divide by zero on context-window math.
-    if (modelType === "completion" && !hasValidCompletionTokenBudgets(draft)) {
+    // An edit may leave a capacity undeclared or withdraw one, so it is only
+    // held to the values it actually states; creating a model still requires
+    // both ceilings (the AddWizard guard).
+    if (modelType === "completion" && !hasValidDeclaredCapacity(draft)) {
       error = m.completion_token_budgets_required();
       return;
     }

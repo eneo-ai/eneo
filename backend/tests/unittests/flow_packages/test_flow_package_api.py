@@ -302,6 +302,7 @@ async def test_create_flow_package_import_plan_returns_typed_resolutions(
         label="Structured Mini",
         model_kind=FlowPackageModelKind.COMPLETION_MODEL,
         identity=FlowPackageModelIdentity(provider="openai", model="gpt-5.4-mini"),
+        max_input_tokens=64000,
     )
 
     async def fake_resolve_space_access_context(
@@ -1988,6 +1989,7 @@ def _model_candidate() -> FlowPackageModelCandidate:
         label="Structured Mini",
         model_kind=FlowPackageModelKind.COMPLETION_MODEL,
         identity=FlowPackageModelIdentity(provider="openai", model="gpt-5.4-mini"),
+        max_input_tokens=64000,
     )
 
 

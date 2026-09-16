@@ -5,12 +5,17 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+from eneo.completion_models.domain.model_capacity import (
+    ModelCapacity,
+    UnknownModelCapacityError,
+)
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AIBuilderAttachmentContextPolicy,
 )
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
+    translate_unknown_model_capacity,
 )
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableKnowledgeBaseResource,
@@ -24,7 +29,6 @@ from eneo.flows.domain.mapped_execution_policy import (
     FlowMappedExecutionPolicy,
     resolve_flow_mapped_execution_policy,
 )
-from eneo.model_providers.domain.model_defaults import lookup_model_defaults
 
 if TYPE_CHECKING:
     from eneo.completion_models.domain.completion_model import CompletionModel
@@ -195,11 +199,6 @@ def build_planner_context(
         active_provider_ids=active_provider_ids,
         minimum_level=minimum_level,
     )
-    defaults = lookup_model_defaults(
-        getattr(model, "litellm_model_name", None),
-        getattr(model, "name", None),
-        provider_type=getattr(model, "provider_type", None),
-    )
     budget_policy = resolve_ai_builder_budget_policy(tenant_flow_settings)
     attachment_context_policy = AIBuilderAttachmentContextPolicy(
         max_template_uncompressed_bytes=(
@@ -208,23 +207,12 @@ def build_planner_context(
         max_template_placeholders=budget_policy.max_template_placeholders,
     )
     mapped_execution_policy = resolve_flow_mapped_execution_policy(tenant_flow_settings)
-    max_input_tokens = getattr(model, "max_input_tokens", None) or (
-        defaults.max_input_tokens if defaults else None
-    )
-    if max_input_tokens is None:
-        raise AIBuilderBadRequestException(
-            "Planner model is missing a usable context window. Configure max_input_tokens for the model.",
-            code=AIBuilderErrorCode.PLANNER_MODEL_MISSING_CONTEXT_WINDOW,
-        )
-
-    max_output_tokens = getattr(model, "max_output_tokens", None) or (
-        defaults.max_output_tokens if defaults else None
-    )
-    if max_output_tokens is None:
-        raise AIBuilderBadRequestException(
-            "Planner model is missing max_output_tokens. Configure the model before using AI Builder.",
-            code=AIBuilderErrorCode.PLANNER_MODEL_MISSING_OUTPUT_TOKENS,
-        )
+    capacity = ModelCapacity(model.max_input_tokens, model.max_output_tokens, None)
+    try:
+        max_input_tokens = capacity.require_input_tokens()
+        max_output_tokens = capacity.require_output_tokens()
+    except UnknownModelCapacityError as error:
+        raise translate_unknown_model_capacity(error) from error
 
     # Request-independent: the window, less the configured safety buffer, must
     # leave room for some request at all. Whether a particular request fits is

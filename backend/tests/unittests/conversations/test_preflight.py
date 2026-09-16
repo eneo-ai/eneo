@@ -119,7 +119,7 @@ async def test_preflight_counts_input_only():
     assert result.input_tokens > 0
     assert result.file_tokens == 0
     assert result.model_name == "gpt-4o"
-    assert result.context_window == 128000
+    assert result.max_input_tokens == 128000
 
 
 @pytest.mark.asyncio
@@ -679,7 +679,7 @@ async def test_preflight_resolves_session_to_group_chat_model():
     )
 
     assert result.model_name == "claude-3-5-sonnet"
-    assert result.context_window == 200000
+    assert result.max_input_tokens == 200000
     service.group_chat_service.get_group_chat.assert_awaited_once_with(group_chat_id)
 
 
@@ -763,7 +763,7 @@ async def test_preflight_group_chat_counts_selector_tokens_and_uses_smallest_win
     expected_question_tokens = count_tokens("hello", "small-context-model")
     assert result.input_tokens == expected_question_tokens + expected_selector_tokens
     assert result.model_name == "small-context-model"
-    assert result.context_window == 4096
+    assert result.max_input_tokens == 4096
 
 
 @pytest.mark.asyncio
@@ -797,5 +797,33 @@ async def test_preflight_group_chat_mention_uses_target_assistant_model():
 
     assert result.input_tokens == count_tokens("hello", "target-model")
     assert result.model_name == "target-model"
-    assert result.context_window == 32000
+    assert result.max_input_tokens == 32000
     service.group_chat_service.find_suitable_completion_model.assert_not_awaited()
+
+
+async def test_preflight_preserves_unknown_input_ceiling():
+    service = _make_service(assistant=_make_assistant(token_limit=None))
+    result = await service.preflight_tokens(
+        question="Hello", file_ids=[], assistant_id=uuid4()
+    )
+    assert result.max_input_tokens is None
+    assert "context_window" not in result.model_dump()
+
+
+async def test_group_chat_unknown_ceiling_refuses_comparison():
+    from eneo.completion_models.domain.model_capacity import UnknownModelCapacityError
+
+    members = [
+        SimpleNamespace(
+            assistant=SimpleNamespace(
+                completion_model=_make_completion_model(token_limit=limit)
+            )
+        )
+        for limit in (100, None)
+    ]
+    service = _make_service(group_chat=SimpleNamespace(assistants=members))
+    with pytest.raises(UnknownModelCapacityError) as error:
+        await service.preflight_tokens(
+            question="Hello", file_ids=[], group_chat_id=uuid4()
+        )
+    assert error.value.missing_dimensions == ("max_input_tokens",)

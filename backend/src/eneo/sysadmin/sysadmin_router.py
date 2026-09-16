@@ -1385,17 +1385,6 @@ async def update_completion_model_metadata(
         )
 
         update_payload = model_data.model_dump(exclude={"id"}, exclude_unset=True)
-        if (
-            "max_input_tokens" in update_payload
-            and "max_output_tokens" not in update_payload
-        ):
-            existing_model = await repo.delegate.get_by(
-                conditions={CompletionModels.id: id}
-            )
-            if existing_model is None:
-                raise NotFoundException(f"Completion model with id {id} not found")
-            update_payload["max_output_tokens"] = existing_model.max_output_tokens
-
         update_with_id = CompletionModelUpdate(
             id=id,
             **update_payload,

@@ -556,7 +556,7 @@ def test_validate_rechecks_selected_model_hard_requirements_at_install_time() ->
             envelope=envelope,
             selected_bindings=(binding,),
             candidates=_candidates(
-                models=[_model_candidate(model_id, max_context_tokens=16000)]
+                models=[_model_candidate(model_id, max_input_tokens=16000)]
             ),
         )
 
@@ -601,7 +601,7 @@ def test_validate_rejects_model_that_became_ineligible_after_import_plan() -> No
             envelope=envelope,
             selected_bindings=(binding,),
             candidates=_candidates(
-                models=[_model_candidate(model_id, max_context_tokens=16000)]
+                models=[_model_candidate(model_id, max_input_tokens=16000)]
             ),
         )
 
@@ -880,7 +880,7 @@ def _binding(
 def _model_candidate(
     local_id: UUID,
     *,
-    max_context_tokens: int | None = 64000,
+    max_input_tokens: int | None = 64000,
 ) -> FlowPackageModelCandidate:
     return FlowPackageModelCandidate(
         local_kind=LocalResourceKind.COMPLETION_MODEL,
@@ -888,7 +888,7 @@ def _model_candidate(
         label="Structured Model",
         model_kind=FlowPackageModelKind.COMPLETION_MODEL,
         identity=FlowPackageModelIdentity(provider="openai", model="gpt-5.4-mini"),
-        max_context_tokens=max_context_tokens,
+        max_input_tokens=max_input_tokens,
     )
 
 

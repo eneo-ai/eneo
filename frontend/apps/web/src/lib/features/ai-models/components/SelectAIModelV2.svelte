@@ -4,8 +4,9 @@
     name: string;
     nickname?: string | null;
     description?: string | null;
-    token_limit?: number;
-    max_input_tokens?: number;
+    // Both ceilings are declarations: null means the model route has none.
+    token_limit?: number | null;
+    max_input_tokens?: number | null;
     org?: string | null;
     provider_id?: string | null;
     provider_name?: string | null;
@@ -94,7 +95,9 @@
   function hasCompletionDetails(
     model: SelectableAIModel
   ): model is SelectableAIModel & CompletionModel {
-    return typeof model.max_input_tokens === "number";
+    // Field presence, not its value: a completion model with an undeclared
+    // input ceiling still has pricing and a description to show.
+    return "max_input_tokens" in model;
   }
 </script>
 

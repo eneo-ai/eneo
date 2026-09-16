@@ -9,6 +9,7 @@ from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.assistants.api.assistant_models import AssistantType, KnowledgeMode
 from eneo.base.base_entity import Entity
 from eneo.completion_models.domain.completion_model import CompletionModel
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.infrastructure.completion_service import (
     CompletionContextPreview,
     CompletionService,
@@ -593,7 +594,13 @@ class Assistant(Entity):
 
         # Fill half the context
         num_chunks = (
-            effective_model.max_input_tokens // 200 // 2 if version == 2 else 30
+            ModelCapacity(
+                effective_model.max_input_tokens, None, None
+            ).require_input_tokens()
+            // 200
+            // 2
+            if version == 2
+            else 30
         )
 
         # Tool mode: the loopback knowledge-MCP server (when provided by the

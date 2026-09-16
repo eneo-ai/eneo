@@ -255,6 +255,7 @@ def test_update_metadata_json(assistant: Assistant):
 def assistant_with_model():
     completion_model = MagicMock()
     completion_model.token_limit = 4000
+    completion_model.max_input_tokens = 4000
     completion_model.vision = False
     return Assistant(
         id=None,
@@ -435,3 +436,17 @@ async def test_ask_uses_runtime_prompt_files_without_mutating_attachments(
     call_kwargs = completion_service.get_response.call_args.kwargs
     assert call_kwargs["prompt_files"] == [stored_attachment, runtime_attachment_image]
     assert assistant_with_model.attachments == [stored_attachment]
+
+
+async def test_unknown_input_capacity_refuses_chunk_budget(assistant_with_model):
+    from eneo.completion_models.domain.model_capacity import UnknownModelCapacityError
+
+    assistant_with_model.completion_model.max_input_tokens = None
+    with pytest.raises(UnknownModelCapacityError) as error:
+        await assistant_with_model.ask(
+            question="test",
+            references_service=MagicMock(),
+            completion_service=MagicMock(),
+            version=2,
+        )
+    assert error.value.missing_dimensions == ("max_input_tokens",)

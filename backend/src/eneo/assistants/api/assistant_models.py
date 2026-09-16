@@ -73,13 +73,13 @@ class ModelInfo(BaseModel):
     """Information about the model used by the assistant."""
 
     name: str
-    max_input_tokens: int
-    max_output_tokens: int
+    max_input_tokens: int | None
+    max_output_tokens: int | None
     prompt_tokens: Optional[int] = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property
-    def token_limit(self) -> int:
+    def token_limit(self) -> int | None:
         """Backward-compat: exposed in JSON responses for frontend."""
         return self.max_input_tokens
 

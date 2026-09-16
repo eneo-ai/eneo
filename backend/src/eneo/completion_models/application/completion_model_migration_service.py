@@ -33,6 +33,7 @@ from eneo.completion_models.constants import (
 from eneo.completion_models.domain.completion_model_migration_history_repo import (
     CompletionModelMigrationHistoryRepo,
 )
+from eneo.completion_models.domain.model_capacity import UnknownModelCapacityError
 from eneo.completion_models.presentation.completion_model_models import (
     ValidationResult,
 )
@@ -82,11 +83,20 @@ class CompletionModelMigrationService(BaseModelMigrationService):
             issues.append("Target model is deprecated")
             issue_codes.append("target_deprecated")
 
-        if from_model.max_input_tokens > to_model.max_input_tokens:
-            issues.append(
-                f"Target model has lower input token limit: {to_model.max_input_tokens}"
+        try:
+            source_limit = from_model.capacity.require_input_tokens()
+            target_limit = to_model.capacity.require_input_tokens()
+        except UnknownModelCapacityError as error:
+            blockers.append(str(error))
+            blocker_codes.append(
+                f"unknown_model_capacity:{','.join(error.missing_dimensions)}"
             )
-            issue_codes.append(f"lower_token_limit:{to_model.max_input_tokens}")
+        else:
+            if source_limit > target_limit:
+                issues.append(
+                    f"Target model has lower input token limit: {target_limit}"
+                )
+                issue_codes.append(f"lower_token_limit:{target_limit}")
 
         if from_model.family != to_model.family:
             issues.append(
@@ -155,6 +165,12 @@ class CompletionModelMigrationService(BaseModelMigrationService):
             warning_codes=issue_codes + info_codes,
             requires_confirmation=len(issues) > 0,
         )
+
+    @staticmethod
+    def _is_blocker_code(code: str) -> bool:
+        return code.startswith(
+            "unknown_model_capacity:"
+        ) or BaseModelMigrationService._is_blocker_code(code)
 
     # --------------------------------------------------------- special entities
     def _special_entity_migrators(self) -> dict[str, Any]:

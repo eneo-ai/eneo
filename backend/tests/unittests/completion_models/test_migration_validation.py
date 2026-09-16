@@ -577,3 +577,40 @@ class TestSecurityClassificationBlocker:
         assert result.warning_codes[0].startswith(
             "security_classification_insufficient"
         )
+
+
+@pytest.mark.parametrize("source_unknown", [False, True])
+async def test_unknown_input_capacity_is_a_migration_blocker(source_unknown):
+    source = _make_model(max_input_tokens=None if source_unknown else 100)
+    target = _make_model(max_input_tokens=100 if source_unknown else None)
+    service = _build_service(repo_side_effect=[source, target])
+    result = await service.validate_migration(source.id, target.id, _tenant().id)
+    assert result.compatible is False
+    assert "unknown_model_capacity:max_input_tokens" in result.warning_codes
+    assert service._is_blocker_code("unknown_model_capacity:max_input_tokens")
+
+
+@pytest.mark.parametrize("force_override", [False, True])
+async def test_unknown_capacity_blocks_execution_even_when_confirmed(force_override):
+    from eneo.main.exceptions import ValidationException
+
+    source = _make_model(max_input_tokens=None)
+    target = _make_model(max_input_tokens=100)
+    service = _build_service(repo_side_effect=[source, target, source, target])
+    service.history_repo = AsyncMock()
+    service.event_publisher = AsyncMock()
+    service._ensure_partial_migrations_keep_same_target = AsyncMock()
+    service._count_affected_entities = AsyncMock(return_value=1)
+    service._execute_migration_transactionally = AsyncMock(return_value={"total": 1})
+    service._after_execute = AsyncMock(return_value=(False, False))
+    with pytest.raises(
+        ValidationException, match="Unknown model capacity: max_input_tokens"
+    ):
+        await service.migrate_model_usage(
+            source.id,
+            target.id,
+            user=MagicMock(id=uuid4(), tenant_id=uuid4()),
+            confirm_migration=True,
+            force_override=force_override,
+        )
+    service._execute_migration_transactionally.assert_not_awaited()

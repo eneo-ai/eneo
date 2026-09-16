@@ -7,6 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 
+from eneo.completion_models.domain.model_capacity import UnknownModelCapacityError
 from eneo.files.file_models import (
     FileInUseError,
     FileOriginalNotFoundError,
@@ -204,6 +205,9 @@ def _exception_context(
     else:
         result = {}
 
+    if isinstance(exc, UnknownModelCapacityError):
+        result["missing_dimensions"] = list(exc.missing_dimensions)
+
     if isinstance(exc, UnauthorizedException):
         result.setdefault("auth_layer", "domain_policy")
 
@@ -221,6 +225,7 @@ logger = logging.getLogger(__name__)
 # server adapter may depend on a domain package without reversing that
 # dependency. One map, so "where do I register this?" has one answer.
 DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] = {
+    UnknownModelCapacityError: (400, None, ErrorCodes.UNKNOWN_MODEL_CAPACITY),
     # --- Object content and files ---
     ObjectContentUnavailableError: (503, None, ErrorCodes.RESOURCE_NOT_READY),
     ObjectContentIntegrityError: (503, None, ErrorCodes.RESOURCE_NOT_READY),

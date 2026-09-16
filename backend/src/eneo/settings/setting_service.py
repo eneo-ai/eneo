@@ -373,9 +373,13 @@ class SettingService:
                     nickname=model.nickname,
                     max_input_tokens=model.max_input_tokens,
                     supports_tool_calling=model.supports_tool_calling,
-                    skill_context_token_allowance=skill_context_token_allowance(
-                        max_input_tokens=model.max_input_tokens,
-                        context_share_percent=policy.context_share_percent,
+                    skill_context_token_allowance=(
+                        skill_context_token_allowance(
+                            max_input_tokens=model.max_input_tokens,
+                            context_share_percent=policy.context_share_percent,
+                        )
+                        if model.max_input_tokens is not None
+                        else None
                     ),
                 )
                 for model in models

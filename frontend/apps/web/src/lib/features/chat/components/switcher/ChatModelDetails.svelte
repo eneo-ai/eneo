@@ -27,12 +27,15 @@
   // rather than showing a placeholder.
   const inputPrice = $derived(formatCostPerMillionTokens(model.input_cost_per_token));
   const outputPrice = $derived(formatCostPerMillionTokens(model.output_cost_per_token));
+  // An undeclared input ceiling is stated as unknown, never as a number.
   const contextWindow = $derived(
-    m.model_selector_context_value({
-      tokens: new Intl.NumberFormat(getLocale() === "sv" ? "sv-SE" : "en-US").format(
-        model.max_input_tokens
-      )
-    })
+    model.max_input_tokens === null || model.max_input_tokens === undefined
+      ? m.context_window_unknown()
+      : m.model_selector_context_value({
+          tokens: new Intl.NumberFormat(getLocale() === "sv" ? "sv-SE" : "en-US").format(
+            model.max_input_tokens
+          )
+        })
   );
   const description = $derived(model.description?.trim() || m.model_selector_no_description());
 </script>

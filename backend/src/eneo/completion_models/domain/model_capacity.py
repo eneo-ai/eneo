@@ -42,6 +42,16 @@ class ModelCapacity:
         if missing:
             raise UnknownModelCapacityError(missing)
 
+    def require_input_tokens(self) -> int:
+        self._require("max_input_tokens")
+        assert self.max_input_tokens is not None
+        return self.max_input_tokens
+
+    def require_output_tokens(self) -> int:
+        self._require("max_output_tokens")
+        assert self.max_output_tokens is not None
+        return self.max_output_tokens
+
     def admits_input(self, input_tokens: int, *, safety_tokens: int) -> bool:
         self._require("max_input_tokens")
         assert self.max_input_tokens is not None

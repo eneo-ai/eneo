@@ -30,8 +30,8 @@ class TenantCompletionModelCreate(BaseModel):
     provider_id: UUID
     name: str
     display_name: str
-    max_input_tokens: int
-    max_output_tokens: int
+    max_input_tokens: int = Field(gt=0)
+    max_output_tokens: int = Field(gt=0)
     context_window_tokens: int | None = Field(default=None, gt=0)
     vision: bool = False
     reasoning: bool = False
@@ -54,8 +54,8 @@ class TenantCompletionModelUpdate(BaseModel):
     name: str | None = None
     display_name: str | None = None
     description: str | None = None
-    max_input_tokens: int | None = None
-    max_output_tokens: int | None = None
+    max_input_tokens: int | None = Field(default=None, gt=0)
+    max_output_tokens: int | None = Field(default=None, gt=0)
     context_window_tokens: int | None = Field(default=None, gt=0)
     vision: bool | None = None
     reasoning: bool | None = None

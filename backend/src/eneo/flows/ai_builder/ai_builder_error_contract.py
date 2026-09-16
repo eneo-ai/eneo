@@ -26,6 +26,7 @@ from litellm.exceptions import (
 )
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from eneo.completion_models.domain.model_capacity import UnknownModelCapacityError
 from eneo.flows.ai_builder.ai_builder_provider_call import (
     ProviderCallCeilingExpired,
     ProviderRejection,
@@ -260,6 +261,25 @@ class AIBuilderBadRequestException(BadRequestException):
     ) -> None:
         super().__init__(message, code=code.value, context=context)
         self.code = code
+
+
+def translate_unknown_model_capacity(
+    error: UnknownModelCapacityError,
+) -> AIBuilderBadRequestException:
+    if any(
+        dimension in error.missing_dimensions
+        for dimension in ("max_input_tokens", "context_window_tokens")
+    ):
+        code = AIBuilderErrorCode.PLANNER_MODEL_MISSING_CONTEXT_WINDOW
+        message = "Planner model is missing a usable context window. Configure max_input_tokens for the model."
+    else:
+        code = AIBuilderErrorCode.PLANNER_MODEL_MISSING_OUTPUT_TOKENS
+        message = "Planner model is missing max_output_tokens. Configure the model before using AI Builder."
+    return AIBuilderBadRequestException(
+        message,
+        code=code,
+        context={"missing_dimensions": ",".join(error.missing_dimensions)},
+    )
 
 
 class AIBuilderProviderOutcomeUnknownException(AIBuilderBadRequestException):

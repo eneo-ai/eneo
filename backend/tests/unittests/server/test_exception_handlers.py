@@ -316,3 +316,24 @@ def test_encryption_not_configured_returns_actionable_503_and_logs_it(caplog):
     )
     assert "POST /providers → 503" in caplog.text
     assert "ENCRYPTION_KEY" in caplog.text
+
+
+def test_unknown_model_capacity_returns_actionable_http_error():
+    from eneo.completion_models.domain.model_capacity import UnknownModelCapacityError
+
+    app = FastAPI()
+    add_exception_handlers(app)
+
+    @app.get("/capacity")
+    async def capacity():
+        raise UnknownModelCapacityError(("max_input_tokens", "max_output_tokens"))
+
+    response = TestClient(app, raise_server_exceptions=False).get("/capacity")
+    assert response.status_code == 400
+    body = response.json()
+    assert body["code"] == "unknown_model_capacity"
+    assert body["context"]["missing_dimensions"] == [
+        "max_input_tokens",
+        "max_output_tokens",
+    ]
+    assert "max_input_tokens" in body["message"]

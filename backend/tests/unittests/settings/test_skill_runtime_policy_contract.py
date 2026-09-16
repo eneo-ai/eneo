@@ -87,3 +87,32 @@ async def test_model_projection_uses_canonical_skill_context_allowance():
         context_share_percent=10,
     )
     assert projections.models[0].skill_context_token_allowance == 12_345
+
+
+@pytest.mark.asyncio
+async def test_projection_preserves_known_and_unknown_model_allowances():
+    service = _setting_service()
+    service.skill_repo.get_or_seed_runtime_policy = AsyncMock(
+        return_value=_runtime_policy()
+    )
+    models = [
+        SimpleNamespace(
+            id=uuid4(),
+            name="model",
+            nickname="Model",
+            max_input_tokens=limit,
+            supports_tool_calling=True,
+            can_access=True,
+        )
+        for limit in (128_000, None)
+    ]
+    service.ai_models_service.get_completion_models = AsyncMock(return_value=models)
+
+    projection = await service.get_skill_runtime_model_projections()
+
+    assert len(projection.models) == 2
+    assert projection.models[0].max_input_tokens == 128_000
+    assert projection.models[0].skill_context_token_allowance == 12_800
+    unknown = projection.models[1].model_dump()
+    assert unknown["max_input_tokens"] is None
+    assert unknown["skill_context_token_allowance"] is None

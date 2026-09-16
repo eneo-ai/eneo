@@ -429,7 +429,7 @@ function flowPackageImportPlan(
             model_kind: "completion_model",
             identity: { provider: "openai", model: "gpt-test" },
             security_level: 3,
-            max_context_tokens: 32000,
+            max_input_tokens: 32000,
             supports_vision: false,
             supports_reasoning: true,
             supports_tool_calling: false

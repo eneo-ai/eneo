@@ -10,7 +10,9 @@ from eneo.tenants.tenant import TenantInDB
 
 
 def _load_model(
-    output_tokens: int | None, window: int | None = None
+    output_tokens: int | None,
+    window: int | None = None,
+    input_tokens: int | None = 1_000_000,
 ) -> CompletionModel:
     now = datetime.now(timezone.utc)
     row = CompletionModels(
@@ -22,7 +24,7 @@ def _load_model(
         litellm_model_name="openai/custom-deployment",
         tenant_id=uuid4(),
         provider_id=uuid4(),
-        max_input_tokens=1_000_000,
+        max_input_tokens=input_tokens,
         max_output_tokens=output_tokens,
         context_window_tokens=window,
         open_source=False,
@@ -45,15 +47,14 @@ def test_unknown_output_limit_is_not_inferred_from_the_context_window() -> None:
     with patch(
         "eneo.model_providers.domain.model_defaults._get_model_cost", return_value={}
     ):
-        with pytest.raises(ValueError, match="missing max_output_tokens"):
-            _load_model(None)
+        assert _load_model(None).max_output_tokens is None
 
 
 @pytest.mark.parametrize(
-    ("configured_output", "expected_output"), [(None, 128_000), (32_000, 32_000)]
+    ("configured_output", "expected_output"), [(None, None), (32_000, 32_000)]
 )
-def test_model_limits_use_configured_values_or_known_provider_metadata(
-    configured_output: int | None, expected_output: int
+def test_model_limits_preserve_only_configured_values(
+    configured_output: int | None, expected_output: int | None
 ) -> None:
     with patch(
         "eneo.model_providers.domain.model_defaults._get_model_cost",
@@ -109,7 +110,12 @@ def test_admin_window_declarations_must_be_positive(value) -> None:
         )
 
 
-async def test_admin_window_create_read_declare_keep_clear_and_route_move() -> None:
+@pytest.mark.parametrize(
+    "dimension", ["max_input_tokens", "max_output_tokens", "context_window_tokens"]
+)
+async def test_admin_window_create_read_declare_keep_clear_and_route_move(
+    dimension,
+) -> None:
     from unittest.mock import AsyncMock, MagicMock
 
     from eneo.completion_models.presentation.tenant_completion_models_router import (
@@ -168,24 +174,24 @@ async def test_admin_window_create_read_declare_keep_clear_and_route_move() -> N
                 context_window_tokens=120,
             )
         )
-        assert model.context_window_tokens == 120
+        initial = {
+            "max_input_tokens": 100,
+            "max_output_tokens": 80,
+            "context_window_tokens": 120,
+        }
+        assert getattr(model, dimension) == initial[dimension]
         for payload, expected in (
-            (TenantCompletionModelUpdate(context_window_tokens=140), 140),
+            (TenantCompletionModelUpdate(**{dimension: 140}), 140),
             (TenantCompletionModelUpdate(description="Updated"), 140),
-            (TenantCompletionModelUpdate(context_window_tokens=None), None),
-            (TenantCompletionModelUpdate(context_window_tokens=120), 120),
+            (TenantCompletionModelUpdate(**{dimension: None}), None),
+            (TenantCompletionModelUpdate(**{dimension: 120}), 120),
             (TenantCompletionModelUpdate(name="renamed"), None),
-            (
-                TenantCompletionModelUpdate(
-                    name="redeclared", context_window_tokens=160
-                ),
-                160,
-            ),
+            (TenantCompletionModelUpdate(name="custom"), None),
+            (TenantCompletionModelUpdate(name="redeclared", **{dimension: 160}), 160),
             (TenantCompletionModelUpdate(name="redeclared"), 160),
         ):
             model = await service.update(model.id, payload)
-            assert model.context_window_tokens == expected
-            assert (model.max_input_tokens, model.max_output_tokens) == (100, 80)
+            assert getattr(model, dimension) == expected
 
 
 @pytest.mark.parametrize("redeclare", [False, True])
@@ -217,11 +223,21 @@ async def test_metadata_route_update_withdraws_only_omitted_declarations(
         id=uuid4(),
         name="new",
         supports_strict_tool_schema=True,
-        **({"context_window_tokens": 120} if redeclare else {}),
+        **(
+            {
+                "context_window_tokens": 120,
+                "max_input_tokens": 100,
+                "max_output_tokens": 80,
+            }
+            if redeclare
+            else {}
+        ),
     )
     await repo.update_model(payload)
     written = repo.delegate.update.call_args.args[0].model_dump(exclude_unset=True)
     assert written["context_window_tokens"] == (120 if redeclare else None)
+    assert written["max_input_tokens"] == (100 if redeclare else None)
+    assert written["max_output_tokens"] == (80 if redeclare else None)
     assert written["supports_strict_tool_schema"] is True
 
 
@@ -287,3 +303,205 @@ def test_sysadmin_window_preserves_optional_declarations(
     assert ("context_window_tokens" in payload.model_fields_set) == (
         "context_window_tokens" in declaration
     )
+
+
+@pytest.mark.parametrize(
+    "input_tokens,output_tokens", [(None, 80), (100, None), (None, None), (100, 80)]
+)
+def test_stored_limits_survive_hydration_and_projections(input_tokens, output_tokens):
+    from eneo.ai_models.completion_models.completion_model import CompletionModelPublic
+    from eneo.completion_models.presentation.completion_model_assembler import (
+        CompletionModelAssembler,
+    )
+
+    model = _load_model(output_tokens, input_tokens=input_tokens)
+    assert model.token_limit == input_tokens
+    assert model.capacity.max_input_tokens == input_tokens
+    for public in (
+        CompletionModelPublic.from_domain(model),
+        CompletionModelAssembler().from_completion_model_to_model(model),
+    ):
+        assert public.max_input_tokens == input_tokens
+        assert public.max_output_tokens == output_tokens
+        assert public.context_window_tokens is None
+
+
+@pytest.mark.parametrize("dimension", ["max_input_tokens", "max_output_tokens"])
+@pytest.mark.parametrize("value", [0, -1])
+def test_tenant_capacity_declarations_must_be_positive(dimension, value):
+    from pydantic import ValidationError
+
+    from eneo.completion_models.presentation.tenant_completion_models_router import (
+        TenantCompletionModelCreate,
+        TenantCompletionModelUpdate,
+    )
+
+    with pytest.raises(ValidationError):
+        TenantCompletionModelUpdate(**{dimension: value})
+    values = dict(
+        provider_id=uuid4(),
+        name="custom",
+        display_name="Custom",
+        max_input_tokens=100,
+        max_output_tokens=80,
+    )
+    values[dimension] = value
+    with pytest.raises(ValidationError):
+        TenantCompletionModelCreate(**values)
+
+
+@pytest.mark.parametrize("dimension", ["max_input_tokens", "max_output_tokens"])
+def test_tenant_creation_requires_declared_ceiling(dimension):
+    from pydantic import ValidationError
+
+    from eneo.completion_models.presentation.tenant_completion_models_router import (
+        TenantCompletionModelCreate,
+    )
+
+    values = dict(
+        provider_id=uuid4(),
+        name="custom",
+        display_name="Custom",
+        max_input_tokens=100,
+        max_output_tokens=80,
+    )
+    values[dimension] = None
+    with pytest.raises(ValidationError):
+        TenantCompletionModelCreate(**values)
+    del values[dimension]
+    with pytest.raises(ValidationError):
+        TenantCompletionModelCreate(**values)
+
+
+async def test_sysadmin_route_move_does_not_redeclare_omitted_output():
+    from unittest.mock import AsyncMock, MagicMock
+
+    from eneo.ai_models.completion_models.completion_model import (
+        CompletionModelSparse,
+        CompletionModelUpdate,
+    )
+    from eneo.sysadmin.sysadmin_router import update_completion_model_metadata
+
+    model = _load_model(80, input_tokens=100)
+    session = MagicMock()
+    session.begin.return_value = AsyncMock()
+    container = MagicMock()
+    container.session.return_value = session
+    with (
+        patch(
+            "eneo.sysadmin.sysadmin_router.validate_unique_display_name", AsyncMock()
+        ),
+        patch("eneo.sysadmin.sysadmin_router.CompletionModelsRepository") as repo,
+    ):
+        repo.return_value.delegate.get_by = AsyncMock(return_value=model)
+        repo.return_value.update_model = AsyncMock(
+            return_value=CompletionModelSparse.model_validate(
+                model, from_attributes=True
+            )
+        )
+        await update_completion_model_metadata(
+            model.id,
+            CompletionModelUpdate(id=model.id, name="moved", max_input_tokens=120),
+            container,
+        )
+        written = repo.return_value.update_model.call_args.args[0]
+        assert "max_output_tokens" not in written.model_fields_set
+
+
+@pytest.mark.parametrize("other_tenant,deleted", [(True, False), (False, True)])
+async def test_reads_preserve_tenant_and_soft_deletion_boundaries(
+    other_tenant, deleted
+):
+    from unittest.mock import AsyncMock, MagicMock
+
+    import sqlalchemy as sa
+
+    from eneo.completion_models.domain.completion_model_repo import (
+        CompletionModelRepository,
+    )
+    from eneo.main.exceptions import NotFoundException
+
+    tenant = TenantInDB.model_construct(id=uuid4(), name="Tenant")
+    table = CompletionModels.__table__
+    metadata = sa.MetaData()
+    visible = sa.Table(
+        table.name,
+        metadata,
+        *(
+            sa.Column(name, table.c[name].type)
+            for name in ("id", "tenant_id", "deleted_at")
+        ),
+    )
+    engine = sa.create_engine("sqlite://")
+    metadata.create_all(engine)
+    model_id = uuid4()
+    with engine.begin() as connection:
+        connection.execute(
+            visible.insert().values(
+                id=model_id,
+                tenant_id=uuid4() if other_tenant else tenant.id,
+                deleted_at=datetime.now(timezone.utc) if deleted else None,
+            )
+        )
+        session = MagicMock()
+        session.execute = AsyncMock(
+            side_effect=lambda stmt: connection.execute(
+                sa.select(table.c.id).where(stmt.whereclause)
+            )
+        )
+        repo = CompletionModelRepository(session=session, tenant=tenant)
+        with pytest.raises(NotFoundException):
+            await repo.one(model_id)
+        assert (
+            connection.execute(
+                sa.select(sa.func.count()).select_from(visible)
+            ).scalar_one()
+            == 1
+        )
+
+
+async def test_update_cannot_clear_another_tenants_capacity():
+    from unittest.mock import AsyncMock, MagicMock
+
+    import sqlalchemy as sa
+
+    from eneo.completion_models.presentation.tenant_completion_models_router import (
+        TenantCompletionModelUpdate,
+    )
+    from eneo.main.exceptions import NotFoundException
+    from eneo.tenant_models.application.tenant_model_service import (
+        TenantCompletionModelService,
+    )
+
+    table = CompletionModels.__table__
+    metadata = sa.MetaData()
+    stored = sa.Table(
+        table.name,
+        metadata,
+        *(
+            sa.Column(name, table.c[name].type)
+            for name in ("id", "tenant_id", "max_input_tokens")
+        ),
+    )
+    engine = sa.create_engine("sqlite://")
+    metadata.create_all(engine)
+    model_id = uuid4()
+    with engine.begin() as connection:
+        connection.execute(
+            stored.insert().values(id=model_id, tenant_id=uuid4(), max_input_tokens=100)
+        )
+        session = MagicMock()
+        session.execute = AsyncMock(
+            side_effect=lambda stmt: connection.execute(
+                sa.select(table.c.id).where(stmt.whereclause)
+            )
+        )
+        service = TenantCompletionModelService(session, MagicMock(tenant_id=uuid4()))
+        with pytest.raises(NotFoundException):
+            await service.update(
+                model_id, TenantCompletionModelUpdate(max_input_tokens=None)
+            )
+        assert (
+            connection.execute(sa.select(stored.c.max_input_tokens)).scalar_one() == 100
+        )
+        session.flush.assert_not_called()

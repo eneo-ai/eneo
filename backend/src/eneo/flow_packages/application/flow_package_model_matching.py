@@ -3,6 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TypeAlias
 
+from eneo.completion_models.domain.model_capacity import (
+    ModelCapacity,
+    UnknownModelCapacityError,
+)
 from eneo.flow_packages.domain.flow_package_import_plan import (
     MAX_IMPORT_PLAN_SUGGESTIONS,
     FlowPackageImportPlanStatus,
@@ -15,6 +19,7 @@ from eneo.flow_packages.domain.flow_package_import_plan import (
 from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageCompletionModelConstraints,
     FlowPackageModelIdentity,
+    FlowPackageModelKind,
     FlowPackageModelRequirement,
 )
 
@@ -150,6 +155,12 @@ def hard_model_candidate_rejection_reasons(
     if candidate.model_kind is not requirement.model_kind:
         return (FlowPackageModelMatchIssue.MODEL_KIND_MISMATCH,)
 
+    if candidate.model_kind is FlowPackageModelKind.COMPLETION_MODEL:
+        try:
+            ModelCapacity(candidate.max_input_tokens, None, None).require_input_tokens()
+        except UnknownModelCapacityError:
+            return (FlowPackageModelMatchIssue.MODEL_CAPACITY_UNKNOWN,)
+
     reasons: list[FlowPackageModelMatchIssue] = []
     if requirement.completion_constraints is not None:
         reasons.extend(
@@ -167,8 +178,9 @@ def _completion_constraint_rejections(
 ) -> list[FlowPackageModelMatchIssue]:
     reasons: list[FlowPackageModelMatchIssue] = []
     if constraints.minimum_context_tokens is not None and (
-        candidate.max_context_tokens is None
-        or candidate.max_context_tokens < constraints.minimum_context_tokens
+        not ModelCapacity(candidate.max_input_tokens, None, None).admits_input(
+            constraints.minimum_context_tokens, safety_tokens=0
+        )
     ):
         reasons.append(FlowPackageModelMatchIssue.MODEL_CONTEXT_TOO_SMALL)
     if constraints.requires_vision and not candidate.supports_vision:
@@ -273,7 +285,11 @@ def _evaluation_sort_key(
     candidate = evaluation.candidate
     return (
         evaluation.identity_rank,
-        -(candidate.max_context_tokens or 0),
+        -(
+            ModelCapacity(candidate.max_input_tokens, None, None).require_input_tokens()
+            if candidate.model_kind is FlowPackageModelKind.COMPLETION_MODEL
+            else 0
+        ),
         len(evaluation.selection_warnings),
         candidate.label.casefold(),
         candidate.local_kind.value,

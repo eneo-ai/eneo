@@ -5,7 +5,10 @@
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
 
-  type Model = { id: string; max_input_tokens: number };
+  // A model whose input ceiling is undeclared cannot be metered: `limit`
+  // falls to 0 below and `show` keeps the meter off rather than measuring
+  // against a number nobody stated.
+  type Model = { id: string; max_input_tokens: number | null };
   type Props = {
     assistantId: string;
     model: Model | undefined;

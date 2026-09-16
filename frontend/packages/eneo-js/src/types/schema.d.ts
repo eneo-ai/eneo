@@ -13714,10 +13714,16 @@ export interface components {
       is_org_enabled?: boolean;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
-      /** Max Input Tokens */
-      max_input_tokens: number;
-      /** Max Output Tokens */
-      max_output_tokens: number;
+      /**
+       * Max Input Tokens
+       * @description Max input tokens; null means not declared for this route.
+       */
+      max_input_tokens: number | null;
+      /**
+       * Max Output Tokens
+       * @description Max output tokens; null means not declared for this route.
+       */
+      max_output_tokens: number | null;
       /** Migrated To Model Id */
       migrated_to_model_id?: string | null;
       model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
@@ -13759,7 +13765,7 @@ export interface components {
        * Token Limit
        * @description Backward-compat: exposed in JSON responses for frontend.
        */
-      readonly token_limit: number;
+      readonly token_limit: number | null;
       /** Updated At */
       updated_at?: string | null;
       /** Vision */
@@ -13790,10 +13796,16 @@ export interface components {
       is_deprecated: boolean;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
-      /** Max Input Tokens */
-      max_input_tokens: number;
-      /** Max Output Tokens */
-      max_output_tokens: number;
+      /**
+       * Max Input Tokens
+       * @description Max input tokens; null means not declared for this route.
+       */
+      max_input_tokens: number | null;
+      /**
+       * Max Output Tokens
+       * @description Max output tokens; null means not declared for this route.
+       */
+      max_output_tokens: number | null;
       model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
       /** Name */
       name: string;
@@ -13883,10 +13895,16 @@ export interface components {
       litellm_model_name?: string | null;
       /** Lock Reason */
       lock_reason?: string | null;
-      /** Max Input Tokens */
-      max_input_tokens: number;
-      /** Max Output Tokens */
-      max_output_tokens: number;
+      /**
+       * Max Input Tokens
+       * @description Max input tokens; null means not declared for this route.
+       */
+      max_input_tokens: number | null;
+      /**
+       * Max Output Tokens
+       * @description Max output tokens; null means not declared for this route.
+       */
+      max_output_tokens: number | null;
       /** Migrated To Model Id */
       migrated_to_model_id?: string | null;
       model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
@@ -13931,7 +13949,7 @@ export interface components {
        * Token Limit
        * @description Backward-compat: exposed in JSON responses for frontend.
        */
-      readonly token_limit: number;
+      readonly token_limit: number | null;
       /** Updated At */
       updated_at?: string | null;
       /** Vision */
@@ -14011,10 +14029,16 @@ export interface components {
       litellm_model_name?: string | null;
       /** Lock Reason */
       lock_reason?: string | null;
-      /** Max Input Tokens */
-      max_input_tokens: number;
-      /** Max Output Tokens */
-      max_output_tokens: number;
+      /**
+       * Max Input Tokens
+       * @description Max input tokens; null means not declared for this route.
+       */
+      max_input_tokens: number | null;
+      /**
+       * Max Output Tokens
+       * @description Max output tokens; null means not declared for this route.
+       */
+      max_output_tokens: number | null;
       /** Meets Security Classification */
       meets_security_classification?: boolean | null;
       /** Migrated To Model Id */
@@ -14061,7 +14085,7 @@ export interface components {
        * Token Limit
        * @description Backward-compat: exposed in JSON responses for frontend.
        */
-      readonly token_limit: number;
+      readonly token_limit: number | null;
       /** Updated At */
       updated_at?: string | null;
       /** Vision */
@@ -14099,10 +14123,16 @@ export interface components {
       is_deprecated: boolean;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
-      /** Max Input Tokens */
-      max_input_tokens: number;
-      /** Max Output Tokens */
-      max_output_tokens: number;
+      /**
+       * Max Input Tokens
+       * @description Max input tokens; null means not declared for this route.
+       */
+      max_input_tokens: number | null;
+      /**
+       * Max Output Tokens
+       * @description Max output tokens; null means not declared for this route.
+       */
+      max_output_tokens: number | null;
       model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
       /** Name */
       name: string;
@@ -14138,7 +14168,7 @@ export interface components {
        * Token Limit
        * @description Backward-compat: exposed in JSON responses for frontend.
        */
-      readonly token_limit: number;
+      readonly token_limit: number | null;
       /** Updated At */
       updated_at?: string | null;
       /** Vision */
@@ -15613,7 +15643,8 @@ export interface components {
       | 9054
       | 9055
       | 9058
-      | 9059;
+      | 9059
+      | 9060;
     /** EvidenceArtifactAvailabilitySummary */
     EvidenceArtifactAvailabilitySummary: {
       /** Artifact Count */
@@ -17627,8 +17658,8 @@ export interface components {
        */
       local_id: string;
       local_kind: components["schemas"]["LocalResourceKind"];
-      /** Max Context Tokens */
-      max_context_tokens?: number | null;
+      /** Max Input Tokens */
+      max_input_tokens?: number | null;
       model_kind: components["schemas"]["FlowPackageModelKind"];
       /** Security Level */
       security_level?: number | null;
@@ -17713,6 +17744,7 @@ export interface components {
      * @enum {string}
      */
     FlowPackageModelMatchIssue:
+      | "model_capacity_unknown"
       | "model_context_too_small"
       | "model_identity_not_preferred"
       | "model_kind_mismatch"
@@ -26279,9 +26311,9 @@ export interface components {
      */
     ModelInfo: {
       /** Max Input Tokens */
-      max_input_tokens: number;
+      max_input_tokens: number | null;
       /** Max Output Tokens */
-      max_output_tokens: number;
+      max_output_tokens: number | null;
       /** Name */
       name: string;
       /** Prompt Tokens */
@@ -26290,7 +26322,7 @@ export interface components {
        * Token Limit
        * @description Backward-compat: exposed in JSON responses for frontend.
        */
-      readonly token_limit: number;
+      readonly token_limit: number | null;
     };
     /** ModelKwargCapability */
     ModelKwargCapability: {
@@ -28178,9 +28210,15 @@ export interface components {
       is_deprecated?: boolean | null;
       /** Litellm Model Name */
       litellm_model_name?: string | null;
-      /** Max Input Tokens */
+      /**
+       * Max Input Tokens
+       * @description Max input tokens; null means not declared for this route.
+       */
       max_input_tokens?: number | null;
-      /** Max Output Tokens */
+      /**
+       * Max Output Tokens
+       * @description Max output tokens; null means not declared for this route.
+       */
       max_output_tokens?: number | null;
       model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
       /** Name */
@@ -28754,7 +28792,7 @@ export interface components {
      *     this local estimate, especially for multimodal inputs. The frontend pairs
      *     this delta with the persisted history tokens to project total context fill.
      *
-     *     `model_name` and `context_window` are echoed so a client can compute the
+     *     `model_name` and `max_input_tokens` are echoed so a client can compute the
      *     percentage fill locally without a separate round-trip to fetch model
      *     metadata.
      *
@@ -28774,8 +28812,6 @@ export interface components {
        * @default 0
        */
       context_reserve_tokens?: number;
-      /** Context Window */
-      context_window: number;
       /**
        * Excluded File Count
        * @default 0
@@ -28785,6 +28821,8 @@ export interface components {
       file_tokens: number;
       /** Input Tokens */
       input_tokens: number;
+      /** Max Input Tokens */
+      max_input_tokens: number | null;
       /** Model Name */
       model_name: string;
       /**
@@ -31858,13 +31896,13 @@ export interface components {
        */
       completion_model_id: string;
       /** Max Input Tokens */
-      max_input_tokens: number;
+      max_input_tokens: number | null;
       /** Name */
       name: string;
       /** Nickname */
       nickname: string | null;
       /** Skill Context Token Allowance */
-      skill_context_token_allowance: number;
+      skill_context_token_allowance: number | null;
       /** Supports Tool Calling */
       supports_tool_calling: boolean;
     };
@@ -45753,10 +45791,16 @@ export interface operations {
                 litellm_model_name?: string | null;
                 /** Lock Reason */
                 lock_reason?: string | null;
-                /** Max Input Tokens */
-                max_input_tokens: number;
-                /** Max Output Tokens */
-                max_output_tokens: number;
+                /**
+                 * Max Input Tokens
+                 * @description Max input tokens; null means not declared for this route.
+                 */
+                max_input_tokens: number | null;
+                /**
+                 * Max Output Tokens
+                 * @description Max output tokens; null means not declared for this route.
+                 */
+                max_output_tokens: number | null;
                 /** Migrated To Model Id */
                 migrated_to_model_id?: string | null;
                 model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
@@ -46190,10 +46234,16 @@ export interface operations {
                 litellm_model_name?: string | null;
                 /** Lock Reason */
                 lock_reason?: string | null;
-                /** Max Input Tokens */
-                max_input_tokens: number;
-                /** Max Output Tokens */
-                max_output_tokens: number;
+                /**
+                 * Max Input Tokens
+                 * @description Max input tokens; null means not declared for this route.
+                 */
+                max_input_tokens: number | null;
+                /**
+                 * Max Output Tokens
+                 * @description Max output tokens; null means not declared for this route.
+                 */
+                max_output_tokens: number | null;
                 /** Migrated To Model Id */
                 migrated_to_model_id?: string | null;
                 model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
@@ -48490,10 +48540,16 @@ export interface operations {
                     litellm_model_name?: string | null;
                     /** Lock Reason */
                     lock_reason?: string | null;
-                    /** Max Input Tokens */
-                    max_input_tokens: number;
-                    /** Max Output Tokens */
-                    max_output_tokens: number;
+                    /**
+                     * Max Input Tokens
+                     * @description Max input tokens; null means not declared for this route.
+                     */
+                    max_input_tokens: number | null;
+                    /**
+                     * Max Output Tokens
+                     * @description Max output tokens; null means not declared for this route.
+                     */
+                    max_output_tokens: number | null;
                     /** Migrated To Model Id */
                     migrated_to_model_id?: string | null;
                     model_kwargs_capabilities?:
