@@ -1,4 +1,7 @@
 {
+  "context_window_tokens": "Context window (tokens)",
+  "context_window_tokens_help": "Leave empty when the model's shared window is not known.",
+  "context_window_unknown": "unknown",
   "$schema": "https://inlang.com/schema/inlang-message-format",
   "flow_capsule_ai_speakers": "Suggests speakers",
   "flow_output_mode_invalid_speaker_mapping": "Review transcript requires text from the previous step as input and structured data (JSON) as the output format.",

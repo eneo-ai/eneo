@@ -178,6 +178,16 @@
               })}
             </td>
           </tr>
+          <tr>
+            <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap"
+              >{m.context_window_tokens()}</td
+            >
+            <td class="py-2.5 font-mono text-sm">
+              {model.context_window_tokens == null
+                ? m.context_window_unknown()
+                : formatTokens(model.context_window_tokens)}
+            </td>
+          </tr>
         {/if}
 
         <!-- Capabilities -->

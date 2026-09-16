@@ -39,6 +39,7 @@
   import {
     MAX_COST_INPUT,
     completionUpdateCapabilities,
+    completionUpdateCapacity,
     createEmptyDraft,
     findDraftCostOverflow,
     hasValidCompletionTokenBudgets,
@@ -134,6 +135,7 @@
       max_input_tokens: draft.maxInputTokensStr ? parseInt(draft.maxInputTokensStr, 10) : null,
       max_output_tokens: draft.maxOutputTokensStr ? parseInt(draft.maxOutputTokensStr, 10) : null,
       ...completionUpdateCapabilities(draft),
+      ...completionUpdateCapacity(draft),
       input_cost_per_token: tokenCostFromPerMillion(draft.inputCostPerTokenStr),
       output_cost_per_token: tokenCostFromPerMillion(draft.outputCostPerTokenStr),
       ...(hasDefaultToggle ? { is_default: isDefault } : {}),

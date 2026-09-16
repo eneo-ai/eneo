@@ -5,7 +5,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from eneo.authentication.auth_dependencies import get_current_active_user
 from eneo.completion_models.domain.model_kwargs_capabilities import (
@@ -32,6 +32,7 @@ class TenantCompletionModelCreate(BaseModel):
     display_name: str
     max_input_tokens: int
     max_output_tokens: int
+    context_window_tokens: int | None = Field(default=None, gt=0)
     vision: bool = False
     reasoning: bool = False
     supports_tool_calling: bool = False
@@ -55,6 +56,7 @@ class TenantCompletionModelUpdate(BaseModel):
     description: str | None = None
     max_input_tokens: int | None = None
     max_output_tokens: int | None = None
+    context_window_tokens: int | None = Field(default=None, gt=0)
     vision: bool | None = None
     reasoning: bool | None = None
     supports_tool_calling: bool | None = None

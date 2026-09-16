@@ -9,13 +9,15 @@ import {
   applyCatalogModelToDraft,
   completionCreateCapabilities,
   completionUpdateCapabilities,
+  completionUpdateCapacity,
   createEmptyDraft,
   declareStrictToolSchema,
   draftToWizardModel,
   findDraftCostOverflow,
   isDraftComplete,
   isStrictToolSchemaDeclared,
-  modelToDraft
+  modelToDraft,
+  setDraftModelName
 } from "./draft";
 
 function completionModel(
@@ -206,5 +208,102 @@ describe("image model drafts", () => {
 
     expect(isDraftComplete(draft, "image")).toBe(true);
     expect(isDraftComplete({ ...draft, displayName: "" }, "image")).toBe(false);
+  });
+});
+
+describe("shared context window declarations", () => {
+  it("keeps an untouched declaration out of an update, including a renamed route", () => {
+    const model = { ...completionModel(), context_window_tokens: 400000 };
+    const draft = modelToDraft(model, "completion");
+    expect(draft.contextWindowTokensStr).toBe("400000");
+    expect(completionUpdateCapacity(draft)).toEqual({});
+    draft.name = "new-route";
+    expect(completionUpdateCapacity(draft)).toEqual({});
+  });
+
+  it.each([
+    ["", null],
+    ["500000", 500000]
+  ] as const)("posts a touched %s window as %s", (raw, expected) => {
+    const draft = modelToDraft(completionModel(), "completion");
+    draft.contextWindowTokensStr = raw;
+    draft.contextWindowTouched = true;
+    expect(completionUpdateCapacity(draft)).toEqual({ context_window_tokens: expected });
+    expect(draftToWizardModel(draft).contextWindowTokens).toBe(expected);
+  });
+
+  it("clears a declaration when selecting another catalogue route and allows redeclaration", () => {
+    const draft = modelToDraft(completionModel(), "completion");
+    draft.contextWindowTokensStr = "400000";
+    draft.contextWindowTouched = true;
+    const next = applyCatalogModelToDraft(draft, { name: "route-b" }, "completion");
+    expect(next.contextWindowTokensStr).toBe("");
+    expect(next.contextWindowTouched).toBe(true);
+    expect(draftToWizardModel(next).contextWindowTokens).toBeNull();
+    // The blank field is what a save stores: the declaration is withdrawn.
+    expect(completionUpdateCapacity(next)).toEqual({ context_window_tokens: null });
+
+    next.contextWindowTokensStr = "600000";
+    next.contextWindowTouched = true;
+    expect(draftToWizardModel(next)).toMatchObject({
+      name: "route-b",
+      contextWindowTokens: 600000
+    });
+    expect(completionUpdateCapacity(next)).toEqual({ context_window_tokens: 600000 });
+  });
+
+  it("clears a declaration on manual rename and requires redeclaration even when returning", () => {
+    const draft = modelToDraft(completionModel(), "completion");
+    draft.contextWindowTokensStr = "400000";
+    draft.contextWindowTouched = true;
+    setDraftModelName(draft, " gpt-old ");
+    expect(draft.contextWindowTokensStr).toBe("400000");
+    setDraftModelName(draft, "route-b");
+    expect(draft.contextWindowTokensStr).toBe("");
+    expect(draft.contextWindowTouched).toBe(true);
+    expect(draftToWizardModel(draft).contextWindowTokens).toBeNull();
+    expect(completionUpdateCapacity(draft)).toEqual({ context_window_tokens: null });
+    // Returning to the original identifier does not resurrect the number the
+    // form no longer shows: the save withdraws it there too.
+    setDraftModelName(draft, "gpt-old");
+    expect(draft.contextWindowTokensStr).toBe("");
+    expect(completionUpdateCapacity(draft)).toEqual({ context_window_tokens: null });
+    setDraftModelName(draft, "route-b");
+    draft.contextWindowTokensStr = "600000";
+    draft.contextWindowTouched = true;
+    expect(draftToWizardModel(draft)).toMatchObject({
+      name: "route-b",
+      contextWindowTokens: 600000
+    });
+    expect(completionUpdateCapacity(draft)).toEqual({ context_window_tokens: 600000 });
+  });
+
+  it("keeps a declaration when catalogue selection preserves the submitted identifier", () => {
+    const draft = modelToDraft(completionModel(), "completion");
+    draft.contextWindowTokensStr = "400000";
+    draft.contextWindowTouched = true;
+    const next = applyCatalogModelToDraft(draft, { name: " gpt-old " }, "completion");
+    expect(draftToWizardModel(next).contextWindowTokens).toBe(400000);
+    expect(completionUpdateCapacity(next)).toEqual({ context_window_tokens: 400000 });
+  });
+
+  it("does not infer a shared window from catalogue input/output limits", () => {
+    const draft = applyCatalogModelToDraft(
+      createEmptyDraft("completion", "openai"),
+      {
+        name: "gpt",
+        max_input_tokens: 272000,
+        max_output_tokens: 128000
+      },
+      "completion"
+    );
+    expect(draft.contextWindowTokensStr).toBe("");
+    expect(draftToWizardModel(draft).contextWindowTokens).toBeNull();
+  });
+
+  it.each(["0", "-1", "1.5", "invalid"])("rejects an invalid declared window %s", (raw) => {
+    const draft = modelToDraft(completionModel(), "completion");
+    draft.contextWindowTokensStr = raw;
+    expect(isDraftComplete(draft, "completion")).toBe(false);
   });
 });

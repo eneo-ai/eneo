@@ -400,7 +400,7 @@ class ModelProviderService:
             provider.is_active = is_active
 
         if self._resolved_request_identity(provider) != request_identity_before:
-            await self.repository.clear_strict_tool_schema_declarations(provider_id)
+            await self.repository.clear_route_declarations(provider_id)
 
         return await self.repository.update(provider)
 

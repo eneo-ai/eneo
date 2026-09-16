@@ -109,7 +109,7 @@ class CompletionModelsRepository:
     async def update_model(
         self, model: CompletionModelUpdate
     ) -> CompletionModel | None:
-        model = await self._withdraw_strict_declaration_on_route_change(model)
+        model = await self._withdraw_declarations_on_route_change(model)
         if "model_kwargs_capabilities" in model.model_fields_set:
             persisted_capabilities = (
                 persist_explicit_model_kwargs_capabilities(
@@ -129,10 +129,10 @@ class CompletionModelsRepository:
             model, exclude=COMPLETION_MODEL_DB_WRITE_EXCLUDE
         )
 
-    async def _withdraw_strict_declaration_on_route_change(
+    async def _withdraw_declarations_on_route_change(
         self, model: CompletionModelUpdate
     ) -> CompletionModelUpdate:
-        """Drop a strict tool schema declaration this write invalidates.
+        """Drop route declarations this write invalidates.
 
         The declaration belongs to one provider route, so moving the route
         withdraws it. The same request may declare the new route explicitly.
@@ -143,7 +143,10 @@ class CompletionModelsRepository:
             for field in COMPLETION_MODEL_ROUTE_FIELDS
             if field in written
         }
-        if not provided or "supports_strict_tool_schema" in written:
+        if (
+            not provided
+            or {"supports_strict_tool_schema", "context_window_tokens"} <= written
+        ):
             return model
 
         current = (
@@ -171,7 +174,12 @@ class CompletionModelsRepository:
             provider_type=provider_type,
         ):
             return model
-        return model.model_copy(update={"supports_strict_tool_schema": False})
+        withdrawn: dict[str, object] = {}
+        if "supports_strict_tool_schema" not in written:
+            withdrawn["supports_strict_tool_schema"] = False
+        if "context_window_tokens" not in written:
+            withdrawn["context_window_tokens"] = None
+        return model.model_copy(update=withdrawn)
 
     async def delete_model(self, id: UUID) -> None:
         # Spaces are containers — a model "enabled" on a space without any

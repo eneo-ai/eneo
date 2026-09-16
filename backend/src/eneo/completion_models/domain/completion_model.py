@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, Optional
 from typing_extensions import override
 
 from eneo.ai_models.ai_model import AIModel
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     SupportedModelKwargs,
     coerce_model_kwargs_capabilities,
@@ -24,6 +25,12 @@ if TYPE_CHECKING:
 
 
 class CompletionModel(AIModel):
+    """C alone may be unknown in storage during capacity preparation.
+
+    Input/output limits retain integer resolution until consumer admission
+    supports unknown dimensions.
+    """
+
     def __init__(
         self,
         *,
@@ -51,6 +58,7 @@ class CompletionModel(AIModel):
         reasoning: bool,
         supports_tool_calling: bool = False,
         supports_strict_tool_schema: bool = False,
+        context_window_tokens: int | None = None,
         token_limit: Optional[int] = None,
         base_url: Optional[str] = None,
         litellm_model_name: Optional[str] = None,
@@ -125,6 +133,7 @@ class CompletionModel(AIModel):
         self.supports_strict_tool_schema = supports_strict_tool_schema
         self.max_input_tokens = resolved_max_input_tokens
         self.max_output_tokens = resolved_max_output_tokens
+        self.context_window_tokens = context_window_tokens
         self.deployment_name = deployment_name
         self.nr_billion_parameters = nr_billion_parameters
         self.input_cost_per_token = input_cost_per_token
@@ -135,6 +144,12 @@ class CompletionModel(AIModel):
         self.provider_type = provider_type
         self.migrated_to_model_id = migrated_to_model_id
         self.deleted_at = deleted_at
+
+    @property
+    def capacity(self) -> ModelCapacity:
+        return ModelCapacity(
+            self.max_input_tokens, self.max_output_tokens, self.context_window_tokens
+        )
 
     @property
     def can_access(self):
@@ -205,6 +220,7 @@ class CompletionModel(AIModel):
             name=completion_model_db.name,
             max_input_tokens=max_input_tokens,
             max_output_tokens=max_output_tokens,
+            context_window_tokens=completion_model_db.context_window_tokens,
             vision=completion_model_db.vision,
             family=completion_model_db.family,
             hosting=completion_model_db.hosting,

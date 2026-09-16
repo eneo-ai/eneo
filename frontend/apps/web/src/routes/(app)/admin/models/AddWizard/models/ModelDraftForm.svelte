@@ -38,6 +38,7 @@
     declareStrictToolSchema,
     isStrictToolSchemaDeclared,
     perMillionFromTokenCost,
+    setDraftModelName,
     type ModelDraftState,
     type ModelType
   } from "./draft";
@@ -163,7 +164,8 @@
     </Field.Label>
     <Input
       id="model-name"
-      bind:value={draft.name}
+      value={draft.name}
+      oninput={(event) => setDraftModelName(draft, event.currentTarget.value)}
       readonly={nameReadOnly}
       placeholder={modelType === "completion"
         ? m.model_identifier_placeholder_completion()
@@ -232,6 +234,25 @@
         max="10000000"
       />
       <Field.Description>{m.token_reference_output()}</Field.Description>
+    </Field.Field>
+
+    <Field.Field>
+      <Field.Label for="context-window-tokens">{m.context_window_tokens()}</Field.Label>
+      <Input
+        id="context-window-tokens"
+        type="number"
+        value={draft.contextWindowTokensStr}
+        oninput={(event) => {
+          draft.contextWindowTokensStr = event.currentTarget.value;
+          draft.contextWindowTouched = true;
+        }}
+        min="1"
+        step="1"
+        aria-describedby="context-window-help"
+      />
+      <Field.Description id="context-window-help"
+        >{m.context_window_tokens_help()}</Field.Description
+      >
     </Field.Field>
   </div>
 

@@ -241,6 +241,11 @@ class CompletionModelBase(BaseModel):
     family: Optional[str] = None
     max_input_tokens: int
     max_output_tokens: int
+    context_window_tokens: int | None = Field(
+        default=None,
+        gt=0,
+        description="Shared context window of input and output in tokens; null when not declared for this model route.",
+    )
     is_deprecated: bool
     nr_billion_parameters: Optional[int] = None
     hf_link: Optional[str] = None
@@ -378,6 +383,7 @@ class CompletionModelPublic(CompletionModel):
             family=completion_model.family,
             max_input_tokens=completion_model.max_input_tokens,
             max_output_tokens=completion_model.max_output_tokens,
+            context_window_tokens=completion_model.context_window_tokens,
             is_deprecated=completion_model.is_effectively_deprecated,
             nr_billion_parameters=completion_model.nr_billion_parameters,
             hf_link=completion_model.hf_link,

@@ -1,4 +1,7 @@
 {
+  "context_window_tokens": "Kontextfönster (tokens)",
+  "context_window_tokens_help": "Lämna tomt om modellens delade fönster inte är känt.",
+  "context_window_unknown": "okänt",
   "$schema": "https://inlang.com/schema/inlang-message-format",
   "flow_capsule_ai_speakers": "Föreslår talare",
   "flow_output_mode_invalid_speaker_mapping": "Granska transkript kräver text från föregående steg som indata och strukturerade data (JSON) som svarsformat.",
