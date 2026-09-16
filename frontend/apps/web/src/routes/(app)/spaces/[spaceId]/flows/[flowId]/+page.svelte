@@ -190,7 +190,8 @@
       stepNavigationRevision,
       isPublished,
       saveStatus,
-      validationErrors
+      validationErrors,
+      serverValidationIssue
     }
   } = flowEditor;
   const careDataPolicy = $derived(resolveFlowCareDataPolicy($resource.metadata_json));
@@ -686,6 +687,9 @@
         </p>
       </section>
       <FlowValidationBanner
+        repairIssue={$serverValidationIssue}
+        onRepairReference={(detail) =>
+          flowEditor.replaceInputBindingReference(detail.stepId, detail.target, detail.option)}
         errors={$validationErrors}
         steps={$update.steps}
         onNavigateToStep={(stepId) => {

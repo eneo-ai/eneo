@@ -1222,6 +1222,10 @@ def _validate_audio_document_transcript_chain(
     )
 
 
+def _binding_reference_context(field: str, reference: str) -> dict[str, object]:
+    return {"field": field, "reference": reference}
+
+
 def _validate_binding_references(
     *,
     input_bindings: FlowPersistedJsonObject,
@@ -1256,29 +1260,29 @@ def _validate_binding_references(
                     if reference.path_error_code == "invalid_step_reference_format"
                     else FlowGraphIssueCode.FLOW_INPUT_BINDING_UNSUPPORTED_KEY
                 )
-                context_key = (
-                    "reference"
-                    if code
-                    is FlowGraphIssueCode.FLOW_INPUT_BINDING_INVALID_STEP_REFERENCE
-                    else "key"
-                )
                 raise FlowStepValidationError(
                     f"Invalid input binding reference '{reference.expression}'.",
                     code=code.value,
-                    context={
-                        "field": "input_bindings.question",
-                        context_key: reference.expression,
-                    },
+                    context=(
+                        _binding_reference_context(
+                            "input_bindings.question", reference.expression
+                        )
+                        if code
+                        is FlowGraphIssueCode.FLOW_INPUT_BINDING_INVALID_STEP_REFERENCE
+                        else {
+                            "field": "input_bindings.question",
+                            "key": reference.expression,
+                        }
+                    ),
                     step_order=current_step_order,
                 )
             if reference.kind is TemplateReferenceKind.UNKNOWN:
                 raise FlowStepValidationError(
                     f"Invalid input binding reference '{reference.expression}'.",
                     code=FlowGraphIssueCode.FLOW_INPUT_BINDING_INVALID_STEP_REFERENCE.value,
-                    context={
-                        "field": "input_bindings.question",
-                        "reference": reference.expression,
-                    },
+                    context=_binding_reference_context(
+                        "input_bindings.question", reference.expression
+                    ),
                     step_order=current_step_order,
                 )
             if reference.kind is TemplateReferenceKind.FORM_FIELD and reference.tail:
@@ -1301,10 +1305,9 @@ def _validate_binding_references(
                 raise FlowStepValidationError(
                     f"Invalid input binding reference '{reference.expression}'.",
                     code=FlowGraphIssueCode.FLOW_INPUT_BINDING_INVALID_STEP_REFERENCE.value,
-                    context={
-                        "field": "input_bindings.question",
-                        "reference": reference.expression,
-                    },
+                    context=_binding_reference_context(
+                        "input_bindings.question", reference.expression
+                    ),
                     step_order=current_step_order,
                 )
             ordered_references.append(
@@ -1333,7 +1336,7 @@ def _validate_binding_references(
                 )
             )
     for expression, referenced_order, field in ordered_references:
-        context: dict[str, object] = {"field": field, "reference": expression}
+        context = _binding_reference_context(field, expression)
         if referenced_order is None:
             raise FlowStepValidationError(
                 f"Invalid input binding reference '{expression}'.",
@@ -1413,26 +1416,31 @@ def _validate_binding_references(
         return
 
     expressions = [
-        reference.expression
+        (reference.expression, "input_bindings.question")
         for reference in analyze_template(
             question or "",
             step_refs={},
             form_field_names=set(),
         )
     ]
-    expressions.extend(source_ref.step_ref for source_ref in source_refs)
-    for expression in expressions:
+    expressions.extend(
+        (source_ref.step_ref, f"input_bindings.source_refs[{index}].step_ref")
+        for index, source_ref in enumerate(source_refs)
+    )
+    for expression, field in expressions:
         if expression.startswith("step_input"):
             continue
         if not expression.startswith("step_"):
             continue
 
+        context = _binding_reference_context(field, expression)
         head = expression.split(".", maxsplit=1)[0]
         step_ref = _STEP_REFERENCE_PATTERN.match(head)
         if step_ref is None:
             raise FlowStepValidationError(
                 f"Invalid step reference '{head}' in input bindings.",
                 code=FlowGraphIssueCode.FLOW_INPUT_BINDING_INVALID_STEP_REFERENCE.value,
+                context=context,
                 step_order=current_step_order,
             )
 
@@ -1441,12 +1449,14 @@ def _validate_binding_references(
             raise FlowStepValidationError(
                 "Input bindings may only reference outputs from earlier steps.",
                 code=FlowGraphIssueCode.FLOW_INPUT_BINDING_FUTURE_STEP_REFERENCE.value,
+                context=context,
                 step_order=current_step_order,
             )
         if referenced_order not in available_orders:
             raise FlowStepValidationError(
                 f"Input binding references unknown step order: {referenced_order}.",
                 code=FlowGraphIssueCode.FLOW_INPUT_BINDING_UNKNOWN_STEP_ORDER.value,
+                context=context,
                 step_order=current_step_order,
             )
 

@@ -65,9 +65,12 @@ export type ParsedValidationError =
  * Structured identity of a server-side validation failure, read from the
  * error payload the backend now emits (context.issue_code + step_order).
  */
-export function parseServerValidationIdentity(error: {
-  response?: unknown;
-}): { code: string; stepOrder: number | null } | null {
+export function parseServerValidationIdentity(error: { response?: unknown }): {
+  code: string;
+  stepOrder: number | null;
+  field: string | null;
+  reference: string | null;
+} | null {
   // The backend's GeneralError body arrives as EneoError.response;
   // context.issue_code is the one validation discriminator — a symbolic
   // top-level code alone is NOT treated as validation, so unrelated domain
@@ -86,7 +89,10 @@ export function parseServerValidationIdentity(error: {
     typeof context.issue_code === "string" && context.issue_code ? context.issue_code : null;
   if (!code) return null;
   const stepOrder = typeof context.step_order === "number" ? context.step_order : null;
-  return { code, stepOrder };
+  const field = typeof context.field === "string" && context.field ? context.field : null;
+  const reference =
+    typeof context.reference === "string" && context.reference ? context.reference : null;
+  return { code, stepOrder, field, reference };
 }
 
 /**

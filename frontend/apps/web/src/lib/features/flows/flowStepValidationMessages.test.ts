@@ -24,7 +24,9 @@ describe("parseServerValidationIdentity", () => {
     );
     expect(parseServerValidationIdentity(error)).toEqual({
       code: "flow_http_post_output_must_be_terminal",
-      stepOrder: 3
+      stepOrder: 3,
+      field: null,
+      reference: null
     });
   });
 
@@ -43,7 +45,12 @@ describe("parseServerValidationIdentity", () => {
       { endpoint: "/api/v1/flows/x" }
     );
     const identity = parseServerValidationIdentity(error);
-    expect(identity).toEqual({ code: "flow_input_binding_runtime_input_unused", stepOrder: 3 });
+    expect(identity).toEqual({
+      code: "flow_input_binding_runtime_input_unused",
+      stepOrder: 3,
+      field: null,
+      reference: null
+    });
     // And the code translates (not the bare code, not the raw sentence).
     expect(getValidationIssueMessage(identity!.code)).not.toBe(identity!.code);
   });
@@ -84,3 +91,34 @@ describe("server validation banner keys", () => {
     }
   });
 });
+
+it.each([
+  {
+    field: "input_bindings.question",
+    reference: "step_9",
+    expectedField: "input_bindings.question",
+    expectedReference: "step_9"
+  },
+  { field: "", reference: 9, expectedField: null, expectedReference: null }
+])(
+  "reads only non-empty binding context strings",
+  ({ field, reference, expectedField, expectedReference }) => {
+    expect(
+      parseServerValidationIdentity({
+        response: {
+          context: {
+            issue_code: "flow_input_binding_unknown_step_order",
+            step_order: 3,
+            field,
+            reference
+          }
+        }
+      })
+    ).toEqual({
+      code: "flow_input_binding_unknown_step_order",
+      stepOrder: 3,
+      field: expectedField,
+      reference: expectedReference
+    });
+  }
+);

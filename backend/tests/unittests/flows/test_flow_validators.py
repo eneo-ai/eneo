@@ -712,26 +712,58 @@ def test_validate_steps_publish_rejects_invalid_numeric_label_and_authored_quest
     assert exc.context == _expected_boundary_context(exc, _expected_context)
 
 
+@pytest.mark.parametrize("location", ["question", "source_ref"])
 @pytest.mark.parametrize(
-    ("question", "code"),
+    ("reference", "code"),
     [
-        ("{{ step_bad }}", "flow_input_binding_invalid_step_reference"),
-        ("{{ step_2 }}", "flow_input_binding_future_step_reference"),
-        ("{{ step_0 }}", "flow_input_binding_unknown_step_order"),
+        ("step_bad", "flow_input_binding_invalid_step_reference"),
+        ("step_9", "flow_input_binding_future_step_reference"),
+        ("step_0", "flow_input_binding_unknown_step_order"),
+        ("step_9.output.structured.title", "flow_input_binding_future_step_reference"),
     ],
 )
-def test_validate_steps_draft_preserves_numeric_reference_rejection(
-    question: str,
+def test_validate_steps_draft_preserves_binding_repair_identity(
+    location: str,
+    reference: str,
     code: str,
 ) -> None:
-    _assert_validate_steps_rejects(
-        [
-            _step(1),
-            _step(2, input_bindings={"question": question}),
-        ],
+    if location == "question":
+        bindings = {"question": "Use {{" + reference + "}}"}
+        field = "input_bindings.question"
+        repaired_bindings = {"question": "Use {{step_1}}"}
+    else:
+        bindings = {
+            "source_refs": [
+                {"step_ref": "step_1", "output": "text"},
+                {"step_ref": reference, "output": "text"},
+            ]
+        }
+        field = "input_bindings.source_refs[1].step_ref"
+        repaired_bindings = {
+            "source_refs": [
+                {"step_ref": "step_1", "output": "text"},
+                {"step_ref": "step_1", "output": "text"},
+            ]
+        }
+    producer = _step(1, output_type="text")
+    consumer = _step(2, input_bindings=bindings)
+    exc = _assert_validate_steps_rejects(
+        [producer, consumer],
         expected_type=FlowStepValidationError,
         match="step",
         code=code,
+        step_order=2,
+        require_complete_template_fill_config=False,
+    )
+    assert exc.context == {
+        "issue_code": code,
+        "step_order": 2,
+        "field": field,
+        "reference": reference,
+    }
+    validate_steps(
+        [producer, consumer.model_copy(update={"input_bindings": repaired_bindings})],
+        require_complete_template_fill_config=False,
     )
 
 
@@ -2347,3 +2379,53 @@ def test_mapped_per_item_step_rejects_explicit_underlag() -> None:
         _validate_step_mapped_execution(
             step=flow_step_validation_view_from_flow_step(step)
         )
+
+
+@pytest.mark.parametrize("publish_strict", [False, True])
+@pytest.mark.parametrize(
+    "bindings",
+    [
+        {"question": "{{step_1}}"},
+        {"question": "{{step_2.output.structured.title}}"},
+        {"question": "{{step_2.output.structured.items}}"},
+        {"source_refs": [{"step_ref": "step_1", "output": "text"}]},
+        # The shape the editor's repair produces for a source ref: a scalar
+        # field, never an array (arrays need an item template it cannot author).
+        {
+            "source_refs": [
+                {"step_ref": "step_2", "output": "structured", "field_path": "title"}
+            ]
+        },
+    ],
+)
+def test_validate_steps_accepts_reference_repair_fixtures(
+    bindings: dict, publish_strict: bool
+) -> None:
+    validate_steps(
+        [
+            _step(1, output_type="text"),
+            _step(
+                2,
+                output_contract={
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string"},
+                        "items": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {"title": {"type": "string"}},
+                            },
+                        },
+                    },
+                },
+            ),
+            _step(
+                3,
+                input_bindings=bindings,
+                output_mode="compose_text",
+                output_type="text",
+            ),
+        ],
+        require_complete_template_fill_config=publish_strict,
+    )

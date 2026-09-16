@@ -68,6 +68,8 @@ import {
   computeStepConfigValidationIssues,
   hasDeletedStepReferences
 } from "./flowStepConfigValidation";
+import { replaceBindingReference, type DanglingBindingReference } from "./flowInputBindingRepair";
+import type { FlowInputMaterialOption } from "./flowInputBindings";
 import { rewriteStepBindings } from "./flowVariableReferenceRewriter";
 import { computeStepOrderRemap } from "./flowStepOrderRemap";
 
@@ -186,6 +188,7 @@ function createFlowEditor(data: FlowEditorInitData) {
 
   const activeStepId = writable<string | null>(null);
   const validationErrors = writable<Map<string, string[]>>(new Map());
+  const serverValidationIssue = writable<ReturnType<typeof parseServerValidationIdentity>>(null);
   const saveStatus = writable<"saved" | "saving" | "unsaved">("saved");
   // The step the user just created: the editor opens its task chapter and hands
   // it over once (name focused and selected). `stepId` follows the temp→real id
@@ -255,6 +258,7 @@ function createFlowEditor(data: FlowEditorInitData) {
     if (!(error instanceof EneoError)) return false;
     const identity = parseServerValidationIdentity(error);
     if (!identity) return false;
+    serverValidationIssue.set(identity);
     const rawMessage = error.getReadableMessage();
     // The server raises only the FIRST failing issue, so the namespace is
     // replaced atomically: the banner always shows the latest rejection,
@@ -269,6 +273,7 @@ function createFlowEditor(data: FlowEditorInitData) {
   }
 
   function clearServerValidationErrors() {
+    serverValidationIssue.set(null);
     replaceFlowValidationErrors(serverValidationPrefix, new Map());
   }
   function setAssistantValidationError(assistantId: string, message: string | null) {
@@ -553,6 +558,22 @@ function createFlowEditor(data: FlowEditorInitData) {
       ...resource,
       steps: nextSteps
     }));
+  }
+
+  function replaceInputBindingReference(
+    stepId: string,
+    target: DanglingBindingReference,
+    option: FlowInputMaterialOption
+  ): boolean {
+    const steps = get(editor.state.update).steps ?? [];
+    const index = steps.findIndex((step) => step.id === stepId);
+    if (index === -1) return false;
+    const step = steps[index];
+    const inputBindings = replaceBindingReference(step, target, option);
+    if (!inputBindings) return false;
+    replaceStepAtIndex(index, { ...step, input_bindings: inputBindings });
+    scheduleAutoSave();
+    return true;
   }
 
   async function removeStepAtIndex(index: number): Promise<void> {
@@ -1080,6 +1101,7 @@ function createFlowEditor(data: FlowEditorInitData) {
       newStepOpenIntent: readonly(newStepOpenIntent),
       stepNavigationRevision: readonly(stepNavigationRevision),
       validationErrors,
+      serverValidationIssue: readonly(serverValidationIssue),
       saveStatus: unifiedSaveStatus,
       isPublished
     },
@@ -1102,6 +1124,7 @@ function createFlowEditor(data: FlowEditorInitData) {
     setName,
     setDescription,
     replaceStepAtIndex,
+    replaceInputBindingReference,
     removeStepAtIndex,
     moveStepAtIndex,
     replaceFormSchemaFields,

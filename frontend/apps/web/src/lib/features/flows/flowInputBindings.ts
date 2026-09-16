@@ -15,7 +15,7 @@ const SUPPORTED_SOURCE_REF_KEYS = new Set([
   "item_template"
 ]);
 const STEP_REF_PATTERN = /^step_(\d+)$/;
-const DELETED_STEP_REF_PATTERN = /^step_(\d+)_deleted$/;
+export const DELETED_STEP_REF_PATTERN = /^step_(\d+)_deleted$/;
 
 export type FlowInputBindingSourceRef = {
   stepRef: string;

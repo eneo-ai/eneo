@@ -5,6 +5,7 @@ import { assert, beforeEach, describe, expect, it, vi } from "vitest";
 import { EneoError } from "@eneo/eneo-js";
 import type { Flow, FlowStep, Eneo } from "@eneo/eneo-js";
 
+import { repairOptionsFor } from "./flowInputBindingRepair";
 import { toast } from "$lib/components/toast";
 import { m } from "$lib/paraglide/messages";
 import {
@@ -1846,4 +1847,131 @@ describe("FlowEditor server validation routing", () => {
     expect(editor.reportServerValidationError(plain)).toBe(false);
     expect(get(editor.state.validationErrors).size).toBe(0);
   });
+});
+
+describe("FlowEditor binding repair", () => {
+  it("exposes the server binding identity and clears it after a successful save", async () => {
+    vi.useFakeTimers();
+    try {
+      const flow = makeFlow();
+      const flowUpdate = vi.fn(async () => flow);
+      const editor = createFlowEditor({ flow, eneo: makeEneo({ flowUpdate }) });
+      const code = "flow_input_binding_unknown_step_order";
+      const error = new EneoError("Unknown step", "RESPONSE", 400, 0, {
+        message: "Unknown step",
+        eneo_error_code: 0,
+        context: {
+          issue_code: code,
+          step_order: 3,
+          field: "input_bindings.question",
+          reference: "step_9"
+        }
+      });
+      expect(editor.reportServerValidationError(error)).toBe(true);
+      expect(get(editor.state.serverValidationIssue)).toEqual({
+        code,
+        stepOrder: 3,
+        field: "input_bindings.question",
+        reference: "step_9"
+      });
+      editor.setName("Repaired flow");
+      await vi.advanceTimersByTimeAsync(600);
+      expect(flowUpdate).toHaveBeenCalledOnce();
+      expect(get(editor.state.serverValidationIssue)).toBeNull();
+      expect(
+        [...get(editor.state.validationErrors).keys()].filter((key) =>
+          key.startsWith("flow:server:")
+        )
+      ).toEqual([]);
+      editor.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+it("repairs exactly one step binding and autosaves it with the draft revision", async () => {
+  vi.useFakeTimers();
+  try {
+    const steps = [
+      makeStep(1),
+      makeStep(2, {
+        input_bindings: {
+          question: "Use {{step_9}}; keep {{step_1}}.",
+          source_refs: [{ step_ref: "step_1", output: "text", label: "Evidence" }]
+        }
+      }),
+      makeStep(3)
+    ];
+    const flow = makeFlow(null, { steps, draft_revision: 7 });
+    const flowUpdate = vi.fn(async (...args: unknown[]) => {
+      const { update } = args[0] as { update: Partial<Flow> };
+      return { ...flow, ...update, draft_revision: 8 };
+    });
+    const editor = createFlowEditor({ flow, eneo: makeEneo({ flowUpdate }) });
+    const option = repairOptionsFor(steps[1], steps, {
+      location: { kind: "question" },
+      token: "step_9"
+    })[0];
+    expect(
+      editor.replaceInputBindingReference(
+        "step-2",
+        { location: { kind: "question" }, token: "step_9" },
+        option
+      )
+    ).toBe(true);
+    const expectedSteps = [
+      steps[0],
+      {
+        ...steps[1],
+        input_bindings: { ...steps[1].input_bindings, question: "Use {{step_1}}; keep {{step_1}}." }
+      },
+      steps[2]
+    ];
+    expect(JSON.stringify(get(editor.state.update).steps)).toBe(JSON.stringify(expectedSteps));
+    expect(flowUpdate).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(600);
+    expect(flowUpdate).toHaveBeenCalledOnce();
+    expect(flowUpdate.mock.calls[0][0]).toMatchObject({
+      update: { expected_revision: 7, steps: expectedSteps }
+    });
+    editor.destroy();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("leaves the draft and save queue untouched when a binding repair is blocked", async () => {
+  vi.useFakeTimers();
+  try {
+    const steps = [
+      makeStep(1),
+      makeStep(2, { input_bindings: { question: "{{step_9}}", unsupported: true } })
+    ];
+    const flowUpdate = vi.fn();
+    const editor = createFlowEditor({
+      flow: makeFlow(null, { steps }),
+      eneo: makeEneo({ flowUpdate })
+    });
+    const before = JSON.stringify(get(editor.state.update));
+    const option = repairOptionsFor(steps[1], steps, {
+      location: { kind: "question" },
+      token: "step_9"
+    })[0];
+    for (const id of ["step-2", "missing"]) {
+      expect(
+        editor.replaceInputBindingReference(
+          id,
+          { location: { kind: "question" }, token: "step_9" },
+          option
+        )
+      ).toBe(false);
+    }
+    expect(JSON.stringify(get(editor.state.update))).toBe(before);
+    await vi.advanceTimersByTimeAsync(600);
+    expect(flowUpdate).not.toHaveBeenCalled();
+    editor.destroy();
+  } finally {
+    vi.useRealTimers();
+  }
 });

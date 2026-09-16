@@ -4,10 +4,18 @@
   import { IconInfo } from "@eneo/icons/info";
   import { fade, slide } from "svelte/transition";
   import { m } from "$lib/paraglide/messages";
+  import * as Select from "$lib/components/ui/select/index.js";
+  import {
+    findDanglingBindingReferences,
+    repairOptionsFor,
+    type DanglingBindingReference
+  } from "$lib/features/flows/flowInputBindingRepair";
+  import type { FlowInputMaterialOption } from "$lib/features/flows/flowInputBindings";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import {
     getValidationIssueMessage,
     parseValidationError,
+    type parseServerValidationIdentity,
     type ParsedValidationError
   } from "$lib/features/flows/flowStepValidationMessages";
 
@@ -17,16 +25,31 @@
     errors,
     steps = [],
     onNavigateToStep,
+    repairIssue = null,
+    onRepairReference,
     isExpanded = $bindable(false)
   }: {
     errors: Map<string, string[]>;
     steps?: FlowStep[];
     onNavigateToStep?: (stepId: string) => void;
+    repairIssue?: ReturnType<typeof parseServerValidationIdentity>;
+    onRepairReference?: (detail: {
+      stepId: string;
+      target: DanglingBindingReference;
+      option: FlowInputMaterialOption;
+    }) => void;
     isExpanded?: boolean;
   } = $props();
 
   const errorCount = $derived(errors.size);
   const hasErrors = $derived(errorCount > 0);
+
+  type ReferenceRepair = {
+    stepId: string;
+    stepLabel: string;
+    target: DanglingBindingReference;
+    options: FlowInputMaterialOption[];
+  };
 
   type DisplayIssue = {
     key: string;
@@ -36,6 +59,7 @@
     message: string;
     /** Raw technical sentence, kept for debugging when it adds anything. */
     detail?: string;
+    repairs?: ReferenceRepair[];
   };
 
   const displayIssues = $derived.by(() => {
@@ -57,6 +81,7 @@
         return {
           key,
           stepOrder: parsed.stepOrder,
+          repairs: step ? serverRepairs(key, parsed, step) : [],
           stepName:
             step?.user_description ||
             m.flow_step_fallback_label({ order: String(parsed.stepOrder) }),
@@ -86,6 +111,10 @@
         return {
           key,
           stepOrder: null,
+          repairs:
+            parsed.code === "deleted-step-reference"
+              ? steps.flatMap((step) => repairsForStep(step, { code: parsed.code }))
+              : [],
           stepName: "",
           stepId: undefined,
           message: translated !== parsed.code ? translated : (raw ?? parsed.message),
@@ -93,6 +122,53 @@
         };
       }
     }
+  }
+
+  function repairsForStep(
+    step: FlowStep,
+    issue: Parameters<typeof findDanglingBindingReferences>[1]
+  ): ReferenceRepair[] {
+    const stepId = step.id;
+    if (!stepId || !onRepairReference) return [];
+    const targets = findDanglingBindingReferences(step, issue);
+    return targets.map((target) => ({
+      stepId,
+      stepLabel: m.flow_validation_replace_reference_option({
+        step: String(step.step_order),
+        name: step.user_description || m.flow_step_unnamed()
+      }),
+      target,
+      options: repairOptionsFor(step, steps, target)
+    }));
+  }
+
+  function serverRepairs(
+    key: string,
+    issue: Extract<ParsedValidationError, { kind: "step" }>,
+    step: FlowStep
+  ): ReferenceRepair[] {
+    if (
+      !key.startsWith("flow:server:") ||
+      repairIssue?.code !== issue.code ||
+      repairIssue.stepOrder !== issue.stepOrder ||
+      ![
+        "flow_input_binding_invalid_step_reference",
+        "flow_input_binding_unknown_step_order",
+        "flow_input_binding_future_step_reference"
+      ].includes(issue.code)
+    )
+      return [];
+    return repairsForStep(step, repairIssue);
+  }
+
+  function optionLabel(option: FlowInputMaterialOption): string {
+    const detail = {
+      step: String(option.sourceStepOrder),
+      name: option.sourceStepName || m.flow_step_unnamed()
+    };
+    return option.fieldPath
+      ? m.flow_validation_replace_reference_option_field({ ...detail, field: option.fieldPath })
+      : m.flow_validation_replace_reference_option(detail);
   }
 
   function handleNavigate(stepId: string | undefined) {
@@ -168,6 +244,46 @@
                       <span class="mt-1 block leading-relaxed break-words">{issue.detail}</span>
                     </details>
                   {/if}
+                  {#each issue.repairs ?? [] as repair (`${repair.stepId}:${repair.target.location.kind}:${repair.target.location.kind === "source_ref" ? repair.target.location.index : ""}:${repair.target.token}`)}
+                    <div class="mt-2 flex min-w-0 flex-col gap-2">
+                      <span class="text-sm font-medium">{repair.stepLabel}</span>
+                      <p class="text-secondary text-xs break-words">
+                        {m.flow_validation_replace_reference_from({ token: repair.target.token })}
+                      </p>
+                      {#if repair.options.length > 0}
+                        <Select.Root
+                          type="single"
+                          onValueChange={(value) => {
+                            const option = repair.options.find(
+                              (candidate) => candidate.key === value
+                            );
+                            if (option)
+                              onRepairReference?.({
+                                stepId: repair.stepId,
+                                target: repair.target,
+                                option
+                              });
+                          }}
+                        >
+                          <Select.Trigger
+                            class="w-full"
+                            aria-label={m.flow_validation_replace_reference()}
+                          >
+                            {m.flow_validation_replace_reference()}
+                          </Select.Trigger>
+                          <Select.Content>
+                            <Select.Group>
+                              {#each repair.options as option (option.key)}
+                                <Select.Item value={option.key} label={optionLabel(option)}>
+                                  {optionLabel(option)}
+                                </Select.Item>
+                              {/each}
+                            </Select.Group>
+                          </Select.Content>
+                        </Select.Root>
+                      {/if}
+                    </div>
+                  {/each}
                 </div>
                 {#if issue.stepId && onNavigateToStep}
                   <button
