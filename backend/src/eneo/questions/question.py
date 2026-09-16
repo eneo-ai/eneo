@@ -12,6 +12,7 @@ from pydantic import (
 )
 
 from eneo.ai_models.completion_models.completion_model import CompletionModel
+from eneo.authentication.signed_urls import redact_reference_tokens
 from eneo.files.file_models import File, FileMetadata, FilePublic
 from eneo.info_blobs.info_blob import InfoBlobInDB, InfoBlobPublicNoText
 from eneo.logging.logging import (
@@ -90,6 +91,20 @@ class ToolCallInfo(BaseModel):
     # on later turns. Absent on rows persisted before this field was introduced;
     # such rows fall back to text-only replay (the model won't see the tool use).
     result: Optional[str] = None
+
+    @field_validator("arguments", "result", mode="after")
+    @classmethod
+    def _redact_reference_tokens(cls, value: Any) -> Any:
+        """Strip signed download tokens from persisted and displayed tool data.
+
+        Reference URLs reach tools as bearer capabilities. The tool already
+        used them by the time this record exists, and later turns receive
+        freshly minted links in their reference entries, so keeping the token
+        here would only extend its exposure (conversation history, the tool
+        panel, the tool-result endpoint, provider replay).
+        """
+        return redact_reference_tokens(value)
+
     # The prefixed tool identifier the LLM sees when calling (e.g.
     # `server__tool`). Needed for replay so the tool_use name matches the
     # currently-registered tools. `tool_name` above is the unprefixed/display

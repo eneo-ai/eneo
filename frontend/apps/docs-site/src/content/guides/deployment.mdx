@@ -500,6 +500,17 @@ is the only credential: it names the file and tenant, is signed with
 Treat every MCP server that receives file links as a recipient of the file
 contents, and enable such servers only where that data flow is acceptable.
 
+Two controls limit the exposure of a link:
+
+- Every redemption is audited as `file_original_downloaded` under **File
+  operations**, with the caller's address and user agent, next to the
+  `file_original_download_link_created` entry written when the link was
+  minted.
+- The token is stripped from tool-call arguments and results before they are
+  stored, shown in the chat, or replayed to the model. Only the tool that was
+  called ever holds the live link. Deleting the file revokes every
+  outstanding link for it.
+
 Choose `FILE_REFERENCE_BASE_URL` by where the MCP servers run:
 
 | MCP servers run | `FILE_REFERENCE_BASE_URL` | Notes |

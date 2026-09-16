@@ -5,7 +5,7 @@ import time
 from collections.abc import AsyncGenerator
 from hashlib import sha256
 from typing import TYPE_CHECKING, cast
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
@@ -748,6 +748,14 @@ async def test_original_audio_range_reads_only_verified_chunks_from_real_store(
                 def file_service(*, user):
                     assert user is None
                     return service
+
+                @staticmethod
+                def session():
+                    return session
+
+                @staticmethod
+                def audit_service():
+                    return AsyncMock()
 
             token = generate_file_original_download_token(
                 file_id=file_id,

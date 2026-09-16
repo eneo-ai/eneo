@@ -67,6 +67,8 @@ from eneo.users.user import UserInDB
 
 @dataclass(frozen=True, slots=True)
 class FileDownload:
+    file_id: UUID
+    tenant_id: UUID
     chunks: AsyncGenerator[bytes]
     content_length: int
     media_type: str
@@ -803,6 +805,8 @@ class FileService:
         )
 
         return FileDownload(
+            file_id=metadata.id,
+            tenant_id=metadata.tenant_id,
             chunks=opened.chunks,
             content_length=opened.content_length,
             media_type=opened.media_type,
@@ -829,6 +833,8 @@ class FileService:
             return None
 
         return FileDownload(
+            file_id=metadata.id,
+            tenant_id=metadata.tenant_id,
             chunks=stream(),
             content_length=content.size_bytes,
             media_type=content.media_type,
@@ -886,6 +892,8 @@ class FileService:
             return None
 
         return FileDownload(
+            file_id=metadata.id,
+            tenant_id=metadata.tenant_id,
             chunks=stream(),
             content_length=len(content.payload),
             media_type=content.media_type,

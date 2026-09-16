@@ -8551,6 +8551,7 @@ export interface components {
       | "file_uploaded"
       | "file_deleted"
       | "file_original_download_link_created"
+      | "file_original_downloaded"
       | "file_signed_url_minted"
       | "info_blob_original_download_link_created"
       | "website_created"
