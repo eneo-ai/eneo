@@ -28,7 +28,7 @@ const release: Release = {
   entries: [entry("a"), { ...entry("b"), showMe: undefined }, entry("c", "admin"), entry("d")]
 };
 const steps = tourSteps(release, true, "en");
-const labels = { done: "Done", progress: "Step {{current}}" };
+const labels = { done: "Done", progress: "Step {{current}} of {{total}}" };
 let tour: ReturnType<typeof createWhatsNewTour>;
 
 beforeEach(() => {
@@ -95,7 +95,10 @@ describe("what's new walkthrough", () => {
     preloadData.mockResolvedValueOnce(result);
     await tour.start(steps, labels);
     expect(goto.mock.calls.map(([href]) => href)).toEqual(["/c", "/d"]);
-    expect(spotlight.mock.calls.map(([, options]) => options.progress?.index)).toEqual([0, 1]);
+    expect(spotlight.mock.calls.map(([, options]) => options.progress)).toEqual([
+      { index: 0, total: 2 },
+      { index: 1, total: 2 }
+    ]);
   });
 
   it("skips missing anchors in the direction of travel", async () => {
@@ -104,6 +107,10 @@ describe("what's new walkthrough", () => {
     }
     await tour.start(steps, labels);
     expect(goto.mock.calls.map(([href]) => href)).toEqual(["/a", "/c", "/d", "/c", "/a", "/d"]);
+    // The total shrinks once a stop is found unreachable.
+    expect(spotlight.mock.calls.map(([, options]) => options.progress?.total)).toEqual([
+      3, 3, 3, 3, 2, 2
+    ]);
     expect(spotlight.mock.calls.at(-1)?.[1].progress?.index).toBe(1);
   });
 

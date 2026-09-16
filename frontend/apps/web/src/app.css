@@ -296,6 +296,17 @@ body.print-mode > .printable-document {
   max-width: 22rem;
   padding: 1rem 1.1rem;
 }
+.driver-popover.eneo-spotlight .eneo-spotlight-version {
+  display: inline-block;
+  margin-bottom: 0.5rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 9999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-stronger);
+  background: color-mix(in srgb, var(--accent-default) 10%, transparent);
+}
 .driver-popover.eneo-spotlight .driver-popover-title {
   font-size: 1rem;
   font-weight: 600;

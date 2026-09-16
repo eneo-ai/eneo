@@ -89,7 +89,8 @@ export function createWhatsNewTour() {
           spotlight(step, {
             labels,
             signal,
-            // No total is shown: later pages have not been loaded yet.
+            // The total counts stops not yet found unreachable; later pages
+            // are checked on arrival, so it can shrink mid-walkthrough.
             progress: candidates.length > 1 ? { index, total: steps.length } : undefined
           }),
           signal

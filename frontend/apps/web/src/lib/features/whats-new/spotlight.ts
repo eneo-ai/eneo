@@ -11,8 +11,10 @@ export interface SpotlightLabels {
   done: string;
   next?: string;
   previous?: string;
-  /** Ordinal only: later pages have not been checked yet. */
+  /** Template with {{current}} and {{total}}. */
   progress?: string;
+  /** Badge above the title, e.g. "v2.1.1": which release the stop belongs to. */
+  version?: string;
 }
 
 interface SpotlightOptions {
@@ -71,11 +73,16 @@ export async function spotlight(
       popoverClass: "eneo-spotlight",
       steps: [{ element, popover: { title: step.title, description: step.description } }],
       onPopoverRender: (popover) => {
+        if (labels.version) {
+          const badge = document.createElement("span");
+          badge.className = "eneo-spotlight-version";
+          badge.textContent = labels.version;
+          popover.title.before(badge);
+        }
         if (progress) {
-          popover.progress.textContent = (labels.progress ?? "{{current}}").replace(
-            "{{current}}",
-            String(progress.index + 1)
-          );
+          popover.progress.textContent = (labels.progress ?? "{{current}} / {{total}}")
+            .replace("{{current}}", String(progress.index + 1))
+            .replace("{{total}}", String(progress.total));
           if (!isFirst) {
             popover.previousButton.disabled = false;
             popover.previousButton.classList.remove("driver-popover-btn-disabled");

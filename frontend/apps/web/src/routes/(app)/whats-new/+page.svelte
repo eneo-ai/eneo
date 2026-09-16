@@ -79,12 +79,15 @@
 
   // Both navigate away; when an anchor is missing on its page the user
   // still lands on the right screen, which is the documented fallback.
-  async function handleShowMe(entry: ReleaseEntry) {
+  async function handleShowMe(release: Release, entry: ReleaseEntry) {
     if (!entry.showMe) return;
     try {
       const outcome = await start(
         [{ ...entry.showMe, title: text(entry.title), description: text(entry.body) }],
-        { done: m.whats_new_spotlight_done() }
+        {
+          done: m.whats_new_spotlight_done(),
+          version: m.whats_new_tour_version({ version: release.version })
+        }
       );
       if (outcome === "unavailable") toast.info(m.whats_new_show_me_unavailable());
     } catch (error) {
@@ -97,7 +100,8 @@
       done: m.whats_new_spotlight_done(),
       next: m.whats_new_tour_next(),
       previous: m.whats_new_tour_previous(),
-      progress: m.whats_new_tour_progress({ current: "{{current}}" })
+      progress: m.whats_new_tour_progress({ current: "{{current}}", total: "{{total}}" }),
+      version: m.whats_new_tour_version({ version: release.version })
     })
       .then((outcome) => {
         if (outcome === "unavailable") toast.info(m.whats_new_show_me_unavailable());
@@ -297,7 +301,7 @@
                         variant="outline"
                         size="sm"
                         disabled={$running}
-                        onclick={() => handleShowMe(entry)}
+                        onclick={() => handleShowMe(current, entry)}
                       >
                         {m.whats_new_show_me()}
                       </Button>

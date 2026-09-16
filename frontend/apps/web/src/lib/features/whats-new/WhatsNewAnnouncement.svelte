@@ -70,13 +70,14 @@
   // The primary action walks through the release's Show me stops; a release
   // without any falls back to the page.
   function primary() {
-    if (steps.length === 0) return openWhatsNew();
+    if (!release || steps.length === 0) return openWhatsNew();
     open = false;
     start(steps, {
       done: m.whats_new_spotlight_done(),
       next: m.whats_new_tour_next(),
       previous: m.whats_new_tour_previous(),
-      progress: m.whats_new_tour_progress({ current: "{{current}}" })
+      progress: m.whats_new_tour_progress({ current: "{{current}}", total: "{{total}}" }),
+      version: m.whats_new_tour_version({ version: release.version })
     })
       .then((outcome) => {
         if (outcome === "unavailable") {

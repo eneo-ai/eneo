@@ -18,7 +18,13 @@ const steps = ["a", "b"].map((anchor) => ({
   title: `Feature ${anchor}`,
   description: `Description ${anchor}`
 }));
-const labels = { done: "Done", next: "Next", previous: "Previous", progress: "Step {{current}}" };
+const labels = {
+  done: "Done",
+  next: "Next",
+  previous: "Previous",
+  progress: "Step {{current}} of {{total}}",
+  version: "v2.2.0"
+};
 let tour: ReturnType<typeof createWhatsNewTour>;
 let main: HTMLElement;
 let result: ReturnType<typeof tour.start> | undefined;
@@ -63,11 +69,18 @@ describe("walkthrough navigation and spotlight contract", () => {
     expect(preloadData).toHaveBeenCalledExactlyOnceWith("/a");
     expect(goto).toHaveBeenCalledExactlyOnceWith("/a");
     expect(document.activeElement).toBe(document.querySelector(".driver-popover-next-btn"));
+    expect(document.querySelector(".eneo-spotlight-version")?.textContent).toBe("v2.2.0");
+    expect(document.querySelector(".driver-popover-progress-text")?.textContent).toBe(
+      "Step 1 of 2"
+    );
     click(".driver-popover-next-btn");
     await vi.waitFor(() =>
       expect(document.querySelector(".driver-popover-title")?.textContent).toBe("Feature b")
     );
-    expect(document.querySelector(".driver-popover-progress-text")?.textContent).toBe("Step 2");
+    expect(document.querySelector(".eneo-spotlight-version")?.textContent).toBe("v2.2.0");
+    expect(document.querySelector(".driver-popover-progress-text")?.textContent).toBe(
+      "Step 2 of 2"
+    );
     expect(document.querySelector<HTMLButtonElement>(".driver-popover-prev-btn")?.disabled).toBe(
       false
     );
