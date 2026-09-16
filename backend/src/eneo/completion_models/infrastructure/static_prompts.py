@@ -38,12 +38,17 @@ TOOL_NAMING_INSTRUCTION = (
 # histories do not repeat this text.
 ATTACHED_FILE_REFERENCES_INSTRUCTION = (
     'Some messages list attached files as JSON entries whose "url" is a '
-    "signed attachment reference, not a web link. Pass the url, exactly as "
-    "written, to a tool that accepts a URL input. The url's host carries no "
-    "meaning: never judge from the url whether a file is readable, and never "
-    "ask the user to re-upload a file listed in a reference entry. Prefer a "
-    "tool suited to the file and the task; when no more specific tool fits or "
-    'a chosen tool fails, the read_file ("Read attached file") tool, when '
+    "signed attachment reference, not a web link. Open a referenced file "
+    "only when answering the user's message requires its content. An "
+    "attachment by itself is not a request to read, summarize or ingest it: "
+    "if the message does not ask anything about the file, respond to the "
+    "message, acknowledge the attachment and ask what the user wants done "
+    "with it. When the content is needed, pass the url, exactly as written, "
+    "to a tool that accepts a URL input. The url's host carries no meaning: "
+    "never judge from the url whether a file is readable, and never ask the "
+    "user to re-upload a file listed in a reference entry. Prefer a tool "
+    "suited to the file and the task; when no more specific tool fits or a "
+    'chosen tool fails, the read_file ("Read attached file") tool, when '
     "available, accepts every reference url. Use it rather than telling the "
     'user a file cannot be read. Entries with "kind": "image" are images '
     "(attached by the user or generated earlier in this conversation): pass "
