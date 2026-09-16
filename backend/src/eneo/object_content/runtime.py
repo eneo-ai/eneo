@@ -7,6 +7,7 @@ from enum import StrEnum
 from time import monotonic
 from uuid import UUID
 
+import asyncpg
 from sqlalchemy import exists, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -68,6 +69,18 @@ _ACTIVE_CONTENT_STATES = tuple(
 _READINESS_CACHE_SECONDS = 1.0
 
 logger = get_logger(__name__)
+
+# Connection-time failures reach the pool unwrapped: a refused socket is an
+# OSError, but a server that is still starting or shutting down answers the
+# handshake with an asyncpg PostgresError (e.g. CannotConnectNowError), and a
+# stalled handshake times out. All of them mean "database unavailable".
+_DATABASE_OUTAGE_ERRORS: tuple[type[BaseException], ...] = (
+    OSError,
+    SQLAlchemyError,
+    asyncpg.PostgresError,
+    asyncpg.InterfaceError,
+    TimeoutError,
+)
 
 
 class ObjectContentReadinessCode(StrEnum):
@@ -610,7 +623,7 @@ class ObjectContentRuntime:
                     )
                 )
                 requires_object_store = bool(result.scalar_one())
-        except (OSError, SQLAlchemyError) as error:
+        except _DATABASE_OUTAGE_ERRORS as error:
             raise ObjectContentUnavailableError(
                 "Unable to verify object-content authority state"
             ) from error

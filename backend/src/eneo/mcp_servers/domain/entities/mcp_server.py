@@ -44,9 +44,9 @@ AUDIENCES: tuple[str, ...] = (AUDIENCE_EVERYONE, AUDIENCE_GROUPS)
 DEFAULT_AUDIENCE_PRIORITY = 100
 
 # A built-in provider is an ordinary row whose endpoint is one of Eneo's own
-# loopback MCP servers. It differs from an external server only by this auth
-# type: the ask path mints a scoped token for it instead of sending stored
-# credentials, and ``image_model_id`` names the catalog image model the
+# loopback MCP servers. It differs from an external server only by this
+# auth type: the ask path mints a scoped token for it instead of sending
+# stored credentials, and ``image_model_id`` names the catalog image model the
 # loopback tool calls (credentials come from that model's provider, defaults
 # and security classification from the model). Today only image generation
 # has one.
