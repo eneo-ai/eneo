@@ -1,4 +1,4 @@
-import { goto } from "$app/navigation";
+import { goto, preloadData } from "$app/navigation";
 import { localizeHref } from "$lib/paraglide/runtime";
 import type { ShowMe } from "@eneo/whats-new";
 import type { Driver } from "driver.js";
@@ -27,19 +27,43 @@ interface SpotlightOptions {
   onClose?: () => void;
 }
 
+export type SpotlightOutcome = "shown" | "unreachable" | "no-anchor";
+
+/**
+ * Whether the current user may open a page, decided by the page's own load
+ * guards (a redirect or a non-200 status means no) without navigating there.
+ * The data a reachable page loads is cached for the navigation that follows,
+ * so this costs no extra requests. Nothing about permissions is kept in
+ * releases.json: the pages are the source of truth.
+ */
+export async function reachable(href: string): Promise<boolean> {
+  try {
+    const result = await preloadData(localizeHref(href));
+    return result.type === "loaded" && result.status === 200;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Navigate to a step's page and spotlight its `data-tour` anchor with
- * driver.js. Resolves false when the anchor never renders (permission,
- * feature flag, redesign that dropped the attribute): the user still lands
+ * driver.js. "unreachable" means the user may not open the page and nothing
+ * happened; "no-anchor" means the page opened but the anchor never rendered
+ * (feature flag, redesign that dropped the attribute) — the user still lands
  * on the right page, which is the documented fallback.
  */
-export async function spotlight(step: SpotlightStep, options: SpotlightOptions): Promise<boolean> {
+export async function spotlight(
+  step: SpotlightStep,
+  options: SpotlightOptions
+): Promise<SpotlightOutcome> {
+  if (!(await reachable(step.href))) return "unreachable";
+
   // The href comes from releases.json (validated as an app path), not a typed route.
   // eslint-disable-next-line svelte/no-navigation-without-resolve -- localizeHref handles routing
   await goto(localizeHref(step.href));
 
   const element = await waitForAnchor(step.anchor);
-  if (!element) return false;
+  if (!element) return "no-anchor";
 
   const { driver } = await import("driver.js");
   await import("driver.js/dist/driver.css");
@@ -118,11 +142,11 @@ export async function spotlight(step: SpotlightStep, options: SpotlightOptions):
   });
   element.scrollIntoView({ block: "center", behavior: "smooth" });
   tour.drive();
-  return true;
+  return "shown";
 }
 
 /** Single "Show me" from an entry on the What's new page. */
-export function showMe(step: SpotlightStep, labels: SpotlightLabels): Promise<boolean> {
+export function showMe(step: SpotlightStep, labels: SpotlightLabels): Promise<SpotlightOutcome> {
   return spotlight(step, { labels });
 }
 

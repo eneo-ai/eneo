@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { toastError } from "$lib/core/errors";
+  import { toast } from "$lib/components/toast";
   import { Page } from "$lib/components/layout";
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
@@ -78,12 +79,13 @@
 
   // Both navigate away; when an anchor is missing on its page the user
   // still lands on the right screen, which is the documented fallback.
-  function handleShowMe(entry: ReleaseEntry) {
+  async function handleShowMe(entry: ReleaseEntry) {
     if (!entry.showMe) return;
-    void showMe(
+    const outcome = await showMe(
       { ...entry.showMe, title: text(entry.title), description: text(entry.body) },
       { done: m.whats_new_spotlight_done() }
     );
+    if (outcome === "unreachable") toast.info(m.whats_new_show_me_unavailable());
   }
 
   function handleTour(release: Release) {

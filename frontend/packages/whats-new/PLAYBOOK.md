@@ -170,15 +170,22 @@ places listed above.
   does not re-light the dot. No coupling to the deployed version number:
   whatever `releases[0]` is in the shipped bundle is "current". A hotfix
   release without user-facing changes therefore needs no entry.
-- **Show me** navigates to `href` and spotlights `[data-tour=anchor]` with a
-  single driver.js step. If the anchor is not on the page (permissions,
-  feature flags) the button only navigates.
+- **Show me** first asks the target page whether this user may open it —
+  SvelteKit's `preloadData` runs the page's own `load` guards without
+  navigating, and a redirect or non-200 status means no. Users are never
+  sent to a page they cannot use, and nothing about permissions lives in
+  this file: the pages are the source of truth, so there is nothing to keep
+  in sync when roles change. `audience: admin` only decides what the list
+  and the announcement _show_. If the page opens but the anchor is not on
+  it (feature flag, redesign) the button only navigates.
 - **Walk me through** on a release header runs every visible Show me entry
   of that release as one walkthrough (1 of N, next/previous), page by page.
   It is derived from the entries — there is no tour definition to maintain,
-  and an entry without `showMe` is simply not a stop. A stop whose anchor is
-  missing is skipped. Order in `releases.json` is the walkthrough order, so
-  put the entries a user should meet first at the top.
+  and an entry without `showMe` is simply not a stop. Stops on pages the
+  user may not open are dropped before the first navigation (same check as
+  Show me), so "1 of N" counts what they will actually see; a stop whose
+  anchor is missing is skipped. Order in `releases.json` is the walkthrough
+  order, so put the entries a user should meet first at the top.
 - The page shows one release at a time (newest selected; older ones via the
   version picker) with area and Show me filters within it.
 - Release notes on docs.eneo.ai render the English text from the same file.

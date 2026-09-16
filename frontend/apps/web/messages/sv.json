@@ -4824,5 +4824,6 @@
   "whats_new_announcement_all": "Alla {count} nyheter",
   "whats_new_announcement_list_label": "Höjdpunkter i den här versionen",
   "whats_new_release_picker": "Version",
-  "whats_new_tour_failed": "Genomgången kunde inte fortsätta."
+  "whats_new_tour_failed": "Genomgången kunde inte fortsätta.",
+  "whats_new_show_me_unavailable": "Den här funktionen ingår inte i dina behörigheter."
 }

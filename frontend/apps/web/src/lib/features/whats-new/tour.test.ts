@@ -2,7 +2,11 @@ import type { Release } from "@eneo/whats-new";
 import { describe, expect, it, vi } from "vitest";
 
 const spotlight = vi.fn();
-vi.mock("./spotlight", () => ({ spotlight: (...args: unknown[]) => spotlight(...args) }));
+const reachable = vi.fn(async (_href: string) => true);
+vi.mock("./spotlight", () => ({
+  spotlight: (...args: unknown[]) => spotlight(...args),
+  reachable: (href: string) => reachable(href)
+}));
 
 const { startTour, tourSteps } = await import("./tour");
 
@@ -45,7 +49,7 @@ describe("what's new walkthrough", () => {
       const click = clicks.shift();
       if (click === "next") options.onNext();
       else if (click === "previous") options.onPrevious();
-      return true;
+      return "shown";
     });
 
     await startTour(tourSteps(release, true, "en"), labels);
@@ -56,9 +60,9 @@ describe("what's new walkthrough", () => {
     const order: string[] = [];
     spotlight.mockImplementation(async (step, options) => {
       order.push(step.anchor);
-      if (step.anchor === "c") return false;
+      if (step.anchor === "c") return "no-anchor";
       options.onNext();
-      return true;
+      return "shown";
     });
 
     await startTour(tourSteps(release, true, "en"), labels);
@@ -70,7 +74,7 @@ describe("what's new walkthrough", () => {
     spotlight.mockImplementation(async (step, options) => {
       order.push(step.anchor);
       options.onClose();
-      return true;
+      return "shown";
     });
 
     await startTour(tourSteps(release, true, "en"), labels);
@@ -90,5 +94,19 @@ describe("what's new walkthrough", () => {
     await expect(startTour(tourSteps(release, true, "en"), labels)).rejects.toThrow(
       "driver failed to load"
     );
+  });
+
+  it("drops pages the user may not open before navigating anywhere", async () => {
+    const order: string[] = [];
+    reachable.mockImplementation(async (href: string) => href !== "/c");
+    spotlight.mockImplementation(async (step, options) => {
+      order.push(`${step.anchor}:${options.progress.index + 1}/${options.progress.total}`);
+      options.onNext();
+      return "shown";
+    });
+
+    await startTour(tourSteps(release, true, "en"), labels);
+    expect(order).toEqual(["a:1/2", "d:2/2"]);
+    reachable.mockImplementation(async () => true);
   });
 });
