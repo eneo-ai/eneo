@@ -2,10 +2,16 @@
 
 Which pages on [docs.eneo.ai](https://docs.eneo.ai) describe which parts of the code. Use it in both directions:
 
-- **Changing code?** Find the rows whose paths you touched and update those pages in the same pull request when user-visible behaviour, configuration, endpoints, defaults, commands or UI labels change. `.github/workflows/docs-check.yml` uses this map to flag PRs that look like they missed a page.
+- **Changing code?** Find the rows whose paths you touched and update those pages in the same pull request when user-visible behaviour, configuration, endpoints, defaults, commands or UI labels change. Follow [AUTHORING.md](AUTHORING.md) to choose the target branch. This map is a review aid, not an automated guarantee that the prose is current.
 - **Changing docs?** Verify claims against the files listed for that page.
 
 Page paths are relative to `frontend/apps/docs-site/src/content/`. Code paths are relative to the repository root. Globs are indicative, not exhaustive — when in doubt, the page whose subject matches wins.
+
+## Release announcements
+
+| Code                                                                 | Pages                                                                                                     |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `frontend/packages/whats-new/**` (on branches containing What's new) | `about/release-notes.mdx` renders the shared release data; edit `releases.json`, not a duplicate MDX list |
 
 ## Deployment and configuration
 

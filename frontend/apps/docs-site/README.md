@@ -1,6 +1,6 @@
 # Eneo documentation site
 
-Source of [docs.eneo.ai](https://docs.eneo.ai): a [Nextra 4](https://nextra.site) (Next.js, static export) site deployed to GitHub Pages by [`.github/workflows/deploy_docs.yml`](../../../.github/workflows/deploy_docs.yml).
+Source of [docs.eneo.ai](https://docs.eneo.ai): a [Nextra 4](https://nextra.site) (Next.js, static export) site deployed to GitHub Pages by [`.github/workflows/deploy_docs.yml`](../../../../.github/workflows/deploy_docs.yml).
 
 ## Layout
 
@@ -19,40 +19,69 @@ cd frontend && bun install
 cd apps/docs-site && bun run dev      # http://localhost:3001
 ```
 
-`bun run build` produces a single-version export in `out/` (plus the Pagefind search index), which is what pull-request checks run.
+`bun run build` produces a single-version export in `out/` (plus the Pagefind search index), for a single-version local preview. Pull-request checks build the complete versioned artifact.
 
 ## Versions
 
-The published site contains several versions, derived from git refs — nothing is edited when a release is cut:
+Start with [AUTHORING.md](AUTHORING.md) for branch selection and examples.
+The version resolver owns which lines are published:
 
-| Path     | Version | Built from                                                                                                |
-| -------- | ------- | --------------------------------------------------------------------------------------------------------- |
-| `/`      | stable  | the `release/vX.Y` branch tip of the highest final `vX.Y.Z` tag (or the tag itself if the branch is gone) |
-| `/vX.Y/` | archive | the next `DOCS_ARCHIVED_LINES` older release lines                                                        |
-| `/dev/`  | dev     | `develop`                                                                                                 |
+| URL                           | Content                                                                            |
+| ----------------------------- | ---------------------------------------------------------------------------------- |
+| `/vX.Y/`                      | Stable or archived release line, from its release branch (tag fallback)            |
+| `/dev/`                       | Current `develop` documentation                                                    |
+| `/` and unversioned page URLs | Redirects to the corresponding latest stable page, or dev before the first release |
 
-Release candidates (`v2.2.0-rc.1`) do not count, so stable only moves when the final tag exists. Tagging a release, pushing a docs change to a release branch, or pushing to `develop` all rebuild every version.
+Every selected line has a permanent version path, including the current
+stable line. `DOCS_ARCHIVED_LINES` controls how many previous lines are retained
+(default 3); explicitly retiring a line removes its content. RC tags never
+promote a release to stable.
 
-Every version is built with the **current site code** and **that ref's `src/content` + `public`**, so changes to the chrome apply to all versions without touching release branches. Non-stable versions get a banner and `noindex`.
+The builder copies current site code into a disposable `.docs-build-*` directory,
+then selects that ref's `src/content`, `public` and, when present,
+`frontend/packages/whats-new/releases.json`. The current package code/schema
+renders the selected JSON. Old lines predating What's new receive an empty
+release list, never development entries. Development previews use local content,
+including uncommitted edits. Installed dependencies are linked, not recopied.
 
-To preview all versions locally:
+All selected versions must build. Only then does the complete artifact replace
+`site/`. Failed builds and cancellation leave source files and the previous
+publication untouched. GitHub Pages receives only a complete artifact, including
+its `versions.json` manifest. There is no skip-failed-archive mode.
+
+Publication runs from `develop` after docs/What's new changes or successful
+existing CI/image workflows for pushed refs. An hourly input reconciliation
+also catches old refs without matching workflows. It skips dependency
+installation and builds when the publication digest matches the deployed
+manifest. This works without backporting publication workflows to old branches.
+GitHub may delay scheduled runs; use workflow_dispatch for immediate recovery.
+
+After any failed publication, correct the failing page or renderer and rerun the
+workflow on `develop`. The existing Pages deployment remains live. For a forced
+process termination, an ignored `.docs-build-*` directory may remain; once the
+build process has stopped it can be removed. It contains no source-file backups and a later build never reuses it.
+If the final rename and rollback both fail, the error identifies a
+`previous-site` recovery directory: restore that publication before cleanup. Roll back a bad deployment by reverting the
+input change and manually rerunning the workflow.
+
+Focused checks from this directory (use your environment's resource supervisor):
 
 ```bash
-bun run build:versions          # writes site/ (site/dev, site/v2.0, …)
-bun run preview                 # serves site/ on http://localhost:3000
-bun run versions                # prints the versions that would be built
+node --test --test-concurrency=1 scripts/*.test.mjs
+node scripts/resolve-versions.mjs
 ```
 
-`build:versions` temporarily swaps `src/content` and `public` while building each ref and restores the working tree afterwards, even on failure or Ctrl-C. Archived versions that no longer build are skipped with a warning (`--strict` makes that fatal); stable and dev must build.
+Full builds/previews require explicit authorization on the shared Mac:
 
-### Fixing docs for a released version
-
-Docs live with the code. To correct the stable docs, open a PR against the release branch (e.g. `release/v2.1`) touching `frontend/apps/docs-site/**`; merging it republishes stable. Cherry-pick the fix to `develop` as with any other change so `/dev` and the next release carry it too.
+```bash
+bun run build:versions          # complete artifact in site/
+bun run preview                 # serve the completed artifact
+```
 
 ## Writing pages
 
 - Verify every claim against the code before writing it (env vars, endpoints, defaults, UI labels, commands). Prefer linking to the real file (`docs/deployment/env_backend.template`, `/openapi.json`) over restating long lists.
 - Map code areas to the pages that describe them in [`DOCS_MAP.md`](./DOCS_MAP.md); pull requests that change documented behaviour are expected to update the affected page.
-- Use `develop` in GitHub links, never `main`.
+- Link to code on the version being described. The automatic edit-page link uses the selected release branch or tag.
 - Add new pages to the folder's `_meta.ts`; unlisted pages are appended unordered.
 - Anything under `src/content/` is published — keep scratch files out of it.

@@ -19,7 +19,7 @@
 
 # multi-version build (scripts/build-versions.mjs)
 /site/
-*.__worktree/
+/.docs-build-*/
 
 # production
 /build
