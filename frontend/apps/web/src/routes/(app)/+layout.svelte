@@ -7,6 +7,7 @@
   import { initJobManager } from "$lib/features/jobs/JobManager";
   import { initExpiringKeysStore } from "$lib/features/api-keys/expiringKeysStore";
   import { initWhatsNewStore } from "$lib/features/whats-new/whatsNewStore";
+  import WhatsNewAnnouncement from "$lib/features/whats-new/WhatsNewAnnouncement.svelte";
   import ProfileMenu from "./ProfileMenu.svelte";
   import { initEneo } from "$lib/core/Eneo";
   import { initEneoSocket } from "$lib/core/EneoSocket";
@@ -65,6 +66,7 @@
 <div class="bg-secondary absolute inset-0"></div>
 
 <PageLoadBar color="var(--accent-default)" displayThresholdMs={200} />
+<WhatsNewAnnouncement />
 
 <div
   class="fixed inset-0 z-[100] h-3"

@@ -1,5 +1,3 @@
-from datetime import datetime
-
 from pydantic import BaseModel, Field
 
 # Release identifiers mirror the versions in frontend/packages/whats-new/releases.json:
@@ -7,18 +5,20 @@ from pydantic import BaseModel, Field
 RELEASE_VERSION_PATTERN = r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$"
 
 
-class WhatsNewSeenUpdate(BaseModel):
+class WhatsNewVersionUpdate(BaseModel):
     version: str = Field(
         min_length=1,
         max_length=64,
         pattern=RELEASE_VERSION_PATTERN,
-        description="The newest release the user has opened on the What's new page.",
+        description="A release id as written in releases.json.",
         examples=["2.2.0"],
     )
 
 
-class WhatsNewSeenPublic(BaseModel):
-    version: str | None = Field(
-        description="Newest release the user has seen, or null when they never opened the page.",
+class WhatsNewStatePublic(BaseModel):
+    seen_version: str | None = Field(
+        description="Newest release the user has opened the What's new page for; null before the first visit.",
     )
-    seen_at: datetime | None = None
+    announced_version: str | None = Field(
+        description="Newest release the user has been shown the announcement for; null before the first one.",
+    )

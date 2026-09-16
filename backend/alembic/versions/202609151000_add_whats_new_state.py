@@ -1,4 +1,4 @@
-"""add whats_new_seen
+"""add whats_new_state
 
 Revision ID: 202609151000
 Revises: 202608271000
@@ -22,14 +22,15 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     op.create_table(
-        "whats_new_seen",
+        "whats_new_state",
         sa.Column(
             "user_id",
             postgresql.UUID(as_uuid=True),
             sa.ForeignKey("users.id", ondelete="CASCADE"),
             primary_key=True,
         ),
-        sa.Column("version", sa.String(length=64), nullable=False),
+        sa.Column("seen_version", sa.String(length=64), nullable=True),
+        sa.Column("announced_version", sa.String(length=64), nullable=True),
         sa.Column(
             "created_at",
             sa.TIMESTAMP(timezone=True),
@@ -46,4 +47,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_table("whats_new_seen")
+    op.drop_table("whats_new_state")

@@ -46,7 +46,7 @@ export const load = async (event) => {
     return null;
   };
 
-  const [userInfo, user, tenant, backendVersion, limits, settings, whatsNewSeen] =
+  const [userInfo, user, tenant, backendVersion, limits, settings, whatsNewState] =
     await Promise.all([
       getUserInfo(),
       eneo.users.me(),
@@ -55,7 +55,7 @@ export const load = async (event) => {
       eneo.limits.list(),
       eneo.settings.get(),
       // Non-essential: an older backend during a rolling deploy must not block the app.
-      eneo.whatsNew.getSeen().catch(() => null)
+      eneo.whatsNew.getState().catch(() => null)
     ]);
 
   const versions = {
@@ -80,7 +80,8 @@ export const load = async (event) => {
     versions,
     limits,
     settings,
-    whatsNewSeenVersion: whatsNewSeen?.version ?? null,
+    whatsNewSeenVersion: whatsNewState?.seen_version ?? null,
+    whatsNewAnnouncedVersion: whatsNewState?.announced_version ?? null,
     featureFlags,
     environment
   };

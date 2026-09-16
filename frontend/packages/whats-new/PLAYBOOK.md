@@ -124,9 +124,11 @@ is the deep-link target on docs.eneo.ai and may be bookmarked. If a release
 had no user-facing changes, add nothing — the app compares by order, not by
 equality, so users are not re-notified.
 
-**Data.** `whats_new_seen` holds one row per user: `user_id`, the release id
-last opened and `created_at`/`updated_at`. No content, no free text. Rows
-cascade on user deletion. There is nothing to purge on a retention schedule.
+**Data.** `whats_new_state` holds one row per user: `user_id`, the release
+id last opened (`seen_version`), the release id last announced
+(`announced_version`) and `created_at`/`updated_at`. No content, no free
+text. Rows cascade on user deletion. There is nothing to purge on a
+retention schedule.
 
 **Growth.** All releases stay in `releases.json` and ship in the web bundle
 (roughly 1 kB per entry). Revisit the app page's rendering (paginate or cap
@@ -139,10 +141,17 @@ places listed above.
 
 ## How the app uses this file
 
-- The user's newest **seen** version is stored per user in the backend
-  (`GET/PUT /api/v1/whats-new/seen/`). The profile menu shows a dot while
-  `releases[0].version` differs from the seen version, and the dot clears
+- The backend keeps two markers per user (`GET /api/v1/whats-new/state/`):
+  **seen** (`PUT …/seen/`), the newest release the user has opened the page
+  for, and **announced** (`PUT …/announced/`), the newest release they have
+  been shown the one-time toast for. The profile menu shows a dot while
+  `releases[0].version` is newer than the seen marker, and the dot clears
   when the user opens `/whats-new`.
+- **Announcement.** On the first app load after a release reaches the user,
+  a persistent toast names the first three visible entry titles ("and N
+  more") with a link to the page. It is recorded as announced when shown,
+  once per user across devices; closing it does not touch the seen marker,
+  so the dot stays until they actually look. There is no modal by design.
 - "Unseen" means `releases[0].version` is **newer** (semver) than the seen
   version, so a rollback or an older frontend pod during a rolling deploy
   does not re-light the dot. No coupling to the deployed version number:

@@ -8,12 +8,22 @@ if (!latest) throw new Error("releases.json must contain at least one release fo
 
 function makeStore(
   seen: string | null,
-  markSeen = vi.fn(async () => ({ version: "", seen_at: null }))
+  markSeen = vi.fn(async () => ({ seen_version: "", announced_version: null })),
+  announced: string | null = null,
+  markAnnounced = vi.fn(async () => ({ seen_version: null, announced_version: "" }))
 ) {
-  const eneo = { whatsNew: { markSeen } } as unknown as Parameters<
+  const eneo = { whatsNew: { markSeen, markAnnounced } } as unknown as Parameters<
     typeof createWhatsNewStore
   >[0]["eneo"];
-  return { store: createWhatsNewStore({ eneo, whatsNewSeenVersion: seen }), markSeen };
+  return {
+    store: createWhatsNewStore({
+      eneo,
+      whatsNewSeenVersion: seen,
+      whatsNewAnnouncedVersion: announced
+    }),
+    markSeen,
+    markAnnounced
+  };
 }
 
 describe("whatsNewStore", () => {
@@ -53,5 +63,27 @@ describe("whatsNewStore", () => {
 
     expect(get(store.hasUnseen)).toBe(true);
     expect(get(store.seenVersion)).toBeNull();
+  });
+
+  it("announces the newest release once and leaves the seen marker alone", async () => {
+    const { store, markAnnounced, markSeen } = makeStore(null);
+    expect(store.pendingAnnouncement()?.version).toBe(latest.version);
+
+    await store.markLatestAnnounced();
+
+    expect(markAnnounced).toHaveBeenCalledWith(latest.version);
+    expect(store.pendingAnnouncement()).toBeNull();
+    expect(get(store.announcedVersion)).toBe(latest.version);
+    expect(get(store.seenVersion)).toBeNull();
+    expect(get(store.hasUnseen)).toBe(true);
+    expect(markSeen).not.toHaveBeenCalled();
+  });
+
+  it("does not announce again for a release already announced or newer", () => {
+    expect(makeStore(null, undefined, latest.version).store.pendingAnnouncement()).toBeNull();
+    expect(makeStore(null, undefined, "999.0.0").store.pendingAnnouncement()).toBeNull();
+    expect(makeStore(null, undefined, "0.0.1").store.pendingAnnouncement()?.version).toBe(
+      latest.version
+    );
   });
 });

@@ -6821,7 +6821,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/whats-new/seen/": {
+  "/api/v1/whats-new/state/": {
     parameters: {
       query?: never;
       header?: never;
@@ -6829,15 +6829,51 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * Get Whats New Seen
-     * @description Get the newest release the current user has opened on the What's new page.
+     * Get Whats New State
+     * @description Get which releases the current user has seen and been told about.
      */
-    get: operations["get_whats_new_seen_api_v1_whats_new_seen__get"];
+    get: operations["get_whats_new_state_api_v1_whats_new_state__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/whats-new/seen/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
     /**
      * Mark Whats New Seen
      * @description Record that the current user has opened the What's new page for a release.
      */
     put: operations["mark_whats_new_seen_api_v1_whats_new_seen__put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/whats-new/announced/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Mark Whats New Announced
+     * @description Record that the current user has been shown the announcement for a release.
+     */
+    put: operations["mark_whats_new_announced_api_v1_whats_new_announced__put"];
     post?: never;
     delete?: never;
     options?: never;
@@ -21617,21 +21653,24 @@ export interface components {
        */
       http_auth_password?: string | null;
     };
-    /** WhatsNewSeenPublic */
-    WhatsNewSeenPublic: {
+    /** WhatsNewStatePublic */
+    WhatsNewStatePublic: {
       /**
-       * Version
-       * @description Newest release the user has seen, or null when they never opened the page.
+       * Seen Version
+       * @description Newest release the user has opened the What's new page for; null before the first visit.
        */
-      version: string | null;
-      /** Seen At */
-      seen_at?: string | null;
+      seen_version: string | null;
+      /**
+       * Announced Version
+       * @description Newest release the user has been shown the announcement for; null before the first one.
+       */
+      announced_version: string | null;
     };
-    /** WhatsNewSeenUpdate */
-    WhatsNewSeenUpdate: {
+    /** WhatsNewVersionUpdate */
+    WhatsNewVersionUpdate: {
       /**
        * Version
-       * @description The newest release the user has opened on the What's new page.
+       * @description A release id as written in releases.json.
        * @example 2.2.0
        */
       version: string;
@@ -45267,7 +45306,7 @@ export interface operations {
       };
     };
   };
-  get_whats_new_seen_api_v1_whats_new_seen__get: {
+  get_whats_new_state_api_v1_whats_new_state__get: {
     parameters: {
       query?: never;
       header?: never;
@@ -45282,7 +45321,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["WhatsNewSeenPublic"];
+          "application/json": components["schemas"]["WhatsNewStatePublic"];
         };
       };
       /** @description Forbidden */
@@ -45305,7 +45344,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["WhatsNewSeenUpdate"];
+        "application/json": components["schemas"]["WhatsNewVersionUpdate"];
       };
     };
     responses: {
@@ -45315,7 +45354,49 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["WhatsNewSeenPublic"];
+          "application/json": components["schemas"]["WhatsNewStatePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  mark_whats_new_announced_api_v1_whats_new_announced__put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WhatsNewVersionUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WhatsNewStatePublic"];
         };
       };
       /** @description Forbidden */
