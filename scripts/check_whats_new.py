@@ -16,9 +16,9 @@ a schema cannot express:
 With --release-tag vX.Y.Z (the image build runs this on every tag) it also
 checks that the newest entry fits the release being built: it may not be
 newer than the tag (notes for a future version leaking into an older release
-branch), a final tag whose version has an entry must carry a date (no
-"Upcoming" in production), and a hotfix without user-facing changes needs no
-entry at all.
+branch), every bundled entry must carry a date on final tags (no "Upcoming"
+in production), and a hotfix without user-facing changes needs no entry of
+its own.
 
 Run locally:  python3 scripts/check_whats_new.py [--release-tag v2.2.0]
 """
@@ -302,10 +302,12 @@ def check_release_tag(data: dict, tag: str) -> list[str]:
             "release notes for a later version must not ship in this release"
         ]
     is_final = "-" not in version
-    if is_final and _core_version(newest_version) == version and not newest.get("date"):
+    if is_final:
         return [
-            f"entry {newest_version} has no date but {tag} is a final release; "
+            f"entry {release['version']} has no date but {tag} is a final release; "
             'set "date" before tagging so the app does not show it as upcoming'
+            for release in releases
+            if not release.get("date")
         ]
     return []
 

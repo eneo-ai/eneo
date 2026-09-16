@@ -8,6 +8,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from scripts.check_whats_new import _semver_key
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CHECK = REPO_ROOT / "scripts" / "check_whats_new.py"
 SCHEMA = REPO_ROOT / "frontend" / "packages" / "whats-new" / "releases.schema.json"
@@ -66,6 +68,12 @@ class _RepoCase(unittest.TestCase):
 
 
 class CheckWhatsNewTests(_RepoCase):
+    def test_release_order_matches_the_shared_cross_runtime_contract(self) -> None:
+        cases = SCHEMA.parent / "version-order.cases.json"
+        versions = json.loads(cases.read_text())["ordered"]
+        for older, newer in zip(versions, versions[1:]):
+            self.assertLess(_semver_key(older), _semver_key(newer))
+
     def test_accepts_valid_file(self) -> None:
         result = self.run_check(self.make_repo(VALID))
         self.assertEqual(result.returncode, 0, result.stdout)
@@ -192,6 +200,18 @@ class ReleaseTagTests(_RepoCase):
             self.make_repo(self.releases("2.2.0", "2026-10-01")), "--release-tag", "v2.2.1"
         )
         self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_hotfix_rejects_undated_notes_for_an_earlier_release(self) -> None:
+        result = self.run_check(self.make_repo(self.releases("2.2.0")), "--release-tag", "v2.2.1")
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("entry 2.2.0 has no date", result.stdout)
+
+    def test_final_tag_rejects_undated_history_even_with_a_dated_latest_release(self) -> None:
+        data = self.releases("2.2.0", "2026-10-01")
+        del data["releases"][1]["date"]
+        result = self.run_check(self.make_repo(data), "--release-tag", "v2.2.0")
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("entry 2.1.0 has no date", result.stdout)
 
     def test_notes_for_a_later_version_cannot_ship_in_an_older_release(self) -> None:
         result = self.run_check(self.make_repo(self.releases("2.3.0")), "--release-tag", "v2.2.0")

@@ -1,0 +1,60 @@
+name: PR user-facing notes
+
+on:
+  workflow_call:
+  pull_request:
+    types:
+      [
+        opened,
+        synchronize,
+        reopened,
+        edited,
+        labeled,
+        unlabeled,
+        ready_for_review,
+      ]
+    branches:
+      - develop
+      - "release/**"
+  # Report the required check as skipped for merge candidates. Each PR has
+  # already passed this metadata check before entering the queue.
+  merge_group:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: user-facing-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  user-facing:
+    name: User-facing section
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check the current User-facing section
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$RUNNER_TEMP/changed-files.txt"
+          # Read fresh metadata, including when an old run is manually retried.
+          gh api "repos/$GH_REPO/pulls/$PR_NUMBER" > "$RUNNER_TEMP/pr.json"
+          jq -r '.body // ""' "$RUNNER_TEMP/pr.json" > "$RUNNER_TEMP/pr-body.md"
+          labels=$(jq -r '[.labels[].name] | join(",")' "$RUNNER_TEMP/pr.json")
+          node .github/scripts/check-user-facing.mjs \
+            --files "$RUNNER_TEMP/changed-files.txt" \
+            --body-file "$RUNNER_TEMP/pr-body.md" \
+            --labels "$labels"

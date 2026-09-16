@@ -83,7 +83,7 @@ jobs:
           echo "✅ Tag $TAG is correctly on $EXPECTED_BRANCH"
 
       # The image ships releases.json as the in-app What's new page: a final
-      # tag must not carry an undated ("upcoming") entry for its own version,
+      # tag must not carry any undated ("upcoming") entries,
       # and notes for a later version must not leak into this release.
       - name: Validate What's new release notes for this tag
         if: startsWith(github.ref, 'refs/tags/v')

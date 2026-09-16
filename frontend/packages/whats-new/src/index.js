@@ -61,7 +61,9 @@ export function compareVersions(a, b) {
 
 /** @param {string} version */
 function parseVersion(version) {
-  const [core, pre = ""] = version.split("-", 2);
+  const separator = version.indexOf("-");
+  const core = separator === -1 ? version : version.slice(0, separator);
+  const pre = separator === -1 ? "" : version.slice(separator + 1);
   return {
     core: core.split(".").map(Number),
     pre: pre ? pre.split(".") : []

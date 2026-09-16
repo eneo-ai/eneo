@@ -1,7 +1,4 @@
-import { goto, preloadData } from "$app/navigation";
-import { localizeHref } from "$lib/paraglide/runtime";
 import type { ShowMe } from "@eneo/whats-new";
-import type { Driver } from "driver.js";
 
 const ANCHOR_WAIT_MS = 2500;
 
@@ -14,140 +11,99 @@ export interface SpotlightLabels {
   done: string;
   next?: string;
   previous?: string;
-  /** driver.js template, e.g. "{{current}} of {{total}}". */
+  /** Ordinal only: later pages have not been checked yet. */
   progress?: string;
 }
 
 interface SpotlightOptions {
   labels: SpotlightLabels;
-  /** Position in a multi-step walkthrough; omitted for a single Show me. */
+  signal: AbortSignal;
   progress?: { index: number; total: number };
-  onNext?: () => void;
-  onPrevious?: () => void;
-  onClose?: () => void;
 }
 
-export type SpotlightOutcome = "shown" | "unreachable" | "no-anchor";
+export type SpotlightOutcome = "next" | "previous" | "closed" | "no-anchor";
 
-/**
- * Whether the current user may open a page, decided by the page's own load
- * guards (a redirect or a non-200 status means no) without navigating there.
- * The data a reachable page loads is cached for the navigation that follows,
- * so this costs no extra requests. Nothing about permissions is kept in
- * releases.json: the pages are the source of truth.
- */
-export async function reachable(href: string): Promise<boolean> {
-  try {
-    const result = await preloadData(localizeHref(href));
-    return result.type === "loaded" && result.status === 200;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Navigate to a step's page and spotlight its `data-tour` anchor with
- * driver.js. "unreachable" means the user may not open the page and nothing
- * happened; "no-anchor" means the page opened but the anchor never rendered
- * (feature flag, redesign that dropped the attribute) — the user still lands
- * on the right page, which is the documented fallback.
- */
+/** Render one stop on the current page and wait for the user's action. */
 export async function spotlight(
   step: SpotlightStep,
-  options: SpotlightOptions
+  { labels, signal, progress }: SpotlightOptions
 ): Promise<SpotlightOutcome> {
-  if (!(await reachable(step.href))) return "unreachable";
-
-  // The href comes from releases.json (validated as an app path), not a typed route.
-  // eslint-disable-next-line svelte/no-navigation-without-resolve -- localizeHref handles routing
-  await goto(localizeHref(step.href));
-
-  const element = await waitForAnchor(step.anchor);
+  const element = await waitForAnchor(step.anchor, signal);
+  if (signal.aborted) return "closed";
   if (!element) return "no-anchor";
 
   const { driver } = await import("driver.js");
   await import("driver.js/dist/driver.css");
+  if (signal.aborted) return "closed";
 
-  const { labels, progress } = options;
   const isFirst = !progress || progress.index === 0;
   const isLast = !progress || progress.index === progress.total - 1;
-  let advanced = false;
-
-  // A one-step drive() rather than highlight(): highlight() renders no
-  // buttons, a step gets next/previous/close plus Esc and overlay-click.
-  const tour: Driver = driver({
-    animate: true,
-    overlayOpacity: 0.55,
-    stagePadding: 8,
-    stageRadius: 8,
-    showButtons: progress ? ["previous", "next", "close"] : ["next", "close"],
-    disableButtons: isFirst ? ["previous"] : [],
-    showProgress: Boolean(progress),
-    progressText: labels.progress ?? "{{current}} / {{total}}",
-    // Each stop is its own one-step drive(), so driver.js always renders the
-    // "done" text; choose it by the walkthrough's position instead.
-    nextBtnText: labels.next ?? labels.done,
-    prevBtnText: labels.previous ?? "",
-    doneBtnText: isLast ? labels.done : (labels.next ?? labels.done),
-    popoverClass: "eneo-spotlight",
-    steps: [
-      {
-        element,
-        popover: {
-          title: step.title,
-          description: step.description,
-          // driver.js counts steps within one drive(); report the walkthrough's
-          // position instead, and re-enable "previous" past the first stop
-          // (driver.js greys it on what it sees as the first step).
-          ...(progress
-            ? {
-                onPopoverRender: (popover: {
-                  progress: HTMLElement;
-                  previousButton: HTMLButtonElement;
-                }) => {
-                  popover.progress.textContent = (labels.progress ?? "{{current}} / {{total}}")
-                    .replace("{{current}}", String(progress.index + 1))
-                    .replace("{{total}}", String(progress.total));
-                  if (!isFirst) {
-                    popover.previousButton.disabled = false;
-                    popover.previousButton.classList.remove("driver-popover-btn-disabled");
-                  }
-                }
-              }
-            : {})
+  return new Promise((resolve, reject) => {
+    let finished = false;
+    const abort = () => finish("closed");
+    const finish = (outcome: SpotlightOutcome) => {
+      if (finished) return;
+      finished = true;
+      signal.removeEventListener("abort", abort);
+      window.removeEventListener("keyup", navigate);
+      tour.destroy();
+      if (!signal.aborted && element.isConnected) focusFeature(element);
+      resolve(outcome);
+    };
+    const navigate = (event: KeyboardEvent) => {
+      if (event.key === "ArrowRight") finish("next");
+      else if (event.key === "ArrowLeft" && !isFirst) finish("previous");
+    };
+    const tour = driver({
+      animate: true,
+      // The controller owns cross-page steps; driver.js only sees one step.
+      allowKeyboardControl: false,
+      overlayOpacity: 0.55,
+      stagePadding: 8,
+      stageRadius: 8,
+      showButtons: progress ? ["previous", "next", "close"] : ["next", "close"],
+      disableButtons: isFirst ? ["previous"] : [],
+      showProgress: Boolean(progress),
+      progressText: labels.progress,
+      nextBtnText: labels.next ?? labels.done,
+      prevBtnText: labels.previous ?? "",
+      doneBtnText: isLast ? labels.done : (labels.next ?? labels.done),
+      popoverClass: "eneo-spotlight",
+      steps: [{ element, popover: { title: step.title, description: step.description } }],
+      onPopoverRender: (popover) => {
+        if (progress) {
+          popover.progress.textContent = (labels.progress ?? "{{current}}").replace(
+            "{{current}}",
+            String(progress.index + 1)
+          );
+          if (!isFirst) {
+            popover.previousButton.disabled = false;
+            popover.previousButton.classList.remove("driver-popover-btn-disabled");
+          }
         }
-      }
-    ],
-    onNextClick: () => {
-      advanced = true;
-      tour.destroy();
-      if (isLast) options.onClose?.();
-      else options.onNext?.();
-    },
-    onPrevClick: () => {
-      if (isFirst) return;
-      advanced = true;
-      tour.destroy();
-      options.onPrevious?.();
-    },
-    // driver.js does not move focus on its own; keyboard and screen-reader
-    // users need to land in the popover and be returned to the feature after.
-    onHighlighted: () => {
-      document.querySelector<HTMLElement>(".eneo-spotlight .driver-popover-next-btn")?.focus();
-    },
-    onDestroyed: () => {
-      focusFeature(element);
-      if (!advanced) options.onClose?.();
+        // driver.js applies its default focus after this render hook returns.
+        queueMicrotask(() => {
+          if (!signal.aborted && popover.wrapper.isConnected) popover.nextButton.focus();
+        });
+      },
+      onNextClick: () => finish("next"),
+      onPrevClick: () => {
+        if (!isFirst) finish("previous");
+      },
+      // onDestroyed is not called when closed during the initial animation.
+      // Own completion here, including the close button and overlay dismissal.
+      onDestroyStarted: () => finish("closed")
+    });
+    signal.addEventListener("abort", abort, { once: true });
+    window.addEventListener("keyup", navigate);
+    try {
+      element.scrollIntoView({ block: "center", behavior: "smooth" });
+      tour.drive();
+    } catch (error) {
+      reject(error);
+      finish("closed");
     }
   });
-  element.scrollIntoView({ block: "center", behavior: "smooth" });
-  tour.drive();
-  return "shown";
-}
-
-/** Single "Show me" from an entry on the What's new page. */
-export function showMe(step: SpotlightStep, labels: SpotlightLabels): Promise<SpotlightOutcome> {
-  return spotlight(step, { labels });
 }
 
 function focusFeature(element: HTMLElement) {
@@ -155,22 +111,34 @@ function focusFeature(element: HTMLElement) {
     element.querySelector<HTMLElement>(
       'button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
     ) ?? element;
-  if (target === element && !element.hasAttribute("tabindex")) {
+  if (target === element && !element.hasAttribute("tabindex"))
     element.setAttribute("tabindex", "-1");
-  }
   target.focus({ preventScroll: true });
 }
 
-function waitForAnchor(anchor: string): Promise<HTMLElement | null> {
-  const selector = `[data-tour="${anchor}"]`;
+function waitForAnchor(anchor: string, signal: AbortSignal): Promise<HTMLElement | null> {
   return new Promise((resolve) => {
-    const started = performance.now();
-    const check = () => {
-      const found = document.querySelector<HTMLElement>(selector);
-      if (found) return resolve(found);
-      if (performance.now() - started > ANCHOR_WAIT_MS) return resolve(null);
-      requestAnimationFrame(check);
+    const finish = (element: HTMLElement | null) => {
+      observer.disconnect();
+      clearTimeout(timeout);
+      signal.removeEventListener("abort", abort);
+      resolve(element);
     };
-    check();
+    const check = () => {
+      const element = document.querySelector<HTMLElement>(`[data-tour="${anchor}"]`);
+      if (element) finish(element);
+    };
+    const abort = () => finish(null);
+    const observer = new MutationObserver(check);
+    const timeout = setTimeout(() => finish(null), ANCHOR_WAIT_MS);
+    signal.addEventListener("abort", abort, { once: true });
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["data-tour"]
+    });
+    if (signal.aborted) abort();
+    else check();
   });
 }

@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import EneoWordMark from "$lib/assets/EneoWordMark.svelte";
   import { Badge } from "$lib/components/ui/badge";
@@ -7,17 +6,19 @@
   import * as Dialog from "$lib/components/ui/dialog";
   import { getAppContext } from "$lib/core/AppContext";
   import { toastError } from "$lib/core/errors";
+  import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
   import { getLocale, localizeHref } from "$lib/paraglide/runtime";
   import type { Localized, Release } from "@eneo/whats-new";
   import { ArrowRight } from "lucide-svelte";
   import { announcementSummary } from "./announcement";
   import { areaIcon, labelFor, typeClass, typeLabel } from "./labels";
-  import { startTour, tourSteps } from "./tour";
+  import { getWhatsNewTour, tourSteps } from "./tour";
   import { getWhatsNewStore } from "./whatsNewStore";
 
   const { user } = getAppContext();
-  const { pendingAnnouncement, markLatestAnnounced } = getWhatsNewStore();
+  const { enabled, pendingAnnouncement, markLatestAnnounced } = getWhatsNewStore();
+  const { start, running } = getWhatsNewTour();
   const locale = getLocale();
   const isAdmin = user.hasPermission("admin");
 
@@ -35,7 +36,11 @@
   // release reaches them. Recorded as announced when opened, so a reload
   // without dismissing does not repeat it; closing is not "seen" — the
   // menu dot stays until they open the page.
-  onMount(() => {
+  $effect(() => {
+    if (!$enabled) {
+      open = false;
+      return;
+    }
     const pending = pendingAnnouncement();
     if (!pending) return;
     if (announcementSummary(pending, isAdmin).entries.length === 0) return;
@@ -67,12 +72,19 @@
   function primary() {
     if (steps.length === 0) return openWhatsNew();
     open = false;
-    startTour(steps, {
+    start(steps, {
       done: m.whats_new_spotlight_done(),
       next: m.whats_new_tour_next(),
       previous: m.whats_new_tour_previous(),
-      progress: m.whats_new_tour_progress({ current: "{{current}}", total: "{{total}}" })
-    }).catch((error: unknown) => toastError(error, m.whats_new_tour_failed()));
+      progress: m.whats_new_tour_progress({ current: "{{current}}" })
+    })
+      .then((outcome) => {
+        if (outcome === "unavailable") {
+          toast.info(m.whats_new_show_me_unavailable());
+          openWhatsNew();
+        }
+      })
+      .catch((error: unknown) => toastError(error, m.whats_new_tour_failed()));
   }
 </script>
 
@@ -104,6 +116,7 @@
               size="lg"
               class="bg-background text-foreground hover:bg-background/90 focus-visible:ring-background/60 h-11 w-full justify-center"
               onclick={primary}
+              disabled={$running}
             >
               {steps.length > 0
                 ? m.whats_new_announcement_tour()

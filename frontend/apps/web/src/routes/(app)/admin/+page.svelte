@@ -8,11 +8,14 @@
   import { Page, Settings } from "$lib/components/layout/index.js";
   import { Input } from "@eneo/ui";
   import { getAppContext } from "$lib/core/AppContext.js";
+  import { getWhatsNewStore } from "$lib/features/whats-new/whatsNewStore";
   import { getEneo } from "$lib/core/Eneo.js";
+  import { toastError } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
   import { invalidate, invalidateAll } from "$app/navigation";
 
   const { tenant, updateTenant } = getAppContext();
+  const { setEnabled: setWhatsNewEnabled } = getWhatsNewStore();
   const eneo = getEneo();
   let { data } = $props();
 
@@ -21,6 +24,7 @@
   let auditLoggingEnabled = $state<boolean | undefined>(undefined);
   let provisioningEnabled = $state(false);
   let whatsNewEnabled = $state(true);
+  let savingWhatsNew = $state(false);
   $effect.pre(() => {
     usingTemplates = data.settings.using_templates;
     auditLoggingEnabled = data.settings.audit_logging_enabled;
@@ -107,17 +111,23 @@
   }
 
   // Opt-out of the What's new page, announcement and menu indicator.
-  async function handleToggleWhatsNew({ next }: { current: boolean; next: boolean }) {
-    const previousValue = whatsNewEnabled;
+  async function handleToggleWhatsNew({ current, next }: { current: boolean; next: boolean }) {
+    savingWhatsNew = true;
     whatsNewEnabled = next;
+    let saved = false;
 
     try {
       const updatedSettings = await eneo.settings.updateWhatsNew(next);
       whatsNewEnabled = updatedSettings.whats_new_enabled ?? true;
+      setWhatsNewEnabled(whatsNewEnabled);
+      saved = true;
       await invalidateAll();
     } catch (error) {
-      console.error("[Admin] Error updating What's new setting:", error);
-      whatsNewEnabled = previousValue;
+      // A failed refresh must not undo a setting the server already saved.
+      if (!saved) whatsNewEnabled = current;
+      toastError(error);
+    } finally {
+      savingWhatsNew = false;
     }
   }
 
@@ -165,7 +175,11 @@
           <Input.Switch bind:value={provisioningEnabled} sideEffect={handleToggleProvisioning} />
         </Settings.Row>
         <Settings.Row title={m.enable_whats_new()} description={m.enable_whats_new_description()}>
-          <Input.Switch bind:value={whatsNewEnabled} sideEffect={handleToggleWhatsNew} />
+          <Input.Switch
+            bind:value={whatsNewEnabled}
+            disabled={savingWhatsNew}
+            sideEffect={handleToggleWhatsNew}
+          />
         </Settings.Row>
       </Settings.Group>
       <Settings.Group title={m.model_pricing()}>

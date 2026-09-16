@@ -2,6 +2,7 @@
 // that consume this package, while Node's ESM loader would need import
 // attributes that older bundlers reject.
 import { expect, test } from "bun:test";
+import { ordered } from "../version-order.cases.json";
 
 import { ENTRY_AREAS, ENTRY_TYPES, LOCALES, compareVersions, releases } from "./index.js";
 
@@ -12,12 +13,11 @@ test("vocabularies come from the schema", () => {
 });
 
 test("compareVersions orders releases like semver", () => {
-  const ordered = ["2.2.0-rc.1", "2.2.0-rc.2", "2.2.0", "2.2.1", "2.10.0", "3.0.0-beta", "3.0.0"];
   for (let i = 1; i < ordered.length; i++) {
     expect(compareVersions(ordered[i - 1], ordered[i])).toBeLessThan(0);
     expect(compareVersions(ordered[i], ordered[i - 1])).toBeGreaterThan(0);
   }
-  expect(compareVersions("2.2.0", "2.2.0")).toBe(0);
+  for (const version of ordered) expect(compareVersions(version, version)).toBe(0);
 });
 
 test("releases.json is newest first", () => {

@@ -7,8 +7,7 @@
   import { Button } from "$lib/components/ui/button";
   import { getAppContext } from "$lib/core/AppContext";
   import { getWhatsNewStore } from "$lib/features/whats-new/whatsNewStore";
-  import { showMe } from "$lib/features/whats-new/spotlight";
-  import { startTour, tourSteps } from "$lib/features/whats-new/tour";
+  import { getWhatsNewTour, tourSteps } from "$lib/features/whats-new/tour";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import { Label } from "$lib/components/ui/label";
@@ -28,6 +27,7 @@
 
   const { user, settings } = getAppContext();
   const { markLatestSeen, seenVersion, resetState } = getWhatsNewStore();
+  const { start, running } = getWhatsNewTour();
   const developerTools = settings.developer_tools_available === true;
   const isAdmin = user.hasPermission("admin");
   const locale = getLocale();
@@ -81,20 +81,28 @@
   // still lands on the right screen, which is the documented fallback.
   async function handleShowMe(entry: ReleaseEntry) {
     if (!entry.showMe) return;
-    const outcome = await showMe(
-      { ...entry.showMe, title: text(entry.title), description: text(entry.body) },
-      { done: m.whats_new_spotlight_done() }
-    );
-    if (outcome === "unreachable") toast.info(m.whats_new_show_me_unavailable());
+    try {
+      const outcome = await start(
+        [{ ...entry.showMe, title: text(entry.title), description: text(entry.body) }],
+        { done: m.whats_new_spotlight_done() }
+      );
+      if (outcome === "unavailable") toast.info(m.whats_new_show_me_unavailable());
+    } catch (error) {
+      toastError(error, m.whats_new_tour_failed());
+    }
   }
 
   function handleTour(release: Release) {
-    startTour(tourSteps(release, isAdmin, locale), {
+    start(tourSteps(release, isAdmin, locale), {
       done: m.whats_new_spotlight_done(),
       next: m.whats_new_tour_next(),
       previous: m.whats_new_tour_previous(),
-      progress: m.whats_new_tour_progress({ current: "{{current}}", total: "{{total}}" })
-    }).catch((error: unknown) => toastError(error, m.whats_new_tour_failed()));
+      progress: m.whats_new_tour_progress({ current: "{{current}}" })
+    })
+      .then((outcome) => {
+        if (outcome === "unavailable") toast.info(m.whats_new_show_me_unavailable());
+      })
+      .catch((error: unknown) => toastError(error, m.whats_new_tour_failed()));
   }
 
   function tourLength(release: Release): number {
@@ -201,8 +209,9 @@
                   size="sm"
                   class="ml-auto"
                   onclick={() => handleTour(current)}
+                  disabled={$running}
                 >
-                  {m.whats_new_tour_start({ count: tourLength(current) })}
+                  {m.whats_new_tour_start()}
                 </Button>
               {/if}
             </div>
@@ -284,7 +293,12 @@
                   <p class="text-secondary text-sm leading-relaxed">{text(entry.body)}</p>
                   {#if entry.showMe}
                     <div class="pt-1">
-                      <Button variant="outline" size="sm" onclick={() => handleShowMe(entry)}>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={$running}
+                        onclick={() => handleShowMe(entry)}
+                      >
                         {m.whats_new_show_me()}
                       </Button>
                     </div>

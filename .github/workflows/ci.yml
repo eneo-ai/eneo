@@ -279,34 +279,12 @@ jobs:
           node .github/scripts/check-user-facing.mjs --self-test
           node scripts/export_github_roadmap.mjs --self-test
 
-  # A PR that changes what users see must fill in the template's
-  # "## User-facing" section (a sentence or "No"); release notes are drafted
-  # from it. See frontend/packages/whats-new/PLAYBOOK.md.
+  # Preserve the existing required CI gate during rollout. Remove this caller
+  # and its aggregate references once the standalone User-facing section check
+  # is required in GitHub (see the What's new PLAYBOOK).
   user-facing:
-    name: User-facing section
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Check the User-facing section
-        env:
-          PR_BODY: ${{ github.event.pull_request.body }}
-          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$RUNNER_TEMP/changed-files.txt"
-          printf '%s' "$PR_BODY" > "$RUNNER_TEMP/pr-body.md"
-          node .github/scripts/check-user-facing.mjs \
-            --files "$RUNNER_TEMP/changed-files.txt" \
-            --body-file "$RUNNER_TEMP/pr-body.md" \
-            --labels "$PR_LABELS"
+    name: User-facing section (CI transition)
+    uses: ./.github/workflows/user-facing.yml
 
   route-metadata:
     name: Route metadata

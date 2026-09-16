@@ -7,6 +7,8 @@
   import { initJobManager } from "$lib/features/jobs/JobManager";
   import { initExpiringKeysStore } from "$lib/features/api-keys/expiringKeysStore";
   import { initWhatsNewStore } from "$lib/features/whats-new/whatsNewStore";
+  import { initWhatsNewTour } from "$lib/features/whats-new/tour";
+  import { beforeNavigate } from "$app/navigation";
   import WhatsNewAnnouncement from "$lib/features/whats-new/WhatsNewAnnouncement.svelte";
   import ProfileMenu from "./ProfileMenu.svelte";
   import { initEneo } from "$lib/core/Eneo";
@@ -27,7 +29,11 @@
   initAppContext(data);
   initJobManager(data);
   initExpiringKeysStore(data);
-  initWhatsNewStore(data);
+  const whatsNew = initWhatsNewStore(data);
+  const whatsNewTour = initWhatsNewTour();
+  $: whatsNew.setEnabled(data.whatsNewEnabled);
+  $: if (!data.whatsNewEnabled) whatsNewTour.stop();
+  beforeNavigate(({ to }) => whatsNewTour.beforeNavigation(to?.url ?? null));
   initAttachmentUrlService(data);
   initFaviconUrlService();
   const socket = initEneoSocket(data);
@@ -37,6 +43,7 @@
   // e.g. will run in child components first. This would mean the socket is not yet open when trying to subscribe in a child.
   if (browser) socket.connect();
   onDestroy(() => {
+    whatsNewTour.stop();
     // Socket needs to be disconnected so it can be garbage collected during HMR
     socket.disconnect();
   });

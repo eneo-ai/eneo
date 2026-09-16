@@ -9,7 +9,7 @@ export { getWhatsNewStore, initWhatsNewStore, createWhatsNewStore };
 export type Marker = string | null | undefined;
 
 export interface WhatsNewInit {
-  eneo: Eneo;
+  eneo: { whatsNew: Pick<Eneo["whatsNew"], "markSeen" | "markAnnounced" | "resetState"> };
   /** Tenant opt-out (admin setting): off hides the page, dot and announcement. */
   whatsNewEnabled: boolean;
   whatsNewSeenVersion: Marker;
@@ -20,34 +20,36 @@ const [getWhatsNewStore, setWhatsNewStore] =
   createContext<ReturnType<typeof createWhatsNewStore>>("What's new");
 
 function initWhatsNewStore(data: WhatsNewInit) {
-  setWhatsNewStore(createWhatsNewStore(data));
+  const store = createWhatsNewStore(data);
+  setWhatsNewStore(store);
+  return store;
 }
 
 function createWhatsNewStore(data: WhatsNewInit) {
   const { eneo } = data;
-  const enabled = data.whatsNewEnabled;
+  const enabled = writable(data.whatsNewEnabled);
   const seenVersion = writable<Marker>(data.whatsNewSeenVersion);
   const announcedVersion = writable<Marker>(data.whatsNewAnnouncedVersion);
-  const hasUnseen = derived(seenVersion, ($seen) =>
-    !enabled || $seen === undefined ? false : hasUnseenRelease($seen)
+  const hasUnseen = derived([enabled, seenVersion], ([$enabled, $seen]) =>
+    !$enabled || $seen === undefined ? false : hasUnseenRelease($seen)
   );
 
   let inFlight: Promise<void> | null = null;
 
   /** Record the newest bundled release as seen. Safe to call repeatedly. */
   function markLatestSeen(): Promise<void> {
+    if (!get(enabled)) return Promise.resolve();
+    if (inFlight) return inFlight;
     const latest = latestRelease();
     const seen = get(seenVersion);
     if (!latest || seen === undefined || !hasUnseenRelease(seen)) return Promise.resolve();
-    if (inFlight) return inFlight;
 
-    // Optimistic: the dot disappears immediately; a failed write only means
-    // the dot returns on the next full load.
+    // Optimistic: the dot disappears immediately and returns if saving fails.
     const previous = get(seenVersion);
     seenVersion.set(latest.version);
     inFlight = eneo.whatsNew
       .markSeen(latest.version)
-      .then(() => undefined)
+      .then((state) => seenVersion.set(state.seen_version))
       .catch((error: unknown) => {
         seenVersion.set(previous);
         console.error("Could not record What's new as seen", error);
@@ -64,7 +66,7 @@ function createWhatsNewStore(data: WhatsNewInit) {
    */
   function pendingAnnouncement() {
     const latest = latestRelease();
-    if (!enabled || !latest) return null;
+    if (!get(enabled) || !latest) return null;
     const announced = get(announcedVersion);
     if (announced === undefined) return null;
     if (announced && compareVersions(latest.version, announced) <= 0) return null;
@@ -82,7 +84,7 @@ function createWhatsNewStore(data: WhatsNewInit) {
     announcedVersion.set(latest.version);
     return eneo.whatsNew
       .markAnnounced(latest.version)
-      .then(() => undefined)
+      .then((state) => announcedVersion.set(state.announced_version))
       .catch((error: unknown) => {
         console.error("Could not record the What's new announcement", error);
       });
@@ -96,7 +98,8 @@ function createWhatsNewStore(data: WhatsNewInit) {
   }
 
   return {
-    enabled,
+    enabled: { subscribe: enabled.subscribe },
+    setEnabled: enabled.set,
     resetState,
     seenVersion: { subscribe: seenVersion.subscribe },
     announcedVersion: { subscribe: announcedVersion.subscribe },
