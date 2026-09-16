@@ -26,7 +26,7 @@ ENTRY = {
 VALID = {"releases": [{"version": "2.2.0", "entries": [ENTRY]}]}
 
 
-class CheckWhatsNewTests(unittest.TestCase):
+class _RepoCase(unittest.TestCase):
     def make_repo(
         self,
         data: object,
@@ -50,9 +50,9 @@ class CheckWhatsNewTests(unittest.TestCase):
         )
         return root
 
-    def run_check(self, root: Path) -> subprocess.CompletedProcess[str]:
+    def run_check(self, root: Path, *extra: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            ["python3", str(CHECK), "--repo-root", str(root)],
+            ["python3", str(CHECK), "--repo-root", str(root), *extra],
             text=True,
             capture_output=True,
             check=False,
@@ -63,6 +63,9 @@ class CheckWhatsNewTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn(fragment, result.stdout)
 
+
+
+class CheckWhatsNewTests(_RepoCase):
     def test_accepts_valid_file(self) -> None:
         result = self.run_check(self.make_repo(VALID))
         self.assertEqual(result.returncode, 0, result.stdout)
@@ -161,6 +164,43 @@ class CheckWhatsNewTests(unittest.TestCase):
         data = copy.deepcopy(VALID)
         data["releases"][0]["entries"][0]["pr"] = 760
         self.assert_rejected(data, "unexpected keys ['pr']")
+
+
+class ReleaseTagTests(_RepoCase):
+    def releases(self, version: str, date: str | None = None) -> dict:
+        release = {"version": version, "entries": [ENTRY]}
+        if date:
+            release["date"] = date
+        return {"releases": [release, {"version": "2.1.0", "date": "2026-06-12", "entries": [ENTRY]}]}
+
+    def test_final_tag_requires_a_dated_entry(self) -> None:
+        undated = self.run_check(self.make_repo(self.releases("2.2.0")), "--release-tag", "v2.2.0")
+        self.assertEqual(undated.returncode, 1, undated.stdout)
+        self.assertIn("has no date", undated.stdout)
+
+        dated = self.run_check(
+            self.make_repo(self.releases("2.2.0", "2026-10-01")), "--release-tag", "v2.2.0"
+        )
+        self.assertEqual(dated.returncode, 0, dated.stdout)
+
+    def test_prerelease_tag_accepts_an_undated_entry(self) -> None:
+        result = self.run_check(self.make_repo(self.releases("2.2.0")), "--release-tag", "v2.2.0-rc.1")
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_hotfix_without_notes_is_fine(self) -> None:
+        result = self.run_check(
+            self.make_repo(self.releases("2.2.0", "2026-10-01")), "--release-tag", "v2.2.1"
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_notes_for_a_later_version_cannot_ship_in_an_older_release(self) -> None:
+        result = self.run_check(self.make_repo(self.releases("2.3.0")), "--release-tag", "v2.2.0")
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("newer than release tag", result.stdout)
+
+    def test_rejects_malformed_tags(self) -> None:
+        result = self.run_check(self.make_repo(self.releases("2.2.0")), "--release-tag", "2.2")
+        self.assertEqual(result.returncode, 1, result.stdout)
 
 
 if __name__ == "__main__":

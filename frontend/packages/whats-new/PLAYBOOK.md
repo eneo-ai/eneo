@@ -94,6 +94,13 @@ Run this when the release branch is cut or the tag is about to be pushed.
 Read it as a user would. Cut, reorder, sharpen. Set `date`. Merge before the
 tag is pushed so the release image ships with its own notes.
 
+The image build enforces this on every `v*` tag
+(`scripts/check_whats_new.py --release-tag`): a **final** tag whose version
+has an entry fails while that entry has no `date`; an RC tag accepts an
+undated entry; an entry newer than the tag fails (notes for a later version
+must not ship in an older release); and a hotfix tag without an entry of its
+own passes — a hotfix with no user-facing changes needs none.
+
 ## Maintenance
 
 **Single sources.** `releases.schema.json` owns the shape and the closed

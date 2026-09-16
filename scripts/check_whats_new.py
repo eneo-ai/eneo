@@ -13,7 +13,14 @@ a schema cannot express:
   * every showMe href resolves to a page under the web app's (app) routes
   * every showMe anchor exists as data-tour="..." in the web app
 
-Run locally:  python3 scripts/check_whats_new.py
+With --release-tag vX.Y.Z (the image build runs this on every tag) it also
+checks that the newest entry fits the release being built: it may not be
+newer than the tag (notes for a future version leaking into an older release
+branch), a final tag whose version has an entry must carry a date (no
+"Upcoming" in production), and a hotfix without user-facing changes needs no
+entry at all.
+
+Run locally:  python3 scripts/check_whats_new.py [--release-tag v2.2.0]
 """
 
 from __future__ import annotations
@@ -30,6 +37,7 @@ WEB_SRC = Path("frontend/apps/web/src")
 APP_ROUTES = WEB_SRC / "routes" / "(app)"
 
 TITLE_MAX = 60
+VERSION_RE_LOOSE = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$")
 
 
 class Vocabulary:
@@ -272,9 +280,43 @@ def validate(
     return errors
 
 
+def _core_version(version: str) -> str:
+    return version.partition("-")[0]
+
+
+def check_release_tag(data: dict, tag: str) -> list[str]:
+    """Rules for the release identified by a git tag (``v2.2.0``, ``v2.2.0-rc.1``)."""
+    version = tag.removeprefix("v")
+    if not VERSION_RE_LOOSE.match(version):
+        return [f"release tag {tag!r} is not vMAJOR.MINOR.PATCH[-prerelease]"]
+    releases = data.get("releases") or []
+    if not releases:
+        return []
+    newest = releases[0]
+    newest_version = newest.get("version")
+    if not isinstance(newest_version, str):
+        return []
+    if _semver_key(_core_version(newest_version)) > _semver_key(_core_version(version)):
+        return [
+            f"newest entry {newest_version} is newer than release tag {tag}; "
+            "release notes for a later version must not ship in this release"
+        ]
+    is_final = "-" not in version
+    if is_final and _core_version(newest_version) == version and not newest.get("date"):
+        return [
+            f"entry {newest_version} has no date but {tag} is a final release; "
+            'set "date" before tagging so the app does not show it as upcoming'
+        ]
+    return []
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo-root", default=".", type=Path)
+    parser.add_argument(
+        "--release-tag",
+        help="git tag being built (vX.Y.Z or vX.Y.Z-rc.N); adds the release rules",
+    )
     args = parser.parse_args()
     root: Path = args.repo_root.resolve()
 
@@ -296,6 +338,8 @@ def main() -> int:
     data = loaded[RELEASES_PATH]
 
     errors = validate(data, vocab, _collect_anchors(root / WEB_SRC), root / APP_ROUTES)
+    if not errors and args.release_tag and isinstance(data, dict):
+        errors = check_release_tag(data, args.release_tag)
     if errors:
         print(f"{RELEASES_PATH}: {len(errors)} problem(s)")
         for error in errors:
