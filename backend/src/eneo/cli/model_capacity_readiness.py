@@ -5,7 +5,11 @@ Usage:
 
 Stored values are declarations, not verification. Exit codes: 0 for no missing
 required dimensions, 1 for missing dimensions, 2 for usage errors, 3 for an
-incomplete report. Only database reads are performed; no providers are contacted.
+incomplete report, including invalid settings. Only database reads are
+performed; no providers are contacted, and the LiteLLM model catalogue is read
+from the installed package unless LITELLM_LOCAL_MODEL_COST_MAP says otherwise.
+Application modules load inside the protected run, so a startup failure exits 3
+without printing settings values.
 """
 
 from __future__ import annotations
@@ -14,28 +18,20 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import shutil
 import sys
 import tempfile
 from collections.abc import AsyncIterator, Callable
-from typing import Literal, NotRequired, Protocol, TypedDict
+from typing import TYPE_CHECKING, Literal, NotRequired, Protocol, TypedDict
 from uuid import UUID
 
-from eneo.completion_models.domain.completion_model import CompletionModel
-from eneo.completion_models.domain.model_capacity import (
-    CapacityDimension,
-    ModelCapacity,
-    UnknownModelCapacityError,
-)
-from eneo.flows.ai_builder.ai_builder_context import eligible_planner_models
-from eneo.flows.domain.flow import FlowRunStatusSnapshot, FlowSparse, FlowVersion
-from eneo.flows.enums import (
-    flow_output_mode_uses_completion_model,
-    is_terminal_flow_run_status,
-)
-from eneo.flows.published_definition import parse_verified_published_definition
-from eneo.spaces.space import Space
-from eneo.tenants.tenant import TenantInDB
+if TYPE_CHECKING:
+    from eneo.completion_models.domain.completion_model import CompletionModel
+    from eneo.completion_models.domain.model_capacity import CapacityDimension
+    from eneo.flows.domain.flow import FlowRunStatusSnapshot, FlowSparse, FlowVersion
+    from eneo.spaces.space import Space
+    from eneo.tenants.tenant import TenantInDB
 
 UseKind = Literal["builder", "published_flow", "resumable_run"]
 
@@ -51,7 +47,7 @@ class ReadinessSource(Protocol):
     ) -> FlowVersion: ...
     async def assistant_model(
         self, owner: TenantInDB, assistant_id: UUID
-    ) -> CompletionModel | None: ...
+    ) -> CompletionModel: ...
     def builder_spaces(self, owner: TenantInDB) -> AsyncIterator[Space]: ...
     async def active_provider_ids(self, owner: TenantInDB) -> set[UUID]: ...
 
@@ -94,6 +90,11 @@ class TenantReadiness(TypedDict):
 def required_dimensions(
     model: CompletionModel, *, builder: bool
 ) -> list[CapacityDimension]:
+    from eneo.completion_models.domain.model_capacity import (
+        ModelCapacity,
+        UnknownModelCapacityError,
+    )
+
     unknown = ModelCapacity(None, None, None)
     rules: list[Callable[[], object]] = (
         [lambda: unknown.admits_request(0, safety_tokens=0, output_reserve_tokens=0)]
@@ -152,6 +153,13 @@ def add_use(
 
 
 async def report_tenant(source: ReadinessSource, owner: TenantInDB) -> TenantReadiness:
+    from eneo.flows.ai_builder.ai_builder_context import eligible_planner_models
+    from eneo.flows.enums import (
+        flow_output_mode_uses_completion_model,
+        is_terminal_flow_run_status,
+    )
+    from eneo.flows.published_definition import parse_verified_published_definition
+
     records: dict[UUID, ModelReadiness] = {}
     seen: set[tuple[UUID, UseKind, UUID]] = set()
     active = await source.active_provider_ids(owner)
@@ -179,11 +187,12 @@ async def report_tenant(source: ReadinessSource, owner: TenantInDB) -> TenantRea
             if flow_output_mode_uses_completion_model(step.output_mode)
         }
         for assistant_id in sorted(assistant_ids):
+            # A completion step runs its assistant's model; one that resolves to
+            # none leaves the report incomplete rather than silently shorter.
             model = await source.assistant_model(owner, assistant_id)
-            if model is not None:
-                if model.tenant_id not in (None, owner.id):
-                    raise ValueError("Invalid model ownership")
-                add_use(records, seen, model, use, identity)
+            if model.tenant_id not in (None, owner.id):
+                raise ValueError("Invalid model ownership")
+            add_use(records, seen, model, use, identity)
 
     async for flow in source.published_flows(owner):
         if flow.tenant_id != owner.id:
@@ -353,6 +362,9 @@ async def _read_database(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    # Importing LiteLLM fetches its model catalogue over the network unless
+    # told to use the packaged copy; this command promises no network access.
+    os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
     try:
         return asyncio.run(_run_database(args))
     except KeyboardInterrupt:

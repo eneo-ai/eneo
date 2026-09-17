@@ -178,7 +178,7 @@ class ModelCapacityReadinessRepository:
 
     async def assistant_model(
         self, owner: TenantInDB, assistant_id: UUID
-    ) -> CompletionModel | None:
+    ) -> CompletionModel:
         # Runtime resolves the current assistant in its tenant-scoped space;
         # published assistant hashes do not freeze a completion model selection.
         row = (
@@ -191,7 +191,10 @@ class ModelCapacityReadinessRepository:
         if row is None:
             raise ValueError("Assistant not found")
         if row[0] is None:
-            return None
-        return await CompletionModelRepository(
+            raise ValueError("Completion step assistant has no model")
+        model = await CompletionModelRepository(
             session=self.session, tenant=owner
         ).one_or_none(row[0])
+        if model is None:
+            raise ValueError("Completion step model not found")
+        return model

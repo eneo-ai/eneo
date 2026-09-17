@@ -386,31 +386,108 @@ async def test_database_failure_closes_and_does_not_expose_credentials(
     assert manager.closed
 
 
-def test_imports_do_not_attempt_network_access():
+def _run_entry_point(script, *, env, cwd):
     import subprocess
     import sys
 
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            """
-import socket
-attempts = []
-def refuse(self, address):
-    attempts.append(address)
-    raise RuntimeError('network forbidden')
-socket.socket.connect = refuse
-import eneo.cli.model_capacity_readiness
-import eneo.cli.model_capacity_readiness_repo
-assert not attempts, attempts
-""",
-        ],
+    return subprocess.run(
+        [sys.executable, "-c", script],
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=60,
+        env=env,
+        cwd=cwd,
     )
-    assert result.returncode == 0, result.stderr
+
+
+def test_entry_point_reads_no_network_before_its_database(tmp_path):
+    import os
+
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key != "LITELLM_LOCAL_MODEL_COST_MAP"
+    }
+    env.update(POSTGRES_HOST="127.0.0.1", POSTGRES_PORT="1")
+    result = _run_entry_point(
+        """
+import socket, sys
+hosts = []
+real_getaddrinfo = socket.getaddrinfo
+def record(host, *args, **kwargs):
+    hosts.append(host)
+    return real_getaddrinfo(host, *args, **kwargs)
+socket.getaddrinfo = record
+real_connect = socket.socket.connect
+def connect(self, address):
+    hosts.append(address[0] if isinstance(address, tuple) else address)
+    return real_connect(self, address)
+socket.socket.connect = connect
+from eneo.cli.model_capacity_readiness import main
+code = main(["report"])
+print(sorted({str(host) for host in hosts}), file=sys.stderr)
+raise SystemExit(code)
+""",
+        env=env,
+        cwd=tmp_path,
+    )
+    assert result.returncode == 3, result.stderr
+    assert result.stdout == ""
+    reached = result.stderr.strip().splitlines()[-1]
+    assert "github" not in reached
+    assert set(eval(reached)) <= {"127.0.0.1", "localhost"}
+
+
+def test_entry_point_invalid_settings_exit_without_values(tmp_path):
+    import os
+
+    env = {
+        "PATH": os.environ["PATH"],
+        "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
+        "POSTGRES_PASSWORD": "s3cret9-sentinel",
+    }
+    result = _run_entry_point(
+        "from eneo.cli.model_capacity_readiness import main; raise SystemExit(main(['report']))",
+        env=env,
+        cwd=tmp_path,
+    )
+    assert result.returncode == 3, result.stderr
+    assert result.stdout == ""
+    assert "s3cret9-sentinel" not in result.stderr
+    assert "capacity readiness report failed" in result.stderr
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stored_model", ["unbound", "missing"])
+async def test_completion_step_without_a_model_leaves_the_report_incomplete(
+    monkeypatch, stored_model
+):
+    from types import SimpleNamespace
+
+    from eneo.cli import model_capacity_readiness_repo
+    from eneo.cli.model_capacity_readiness_repo import ModelCapacityReadinessRepository
+
+    owner = tenant()
+    bound = None if stored_model == "unbound" else uuid4()
+
+    class Session:
+        async def execute(self, statement):
+            return SimpleNamespace(one_or_none=lambda: (bound,))
+
+    class Models:
+        def __init__(self, session, tenant):
+            pass
+
+        async def one_or_none(self, model_id):
+            return None
+
+    monkeypatch.setattr(
+        model_capacity_readiness_repo, "CompletionModelRepository", Models
+    )
+    with pytest.raises(ValueError):
+        await ModelCapacityReadinessRepository(Session()).assistant_model(
+            owner, uuid4()
+        )
 
 
 @pytest.mark.asyncio
