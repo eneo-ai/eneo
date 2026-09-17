@@ -33,10 +33,16 @@
 
   const theme = getThemeStore();
 
-  onMount(() => {
-    const scheme = data.config.theme.color_scheme ?? "auto";
-    theme.set(scheme === "auto" ? "system" : scheme);
-  });
+  // A widget pinned to light or dark stays that way; "auto" follows the host
+  // page (its `scheme` query parameter first, later `theme` messages).
+  const pinnedScheme = page.config.theme.color_scheme ?? "auto";
+
+  function applyScheme(scheme: "light" | "dark" | "auto") {
+    const effective = pinnedScheme === "auto" ? scheme : pinnedScheme;
+    theme.set(effective === "auto" ? "system" : effective);
+  }
+
+  onMount(() => applyScheme(page.hostScheme ?? "auto"));
 </script>
 
 <svelte:head>
@@ -54,5 +60,6 @@
     {client}
     hostOrigin={data.hostOrigin}
     onSession={(created) => (session = created)}
+    onTheme={applyScheme}
   />
 </div>

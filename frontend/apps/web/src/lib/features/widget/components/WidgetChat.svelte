@@ -25,9 +25,11 @@
     client: WidgetClient;
     hostOrigin: string | null;
     onSession: (session: VisitorSession) => void;
+    /** The host page's colour scheme, forwarded by the loader. */
+    onTheme?: (scheme: "light" | "dark" | "auto") => void;
   };
 
-  let { config, client, hostOrigin, onSession }: Props = $props();
+  let { config, client, hostOrigin, onSession, onTheme }: Props = $props();
 
   const chat = getChatService();
 
@@ -44,7 +46,7 @@
   let pendingQuestion = $state<string | null>(null);
 
   // Props are fixed for the lifetime of the page; capture them once.
-  const initial = untrack(() => ({ client, config, hostOrigin, onSession }));
+  const initial = untrack(() => ({ client, config, hostOrigin, onSession, onTheme }));
 
   const session = new VisitorSession({
     client: initial.client,
@@ -61,7 +63,8 @@
   const bridge = createEmbedBridge({
     hostOrigin: initial.hostOrigin,
     handlers: {
-      onOpen: () => composer?.focus()
+      onOpen: () => composer?.focus(),
+      onTheme: (scheme) => initial.onTheme?.(scheme)
     }
   });
 

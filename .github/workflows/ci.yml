@@ -359,6 +359,11 @@ jobs:
       - name: Run web unit & component tests
         run: FORCE_COLOR=1 bun run --filter '@eneo/web' test
 
+      # Builds the loader first (its size budget is enforced by the build) and
+      # runs its element tests in the same Chromium.
+      - name: Run widget loader tests
+        run: FORCE_COLOR=1 bun run --filter '@eneo/widget-loader' test
+
       - name: Build frontend
         run: bun run build
         env:

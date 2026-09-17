@@ -15,6 +15,10 @@ function parseHostOrigin(raw: string | null): string | null {
   }
 }
 
+function parseScheme(raw: string | null): "light" | "dark" | "auto" | null {
+  return raw === "light" || raw === "dark" || raw === "auto" ? raw : null;
+}
+
 export const load: PageServerLoad = async ({ params, url, fetch, locals, setHeaders }) => {
   const baseUrl = getBackendUrl() ?? "";
   const client = createWidgetClient({ baseUrl, publicId: params.publicId, fetch });
@@ -46,6 +50,7 @@ export const load: PageServerLoad = async ({ params, url, fetch, locals, setHead
     publicId: params.publicId,
     baseUrl,
     hostOrigin: standalone ? null : parseHostOrigin(url.searchParams.get("origin")),
+    hostScheme: parseScheme(url.searchParams.get("scheme")),
     standalone
   };
 };
