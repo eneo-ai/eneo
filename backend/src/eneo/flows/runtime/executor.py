@@ -220,10 +220,7 @@ from eneo.model_providers.domain.provider_call_observer import (
 from eneo.model_providers.infrastructure.litellm_provider import (
     load_active_litellm_provider,
 )
-from eneo.object_content.content import (
-    ObjectContentIntegrityError,
-    ObjectContentUnavailableError,
-)
+from eneo.object_content.content import ObjectContentIntegrityError
 from eneo.prompts.prompt import Prompt
 from eneo.settings.encryption_service import EncryptionService
 from eneo.spaces.space_repo import SpaceRepository
@@ -2508,12 +2505,6 @@ class FlowRunExecutor:
                     raise BadRequestException(
                         "Assistant snapshot resource is missing, inaccessible, or inactive.",
                         code=FlowApiErrorCode.ASSISTANT_SNAPSHOT_RESOURCE_INVALID.value,
-                        context={"step_order": step.step_order},
-                    ) from exc
-                except ObjectContentUnavailableError as exc:
-                    raise BadRequestException(
-                        "Assistant snapshot attachment content is unavailable.",
-                        code=FlowApiErrorCode.TYPED_IO_FILE_NOT_FOUND.value,
                         context={"step_order": step.step_order},
                     ) from exc
                 continue

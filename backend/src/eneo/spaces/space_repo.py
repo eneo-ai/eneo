@@ -2038,10 +2038,6 @@ class SpaceRepository:
             .options(selectinload(Prompts.user))
         )
         mcp_servers = MCPServerMapper.to_entities(record.mcp_servers)
-        if mcp_servers:
-            mcp_servers = await self._load_assistant_mcp_server_tools_with_overrides(
-                space_id=space_id, assistant_id=assistant_id, mcp_servers=mcp_servers
-            )
         return Assistant(
             id=record.id,
             space_id=space_id,

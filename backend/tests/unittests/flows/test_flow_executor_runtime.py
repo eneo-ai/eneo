@@ -6750,15 +6750,9 @@ async def test_v2_space_cache_does_not_change_v1_classification(user, monkeypatc
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("failure", "code"),
-    [
-        ("integrity", "flow_assistant_snapshot_resource_invalid"),
-        ("unavailable", "typed_io_file_not_found"),
-    ],
-)
-async def test_v2_attachment_storage_failure_terminalizes(
-    user, monkeypatch, failure, code
+@pytest.mark.parametrize("failure", ["integrity", "unavailable"])
+async def test_v2_attachment_storage_failures_preserve_error_semantics(
+    user, monkeypatch, failure
 ):
     from eneo.object_content.content import (
         ObjectContentIntegrityError,
@@ -6789,13 +6783,14 @@ async def test_v2_attachment_storage_failure_terminalizes(
     executor.file_repo.get_by_id.return_value = SimpleNamespace(
         id=file_id, tenant_id=user.tenant_id
     )
-    executor.file_content_loader.load.side_effect = (
+    error = (
         ObjectContentIntegrityError("corrupt")
         if failure == "integrity"
         else ObjectContentUnavailableError("offline")
     )
+    executor.file_content_loader.load.side_effect = error
 
-    result = await executor.execute(
+    execution = executor.execute(
         run_id=run.id,
         flow_id=run.flow_id,
         tenant_id=user.tenant_id,
@@ -6803,14 +6798,23 @@ async def test_v2_attachment_storage_failure_terminalizes(
         dispatch_task_id="task-1",
         retry_count=0,
     )
-
-    assert result == {"status": "failed", "error": code}
-    assert (
-        executor.flow_run_terminalizer.terminalize_run.await_args.kwargs[
-            "target_status"
-        ]
-        == FlowRunStatus.FAILED
-    )
+    if failure == "unavailable":
+        with pytest.raises(ObjectContentUnavailableError) as exc:
+            await execution
+        assert exc.value is error
+        executor.flow_run_terminalizer.terminalize_run.assert_not_awaited()
+    else:
+        result = await execution
+        assert result == {
+            "status": "failed",
+            "error": "flow_assistant_snapshot_resource_invalid",
+        }
+        assert (
+            executor.flow_run_terminalizer.terminalize_run.await_args.kwargs[
+                "target_status"
+            ]
+            == FlowRunStatus.FAILED
+        )
     executor.flow_run_repo.claim_step_result.assert_not_awaited()
     executor.completion_service.get_response.assert_not_awaited()
     executor.references_service.get_references.assert_not_awaited()
