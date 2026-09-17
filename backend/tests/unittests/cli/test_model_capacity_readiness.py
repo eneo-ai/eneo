@@ -400,7 +400,8 @@ def _run_entry_point(script, *, env, cwd):
     )
 
 
-def test_entry_point_reads_no_network_before_its_database(tmp_path):
+@pytest.mark.parametrize("catalogue_setting", [None, "False", ""])
+def test_entry_point_reads_no_network_before_its_database(tmp_path, catalogue_setting):
     import os
 
     env = {
@@ -408,6 +409,8 @@ def test_entry_point_reads_no_network_before_its_database(tmp_path):
         for key, value in os.environ.items()
         if key != "LITELLM_LOCAL_MODEL_COST_MAP"
     }
+    if catalogue_setting is not None:
+        env["LITELLM_LOCAL_MODEL_COST_MAP"] = catalogue_setting
     env.update(POSTGRES_HOST="127.0.0.1", POSTGRES_PORT="1")
     result = _run_entry_point(
         """

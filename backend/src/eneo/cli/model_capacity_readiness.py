@@ -6,8 +6,8 @@ Usage:
 Stored values are declarations, not verification. Exit codes: 0 for no missing
 required dimensions, 1 for missing dimensions, 2 for usage errors, 3 for an
 incomplete report, including invalid settings. Only database reads are
-performed; no providers are contacted, and the LiteLLM model catalogue is read
-from the installed package unless LITELLM_LOCAL_MODEL_COST_MAP says otherwise.
+performed; no providers are contacted, and the LiteLLM model catalogue is always
+read from the installed package.
 Application modules load inside the protected run, so a startup failure exits 3
 without printing settings values.
 """
@@ -363,8 +363,9 @@ async def _read_database(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     # Importing LiteLLM fetches its model catalogue over the network unless
-    # told to use the packaged copy; this command promises no network access.
-    os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+    # told to use the packaged copy; this command promises no network access,
+    # whatever the inherited environment says.
+    os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
     try:
         return asyncio.run(_run_database(args))
     except KeyboardInterrupt:
