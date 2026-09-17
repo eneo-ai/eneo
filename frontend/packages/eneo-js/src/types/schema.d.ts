@@ -16629,7 +16629,8 @@ export interface components {
       | "flow_template_missing_content"
       | "flow_template_in_use"
       | "flow_template_download_audit_unavailable"
-      | "flow_package_export_audit_unavailable";
+      | "flow_package_export_audit_unavailable"
+      | "flow_assistant_snapshot_resource_invalid";
     /**
      * FlowAssistantCreateRequest
      * @example {
@@ -19595,6 +19596,7 @@ export interface components {
        */
       code:
         | "flow_assistant_snapshot_drift"
+        | "flow_assistant_snapshot_resource_invalid"
         | "flow_definition_checksum_mismatch"
         | "flow_definition_flow_id_invalid"
         | "flow_definition_invalid"
@@ -22093,6 +22095,7 @@ export interface components {
       error_code?:
         | (
             | "flow_assistant_snapshot_drift"
+            | "flow_assistant_snapshot_resource_invalid"
             | "flow_definition_checksum_mismatch"
             | "flow_definition_flow_id_invalid"
             | "flow_definition_invalid"
@@ -23168,6 +23171,7 @@ export interface components {
       error_code?:
         | (
             | "flow_assistant_snapshot_drift"
+            | "flow_assistant_snapshot_resource_invalid"
             | "flow_definition_checksum_mismatch"
             | "flow_definition_flow_id_invalid"
             | "flow_definition_invalid"
