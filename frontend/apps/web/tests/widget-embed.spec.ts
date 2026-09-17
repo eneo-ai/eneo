@@ -17,7 +17,7 @@ const DENIED_PORT = 4175;
 const HOST_ORIGIN = `http://127.0.0.1:${HOST_PORT}`;
 const DENIED_ORIGIN = `http://127.0.0.1:${DENIED_PORT}`;
 
-type Widget = { id: string; public_id: string; status: string };
+type Widget = { id: string; public_id: string; status: string; revision: number };
 
 async function createActiveWidget(page: Page, request: APIRequestContext): Promise<Widget> {
   const space = await backendFetch(page, request, "/api/v1/spaces/", {
@@ -54,11 +54,12 @@ async function createActiveWidget(page: Page, request: APIRequestContext): Promi
     await backendFetch(page, request, `/api/v1/widgets/${widget.id}/`, {
       method: "PATCH",
       data: {
+        revision: widget.revision,
         allowed_origins: [HOST_ORIGIN],
         texts: {
           title: "Fråga kommunen",
           welcome: "Hej! Vad kan jag hjälpa dig med?",
-          ai_disclosure: "Du chattar med en AI-assistent. Svaren kan innehålla fel."
+          subtitle: "Du chattar med en AI-assistent. Svaren kan innehålla fel."
         }
       }
     }),

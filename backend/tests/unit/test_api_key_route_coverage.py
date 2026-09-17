@@ -24,6 +24,7 @@ from eneo.authentication.auth_dependencies import (
 from eneo.main.config import get_settings
 from eneo.roles.permissions import Permission
 from tests.unit.api_key_test_utils import (
+    route_dependency_callables,
     route_dependency_closures,
     route_has_dependency_named,
     route_is_session_only,
@@ -144,6 +145,13 @@ INTENTIONALLY_UNGUARDED = {
     "router-level resource_permission_for_method check would be a no-op here — there is "
     "no single resource_type/path-param pair that captures the gating. Mutating routes "
     "are listed individually in MUTATING_ALLOWLIST_EXACT.",
+    "/widgets": "Editor/admin widget routes are session-only (require_session_auth); "
+    "WidgetService authorizes per space via the space actor plus Permission.WIDGETS "
+    "and Permission.ADMIN. The visitor routes (/widgets/{public_id}/...) authenticate "
+    "with short-lived visitor tokens and never resolve an Eneo user, so API-key "
+    "resource guards have nothing to gate.",
+    "/widget-templates": "Session-only read of the tenant's widget templates; "
+    "WidgetTemplateService checks Permission.WIDGETS or Permission.ADMIN and tenant.",
 }
 
 # Route prefixes that intentionally do NOT have scope guards.
@@ -165,6 +173,10 @@ INTENTIONALLY_SCOPE_FREE = {
     "not the URL, so a path-level scope check would not gate anything. The HelperRunService "
     "enforces edit-permission on the body's target_id and actor identity on the run.",
     "/skills": "Skill catalogue and organisation lifecycle endpoints reject API keys with require_session_auth; service-layer checks authorize the authenticated user",
+    "/widgets": "Anonymous visitor routes (config, challenge, visitor-sessions, ask, "
+    "sessions, feedback) are authenticated by widget visitor tokens bound to one "
+    "widget; no API key context exists. The admin routes under the same prefix are "
+    "session-only and skipped by route_is_session_only.",
 }
 
 
@@ -503,6 +515,53 @@ class TestHighRiskExactRouteGuards:
         assert _route_has_dep_name(route, "require_session_auth"), (
             "GET /skills/organization/{skill_id}/adoption/ must remain "
             "session-only; OrganizationSkillService performs the tenant-admin check"
+        )
+
+    @pytest.mark.parametrize(
+        ("method", "path"),
+        [
+            ("GET", "/spaces/{space_id}/widgets/"),
+            ("POST", "/spaces/{space_id}/widgets/"),
+            ("GET", "/widgets/{id}/"),
+            ("PATCH", "/widgets/{id}/"),
+            ("POST", "/widgets/{id}/apply-template/"),
+            ("POST", "/widgets/{id}/preview-token/"),
+            ("POST", "/widgets/{id}/activate/"),
+            ("POST", "/widgets/{id}/pause/"),
+            ("POST", "/widgets/{id}/archive/"),
+            ("GET", "/widgets/{id}/usage/"),
+            ("GET", "/widget-templates/"),
+        ],
+    )
+    def test_widget_admin_routes_are_session_only(self, method: str, path: str):
+        """A scoped API key must never configure, activate or re-origin a widget."""
+        route = _find_route_by_method_and_paths(method, path, path.rstrip("/"))
+        assert _route_has_dep_name(route, "require_session_auth"), (
+            f"{method} {path} must reject API keys; widget configuration decides "
+            "what the public internet can reach"
+        )
+
+    @pytest.mark.parametrize(
+        ("method", "path"),
+        [
+            ("GET", "/widgets/{public_id}/config/"),
+            ("GET", "/widgets/{public_id}/challenge/"),
+            ("POST", "/widgets/{public_id}/visitor-sessions/"),
+            ("POST", "/widgets/{public_id}/ask/"),
+            ("GET", "/widgets/{public_id}/sessions/{session_id}/"),
+            ("POST", "/widgets/{public_id}/sessions/{session_id}/feedback/"),
+        ],
+    )
+    def test_widget_visitor_routes_never_resolve_a_user(self, method: str, path: str):
+        """The anonymous surface must not pick up user auth by accident."""
+        route = _find_route_by_method_and_paths(method, path, path.rstrip("/"))
+        dep_names = {
+            getattr(fn, "__name__", "") for fn in route_dependency_callables(route)
+        }
+        assert "require_session_auth" not in dep_names
+        assert "_get_container_with_user" not in dep_names, (
+            f"{method} {path} resolves an Eneo user; visitors must only ever be "
+            "authenticated by widget visitor tokens"
         )
 
     def test_chat_turn_diagnostics_is_session_only_and_permission_gated(self):
@@ -895,6 +954,23 @@ MUTATING_ALLOWLIST_EXACT: dict[tuple[str, str], str] = {
     ): "Status transitions are gated on (run.tenant_id, run.actor_user_id) inside "
     "HelperRunService.set_status; repeat transitions return 400. Basic PATCH→write blocks "
     "read-only keys.",
+    (
+        "POST",
+        "/widgets/{public_id}/visitor-sessions/",
+    ): "Public visitor surface: mints a visitor token after an ALTCHA proof of work "
+    "(or a valid previous token); rate limited per widget and IP. No user or API key "
+    "is resolved, so API-key guards have nothing to gate.",
+    (
+        "POST",
+        "/widgets/{public_id}/ask/",
+    ): "Public visitor surface: requires a visitor token bound to the widget "
+    "(get_widget_principal); the container user is the synthetic visitor and the "
+    "space actor only allows READ on the widget's assistant.",
+    (
+        "POST",
+        "/widgets/{public_id}/sessions/{session_id}/feedback/",
+    ): "Public visitor surface: visitor token required and the session must be owned "
+    "by widget + visitor id (SessionService._is_owner).",
 }
 
 
