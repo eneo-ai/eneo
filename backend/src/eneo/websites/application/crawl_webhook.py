@@ -141,12 +141,18 @@ async def request_crawl(session: AsyncSession, website: Websites) -> str:
 async def consume_on_start(
     session: AsyncSession, website: Websites, job_id: UUID
 ) -> None:
-    # A retry of the same logical run must not consume a newer webhook request.
-    if website.webhook_started_job_id != job_id:
+    # Only a run admitted by the webhook dispatcher can consume its request.
+    # Initial/manual crawls have no outbox; retries already cleared theirs.
+    run_id = await session.scalar(
+        sa.update(CrawlRuns)
+        .where(
+            CrawlRuns.website_id == website.id,
+            CrawlRuns.job_id == job_id,
+            CrawlRuns.webhook_dispatch.is_not(None),
+        )
+        .values(webhook_dispatch=None)
+        .returning(CrawlRuns.id)
+    )
+    if run_id is not None and website.webhook_started_job_id != job_id:
         website.webhook_pending = False
         website.webhook_started_job_id = job_id
-    await session.execute(
-        sa.update(CrawlRuns)
-        .where(CrawlRuns.website_id == website.id, CrawlRuns.job_id == job_id)
-        .values(webhook_dispatch=None)
-    )

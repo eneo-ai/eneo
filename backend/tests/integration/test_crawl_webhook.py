@@ -533,3 +533,56 @@ async def test_cancel_cleanup_and_watchdog_preserve_live_slot(
         assert not await redis_client.exists(flag)
     finally:
         await redis_client.delete(key, flag)
+
+
+@pytest.mark.parametrize("post_before_start", [True, False])
+async def test_non_webhook_run_preserves_pending_followup(
+    db_session, webhook_site, post_before_start
+):
+    from eneo.jobs.job_models import Task
+
+    site_id, _ = webhook_site
+    job_id = uuid4()
+    async with db_session() as session:
+        site = await lock_website(session, site_id)
+        session.add(
+            Jobs(
+                id=job_id,
+                user_id=site.user_id,
+                task=Task.CRAWL.value,
+                status=Status.QUEUED.value,
+                name="Initial or manual crawl",
+            )
+        )
+        await session.flush()
+        session.add(
+            CrawlRuns(
+                id=uuid4(),
+                tenant_id=site.tenant_id,
+                website_id=site_id,
+                job_id=job_id,
+            )
+        )
+    if post_before_start:
+        await post(db_session, site_id)
+    assert await start(db_session, site_id) == job_id
+    if not post_before_start:
+        await post(db_session, site_id)
+        # A retry of an initial/manual crawl must preserve requests too.
+        async with db_session() as session:
+            site = await lock_website(session, site_id)
+            await consume_on_start(session, site, job_id)
+    async with db_session() as session:
+        site = await lock_website(session, site_id)
+        assert site.webhook_pending
+        assert site.webhook_started_job_id is None
+    await finish(db_session, site_id, job_id)
+    assert await run_count(db_session, site_id) == 2
+    followup_id = await start(db_session, site_id)
+    assert followup_id != job_id
+    async with db_session() as session:
+        site = await lock_website(session, site_id)
+        assert not site.webhook_pending
+        assert site.webhook_started_job_id == followup_id
+    await finish(db_session, site_id, followup_id)
+    assert await run_count(db_session, site_id) == 2
