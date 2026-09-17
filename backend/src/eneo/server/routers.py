@@ -154,6 +154,9 @@ from eneo.user_groups.user_groups_router import router as user_groups_router
 from eneo.users.user_router import router as users_router
 from eneo.users.user_router import users_admin_router
 from eneo.websites.presentation.website_router import router as website_router
+from eneo.widgets.presentation.public_widget_router import (
+    router as public_widgets_router,
+)
 from eneo.widgets.presentation.widget_router import (
     policy_router as widget_policy_router,
 )
@@ -375,6 +378,7 @@ router.include_router(
 )
 router.include_router(space_widgets_router, prefix="/spaces", tags=["widgets"])
 router.include_router(widgets_router, prefix="/widgets", tags=["widgets"])
+router.include_router(public_widgets_router, prefix="/widgets", tags=["widgets"])
 router.include_router(
     widget_policy_router,
     prefix="/admin/widget-policy",

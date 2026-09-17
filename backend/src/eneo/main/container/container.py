@@ -396,6 +396,9 @@ from eneo.websites.infrastructure.update_website_size_service import (
     UpdateWebsiteSizeService,
 )
 from eneo.websites.infrastructure.website_cleaner_service import WebsiteCleanerService
+from eneo.widgets.application.altcha_service import AltchaService
+from eneo.widgets.application.visitor_token_service import VisitorTokenService
+from eneo.widgets.application.widget_limits import WidgetBudget, WidgetLimiter
 from eneo.widgets.application.widget_service import WidgetService
 from eneo.widgets.infrastructure.widget_repo_impl import WidgetRepoImpl
 from eneo.widgets.presentation.widget_assembler import WidgetAssembler
@@ -665,6 +668,10 @@ class Container(containers.DeclarativeContainer):
     governance_policy_assembler = providers.Factory(GovernancePolicyAssembler)
     widget_repo = providers.Factory(WidgetRepoImpl, session=session)
     widget_assembler = providers.Factory(WidgetAssembler)
+    widget_visitor_token_service = providers.Factory(VisitorTokenService)
+    widget_altcha_service = providers.Factory(AltchaService, redis_client=redis_client)
+    widget_limiter = providers.Factory(WidgetLimiter, redis_client=redis_client)
+    widget_budget = providers.Factory(WidgetBudget, redis_client=redis_client)
     org_space_assistant_role_repo = providers.Factory(
         OrgSpaceAssistantRoleRepo,
         session=session,

@@ -45,7 +45,7 @@ All routes: `response_model`/`responses.get_responses` per the route-metadata ra
 
 | Method & path | Auth | Purpose |
 |---|---|---|
-| `GET config/` | none | `WidgetPublicConfig`: texts, theme, language, `bot_protection`, `limits.max_question_chars`, assistant display name, `token_generation`. `ETag` + `Cache-Control: public, max-age=60`. 404 unless `status=active`. Never includes `allowed_origins`, internal ids or model names. |
+| `GET config/` | none | `WidgetPublicConfig`: widget name, texts, theme, language, `bot_protection`, `limits.max_question_chars`, `token_generation`. `ETag` + `Cache-Control: public, max-age=60` (304 on `If-None-Match`). 404 unless `status=active`. Never includes `allowed_origins`, internal ids or model names. Delivered with the visitor-token PR (#848) because the embed page needs it before the ask path exists. |
 | `GET challenge/` | none | ALTCHA challenge (`algorithm`, `challenge`, `salt`, `signature`, `maxnumber`). Rate limited per IP. |
 | `POST visitor-sessions/` | none | Body: `{visitor_id?, altcha?, previous_token?}`. Returns `{token, expires_in, visitor_id}`. Exactly one of `altcha` (new/expired visitor) or `previous_token` (silent rotation; accepted while the old token is valid or expired < 60 min and its `gen` still matches). |
 | `POST ask/` | visitor Bearer | Body `{question, session_id?}`. Always streams (`text/event-stream`), reusing the existing SSE event types. `session_id` must belong to `(widget_id, visitor_id)`. |
@@ -67,12 +67,12 @@ gen       = <widget.token_generation>
 iat, exp  = 15 min, jti
 ```
 
-Verification: signature, `exp`, `aud`, `token_use`, and `gen == widget.token_generation` read from a 30-second in-process cache backed by Redis (`widget:gen:<id>`), so pausing takes effect within seconds without a DB read per request. No refresh tokens: the client re-mints with `previous_token`.
+Verification: signature, `exp`, `aud`, `token_use`, and `gen == widget.token_generation`. The widget row is read per request by its unique `public_id` (one indexed lookup, also needed for the status check and limits), so pausing takes effect immediately; a generation cache can be added later if profiling shows the read matters. No refresh tokens: the client re-mints with `previous_token` inside a 60-minute grace after expiry.
 
 ### ALTCHA (proof of work)
 
-- Server-side with the `altcha` Python library: challenge = HMAC-signed `salt` + target; `maxnumber` tuned so a phone solves it in roughly 200–500 ms (start at 100 000; make it a setting).
-- Replay protection: solved `salt` values are stored in Redis `SETNX` with the challenge's expiry (5 min).
+- Server-side with the `altcha` Python library (v2 API): `create_challenge("SHA-256", cost, expires_at, hmac_secret)` returns `{parameters: {algorithm, cost, keyLength, keyPrefix, nonce, salt, expiresAt}, signature}`; the browser returns a base64 payload `{challenge, solution}` verified with `verify_solution`. The HMAC key is derived from `url_signing_key`, so challenges need no storage. `cost` is the expected hash count (`widget_altcha_cost`, default 50 000; ~0.25 s in Python, faster in browsers).
+- Replay protection: the solved challenge's `nonce` is stored in Redis with `SET NX` for the challenge's remaining lifetime (`widget_altcha_challenge_ttl_seconds`, default 5 min).
 - Challenge issuance is itself rate limited per IP (60/min) and per widget.
 - `bot_protection=none` skips the challenge; the tenant policy (`WidgetPolicy`) may forbid it.
 
