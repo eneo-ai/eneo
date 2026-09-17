@@ -466,7 +466,7 @@ class Settings(BaseSettings):
     widget_budget_timezone: str = "Europe/Stockholm"
     # Tokens reserved against the daily budget before a widget answer starts;
     # settled to the real usage afterwards. Sized for a RAG prompt plus a
-    # full answer so concurrent bursts cannot overshoot the cap.
+    # full answer. This admission estimate does not bound actual model usage.
     widget_budget_reservation_tokens: int = Field(default=8_000, gt=0)
     trusted_proxy_count: int = 0
     trusted_proxy_headers: list[str] = ["x-forwarded-for", "x-real-ip"]

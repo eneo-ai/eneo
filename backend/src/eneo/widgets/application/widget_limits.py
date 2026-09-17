@@ -4,18 +4,19 @@
 
 
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any, Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
-import redis.exceptions
+from sqlalchemy.exc import SQLAlchemyError
 
 from eneo.audit.infrastructure.rate_limiting import (
     RateLimitConfig,
     RateLimitServiceUnavailableError,
     check_rate_limit,
 )
+from eneo.database.database import sessionmanager
 from eneo.main.config import Settings, get_settings
 from eneo.main.logging import get_logger
 from eneo.widgets.domain.exceptions import (
@@ -24,6 +25,7 @@ from eneo.widgets.domain.exceptions import (
     WidgetRateLimitedError,
 )
 from eneo.widgets.domain.widget import Widget
+from eneo.widgets.infrastructure.widget_usage_repo_impl import WidgetUsageRepoImpl
 
 logger = get_logger(__name__)
 
@@ -117,71 +119,76 @@ class WidgetLimiter:
 
 @dataclass(frozen=True)
 class BudgetReservation:
-    key: str
+    id: UUID
+    widget_id: UUID
+    day: date
     reserved_tokens: int
 
 
 class WidgetBudget:
-    """Daily token budget per widget, reserve-then-settle.
+    """Durable admission and exactly-once settlement, independent of Redis.
 
-    The reservation is added before the model call so concurrent requests
-    cannot collectively overshoot the cap; the actual usage replaces it once
-    the answer is complete. Days roll over at local midnight.
+    Each operation commits separately from the streamed chat transaction. An
+    interrupted process leaves its reservation charged for the admission day;
+    unknown usage must never be silently refunded. Receipts contain no content.
     """
 
-    def __init__(self, redis_client: Any, settings: Optional[Settings] = None) -> None:
-        self.redis = redis_client
+    def __init__(self, settings: Optional[Settings] = None) -> None:
         self.settings = settings or get_settings()
 
-    def _day_key(self, widget: Widget) -> tuple[str, int]:
+    def today(self) -> date:
+        return datetime.now(ZoneInfo(self.settings.widget_budget_timezone)).date()
+
+    async def reserve(self, widget: Widget, tokens: int) -> BudgetReservation:
+        assert widget.id is not None
         zone = ZoneInfo(self.settings.widget_budget_timezone)
         now = datetime.now(zone)
         midnight = datetime.combine(
             now.date() + timedelta(days=1), time.min, tzinfo=zone
         )
-        ttl = max(1, int((midnight - now).total_seconds()))
-        return _widget_key(widget, "budget", now.date().isoformat()), ttl
-
-    async def reserve(self, widget: Widget, tokens: int) -> BudgetReservation:
-        key, ttl = self._day_key(widget)
-        tokens = max(0, tokens)
+        reservation = BudgetReservation(uuid4(), widget.id, now.date(), max(0, tokens))
         try:
-            async with self.redis.pipeline(transaction=True) as pipe:
-                pipe.incrby(key, tokens)
-                pipe.expire(key, ttl)
-                results = await pipe.execute()
-            total = int(results[0])
-            if total > widget.limits.daily_token_budget:
-                await self.redis.decrby(key, tokens)
-                raise WidgetBudgetExhaustedError(retry_after=ttl)
-        except redis.exceptions.RedisError as exc:
-            if self.settings.widget_rate_limit_fail_open:
-                logger.warning(
-                    "Widget budget check skipped: Redis unavailable",
-                    extra={"key": key, "error": str(exc)},
+            async with sessionmanager.session() as session, session.begin():
+                admitted = await WidgetUsageRepoImpl(session).reserve(
+                    reservation.id,
+                    widget.id,
+                    reservation.day,
+                    tokens=reservation.reserved_tokens,
+                    limit=widget.limits.daily_token_budget,
                 )
-                return BudgetReservation(key=key, reserved_tokens=0)
+                if not admitted:
+                    raise WidgetBudgetExhaustedError(
+                        retry_after=max(1, int(midnight.timestamp() - now.timestamp()))
+                    )
+        except SQLAlchemyError as exc:
             raise WidgetProtectionUnavailableError() from exc
-        return BudgetReservation(key=key, reserved_tokens=tokens)
+        return reservation
 
-    async def settle(self, reservation: BudgetReservation, actual_tokens: int) -> None:
-        delta = max(0, actual_tokens) - reservation.reserved_tokens
-        if delta == 0:
-            return
-        try:
-            await self.redis.incrby(reservation.key, delta)
-        except redis.exceptions.RedisError as exc:
-            # The reservation stays as the charged amount; never block an
-            # answer that has already been produced.
-            logger.warning(
-                "Widget budget settlement failed",
-                extra={"key": reservation.key, "delta": delta, "error": str(exc)},
+    async def release(self, reservation: BudgetReservation) -> None:
+        async with sessionmanager.session() as session, session.begin():
+            await WidgetUsageRepoImpl(session).finish_reservation(
+                reservation.id,
+                input_tokens=0,
+                output_tokens=0,
+                released=True,
+            )
+
+    async def settle(
+        self,
+        reservation: BudgetReservation,
+        input_tokens: int,
+        output_tokens: int,
+    ) -> None:
+        async with sessionmanager.session() as session, session.begin():
+            await WidgetUsageRepoImpl(session).finish_reservation(
+                reservation.id,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
             )
 
     async def used_today(self, widget: Widget) -> int:
-        key, _ = self._day_key(widget)
-        try:
-            value = await self.redis.get(key)
-        except redis.exceptions.RedisError:
-            return 0
-        return int(value or 0)
+        assert widget.id is not None
+        async with sessionmanager.session() as session, session.begin():
+            return await WidgetUsageRepoImpl(session).budget_used(
+                widget.id, self.today()
+            )

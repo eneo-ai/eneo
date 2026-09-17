@@ -3,8 +3,11 @@
 # Licensed under the MIT License.
 
 
+from datetime import timedelta
+
 from eneo.database.database import sessionmanager
 from eneo.main.logging import get_logger
+from eneo.widgets.application.widget_limits import WidgetBudget
 from eneo.widgets.infrastructure.widget_usage_repo_impl import WidgetUsageRepoImpl
 
 logger = get_logger(__name__)
@@ -17,7 +20,8 @@ async def purge_expired_widget_sessions() -> dict[str, int]:
     rolls back another's deletions.
     """
     async with sessionmanager.session() as session, session.begin():
-        targets = await WidgetUsageRepoImpl(session).retention_targets()
+        repo = WidgetUsageRepoImpl(session)
+        targets = await repo.retention_targets()
 
     widgets_processed = 0
     sessions_deleted = 0
@@ -35,6 +39,16 @@ async def purge_expired_widget_sessions() -> dict[str, int]:
             logger.exception(
                 "Widget retention purge failed", extra={"widget_id": str(widget_id)}
             )
+
+    # Accounting maintenance must never prevent conversation retention.
+    try:
+        async with sessionmanager.session() as session, session.begin():
+            await WidgetUsageRepoImpl(session).prune_budget_receipts(
+                WidgetBudget().today() - timedelta(days=7)
+            )
+    except Exception:
+        errors += 1
+        logger.exception("Widget budget receipt cleanup failed")
 
     summary = {
         "widgets_processed": widgets_processed,

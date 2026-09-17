@@ -142,7 +142,11 @@ async def test_activation_requires_admin_and_reports_blockers(assistant):
     assert "allowed_origins_empty" in str(exc.value)
 
     await admin.update_widget(
-        view.widget.id, {"allowed_origins": ["https://www.kommun.se"]}
+        view.widget.id,
+        {
+            "revision": view.widget.revision,
+            "allowed_origins": ["https://www.kommun.se"],
+        },
     )
     activated = await admin.activate_widget(view.widget.id)
     assert activated.widget.status == WidgetStatus.ACTIVE
@@ -156,7 +160,10 @@ async def test_reactivating_an_active_widget_is_rejected(assistant):
     view = await service.create_widget(
         space_id=space.id, target_id=assistant.id, name="a"
     )
-    await service.update_widget(view.widget.id, {"allowed_origins": ["https://a.se"]})
+    await service.update_widget(
+        view.widget.id,
+        {"revision": view.widget.revision, "allowed_origins": ["https://a.se"]},
+    )
     await service.activate_widget(view.widget.id)
     with pytest.raises(BadRequestException):
         await service.activate_widget(view.widget.id)
@@ -171,7 +178,11 @@ async def test_update_enforces_tenant_policy(assistant):
     )
     with pytest.raises(BadRequestException) as exc:
         await service.update_widget(
-            view.widget.id, {"limits": {"daily_token_budget": 100_000}}
+            view.widget.id,
+            {
+                "revision": view.widget.revision,
+                "limits": {"daily_token_budget": 100_000},
+            },
         )
     assert "daily_token_budget_exceeds_policy" in str(exc.value)
 
@@ -184,7 +195,10 @@ async def test_admin_runs_the_lifecycle_outside_their_own_spaces(assistant):
     view = await editor.create_widget(
         space_id=space.id, target_id=assistant.id, name="w"
     )
-    await editor.update_widget(view.widget.id, {"allowed_origins": ["https://a.se"]})
+    await editor.update_widget(
+        view.widget.id,
+        {"revision": view.widget.revision, "allowed_origins": ["https://a.se"]},
+    )
 
     outsider = _service(admin_user, space, repo=repo)
     outsider.space_service.get_space = AsyncMock(
@@ -206,7 +220,10 @@ async def test_pause_is_allowed_for_editors_and_admins(assistant):
     view = await admin.create_widget(
         space_id=space.id, target_id=assistant.id, name="w"
     )
-    await admin.update_widget(view.widget.id, {"allowed_origins": ["https://a.se"]})
+    await admin.update_widget(
+        view.widget.id,
+        {"revision": view.widget.revision, "allowed_origins": ["https://a.se"]},
+    )
     await admin.activate_widget(view.widget.id)
 
     editor_user = _user(Permission.WIDGETS)

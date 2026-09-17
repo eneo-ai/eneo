@@ -2,16 +2,14 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-import redis.exceptions
 
 from eneo.audit.infrastructure.rate_limiting import (
     RateLimitResult,
     RateLimitServiceUnavailableError,
 )
 from eneo.widgets.application import widget_limits
-from eneo.widgets.application.widget_limits import WidgetBudget, WidgetLimiter
+from eneo.widgets.application.widget_limits import WidgetLimiter
 from eneo.widgets.domain.exceptions import (
-    WidgetBudgetExhaustedError,
     WidgetProtectionUnavailableError,
     WidgetRateLimitedError,
 )
@@ -97,87 +95,3 @@ async def test_challenge_limit_and_fail_closed(monkeypatch):
         redis_client=None, settings=_settings(widget_rate_limit_fail_open=True)
     )
     await open_limiter.check_mint(widget, None)
-
-
-class FakeBudgetRedis:
-    def __init__(self, *, fail: bool = False) -> None:
-        self.values: dict[str, int] = {}
-        self.ttls: dict[str, int] = {}
-        self.fail = fail
-
-    def pipeline(self, transaction=True):
-        return _Pipeline(self)
-
-    async def incrby(self, key, amount):
-        if self.fail:
-            raise redis.exceptions.ConnectionError("down")
-        self.values[key] = self.values.get(key, 0) + amount
-        return self.values[key]
-
-    async def decrby(self, key, amount):
-        return await self.incrby(key, -amount)
-
-    async def get(self, key):
-        return self.values.get(key)
-
-
-class _Pipeline:
-    def __init__(self, parent: FakeBudgetRedis) -> None:
-        self.parent = parent
-        self.ops: list = []
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *exc):
-        return False
-
-    def incrby(self, key, amount):
-        self.ops.append(("incrby", key, amount))
-
-    def expire(self, key, ttl):
-        self.ops.append(("expire", key, ttl))
-
-    async def execute(self):
-        results = []
-        for op, key, arg in self.ops:
-            if op == "incrby":
-                results.append(await self.parent.incrby(key, arg))
-            else:
-                self.parent.ttls[key] = arg
-                results.append(True)
-        return results
-
-
-async def test_budget_reserve_then_settle():
-    fake = FakeBudgetRedis()
-    budget = WidgetBudget(redis_client=fake, settings=_settings())
-    widget = _widget(daily_token_budget=10_000)
-
-    reservation = await budget.reserve(widget, 6_000)
-    assert await budget.used_today(widget) == 6_000
-    assert 0 < fake.ttls[reservation.key] <= 24 * 3600
-
-    await budget.settle(reservation, 2_500)
-    assert await budget.used_today(widget) == 2_500
-
-    second = await budget.reserve(widget, 7_000)
-    assert await budget.used_today(widget) == 9_500
-    with pytest.raises(WidgetBudgetExhaustedError) as exc:
-        await budget.reserve(widget, 1_000)
-    assert "Retry-After" in (exc.value.headers or {})
-    # The failed reservation is rolled back.
-    assert await budget.used_today(widget) == 9_500
-    await budget.settle(second, 7_000)
-
-
-async def test_budget_redis_loss_fails_closed_or_open():
-    widget = _widget()
-    with pytest.raises(WidgetProtectionUnavailableError):
-        await WidgetBudget(FakeBudgetRedis(fail=True), settings=_settings()).reserve(
-            widget, 10
-        )
-    reservation = await WidgetBudget(
-        FakeBudgetRedis(fail=True), settings=_settings(widget_rate_limit_fail_open=True)
-    ).reserve(widget, 10)
-    assert reservation.reserved_tokens == 0

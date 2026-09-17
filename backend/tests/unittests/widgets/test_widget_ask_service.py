@@ -1,3 +1,4 @@
+from datetime import date
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -46,6 +47,7 @@ def _service(*, ask_result=None, session_questions=0, tokens=(120, 80)):
             session=session_obj,
             answer=_chunks(),
             question="q",
+            question_id=uuid4(),
             completion_model=object(),
         )
     )
@@ -56,11 +58,14 @@ def _service(*, ask_result=None, session_questions=0, tokens=(120, 80)):
     limiter.check_message = AsyncMock()
     budget = MagicMock()
     budget.reserve = AsyncMock(
-        return_value=BudgetReservation(key="k", reserved_tokens=8_000)
+        return_value=BudgetReservation(
+            id=uuid4(), widget_id=uuid4(), day=date.today(), reserved_tokens=8_000
+        )
     )
     budget.settle = AsyncMock()
-    budget.redis = MagicMock()
-    budget.redis.set = AsyncMock(return_value=True)
+    budget.release = AsyncMock()
+    limiter.redis = MagicMock()
+    limiter.redis.set = AsyncMock(return_value=True)
     usage = MagicMock()
     usage.session = MagicMock()
     usage.record = AsyncMock()
@@ -82,7 +87,7 @@ def _service(*, ask_result=None, session_questions=0, tokens=(120, 80)):
         settings=settings,
     )
     # Stub the token lookup so the settlement wrapper can be exercised in isolation.
-    service._last_question_tokens = AsyncMock(return_value=tokens)  # type: ignore[method-assign]
+    service._question_tokens = AsyncMock(return_value=tokens)  # type: ignore[method-assign]
     return service, SimpleNamespace(
         assistant_service=assistant_service,
         session_service=session_service,
@@ -163,15 +168,12 @@ async def test_ask_streams_then_settles_budget_and_records_usage():
 
     deps.budget.reserve.assert_awaited_once_with(widget, 8_000)
     deps.budget.settle.assert_awaited_once()
-    assert deps.budget.settle.await_args.args[1] == 200
-    # Settlement reads and writes through the request session so it sees the
-    # answer tokens the pipeline stored in the same (uncommitted) transaction.
-    service._last_question_tokens.assert_awaited_once_with(  # type: ignore[attr-defined]
-        deps.usage.session, deps.session.id
+    assert deps.budget.settle.await_args.args[1:] == (120, 80)
+    # Read through the request session to see the uncommitted answer tokens;
+    # the budget service commits its accounting independently.
+    service._question_tokens.assert_awaited_once_with(  # type: ignore[attr-defined]
+        deps.usage.session, response.question_id
     )
-    deps.usage.record.assert_awaited_once()
-    assert deps.usage.record.await_args.kwargs["input_tokens"] == 120
-    assert deps.usage.record.await_args.kwargs["output_tokens"] == 80
     deps.usage.delete_session.assert_not_awaited()
 
 
@@ -183,6 +185,60 @@ async def test_retention_zero_deletes_the_session_after_streaming():
     )
     await _drain(response)
     deps.usage.delete_session.assert_awaited_once_with(deps.session.id)
+
+
+async def test_start_failure_releases_reservation_and_preserves_original_error():
+    service, deps = _service()
+    error = NotFoundException("Assistant deleted")
+    deps.assistant_service.ask.side_effect = error
+    with pytest.raises(NotFoundException) as caught:
+        await service.ask(
+            _principal(_widget()), question="q", session_id=None, client_ip=None
+        )
+    assert caught.value is error
+    deps.budget.release.assert_awaited_once_with(deps.budget.reserve.return_value)
+    deps.budget.settle.assert_not_awaited()
+
+
+async def test_retention_runs_even_when_settlement_fails():
+    service, deps = _service()
+    deps.budget.settle.side_effect = RuntimeError("Database unavailable")
+    response = await service.ask(
+        _principal(_widget(privacy=WidgetPrivacy(retention_days=0))),
+        question="q",
+        session_id=None,
+        client_ip=None,
+    )
+    assert await _drain(response) == ["Hej", " där"]
+    deps.usage.delete_session.assert_awaited_once_with(deps.session.id)
+
+
+async def test_aborted_stream_retains_uncertain_charge_but_deletes_private_content():
+    service, deps = _service()
+    response = await service.ask(
+        _principal(_widget(privacy=WidgetPrivacy(retention_days=0))),
+        question="q",
+        session_id=None,
+        client_ip=None,
+    )
+    await anext(response.answer)
+    await response.answer.aclose()
+    deps.budget.settle.assert_not_awaited()
+    deps.budget.release.assert_not_awaited()
+    deps.usage.delete_session.assert_awaited_once_with(deps.session.id)
+
+
+async def test_retention_failure_is_not_silently_committed():
+    service, deps = _service()
+    deps.usage.delete_session.side_effect = RuntimeError("Delete failed")
+    response = await service.ask(
+        _principal(_widget(privacy=WidgetPrivacy(retention_days=0))),
+        question="q",
+        session_id=None,
+        client_ip=None,
+    )
+    with pytest.raises(RuntimeError, match="Delete failed"):
+        await _drain(response)
 
 
 async def test_question_limits():
@@ -236,7 +292,7 @@ async def test_budget_exhaustion_is_recorded_and_audited_once(fake_db):
     }
     deps.audit.log_async.assert_awaited_once()
 
-    deps.budget.redis.set = AsyncMock(return_value=None)  # already audited today
+    deps.limiter.redis.set = AsyncMock(return_value=None)  # already audited today
     with pytest.raises(WidgetBudgetExhaustedError):
         await service.ask(
             _principal(widget), question="q", session_id=None, client_ip=None

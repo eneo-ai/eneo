@@ -4,7 +4,7 @@
 
 
 from datetime import date, datetime
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -36,10 +36,22 @@ class WidgetCreate(BaseModel):
 
 class WidgetApplyTemplate(BaseModel):
     template_id: UUID
+    revision: int = Field(ge=0)
+
+
+class WidgetConflictDetail(BaseModel):
+    code: Literal["widget_revision_conflict"]
+    message: str
+
+
+class WidgetConflictResponse(BaseModel):
+    detail: WidgetConflictDetail
 
 
 class WidgetUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+    revision: int = Field(ge=0)
 
     name: Optional[str] = Field(default=None, min_length=1, max_length=100)
     texts: Optional[WidgetTexts] = None
@@ -64,6 +76,7 @@ class WidgetPublic(BaseModel):
     target_id: UUID
     status: WidgetStatus
     token_generation: int
+    revision: int
     name: str
     texts: WidgetTexts
     theme: WidgetTheme
@@ -138,7 +151,7 @@ class WidgetOverviewItem(BaseModel):
     last_activity: Optional[date] = None
     daily_token_budget: int
     budget_used_today: int = Field(
-        description="Live counter from Redis for active widgets; 0 otherwise."
+        description="Durable usage plus in-flight reservations for today's budget."
     )
 
 

@@ -20,9 +20,10 @@
     onActivate: () => Promise<void>;
     onPause: () => Promise<void>;
     onArchive: () => Promise<void>;
+    onReload: () => Promise<void>;
   };
 
-  let { autosave, isAdmin, onActivate, onPause, onArchive }: Props = $props();
+  let { autosave, isAdmin, onActivate, onPause, onArchive, onReload }: Props = $props();
 
   const widget = $derived(autosave.widget);
   const blockers = $derived(widget.activation_blockers ?? []);
@@ -33,6 +34,7 @@
   const activate = createAsyncState(async () => {
     try {
       await autosave.flush();
+      if (autosave.hasPending) return;
       await onActivate();
     } catch (error) {
       toastError(error, m.widget_admin_could_not_activate());
@@ -75,6 +77,8 @@
         return m.widget_admin_saved();
       case "error":
         return m.widget_admin_save_failed();
+      case "conflict":
+        return m.widget_admin_save_conflict();
       default:
         return "";
     }
@@ -108,6 +112,19 @@
         {#if autosave.status === "error"}
           <Button variant="link" size="sm" onclick={() => autosave.retry()}
             >{m.widget_admin_retry_save()}</Button
+          >
+        {/if}
+        {#if autosave.status === "conflict"}
+          <Button
+            variant="link"
+            size="sm"
+            onclick={async () => {
+              try {
+                await onReload();
+              } catch (error) {
+                toastError(error);
+              }
+            }}>{m.widget_admin_reload_discard()}</Button
           >
         {/if}
       </span>

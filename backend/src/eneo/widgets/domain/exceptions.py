@@ -42,6 +42,14 @@ class WidgetNotActiveError(WidgetPublicError):
         super().__init__(message)
 
 
+class WidgetRevisionConflictError(WidgetPublicError):
+    status_code = 409
+    code = "widget_revision_conflict"
+
+    def __init__(self) -> None:
+        super().__init__("Widget changed. Reload it before saving your changes.")
+
+
 class ChallengeInvalidError(WidgetPublicError):
     status_code = 400
     code = "challenge_invalid"

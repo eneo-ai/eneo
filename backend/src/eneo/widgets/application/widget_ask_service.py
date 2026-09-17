@@ -3,12 +3,14 @@
 # Licensed under the MIT License.
 
 
+from collections.abc import AsyncGenerator
 from datetime import date, datetime
 from typing import TYPE_CHECKING, AsyncIterator, Optional
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import sqlalchemy as sa
+from anyio import CancelScope
 
 from eneo.ai_models.completion_models.completion_model import Completion
 from eneo.assistants.api.assistant_models import AssistantResponse
@@ -161,14 +163,24 @@ class WidgetAskService:
             await self._audit_budget_exhausted(widget)
             raise
 
-        response = await self.assistant_service.ask(
-            question=cleaned,
-            assistant_id=widget.target_id,
-            session_id=session_id,
-            stream=True,
-            allow_tools=False,
-            disabled_capabilities=list(CAPABILITY_PURPOSES),
-        )
+        try:
+            response = await self.assistant_service.ask(
+                question=cleaned,
+                assistant_id=widget.target_id,
+                session_id=session_id,
+                stream=True,
+                allow_tools=False,
+                disabled_capabilities=list(CAPABILITY_PURPOSES),
+            )
+        except BaseException:
+            # No stream owns the reservation yet. Cleanup must also run on a
+            # disconnected client, without hiding the original provider error.
+            with CancelScope(shield=True):
+                try:
+                    await self.budget.release(reservation)
+                except Exception:
+                    logger.exception("Widget budget release failed")
+            raise
         # Visitors never learn which model answers; the first chunk would
         # otherwise carry the full model record.
         response.completion_model = None  # type: ignore[assignment]
@@ -178,6 +190,7 @@ class WidgetAskService:
             answer.__aiter__(),
             widget=widget,
             session_id=response.session.id,
+            question_id=response.question_id,
             reservation=reservation,
         )
         return response
@@ -188,16 +201,36 @@ class WidgetAskService:
         *,
         widget: Widget,
         session_id: UUID,
+        question_id: UUID | None,
         reservation: BudgetReservation,
     ) -> AsyncIterator[Completion]:
+        completed = False
         try:
             async for chunk in answer:
                 yield chunk
+            completed = True
         finally:
-            await self._finish(widget, session_id, reservation)
+            with CancelScope(shield=True):
+                try:
+                    if isinstance(answer, AsyncGenerator):
+                        await answer.aclose()
+                finally:
+                    await self._finish(
+                        widget,
+                        session_id,
+                        question_id,
+                        reservation,
+                        completed=completed,
+                    )
 
     async def _finish(
-        self, widget: Widget, session_id: UUID, reservation: BudgetReservation
+        self,
+        widget: Widget,
+        session_id: UUID,
+        question_id: UUID | None,
+        reservation: BudgetReservation,
+        *,
+        completed: bool,
     ) -> None:
         """Settle the budget, record usage and apply "never persist".
 
@@ -209,28 +242,27 @@ class WidgetAskService:
         assert widget.id is not None
         try:
             usage = self.usage_repo
-            prompt_tokens, completion_tokens = await self._last_question_tokens(
-                usage.session, session_id
-            )
-            await self.budget.settle(reservation, prompt_tokens + completion_tokens)
-            await usage.record(
-                widget.id,
-                self._today(),
-                questions=1,
-                input_tokens=prompt_tokens,
-                output_tokens=completion_tokens,
-            )
-            if widget.privacy.retention_days == 0:
-                await usage.delete_session(session_id)
+            # An interrupted stream has uncertain provider usage: retain the
+            # reservation for this day rather than refunding unknown costs.
+            if completed and question_id is not None:
+                prompt_tokens, completion_tokens = await self._question_tokens(
+                    usage.session, question_id
+                )
+                await self.budget.settle(reservation, prompt_tokens, completion_tokens)
         except Exception:
             logger.exception(
                 "Widget answer settlement failed",
                 extra={"widget_id": str(widget.id), "session_id": str(session_id)},
             )
+        finally:
+            # Retention is not conditional on successful budget/statistics
+            # writes. Failure here propagates and rolls back the chat write.
+            if widget.privacy.retention_days == 0:
+                await self.usage_repo.delete_session(session_id)
 
     @staticmethod
-    async def _last_question_tokens(
-        session: AsyncSession, session_id: UUID
+    async def _question_tokens(
+        session: AsyncSession, question_id: UUID
     ) -> tuple[int, int]:
         row = (
             await session.execute(
@@ -239,14 +271,11 @@ class WidgetAskService:
                     Questions.num_tokens_answer,
                     Questions.context_prompt_tokens,
                     Questions.context_completion_tokens,
-                )
-                .where(Questions.session_id == session_id)
-                .order_by(Questions.created_at.desc())
-                .limit(1)
+                ).where(Questions.id == question_id)
             )
         ).first()
         if row is None:
-            return 0, 0
+            raise RuntimeError("Widget answer usage is missing; reservation retained.")
         question_tokens, answer_tokens, prompt_tokens, completion_tokens = row
         return (
             int(prompt_tokens if prompt_tokens is not None else question_tokens or 0),
@@ -282,7 +311,7 @@ class WidgetAskService:
             return
         key = f"widget:{widget.id}:budget-audited:{self._today().isoformat()}"
         try:
-            first = await self.budget.redis.set(key, b"1", nx=True, ex=36 * 3600)
+            first = await self.limiter.redis.set(key, b"1", nx=True, ex=36 * 3600)
         except Exception:
             first = True
         if not first:

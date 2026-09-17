@@ -22118,6 +22118,8 @@ export interface components {
        * Format: uuid
        */
       template_id: string;
+      /** Revision */
+      revision: number;
     };
     /** WidgetAsk */
     WidgetAsk: {
@@ -22148,6 +22150,20 @@ export interface components {
      * @enum {string}
      */
     WidgetColorScheme: "auto" | "light" | "dark";
+    /** WidgetConflictDetail */
+    WidgetConflictDetail: {
+      /**
+       * Code
+       * @constant
+       */
+      code: "widget_revision_conflict";
+      /** Message */
+      message: string;
+    };
+    /** WidgetConflictResponse */
+    WidgetConflictResponse: {
+      detail: components["schemas"]["WidgetConflictDetail"];
+    };
     /** WidgetCreate */
     WidgetCreate: {
       /**
@@ -22260,7 +22276,7 @@ export interface components {
       daily_token_budget: number;
       /**
        * Budget Used Today
-       * @description Live counter from Redis for active widgets; 0 otherwise.
+       * @description Durable usage plus in-flight reservations for today's budget.
        */
       budget_used_today: number;
     };
@@ -22363,6 +22379,8 @@ export interface components {
       status: components["schemas"]["WidgetStatus"];
       /** Token Generation */
       token_generation: number;
+      /** Revision */
+      revision: number;
       /** Name */
       name: string;
       texts: components["schemas"]["WidgetTexts"];
@@ -22552,6 +22570,8 @@ export interface components {
     };
     /** WidgetUpdate */
     WidgetUpdate: {
+      /** Revision */
+      revision: number;
       /** Name */
       name?: string | null;
       texts?: components["schemas"]["WidgetTexts"] | null;
@@ -35253,6 +35273,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Widget changed since it was read. Reload before saving. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WidgetConflictResponse"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -35362,6 +35391,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Widget changed since it was read. Reload before saving. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WidgetConflictResponse"];
         };
       };
       /** @description Validation Error */
@@ -35531,6 +35569,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Widget changed since it was read. Reload before saving. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WidgetConflictResponse"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -35589,6 +35636,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Widget changed since it was read. Reload before saving. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WidgetConflictResponse"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -35645,6 +35701,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Widget changed since it was read. Reload before saving. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WidgetConflictResponse"];
         };
       };
       /** @description Validation Error */

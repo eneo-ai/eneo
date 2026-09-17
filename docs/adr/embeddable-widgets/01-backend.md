@@ -37,7 +37,17 @@ Indexes: `(tenant_id, status)`, unique `(public_id)`, `(space_id)`, `(target_typ
 
 ### `widget_daily_usage`
 
-`(widget_id, day) PK`, `questions int`, `input_tokens int`, `output_tokens int`, `blocked_budget int`, `blocked_rate int`. Written from the ask path after settlement; Redis holds the live counters (below). Used by the admin usage endpoint and the daily budget gate's warm-up on Redis loss.
+UUID primary key, unique `(widget_id, day)`. Holds `questions`, `input_tokens`, `output_tokens`, `blocked_budget`, `blocked_rate` and `reserved_tokens`. PostgreSQL is the canonical owner of both completed usage and in-flight budget charges. The overview filters by tenant before aggregating and includes today's budget in that same query.
+
+### `widget_budget_reservations`
+
+One UUID receipt per admitted turn: widget, admission day, reserved token count and state (`reserved`, `settled`, `released`). No conversation content or visitor identifier. A conditional update of the daily row serializes admission; locking the receipt makes settlement/release idempotent. Receipt and daily total updates commit together in a short transaction independent of the streaming request. A process crash conservatively leaves unknown usage charged for its admission day. Receipts older than seven days are pruned by the widget maintenance job; daily totals remain.
+
+### Concurrent changes and deletion ownership
+
+`widgets.revision` increments on every mutation. PATCH and apply-template require the revision read by the editor; the repository also compares it atomically before updating. A stale revision returns `409 widget_revision_conflict`. Autosave stops for an explicit reload, and a late response cannot replace a newer lifecycle response.
+
+A database trigger removes a question's model log when its last question owner is deleted, including FK cascades from sessions, assistants and spaces. It does not sweep historical orphan logs whose ownership is no longer identifiable.
 
 ## Public API (`/api/v1/widgets/{public_id}/…`, no Eneo auth)
 
@@ -76,18 +86,17 @@ Verification: signature, `exp`, `aud`, `token_use`, and `gen == widget.token_gen
 - Challenge issuance is itself rate limited per IP (60/min) and per widget.
 - `bot_protection=none` skips the challenge; the tenant policy (`WidgetPolicy`) may forbid it.
 
-### Limits and budget (Redis, atomic)
+### Request limits (Redis) and daily budget (PostgreSQL)
 
-All keys are namespaced `widget:<id>:…` and use `check_rate_limit` from `audit/infrastructure/rate_limiting.py`:
+Request-limit keys are namespaced `widget:<id>:…` and use `check_rate_limit` from `audit/infrastructure/rate_limiting.py`:
 
 | Key | Window | Default |
 |---|---|---|
 | `visitor:<vid>` | 10 min | 10 questions |
 | `ip:<ip>` | 60 min | 60 questions |
-| `ip:<ip>:challenge` | 1 min | 60 |
-| `budget:<day>` | until end of day (tenant-local, from `tenant.timezone` or `Europe/Stockholm`) | 500 000 tokens |
+| `challenge:<ip>` / `mint:<ip>` | 1 min | 60 each |
 
-Budget uses **reserve-then-settle**: before calling the model, `INCRBY` the day counter by the reservation (`prompt tokens + max_completion_tokens` from the resolved model settings); if the result exceeds the budget, `DECRBY` and fail with `budget_exhausted`. After the answer, adjust by `actual − reserved`. Redis loss follows the API-key precedent: fail closed unless `widget_rate_limit_fail_open=true` (default false), because an unmetered public LLM endpoint is a cost incident.
+Budget uses **reserve-then-settle** in PostgreSQL, with a default limit of 500,000 tokens per day in `WIDGET_BUDGET_TIMEZONE` (default `Europe/Stockholm`). The configured reservation (default 8,000 tokens) is an admission estimate; it does not bound the model's eventual consumption. Successful answers settle their own question's token counts against the admission day. Pre-stream failures release their reservation; interrupted streams retain their charge when usage is uncertain. Redis loss cannot reset the budget. `widget_rate_limit_fail_open` affects only request-rate and ALTCHA replay checks.
 
 Client IP comes from `resolve_client_ip` (same trusted-proxy rules as API keys). IP limits are a backstop, not the primary control — CGNAT and campus networks share IPs.
 
@@ -99,9 +108,9 @@ Client IP comes from `resolve_client_ip` (same trusted-proxy rules as API keys).
 2. Load the target assistant through `AssistantService` **as the widget principal**: a `WidgetPrincipal` dataclass (not a synthetic `UserInDB`) carrying `tenant_id`, `widget_id`, `visitor_id`. `SpaceActor`/permission checks are bypassed by construction because the widget was authorized at activation time by a tenant admin; the ask path only needs the assistant's resolved config.
 3. Build the `AskAssistant` payload with `stream=True`, `files=[]`, `tools=None`, every `CapabilityPurpose` disabled except plain completion + knowledge retrieval, and all MCP servers disabled. Governance `effective_config` still applies (model allowlist, prompt library, security classification).
 4. Create/continue the session with `widget_id`/`visitor_id` and stream through the same `response_stream` layers as today (so new SSE event types keep flowing; see the three chunk-filter layers note in `docs/`).
-5. Settle the budget; upsert `widget_daily_usage`.
+5. Settle the durable receipt and daily usage atomically, then apply content retention even if settlement failed.
 
-Retention: a worker cron job (`purge_widget_sessions`, daily 03:30 UTC, one transaction per widget) deletes widget sessions older than `privacy.retention_days`; `retention_days=0` deletes the session as soon as the streamed answer has been settled, so nothing outlives the turn and follow-ups answer 404.
+Retention: a worker cron job (`purge_widget_sessions`, daily 03:30 UTC, one transaction per widget) deletes widget sessions older than `privacy.retention_days`; `retention_days=0` deletes the session when streaming ends, independently of budget settlement, and includes pre-existing sessions in the next scheduled purge, so nothing outlives the turn and follow-ups answer 404.
 
 ## Admin API (Eneo session auth)
 
@@ -128,6 +137,13 @@ Retention: a worker cron job (`purge_widget_sessions`, daily 03:30 UTC, one tran
 
 ## Testing
 
-- Unit: policy validation, origin → CSP conversion, token claims/generation, ALTCHA verify + replay, reserve/settle arithmetic incl. Redis loss.
-- Integration (testcontainers): full mint → ask → follow-up → feedback; cross-visitor session access returns 404; pause invalidates within the cache window; retention job; `retention_days=0`.
+- Unit: policy validation, origin → CSP conversion, token claims/generation, ALTCHA verify + replay, pre-stream release, interrupted streams and cleanup after settlement failures.
+- Integration (testcontainers): full mint → ask → follow-up → feedback; cross-visitor session access returns 404; stale writes cannot undo pause; retention including question-owned logs and `retention_days=0`; durable concurrent reservation and idempotent settlement/release; tenant-filtered overview in one query.
 - Contract: `schema.d.ts` regenerated canonically (pre-push byte gate); route-metadata ratchet green.
+
+
+## Deployment and recovery (next release on develop)
+
+Apply migration `202609171600` before deploying the matching backend and frontend. Drain widget streams and stop old backend writers during the switch from Redis accounting to PostgreSQL; mixed versions cannot share reservations or the required revision contract. Completed usage already in `widget_daily_usage` is retained. No live migration or purge is performed by the code change itself.
+
+The schema change is additive. Rollback requires draining streams again and deploying matched backend/frontend versions. Prefer leaving the added schema in place while investigating; downgrading removes reservation receipts and the log-deletion trigger. Deleted conversation content can only be recovered from a backup. Historical orphan model logs are not automatically removed because their widget/tenant ownership is no longer recoverable from the schema.

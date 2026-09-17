@@ -22,6 +22,7 @@ from eneo.widgets.domain.widget import WidgetStatus
 from eneo.widgets.domain.widget_template import WidgetTemplate
 from eneo.widgets.presentation.widget_models import (
     WidgetApplyTemplate,
+    WidgetConflictResponse,
     WidgetCreate,
     WidgetOverviewItem,
     WidgetOverviewPublic,
@@ -47,7 +48,14 @@ templates_router = APIRouter()
 admin_templates_router = APIRouter()
 overview_router = APIRouter()
 
-_ContainerWithUser = Annotated[Container, Depends(get_container(with_user=True))]
+_CONFLICT_RESPONSE = {
+    "model": WidgetConflictResponse,
+    "description": "Widget changed since it was read. Reload before saving.",
+}
+
+_ContainerWithUser = Annotated[
+    Container, Depends(get_container(with_user=True, transaction_scope="function"))
+]
 
 
 def _widget_snapshot(view: WidgetView) -> dict[str, Any]:
@@ -147,7 +155,7 @@ async def create_space_widget(
         "Copy a template's texts, appearance and language onto the widget."
         " A snapshot: later template edits do not affect the widget."
     ),
-    responses=responses.get_responses([400, 403, 404]),
+    responses={**responses.get_responses([400, 403, 404]), 409: _CONFLICT_RESPONSE},
 )
 async def apply_widget_template(
     id: UUID, body: WidgetApplyTemplate, container: _ContainerWithUser
@@ -155,7 +163,7 @@ async def apply_widget_template(
     service = container.widget_service()
     assembler = container.widget_assembler()
     template = await container.widget_template_service().get_template(body.template_id)
-    view = await service.apply_template(id, template)
+    view = await service.apply_template(id, template, revision=body.revision)
     await _audit(
         container,
         action=ActionType.WIDGET_UPDATED,
@@ -185,7 +193,7 @@ async def get_widget(id: UUID, container: _ContainerWithUser):
         "Update a widget's configuration. Changes to allowed origins, limits,"
         " privacy or bot protection invalidate outstanding visitor tokens."
     ),
-    responses=responses.get_responses([400, 403, 404]),
+    responses={**responses.get_responses([400, 403, 404]), 409: _CONFLICT_RESPONSE},
 )
 async def update_widget(id: UUID, body: WidgetUpdate, container: _ContainerWithUser):
     service = container.widget_service()
@@ -221,7 +229,9 @@ async def get_widget_usage(
     service = container.widget_service()
     view = await service.get_widget(id)
     assert view.widget.id is not None
-    rows = await container.widget_usage_repo().list_days(view.widget.id, days=days)
+    rows = await container.widget_usage_repo().list_days(
+        view.widget.id, days=days, today=container.widget_budget().today()
+    )
     used_today = await container.widget_budget().used_today(view.widget)
     return WidgetUsagePublic(
         days=[
@@ -266,7 +276,7 @@ async def create_widget_preview_token(id: UUID, container: _ContainerWithUser):
         "Activate a widget so it serves visitors. Tenant admins only; fails"
         " with the list of blockers when the configuration is incomplete."
     ),
-    responses=responses.get_responses([400, 403, 404]),
+    responses={**responses.get_responses([400, 403, 404]), 409: _CONFLICT_RESPONSE},
 )
 async def activate_widget(id: UUID, container: _ContainerWithUser):
     service = container.widget_service()
@@ -289,7 +299,7 @@ async def activate_widget(id: UUID, container: _ContainerWithUser):
         "Pause a widget immediately. Visitors get a paused notice and existing"
         " visitor tokens stop validating."
     ),
-    responses=responses.get_responses([400, 403, 404]),
+    responses={**responses.get_responses([400, 403, 404]), 409: _CONFLICT_RESPONSE},
 )
 async def pause_widget(id: UUID, container: _ContainerWithUser):
     service = container.widget_service()
@@ -309,7 +319,7 @@ async def pause_widget(id: UUID, container: _ContainerWithUser):
     "/{id}/archive/",
     response_model=WidgetPublic,
     description="Archive a widget permanently. Tenant admins only.",
-    responses=responses.get_responses([400, 403, 404]),
+    responses={**responses.get_responses([400, 403, 404]), 409: _CONFLICT_RESPONSE},
 )
 async def archive_widget(id: UUID, container: _ContainerWithUser):
     service = container.widget_service()
@@ -385,16 +395,11 @@ async def update_widget_policy(body: WidgetPolicyUpdate, container: _ContainerWi
 async def get_widget_overview(container: _ContainerWithUser):
     user = container.user()
     validate_permission(user, Permission.ADMIN)
-    rows = await container.widget_overview_repo().list_tenant(user.tenant_id)
-    budget = container.widget_budget()
-    repo = container.widget_repo()
+    rows = await container.widget_overview_repo().list_tenant(
+        user.tenant_id, today=container.widget_budget().today()
+    )
     items: list[WidgetOverviewItem] = []
     for row in rows:
-        used_today = 0
-        if row.status == WidgetStatus.ACTIVE.value:
-            widget = await repo.get(row.id)
-            if widget is not None:
-                used_today = await budget.used_today(widget)
         items.append(
             WidgetOverviewItem(
                 id=row.id,
@@ -416,7 +421,7 @@ async def get_widget_overview(container: _ContainerWithUser):
                 blocked_30d=row.blocked_30d,
                 last_activity=row.last_activity,
                 daily_token_budget=row.daily_token_budget,
-                budget_used_today=used_today,
+                budget_used_today=row.budget_used_today,
             )
         )
     totals = WidgetOverviewTotals(

@@ -22,6 +22,7 @@ class WidgetAssembler:
             target_id=widget.target_id,
             status=widget.status,
             token_generation=widget.token_generation,
+            revision=widget.revision,
             name=widget.name,
             texts=widget.texts,
             theme=widget.theme,

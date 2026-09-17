@@ -145,15 +145,15 @@ export function initWidgets(client) {
 
     /**
      * Copy a template's texts, appearance and language onto the widget (a snapshot).
-     * @param {{widget: {id: string}; templateId: string}} params
+     * @param {{widget: {id: string}; templateId: string; revision: number}} params
      * @returns {Promise<Widget>}
      * @throws {EneoError}
      */
-    applyTemplate: async ({ widget, templateId }) => {
+    applyTemplate: async ({ widget, templateId, revision }) => {
       const res = await client.fetch("/api/v1/widgets/{id}/apply-template/", {
         method: "post",
         params: { path: { id: widget.id } },
-        requestBody: { "application/json": { template_id: templateId } }
+        requestBody: { "application/json": { template_id: templateId, revision } }
       });
       return res;
     },

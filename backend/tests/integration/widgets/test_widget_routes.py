@@ -102,6 +102,11 @@ async def test_widget_lifecycle(client, admin_token, space_with_assistant):
     resp = await client.patch(
         f"/api/v1/widgets/{widget_id}/",
         json={
+            "revision": (
+                await client.get(
+                    f"/api/v1/widgets/{widget_id}/", headers=_auth(admin_token)
+                )
+            ).json()["revision"],
             "allowed_origins": ["https://www.kommun.se/", "https://*.kommun.se"],
             "theme": {"primary_color": "#005a9c"},
             "texts": {
@@ -145,7 +150,14 @@ async def test_widget_lifecycle(client, admin_token, space_with_assistant):
 
     resp = await client.patch(
         f"/api/v1/widgets/{widget_id}/",
-        json={"name": "x"},
+        json={
+            "revision": (
+                await client.get(
+                    f"/api/v1/widgets/{widget_id}/", headers=_auth(admin_token)
+                )
+            ).json()["revision"],
+            "name": "x",
+        },
         headers=_auth(admin_token),
     )
     assert resp.status_code == 400, resp.text
@@ -172,14 +184,28 @@ async def test_widget_validation_errors(client, admin_token, space_with_assistan
 
     resp = await client.patch(
         f"/api/v1/widgets/{widget_id}/",
-        json={"allowed_origins": ["www.kommun.se"]},
+        json={
+            "revision": (
+                await client.get(
+                    f"/api/v1/widgets/{widget_id}/", headers=_auth(admin_token)
+                )
+            ).json()["revision"],
+            "allowed_origins": ["www.kommun.se"],
+        },
         headers=_auth(admin_token),
     )
     assert resp.status_code == 422, resp.text
 
     resp = await client.patch(
         f"/api/v1/widgets/{widget_id}/",
-        json={"limits": {"daily_token_budget": 5_000_000}},
+        json={
+            "revision": (
+                await client.get(
+                    f"/api/v1/widgets/{widget_id}/", headers=_auth(admin_token)
+                )
+            ).json()["revision"],
+            "limits": {"daily_token_budget": 5_000_000},
+        },
         headers=_auth(admin_token),
     )
     assert resp.status_code == 400, resp.text
@@ -323,7 +349,14 @@ async def test_widget_templates(
 
     resp = await client.post(
         f"/api/v1/widgets/{widget['id']}/apply-template/",
-        json={"template_id": template["id"]},
+        json={
+            "revision": (
+                await client.get(
+                    f"/api/v1/widgets/{widget['id']}/", headers=_auth(admin_token)
+                )
+            ).json()["revision"],
+            "template_id": template["id"],
+        },
         headers=_auth(admin_token),
     )
     assert resp.status_code == 200, resp.text
@@ -339,7 +372,14 @@ async def test_widget_templates(
     assert resp.status_code == 200
     resp = await client.post(
         f"/api/v1/widgets/{widget['id']}/apply-template/",
-        json={"template_id": template["id"]},
+        json={
+            "revision": (
+                await client.get(
+                    f"/api/v1/widgets/{widget['id']}/", headers=_auth(admin_token)
+                )
+            ).json()["revision"],
+            "template_id": template["id"],
+        },
         headers=_auth(admin_token),
     )
     assert resp.status_code == 404
@@ -367,7 +407,14 @@ async def test_widget_overview(
         created.append(resp.json())
     await client.patch(
         f"/api/v1/widgets/{created[0]['id']}/",
-        json={"allowed_origins": ["https://www.kommun.se"]},
+        json={
+            "revision": (
+                await client.get(
+                    f"/api/v1/widgets/{created[0]['id']}/", headers=_auth(admin_token)
+                )
+            ).json()["revision"],
+            "allowed_origins": ["https://www.kommun.se"],
+        },
         headers=_auth(admin_token),
     )
     resp = await client.post(

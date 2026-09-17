@@ -10,7 +10,7 @@ This guide covers the editor's side (creating and publishing a widget), the oper
 
 - Your site includes one small script (the *loader*, about 4 kB) from your Eneo installation. It renders a launcher button and, when opened, an `iframe` with Eneo's chat page.
 - The chat runs entirely on the Eneo origin. The host site never sees the conversation, and the browser only allows the widget on the sites you have listed (`Content-Security-Policy: frame-ancestors`).
-- Before the first message the visitor's browser solves an invisible proof of work (ALTCHA, self-hosted, no third party) and receives a short-lived visitor token. Rate limits per visitor and per IP address, a maximum question length and a daily token budget per widget cap the cost.
+- Before the first message the visitor's browser solves an invisible proof of work (ALTCHA, self-hosted, no third party) and receives a short-lived visitor token. Rate limits per visitor and per IP address, a maximum question length and a daily token budget per widget limit usage.
 - Tools, MCP servers and file uploads are always off for visitors. The assistant answers from its instructions and knowledge only.
 
 ## For editors: publish a widget
@@ -37,6 +37,8 @@ You need the **widgets** permission and edit rights on the assistant.
 ```
 
 The floating `v1` address follows Eneo releases. Sites that require Subresource Integrity can copy the pinned variant instead; it must be replaced after each Eneo release.
+
+If another editor changes the widget while you edit, autosave stops and keeps your unsaved values visible. Copy anything you want to keep, then choose **Reload and discard unsaved changes** before editing the latest version. A stale save cannot undo a pause or archive.
 
 **Pause** stops the widget immediately for every visitor; any editor can pause. **Archive** (admins) is permanent.
 
@@ -79,7 +81,8 @@ Templates hold the organisation's house style: texts, colours, logo, shape and l
 - **Who may frame the chat** is enforced by the visitor's browser from the widget's allowed origins. A site that is not listed gets a blank frame.
 - **Visitor tokens** are JWTs bound to one widget and one pseudonymous visitor id, valid for 15 minutes and rotated silently. Pausing the widget or changing its origins, limits or privacy settings invalidates every outstanding token.
 - **ALTCHA** is a self-hosted proof of work; no CAPTCHA provider, no cookies, no fingerprinting. Widgets without it require the tenant policy to allow it.
-- **Limits fail closed.** If Redis is unavailable, the public endpoints answer `503` instead of letting traffic through unmetered.
+- **Limits fail closed by default.** Redis protects request rates and challenge replays. The daily token budget and in-flight reservations are stored in PostgreSQL, so losing Redis data does not reset that budget.
+- **Budget accounting** reserves tokens before a turn and replaces the reservation with that answer’s measured usage exactly once. A failure before streaming releases the reservation. If a stream or process stops with uncertain usage, its reservation remains charged for that day. The reservation size is an admission estimate, not a hard maximum for a model response; actual usage can exceed it.
 - **The loader** is served from your Eneo origin with `nosniff`, open CORS (required for `integrity`) and an ETag; the pinned variant is immutable.
 - The embed page sends `Referrer-Policy: strict-origin-when-cross-origin`, a restrictive `Permissions-Policy` and a CSP without `unsafe-inline` scripts.
 
@@ -88,6 +91,12 @@ Templates hold the organisation's house style: texts, colours, logo, shape and l
 The widget sets **no cookies**. The visitor's browser keeps a small record in the iframe's own storage (a random visitor id, the current token and the id of the last conversation) so the conversation survives a page reload on the same site. Nothing is written before the first message, and the storage is partitioned per site by the browser.
 
 Suggested sentence for your cookie or privacy page: *"The chat assistant uses no cookies. Your browser stores a random identifier and the current conversation locally so you can continue it while browsing our site. Conversations are stored by [organisation] for [N] days."*
+
+### Conversation retention
+
+The worker removes expired conversations daily at 03:30 UTC, including their questions, source references and question-owned model logs. Knowledge sources and audit records have their own lifecycles. With retention set to `0`, new conversations are deleted at the end of the turn, including when budget settlement fails. Changing an existing widget to `0` also makes its earlier conversations eligible for the next scheduled purge.
+
+Daily usage totals and budget receipts contain no conversation text or visitor identifier. Receipts expire after seven days; daily totals remain available for statistics.
 
 ### DPIA checklist
 

@@ -29,6 +29,7 @@ class Widgets(BasePublic):
     # Bumped on pause/archive and on changes to origins, limits, privacy or
     # bot protection so outstanding visitor tokens stop validating.
     token_generation: Mapped[int] = mapped_column(server_default="0")
+    revision: Mapped[int] = mapped_column(server_default="0")
 
     name: Mapped[str] = mapped_column()
     texts: Mapped[dict[str, Any]] = mapped_column(

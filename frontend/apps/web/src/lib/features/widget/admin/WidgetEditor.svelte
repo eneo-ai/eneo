@@ -80,10 +80,12 @@
     applying = true;
     try {
       await autosave.flush();
+      if (autosave.hasPending) return;
       autosave.replace(
         await eneo.widgets.applyTemplate({
           widget: { id: widget.id },
-          templateId: chosenTemplate.id
+          templateId: chosenTemplate.id,
+          revision: current.revision
         })
       );
       confirmTemplate = false;
@@ -108,6 +110,7 @@
   <WidgetStatusBar
     {autosave}
     {isAdmin}
+    onReload={async () => autosave.reload(await eneo.widgets.get({ id: widget.id }))}
     onActivate={lifecycle(eneo.widgets.activate)}
     onPause={lifecycle(eneo.widgets.pause)}
     onArchive={lifecycle(eneo.widgets.archive)}

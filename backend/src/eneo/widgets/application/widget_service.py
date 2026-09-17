@@ -17,6 +17,7 @@ from eneo.main.exceptions import (
 from eneo.roles.permissions import Permission, validate_permission
 from eneo.users.user import UserInDB
 from eneo.widgets.application.visitor_token_service import VisitorTokenService
+from eneo.widgets.domain.exceptions import WidgetRevisionConflictError
 from eneo.widgets.domain.widget import (
     Widget,
     WidgetLanguage,
@@ -176,11 +177,13 @@ class WidgetService:
         widget.language = template.language
 
     async def apply_template(
-        self, widget_id: UUID, template: WidgetTemplate
+        self, widget_id: UUID, template: WidgetTemplate, *, revision: int
     ) -> WidgetView:
         validate_permission(self.user, Permission.WIDGETS)
         widget = await self._owned_widget(widget_id)
         space = await self._space_for_edit(widget.space_id)
+        if widget.revision != revision:
+            raise WidgetRevisionConflictError()
         if widget.status == WidgetStatus.ARCHIVED:
             raise BadRequestException("Archived widgets cannot be changed.")
         self._copy_template(widget, template)
@@ -193,6 +196,9 @@ class WidgetService:
         validate_permission(self.user, Permission.WIDGETS)
         widget = await self._owned_widget(widget_id)
         space = await self._space_for_edit(widget.space_id)
+        changes = dict(changes)
+        if changes.pop("revision") != widget.revision:
+            raise WidgetRevisionConflictError()
         widget.apply_update(changes)
         violations = self.get_policy().violations(widget)
         if violations:

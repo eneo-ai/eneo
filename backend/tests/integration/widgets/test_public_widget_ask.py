@@ -14,57 +14,14 @@ from eneo.ai_models.completion_models.completion_model import Completion, Respon
 from eneo.assistants.api.assistant_models import AssistantResponse
 from eneo.assistants.assistant_service import AssistantService
 from eneo.database.database import sessionmanager
+from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
 from eneo.questions.question import UseTools
 from eneo.widgets.application.widget_retention import purge_expired_widget_sessions
 
 
-@pytest.fixture
-async def admin_token(db_container, patch_auth_service_jwt):
-    async with db_container() as container:
-        user = await container.user_repo().get_user_by_email("test@example.com")
-        return container.auth_service().create_access_token_for_user(user)
-
-
 def _auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
-
-
-@pytest.fixture
-async def active_widget(client, admin_token):
-    resp = await client.post(
-        "/api/v1/spaces/",
-        json={"name": f"ask-widget-{uuid4().hex[:8]}"},
-        headers=_auth(admin_token),
-    )
-    space_id = resp.json()["id"]
-    resp = await client.post(
-        f"/api/v1/spaces/{space_id}/applications/assistants/",
-        json={"name": "Kommunassistenten"},
-        headers=_auth(admin_token),
-    )
-    assistant_id = resp.json()["id"]
-    await client.post(
-        f"/api/v1/assistants/{assistant_id}/publish/",
-        params={"published": "true"},
-        headers=_auth(admin_token),
-    )
-    resp = await client.post(
-        f"/api/v1/spaces/{space_id}/widgets/",
-        json={"target_id": assistant_id, "name": "Webbchatt"},
-        headers=_auth(admin_token),
-    )
-    widget = resp.json()
-    await client.patch(
-        f"/api/v1/widgets/{widget['id']}/",
-        json={"allowed_origins": ["https://www.kommun.se"]},
-        headers=_auth(admin_token),
-    )
-    resp = await client.post(
-        f"/api/v1/widgets/{widget['id']}/activate/", headers=_auth(admin_token)
-    )
-    assert resp.status_code == 200, resp.text
-    return resp.json()
 
 
 async def _mint(client, public_id: str) -> str:
@@ -100,6 +57,20 @@ def fake_assistant_ask(monkeypatch):
                 id=session_id, assistant_id=assistant_id
             )
 
+        question_id = await self.session_service.question_repo.session.scalar(
+            sa.insert(Questions)
+            .values(
+                session_id=session.id,
+                tenant_id=self.user.tenant_id,
+                assistant_id=assistant_id,
+                question=question,
+                answer="Hej där!",
+                num_tokens_question=0,
+                num_tokens_answer=0,
+            )
+            .returning(Questions.id)
+        )
+
         async def answer():
             for text in ("Hej", " där!"):
                 yield Completion(text=text, response_type=ResponseType.TEXT)
@@ -107,6 +78,7 @@ def fake_assistant_ask(monkeypatch):
         return AssistantResponse.model_construct(
             session=session,
             question=question,
+            question_id=question_id,
             files=[],
             answer=answer(),
             info_blobs=[],
@@ -261,7 +233,15 @@ async def test_budget_exhaustion_blocks_and_is_counted(
     public_id = active_widget["public_id"]
     resp = await client.patch(
         f"/api/v1/widgets/{active_widget['id']}/",
-        json={"limits": {"daily_token_budget": 1_000}},
+        json={
+            "revision": (
+                await client.get(
+                    f"/api/v1/widgets/{active_widget['id']}/",
+                    headers=_auth(admin_token),
+                )
+            ).json()["revision"],
+            "limits": {"daily_token_budget": 1_000},
+        },
         headers=_auth(admin_token),
     )
     assert resp.status_code == 200, resp.text

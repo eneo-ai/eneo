@@ -683,7 +683,7 @@ class Container(containers.DeclarativeContainer):
     widget_visitor_token_service = providers.Factory(VisitorTokenService)
     widget_altcha_service = providers.Factory(AltchaService, redis_client=redis_client)
     widget_limiter = providers.Factory(WidgetLimiter, redis_client=redis_client)
-    widget_budget = providers.Factory(WidgetBudget, redis_client=redis_client)
+    widget_budget = providers.Factory(WidgetBudget)
     org_space_assistant_role_repo = providers.Factory(
         OrgSpaceAssistantRoleRepo,
         session=session,

@@ -4840,6 +4840,8 @@
   "widget_admin_status_archived": "Arkiverad",
   "widget_admin_saving": "Sparar…",
   "widget_admin_saved": "Alla ändringar sparade",
+  "widget_admin_save_conflict": "Widgeten har ändrats av någon annan. Dina ändringar har inte sparats.",
+  "widget_admin_reload_discard": "Ladda om och kasta osparade ändringar",
   "widget_admin_save_failed": "Ändringarna kunde inte sparas",
   "widget_admin_retry_save": "Försök igen",
   "widget_admin_activate": "Aktivera",

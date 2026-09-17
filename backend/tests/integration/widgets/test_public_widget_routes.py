@@ -48,7 +48,14 @@ async def active_widget(client, admin_token):
     widget = resp.json()
     await client.patch(
         f"/api/v1/widgets/{widget['id']}/",
-        json={"allowed_origins": ["https://www.kommun.se"]},
+        json={
+            "revision": (
+                await client.get(
+                    f"/api/v1/widgets/{widget['id']}/", headers=_auth(admin_token)
+                )
+            ).json()["revision"],
+            "allowed_origins": ["https://www.kommun.se"],
+        },
         headers=_auth(admin_token),
     )
     resp = await client.post(
@@ -216,7 +223,15 @@ async def test_visitor_session_lifecycle(client, admin_token, active_widget):
     # A configuration change bumps the generation: old tokens are stale.
     resp = await client.patch(
         f"/api/v1/widgets/{active_widget['id']}/",
-        json={"limits": {"messages_per_visitor_10min": 5}},
+        json={
+            "revision": (
+                await client.get(
+                    f"/api/v1/widgets/{active_widget['id']}/",
+                    headers=_auth(admin_token),
+                )
+            ).json()["revision"],
+            "limits": {"messages_per_visitor_10min": 5},
+        },
         headers=_auth(admin_token),
     )
     assert resp.status_code == 200, resp.text
@@ -250,7 +265,15 @@ async def test_bot_protection_none_requires_policy(client, admin_token, active_w
 
     resp = await client.patch(
         f"/api/v1/widgets/{active_widget['id']}/",
-        json={"bot_protection": "none"},
+        json={
+            "revision": (
+                await client.get(
+                    f"/api/v1/widgets/{active_widget['id']}/",
+                    headers=_auth(admin_token),
+                )
+            ).json()["revision"],
+            "bot_protection": "none",
+        },
         headers=_auth(admin_token),
     )
     assert resp.status_code == 400, resp.text
@@ -264,7 +287,15 @@ async def test_bot_protection_none_requires_policy(client, admin_token, active_w
     assert resp.status_code == 200, resp.text
     resp = await client.patch(
         f"/api/v1/widgets/{active_widget['id']}/",
-        json={"bot_protection": "none"},
+        json={
+            "revision": (
+                await client.get(
+                    f"/api/v1/widgets/{active_widget['id']}/",
+                    headers=_auth(admin_token),
+                )
+            ).json()["revision"],
+            "bot_protection": "none",
+        },
         headers=_auth(admin_token),
     )
     assert resp.status_code == 200, resp.text

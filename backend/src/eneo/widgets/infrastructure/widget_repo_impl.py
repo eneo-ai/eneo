@@ -11,6 +11,7 @@ import sqlalchemy as sa
 from eneo.database.database import AsyncSession
 from eneo.database.tables.widgets_table import Widgets
 from eneo.main.exceptions import NotFoundException
+from eneo.widgets.domain.exceptions import WidgetRevisionConflictError
 from eneo.widgets.domain.widget import (
     BotProtection,
     Widget,
@@ -34,6 +35,7 @@ def _to_entity(row: Widgets) -> Widget:
         target_id=row.target_id,
         status=WidgetStatus(row.status),
         token_generation=row.token_generation,
+        revision=row.revision,
         name=row.name,
         texts=WidgetTexts.model_validate(row.texts or {}),
         theme=WidgetTheme.model_validate(row.theme or {}),
@@ -109,14 +111,15 @@ class WidgetRepoImpl:
         if widget.id is None:
             raise NotFoundException("Widget has not been persisted.")
         values = _to_values(widget)
+        values["revision"] = Widgets.revision + 1
         values["updated_at"] = sa.func.now()
         stmt = (
             sa.update(Widgets)
-            .where(Widgets.id == widget.id)
+            .where(Widgets.id == widget.id, Widgets.revision == widget.revision)
             .values(**values)
             .returning(Widgets)
         )
         row = await self.session.scalar(stmt)
         if row is None:
-            raise NotFoundException("Widget not found.")
+            raise WidgetRevisionConflictError()
         return _to_entity(row)

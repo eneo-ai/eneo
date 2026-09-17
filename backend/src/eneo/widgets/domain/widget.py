@@ -273,6 +273,7 @@ class Widget(BaseModel):
     target_id: UUID
     status: WidgetStatus = WidgetStatus.DRAFT
     token_generation: int = 0
+    revision: int = Field(default=0, ge=0)
     name: str = Field(min_length=1, max_length=100)
     texts: WidgetTexts = Field(default_factory=WidgetTexts)
     theme: WidgetTheme = Field(default_factory=WidgetTheme)

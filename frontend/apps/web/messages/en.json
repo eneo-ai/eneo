@@ -4840,6 +4840,8 @@
   "widget_admin_status_archived": "Archived",
   "widget_admin_saving": "Saving…",
   "widget_admin_saved": "All changes saved",
+  "widget_admin_save_conflict": "The widget was changed by someone else. Your changes have not been saved.",
+  "widget_admin_reload_discard": "Reload and discard unsaved changes",
   "widget_admin_save_failed": "Could not save the changes",
   "widget_admin_retry_save": "Try again",
   "widget_admin_activate": "Activate",

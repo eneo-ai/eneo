@@ -46,8 +46,8 @@ class Questions(BasePublic):
     completion_model_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(CompletionModels.id, ondelete="RESTRICT"),
     )
-    logging_details_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey(logging_table.id, ondelete="SET NULL")  # type: ignore[attr-defined]
+    logging_details_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("logging.id", ondelete="SET NULL"), index=True
     )
     session_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(Sessions.id, ondelete="CASCADE"), index=True

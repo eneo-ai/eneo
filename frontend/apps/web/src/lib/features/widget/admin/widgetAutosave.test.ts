@@ -1,5 +1,5 @@
 /* eslint-disable eneo/no-raw-color -- fixtures use literal widget colours */
-import type { Widget } from "@eneo/eneo-js";
+import { EneoError, type Widget } from "@eneo/eneo-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WidgetAutosave } from "./widgetAutosave.svelte";
 
@@ -13,6 +13,7 @@ function widget(overrides: Partial<Widget> = {}): Widget {
     privacy: { retention_days: 30 },
     status: "draft",
     token_generation: 0,
+    revision: 0,
     allowed_origins: [],
     ...overrides
   } as unknown as Widget;
@@ -22,6 +23,62 @@ beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
 describe("WidgetAutosave", () => {
+  it("sends the last saved revision on each update", async () => {
+    const save = vi.fn(async (update) => widget({ ...update, revision: update.revision + 1 }));
+    const autosave = new WidgetAutosave(widget({ revision: 4 }), save);
+    autosave.patch({ name: "First" });
+    await autosave.flush();
+    autosave.patch({ name: "Second" });
+    await autosave.flush();
+    expect(save).toHaveBeenNthCalledWith(1, { name: "First", revision: 4 });
+    expect(save).toHaveBeenNthCalledWith(2, { name: "Second", revision: 5 });
+  });
+
+  it("stops automatic saves on a conflict until the user reloads", async () => {
+    let reject!: (reason: Error) => void;
+    const save = vi.fn(
+      () =>
+        new Promise<Widget>((_, rejectSave) => {
+          reject = rejectSave;
+        })
+    );
+    const autosave = new WidgetAutosave(widget(), save, { delay: 10 });
+    autosave.patch({ name: "A" });
+    const flushing = autosave.flush();
+    autosave.patch({ name: "B" });
+    reject(new EneoError("Conflict", "RESPONSE", 409, 0));
+    await flushing;
+    await autosave.retry();
+    autosave.patch({ name: "C" });
+    await vi.runAllTimersAsync();
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(autosave.status).toBe("conflict");
+    expect(autosave.widget.name).toBe("C");
+    expect(autosave.hasPending).toBe(true);
+    autosave.reload(widget({ revision: 3, status: "paused" }));
+    expect(autosave.status).toBe("idle");
+    expect(autosave.hasPending).toBe(false);
+    expect(autosave.widget.revision).toBe(3);
+  });
+
+  it("does not replace a newer pause response with an older save response", async () => {
+    let resolve!: (value: Widget) => void;
+    const autosave = new WidgetAutosave(
+      widget({ status: "active" }),
+      () =>
+        new Promise<Widget>((resolveSave) => {
+          resolve = resolveSave;
+        })
+    );
+    autosave.patch({ name: "Changed" });
+    const flushing = autosave.flush();
+    autosave.replace(widget({ status: "paused", revision: 2, token_generation: 1 }));
+    resolve(widget({ status: "active", revision: 1 }));
+    await flushing;
+    expect(autosave.widget.status).toBe("paused");
+    expect(autosave.widget.token_generation).toBe(1);
+    expect(autosave.widget.revision).toBe(2);
+  });
   it("applies edits immediately and coalesces them into one save", async () => {
     const save = vi.fn(async (update) => widget({ ...update, token_generation: 1 }));
     const autosave = new WidgetAutosave(widget(), save, { delay: 100 });
@@ -34,7 +91,11 @@ describe("WidgetAutosave", () => {
 
     await vi.advanceTimersByTimeAsync(100);
     expect(save).toHaveBeenCalledTimes(1);
-    expect(save).toHaveBeenCalledWith({ name: "Ny", texts: { title: "Hej", welcome: "" } });
+    expect(save).toHaveBeenCalledWith({
+      revision: 0,
+      name: "Ny",
+      texts: { title: "Hej", welcome: "" }
+    });
     expect(autosave.status).toBe("saved");
     expect(autosave.widget.token_generation).toBe(1);
     expect(autosave.hasPending).toBe(false);
@@ -57,7 +118,7 @@ describe("WidgetAutosave", () => {
     await vi.runAllTimersAsync();
 
     expect(save).toHaveBeenCalledTimes(2);
-    expect(save).toHaveBeenLastCalledWith({ name: "B" });
+    expect(save).toHaveBeenLastCalledWith({ revision: 0, name: "B" });
     expect(autosave.widget.name).toBe("B");
   });
 
@@ -74,7 +135,7 @@ describe("WidgetAutosave", () => {
     expect(autosave.hasPending).toBe(true);
 
     await autosave.retry();
-    expect(save).toHaveBeenLastCalledWith({ name: "A" });
+    expect(save).toHaveBeenLastCalledWith({ revision: 0, name: "A" });
     expect(autosave.status).toBe("saved");
     expect(autosave.hasPending).toBe(false);
   });
