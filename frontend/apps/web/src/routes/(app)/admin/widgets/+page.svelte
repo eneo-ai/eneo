@@ -8,12 +8,12 @@
   import { goto } from "$app/navigation";
   import {
     LayoutGrid,
-    LayoutTemplate,
     Pencil,
     Plus,
     ShieldCheck,
     Star,
     StarOff,
+    SwatchBook,
     Trash2
   } from "lucide-svelte";
   import { Page } from "$lib/components/layout";
@@ -175,7 +175,7 @@
             {m.widget_admin_tab_policy()}
           </Tabs.Trigger>
           <Tabs.Trigger value="templates" class="h-9 px-3">
-            <LayoutTemplate aria-hidden="true" />
+            <SwatchBook aria-hidden="true" />
             {m.widget_admin_templates()}
             <Badge variant="secondary" class="ml-1">{number.format(templates.length)}</Badge>
           </Tabs.Trigger>

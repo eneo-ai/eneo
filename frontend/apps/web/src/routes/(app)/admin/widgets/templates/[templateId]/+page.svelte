@@ -69,7 +69,10 @@
 <Page.Root>
   <Page.Header>
     <Page.Title
-      parent={{ title: m.widget_admin_nav(), href: resolve("/admin/widgets") }}
+      parent={{
+        title: m.widget_admin_templates(),
+        href: `${resolve("/admin/widgets")}?tab=templates`
+      }}
       title={template.name}
       truncate
     ></Page.Title>

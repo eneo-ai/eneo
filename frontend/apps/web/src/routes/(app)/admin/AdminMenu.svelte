@@ -70,7 +70,7 @@
       items: [
         navItem("/admin/models", Cpu, m.models()),
         ...(settings?.using_templates
-          ? [navItem("/admin/templates", LayoutTemplate, m.templates())]
+          ? [navItem("/admin/templates", LayoutTemplate, m.assistant_and_app_templates())]
           : []),
         navItem("/admin/skills", BookOpenCheck, m.admin_skills_nav_label()),
         navItem("/admin/help-assistants", Sparkles, m.admin_help_assistants_nav_label()),
