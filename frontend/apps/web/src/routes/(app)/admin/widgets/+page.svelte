@@ -4,7 +4,7 @@
 -->
 <script lang="ts">
   import type { WidgetPolicy, WidgetPolicyUpdate, WidgetTemplate } from "@eneo/eneo-js";
-  import WidgetOverviewTable from "$lib/features/widget/admin/WidgetOverviewTable.svelte";
+  import WidgetOverviewList from "$lib/features/widget/admin/WidgetOverviewList.svelte";
   import { Dialog } from "@eneo/ui";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
@@ -137,7 +137,7 @@
           description={m.widget_admin_overview_description()}
           fullWidth
         >
-          <WidgetOverviewTable overview={data.overview} />
+          <WidgetOverviewList overview={data.overview} />
         </Settings.Row>
       </Settings.Group>
 
@@ -149,9 +149,9 @@
         >
           <Card.Root>
             <Card.Content>
-              <Field.Group class="grid gap-6 sm:grid-cols-2">
+              <Field.Group class="grid gap-6 md:grid-cols-3">
                 <Field.Field>
-                  <Field.Label for="policy-max-budget"
+                  <Field.Label for="policy-max-budget" class="min-h-10 items-end"
                     >{m.widget_admin_policy_max_budget()}</Field.Label
                   >
                   <Input
@@ -169,42 +169,40 @@
                   >
                 </Field.Field>
                 <Field.Field>
-                  <Field.Title>{m.widget_admin_policy_retention()}</Field.Title>
-                  <div class="grid grid-cols-2 gap-3">
-                    <Field.Field>
-                      <Field.Label for="policy-retention-min"
-                        >{m.widget_admin_policy_retention_min()}</Field.Label
-                      >
-                      <Input
-                        id="policy-retention-min"
-                        type="number"
-                        min={0}
-                        max={3650}
-                        value={policy.min_retention_days}
-                        oninput={(event) =>
-                          number(event, (value) => patch({ min_retention_days: value }))}
-                      />
-                    </Field.Field>
-                    <Field.Field>
-                      <Field.Label for="policy-retention-max"
-                        >{m.widget_admin_policy_retention_max()}</Field.Label
-                      >
-                      <Input
-                        id="policy-retention-max"
-                        type="number"
-                        min={0}
-                        max={3650}
-                        value={policy.max_retention_days}
-                        oninput={(event) =>
-                          number(event, (value) => patch({ max_retention_days: value }))}
-                      />
-                    </Field.Field>
-                  </div>
-                  <Field.Description
+                  <Field.Label for="policy-retention-min" class="min-h-10 items-end"
+                    >{m.widget_admin_policy_retention_min()}</Field.Label
+                  >
+                  <Input
+                    id="policy-retention-min"
+                    type="number"
+                    min={0}
+                    max={3650}
+                    value={policy.min_retention_days}
+                    aria-describedby="policy-retention-help"
+                    oninput={(event) =>
+                      number(event, (value) => patch({ min_retention_days: value }))}
+                  />
+                  <Field.Description id="policy-retention-help"
                     >{m.widget_admin_policy_retention_description()}</Field.Description
                   >
                 </Field.Field>
-                <Field.Field orientation="horizontal" class="sm:col-span-2">
+                <Field.Field>
+                  <Field.Label for="policy-retention-max" class="min-h-10 items-end"
+                    >{m.widget_admin_policy_retention_max()}</Field.Label
+                  >
+                  <Input
+                    id="policy-retention-max"
+                    type="number"
+                    min={0}
+                    max={3650}
+                    value={policy.max_retention_days}
+                    aria-describedby="policy-retention-help"
+                    oninput={(event) =>
+                      number(event, (value) => patch({ max_retention_days: value }))}
+                  />
+                </Field.Field>
+                <Field.Separator class="md:col-span-3" />
+                <Field.Field orientation="horizontal" class="md:col-span-3">
                   <Field.Content>
                     <Field.Label for="policy-allow-none"
                       >{m.widget_admin_policy_allow_none()}</Field.Label

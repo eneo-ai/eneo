@@ -7,6 +7,7 @@
 -->
 <script lang="ts">
   import type { WidgetTexts, WidgetTheme } from "@eneo/eneo-js";
+  import { IconSendArrow } from "@eneo/icons/send-arrow";
   import { m } from "$lib/paraglide/messages";
   import { DEFAULT_PRIMARY_COLOR, isHexColor, readableOn } from "../contrast";
 
@@ -92,10 +93,13 @@
         >
           <span>{texts.placeholder || m.widget_input_placeholder()}</span>
           <span
-            class="inline-block h-6 w-6 rounded-full"
+            class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full"
             style:background={accent}
+            style:color={readableOn(accent)}
             aria-hidden="true"
-          ></span>
+          >
+            <IconSendArrow size="sm" />
+          </span>
         </div>
         {#if texts.personal_data_notice}
           <p class="text-secondary text-xs">{texts.personal_data_notice}</p>
@@ -103,9 +107,17 @@
       </div>
     </div>
     <span
-      class="inline-block h-14 w-14 shrink-0 rounded-full shadow"
+      class="inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-full shadow"
       style:background={accent}
+      style:color={readableOn(accent)}
       aria-hidden="true"
-    ></span>
+    >
+      <!-- Same glyph as the loader's launcher button. -->
+      <svg viewBox="0 0 24 24" class="h-7 w-7" fill="currentColor"
+        ><path
+          d="M4 3h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-5 4v-4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"
+        /></svg
+      >
+    </span>
   </div>
 </section>

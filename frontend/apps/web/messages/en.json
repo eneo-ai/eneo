@@ -5009,8 +5009,6 @@
   "widget_admin_overview_description": "Every widget in the organisation, active ones first, with usage over the last 7 and 30 days. Open a widget to configure or pause it.",
   "widget_admin_overview_empty": "No widgets yet. Editors create them from an assistant's page.",
   "widget_admin_overview_only_active": "Show only active",
-  "widget_admin_overview_widget": "Widget",
-  "widget_admin_overview_placement": "Space / assistant",
   "widget_admin_overview_questions_7d": "Questions, 7 days",
   "widget_admin_overview_questions_30d": "Questions, 30 days",
   "widget_admin_overview_tokens_30d": "Tokens, 30 days",
@@ -5058,5 +5056,7 @@
   "widget_admin_publish_ready": "Everything is in place. A tenant admin can activate the widget from the status bar.",
   "widget_admin_publish_live": "The widget is active and answering visitors.",
   "widget_admin_policy_description": "Ceilings every widget in the organisation must stay within. Editors see violations as activation blockers.",
-  "widget_admin_template_unset_default": "Remove as default"
+  "widget_admin_template_unset_default": "Remove as default",
+  "widget_admin_overview_open": "Open {name}",
+  "widget_admin_overview_budget_inactive": "Not serving visitors (budget {budget} tokens)"
 }
