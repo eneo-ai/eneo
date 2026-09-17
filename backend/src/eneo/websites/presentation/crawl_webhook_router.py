@@ -42,7 +42,16 @@ class CrawlWebhookResponse(BaseModel):
 
 
 @router.post(
-    "/websites/{website_id}/crawl", status_code=202, response_model=CrawlWebhookResponse
+    "/websites/{website_id}/crawl",
+    status_code=202,
+    response_model=CrawlWebhookResponse,
+    description="Request a sitemap crawl using a bearer webhook token. Concurrent requests coalesce into one pending run.",
+    responses={
+        400: {"description": "HTTPS is required in production"},
+        401: {"description": "Invalid token or inactive webhook"},
+        429: {"description": "Webhook rate limit exceeded"},
+        503: {"description": "Rate limiting is temporarily unavailable"},
+    },
 )
 async def trigger_crawl(
     website_id: UUID,

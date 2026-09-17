@@ -524,7 +524,16 @@ class WebsiteWebhookToken(BaseModel):
     url: str
 
 
-@router.post("/{id}/webhook/token/", response_model=WebsiteWebhookToken)
+@router.post(
+    "/{id}/webhook/token/",
+    response_model=WebsiteWebhookToken,
+    description="Issue or rotate a website webhook token. Requires website edit permission and webhook update mode.",
+    responses={
+        403: {"description": "Website edit permission required"},
+        404: {"description": "Website not found"},
+        409: {"description": "Webhook update mode must be saved first"},
+    },
+)
 async def rotate_webhook_token(
     id: UUID,
     request: Request,
@@ -568,7 +577,12 @@ class WebsiteWebhookSettings(BaseModel):
     next_retry_at: datetime | None
 
 
-@router.get("/{id}/webhook/", response_model=WebsiteWebhookSettings)
+@router.get(
+    "/{id}/webhook/",
+    response_model=WebsiteWebhookSettings,
+    description="Read the webhook URL, activation status, pending request and next retry time for a website.",
+    responses=responses.get_responses([403, 404]),
+)
 async def get_webhook_settings(id: UUID, request: Request, container: ContainerDep):
     website = await container.website_crud_service().get_website(id)
     return WebsiteWebhookSettings(
