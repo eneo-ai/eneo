@@ -7255,7 +7255,7 @@
   "flow_transcript_editor_skip_forward": "Spola framåt 5 sekunder",
   "flow_transcript_editor_skip_back_short": "−5s",
   "flow_transcript_editor_skip_forward_short": "+5s",
-  "flow_run_review_fields_help": "Kontrollera uppgifterna och rätta det som behövs. Godkänn sparar även dina osparade ändringar.",
+  "flow_run_review_fields_help": "Kontrollera uppgifterna och rätta det som behövs. Öppna ett avsnitt för att se detaljerna.",
   "flow_run_review_no_items": "Inga poster.",
   "flow_run_review_item": "Post {number}",
   "flow_run_review_remove_item": "Ta bort post {number}",
@@ -7265,5 +7265,17 @@
   "flow_run_review_unsupported_field": "Fältet visas oförändrat. Vid behov kan det redigeras i Avancerat: JSON.",
   "flow_run_review_show_fields": "Visa fält",
   "flow_run_review_show_json": "Avancerat: JSON",
-  "flow_run_review_json_payload": "Resultat som JSON"
+  "flow_run_review_json_payload": "Resultat som JSON",
+  "flow_run_review_changed": "Ändrat",
+  "flow_run_review_previous_value": "Visa värdet före ändringen",
+  "flow_run_review_collection_count": "{label}: {count}",
+  "flow_run_review_field_help": "Hjälp för {label}",
+  "flow_run_review_original_help": "Det här är resultatet innan någon granskare ändrade det. Dina ändringar finns kvar när du går tillbaka.",
+  "flow_run_review_show_original": "Visa original",
+  "flow_run_review_back_to_edit": "Tillbaka till granskningen",
+  "flow_run_review_unsaved": "Osparade ändringar",
+  "flow_run_review_approve_help": "Godkänn sparar dina ändringar. Därefter kan du fortsätta körningen.",
+  "flow_run_review_resume_help": "Granskningen är godkänd. Fortsätt för att köra nästa steg.",
+  "flow_run_review_reject_open": "Avvisa resultatet…",
+  "flow_run_review_reject_help": "Avvisning stoppar körningen. Beskriv vad som behöver rättas."
 }

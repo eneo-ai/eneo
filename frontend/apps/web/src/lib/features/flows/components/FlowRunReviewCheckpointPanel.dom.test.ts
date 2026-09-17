@@ -146,6 +146,33 @@ function buildEneo({
 }
 
 describe("FlowRunReviewCheckpointPanel", () => {
+  it("names the step and keeps unsaved changes distinct from saved differences", async () => {
+    const checkpoint = buildCheckpoint("awaiting_review", 1);
+    const edit = vi.fn(async () => ({
+      ...checkpoint,
+      revision: 2,
+      state: "edited" as const,
+      current_payload_json: { structured: { answer: "New answer" } }
+    }));
+    const eneo = buildEneo({ activeCheckpoint: checkpoint, edit });
+    render(FlowRunReviewCheckpointPanel, {
+      flowId: "flow-1",
+      runId: "run-1",
+      eneo: eneo as unknown as Eneo
+    });
+    await screen.findByRole("heading", { name: "Review answer" });
+    expect(screen.queryByText(m.flow_run_review_unsaved())).toBeNull();
+    expect(
+      screen.getByRole("button", { name: m.flow_run_review_save_edit() }).hasAttribute("disabled")
+    ).toBe(true);
+    await fireEvent.input(screen.getByLabelText("Answer"), { target: { value: "New answer" } });
+    expect(screen.getByText(m.flow_run_review_unsaved())).toBeTruthy();
+    await fireEvent.click(screen.getByRole("button", { name: m.flow_run_review_save_edit() }));
+    await waitFor(() => expect(screen.queryByText(m.flow_run_review_unsaved())).toBeNull());
+    expect(screen.getByText(m.flow_run_review_changed())).toBeTruthy();
+    expect((screen.getByLabelText("Answer") as HTMLTextAreaElement).value).toBe("New answer");
+  });
+
   it("edits a schema-labelled field and saves it before approving the visible result", async () => {
     const checkpoint = buildCheckpoint("awaiting_review", 1);
     checkpoint.output_contract = {
@@ -212,13 +239,13 @@ describe("FlowRunReviewCheckpointPanel", () => {
       props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
     });
     await fireEvent.input(await screen.findByLabelText("Answer"), { target: { value: "Unsaved" } });
-    const summary = screen.getByText(m.flow_run_review_original_payload());
-    const details = summary.closest("details");
-    if (!details) throw new Error("Missing original result disclosure");
-    details.open = true;
-    await fireEvent(details, new Event("toggle"));
-    const original = await screen.findByDisplayValue("Draft answer.");
-    expect(original.hasAttribute("disabled")).toBe(true);
+    await fireEvent.click(screen.getByRole("button", { name: m.flow_run_review_show_original() }));
+    expect(await screen.findByText("Draft answer.")).toBeTruthy();
+    expect(screen.queryByLabelText("Answer")).toBeNull();
+    expect(screen.queryByRole("button", { name: m.approve() })).toBeNull();
+    await fireEvent.click(
+      screen.getAllByRole("button", { name: m.flow_run_review_back_to_edit() })[0]
+    );
     expect(screen.getByDisplayValue("Unsaved").hasAttribute("disabled")).toBe(false);
     expect(screen.queryByLabelText(m.flow_run_review_json_payload())).toBeNull();
   });
@@ -651,6 +678,7 @@ describe("FlowRunReviewCheckpointPanel", () => {
     });
 
     await screen.findByText(m.flow_run_review_state_awaiting_review());
+    expect(screen.queryByRole("button", { name: m.flow_run_review_resume() })).toBeNull();
     await fireEvent.click(screen.getByRole("button", { name: m.approve() }));
     await screen.findByText(m.flow_run_review_state_approved());
     await fireEvent.click(screen.getByRole("button", { name: m.flow_run_review_resume() }));
@@ -773,6 +801,14 @@ describe("FlowRunReviewCheckpointPanel", () => {
     });
 
     await screen.findByText(m.flow_run_review_state_awaiting_review());
+    const disclosure = screen.getByText(m.flow_run_review_reject_open()).closest("details");
+    expect(disclosure?.open).toBe(false);
+    expect(disclosure?.contains(screen.getByLabelText(m.flow_run_review_reject_reason()))).toBe(
+      true
+    );
+    if (!disclosure) throw new Error("Missing rejection disclosure");
+    disclosure.open = true;
+    await fireEvent(disclosure, new Event("toggle"));
     expect((screen.getByRole("button", { name: m.reject() }) as HTMLButtonElement).disabled).toBe(
       true
     );
@@ -826,10 +862,7 @@ describe("FlowRunReviewCheckpointPanel", () => {
     expect((screen.getByRole("button", { name: m.reject() }) as HTMLButtonElement).disabled).toBe(
       true
     );
-    expect(
-      (screen.getByRole("button", { name: m.flow_run_review_resume() }) as HTMLButtonElement)
-        .disabled
-    ).toBe(true);
+    expect(screen.queryByRole("button", { name: m.flow_run_review_resume() })).toBeNull();
   });
 });
 

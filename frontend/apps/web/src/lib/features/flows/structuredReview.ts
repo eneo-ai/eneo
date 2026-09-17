@@ -94,13 +94,75 @@ export function reviewFieldLabel(schema: ReviewSchema, key: string): string {
   return key.replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase());
 }
 
-export function reviewObjectFields(schema: ReviewSchema, value: ReviewValue | undefined) {
+export function reviewObjectFields(
+  schema: ReviewSchema,
+  value: ReviewValue | undefined,
+  original?: ReviewValue
+) {
   const properties = reviewSchema(schema.properties);
   const keys = new Set([
     ...Object.keys(properties),
-    ...Object.keys(isReviewObject(value) ? value : {})
+    ...Object.keys(isReviewObject(value) ? value : {}),
+    ...Object.keys(isReviewObject(original) ? original : {})
   ]);
   return [...keys].map((key) => ({ key, schema: reviewSchema(properties[key]) }));
+}
+
+export function reviewPropertyPath(parent: string, key: string): string {
+  return `${parent}/${key.replaceAll("~", "~0").replaceAll("/", "~1")}`;
+}
+
+function reviewValuesEqual(left: ReviewValue | undefined, right: ReviewValue | undefined): boolean {
+  if (left === right) return true;
+  if (Array.isArray(left) && Array.isArray(right)) {
+    return (
+      left.length === right.length &&
+      left.every((item, index) => reviewValuesEqual(item, right[index]))
+    );
+  }
+  if (isReviewObject(left) && isReviewObject(right)) {
+    const keys = Object.keys(left);
+    return (
+      keys.length === Object.keys(right).length &&
+      keys.every((key) => reviewValuesEqual(left[key], right[key]))
+    );
+  }
+  return false;
+}
+
+export function reviewChangedPaths(before: ReviewValue, after: ReviewValue): ReadonlySet<string> {
+  const changed = new Set<string>();
+  function visit(
+    left: ReviewValue | undefined,
+    right: ReviewValue | undefined,
+    path: string
+  ): boolean {
+    let differs: boolean;
+    if (isReviewObject(left) && isReviewObject(right)) {
+      differs = false;
+      for (const key of new Set([...Object.keys(left), ...Object.keys(right)])) {
+        if (visit(left[key], right[key], reviewPropertyPath(path, key))) differs = true;
+      }
+    } else {
+      // A schema does not give list items stable identities. Compare the whole list,
+      // including equal-length replacements, without presenting false field matches.
+      differs = !reviewValuesEqual(left, right);
+    }
+    if (differs) changed.add(path);
+    return differs;
+  }
+  visit(before, after, "");
+  return changed;
+}
+
+export function reviewCollectionCounts(schema: ReviewSchema, value: ReviewValue | undefined) {
+  if (!isReviewObject(value)) return [];
+  return reviewObjectFields(schema, value).flatMap((field) => {
+    const entries = value[field.key];
+    return Array.isArray(entries)
+      ? [{ label: reviewFieldLabel(field.schema, field.key), count: entries.length }]
+      : [];
+  });
 }
 
 export function reviewItemPreview(schema: ReviewSchema, value: ReviewValue): string {

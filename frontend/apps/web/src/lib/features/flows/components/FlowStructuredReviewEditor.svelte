@@ -3,7 +3,12 @@
   import * as Field from "$lib/components/ui/field/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { parseReviewValue, reviewSchema, type ReviewSchema } from "../structuredReview";
+  import {
+    parseReviewValue,
+    reviewChangedPaths,
+    reviewSchema,
+    type ReviewSchema
+  } from "../structuredReview";
   import FlowStructuredReviewField from "./FlowStructuredReviewField.svelte";
 
   let {
@@ -11,16 +16,29 @@
     schema,
     disabled,
     original = false,
+    originalText,
+    showOriginal = $bindable(false),
     onChange
   }: {
     text: string;
     schema: ReviewSchema | null | undefined;
     disabled: boolean;
     original?: boolean;
+    originalText?: string;
+    showOriginal?: boolean;
     onChange: (text: string) => void;
   } = $props();
   let advanced = $state(false);
-  const value = $derived(parseReviewValue(text));
+  const originalValue = $derived(
+    originalText === undefined ? undefined : parseReviewValue(originalText)
+  );
+  const currentValue = $derived(parseReviewValue(text));
+  const changedPaths = $derived(
+    originalValue !== undefined && currentValue !== undefined
+      ? reviewChangedPaths(originalValue, currentValue)
+      : new Set<string>()
+  );
+  const value = $derived(showOriginal ? originalValue : currentValue);
   const readable = $derived(value !== null && typeof value === "object");
   const id = $props.id();
 </script>
@@ -29,31 +47,53 @@
   <div class="flex flex-wrap items-start justify-between gap-3">
     <div class="flex flex-col gap-1">
       {#if !original}
-        <h3 class="text-primary text-sm font-medium">{m.flow_run_review_current_payload()}</h3>
-        {#if !disabled}<p class="text-muted text-sm leading-relaxed">
-            {m.flow_run_review_fields_help()}
+        <h3 class="text-primary text-sm font-semibold">
+          {showOriginal
+            ? m.flow_run_review_original_payload()
+            : m.flow_run_review_current_payload()}
+        </h3>
+        {#if showOriginal || !disabled}<p
+            class="text-secondary max-w-prose text-sm leading-relaxed"
+          >
+            {showOriginal ? m.flow_run_review_original_help() : m.flow_run_review_fields_help()}
           </p>{/if}
       {/if}
     </div>
-    <Button
-      type="button"
-      variant="ghost"
-      class="min-h-10"
-      disabled={!readable}
-      aria-pressed={advanced || !readable}
-      onclick={() => (advanced = !advanced)}
-      >{advanced || !readable
-        ? m.flow_run_review_show_fields()
-        : m.flow_run_review_show_json()}</Button
-    >
+    <div class="flex flex-wrap items-center gap-1">
+      {#if originalValue !== undefined && !original}
+        <Button
+          type="button"
+          variant="outline"
+          class="min-h-10"
+          aria-pressed={showOriginal}
+          onclick={() => {
+            showOriginal = !showOriginal;
+            advanced = false;
+          }}
+        >
+          {showOriginal ? m.flow_run_review_back_to_edit() : m.flow_run_review_show_original()}
+        </Button>
+      {/if}
+      <Button
+        type="button"
+        variant="ghost"
+        class="min-h-10"
+        disabled={!readable}
+        aria-pressed={advanced}
+        onclick={() => (advanced = !advanced)}
+        >{advanced || !readable
+          ? m.flow_run_review_show_fields()
+          : m.flow_run_review_show_json()}</Button
+      >
+    </div>
   </div>
   {#if advanced || !readable}
     <Field.Field>
       <Field.Label for={id}>{m.flow_run_review_json_payload()}</Field.Label>
       <Textarea
         {id}
-        value={text}
-        {disabled}
+        value={showOriginal ? originalText : text}
+        disabled={disabled || showOriginal || original}
         aria-invalid={!readable}
         class="min-h-72 font-mono text-xs"
         spellcheck={false}
@@ -67,6 +107,9 @@
       schema={reviewSchema(schema)}
       {value}
       {disabled}
+      readOnly={original || showOriginal}
+      originalValue={showOriginal ? undefined : originalValue}
+      changedPaths={showOriginal ? undefined : changedPaths}
       label={m.flow_run_review_current_payload()}
       onChange={(next) => onChange(JSON.stringify(next, null, 2))}
     />

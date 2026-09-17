@@ -7255,7 +7255,7 @@
   "flow_transcript_editor_skip_forward": "Skip forward 5 seconds",
   "flow_transcript_editor_skip_back_short": "−5s",
   "flow_transcript_editor_skip_forward_short": "+5s",
-  "flow_run_review_fields_help": "Check the information and correct it as needed. Approve also saves your unsaved changes.",
+  "flow_run_review_fields_help": "Check the information and correct it as needed. Open a section to see its details.",
   "flow_run_review_no_items": "No items.",
   "flow_run_review_item": "Item {number}",
   "flow_run_review_remove_item": "Remove item {number}",
@@ -7265,5 +7265,17 @@
   "flow_run_review_unsupported_field": "This field is shown unchanged. If needed, edit it in Advanced: JSON.",
   "flow_run_review_show_fields": "Show fields",
   "flow_run_review_show_json": "Advanced: JSON",
-  "flow_run_review_json_payload": "Result as JSON"
+  "flow_run_review_json_payload": "Result as JSON",
+  "flow_run_review_changed": "Changed",
+  "flow_run_review_previous_value": "Show value before the change",
+  "flow_run_review_collection_count": "{label}: {count}",
+  "flow_run_review_field_help": "Help for {label}",
+  "flow_run_review_original_help": "This is the result before any reviewer edited it. Your changes are kept when you go back.",
+  "flow_run_review_show_original": "Show original",
+  "flow_run_review_back_to_edit": "Back to review",
+  "flow_run_review_unsaved": "Unsaved changes",
+  "flow_run_review_approve_help": "Approve saves your changes. You can then continue the run.",
+  "flow_run_review_resume_help": "The review is approved. Continue to run the next step.",
+  "flow_run_review_reject_open": "Reject result…",
+  "flow_run_review_reject_help": "Rejection stops the run. Describe what needs correcting."
 }

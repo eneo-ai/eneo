@@ -7,6 +7,115 @@ import { parseReviewValue } from "../structuredReview";
 afterEach(cleanup);
 
 describe("FlowStructuredReviewEditor", () => {
+  it("shows list counts, collapses empty sections and reaches a fact without redundant headings", async () => {
+    render(FlowStructuredReviewEditor, {
+      text: JSON.stringify({
+        section: { heading: "Anteckningar", entries: [{ statement: "Kontrollera uppgiften" }] },
+        empty: []
+      }),
+      schema: {
+        type: "object",
+        properties: {
+          section: {
+            type: "object",
+            title: "Anteckningar",
+            properties: {
+              heading: { const: "Anteckningar" },
+              entries: {
+                type: "array",
+                title: "Uppgifter",
+                items: {
+                  type: "object",
+                  properties: {
+                    statement: {
+                      type: "string",
+                      title: "Uppgift",
+                      description: "Behåll villkoren i underlaget."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          empty: { type: "array", title: "Kompletteringar", items: { type: "string" } }
+        }
+      },
+      disabled: false,
+      onChange: vi.fn()
+    });
+    expect(
+      screen.getByText(m.flow_run_review_collection_count({ label: "Uppgifter", count: 1 }))
+    ).toBeTruthy();
+    expect(screen.getByText("Kompletteringar").closest("details")?.open).toBe(false);
+    const row = screen.getByText("Kontrollera uppgiften").closest("details");
+    if (!row) throw new Error("Missing fact disclosure");
+    row.open = true;
+    await fireEvent(row, new Event("toggle"));
+    expect(screen.getByLabelText("Uppgift")).toBeTruthy();
+    expect(screen.queryByText("Behåll villkoren i underlaget.")).toBeNull();
+    await fireEvent.click(
+      screen.getByRole("button", { name: m.flow_run_review_field_help({ label: "Uppgift" }) })
+    );
+    expect(screen.getByText("Behåll villkoren i underlaget.")).toBeTruthy();
+  });
+
+  it("keeps a section's heading and extra fields visible when it contains more than a fixed heading and list", () => {
+    render(FlowStructuredReviewEditor, {
+      text: JSON.stringify({
+        section: { heading: "Anteckningar", entries: [], qualification: "Endast vid behov" }
+      }),
+      schema: {
+        type: "object",
+        properties: {
+          section: {
+            title: "Anteckningar",
+            type: "object",
+            properties: {
+              heading: { const: "Anteckningar", title: "Rubrik" },
+              entries: { type: "array", title: "Uppgifter", items: { type: "string" } }
+            }
+          }
+        }
+      },
+      disabled: false,
+      onChange: vi.fn()
+    });
+    expect(screen.getByText("Rubrik")).toBeTruthy();
+    expect(screen.getByText("Qualification")).toBeTruthy();
+    expect(screen.getByText("Endast vid behov")).toBeTruthy();
+    expect(screen.getByText("Uppgifter").closest("details")?.open).toBe(false);
+  });
+
+  it("compares an edited list with its complete original without pairing different items", async () => {
+    const schema = {
+      type: "object",
+      properties: {
+        notes: { title: "Anteckningar", type: "array", items: { type: "string" } }
+      }
+    };
+    const onChange = vi.fn();
+    render(FlowStructuredReviewEditor, {
+      schema,
+      text: '{"notes":["Två","Ny"]}',
+      originalText: '{"notes":["Ett","Två"]}',
+      disabled: false,
+      onChange
+    });
+    expect(screen.getAllByText(m.flow_run_review_changed())).toHaveLength(1);
+    const comparison = screen.getByText(m.flow_run_review_previous_value()).closest("details");
+    if (!comparison) throw new Error("Missing original list");
+    expect(screen.queryByText("Ett")).toBeNull();
+    comparison.open = true;
+    await fireEvent(comparison, new Event("toggle"));
+    expect(screen.getByText("Ett")).toBeTruthy();
+    expect(screen.getByText("Två")).toBeTruthy();
+    expect(comparison.querySelector("textarea, input, select")).toBeNull();
+    await fireEvent.input(screen.getByLabelText(m.flow_run_review_item({ number: 2 })), {
+      target: { value: "Ny rättelse" }
+    });
+    expect(parseReviewValue(onChange.mock.lastCall![0])).toEqual({ notes: ["Två", "Ny rättelse"] });
+  });
+
   it("edits typed fields without changing unknown data or choosing values for an empty row", async () => {
     const schema = {
       type: "array",

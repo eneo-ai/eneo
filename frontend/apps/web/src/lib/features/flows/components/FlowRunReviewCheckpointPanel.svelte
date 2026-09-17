@@ -66,7 +66,8 @@
   let loadError: string | null = $state(null);
   let actionError: string | null = $state(null);
   let draftValueText = $state("");
-  let originalExpanded = $state(false);
+  let historyExpanded = $state(false);
+  let showOriginal = $state(false);
   let transcriptPlayer = $state<{ playSpeakerSample: (label: string) => void }>();
   let speakerReviews = $state<TranscriptFileReview[]>([]);
   let speakerRows = $state<SpeakerMappingRow[]>([]);
@@ -136,11 +137,11 @@
       JSON.stringify(buildEditedMapping(speakerRows)) !==
         JSON.stringify(buildEditedMapping(buildSpeakerRows(checkpoint?.current_payload_json)))
   );
+  const savedValueText = $derived(
+    checkpoint ? renderEditableValue(checkpoint.current_payload_json, checkpoint.output_type) : ""
+  );
   const outputEditsPending = $derived(
-    checkpoint !== null &&
-      !isSpeakerMapping &&
-      draftValueText !==
-        renderEditableValue(checkpoint.current_payload_json, checkpoint.output_type)
+    checkpoint !== null && !isSpeakerMapping && draftValueText !== savedValueText
   );
   let rejectReason = $state("");
   let activeAction: ReviewAction | null = $state(null);
@@ -159,6 +160,7 @@
   const canEdit = $derived(canDecide && checkpoint?.review_mode === "edit");
   const canApprove = $derived(
     canDecide &&
+      !showOriginal &&
       (!isTranscriptReview ||
         (!audioContextPending &&
           !audioContextError &&
@@ -260,6 +262,7 @@
       console.error("Failed to load review checkpoint history", error);
       // Pages already shown stay; the failed page can be asked for again.
       historyError = getFlowRuntimeErrorMessage(error, m.flow_run_review_history_load_failed());
+      historyExpanded = true;
     } finally {
       if (generation === historyGeneration) historyLoading = false;
     }
@@ -586,11 +589,11 @@
 {:else}
   <!-- The panel renders inside a table cell that keeps its own text on one
        line; review prose must wrap. -->
-  <div class="flex min-w-0 flex-col gap-4 whitespace-normal">
+  <div class="bg-primary flex min-w-0 flex-col gap-5 rounded-lg p-3 whitespace-normal sm:p-5">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div class="min-w-0">
         <h3 class="text-primary text-sm font-semibold">
-          {m.flow_run_review_checkpoint_title()}
+          {checkpoint.step_label || m.flow_run_review_checkpoint_title()}
         </h3>
         <p class="text-muted mt-1 text-xs">
           {m.flow_run_review_checkpoint_step({ step: checkpoint.step_order })}
@@ -762,31 +765,20 @@
           {/key}
         </Field.Field>
       {:else if checkpoint.output_type === "json"}
-        <div class="flex min-w-0 flex-col gap-6 lg:col-span-2">
+        <div class="min-w-0 lg:col-span-2">
           {#key checkpoint.id}
             <FlowStructuredReviewEditor
               text={draftValueText}
+              bind:showOriginal
+              originalText={renderEditableValue(
+                checkpoint.original_payload_json,
+                checkpoint.output_type
+              )}
               schema={checkpoint.output_contract}
               disabled={!canEdit || activeAction !== null}
               onChange={(text) => (draftValueText = text)}
             />
           {/key}
-          <details bind:open={originalExpanded} class="border-default border-t py-2">
-            <summary
-              class="text-primary focus-visible:ring-accent-default cursor-pointer py-2 text-sm font-medium focus-visible:ring-2"
-            >
-              {m.flow_run_review_original_payload()}
-            </summary>
-            {#if originalExpanded}
-              <FlowStructuredReviewEditor
-                text={renderEditableValue(checkpoint.original_payload_json, checkpoint.output_type)}
-                schema={checkpoint.output_contract}
-                disabled={true}
-                original
-                onChange={() => {}}
-              />
-            {/if}
-          </details>
         </div>
       {:else}
         <Field.Field>
@@ -815,18 +807,23 @@
       {/if}
     </Field.Group>
 
-    <section
-      class="border-default bg-primary rounded-lg border p-3"
+    <details
+      bind:open={historyExpanded}
+      class="border-default border-t py-2"
       aria-labelledby="flow-review-history-title"
     >
-      <div class="flex items-center justify-between gap-2">
-        <h3 id="flow-review-history-title" class="text-primary text-xs font-medium">
-          {m.flow_run_review_history_title()}
-        </h3>
-        {#if historyLoading}
-          <IconLoadingSpinner class="size-4 animate-spin" />
-        {/if}
-      </div>
+      <summary
+        id="flow-review-history-title"
+        class="text-primary focus-visible:ring-accent-default cursor-pointer py-2 text-sm font-medium focus-visible:ring-2"
+      >
+        {m.flow_run_review_history_title()}
+        {#if history}<span class="text-secondary ml-2 tabular-nums"
+            >({history.items.length}{history.truncated ? "+" : ""})</span
+          >{/if}
+        {#if historyLoading}<IconLoadingSpinner
+            class="ml-2 inline-block size-4 animate-spin"
+          />{/if}
+      </summary>
       <Field.Description class="mt-1 text-xs">{m.flow_run_review_history_help()}</Field.Description>
       {#if historyError}
         <Alert.Root variant="destructive" class="mt-2 flex items-center gap-3">
@@ -866,21 +863,44 @@
                         ? m.flow_run_review_history_original()
                         : m.flow_run_review_history_before()}
                     </Field.Label>
-                    <pre
-                      class="border-default bg-hover-dimmer mt-1 max-h-80 overflow-auto rounded-lg border p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap">{renderEditableValue(
-                        historyPredecessor(index),
-                        checkpoint.output_type
-                      )}</pre>
+                    {#if checkpoint.output_type === "json" && !isSpeakerMapping}
+                      <FlowStructuredReviewEditor
+                        text={renderEditableValue(
+                          historyPredecessor(index),
+                          checkpoint.output_type
+                        )}
+                        schema={checkpoint.output_contract}
+                        disabled
+                        original
+                        onChange={() => {}}
+                      />
+                    {:else}
+                      <pre
+                        class="border-default bg-hover-dimmer mt-1 max-h-80 overflow-auto rounded-lg border p-3 text-sm leading-relaxed whitespace-pre-wrap">{renderEditableValue(
+                          historyPredecessor(index),
+                          checkpoint.output_type
+                        )}</pre>
+                    {/if}
                   </div>
                   <div>
                     <Field.Label class="text-primary text-xs font-medium">
                       {m.flow_run_review_history_after()}
                     </Field.Label>
-                    <pre
-                      class="border-default bg-hover-dimmer mt-1 max-h-80 overflow-auto rounded-lg border p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap">{renderEditableValue(
-                        item.payload_json,
-                        checkpoint.output_type
-                      )}</pre>
+                    {#if checkpoint.output_type === "json" && !isSpeakerMapping}
+                      <FlowStructuredReviewEditor
+                        text={renderEditableValue(item.payload_json, checkpoint.output_type)}
+                        schema={checkpoint.output_contract}
+                        disabled
+                        original
+                        onChange={() => {}}
+                      />
+                    {:else}
+                      <pre
+                        class="border-default bg-hover-dimmer mt-1 max-h-80 overflow-auto rounded-lg border p-3 text-sm leading-relaxed whitespace-pre-wrap">{renderEditableValue(
+                          item.payload_json,
+                          checkpoint.output_type
+                        )}</pre>
+                    {/if}
                   </div>
                 </div>
               {/if}
@@ -900,107 +920,91 @@
           </Button>
         {/if}
       {/if}
-    </section>
+    </details>
 
-    {#if isTranscriptReview}
-      <details class="text-secondary text-sm">
-        <summary class="focus-visible:ring-accent-default cursor-pointer py-2 focus-visible:ring-2"
-          >{m.flow_transcript_editor_reject()}</summary
-        >
+    <details class="text-secondary border-default border-t text-sm">
+      <summary class="focus-visible:ring-accent-default cursor-pointer py-3 focus-visible:ring-2">
+        {isTranscriptReview ? m.flow_transcript_editor_reject() : m.flow_run_review_reject_open()}
+      </summary>
+      <div class="flex flex-col gap-3 pb-2">
+        <p class="max-w-prose text-sm">{m.flow_run_review_reject_help()}</p>
         <Field.Field data-invalid={reviewDecisionExpired ? "true" : undefined}>
-          <Field.Label class="text-primary text-xs font-medium" for="flow-review-reject-reason">
-            {m.flow_run_review_reject_reason()}
-          </Field.Label>
+          <Field.Label for="flow-review-reject-reason"
+            >{m.flow_run_review_reject_reason()}</Field.Label
+          >
           <Textarea
             id="flow-review-reject-reason"
             bind:value={rejectReason}
             disabled={!canReject || activeAction !== null}
             aria-invalid={reviewDecisionExpired || checkpointExpired}
             maxlength={1024}
-            class="min-h-24 resize-y text-sm"
+            class="min-h-20 resize-y text-sm"
           />
-          {#if deadlineDisplay}
-            <Field.Description class="text-xs">
-              {m.flow_run_review_deadline_help()}
-            </Field.Description>
-          {/if}
         </Field.Field>
-
         <Button
           variant="destructive"
+          class="min-h-10 self-start"
           disabled={!canReject || activeAction !== null || !rejectReason.trim()}
-          onclick={() => void rejectCheckpoint()}>{m.reject()}</Button
-        >
-      </details>
-    {:else}
-      <Field.Field data-invalid={reviewDecisionExpired ? "true" : undefined}>
-        <Field.Label class="text-primary text-xs font-medium" for="flow-review-reject-reason">
-          {m.flow_run_review_reject_reason()}
-        </Field.Label>
-        <Textarea
-          id="flow-review-reject-reason"
-          bind:value={rejectReason}
-          disabled={!canReject || activeAction !== null}
-          aria-invalid={reviewDecisionExpired || checkpointExpired}
-          maxlength={1024}
-          class="min-h-24 resize-y text-sm"
-        />
-        {#if deadlineDisplay}
-          <Field.Description class="text-xs">
-            {m.flow_run_review_deadline_help()}
-          </Field.Description>
-        {/if}
-      </Field.Field>
-    {/if}
-
-    <div
-      class="flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end"
-    >
-      {#if !isTranscriptReview}
-        <Button
-          variant={speakerEditsPending ? "default" : "outline"}
-          size="sm"
-          class="min-h-10 sm:min-h-8"
-          disabled={!canEdit || activeAction !== null}
-          onclick={() => void saveEdit()}
-        >
-          {activeAction === "edit" ? m.saving() : m.flow_run_review_save_edit()}
-        </Button>
-      {/if}
-      <Button
-        variant={isTranscriptReview ? "default" : "outline"}
-        size="sm"
-        class="min-h-10 sm:min-h-8"
-        disabled={!canApprove || activeAction !== null}
-        onclick={() => void approveCheckpoint()}
-      >
-        {activeAction === "approve" || activeAction === "resume"
-          ? m.flow_run_review_approving()
-          : isTranscriptReview
-            ? m.flow_transcript_editor_approve_continue()
-            : m.approve()}
-      </Button>
-      {#if !isTranscriptReview}
-        <Button
-          variant="destructive"
-          size="sm"
-          class="min-h-10 sm:min-h-8"
-          disabled={!canReject || activeAction !== null || rejectReason.trim().length === 0}
           onclick={() => void rejectCheckpoint()}
         >
           {activeAction === "reject" ? m.flow_run_review_rejecting() : m.reject()}
         </Button>
-      {/if}
-      {#if !isTranscriptReview || canResume}
-        <Button
-          size="sm"
-          class="min-h-10 sm:min-h-8"
-          disabled={!canResume || activeAction !== null}
-          onclick={() => void resumeCheckpoint()}
-        >
-          {activeAction === "resume" ? m.flow_run_review_resuming() : m.flow_run_review_resume()}
-        </Button>
-      {/if}
+      </div>
+    </details>
+
+    <div
+      class="border-default flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between"
+    >
+      <div class="flex min-w-0 flex-col gap-1.5" role="status" aria-live="polite">
+        {#if outputEditsPending || speakerEditsPending}
+          <span
+            class="bg-warning-dimmer text-warning-stronger self-start rounded px-2 py-1 text-xs font-medium"
+            >{m.flow_run_review_unsaved()}</span
+          >
+        {/if}
+        {#if canResume && !showOriginal}
+          <p class="text-secondary max-w-prose text-sm">{m.flow_run_review_resume_help()}</p>
+        {:else if !isTranscriptReview && canEdit && !showOriginal}
+          <p class="text-secondary max-w-prose text-sm">{m.flow_run_review_approve_help()}</p>
+        {/if}
+      </div>
+      <div class="flex shrink-0 flex-wrap justify-end gap-2">
+        {#if !isTranscriptReview && !canResume && !showOriginal}
+          <Button
+            variant="outline"
+            class="min-h-10"
+            disabled={!canEdit || activeAction !== null || !outputEditsPending}
+            onclick={() => void saveEdit()}
+          >
+            {activeAction === "edit" ? m.saving() : m.flow_run_review_save_edit()}
+          </Button>
+        {/if}
+        {#if showOriginal}
+          <Button class="min-h-10" onclick={() => (showOriginal = false)}
+            >{m.flow_run_review_back_to_edit()}</Button
+          >
+        {:else if canResume}
+          <Button
+            class="min-h-10"
+            disabled={activeAction !== null}
+            onclick={() => void resumeCheckpoint()}
+          >
+            {activeAction === "resume" ? m.flow_run_review_resuming() : m.flow_run_review_resume()}
+          </Button>
+        {:else}
+          <Button
+            class="min-h-10"
+            disabled={!canApprove || activeAction !== null}
+            onclick={() => void approveCheckpoint()}
+          >
+            {activeAction === "approve" || activeAction === "resume"
+              ? m.flow_run_review_approving()
+              : isTranscriptReview
+                ? m.flow_transcript_editor_approve_continue()
+                : m.approve()}
+          </Button>
+        {/if}
+      </div>
     </div>
   </div>
 {/if}
