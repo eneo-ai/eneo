@@ -325,12 +325,11 @@
     })()
   );
 
-  // Screens that start turns without a composer of their own get the model
-  // controls here while the model on screen cannot run, so the reason and the
-  // way out are always on the screen whose actions are refused.
+  // Screens that start turns without a composer of their own show the model
+  // controls here, so the model a turn or a retry runs is always named on the
+  // screen that starts it, and a blocked model's reason and way out are too.
   const showModelNotice = $derived(
     service.hasSession &&
-      service.modelSendBlock !== null &&
       ((screen === "findings" && service.failureRepair.status !== "closed") ||
         (screen === "question" && Boolean(questionMessage)) ||
         (screen === "confirm" && Boolean(latestSummary)) ||

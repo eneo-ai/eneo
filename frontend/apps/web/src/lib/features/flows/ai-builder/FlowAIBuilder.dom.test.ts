@@ -1766,6 +1766,91 @@ describe("FlowAIBuilder confirm, build and review", () => {
     calls[1]!.finish();
   });
 
+  it("names the model on a resumed confirmation before it can be confirmed", async () => {
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          conversation: [
+            userMessage("u1", "Sammanfatta rapporter"),
+            assistantMessage("a1", "", { requirements_summary: SUMMARY })
+          ]
+        })
+      ]
+    });
+    renderShell({ fetch, stream: makeStream().stream, resumeSessionId: "s-1" });
+
+    await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
+    const notice = await screen.findByTestId("ai-builder-model-notice");
+    await waitFor(() =>
+      expect(within(notice).getByTestId("ai-builder-shown-model").textContent).toContain(
+        "Test model"
+      )
+    );
+    expect(button(m.ai_builder_confirm_action()).disabled).toBe(false);
+  });
+
+  it("keeps the picker after a ready replacement is chosen and confirms with that model", async () => {
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          conversation: [
+            userMessage("u1", "Sammanfatta rapporter"),
+            assistantMessage("a1", "", { requirements_summary: SUMMARY })
+          ]
+        })
+      ]
+    });
+    const secondModelId = "11111111-1111-4111-8111-111111111198";
+    const listing = vi.fn(async (path: string, init?: Record<string, unknown>) =>
+      path.endsWith("/models")
+        ? {
+            models: [
+              {
+                id: DEFAULT_MODEL_ID,
+                name: "Test model",
+                provider: "openai",
+                reasoning_effort_options: [],
+                availability: {
+                  state: "capacity_undeclared",
+                  missing_dimensions: ["context_window_tokens"]
+                }
+              },
+              {
+                id: secondModelId,
+                name: "Second model",
+                provider: "openai",
+                reasoning_effort_options: [],
+                availability: { state: "ready" }
+              }
+            ],
+            default_model_id: secondModelId
+          }
+        : fetch(path as string, init as never)
+    );
+    const { stream, calls } = makeStream(() => "hold");
+    renderShell({ fetch: listing, stream, resumeSessionId: "s-1" });
+
+    await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
+    const notice = await screen.findByTestId("ai-builder-model-notice");
+    await fireEvent.click(
+      await within(notice).findByRole("button", {
+        name: `${m.ai_builder_model_label()}: Second model`
+      })
+    );
+    const option = await screen.findByRole("option", { name: /Second model/ });
+    await fireEvent.click(option);
+
+    expect(
+      within(screen.getByTestId("ai-builder-model-notice")).getByRole("button", {
+        name: `${m.ai_builder_model_label()}: Second model`
+      })
+    ).toBeTruthy();
+    await fireEvent.click(button(m.ai_builder_confirm_action()));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]!.body).toMatchObject({ model_id: secondModelId });
+    calls[0]!.finish();
+  });
+
   it("puts the model reason and picker on the confirmation and refuses its turn actions while no model can run", async () => {
     const { fetch } = makeFetch({
       sessions: [
@@ -3099,6 +3184,24 @@ describe("FlowAIBuilder confirm, build and review", () => {
     }
     return { reports, calls };
   }
+
+  it("names the model beside a failed generation whose retry runs it", async () => {
+    await driveGenerationFailure(
+      {
+        code: "planner_stream_failed",
+        category: "upstream",
+        message: "Modellen svarade inte i tid."
+      },
+      "committed"
+    );
+
+    const notice = await screen.findByTestId("ai-builder-model-notice");
+    await waitFor(() =>
+      expect(within(notice).getByTestId("ai-builder-shown-model").textContent).toContain(
+        "Test model"
+      )
+    );
+  });
 
   it.each(generationFailures)(
     "shows one assistive failure card for $name",
