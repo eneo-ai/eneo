@@ -62,6 +62,14 @@ TAGS_METADATA = [
         ),
     },
     {
+        "name": "widgets",
+        "description": (
+            "Embeddable widgets. Publish an assistant as a chat widget on an"
+            " external website and manage its configuration, activation and"
+            " tenant policy."
+        ),
+    },
+    {
         "name": "allowed-origins",
         "description": (
             "Allowed Origins operations. Lists the origins that may make"

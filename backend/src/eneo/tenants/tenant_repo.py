@@ -183,6 +183,25 @@ class TenantRepository:
         model = await self.delegate.get_model_from_query(stmt)
         return cast(TenantInDB, model)
 
+    async def update_widget_policy(
+        self,
+        tenant_id: UUID,
+        policy: dict[str, Any],
+    ) -> TenantInDB:
+        tenant = await self.get(tenant_id)
+        if tenant is None:
+            raise exceptions.NotFoundException(f"Tenant {tenant_id} not found.")
+
+        stmt = (
+            sa.update(Tenants)
+            .where(Tenants.id == tenant_id)
+            .values(widget_policy=policy, updated_at=datetime.now(timezone.utc))
+            .returning(Tenants)
+            .options(selectinload(Tenants.modules))
+        )
+        model = await self.delegate.get_model_from_query(stmt)
+        return cast(TenantInDB, model)
+
     async def update_show_model_pricing(
         self,
         tenant_id: UUID,

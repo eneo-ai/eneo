@@ -29,6 +29,7 @@ roles:
   - name: 'Owner'
     permissions:
       - admin
+      - widgets
       - storage
       - modules
       - personal_chat

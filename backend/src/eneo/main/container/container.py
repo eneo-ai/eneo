@@ -396,6 +396,9 @@ from eneo.websites.infrastructure.update_website_size_service import (
     UpdateWebsiteSizeService,
 )
 from eneo.websites.infrastructure.website_cleaner_service import WebsiteCleanerService
+from eneo.widgets.application.widget_service import WidgetService
+from eneo.widgets.infrastructure.widget_repo_impl import WidgetRepoImpl
+from eneo.widgets.presentation.widget_assembler import WidgetAssembler
 from eneo.worker.task_manager import TaskManager
 from eneo.worker.tenant_concurrency import TenantConcurrencyLimiter
 from eneo.workflows.step_repo import StepRepository
@@ -660,6 +663,8 @@ class Container(containers.DeclarativeContainer):
         GovernancePolicyRepoImpl, session=session
     )
     governance_policy_assembler = providers.Factory(GovernancePolicyAssembler)
+    widget_repo = providers.Factory(WidgetRepoImpl, session=session)
+    widget_assembler = providers.Factory(WidgetAssembler)
     org_space_assistant_role_repo = providers.Factory(
         OrgSpaceAssistantRoleRepo,
         session=session,
@@ -1188,6 +1193,14 @@ class Container(containers.DeclarativeContainer):
         protocol=file_protocol,
         object_content=object_content_service,
         upload_admission=upload_admission,
+    )
+    widget_service = providers.Factory(
+        WidgetService,
+        user=user,
+        repo=widget_repo,
+        space_service=space_service,
+        actor_manager=actor_manager,
+        tenant_service=tenant_service,
     )
     assistant_template_service = providers.Factory(
         AssistantTemplateService,
