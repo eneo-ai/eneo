@@ -449,6 +449,20 @@ class Settings(BaseSettings):
     api_key_rate_limit_assistant_default: int = 1000
     api_key_rate_limit_app_default: int = 1000
     api_key_enforce_resource_permissions: bool = True
+    # Embeddable widgets: anonymous visitor access. Tokens are short-lived and
+    # re-minted silently; the grace window lets an expired token prove the
+    # visitor's identity for a re-mint without a new proof of work.
+    widget_visitor_token_ttl_seconds: int = Field(default=900, gt=0)
+    widget_visitor_token_grace_seconds: int = Field(default=3600, ge=0)
+    # ALTCHA proof-of-work cost (expected hash count). ~0.5 s in Python at
+    # 100k; browsers solve it several times faster.
+    widget_altcha_cost: int = Field(default=50_000, ge=1_000)
+    widget_altcha_challenge_ttl_seconds: int = Field(default=300, gt=0)
+    widget_challenge_rate_limit_per_minute: int = Field(default=60, gt=0)
+    # Fail closed by default: an unmetered public LLM endpoint is a cost
+    # incident, so Redis loss blocks widget traffic unless overridden.
+    widget_rate_limit_fail_open: bool = False
+    widget_budget_timezone: str = "Europe/Stockholm"
     trusted_proxy_count: int = 0
     trusted_proxy_headers: list[str] = ["x-forwarded-for", "x-real-ip"]
     jwt_audience: str

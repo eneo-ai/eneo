@@ -1,0 +1,38 @@
+# Copyright (c) 2026 Sundsvalls Kommun
+#
+# Licensed under the MIT License.
+
+
+from dataclasses import dataclass
+from datetime import datetime
+from uuid import UUID
+
+from eneo.widgets.domain.widget import Widget
+
+
+@dataclass(frozen=True)
+class VisitorClaims:
+    widget_id: UUID
+    tenant_id: UUID
+    visitor_id: UUID
+    generation: int
+    issued_at: datetime
+    expires_at: datetime
+    jti: str
+
+
+@dataclass(frozen=True)
+class WidgetPrincipal:
+    """The authenticated party on the anonymous widget surface.
+
+    Deliberately not a ``UserInDB``: nothing downstream may mistake a visitor
+    for a user, and there is no users row to key ownership on.
+    """
+
+    widget: Widget
+    visitor_id: UUID
+    claims: VisitorClaims
+
+    @property
+    def tenant_id(self) -> UUID:
+        return self.widget.tenant_id

@@ -3267,6 +3267,66 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/widgets/{public_id}/config/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Widget Config
+     * @description Display configuration for an active widget. Cacheable for a minute; never includes origins, internal ids or model names.
+     */
+    get: operations["get_widget_config_api_v1_widgets__public_id__config__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/widgets/{public_id}/challenge/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Widget Challenge
+     * @description Issue an ALTCHA proof-of-work challenge. Solve it in the browser and send the payload when creating a visitor session.
+     */
+    get: operations["get_widget_challenge_api_v1_widgets__public_id__challenge__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/widgets/{public_id}/visitor-sessions/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Create Visitor Session
+     * @description Mint a short-lived visitor token. A new visitor sends a solved challenge; an existing visitor rotates silently with `previous_token` while it is valid or recently expired.
+     */
+    post: operations["create_visitor_session_api_v1_widgets__public_id__visitor_sessions__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/widget-policy/": {
     parameters: {
       query?: never;
@@ -21564,6 +21624,39 @@ export interface components {
        */
       user_confirmed?: boolean;
     };
+    /** VisitorSession */
+    VisitorSession: {
+      /** Token */
+      token: string;
+      /**
+       * Expires In
+       * @description Seconds until the token expires.
+       */
+      expires_in: number;
+      /**
+       * Visitor Id
+       * Format: uuid
+       */
+      visitor_id: string;
+    };
+    /** VisitorSessionRequest */
+    VisitorSessionRequest: {
+      /**
+       * Visitor Id
+       * @description Pseudonymous visitor id from a previous session on this site.
+       */
+      visitor_id?: string | null;
+      /**
+       * Altcha
+       * @description Base64 ALTCHA payload for a new or expired visitor.
+       */
+      altcha?: string | null;
+      /**
+       * Previous Token
+       * @description A still-valid or recently expired visitor token to rotate silently.
+       */
+      previous_token?: string | null;
+    };
     /**
      * WatchdogMetrics
      * @description Watchdog activity metrics.
@@ -21771,6 +21864,20 @@ export interface components {
       http_auth_password?: string | null;
     };
     /**
+     * WidgetChallenge
+     * @description ALTCHA v2 challenge as produced by the ``altcha`` library.
+     */
+    WidgetChallenge: {
+      /** Parameters */
+      parameters: {
+        [key: string]: unknown;
+      };
+      /** Signature */
+      signature: string;
+    } & {
+      [key: string]: unknown;
+    };
+    /**
      * WidgetColorScheme
      * @enum {string}
      */
@@ -21926,6 +22033,25 @@ export interface components {
        * Format: date-time
        */
       updated_at: string;
+    };
+    /**
+     * WidgetPublicConfig
+     * @description What the embed page needs to render. Display fields only — no origins,
+     *     limits beyond the question length, internal ids or model names.
+     */
+    WidgetPublicConfig: {
+      /** Public Id */
+      public_id: string;
+      /** Name */
+      name: string;
+      texts: components["schemas"]["WidgetTexts"];
+      theme: components["schemas"]["WidgetTheme"];
+      language: components["schemas"]["WidgetLanguage"];
+      bot_protection: components["schemas"]["BotProtection"];
+      /** Max Question Chars */
+      max_question_chars: number;
+      /** Token Generation */
+      token_generation: number;
     };
     /**
      * WidgetStatus
@@ -34861,6 +34987,191 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_widget_config_api_v1_widgets__public_id__config__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        public_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WidgetPublicConfig"];
+        };
+      };
+      /** @description Not modified (matching ETag). */
+      304: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_widget_challenge_api_v1_widgets__public_id__challenge__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        public_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WidgetChallenge"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  create_visitor_session_api_v1_widgets__public_id__visitor_sessions__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        public_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["VisitorSessionRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["VisitorSession"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
