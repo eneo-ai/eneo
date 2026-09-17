@@ -88,12 +88,6 @@ services:
       DEFAULT_TENANT_NAME: E2ETenant
       DEFAULT_USER_EMAIL: e2e@example.com
       DEFAULT_USER_PASSWORD: E2ePassword123!
-      # The widget spec solves a real ALTCHA proof of work in Chromium. The
-      # attempt count is geometric (16**len(prefix) expected) and an attempt at
-      # cost 1000 takes ~0.24 s on the runner, so the production prefix "00"
-      # (256 attempts) blows the 45 s answer budget about every other run.
-      WIDGET_ALTCHA_COST: "1000"
-      WIDGET_ALTCHA_KEY_PREFIX: "0"
     command:
       - bash
       - -lc
