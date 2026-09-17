@@ -11,7 +11,7 @@ import re
 import typing
 from collections.abc import Sequence
 
-from starlette.datastructures import Headers, MutableHeaders
+from starlette.datastructures import URL, Headers, MutableHeaders
 from starlette.responses import PlainTextResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -32,7 +32,7 @@ class CORSMiddleware:
         expose_headers: Sequence[str] = (),
         max_age: int = 600,
         callback: typing.Optional[
-            typing.Callable[[str], typing.Awaitable[bool]]
+            typing.Callable[[str, Headers, bool, URL | None], typing.Awaitable[bool]]
         ] = None,
     ) -> None:
         super().__init__()
@@ -105,9 +105,33 @@ class CORSMiddleware:
             await response(scope, receive, send)
             return
 
-        await self.simple_response(scope, receive, send, request_headers=headers)
+        if not await self.is_allowed_origin(
+            origin=origin, request_headers=headers, request_url=URL(scope=scope)
+        ):
+            response = PlainTextResponse(
+                "Disallowed CORS origin",
+                status_code=400,
+                headers={"Vary": "Origin"},
+            )
+            await response(scope, receive, send)
+            return
 
-    async def is_allowed_origin(self, origin: str) -> bool:
+        await self.simple_response(
+            scope,
+            receive,
+            send,
+            request_headers=headers,
+            origin_allowed=True,
+        )
+
+    async def is_allowed_origin(
+        self,
+        origin: str,
+        request_headers: Headers | None = None,
+        *,
+        is_preflight: bool = False,
+        request_url: URL | None = None,
+    ) -> bool:
         if self.allow_all_origins:
             return True
 
@@ -120,7 +144,9 @@ class CORSMiddleware:
             return True
 
         if self.callback is not None:
-            return await self.callback(origin)
+            return await self.callback(
+                origin, request_headers or Headers(), is_preflight, request_url
+            )
 
         return False
 
@@ -135,7 +161,9 @@ class CORSMiddleware:
         headers = dict(self.preflight_headers)
         failures: list[str] = []
 
-        if await self.is_allowed_origin(origin=requested_origin):
+        if await self.is_allowed_origin(
+            origin=requested_origin, request_headers=request_headers, is_preflight=True
+        ):
             if self.preflight_explicit_allow_origin:
                 # The "else" case is already accounted for in self.preflight_headers
                 # and the value would be "*".
@@ -172,13 +200,27 @@ class CORSMiddleware:
         return PlainTextResponse("OK", status_code=200, headers=headers)
 
     async def simple_response(
-        self, scope: Scope, receive: Receive, send: Send, request_headers: Headers
+        self,
+        scope: Scope,
+        receive: Receive,
+        send: Send,
+        request_headers: Headers,
+        origin_allowed: bool,
     ) -> None:
-        send = functools.partial(self.send, send=send, request_headers=request_headers)
+        send = functools.partial(
+            self.send,
+            send=send,
+            request_headers=request_headers,
+            origin_allowed=origin_allowed,
+        )
         await self.app(scope, receive, send)
 
     async def send(
-        self, message: Message, send: Send, request_headers: Headers
+        self,
+        message: Message,
+        send: Send,
+        request_headers: Headers,
+        origin_allowed: bool,
     ) -> None:
         if message["type"] != "http.response.start":
             await send(message)
@@ -196,7 +238,7 @@ class CORSMiddleware:
 
         # If we only allow specific origins, then we have to mirror back
         # the Origin header in the response.
-        elif not self.allow_all_origins and await self.is_allowed_origin(origin=origin):
+        elif not self.allow_all_origins and origin_allowed:
             self.allow_explicit_origin(headers, origin)
 
         await send(message)

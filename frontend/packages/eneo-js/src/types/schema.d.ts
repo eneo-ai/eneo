@@ -8945,6 +8945,11 @@ export interface components {
       max_delegation_depth?: number | null;
       /** Revocation Cascade Enabled */
       revocation_cascade_enabled?: boolean | null;
+      /**
+       * Require Tenant Allowed Origin
+       * @default true
+       */
+      require_tenant_allowed_origin?: boolean;
       /** Require Expiration */
       require_expiration?: boolean | null;
       /** Max Expiration Days */
@@ -8962,6 +8967,11 @@ export interface components {
       max_delegation_depth?: number | null;
       /** Revocation Cascade Enabled */
       revocation_cascade_enabled?: boolean | null;
+      /**
+       * Require Tenant Allowed Origin
+       * @default true
+       */
+      require_tenant_allowed_origin?: boolean;
       /** Require Expiration */
       require_expiration?: boolean | null;
       /** Max Expiration Days */
@@ -30923,6 +30933,7 @@ export interface operations {
            *       "auto_expire_unused_days": 180,
            *       "max_delegation_depth": 3,
            *       "revocation_cascade_enabled": true,
+           *       "require_tenant_allowed_origin": true,
            *       "max_rate_limit_override": 10000
            *     }
            */
@@ -30980,6 +30991,7 @@ export interface operations {
           /**
            * @example {
            *       "require_expiration": true,
+           *       "require_tenant_allowed_origin": true,
            *       "max_expiration_days": 90,
            *       "auto_expire_unused_days": 180
            *     }
