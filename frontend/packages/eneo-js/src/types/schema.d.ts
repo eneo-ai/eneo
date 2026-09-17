@@ -13,7 +13,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Trigger Crawl */
+    /**
+     * Trigger Crawl
+     * @description Request a sitemap crawl using a bearer webhook token. Concurrent requests coalesce into one pending run.
+     */
     post: operations["trigger_crawl_api_v1_webhooks_websites__website_id__crawl_post"];
     delete?: never;
     options?: never;
@@ -5164,7 +5167,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Rotate Webhook Token */
+    /**
+     * Rotate Webhook Token
+     * @description Issue or rotate a website webhook token. Requires website edit permission and webhook update mode.
+     */
     post: operations["rotate_webhook_token_api_v1_websites__id__webhook_token__post"];
     delete?: never;
     options?: never;
@@ -5179,7 +5185,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get Webhook Settings */
+    /**
+     * Get Webhook Settings
+     * @description Read the webhook URL, activation status, pending request and next retry time for a website.
+     */
     get: operations["get_webhook_settings_api_v1_websites__id__webhook__get"];
     put?: never;
     post?: never;
@@ -22486,6 +22495,20 @@ export interface operations {
           "application/json": components["schemas"]["CrawlWebhookResponse"];
         };
       };
+      /** @description HTTPS is required in production */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Invalid token or inactive webhook */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -22494,6 +22517,20 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
         };
+      };
+      /** @description Webhook rate limit exceeded */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Rate limiting is temporarily unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };
@@ -40365,6 +40402,27 @@ export interface operations {
           "application/json": components["schemas"]["WebsiteWebhookToken"];
         };
       };
+      /** @description Website edit permission required */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Website not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Webhook update mode must be saved first */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -40394,6 +40452,24 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["WebsiteWebhookSettings"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
