@@ -710,6 +710,14 @@ class SpaceActor:
         """
         if resource_type not in PERMISSION_RESOURCES or self._is_service_api_key():
             return True
+        if getattr(self.user, "active_widget", None) is not None:
+            # Widget visitors are authorized by the widget (activated by a
+            # tenant admin), not by a role: they may read (ask) an assistant
+            # and nothing else.
+            return (
+                action == SpaceAction.READ
+                and resource_type == SpaceResourceType.ASSISTANT
+            )
         permission = self._to_permisson(resource_type=resource_type)
         if permission is not None and permission in self.user.permissions:
             return True

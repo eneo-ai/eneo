@@ -10008,6 +10008,37 @@ export interface components {
       stream?: boolean;
       tools?: components["schemas"]["UseTools"] | null;
     };
+    /** AskChatResponse */
+    AskChatResponse: {
+      /** Id */
+      id?: string | null;
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      completion_model?: components["schemas"]["CompletionModelPublic"] | null;
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /** Question */
+      question: string;
+      /** Answer */
+      answer: string;
+      /** Files */
+      files: components["schemas"]["FilePublic"][];
+      /** Generated Files */
+      generated_files: components["schemas"]["FilePublic"][];
+      /** References */
+      references: components["schemas"]["InfoBlobAskAssistantPublic"][];
+      tools: components["schemas"]["UseTools"];
+      /**
+       * Mcp Tool References
+       * @default []
+       */
+      mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
+    };
     /** AskResponse */
     AskResponse: {
       /** Id */
@@ -22145,6 +22176,11 @@ export interface components {
       max_question_chars: number;
       /** Token Generation */
       token_generation: number;
+      /**
+       * Frame Ancestors
+       * @description CSP host sources the embed page may be framed by. Mirrors the frame-ancestors response header, which is public anyway.
+       */
+      frame_ancestors: string[];
     };
     /**
      * WidgetStatus
@@ -35405,7 +35441,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["AskResponse"];
+          "application/json": components["schemas"]["AskChatResponse"];
           "text/event-stream": {
             /** Id */
             id?: string | null;
@@ -35435,7 +35471,6 @@ export interface operations {
              * @default []
              */
             mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
-            model?: components["schemas"]["CompletionModelPublic"] | null;
             $defs: {
               /** CompletionModelPublic */
               CompletionModelPublic: {

@@ -118,12 +118,16 @@ def fake_assistant_ask(monkeypatch):
     return calls
 
 
-def _sse_chunks(text: str) -> list[dict]:
-    chunks = []
+def _sse_events(text: str) -> list[tuple[str, dict]]:
+    events: list[tuple[str, dict]] = []
+    event = "message"
     for line in text.splitlines():
-        if line.startswith("data:"):
-            chunks.append(json.loads(line[len("data:") :].strip()))
-    return chunks
+        if line.startswith("event:"):
+            event = line[len("event:") :].strip()
+        elif line.startswith("data:"):
+            events.append((event, json.loads(line[len("data:") :].strip())))
+            event = "message"
+    return events
 
 
 @pytest.mark.integration
@@ -175,9 +179,10 @@ async def test_visitor_ask_streams_and_owns_its_session(
     )
     assert resp.status_code == 200, resp.text
     assert resp.headers["content-type"].startswith("text/event-stream")
-    chunks = _sse_chunks(resp.text)
-    assert "".join(c["answer"] for c in chunks) == "Hej där!"
-    session_id = chunks[0]["session_id"]
+    events = _sse_events(resp.text)
+    assert events[0][0] == "first_chunk"
+    assert "".join(d["answer"] for e, d in events if e == "text") == "Hej där!"
+    session_id = events[0][1]["session_id"]
     assert fake_assistant_ask[-1]["allow_tools"] is False
     assert fake_assistant_ask[-1]["stream"] is True
 
@@ -290,7 +295,7 @@ async def test_retention_purge_deletes_old_widget_sessions(
         json={"question": "Hej"},
         headers=_auth(token),
     )
-    session_id = UUID(_sse_chunks(resp.text)[0]["session_id"])
+    session_id = UUID(_sse_events(resp.text)[0][1]["session_id"])
 
     # Age the session past the 30-day default retention.
     async with sessionmanager.session() as db, db.begin():

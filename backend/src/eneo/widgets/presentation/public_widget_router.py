@@ -16,11 +16,11 @@ from eneo.server.dependencies.widget_auth import (
     client_ip,
 )
 from eneo.server.protocol import responses
-from eneo.sessions.session import AskResponse, SessionFeedback, SessionPublic
+from eneo.sessions.session import AskChatResponse, SessionFeedback, SessionPublic
 from eneo.sessions.session_protocol import to_session_public
 from eneo.widgets.domain.exceptions import ChallengeInvalidError
 from eneo.widgets.domain.visitor import WidgetPrincipal
-from eneo.widgets.domain.widget import BotProtection
+from eneo.widgets.domain.widget import BotProtection, frame_ancestor_sources
 from eneo.widgets.presentation.public_widget_models import (
     VisitorSession,
     VisitorSessionRequest,
@@ -66,6 +66,7 @@ async def get_widget_config(request: Request, response: Response, widget: Active
         bot_protection=widget.bot_protection,
         max_question_chars=widget.limits.max_question_chars,
         token_generation=widget.token_generation,
+        frame_ancestors=frame_ancestor_sources(widget.allowed_origins),
     )
 
 
@@ -138,13 +139,13 @@ def _principal(request: Request) -> WidgetPrincipal:
 
 @router.post(
     "/{public_id}/ask/",
-    response_model=AskResponse,
+    response_model=AskChatResponse,
     description=(
         "Ask the widget's assistant as a visitor. Always streams Server-Sent"
         " Events. Pass `session_id` to continue one of the visitor's own"
         " sessions; tools, uploads and MCP servers are never available here."
     ),
-    responses=responses.streaming_response(AskResponse, [400, 401, 404, 429, 503]),
+    responses=responses.streaming_response(AskChatResponse, [400, 401, 404, 429, 503]),
 )
 async def ask_widget(request: Request, body: WidgetAsk, container: VisitorContainer):
     response = await container.widget_ask_service().ask(
@@ -153,7 +154,9 @@ async def ask_widget(request: Request, body: WidgetAsk, container: VisitorContai
         session_id=body.session_id,
         client_ip=client_ip(request),
     )
-    return await assistant_protocol.to_response(
+    # Conversation-protocol events (first_chunk/text/...) so the embed page can
+    # drive the same ChatService as the rest of the app.
+    return await assistant_protocol.to_conversation_response(
         response=response, stream=True, show_pricing=False
     )
 

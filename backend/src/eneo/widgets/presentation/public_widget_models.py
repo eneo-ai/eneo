@@ -28,6 +28,12 @@ class WidgetPublicConfig(BaseModel):
     bot_protection: BotProtection
     max_question_chars: int
     token_generation: int
+    frame_ancestors: list[str] = Field(
+        description=(
+            "CSP host sources the embed page may be framed by. Mirrors the"
+            " frame-ancestors response header, which is public anyway."
+        )
+    )
 
 
 class WidgetChallenge(BaseModel):

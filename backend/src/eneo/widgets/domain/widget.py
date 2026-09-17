@@ -202,6 +202,16 @@ def normalize_allowed_origins(origins: list[str]) -> list[str]:
     return seen
 
 
+def frame_ancestor_sources(origins: list[str]) -> list[str]:
+    """Allowed-origin patterns as CSP ``frame-ancestors`` host sources.
+
+    Normalised origins are already ``scheme://host[:port]`` with optional
+    ``*.`` host and ``*`` port wildcards, which CSP host-source syntax accepts
+    verbatim; a bare host pattern gets no scheme so both http and https match.
+    """
+    return list(origins)
+
+
 class Widget(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
 
