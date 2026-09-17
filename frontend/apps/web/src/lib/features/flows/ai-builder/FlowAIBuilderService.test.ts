@@ -774,6 +774,16 @@ describe("FlowAIBuilderService", () => {
       expect(service.modelSendBlock).toBe("no_ready_model");
       expect(service.modelSendBlockMessage).toBe(m.ai_builder_no_ready_model());
     });
+
+    it("gives every blocked state a reason, so a refused send never goes unexplained", () => {
+      const { service } = makeReviewService();
+      service.seedState({ modelLoadStatus: "loading" });
+      expect(service.modelSendBlockMessage).toBe(m.loading());
+      service.seedState({ modelLoadStatus: "failed" });
+      expect(service.modelSendBlockMessage).toBe(m.failed_to_load_models());
+      seedReadyModel(service);
+      expect(service.modelSendBlockMessage).toBeNull();
+    });
   });
 
   it("keeps the plan-seen latch for transient re-plan streams", () => {

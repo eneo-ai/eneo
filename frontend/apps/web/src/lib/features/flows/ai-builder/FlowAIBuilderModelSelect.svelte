@@ -19,6 +19,8 @@
     )
   );
   const activeName = $derived(activeModel?.name ?? m.choose_a_completion_model());
+  // Rendered only once the list has loaded; loading and a failed read keep
+  // their own presentation above.
   const blockReason = $derived(service.modelSendBlockMessage);
 </script>
 

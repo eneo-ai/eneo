@@ -1157,7 +1157,19 @@ function makeCreateState() {
       flow_id: null,
       latest_plan_id: "plan-1"
     }),
-    currentPlan: makePlan({ status: "proposed" })
+    currentPlan: makePlan({ status: "proposed" }),
+    // A loaded listing with a ready default, as a real session has once the
+    // composer can start a turn.
+    availableModels: [
+      {
+        id: "model-1",
+        name: "Model",
+        provider: "openai",
+        availability: { state: "ready" as const }
+      }
+    ],
+    defaultModelId: "model-1",
+    modelLoadStatus: "loaded" as const
   };
 }
 

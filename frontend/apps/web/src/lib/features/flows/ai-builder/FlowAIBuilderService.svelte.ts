@@ -319,17 +319,20 @@ export class FlowAIBuilderService {
     return this.#driver.modelSendBlock;
   }
 
-  /** The sentence shown wherever a turn would start. Loading and a failed
-   *  read say so next to the picker on their own. */
+  /** The sentence shown wherever a turn would start, or null when one may. */
   get modelSendBlockMessage(): string | null {
     switch (this.modelSendBlock) {
+      case "models_loading":
+        return m.loading();
+      case "models_failed":
+        return m.failed_to_load_models();
       case "model_not_listed":
         return m.ai_builder_model_not_listed();
       case "model_capacity_undeclared":
         return m.ai_builder_model_capacity_undeclared();
       case "no_ready_model":
         return m.ai_builder_no_ready_model();
-      default:
+      case null:
         return null;
     }
   }
