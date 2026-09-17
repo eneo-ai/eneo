@@ -55,9 +55,7 @@
       if (widget.language && widget.language !== "auto") {
         mounted.setAttribute("lang", widget.language);
       }
-      if (widget.theme.primary_color) {
-        mounted.style.setProperty("--eneo-widget-color", widget.theme.primary_color);
-      }
+      // The launcher takes the widget's colours from the embed page itself.
       mounted.style.setProperty("--eneo-widget-radius", `${widget.theme.radius ?? 12}px`);
       document.body.appendChild(mounted);
       element = mounted;

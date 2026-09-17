@@ -29,17 +29,17 @@ export const styles = `
   padding: 0;
   border: 0;
   border-radius: 50%;
-  background: var(--eneo-widget-color, #1d4ed8);
-  color: var(--eneo-widget-on-color, #ffffff);
+  background: var(--eneo-widget-color, var(--_eneo-accent, #1d4ed8));
+  color: var(--eneo-widget-on-color, var(--_eneo-on-accent, #ffffff));
   cursor: pointer;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
   transition: transform 0.15s ease;
 }
 .launcher:hover { transform: scale(1.05); }
 .launcher:focus-visible {
-  outline: 3px solid var(--eneo-widget-on-color, #ffffff);
+  outline: 3px solid var(--eneo-widget-on-color, var(--_eneo-on-accent, #ffffff));
   outline-offset: 2px;
-  box-shadow: 0 0 0 6px var(--eneo-widget-color, #1d4ed8);
+  box-shadow: 0 0 0 6px var(--eneo-widget-color, var(--_eneo-accent, #1d4ed8));
 }
 .launcher[hidden] { display: none; }
 .launcher svg { width: 28px; height: 28px; }

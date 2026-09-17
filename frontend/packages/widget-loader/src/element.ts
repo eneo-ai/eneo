@@ -3,6 +3,7 @@ import {
   parseFrameMessage,
   type ColorScheme,
   type HostMessage,
+  type LauncherColors,
   type PageContext
 } from "./protocol";
 import { styles } from "./styles";
@@ -68,12 +69,16 @@ export class EneoWidgetElement extends HTMLElement {
   private isOpen = false;
   private unread = 0;
   private context: PageContext | null = null;
+  private colors: LauncherColors | null = null;
   private lastFocus: Element | null = null;
   private closeTimer: ReturnType<typeof setTimeout> | null = null;
 
   private readonly onMessage = (event: MessageEvent) => this.receive(event);
   private readonly onViewport = () => this.fitViewport();
-  private readonly onSchemeChange = () => this.sendTheme();
+  private readonly onSchemeChange = () => {
+    this.paintLauncher();
+    this.sendTheme();
+  };
   private schemeQuery: MediaQueryList | null = null;
 
   get widgetId(): string {
@@ -153,6 +158,7 @@ export class EneoWidgetElement extends HTMLElement {
   attributeChangedCallback(name: string): void {
     if (!this.shadowRoot) return;
     if (name === "color-scheme") {
+      this.paintLauncher();
       this.sendTheme();
     } else {
       this.syncLauncher();
@@ -170,6 +176,21 @@ export class EneoWidgetElement extends HTMLElement {
     this.badge = root.querySelector(".badge") as HTMLSpanElement;
     this.launcher.addEventListener("click", () => this.toggle());
     this.syncLauncher();
+  }
+
+  /**
+   * The launcher takes the widget's own colour for the scheme in effect. A
+   * host page's `--eneo-widget-color` still wins; see styles.
+   */
+  private paintLauncher(): void {
+    const scheme = this.colors?.[this.effectiveScheme];
+    if (scheme) {
+      this.launcher.style.setProperty("--_eneo-accent", scheme.accent);
+      this.launcher.style.setProperty("--_eneo-on-accent", scheme.on_accent);
+    } else {
+      this.launcher.style.removeProperty("--_eneo-accent");
+      this.launcher.style.removeProperty("--_eneo-on-accent");
+    }
   }
 
   private syncLauncher(): void {
@@ -278,6 +299,8 @@ export class EneoWidgetElement extends HTMLElement {
     switch (message.type) {
       case "ready":
         this.frameReady = true;
+        this.colors = message.payload?.colors ?? null;
+        this.paintLauncher();
         this.sendTheme();
         if (this.context) this.send({ type: "context", payload: this.context });
         if (this.pendingOpen) {

@@ -12,8 +12,11 @@
   import { m } from "$lib/paraglide/messages";
   import { getChatService } from "$lib/features/chat/ChatService.svelte";
   import { IconEneo } from "@eneo/icons/eneo";
+  import { launcherColors } from "../contrast";
+  import { linkHost } from "../urls";
   import { IconThumb } from "@eneo/icons/thumb";
-  import { IconPlus } from "@eneo/icons/plus";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
+  import { MessageSquarePlus, X } from "lucide-svelte";
   import { solveWithAltcha } from "../altcha";
   import { createEmbedBridge } from "../embedBridge";
   import { VisitorSession, isTokenRejected, isWidgetUnavailable } from "../visitorSession";
@@ -79,10 +82,10 @@
     pendingQuestion !== null && !messages.some((message) => message.question === pendingQuestion)
   );
   const busy = $derived(status !== "idle" || chat.askQuestion.isLoading);
-  const disclosure = $derived(config.texts.ai_disclosure);
+  const subtitle = $derived(config.texts.subtitle);
 
   onMount(() => {
-    bridge.ready();
+    bridge.ready(launcherColors(initial.config.theme));
     // Restore the visitor's last conversation on this site, if any.
     if (session.sessionId && session.hasIdentity) {
       void restore(session.sessionId);
@@ -169,7 +172,11 @@
     }
   }
 
+  // Starting over throws the visible conversation away, so it asks first.
+  let confirmStartOver = $state(false);
+
   function startOver() {
+    confirmStartOver = false;
     chat.newConversation();
     session.rememberSession(null);
     errorMessage = null;
@@ -216,29 +223,31 @@
       {/if}
       <div class="min-w-0">
         <h1 class="truncate text-base font-semibold">{config.texts.title || config.name}</h1>
-        <p class="widget-header-muted text-xs">{disclosure}</p>
+        <p class="widget-header-muted text-xs">{subtitle}</p>
       </div>
     </div>
     <div class="flex shrink-0 items-center gap-1">
       {#if messages.length > 0}
         <button
           type="button"
-          class="text-secondary hover:bg-secondary focus-visible:ring-default flex h-9 w-9 items-center justify-center rounded-full focus-visible:ring-2 focus-visible:outline-none"
-          onclick={startOver}
+          class="widget-header-button"
+          onclick={() => (confirmStartOver = true)}
           aria-label={m.widget_new_conversation()}
           title={m.widget_new_conversation()}
         >
-          <IconPlus size="sm" />
+          <MessageSquarePlus class="size-5" aria-hidden="true" />
         </button>
       {/if}
       {#if bridge.embedded}
         <button
           type="button"
-          class="text-secondary hover:bg-secondary focus-visible:ring-default flex h-9 w-9 items-center justify-center rounded-full text-lg leading-none focus-visible:ring-2 focus-visible:outline-none"
+          class="widget-header-button"
           onclick={() => bridge.close()}
           aria-label={m.widget_close()}
-          title={m.widget_close()}>×</button
+          title={m.widget_close()}
         >
+          <X class="size-5" aria-hidden="true" />
+        </button>
       {/if}
     </div>
   </header>
@@ -339,21 +348,38 @@
       onSend={(question) => void send(question)}
       onEscape={() => bridge.close()}
     />
-    {#if config.texts.personal_data_notice || config.texts.privacy_url}
+    {#if config.texts.footer_text || config.texts.footer_link_url}
       <p class="text-secondary text-xs">
-        {config.texts.personal_data_notice}
-        {#if config.texts.privacy_url}
-          <!-- eslint-disable svelte/no-navigation-without-resolve -- external privacy policy URL from widget configuration -->
+        {config.texts.footer_text}
+        {#if config.texts.footer_link_url}
+          <!-- eslint-disable svelte/no-navigation-without-resolve -- external link from widget configuration -->
           <a
             class="underline underline-offset-2"
-            href={config.texts.privacy_url}
+            href={config.texts.footer_link_url}
             target="_blank"
-            rel="noopener noreferrer">{m.widget_privacy_link()}</a
+            rel="noopener noreferrer"
+            >{config.texts.footer_link_label || linkHost(config.texts.footer_link_url)}</a
           >
         {/if}
       </p>
     {/if}
   </footer>
+
+  <AlertDialog.Root bind:open={confirmStartOver}>
+    <AlertDialog.Content class="max-w-[calc(100%-2rem)] sm:max-w-sm">
+      <AlertDialog.Header>
+        <AlertDialog.Title>{m.widget_new_conversation_confirm_title()}</AlertDialog.Title>
+        <AlertDialog.Description>{m.widget_new_conversation_confirm_body()}</AlertDialog.Description
+        >
+      </AlertDialog.Header>
+      <AlertDialog.Footer>
+        <AlertDialog.Cancel>{m.cancel()}</AlertDialog.Cancel>
+        <AlertDialog.Action onclick={startOver}
+          >{m.widget_new_conversation_confirm_action()}</AlertDialog.Action
+        >
+      </AlertDialog.Footer>
+    </AlertDialog.Content>
+  </AlertDialog.Root>
 
   {#if config.bot_protection === "altcha"}
     <!-- Invisible proof of work: solved on first send, never part of the accessible UI. -->
@@ -377,8 +403,28 @@
     color: var(--widget-on-header);
     border-color: transparent;
   }
-  .widget-header-tinted :global(button) {
+  .widget-header-button {
+    display: flex;
+    width: 2.25rem;
+    height: 2.25rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    color: var(--text-primary);
+    background: transparent;
+  }
+  .widget-header-button:hover {
+    background: var(--background-secondary);
+  }
+  .widget-header-button:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
+  }
+  .widget-header-tinted .widget-header-button {
     color: inherit;
+  }
+  .widget-header-tinted .widget-header-button:hover {
+    background: color-mix(in srgb, currentColor 15%, transparent);
   }
   .widget-header-muted {
     color: var(--text-secondary);

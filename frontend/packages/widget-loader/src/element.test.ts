@@ -227,6 +227,33 @@ describe("messages from the iframe", () => {
   });
 });
 
+describe("launcher colours", () => {
+  const colors = {
+    light: { accent: "#1F4E79", on_accent: "#FFFFFF" },
+    dark: { accent: "#9CC7F0", on_accent: "#111111" }
+  };
+
+  it("paints the launcher with the widget's colour for the scheme in effect", () => {
+    const element = mount({ "color-scheme": "light" });
+    element.openPanel();
+    deliver(element, { ...frameMessage("ready"), payload: { colors } });
+    const launcher = launcherOf(element);
+    expect(launcher.style.getPropertyValue("--_eneo-accent")).toBe("#1F4E79");
+    expect(launcher.style.getPropertyValue("--_eneo-on-accent")).toBe("#FFFFFF");
+
+    element.setAttribute("color-scheme", "dark");
+    expect(launcher.style.getPropertyValue("--_eneo-accent")).toBe("#9CC7F0");
+    expect(launcher.style.getPropertyValue("--_eneo-on-accent")).toBe("#111111");
+  });
+
+  it("keeps the default when the embed page sends no colours", () => {
+    const element = mount();
+    element.openPanel();
+    deliver(element, frameMessage("ready"));
+    expect(launcherOf(element).style.getPropertyValue("--_eneo-accent")).toBe("");
+  });
+});
+
 describe("host controls", () => {
   it("forwards colour scheme changes and page context once the frame is ready", () => {
     const element = mount();

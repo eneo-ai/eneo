@@ -60,6 +60,7 @@ def _space(space_id, assistant, *, can_edit=True):
 def _service(user, space, can_edit=True, repo=None):
     space_service = MagicMock()
     space_service.get_space = AsyncMock(return_value=space)
+    space_service.repo.one = AsyncMock(return_value=space)
     actor = MagicMock()
     actor.can_edit_assistants = MagicMock(return_value=can_edit)
     actor_manager = MagicMock()
@@ -173,6 +174,28 @@ async def test_update_enforces_tenant_policy(assistant):
             view.widget.id, {"limits": {"daily_token_budget": 100_000}}
         )
     assert "daily_token_budget_exceeds_policy" in str(exc.value)
+
+
+async def test_admin_runs_the_lifecycle_outside_their_own_spaces(assistant):
+    space, _ = _space(uuid4(), assistant)
+    repo = _InMemoryRepo()
+    admin_user = _user(Permission.WIDGETS, Permission.ADMIN)
+    editor = _service(admin_user, space, repo=repo)
+    view = await editor.create_widget(
+        space_id=space.id, target_id=assistant.id, name="w"
+    )
+    await editor.update_widget(view.widget.id, {"allowed_origins": ["https://a.se"]})
+
+    outsider = _service(admin_user, space, repo=repo)
+    outsider.space_service.get_space = AsyncMock(
+        side_effect=UnauthorizedException("not a member")
+    )
+    activated = await outsider.activate_widget(view.widget.id)
+    assert activated.widget.status == WidgetStatus.ACTIVE
+    paused = await outsider.pause_widget(view.widget.id)
+    assert paused.widget.status == WidgetStatus.PAUSED
+    archived = await outsider.archive_widget(view.widget.id)
+    assert archived.widget.status == WidgetStatus.ARCHIVED
 
 
 async def test_pause_is_allowed_for_editors_and_admins(assistant):

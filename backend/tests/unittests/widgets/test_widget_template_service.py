@@ -59,7 +59,7 @@ async def test_admin_creates_updates_and_swaps_default():
     first = await service.create_template(name="Kommunblå", is_default=True)
     second = await service.create_template(name="Sekundär", language=WidgetLanguage.EN)
     assert first.is_default is True
-    assert second.texts.ai_disclosure != first.texts.ai_disclosure  # english default
+    assert second.texts.subtitle != first.texts.subtitle  # english default
 
     updated = await service.update_template(
         second.id,

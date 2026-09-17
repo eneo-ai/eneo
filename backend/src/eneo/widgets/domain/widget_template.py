@@ -69,7 +69,7 @@ class WidgetTemplate(BaseModel):
             tenant_id=tenant_id,
             name=name,
             language=language,
-            texts=WidgetTexts(ai_disclosure=DEFAULT_AI_DISCLOSURE[disclosure_lang]),
+            texts=WidgetTexts(subtitle=DEFAULT_AI_DISCLOSURE[disclosure_lang]),
             created_by_user_id=created_by_user_id,
         )
 

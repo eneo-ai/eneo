@@ -7,3 +7,12 @@ export function isHttpUrl(value: string): boolean {
     return false;
   }
 }
+
+/** The host name of a link, shown when a footer link has no label of its own. */
+export function linkHost(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}

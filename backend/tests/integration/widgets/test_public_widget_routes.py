@@ -76,7 +76,7 @@ async def test_public_config_only_for_active_widgets(
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["public_id"] == public_id
-    assert body["texts"]["ai_disclosure"]
+    assert body["texts"]["subtitle"]
     assert "allowed_origins" not in body
     assert body["frame_ancestors"] == ["https://www.kommun.se"]
     assert resp.headers["cache-control"] == "public, max-age=60"

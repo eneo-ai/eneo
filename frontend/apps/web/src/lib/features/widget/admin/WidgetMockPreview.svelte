@@ -9,8 +9,13 @@
   import type { WidgetTexts, WidgetTheme } from "@eneo/eneo-js";
   import { IconEneo } from "@eneo/icons/eneo";
   import { IconSendArrow } from "@eneo/icons/send-arrow";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { DEFAULT_PRIMARY_COLOR, isHexColor, readableOn } from "../contrast";
+  import { Moon, Sun } from "lucide-svelte";
+  import { untrack } from "svelte";
+  import { readableOn, themeColors } from "../contrast";
+  import { currentAppScheme } from "./appScheme";
+  import { linkHost } from "../urls";
 
   type Props = {
     name: string;
@@ -20,14 +25,20 @@
 
   let { name, texts, theme }: Props = $props();
 
-  const accent = $derived(
-    isHexColor(theme.primary_color ?? "") ? theme.primary_color! : DEFAULT_PRIMARY_COLOR
+  // Previewed in the scheme the template pins, else what the admin sees in
+  // Eneo; the toggle lets them check the other one.
+  const pinned = $derived(
+    theme.color_scheme === "light" || theme.color_scheme === "dark" ? theme.color_scheme : null
   );
-  const header = $derived(
-    theme.header_color && isHexColor(theme.header_color) ? theme.header_color : null
-  );
+  let scheme = $state<"light" | "dark">(untrack(() => pinned ?? currentAppScheme()));
+  $effect(() => {
+    if (pinned) scheme = pinned;
+  });
+  const dark = $derived(scheme === "dark");
+  const colors = $derived(themeColors(theme, dark));
+  const accent = $derived(colors.accent);
+  const header = $derived(colors.header);
   const radius = $derived(`${theme.radius ?? 12}px`);
-  const dark = $derived(theme.color_scheme === "dark");
   const left = $derived(theme.position === "bottom-left");
 </script>
 
@@ -35,14 +46,36 @@
   aria-labelledby="widget-mock-preview-title"
   class="border-default bg-primary flex flex-col gap-3 rounded-xl border p-4"
 >
-  <h2 id="widget-mock-preview-title" class="text-base font-semibold">
-    {m.widget_admin_template_preview()}
-  </h2>
+  <div class="flex flex-wrap items-center justify-between gap-2">
+    <h2 id="widget-mock-preview-title" class="text-base font-semibold">
+      {m.widget_admin_template_preview()}
+    </h2>
+    <div role="group" aria-label={m.widget_admin_preview_scheme()} class="flex gap-1">
+      <Button
+        variant={dark ? "outline" : "secondary"}
+        size="sm"
+        aria-pressed={!dark}
+        onclick={() => (scheme = "light")}
+      >
+        <Sun aria-hidden="true" data-icon="inline-start" />
+        {m.widget_admin_scheme_light()}
+      </Button>
+      <Button
+        variant={dark ? "secondary" : "outline"}
+        size="sm"
+        aria-pressed={dark}
+        onclick={() => (scheme = "dark")}
+      >
+        <Moon aria-hidden="true" data-icon="inline-start" />
+        {m.widget_admin_scheme_dark()}
+      </Button>
+    </div>
+  </div>
   <p class="text-secondary text-sm">{m.widget_admin_template_preview_description()}</p>
 
   <div
     class={["bg-secondary flex items-end gap-3 rounded-lg p-4", left && "flex-row-reverse"]}
-    data-theme={dark ? "dark" : "light"}
+    data-theme={scheme}
     role="img"
     aria-label={m.widget_admin_template_preview_alt({ name })}
   >
@@ -71,7 +104,7 @@
         <div class="min-w-0">
           <p class="truncate text-base font-semibold">{texts.title || name}</p>
           <p class={["text-xs", header ? "opacity-85" : "text-secondary"]}>
-            {texts.ai_disclosure}
+            {texts.subtitle}
           </p>
         </div>
       </div>
@@ -106,8 +139,15 @@
             <IconSendArrow size="sm" />
           </span>
         </div>
-        {#if texts.personal_data_notice}
-          <p class="text-secondary text-xs">{texts.personal_data_notice}</p>
+        {#if texts.footer_text || texts.footer_link_url}
+          <p class="text-secondary text-xs">
+            {texts.footer_text}
+            {#if texts.footer_link_url}
+              <span class="underline underline-offset-2"
+                >{texts.footer_link_label || linkHost(texts.footer_link_url)}</span
+              >
+            {/if}
+          </p>
         {/if}
       </div>
     </div>

@@ -1,3 +1,4 @@
+/* eslint-disable eneo/no-raw-color -- fixtures use literal widget colours */
 import { describe, expect, it, vi } from "vitest";
 import { BRIDGE_NAMESPACE, createEmbedBridge, parseInbound } from "./embedBridge";
 
@@ -54,7 +55,12 @@ describe("createEmbedBridge", () => {
 
   it("posts versioned envelopes to the host origin only", () => {
     const { bridge, target } = setup();
+    const colors = {
+      light: { accent: "#1F4E79", on_accent: "#FFFFFF" },
+      dark: { accent: "#9CC7F0", on_accent: "#111111" }
+    };
     bridge.ready();
+    bridge.ready(colors);
     bridge.conversationStarted("sess-1");
     expect(target.postMessage).toHaveBeenNthCalledWith(
       1,
@@ -63,6 +69,11 @@ describe("createEmbedBridge", () => {
     );
     expect(target.postMessage).toHaveBeenNthCalledWith(
       2,
+      { ns: BRIDGE_NAMESPACE, v: 1, type: "ready", payload: { colors } },
+      "https://www.kommun.se"
+    );
+    expect(target.postMessage).toHaveBeenNthCalledWith(
+      3,
       {
         ns: BRIDGE_NAMESPACE,
         v: 1,

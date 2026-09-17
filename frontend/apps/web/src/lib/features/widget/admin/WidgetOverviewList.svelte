@@ -5,10 +5,14 @@
   unit on any screen.
 -->
 <script lang="ts">
-  import type { WidgetOverview, WidgetOverviewItem } from "@eneo/eneo-js";
-  import { ArrowRight } from "lucide-svelte";
+  import type { Eneo, WidgetOverview, WidgetOverviewItem } from "@eneo/eneo-js";
+  import { invalidateAll } from "$app/navigation";
+  import { ArrowRight, Pause, Play } from "lucide-svelte";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
+  import { toastError } from "$lib/core/errors";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { Label } from "$lib/components/ui/label/index.js";
   import { m } from "$lib/paraglide/messages";
@@ -16,9 +20,32 @@
 
   type Props = {
     overview: WidgetOverview;
+    eneo: Eneo;
   };
 
-  let { overview }: Props = $props();
+  let { overview, eneo }: Props = $props();
+
+  // Pausing a live widget is the kill switch, so it asks first; resuming and
+  // activating are safe to do straight away. The list is reloaded afterwards.
+  let toPause = $state<WidgetOverviewItem | null>(null);
+  let busyId = $state<string | null>(null);
+
+  async function run(item: WidgetOverviewItem, action: "pause" | "activate") {
+    busyId = item.id;
+    try {
+      if (action === "pause") await eneo.widgets.pause({ id: item.id });
+      else await eneo.widgets.activate({ id: item.id });
+      toPause = null;
+      await invalidateAll();
+    } catch (error) {
+      toastError(
+        error,
+        action === "pause" ? m.widget_admin_could_not_pause() : m.widget_admin_could_not_activate()
+      );
+    } finally {
+      busyId = null;
+    }
+  }
 
   let onlyActive = $state(false);
 
@@ -169,12 +196,44 @@
                 </div>
               </div>
 
-              <p class="text-secondary text-xs">
-                {m.widget_admin_overview_last_activity()}:
-                {item.last_activity
-                  ? day.format(new Date(item.last_activity))
-                  : m.widget_admin_overview_never()}
-              </p>
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <p class="text-secondary text-xs">
+                  {m.widget_admin_overview_last_activity()}:
+                  {item.last_activity
+                    ? day.format(new Date(item.last_activity))
+                    : m.widget_admin_overview_never()}
+                </p>
+                {#if item.status !== "archived"}
+                  <div
+                    role="group"
+                    aria-label={m.widget_admin_overview_actions({ name: item.name })}
+                  >
+                    {#if item.status === "active"}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={busyId === item.id}
+                        onclick={() => (toPause = item)}
+                      >
+                        <Pause aria-hidden="true" data-icon="inline-start" />
+                        {m.widget_admin_pause()}
+                      </Button>
+                    {:else}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={busyId === item.id}
+                        onclick={() => run(item, "activate")}
+                      >
+                        <Play aria-hidden="true" data-icon="inline-start" />
+                        {item.status === "paused"
+                          ? m.widget_admin_resume()
+                          : m.widget_admin_activate()}
+                      </Button>
+                    {/if}
+                  </div>
+                {/if}
+              </div>
             </Card.Content>
           </Card.Root>
         </li>
@@ -182,3 +241,26 @@
     </ul>
   {/if}
 </div>
+
+<AlertDialog.Root open={toPause !== null} onOpenChange={(open) => !open && (toPause = null)}>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>
+        {m.widget_admin_overview_pause_title({ name: toPause?.name ?? "" })}
+      </AlertDialog.Title>
+      <AlertDialog.Description
+        >{m.widget_admin_overview_pause_description()}</AlertDialog.Description
+      >
+    </AlertDialog.Header>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel disabled={busyId !== null}>{m.cancel()}</AlertDialog.Cancel>
+      <AlertDialog.Action
+        disabled={busyId !== null}
+        onclick={(event) => {
+          event.preventDefault();
+          if (toPause) void run(toPause, "pause");
+        }}>{m.widget_admin_pause()}</AlertDialog.Action
+      >
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>

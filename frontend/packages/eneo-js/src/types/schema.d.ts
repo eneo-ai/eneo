@@ -22504,17 +22504,22 @@ export interface components {
       /** Suggested Questions */
       suggested_questions?: string[];
       /**
-       * Ai Disclosure
+       * Subtitle
        * @default Du chattar med en AI-assistent. Svaren kan innehålla fel – kontrollera viktig information.
        */
-      ai_disclosure?: string;
+      subtitle?: string;
       /**
-       * Personal Data Notice
+       * Footer Text
        * @default
        */
-      personal_data_notice?: string;
-      /** Privacy Url */
-      privacy_url?: string | null;
+      footer_text?: string;
+      /** Footer Link Url */
+      footer_link_url?: string | null;
+      /**
+       * Footer Link Label
+       * @default
+       */
+      footer_link_label?: string;
     };
     /** WidgetTheme */
     WidgetTheme: {
@@ -22536,6 +22541,10 @@ export interface components {
       radius?: number;
       /** Header Color */
       header_color?: string | null;
+      /** Primary Color Dark */
+      primary_color_dark?: string | null;
+      /** Header Color Dark */
+      header_color_dark?: string | null;
       /** Logo Url */
       logo_url?: string | null;
       /** Logo File Id */

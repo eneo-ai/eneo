@@ -80,7 +80,7 @@ async def test_widget_lifecycle(client, admin_token, space_with_assistant):
     widget_id = widget["id"]
     assert widget["public_id"].startswith("wgt_")
     assert widget["status"] == "draft"
-    assert widget["texts"]["ai_disclosure"]
+    assert widget["texts"]["subtitle"]
     assert set(widget["activation_blockers"]) == {
         "allowed_origins_empty",
         "target_not_published",

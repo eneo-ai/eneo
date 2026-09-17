@@ -37,9 +37,9 @@ def test_public_id_has_prefix_and_is_unique():
 
 
 def test_create_uses_language_specific_disclosure():
-    assert _widget().texts.ai_disclosure == DEFAULT_AI_DISCLOSURE["sv"]
+    assert _widget().texts.subtitle == DEFAULT_AI_DISCLOSURE["sv"]
     assert (
-        _widget(language=WidgetLanguage.EN).texts.ai_disclosure
+        _widget(language=WidgetLanguage.EN).texts.subtitle
         == DEFAULT_AI_DISCLOSURE["en"]
     )
 
@@ -91,16 +91,16 @@ def test_texts_are_cleaned_and_bounded():
     with pytest.raises(ValueError):
         WidgetTexts(suggested_questions=["a", "b", "c", "d", "e"])
     with pytest.raises(ValueError):
-        WidgetTexts(privacy_url="kommun.se/integritet")
-    assert WidgetTexts(privacy_url="  ").privacy_url is None
+        WidgetTexts(footer_link_url="kommun.se/integritet")
+    assert WidgetTexts(footer_link_url="  ").footer_link_url is None
 
 
 def test_activation_blockers_cover_origins_disclosure_and_target():
     widget = _widget()
-    widget.texts = WidgetTexts(ai_disclosure="")
+    widget.texts = WidgetTexts(subtitle="")
     assert widget.activation_blockers(target_published=False) == [
         "allowed_origins_empty",
-        "ai_disclosure_empty",
+        "subtitle_empty",
         "target_not_published",
     ]
     widget.allowed_origins = ["https://www.kommun.se"]
@@ -177,6 +177,11 @@ def test_theme_header_colour_and_logo_are_validated():
     assert theme.logo_url == "https://kommun.se/logo.svg"
     assert WidgetTheme(header_color="", logo_url="").header_color is None
     assert WidgetTheme(header_color="", logo_url="").logo_url is None
+    dark = WidgetTheme(primary_color_dark="#abcdef", header_color_dark="")
+    assert dark.primary_color_dark == "#ABCDEF"
+    assert dark.header_color_dark is None
+    with pytest.raises(ValueError):
+        WidgetTheme(primary_color_dark="red")
     with pytest.raises(ValueError):
         WidgetTheme(header_color="blue")
     with pytest.raises(ValueError):

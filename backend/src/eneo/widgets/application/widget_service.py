@@ -94,6 +94,11 @@ class WidgetService:
             )
         return space
 
+    async def _space_as_admin(self, space_id: UUID) -> "Space":
+        # Tenant admins run the lifecycle from the admin page, also for widgets
+        # in spaces they are not members of, so no space-level read check.
+        return await self.space_service.repo.one(space_id)
+
     async def _owned_widget(self, widget_id: UUID) -> Widget:
         widget = await self.repo.get(widget_id)
         if widget is None or widget.tenant_id != self.user.tenant_id:
@@ -200,7 +205,7 @@ class WidgetService:
     async def activate_widget(self, widget_id: UUID) -> WidgetView:
         validate_permission(self.user, Permission.ADMIN)
         widget = await self._owned_widget(widget_id)
-        space = await self.space_service.get_space(widget.space_id)
+        space = await self._space_as_admin(widget.space_id)
         view = self._view(space, widget)
         blockers = list(view.activation_blockers)
         if blockers:
@@ -230,7 +235,7 @@ class WidgetService:
         # Pausing is the kill switch: any space editor with the widgets
         # permission may stop a widget, not only tenant admins.
         if Permission.ADMIN in self.user.permissions:
-            space = await self.space_service.get_space(widget.space_id)
+            space = await self._space_as_admin(widget.space_id)
         else:
             validate_permission(self.user, Permission.WIDGETS)
             space = await self._space_for_edit(widget.space_id)
@@ -241,7 +246,7 @@ class WidgetService:
     async def archive_widget(self, widget_id: UUID) -> WidgetView:
         validate_permission(self.user, Permission.ADMIN)
         widget = await self._owned_widget(widget_id)
-        space = await self.space_service.get_space(widget.space_id)
+        space = await self._space_as_admin(widget.space_id)
         widget.archive()
         widget = await self.repo.update(widget)
         return self._view(space, widget)

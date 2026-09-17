@@ -4,6 +4,7 @@
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
+  import { Switch } from "$lib/components/ui/switch/index.js";
   import { IconEneo } from "@eneo/icons/eneo";
   import { m } from "$lib/paraglide/messages";
   import { untrack } from "svelte";
@@ -60,6 +61,18 @@
     }
   }
 
+  // Dark mode shows its own colour fields once switched on; switching off
+  // clears them so dark mode falls back to the light-mode colours.
+  const hasDarkColors = $derived(!!(theme.primary_color_dark || theme.header_color_dark));
+  let customDark = $state(untrack(() => hasDarkColors));
+  $effect(() => {
+    if (hasDarkColors) customDark = true;
+  });
+  function toggleDark(checked: boolean) {
+    customDark = checked;
+    if (!checked && hasDarkColors) onChange({ primary_color_dark: null, header_color_dark: null });
+  }
+
   function number(event: Event, apply: (value: number) => void) {
     const value = Number((event.currentTarget as HTMLInputElement).value);
     if (Number.isFinite(value)) apply(value);
@@ -84,6 +97,48 @@
     clearable
     onChange={(value) => onChange({ header_color: value })}
   />
+
+  <Field.Set class="border-default rounded-lg border p-4">
+    <div class="flex items-start justify-between gap-4">
+      <div class="flex flex-col gap-1">
+        <Field.Legend>{m.widget_admin_dark_mode()}</Field.Legend>
+        <Field.Description id={id("dark-mode-help")}
+          >{m.widget_admin_dark_mode_description()}</Field.Description
+        >
+      </div>
+      <Field.Field orientation="horizontal" class="w-auto shrink-0">
+        <Field.Label for={id("dark-mode-custom")}>{m.widget_admin_dark_mode_custom()}</Field.Label>
+        <Switch
+          id={id("dark-mode-custom")}
+          checked={customDark}
+          aria-describedby={id("dark-mode-help")}
+          onCheckedChange={toggleDark}
+        />
+      </Field.Field>
+    </div>
+    {#if customDark}
+      <Field.Group class="grid gap-6 pt-2">
+        <ColorField
+          id={id("primary-color-dark")}
+          label={m.widget_admin_primary_color_dark()}
+          description={m.widget_admin_primary_color_dark_description()}
+          value={theme.primary_color_dark ?? null}
+          clearable
+          checkContrast
+          surface="dark"
+          onChange={(value) => onChange({ primary_color_dark: value })}
+        />
+        <ColorField
+          id={id("header-color-dark")}
+          label={m.widget_admin_header_color_dark()}
+          description={m.widget_admin_header_color_dark_description()}
+          value={theme.header_color_dark ?? null}
+          clearable
+          onChange={(value) => onChange({ header_color_dark: value })}
+        />
+      </Field.Group>
+    {/if}
+  </Field.Set>
 
   <Field.Field data-invalid={logoInvalid || undefined}>
     <Field.Label for={id("logo-url")}>{m.widget_admin_logo_url()}</Field.Label>

@@ -5,8 +5,8 @@ export function blockerLabel(code: string): string {
   switch (code) {
     case "allowed_origins_empty":
       return m.widget_admin_blocker_allowed_origins_empty();
-    case "ai_disclosure_empty":
-      return m.widget_admin_blocker_ai_disclosure_empty();
+    case "subtitle_empty":
+      return m.widget_admin_blocker_subtitle_empty();
     case "target_not_published":
       return m.widget_admin_blocker_target_not_published();
     case "archived":

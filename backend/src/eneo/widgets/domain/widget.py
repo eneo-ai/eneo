@@ -16,6 +16,7 @@ from pydantic import (
     ConfigDict,
     Field,
     ValidationError,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
@@ -119,12 +120,22 @@ class WidgetTexts(BaseModel):
     suggested_questions: list[str] = Field(
         default_factory=list, max_length=MAX_SUGGESTED_QUESTIONS
     )
-    ai_disclosure: str = Field(default=DEFAULT_AI_DISCLOSURE["sv"], max_length=300)
-    personal_data_notice: str = Field(default="", max_length=300)
-    privacy_url: Optional[str] = Field(default=None, max_length=500)
+    # Line under the title in the panel header. Defaults to an AI disclosure,
+    # which is what the EU AI Act transparency duty expects it to say.
+    subtitle: str = Field(default=DEFAULT_AI_DISCLOSURE["sv"], max_length=300)
+    # Free footer note under the composer, e.g. a data-handling reminder or a
+    # "powered by" line, with an optional link.
+    footer_text: str = Field(default="", max_length=300)
+    footer_link_url: Optional[str] = Field(default=None, max_length=500)
+    footer_link_label: str = Field(default="", max_length=80)
 
     @field_validator(
-        "title", "welcome", "placeholder", "ai_disclosure", "personal_data_notice"
+        "title",
+        "welcome",
+        "placeholder",
+        "subtitle",
+        "footer_text",
+        "footer_link_label",
     )
     @classmethod
     def _strip(cls, value: str) -> str:
@@ -142,9 +153,9 @@ class WidgetTexts(BaseModel):
             )
         return cleaned
 
-    @field_validator("privacy_url")
+    @field_validator("footer_link_url")
     @classmethod
-    def _privacy_url(cls, value: Optional[str]) -> Optional[str]:
+    def _footer_link_url(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
             return None
         value = value.strip()
@@ -152,7 +163,7 @@ class WidgetTexts(BaseModel):
             return None
         parsed = urlparse(value)
         if parsed.scheme not in ("http", "https") or not parsed.hostname:
-            raise ValueError("privacy_url must be an http(s) URL.")
+            raise ValueError("footer_link_url must be an http(s) URL.")
         return value
 
 
@@ -167,6 +178,10 @@ class WidgetTheme(BaseModel):
     # Panel header background; None keeps the neutral surface. Text colour on
     # it is picked automatically for contrast.
     header_color: Optional[str] = None
+    # Optional colours for dark mode; None means the light-mode colour is
+    # used in both modes.
+    primary_color_dark: Optional[str] = None
+    header_color_dark: Optional[str] = None
     # Logo shown in the panel header, hosted by the organisation.
     logo_url: Optional[str] = Field(default=None, max_length=500)
     # Kept for stored rows from the first schema; never populated.
@@ -180,16 +195,16 @@ class WidgetTheme(BaseModel):
             raise ValueError("primary_color must be a #RRGGBB hex colour.")
         return value.upper()
 
-    @field_validator("header_color")
+    @field_validator("header_color", "primary_color_dark", "header_color_dark")
     @classmethod
-    def _header_hex(cls, value: Optional[str]) -> Optional[str]:
+    def _optional_hex(cls, value: Optional[str], info: ValidationInfo) -> Optional[str]:
         if value is None:
             return None
         value = value.strip()
         if not value:
             return None
         if not _HEX_COLOR_RE.match(value):
-            raise ValueError("header_color must be a #RRGGBB hex colour.")
+            raise ValueError(f"{info.field_name} must be a #RRGGBB hex colour.")
         return value.upper()
 
     @field_validator("logo_url")
@@ -320,7 +335,7 @@ class Widget(BaseModel):
             target_id=target_id,
             name=name,
             language=language,
-            texts=WidgetTexts(ai_disclosure=DEFAULT_AI_DISCLOSURE[disclosure_lang]),
+            texts=WidgetTexts(subtitle=DEFAULT_AI_DISCLOSURE[disclosure_lang]),
             created_by_user_id=created_by_user_id,
         )
 
@@ -335,8 +350,8 @@ class Widget(BaseModel):
             blockers.append("archived")
         if not self.allowed_origins:
             blockers.append("allowed_origins_empty")
-        if not self.texts.ai_disclosure:
-            blockers.append("ai_disclosure_empty")
+        if not self.texts.subtitle:
+            blockers.append("subtitle_empty")
         if not target_published:
             blockers.append("target_not_published")
         return blockers

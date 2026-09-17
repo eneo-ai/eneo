@@ -21,27 +21,27 @@
 
   const id = (name: string) => `${idPrefix}-${name}`;
 
-  // The privacy link is committed when the field is left, never per keystroke.
-  let privacyDraft = $state(untrack(() => texts.privacy_url ?? ""));
-  let privacyInvalid = $state(false);
-  let lastSavedPrivacy = untrack(() => texts.privacy_url ?? "");
+  // The footer link is committed when the field is left, never per keystroke.
+  let linkDraft = $state(untrack(() => texts.footer_link_url ?? ""));
+  let linkInvalid = $state(false);
+  let lastSavedLink = untrack(() => texts.footer_link_url ?? "");
   $effect(() => {
-    const saved = texts.privacy_url ?? "";
-    if (saved !== lastSavedPrivacy) {
-      lastSavedPrivacy = saved;
-      privacyDraft = saved;
-      privacyInvalid = false;
+    const saved = texts.footer_link_url ?? "";
+    if (saved !== lastSavedLink) {
+      lastSavedLink = saved;
+      linkDraft = saved;
+      linkInvalid = false;
     }
   });
-  function commitPrivacy() {
-    const trimmed = privacyDraft.trim();
+  function commitLink() {
+    const trimmed = linkDraft.trim();
     if (trimmed === "") {
-      privacyInvalid = false;
-      if (texts.privacy_url) onChange({ privacy_url: null });
+      linkInvalid = false;
+      if (texts.footer_link_url) onChange({ footer_link_url: null });
       return;
     }
-    privacyInvalid = !isHttpUrl(trimmed);
-    if (!privacyInvalid && trimmed !== texts.privacy_url) onChange({ privacy_url: trimmed });
+    linkInvalid = !isHttpUrl(trimmed);
+    if (!linkInvalid && trimmed !== texts.footer_link_url) onChange({ footer_link_url: trimmed });
   }
 </script>
 
@@ -103,61 +103,79 @@
 
   <Field.Separator />
 
-  <Field.Field data-invalid={!(texts.ai_disclosure ?? "").trim() || undefined}>
-    <Field.Label for={id("disclosure")}>{m.widget_admin_text_disclosure()}</Field.Label>
+  <Field.Field data-invalid={!(texts.subtitle ?? "").trim() || undefined}>
+    <Field.Label for={id("subtitle")}>{m.widget_admin_text_subtitle()}</Field.Label>
     <Textarea
-      id={id("disclosure")}
+      id={id("subtitle")}
       maxlength={300}
       rows={2}
       required
       aria-required="true"
-      aria-invalid={!(texts.ai_disclosure ?? "").trim()}
-      value={texts.ai_disclosure ?? ""}
-      aria-describedby={id("disclosure-help")}
-      oninput={(event) => onChange({ ai_disclosure: event.currentTarget.value })}
+      aria-invalid={!(texts.subtitle ?? "").trim()}
+      value={texts.subtitle ?? ""}
+      aria-describedby={id("subtitle-help")}
+      oninput={(event) => onChange({ subtitle: event.currentTarget.value })}
     />
-    <Field.Description id={id("disclosure-help")}
-      >{m.widget_admin_text_disclosure_description()}</Field.Description
+    <Field.Description id={id("subtitle-help")}
+      >{m.widget_admin_text_subtitle_description()}</Field.Description
     >
   </Field.Field>
 
   <Field.Field>
-    <Field.Label for={id("personal-data")}>{m.widget_admin_text_personal_data()}</Field.Label>
+    <Field.Label for={id("footer")}>{m.widget_admin_text_footer()}</Field.Label>
     <Textarea
-      id={id("personal-data")}
+      id={id("footer")}
       maxlength={300}
       rows={2}
-      value={texts.personal_data_notice ?? ""}
-      aria-describedby={id("personal-data-help")}
-      oninput={(event) => onChange({ personal_data_notice: event.currentTarget.value })}
+      value={texts.footer_text ?? ""}
+      aria-describedby={id("footer-help")}
+      oninput={(event) => onChange({ footer_text: event.currentTarget.value })}
     />
-    <Field.Description id={id("personal-data-help")}
-      >{m.widget_admin_text_personal_data_description()}</Field.Description
+    <Field.Description id={id("footer-help")}
+      >{m.widget_admin_text_footer_description()}</Field.Description
     >
   </Field.Field>
 
-  <Field.Field data-invalid={privacyInvalid || undefined}>
-    <Field.Label for={id("privacy-url")}>{m.widget_admin_text_privacy_url()}</Field.Label>
-    <Input
-      id={id("privacy-url")}
-      type="url"
-      maxlength={500}
-      aria-invalid={privacyInvalid}
-      aria-describedby={id("privacy-url-help")}
-      bind:value={privacyDraft}
-      onchange={commitPrivacy}
-      onkeydown={(event) => {
-        if (event.key === "Enter") {
-          event.preventDefault();
-          commitPrivacy();
-        }
-      }}
-    />
-    <Field.Description id={id("privacy-url-help")}
-      >{m.widget_admin_text_privacy_url_description()}</Field.Description
-    >
-    {#if privacyInvalid}
-      <Field.Error>{m.widget_admin_url_invalid()}</Field.Error>
-    {/if}
-  </Field.Field>
+  <Field.Group class="grid gap-6 sm:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+    <Field.Field data-invalid={linkInvalid || undefined}>
+      <Field.Label for={id("footer-link")}>{m.widget_admin_text_footer_link_url()}</Field.Label>
+      <Input
+        id={id("footer-link")}
+        type="url"
+        maxlength={500}
+        aria-invalid={linkInvalid}
+        aria-describedby={id("footer-link-help")}
+        bind:value={linkDraft}
+        onchange={commitLink}
+        onkeydown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            commitLink();
+          }
+        }}
+      />
+      <Field.Description id={id("footer-link-help")}
+        >{m.widget_admin_text_footer_link_url_description()}</Field.Description
+      >
+      {#if linkInvalid}
+        <Field.Error>{m.widget_admin_url_invalid()}</Field.Error>
+      {/if}
+    </Field.Field>
+
+    <Field.Field>
+      <Field.Label for={id("footer-link-label")}
+        >{m.widget_admin_text_footer_link_label()}</Field.Label
+      >
+      <Input
+        id={id("footer-link-label")}
+        maxlength={80}
+        value={texts.footer_link_label ?? ""}
+        aria-describedby={id("footer-link-label-help")}
+        oninput={(event) => onChange({ footer_link_label: event.currentTarget.value })}
+      />
+      <Field.Description id={id("footer-link-label-help")}
+        >{m.widget_admin_text_footer_link_label_description()}</Field.Description
+      >
+    </Field.Field>
+  </Field.Group>
 </Field.Group>

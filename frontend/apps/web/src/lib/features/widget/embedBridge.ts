@@ -7,8 +7,10 @@
 export const BRIDGE_NAMESPACE = "eneo-widget";
 export const BRIDGE_VERSION = 1;
 
+import type { LauncherColors } from "./contrast";
+
 export type OutboundMessage =
-  | { type: "ready" }
+  | { type: "ready"; payload?: { colors: LauncherColors } }
   | { type: "close" }
   | { type: "conversation_started"; payload: { session_id: string } }
   | { type: "unread"; payload: { count: number } };
@@ -108,7 +110,9 @@ export function createEmbedBridge(options: {
   return {
     embedded,
     post,
-    ready: () => post({ type: "ready" }),
+    /** The loader paints its launcher with the widget's colours once the page is up. */
+    ready: (colors?: LauncherColors) =>
+      post(colors ? { type: "ready", payload: { colors } } : { type: "ready" }),
     close: () => post({ type: "close" }),
     conversationStarted: (sessionId: string) =>
       post({ type: "conversation_started", payload: { session_id: sessionId } }),

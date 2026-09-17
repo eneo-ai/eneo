@@ -52,7 +52,7 @@ Cache-Control: no-store
 
 ## EU AI Act, Article 50
 
-Transparency obligations for AI systems interacting with natural persons apply since **2 August 2026**. The widget renders `ai_disclosure` on every load, above the composer, and it cannot be switched off — only reworded. Default (sv): "Du chattar med en AI-assistent. Svaren kan innehålla fel – kontrollera viktig information." The stand-alone page shows the same text in the header.
+Transparency obligations for AI systems interacting with natural persons apply since **2 August 2026**. The widget renders the `subtitle` text under the title on every load; it cannot be empty (activation blocker), only reworded, and it defaults to an AI disclosure. Default (sv): "Du chattar med en AI-assistent. Svaren kan innehålla fel – kontrollera viktig information." The stand-alone page shows the same text in the header.
 
 ## DOS-lagen / EN 301 549
 

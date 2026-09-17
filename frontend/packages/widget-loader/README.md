@@ -34,7 +34,9 @@ Optional `data-*` attributes (also usable as attributes on a hand-written
 | `prefetch`     | `true` (load before first open)                   | lazy                        |
 | `preview`      | preview token from the admin page (draft widgets) | none                        |
 
-CSS custom properties on the element or `:root`: `--eneo-widget-color`,
+The launcher takes the widget's primary colour (and its dark-mode colour when
+the page is dark) as soon as the embed page reports ready. CSS custom
+properties on the element or `:root` override it: `--eneo-widget-color`,
 `--eneo-widget-on-color`, `--eneo-widget-radius`, `--eneo-widget-z`,
 `--eneo-widget-offset-x`, `--eneo-widget-offset-y`. Parts: `launcher`, `panel`.
 

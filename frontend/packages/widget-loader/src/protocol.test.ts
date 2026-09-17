@@ -6,6 +6,13 @@ describe("parseFrameMessage", () => {
     expect(parseFrameMessage({ ns: BRIDGE_NAMESPACE, v: 1, type: "ready" })).toEqual({
       type: "ready"
     });
+    const colors = {
+      light: { accent: "#1F4E79", on_accent: "#FFFFFF" },
+      dark: { accent: "#9CC7F0", on_accent: "#111111" }
+    };
+    expect(
+      parseFrameMessage({ ns: BRIDGE_NAMESPACE, v: 1, type: "ready", payload: { colors } })
+    ).toEqual({ type: "ready", payload: { colors } });
     expect(parseFrameMessage({ ns: BRIDGE_NAMESPACE, v: 1, type: "close" })).toEqual({
       type: "close"
     });
@@ -25,6 +32,14 @@ describe("parseFrameMessage", () => {
   it("rejects foreign, newer or malformed messages", () => {
     expect(parseFrameMessage(null)).toBeNull();
     expect(parseFrameMessage("ready")).toBeNull();
+    expect(
+      parseFrameMessage({
+        ns: BRIDGE_NAMESPACE,
+        v: 1,
+        type: "ready",
+        payload: { colors: { light: { accent: "red", on_accent: "#fff" } } }
+      })
+    ).toEqual({ type: "ready" });
     expect(parseFrameMessage({ ns: "other", v: 1, type: "ready" })).toBeNull();
     expect(
       parseFrameMessage({ ns: BRIDGE_NAMESPACE, v: BRIDGE_VERSION + 1, type: "ready" })

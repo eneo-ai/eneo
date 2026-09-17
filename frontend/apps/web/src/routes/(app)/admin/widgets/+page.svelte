@@ -6,7 +6,16 @@
 <script lang="ts">
   import type { WidgetPolicy, WidgetPolicyUpdate, WidgetTemplate } from "@eneo/eneo-js";
   import { goto } from "$app/navigation";
-  import { LayoutGrid, LayoutTemplate, Plus, ShieldCheck } from "lucide-svelte";
+  import {
+    LayoutGrid,
+    LayoutTemplate,
+    Pencil,
+    Plus,
+    ShieldCheck,
+    Star,
+    StarOff,
+    Trash2
+  } from "lucide-svelte";
   import { Page } from "$lib/components/layout";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
@@ -216,7 +225,7 @@
               </Card.Content>
             </Card.Root>
           </dl>
-          <WidgetOverviewList overview={data.overview} />
+          <WidgetOverviewList overview={data.overview} eneo={data.eneo} />
         </Tabs.Content>
 
         <Tabs.Content value="policy">
@@ -354,29 +363,39 @@
                           variant="outline"
                           size="sm"
                           href={localizeHref(`/admin/widgets/templates/${template.id}`)}
-                          >{m.edit()}</Button
                         >
+                          <Pencil aria-hidden="true" data-icon="inline-start" />
+                          {m.edit()}
+                        </Button>
                         <!-- eslint-enable svelte/no-navigation-without-resolve -->
                         <Button
-                          variant="ghost"
+                          variant="outline"
                           size="sm"
                           onclick={() => setDefault(template, !template.is_default)}
-                          >{template.is_default
-                            ? m.widget_admin_template_unset_default()
-                            : m.widget_admin_template_set_default()}</Button
                         >
+                          {#if template.is_default}
+                            <StarOff aria-hidden="true" data-icon="inline-start" />
+                            {m.widget_admin_template_unset_default()}
+                          {:else}
+                            <Star aria-hidden="true" data-icon="inline-start" />
+                            {m.widget_admin_template_set_default()}
+                          {/if}
+                        </Button>
                         <Button
-                          variant="ghost"
+                          variant="outline"
                           size="sm"
-                          class="text-negative-default"
+                          class="text-negative-default hover:text-negative-default"
                           onclick={() => {
                             templateToDelete = template;
                             deleteOpen = true;
                           }}
                           aria-label={m.widget_admin_template_delete_named({
                             name: template.name
-                          })}>{m.delete()}</Button
+                          })}
                         >
+                          <Trash2 aria-hidden="true" data-icon="inline-start" />
+                          {m.delete()}
+                        </Button>
                       </div>
                     </li>
                   {/each}

@@ -17,7 +17,7 @@ Companion to [00-overview.md](00-overview.md). Paths are relative to `backend/sr
 | `status` | text | `draft` → `active` → `paused` → `archived`; only `active` serves visitors |
 | `token_generation` | int, default 0 | bumped on pause/archive/config change that must invalidate outstanding visitor tokens |
 | `name` | text | internal label |
-| `texts` | JSONB | `title`, `welcome`, `placeholder`, `suggested_questions[]` (max 4), `ai_disclosure` (non-removable, editable wording), `personal_data_notice`, `privacy_url` |
+| `texts` | JSONB | `title`, `welcome`, `placeholder`, `suggested_questions[]` (max 4), `subtitle` (required; an AI disclosure by default), `footer_text`, `footer_link_url`, `footer_link_label` |
 | `theme` | JSONB | `primary_color`, `color_scheme` (`auto`/`light`/`dark`), `position` (`bottom-right`/`bottom-left`), `launcher` (`bubble`/`bar`/`none`), `radius`, `logo_file_id` |
 | `language` | text | `sv`, `en` or `auto` (follow host `<html lang>`) |
 | `allowed_origins` | JSONB list | validated with `_validate_origin_format` rules; wildcards `https://*.kommun.se` allowed; at least one required to activate |
@@ -110,7 +110,7 @@ Retention: a worker cron job (`purge_widget_sessions`, daily 03:30 UTC, one tran
 | `GET /spaces/{space_id}/widgets/` | space member | list with status and 7-day usage |
 | `POST /spaces/{space_id}/widgets/` | space editor + `Permission.WIDGETS` | create as `draft` for an assistant in that space |
 | `GET/PATCH /widgets/{id}/` | space editor | config; PATCH bumps `token_generation` when `allowed_origins`, `limits`, `privacy` or `bot_protection` change |
-| `POST /widgets/{id}/activate/` | tenant admin | requires `allowed_origins` non-empty, `ai_disclosure` non-empty, assistant published; audited |
+| `POST /widgets/{id}/activate/` | tenant admin | requires `allowed_origins` non-empty, `subtitle` non-empty, assistant published; audited |
 | `POST /widgets/{id}/pause/` · `archive/` | tenant admin (pause also space editor, so an editor can stop an incident) | bumps generation; audited |
 | `GET /widgets/{id}/usage/?days=30` | space member | from `widget_daily_usage` |
 | `POST /widgets/{id}/preview-token/` | space editor | visitor token whose `aud` carries `preview=1`; ask works only from Eneo's own origin and does not count towards the budget beyond a small preview allowance |

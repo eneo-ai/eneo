@@ -9,7 +9,7 @@
   import { onMount, untrack } from "svelte";
   import { initChatService } from "$lib/features/chat/ChatService.svelte";
   import type { VisitorSession } from "../visitorSession";
-  import { DEFAULT_PRIMARY_COLOR, isHexColor, readableOn } from "../contrast";
+  import { readableOn, themeColors } from "../contrast";
   import { widgetChatPartner } from "../widgetPartner";
   import WidgetChat from "./WidgetChat.svelte";
 
@@ -54,25 +54,34 @@
   // preference in this origin's storage, which a visitor page must not touch.
   const pinnedScheme = initial.config.theme.color_scheme ?? "auto";
 
+  // Whether the panel is dark right now, so the widget's own colours can
+  // switch with it. Starts from what the server rendered.
+  let dark = $state(
+    untrack(() => (pinnedScheme === "auto" ? initial.hostScheme : pinnedScheme) === "dark")
+  );
+  let systemQuery: MediaQueryList | null = null;
+
   function applyScheme(scheme: Scheme) {
     const effective = pinnedScheme === "auto" ? scheme : pinnedScheme;
     document.documentElement.dataset.theme = effective === "auto" ? "system" : effective;
+    dark = effective === "auto" ? (systemQuery?.matches ?? false) : effective === "dark";
   }
 
-  onMount(() => applyScheme(initial.hostScheme ?? "auto"));
+  onMount(() => {
+    systemQuery = matchMedia("(prefers-color-scheme: dark)");
+    const followSystem = () => {
+      if (document.documentElement.dataset.theme === "system") dark = systemQuery!.matches;
+    };
+    systemQuery.addEventListener("change", followSystem);
+    applyScheme(initial.hostScheme ?? "auto");
+    return () => systemQuery?.removeEventListener("change", followSystem);
+  });
 
-  // The widget's own colours as CSS variables; text colours are derived so the
-  // combination always reads (WCAG 1.4.3 / 1.4.11).
-  const accent = $derived(
-    isHexColor(config.theme.primary_color ?? "")
-      ? config.theme.primary_color!
-      : DEFAULT_PRIMARY_COLOR
-  );
-  const header = $derived(
-    config.theme.header_color && isHexColor(config.theme.header_color)
-      ? config.theme.header_color
-      : null
-  );
+  // The widget's own colours as CSS variables, per scheme; text colours are
+  // derived so the combination always reads (WCAG 1.4.3 / 1.4.11).
+  const colors = $derived(themeColors(config.theme, dark));
+  const accent = $derived(colors.accent);
+  const header = $derived(colors.header);
 </script>
 
 <div

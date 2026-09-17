@@ -8,7 +8,13 @@
   import { Input } from "$lib/components/ui/input/index.js";
   import { m } from "$lib/paraglide/messages";
   import { untrack } from "svelte";
-  import { contrastVerdict, DEFAULT_PRIMARY_COLOR, isHexColor } from "../contrast";
+  import {
+    contrastVerdict,
+    DARK_SURFACE,
+    DEFAULT_PRIMARY_COLOR,
+    isHexColor,
+    LIGHT_SURFACE
+  } from "../contrast";
 
   type Props = {
     id: string;
@@ -18,8 +24,10 @@
     onChange: (value: string | null) => void;
     /** Optional colours can be cleared back to the neutral surface. */
     clearable?: boolean;
-    /** Show how the colour fares against white text and icons. */
+    /** Show how the colour fares against the surface it will sit on. */
     checkContrast?: boolean;
+    /** The surface behind the colour: the white page or the dark panel. */
+    surface?: "light" | "dark";
   };
 
   let {
@@ -29,7 +37,8 @@
     value,
     onChange,
     clearable = false,
-    checkContrast = false
+    checkContrast = false,
+    surface = "light"
   }: Props = $props();
 
   // What is typed stays local until it is a complete hex colour; the server
@@ -45,7 +54,11 @@
   });
   const current = $derived(draft);
   const pickerValue = $derived(isHexColor(current) ? current : DEFAULT_PRIMARY_COLOR);
-  const contrast = $derived(checkContrast && current ? contrastVerdict(current) : null);
+  const contrast = $derived(
+    checkContrast && current
+      ? contrastVerdict(current, surface === "dark" ? DARK_SURFACE : LIGHT_SURFACE)
+      : null
+  );
 
   function typed(raw: string) {
     draft = raw.trim();
@@ -55,13 +68,20 @@
   const contrastLabel = $derived.by(() => {
     if (!contrast) return "";
     const ratio = contrast.ratio.toFixed(1);
+    const dark = surface === "dark";
     switch (contrast.verdict) {
       case "text":
-        return m.widget_admin_contrast_ok({ ratio });
+        return dark
+          ? m.widget_admin_contrast_dark_ok({ ratio })
+          : m.widget_admin_contrast_ok({ ratio });
       case "graphics":
-        return m.widget_admin_contrast_graphics_only({ ratio });
+        return dark
+          ? m.widget_admin_contrast_dark_graphics_only({ ratio })
+          : m.widget_admin_contrast_graphics_only({ ratio });
       case "fail":
-        return m.widget_admin_contrast_fail({ ratio });
+        return dark
+          ? m.widget_admin_contrast_dark_fail({ ratio })
+          : m.widget_admin_contrast_fail({ ratio });
       default:
         return m.widget_admin_contrast_invalid();
     }

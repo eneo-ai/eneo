@@ -56,7 +56,7 @@ The package build emits `eneo.<semver>.js`; the route maps `v1` → latest `1.x`
 - Session restore: on load with a stored `visitor_id` and a recent `session_id`, the page mints (previous token if fresh, else challenge) and calls `GET sessions/{id}/` to restore history.
 - Theming: `theme.primary_color` becomes a CSS custom property that maps onto Eneo's semantic tokens (`bg-accent-default`, `text-on-fill` …); `color_scheme` sets `data-theme`; contrast is checked at config time in the admin page (see below) so the embed page never renders a non-compliant colour.
 - i18n through paraglide (`sv`, `en`); `<html lang>` follows the resolved language.
-- Disclosure: the `ai_disclosure` text renders above the composer on every load and cannot be dismissed; `personal_data_notice` and `privacy_url` render in the panel footer.
+- Disclosure: the `subtitle` text (an AI disclosure by default) renders in the header on every load and cannot be dismissed; `footer_text` with the optional `footer_link_url`/`footer_link_label` render in the panel footer.
 
 ### Accessibility acceptance (WCAG 2.2 AA / EN 301 549)
 

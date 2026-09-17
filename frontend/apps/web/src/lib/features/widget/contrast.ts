@@ -10,6 +10,9 @@ export const HEX_COLOR = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 
 /** The backend default for a new widget's primary colour. */
 export const DEFAULT_PRIMARY_COLOR = "#1F4E79";
+/** The panel background in dark mode; the loader paints the same colour behind the frame. */
+export const DARK_SURFACE = "#111111";
+export const LIGHT_SURFACE = "#FFFFFF";
 
 export function isHexColor(value: string): boolean {
   return HEX_COLOR.test(value.trim());
@@ -37,10 +40,13 @@ export function contrastRatio(foreground: string, background: string): number {
 
 export type ContrastVerdict = "text" | "graphics" | "fail" | "invalid";
 
-/** How the colour fares against white, the launcher icon and message text colour. */
-export function contrastVerdict(primary: string): { ratio: number; verdict: ContrastVerdict } {
+/** How the colour fares against the surface it sits on: white in light mode, the dark panel in dark mode. */
+export function contrastVerdict(
+  primary: string,
+  surface: string = LIGHT_SURFACE
+): { ratio: number; verdict: ContrastVerdict } {
   if (!isHexColor(primary)) return { ratio: 0, verdict: "invalid" };
-  const ratio = contrastRatio(primary, "#ffffff");
+  const ratio = contrastRatio(primary, surface);
   return {
     ratio,
     verdict: ratio >= 4.5 ? "text" : ratio >= 3 ? "graphics" : "fail"
@@ -53,4 +59,46 @@ export function readableOn(background: string): "#FFFFFF" | "#111111" {
   return contrastRatio("#FFFFFF", background) >= contrastRatio("#111111", background)
     ? "#FFFFFF"
     : "#111111";
+}
+
+type ThemeColors = {
+  primary_color?: string | null;
+  header_color?: string | null;
+  primary_color_dark?: string | null;
+  header_color_dark?: string | null;
+};
+
+function valid(colour: string | null | undefined): string | null {
+  return colour && isHexColor(colour) ? colour : null;
+}
+
+/**
+ * The accent and header colour to paint for one scheme. Dark mode falls back
+ * to the light-mode colours when it has none of its own.
+ */
+export function themeColors(
+  theme: ThemeColors,
+  dark: boolean
+): { accent: string; header: string | null } {
+  const accent =
+    (dark ? valid(theme.primary_color_dark) : null) ??
+    valid(theme.primary_color) ??
+    DEFAULT_PRIMARY_COLOR;
+  const header = (dark ? valid(theme.header_color_dark) : null) ?? valid(theme.header_color);
+  return { accent, header };
+}
+
+export type LauncherColors = {
+  light: { accent: string; on_accent: string };
+  dark: { accent: string; on_accent: string };
+};
+
+/** What the loader paints its launcher button with, per scheme. */
+export function launcherColors(theme: ThemeColors): LauncherColors {
+  const light = themeColors(theme, false).accent;
+  const dark = themeColors(theme, true).accent;
+  return {
+    light: { accent: light, on_accent: readableOn(light) },
+    dark: { accent: dark, on_accent: readableOn(dark) }
+  };
 }
