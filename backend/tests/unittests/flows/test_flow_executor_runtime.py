@@ -1061,7 +1061,9 @@ def _execute_setup_for_security(
     by_id = {candidate.id: candidate for candidate in assistants}
     executor.space_repo.get_space_by_assistant = AsyncMock(return_value=space)
     executor._load_assistant = AsyncMock(
-        side_effect=lambda assistant_id, state=None: by_id[assistant_id]
+        side_effect=lambda assistant_id, state=None, *, snapshot=None: by_id[
+            assistant_id
+        ]
     )
     flow_run_repo.get = _run_get_mock(running_run, running_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
@@ -6184,3 +6186,557 @@ async def test_validate_runtime_step_security_rejects_write_down(user):
             state=state,
             prior_output_levels_by_order={1: 3},
         )
+
+
+def _v2_model(user):
+    from eneo.completion_models.domain.completion_model import CompletionModel
+
+    now = datetime.now(timezone.utc)
+    return CompletionModel(
+        tenant=user.tenant,
+        tenant_id=user.tenant_id,
+        id=uuid4(),
+        created_at=now,
+        updated_at=now,
+        nickname="Model label",
+        name="model-a",
+        provider_id=uuid4(),
+        provider_type="provider-a",
+        litellm_model_name=None,
+        max_input_tokens=8192,
+        max_output_tokens=1024,
+        vision=False,
+        family=None,
+        hosting=None,
+        org=None,
+        stability=None,
+        open_source=False,
+        description=None,
+        nr_billion_parameters=None,
+        hf_link=None,
+        is_deprecated=False,
+        deployment_name=None,
+        is_org_enabled=True,
+        is_org_default=False,
+        reasoning=False,
+        model_kwargs_capabilities=SupportedModelKwargs.model_validate(
+            {
+                "temperature": {"supported": True, "control": "slider"},
+            }
+        ),
+    )
+
+
+def _v2_snapshot(assistant_id, model, *, prompt="Frozen instructions"):
+    payload = {
+        "schema_version": 2,
+        "assistant_id": str(assistant_id),
+        "origin": "flow_managed",
+        "instructions": prompt,
+        "completion_model": {
+            "model_id": str(model.id),
+            "provider_id": str(model.provider_id),
+            "provider_type": model.provider_type,
+            "resolved_route": model.get_model_route(),
+        },
+        "completion_model_kwargs": {"temperature": 0.2},
+        "knowledge_refs": [],
+        "attachments": [],
+        "inline_file_text": False,
+    }
+    return {**payload, "execution_surface_hash": canonical_json_hash(payload)}
+
+
+def _v2_executor_run(user, snapshot, model):
+    executor, _, runs, versions = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    assistant_id = UUID(snapshot["assistant_id"])
+    from eneo.ai_models.completion_models.completion_model import ModelKwargs
+    from eneo.assistants.assistant import Assistant
+    from eneo.prompts.prompt_factory import PromptFactory
+
+    live = Assistant(
+        id=assistant_id,
+        user=None,
+        space_id=uuid4(),
+        completion_model=model,
+        name="Live label",
+        prompt=PromptFactory.create_prompt(
+            text=_DEFAULT_SNAPSHOT_PROMPT,
+            description=None,
+            user_id=user.id,
+            tenant_id=user.tenant_id,
+        ),
+        completion_model_kwargs=ModelKwargs(temperature=0.7),
+        logging_enabled=False,
+        websites=[],
+        collections=[],
+        attachments=[],
+        published=False,
+    )
+    space = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=user.tenant_id,
+        default_assistant=None,
+        assistants=[live],
+        get_assistant=lambda assistant_id: live,
+        security_classification=None,
+    )
+    executor.space_repo.get_space_by_assistant = AsyncMock(return_value=space)
+    executor.space_repo.one = AsyncMock(return_value=space)
+    executor.flow_repo.get = AsyncMock(return_value=SimpleNamespace(space_id=space.id))
+    executor.space_repo.completion_model_repo.one = AsyncMock(return_value=model)
+    executor.references_service = AsyncMock()
+    executor._flow_is_active = AsyncMock(return_value=True)
+    runs.get = AsyncMock(return_value=run)
+    runs.mark_running_if_claimable = AsyncMock(return_value=True)
+    runs.list_step_results = AsyncMock(return_value=[])
+    step_id = uuid4()
+    versions.get = AsyncMock(
+        return_value=_published_flow_version(
+            flow_id=run.flow_id,
+            version=1,
+            tenant_id=user.tenant_id,
+            definition_checksum=None,
+            created_at=run.created_at,
+            updated_at=run.updated_at,
+            definition_json={
+                "steps": [
+                    {
+                        "step_id": str(step_id),
+                        "step_order": 1,
+                        "assistant_id": str(assistant_id),
+                        "input_source": "flow_input",
+                        "output_mode": "pass_through",
+                        "assistant_snapshot": snapshot,
+                    }
+                ]
+            },
+        )
+    )
+    return executor, run, live
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "change", ["route", "explicit_route", "provider_id", "provider_type"]
+)
+async def test_v2_route_rename_refused_before_provider_io(user, change):
+    model = _v2_model(user)
+    if change == "explicit_route":
+        model.litellm_model_name = "provider-a/explicit-route"
+    snapshot = _v2_snapshot(uuid4(), model)
+    if change in {"route", "explicit_route"}:
+        model.name = "model-b"
+    elif change == "provider_id":
+        model.provider_id = uuid4()
+    else:
+        model.provider_type = "provider-b"
+    executor, run, _ = _v2_executor_run(user, snapshot, model)
+
+    result = await executor.execute(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=user.tenant_id,
+        run_revision=run.revision,
+        dispatch_task_id="task-1",
+        retry_count=0,
+    )
+
+    assert result == {"status": "failed", "error": "flow_assistant_snapshot_drift"}
+    executor.flow_run_repo.claim_step_result.assert_not_awaited()
+    executor.completion_service.get_response.assert_not_awaited()
+    executor.references_service.get_references.assert_not_awaited()
+    assert (
+        executor.flow_run_terminalizer.terminalize_run.await_args.kwargs[
+            "target_status"
+        ]
+        == FlowRunStatus.FAILED
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        "nickname",
+        "rename_after_preflight",
+        "two_snapshots",
+        "mixed",
+        "removed_prompt",
+        "removed_assistant",
+        "resources",
+        "retry",
+    ],
+)
+async def test_v2_frozen_prompt_and_nickname_reach_completion(
+    user, monkeypatch, scenario
+):
+    model = _v2_model(user)
+    assistant_id = uuid4()
+    snapshot = _v2_snapshot(assistant_id, model)
+    executor, run, live = _v2_executor_run(user, snapshot, model)
+    if scenario == "resources":
+        from eneo.files.file_models import File, FileMetadata
+        from eneo.flows.assistant_execution_snapshot import (
+            build_assistant_execution_snapshot_v2,
+        )
+
+        resources = [
+            SimpleNamespace(
+                id=uuid4(),
+                tenant_id=user.tenant_id,
+                embedding_model=SimpleNamespace(
+                    id=uuid4(), security_classification=None
+                ),
+            )
+            for _ in range(3)
+        ]
+        live._collections, live._websites, live._integration_knowledge_list = (
+            [resources[0]],
+            [resources[1]],
+            [resources[2]],
+        )
+        files = [
+            File(
+                id=uuid4(),
+                name=f"File {index}",
+                checksum=f"checksum-{index}",
+                size=4,
+                text="text",
+                file_type=FileType.TEXT,
+                owner_type=PrincipalType.USER,
+                owner_user_id=user.id,
+                tenant_id=user.tenant_id,
+            )
+            for index in range(2)
+        ]
+        live._attachments = list(reversed(files))
+        live.prompt.text = "Frozen instructions"
+        live.completion_model_kwargs.temperature = 0.2
+        live.inline_file_text = False
+        snapshot = build_assistant_execution_snapshot_v2(assistant=live)
+        live._collections, live._websites, live._integration_knowledge_list = [], [], []
+        live._attachments = []
+        live.prompt.text = _DEFAULT_SNAPSHOT_PROMPT
+        live.completion_model_kwargs.temperature = 0.7
+        live.inline_file_text = True
+        resource_space = SimpleNamespace(
+            tenant_id=user.tenant_id,
+            get_collection=lambda _: resources[0],
+            get_website=lambda _: resources[1],
+            get_integration_knowledge=lambda _: resources[2],
+        )
+        for method in (
+            "get_space_by_collection",
+            "get_space_by_website",
+            "get_space_by_integration_knowledge",
+        ):
+            setattr(executor.space_repo, method, AsyncMock(return_value=resource_space))
+        metadata = {
+            file.id: FileMetadata.model_validate(file.model_dump()) for file in files
+        }
+        executor.file_repo.get_by_id.side_effect = lambda file_id, **_: metadata[
+            file_id
+        ]
+        executor.file_content_loader.load.return_value = {
+            file.id: file for file in files
+        }
+        chunks = [
+            retrieved_info_blob_chunk(
+                info_blob_id=uuid4(),
+                info_blob_title="Source",
+                chunk_no=0,
+                score=0.9,
+                text="Evidence",
+            )
+        ]
+        executor.references_service.get_references.return_value = SimpleNamespace(
+            chunks=chunks,
+            no_duplicate_chunks=chunks,
+        )
+    model.nickname = "Renamed label"
+    state = _empty_execution_state()
+    state.flow_id = run.flow_id
+    step = replace(
+        _step_for_execute_step(), assistant_id=assistant_id, assistant_snapshot=snapshot
+    )
+    monkeypatch.setattr(
+        executor_module,
+        "load_active_litellm_provider",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                id=model.provider_id, provider_type=model.provider_type
+            )
+        ),
+        raising=False,
+    )
+    executor._resolve_step_input = AsyncMock(
+        return_value=StepInputValue(
+            text="hello",
+            source_text="hello",
+            input_source="flow_input",
+            edges=(
+                build_resolved_input_edge(
+                    binding_ref="input",
+                    source=FlowResolvedInputFlowInputSource(
+                        kind="flow_input",
+                        selector=FlowResolvedInputJsonPath(
+                            kind="json_path", path=("text",)
+                        ),
+                    ),
+                    selected_value="hello",
+                ),
+            ),
+        )
+    )
+    executor._process_typed_output = AsyncMock(return_value=_typed_output_result())
+    executor._apply_output_cap = AsyncMock(return_value=("answer", []))
+    executor._commit = AsyncMock()
+    executor.completion_service.get_response = AsyncMock(
+        return_value=SimpleNamespace(
+            completion="answer",
+            total_token_count=42,
+        )
+    )
+
+    steps = [step]
+    if scenario in {"two_snapshots", "mixed"}:
+        other_snapshot = (
+            _v2_snapshot(assistant_id, model, prompt="Second frozen instructions")
+            if scenario == "two_snapshots"
+            else build_assistant_execution_snapshot(assistant=live)
+        )
+        steps.append(
+            replace(
+                step, step_id=uuid4(), step_order=2, assistant_snapshot=other_snapshot
+            )
+        )
+    if scenario == "removed_prompt":
+        live.prompt = None
+    if scenario == "removed_assistant":
+        from eneo.main.exceptions import NotFoundException
+
+        space = executor.space_repo.one.return_value
+        space.assistants = []
+        space.get_assistant = MagicMock(side_effect=NotFoundException())
+        executor.space_repo.get_space_by_assistant.side_effect = NotFoundException()
+    if scenario == "retry":
+        await executor._validate_assistant_snapshots(
+            steps=steps, state=state, run_id=run.id
+        )
+        state = _empty_execution_state()
+        state.flow_id = run.flow_id
+        live.completion_model_kwargs.temperature = 0.9
+    state.flow_id = run.flow_id
+    await executor._validate_assistant_snapshots(
+        steps=steps, state=state, run_id=run.id
+    )
+    if scenario == "rename_after_preflight":
+        model.name = "model-b"
+    for current_step in steps:
+        await executor._execute_step(
+            step=current_step, run=run, state=state, attempt_no=1
+        )
+
+    calls = executor.completion_service.get_response.await_args_list
+    if scenario in {"two_snapshots", "mixed"}:
+        assert calls[1].kwargs["prompt"] == (
+            "Second frozen instructions"
+            if scenario == "two_snapshots"
+            else _DEFAULT_SNAPSHOT_PROMPT
+        )
+    if scenario == "resources":
+        retrieved = executor.references_service.get_references.await_args.kwargs
+        assert retrieved["collections"] == [resources[0]]
+        assert retrieved["websites"] == [resources[1]]
+        assert retrieved["integration_knowledge_list"] == [resources[2]]
+        assert calls[0].kwargs["prompt_files"] == list(reversed(files))
+    call = calls[0].kwargs
+    assert call["prompt"] == "Frozen instructions"
+    assert call["model"].get_model_route() == "provider-a/model-a"
+    assert call["model_kwargs"].temperature == 0.2
+    assert call["inline_file_text"] is False
+    assert live.get_prompt_text() == (
+        "" if scenario == "removed_prompt" else _DEFAULT_SNAPSHOT_PROMPT
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "missing_model",
+        "foreign_model",
+        "inactive_provider",
+        "missing_file",
+        "foreign_file",
+        "checksum",
+        "missing_knowledge",
+        "foreign_knowledge",
+    ],
+)
+async def test_v2_resource_integrity_refused_before_provider_io(
+    user, monkeypatch, failure
+):
+    from eneo.main.exceptions import NotFoundException, ProviderInactiveException
+
+    model = _v2_model(user)
+    snapshot = _v2_snapshot(uuid4(), model)
+    resource_id = uuid4()
+    if failure in {"missing_file", "foreign_file", "checksum"}:
+        snapshot["attachments"] = [
+            {"file_id": str(resource_id), "checksum": "original"}
+        ]
+    if failure in {"missing_knowledge", "foreign_knowledge"}:
+        snapshot["knowledge_refs"] = [{"kind": "collection", "id": str(resource_id)}]
+    snapshot["execution_surface_hash"] = canonical_json_hash(
+        {
+            key: value
+            for key, value in snapshot.items()
+            if key != "execution_surface_hash"
+        }
+    )
+    executor, run, _ = _v2_executor_run(user, snapshot, model)
+    provider = AsyncMock(
+        return_value=SimpleNamespace(
+            id=model.provider_id,
+            provider_type=model.provider_type,
+        )
+    )
+    monkeypatch.setattr(executor_module, "load_active_litellm_provider", provider)
+    if failure == "missing_model":
+        executor.space_repo.completion_model_repo.one.side_effect = NotFoundException()
+    elif failure == "foreign_model":
+        model.tenant_id = uuid4()
+    elif failure == "inactive_provider":
+        provider.side_effect = ProviderInactiveException("inactive")
+    elif failure == "missing_file":
+        executor.file_repo.get_by_id.side_effect = NotFoundException()
+    elif failure in {"foreign_file", "checksum"}:
+        executor.file_repo.get_by_id.return_value = SimpleNamespace(
+            id=resource_id,
+            tenant_id=uuid4() if failure == "foreign_file" else user.tenant_id,
+        )
+        executor.file_content_loader.load.return_value = {
+            resource_id: SimpleNamespace(
+                id=resource_id,
+                checksum="changed",
+            )
+        }
+    else:
+        if failure == "missing_knowledge":
+            executor.space_repo.get_space_by_collection.side_effect = (
+                NotFoundException()
+            )
+        else:
+            executor.space_repo.get_space_by_collection.return_value = SimpleNamespace(
+                tenant_id=uuid4(),
+            )
+
+    result = await executor.execute(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=user.tenant_id,
+        run_revision=run.revision,
+        dispatch_task_id="task-1",
+        retry_count=0,
+    )
+
+    assert result == {
+        "status": "failed",
+        "error": "flow_assistant_snapshot_resource_invalid",
+    }
+    executor.flow_run_repo.claim_step_result.assert_not_awaited()
+    executor.completion_service.get_response.assert_not_awaited()
+    executor.references_service.get_references.assert_not_awaited()
+    if failure == "foreign_file":
+        executor.file_content_loader.load.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["mcp", "classification"])
+async def test_v2_preserves_preflight_refusals(user, monkeypatch, failure):
+    model = _v2_model(user)
+    snapshot = _v2_snapshot(uuid4(), model)
+    executor, run, live = _v2_executor_run(user, snapshot, model)
+    monkeypatch.setattr(
+        executor_module,
+        "load_active_litellm_provider",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                id=model.provider_id, provider_type=model.provider_type
+            )
+        ),
+    )
+    if failure == "mcp":
+        live.mcp_servers = [SimpleNamespace(id=uuid4())]
+    else:
+        executor.space_repo.one.return_value.security_classification = SimpleNamespace(
+            security_level=2
+        )
+        model.security_classification = SimpleNamespace(security_level=1)
+
+    result = await executor.execute(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=user.tenant_id,
+        run_revision=run.revision,
+        dispatch_task_id="task-1",
+        retry_count=0,
+    )
+
+    assert result["status"] == "failed"
+    error = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs["error"]
+    assert ("MCP" if failure == "mcp" else "classification") in error.message
+    executor.flow_run_repo.claim_step_result.assert_not_awaited()
+    executor.completion_service.get_response.assert_not_awaited()
+    executor.references_service.get_references.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_v2_space_cache_does_not_change_v1_classification(user, monkeypatch):
+    model = _v2_model(user)
+    model.security_classification = SimpleNamespace(security_level=10)
+    snapshot = _v2_snapshot(uuid4(), model)
+    executor, run, live = _v2_executor_run(user, snapshot, model)
+    flow_space = executor.space_repo.one.return_value
+    flow_space.security_classification = SimpleNamespace(security_level=2)
+    legacy_space = SimpleNamespace(
+        id=uuid4(),
+        tenant_id=user.tenant_id,
+        default_assistant=None,
+        assistants=[live],
+        get_assistant=lambda assistant_id: live,
+        security_classification=SimpleNamespace(security_level=5),
+    )
+    executor.space_repo.get_space_by_assistant.return_value = legacy_space
+    monkeypatch.setattr(
+        executor_module,
+        "load_active_litellm_provider",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                id=model.provider_id, provider_type=model.provider_type
+            )
+        ),
+    )
+    legacy_step = replace(
+        _step_for_execute_step(),
+        assistant_id=live.id,
+        assistant_snapshot=build_assistant_execution_snapshot(assistant=live),
+    )
+    frozen_step = replace(
+        _step_for_execute_step(step_order=2),
+        assistant_id=live.id,
+        assistant_snapshot=snapshot,
+    )
+    state = _empty_execution_state()
+    state.flow_id = run.flow_id
+    steps = [legacy_step, frozen_step]
+
+    await executor._validate_assistant_snapshots(
+        steps=steps, state=state, run_id=run.id
+    )
+    levels = await executor._resolve_step_output_levels(steps=steps, state=state)
+
+    assert levels == {1: 5, 2: 2}

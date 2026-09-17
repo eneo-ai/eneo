@@ -17,7 +17,8 @@ class Prompt:
     id: UUID | None
     text: str
     description: str | None
-    user_id: UUID
+    # Detached execution prompts need not have an author record.
+    user_id: UUID | None
     tenant_id: UUID
     is_selected: bool | None
     user: UserSparse | None

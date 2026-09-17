@@ -206,6 +206,8 @@ class LoadAssistantFn(Protocol):
         self,
         assistant_id: UUID,
         state: RunExecutionState | None = None,
+        *,
+        snapshot: dict[str, Any] | None = None,
     ) -> Awaitable[RuntimeAssistantProtocol]: ...
 
 
@@ -1085,7 +1087,9 @@ async def prepare_step_execution(
         step_names_by_order=state.step_names_by_order,
         step_ref_mapping=state.step_ref_mapping,
     )
-    assistant = await deps.load_assistant(step.assistant_id, state)
+    assistant = await deps.load_assistant(
+        step.assistant_id, state, snapshot=step.assistant_snapshot
+    )
     prompt_text = assistant.get_prompt_text()
     effective_prompt = ""
     input_payload_for_result: dict[str, Any] = {

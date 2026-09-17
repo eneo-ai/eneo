@@ -165,6 +165,7 @@ export declare const FLOW_API_ERROR_CODE: Readonly<{
   TEMPLATE_IN_USE: "flow_template_in_use";
   TEMPLATE_DOWNLOAD_AUDIT_UNAVAILABLE: "flow_template_download_audit_unavailable";
   PACKAGE_EXPORT_AUDIT_UNAVAILABLE: "flow_package_export_audit_unavailable";
+  ASSISTANT_SNAPSHOT_RESOURCE_INVALID: "flow_assistant_snapshot_resource_invalid";
 }>;
 export type FlowApiErrorCode =
   | "flow_not_published"
@@ -331,5 +332,6 @@ export type FlowApiErrorCode =
   | "flow_template_missing_content"
   | "flow_template_in_use"
   | "flow_template_download_audit_unavailable"
-  | "flow_package_export_audit_unavailable";
+  | "flow_package_export_audit_unavailable"
+  | "flow_assistant_snapshot_resource_invalid";
 export declare const FLOW_API_ERROR_CODES: readonly FlowApiErrorCode[];

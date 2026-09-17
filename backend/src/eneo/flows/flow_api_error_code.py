@@ -191,6 +191,8 @@ class FlowApiErrorCode(str, Enum):
     TEMPLATE_DOWNLOAD_AUDIT_UNAVAILABLE = "flow_template_download_audit_unavailable"
     PACKAGE_EXPORT_AUDIT_UNAVAILABLE = "flow_package_export_audit_unavailable"
 
+    ASSISTANT_SNAPSHOT_RESOURCE_INVALID = "flow_assistant_snapshot_resource_invalid"
+
 
 FLOW_API_ERROR_CODES: tuple[FlowApiErrorCode, ...] = tuple(FlowApiErrorCode)
 FLOW_TYPED_IO_ERROR_CODES: frozenset[FlowApiErrorCode] = frozenset(
@@ -265,6 +267,7 @@ FLOW_RUN_TERMINAL_ERROR_CODES: frozenset[FlowApiErrorCode] = frozenset(
         FlowApiErrorCode.DEFINITION_STEPS_INVALID,
         FlowApiErrorCode.DEFINITION_NO_EXECUTABLE_STEPS,
         FlowApiErrorCode.ASSISTANT_SNAPSHOT_DRIFT,
+        FlowApiErrorCode.ASSISTANT_SNAPSHOT_RESOURCE_INVALID,
         FlowApiErrorCode.INPUT_CONTRACT_INAPPLICABLE,
         FlowApiErrorCode.STEP_MISSING,
         FlowApiErrorCode.STEP_ATTEMPT_START_FAILED,

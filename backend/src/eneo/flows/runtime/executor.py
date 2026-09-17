@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Iterable, Sequence, assert_never, cast
@@ -12,12 +13,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
+from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.assistants.assistant import Assistant, AssistantOrigin
 from eneo.audit.domain.outcome import Outcome
 from eneo.completion_models.infrastructure.completion_service import CompletionService
 from eneo.completion_models.infrastructure.context_builder import count_tokens
 from eneo.database.database import sessionmanager
 from eneo.files.file_content_loader import FileContentLoader
-from eneo.files.file_models import FileType
+from eneo.files.file_models import File, FileMetadata, FileType
 from eneo.files.file_repo import FileRepository
 from eneo.files.file_service import FileService
 from eneo.flows.application.flow_run_terminalization import (
@@ -25,6 +28,7 @@ from eneo.flows.application.flow_run_terminalization import (
     FlowRunTerminalizer,
 )
 from eneo.flows.assistant_execution_snapshot import (
+    AssistantExecutionSnapshotV2,
     build_assistant_execution_snapshot,
     validate_assistant_execution_snapshot,
 )
@@ -59,6 +63,7 @@ from eneo.flows.domain.runtime import (
     StepDiagnostic,
     StepExecutionOutput,
     StepInputValue,
+    assistant_cache_key,
 )
 from eneo.flows.domain.runtime_input import build_runtime_input_config
 from eneo.flows.domain.runtime_invariant_exceptions import FlowRuntimeInvariantError
@@ -200,8 +205,11 @@ from eneo.json_types import JsonObject
 from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     BadRequestException,
+    NotFoundException,
     OpenAIException,
     ProviderCapabilityRejectedException,
+    ProviderInactiveException,
+    ProviderNotFoundException,
     ProviderRejectedRequestException,
     TypedIOValidationException,
 )
@@ -209,17 +217,26 @@ from eneo.model_providers.domain.provider_call_observer import (
     ProviderCallObserver,
     ProviderCallObserverError,
 )
+from eneo.model_providers.infrastructure.litellm_provider import (
+    load_active_litellm_provider,
+)
+from eneo.prompts.prompt import Prompt
 from eneo.settings.encryption_service import EncryptionService
 from eneo.spaces.space_repo import SpaceRepository
 
 if TYPE_CHECKING:
     from eneo.assistants.references import ReferencesService
     from eneo.audit.application.audit_service import AuditService
+    from eneo.collections.domain.collection import Collection
     from eneo.flows.infrastructure.flow_transcript_words_repo import (
         FlowTranscriptWordsRepository,
     )
     from eneo.flows.runtime.transcription import FlowStepTranscriber
+    from eneo.integration.domain.entities.integration_knowledge import (
+        IntegrationKnowledge,
+    )
     from eneo.spaces.space import Space
+    from eneo.websites.domain.website import Website
 
 
 _PROCESS_TEST_CRASH_AFTER_ATTEMPT_START_RUN_ID_ENV = (
@@ -444,7 +461,9 @@ def _pre_attempt_start_model_from_state_cache(
     # attempt_start is persisted; preserve model triage data in that window.
     if state is None:
         return None, None
-    assistant = state.assistant_cache.get(step.assistant_id)
+    assistant = state.assistant_cache.get(
+        assistant_cache_key(step.assistant_id, step.assistant_snapshot)
+    )
     if assistant is None:
         return None, None
     return (
@@ -715,7 +734,7 @@ class FlowRunExecutor:
             run_id=run_id, tenant_id=tenant_id
         )
         state = build_run_execution_state(
-            steps=steps, persisted_results=persisted_results
+            steps=steps, persisted_results=persisted_results, flow_id=flow_id
         )
         try:
             await self._validate_assistant_snapshots(
@@ -1105,6 +1124,7 @@ class FlowRunExecutor:
     ) -> StepExecutionResult:
         if state is None:
             state = RunExecutionState(
+                flow_id=run.flow_id,
                 completed_by_order={},
                 prior_results=[],
                 assistant_cache={},
@@ -2257,20 +2277,190 @@ class FlowRunExecutor:
         )
 
     async def _load_assistant(
-        self, assistant_id: UUID, state: RunExecutionState | None = None
+        self,
+        assistant_id: UUID,
+        state: RunExecutionState | None = None,
+        *,
+        snapshot: dict[str, Any] | None = None,
     ) -> RuntimeAssistantProtocol:
-        if state and assistant_id in state.assistant_cache:
-            assistant = state.assistant_cache[assistant_id]
+        key = assistant_cache_key(assistant_id, snapshot)
+        if state and key in state.assistant_cache:
+            assistant = state.assistant_cache[key]
             self._reject_flow_mcp_assistant(assistant)
             return assistant
-        space = await self._load_space_for_assistant(
-            assistant_id=assistant_id, state=state
-        )
-        assistant = space.get_assistant(assistant_id=assistant_id)
-        self._reject_flow_mcp_assistant(assistant)
+        if snapshot is not None and snapshot.get("schema_version") == 2:
+            validated = validate_assistant_execution_snapshot(
+                snapshot=snapshot, assistant_id=assistant_id
+            )
+            if state is None or state.flow_id is None:
+                raise FlowRuntimeInvariantError(
+                    "Frozen assistants require run context."
+                )
+            if state.flow_space is None:
+                flow = await self.flow_repo.get(
+                    flow_id=state.flow_id, tenant_id=self.runtime_actor.tenant_id
+                )
+                space = await self.space_repo.one(
+                    flow.space_id, include_hidden_assistants=True
+                )
+                if space.tenant_id != self.runtime_actor.tenant_id:
+                    raise NotFoundException()
+                state.flow_space = space
+            space = state.flow_space
+            live = next(
+                (item for item in space.assistants if item.id == assistant_id), None
+            )
+            if (
+                space.default_assistant is not None
+                and space.default_assistant.id == assistant_id
+            ):
+                live = space.default_assistant
+            if live is not None:
+                self._reject_flow_mcp_assistant(live)
+            assistant = await self._load_frozen_assistant(
+                space=space,
+                live=live,
+                snapshot=AssistantExecutionSnapshotV2.model_validate(validated),
+            )
+        else:
+            space = await self._load_space_for_assistant(
+                assistant_id=assistant_id, state=state
+            )
+            assistant = space.get_assistant(assistant_id=assistant_id)
+            self._reject_flow_mcp_assistant(assistant)
         if state:
-            state.assistant_cache[assistant_id] = assistant
+            state.assistant_cache[key] = assistant
         return assistant
+
+    async def _load_frozen_assistant(
+        self,
+        *,
+        space: Space,
+        live: Assistant | None,
+        snapshot: AssistantExecutionSnapshotV2,
+    ) -> Assistant:
+        if space.id is None:
+            raise NotFoundException()
+        binding = snapshot.completion_model
+        model = None
+        if binding is not None:
+            model = await self.space_repo.completion_model_repo.one(
+                UUID(binding.model_id)
+            )
+            if model.tenant_id != self.runtime_actor.tenant_id:
+                raise NotFoundException()
+            if (
+                str(model.id) != binding.model_id
+                or str(model.provider_id) != binding.provider_id
+                or model.provider_type != binding.provider_type
+                or model.get_model_route() != binding.resolved_route
+            ):
+                raise BadRequestException(
+                    "Assistant model binding changed after publication.",
+                    code=FlowApiErrorCode.ASSISTANT_SNAPSHOT_DRIFT.value,
+                )
+            provider = await load_active_litellm_provider(
+                session=self.session,
+                provider_id=UUID(binding.provider_id),
+                tenant_id=self.runtime_actor.tenant_id,
+            )
+            if (
+                str(provider.id) != binding.provider_id
+                or provider.provider_type != binding.provider_type
+                or model.get_model_route(provider_type=provider.provider_type)
+                != binding.resolved_route
+            ):
+                raise BadRequestException(
+                    "Assistant model binding changed after publication.",
+                    code=FlowApiErrorCode.ASSISTANT_SNAPSHOT_DRIFT.value,
+                )
+            model = deepcopy(model)
+        collections: list[Collection] = []
+        websites: list[Website] = []
+        integrations: list[IntegrationKnowledge] = []
+        for ref in snapshot.knowledge_refs:
+            resource_id = UUID(ref.id)
+            if ref.kind == "collection":
+                resource_space = await self.space_repo.get_space_by_collection(
+                    resource_id
+                )
+                if resource_space.tenant_id != self.runtime_actor.tenant_id:
+                    raise NotFoundException()
+                collection = resource_space.get_collection(resource_id)
+                if collection.tenant_id != self.runtime_actor.tenant_id:
+                    raise NotFoundException()
+                collections.append(collection)
+            elif ref.kind == "website":
+                resource_space = await self.space_repo.get_space_by_website(resource_id)
+                if resource_space.tenant_id != self.runtime_actor.tenant_id:
+                    raise NotFoundException()
+                website = resource_space.get_website(resource_id)
+                if website.tenant_id != self.runtime_actor.tenant_id:
+                    raise NotFoundException()
+                websites.append(website)
+            else:
+                resource_space = (
+                    await self.space_repo.get_space_by_integration_knowledge(
+                        resource_id
+                    )
+                )
+                if resource_space.tenant_id != self.runtime_actor.tenant_id:
+                    raise NotFoundException()
+                integration = resource_space.get_integration_knowledge(resource_id)
+                if integration.tenant_id != self.runtime_actor.tenant_id:
+                    raise NotFoundException()
+                integrations.append(integration)
+        metadata: list[FileMetadata] = []
+        for attachment in snapshot.attachments:
+            file = await self.file_repo.get_by_id(
+                UUID(attachment.file_id), tenant_id=self.runtime_actor.tenant_id
+            )
+            if file.tenant_id != self.runtime_actor.tenant_id:
+                raise NotFoundException()
+            metadata.append(file)
+        loaded_files = await self.file_content_loader.load(metadata) if metadata else {}
+        attachments: list[File] = []
+        for attachment in snapshot.attachments:
+            loaded = loaded_files.get(UUID(attachment.file_id))
+            if loaded is None or loaded.checksum != attachment.checksum:
+                raise BadRequestException(
+                    "Assistant snapshot attachment checksum does not match.",
+                    code=FlowApiErrorCode.ASSISTANT_SNAPSHOT_RESOURCE_INVALID.value,
+                )
+            attachments.append(loaded)
+        prompt = Prompt(
+            id=None,
+            created_at=None,
+            updated_at=None,
+            text=snapshot.instructions or "",
+            description=None,
+            user_id=live.prompt.user_id
+            if live is not None and live.prompt is not None
+            else None,
+            tenant_id=self.runtime_actor.tenant_id,
+            is_selected=True,
+            user=None,
+        )
+        return Assistant(
+            id=UUID(snapshot.assistant_id),
+            user=live.user if live is not None else None,
+            space_id=space.id,
+            name=live.name if live is not None else "",
+            prompt=prompt,
+            completion_model=model,
+            completion_model_kwargs=ModelKwargs.model_validate(
+                snapshot.completion_model_kwargs.model_dump()
+            ),
+            logging_enabled=live.logging_enabled if live is not None else False,
+            websites=websites,
+            collections=collections,
+            integration_knowledge_list=integrations,
+            attachments=attachments,
+            published=True,
+            inline_file_text=snapshot.inline_file_text,
+            origin=AssistantOrigin(snapshot.origin),
+            mcp_servers=[],
+        )
 
     @staticmethod
     def _reject_flow_mcp_assistant(assistant: RuntimeAssistantProtocol) -> None:
@@ -2315,6 +2505,22 @@ class FlowRunExecutor:
                 snapshot=step.assistant_snapshot,
                 assistant_id=step.assistant_id,
             )
+            if validated_snapshot["schema_version"] == 2:
+                try:
+                    await self._load_assistant(
+                        step.assistant_id, state, snapshot=validated_snapshot
+                    )
+                except (
+                    NotFoundException,
+                    ProviderNotFoundException,
+                    ProviderInactiveException,
+                ) as exc:
+                    raise BadRequestException(
+                        "Assistant snapshot resource is missing, inaccessible, or inactive.",
+                        code=FlowApiErrorCode.ASSISTANT_SNAPSHOT_RESOURCE_INVALID.value,
+                        context={"step_order": step.step_order},
+                    ) from exc
+                continue
             current_assistant = await self._load_assistant(step.assistant_id, state)
             self._reject_flow_mcp_assistant(current_assistant)
             current_snapshot = build_assistant_execution_snapshot(
@@ -2366,10 +2572,23 @@ class FlowRunExecutor:
         state: RunExecutionState,
         prior_output_levels_by_order: dict[int, int | None],
     ) -> int | None:
-        space = await self._load_space_for_assistant(
-            assistant_id=step.assistant_id, state=state
-        )
-        assistant = await self._load_assistant(step.assistant_id, state)
+        if (
+            step.assistant_snapshot is not None
+            and step.assistant_snapshot.get("schema_version") == 2
+        ):
+            assistant = await self._load_assistant(
+                step.assistant_id, state, snapshot=step.assistant_snapshot
+            )
+            if state.flow_space is None:
+                raise FlowRuntimeInvariantError(
+                    "Frozen assistants require a flow space."
+                )
+            space = state.flow_space
+        else:
+            space = await self._load_space_for_assistant(
+                assistant_id=step.assistant_id, state=state
+            )
+            assistant = await self._load_assistant(step.assistant_id, state)
         evaluation = evaluate_step_security_classification(
             step_order=step.step_order,
             # Preflight runs before any step completes, so the definition

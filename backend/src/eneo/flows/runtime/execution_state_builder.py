@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from uuid import UUID
+
 from eneo.flows.domain.flow import FlowStepResult, FlowStepResultStatus
 from eneo.flows.domain.runtime import RunExecutionState, RuntimeStep
 from eneo.flows.step_lineage import build_step_ref_mapping
@@ -9,6 +11,7 @@ def build_run_execution_state(
     *,
     steps: list[RuntimeStep],
     persisted_results: list[FlowStepResult],
+    flow_id: UUID | None = None,
 ) -> RunExecutionState:
     completed = {
         result.step_order: result
@@ -17,6 +20,7 @@ def build_run_execution_state(
     }
     sorted_completed = sorted(completed.values(), key=lambda result: result.step_order)
     return RunExecutionState(
+        flow_id=flow_id,
         completed_by_order=completed,
         prior_results=list(sorted_completed),
         assistant_cache={},

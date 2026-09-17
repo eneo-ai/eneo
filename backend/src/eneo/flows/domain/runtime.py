@@ -55,6 +55,14 @@ def _empty_activated_attempts() -> set[tuple[UUID, int]]:
     return set()
 
 
+def assistant_cache_key(
+    assistant_id: UUID, snapshot: dict[str, Any] | None
+) -> UUID | tuple[UUID, str]:
+    if snapshot is not None and snapshot.get("schema_version") == 2:
+        return assistant_id, str(snapshot["execution_surface_hash"])
+    return assistant_id
+
+
 @dataclass(frozen=True)
 class RuntimeStep:
     step_id: UUID
@@ -143,9 +151,11 @@ class StepInputValue:
 class RunExecutionState:
     completed_by_order: dict[int, FlowStepResult]
     prior_results: list[FlowStepResult]
-    assistant_cache: dict[UUID, Any]
+    assistant_cache: dict[UUID | tuple[UUID, str], Any]
     json_mode_supported: dict[str, bool]
     file_cache: dict[frozenset[UUID], list[File]]
+    flow_id: UUID | None = None
+    flow_space: Space | None = None
     space_cache: dict[UUID, Space] = field(default_factory=_empty_space_cache)
     attempt_start_by_step: dict[UUID, FlowStepAttemptStart] = field(
         default_factory=_empty_attempt_start_by_step

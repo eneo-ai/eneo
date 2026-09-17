@@ -539,6 +539,13 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Prevent run creation until at least one executable step is published.",
         user_action="Add an executable step, republish, and run again.",
     ),
+    FlowApiErrorCode.ASSISTANT_SNAPSHOT_RESOURCE_INVALID: _entry(
+        category="Published definition",
+        surfaced_through="Run error payload",
+        cause="A frozen assistant resource is missing, outside the tenant, inactive, or has a different checksum.",
+        consumer_action="Restore the pinned resource or republish the flow before starting another run.",
+        user_action="Restore the resource or republish the flow and start a new run.",
+    ),
     FlowApiErrorCode.ASSISTANT_SNAPSHOT_DRIFT: _entry(
         category="Published definition",
         surfaced_through="Run error payload",

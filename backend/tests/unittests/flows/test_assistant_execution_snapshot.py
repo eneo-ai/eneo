@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -135,7 +135,7 @@ def test_validate_assistant_execution_snapshot_rejects_unknown_fields() -> None:
 
 def test_validate_assistant_execution_snapshot_rejects_unsupported_schema() -> None:
     snapshot, assistant = _snapshot()
-    snapshot["schema_version"] = 2
+    snapshot["schema_version"] = 3
 
     with pytest.raises(BadRequestException, match="schema_version"):
         validate_assistant_execution_snapshot(
@@ -209,4 +209,126 @@ def test_validate_assistant_execution_snapshot_rejects_stale_hash() -> None:
         validate_assistant_execution_snapshot(
             snapshot=snapshot,
             assistant_id=assistant.id,
+        )
+
+
+def test_v1_fixed_historical_hash_and_writer_are_unchanged():
+    assistant_id = UUID("00000000-0000-0000-0000-000000000001")
+    snapshot = {
+        "schema_version": 1,
+        "assistant_id": str(assistant_id),
+        "origin": "flow_managed",
+        "instructions": "Frozen instructions",
+        "completion_model": {
+            "id": "00000000-0000-0000-0000-000000000002",
+            "name": "model-a",
+            "nickname": "Model label",
+            "litellm_model_name": None,
+        },
+        "completion_model_kwargs": {"temperature": 0.2},
+        "knowledge_refs": [],
+        "execution_surface_hash": "9bafa9cede765e142c9c991fd8d48c22316dea4b06208786269634eeb07e8433",
+    }
+    assert (
+        validate_assistant_execution_snapshot(
+            snapshot=snapshot, assistant_id=assistant_id
+        )
+        == snapshot
+    )
+    assert (
+        assistant_execution_surface_hash(snapshot) == snapshot["execution_surface_hash"]
+    )
+    written = build_assistant_execution_snapshot(assistant=_assistant())
+    assert written["schema_version"] == 1
+
+
+def _v2_snapshot_payload():
+    payload = {
+        "schema_version": 2,
+        "assistant_id": "00000000-0000-0000-0000-000000000001",
+        "origin": "flow_managed",
+        "instructions": "Frozen instructions",
+        "completion_model": {
+            "model_id": "00000000-0000-0000-0000-000000000002",
+            "provider_id": "00000000-0000-0000-0000-000000000003",
+            "provider_type": "provider-a",
+            "resolved_route": "provider-a/model-a",
+        },
+        "completion_model_kwargs": {"temperature": 0.2},
+        "knowledge_refs": [],
+        "attachments": [],
+        "inline_file_text": False,
+    }
+    return {
+        **payload,
+        "execution_surface_hash": assistant_execution_surface_hash(payload),
+    }
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("schema_version", 3),
+        ("schema_version", True),
+        ("inline_file_text", "false"),
+        ("completion_model_kwargs", {"unknown": 1}),
+        ("completion_model_kwargs", {"temperature": "0.2"}),
+        ("completion_model_kwargs", {"response_format": {"value": float("nan")}}),
+        ("completion_model", {"model_id": "invalid"}),
+        ("knowledge_refs", [{"kind": "unknown", "id": str(uuid4())}]),
+        ("attachments", [{"file_id": str(uuid4()), "checksum": ""}]),
+        ("execution_surface_hash", "a" * 64),
+    ],
+)
+def test_v2_rejects_malformed_snapshot(field, value):
+    snapshot = _v2_snapshot_payload()
+    snapshot[field] = value
+    with pytest.raises(BadRequestException):
+        validate_assistant_execution_snapshot(
+            snapshot=snapshot, assistant_id=UUID(snapshot["assistant_id"])
+        )
+
+
+@pytest.mark.parametrize(
+    "field", ["inline_file_text", "attachments", "completion_model", "origin"]
+)
+def test_v2_requires_frozen_fields(field):
+    snapshot = _v2_snapshot_payload()
+    del snapshot[field]
+    with pytest.raises(BadRequestException):
+        validate_assistant_execution_snapshot(
+            snapshot=snapshot, assistant_id=UUID(snapshot["assistant_id"])
+        )
+
+
+def test_v2_canonicalizes_knowledge_but_preserves_attachment_order():
+    snapshot = _v2_snapshot_payload()
+    first_id, second_id = str(UUID(int=10)), str(UUID(int=20))
+    snapshot["knowledge_refs"] = [
+        {"kind": "website", "id": second_id},
+        {"kind": "collection", "id": first_id},
+    ]
+    snapshot["attachments"] = [
+        {"file_id": second_id, "checksum": "second"},
+        {"file_id": first_id, "checksum": "first"},
+    ]
+    snapshot["execution_surface_hash"] = assistant_execution_surface_hash(snapshot)
+    validated = validate_assistant_execution_snapshot(
+        snapshot=snapshot, assistant_id=UUID(snapshot["assistant_id"])
+    )
+    assert validated["knowledge_refs"][0] == {"kind": "collection", "id": first_id}
+    assert validated["attachments"] == snapshot["attachments"]
+    snapshot["attachments"].reverse()
+    assert (
+        assistant_execution_surface_hash(snapshot)
+        != validated["execution_surface_hash"]
+    )
+
+
+def test_v2_rejects_unknown_field():
+    snapshot = _v2_snapshot_payload()
+    snapshot["future_setting"] = True
+    with pytest.raises(BadRequestException):
+        validate_assistant_execution_snapshot(
+            snapshot=snapshot, assistant_id=UUID(snapshot["assistant_id"])
         )

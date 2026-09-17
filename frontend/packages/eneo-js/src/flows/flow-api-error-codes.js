@@ -165,7 +165,8 @@ export const FLOW_API_ERROR_CODE = Object.freeze({
   TEMPLATE_MISSING_CONTENT: "flow_template_missing_content",
   TEMPLATE_IN_USE: "flow_template_in_use",
   TEMPLATE_DOWNLOAD_AUDIT_UNAVAILABLE: "flow_template_download_audit_unavailable",
-  PACKAGE_EXPORT_AUDIT_UNAVAILABLE: "flow_package_export_audit_unavailable"
+  PACKAGE_EXPORT_AUDIT_UNAVAILABLE: "flow_package_export_audit_unavailable",
+  ASSISTANT_SNAPSHOT_RESOURCE_INVALID: "flow_assistant_snapshot_resource_invalid"
 });
 export const FLOW_API_ERROR_CODES = Object.freeze([
   "flow_not_published",
@@ -332,5 +333,6 @@ export const FLOW_API_ERROR_CODES = Object.freeze([
   "flow_template_missing_content",
   "flow_template_in_use",
   "flow_template_download_audit_unavailable",
-  "flow_package_export_audit_unavailable"
+  "flow_package_export_audit_unavailable",
+  "flow_assistant_snapshot_resource_invalid"
 ]);
