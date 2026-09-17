@@ -105,17 +105,6 @@ class WidgetRepoImpl:
         )
         return [_to_entity(row) for row in rows]
 
-    async def count_active(self, tenant_id: UUID) -> int:
-        count = await self.session.scalar(
-            sa.select(sa.func.count())
-            .select_from(Widgets)
-            .where(
-                Widgets.tenant_id == tenant_id,
-                Widgets.status == WidgetStatus.ACTIVE.value,
-            )
-        )
-        return int(count or 0)
-
     async def update(self, widget: Widget) -> Widget:
         if widget.id is None:
             raise NotFoundException("Widget has not been persisted.")

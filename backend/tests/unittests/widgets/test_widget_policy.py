@@ -19,15 +19,15 @@ def _widget() -> Widget:
 
 def test_defaults_apply_when_tenant_has_no_policy():
     policy = WidgetPolicy.from_tenant(None)
-    assert policy.max_active_widgets == 5
     assert policy.max_daily_token_budget == 2_000_000
     assert policy.allow_bot_protection_none is False
     assert (policy.min_retention_days, policy.max_retention_days) == (0, 365)
 
 
 def test_unknown_keys_are_ignored_and_window_is_validated():
+    # Keys from older policies (the removed active-widget ceiling) are ignored.
     policy = WidgetPolicy.from_tenant({"max_active_widgets": 2, "legacy": True})
-    assert policy.max_active_widgets == 2
+    assert policy.max_daily_token_budget == 2_000_000
     with pytest.raises(ValueError):
         WidgetPolicy.from_tenant({"min_retention_days": 10, "max_retention_days": 5})
 

@@ -32,13 +32,6 @@ class _InMemoryRepo:
     async def list_by_space(self, space_id):
         return [w for w in self.rows.values() if w.space_id == space_id]
 
-    async def count_active(self, tenant_id):
-        return sum(
-            1
-            for w in self.rows.values()
-            if w.tenant_id == tenant_id and w.status == WidgetStatus.ACTIVE
-        )
-
     async def update(self, widget: Widget) -> Widget:
         self.rows[widget.id] = widget
         return widget
@@ -155,34 +148,17 @@ async def test_activation_requires_admin_and_reports_blockers(assistant):
     assert activated.activation_blockers == []
 
 
-async def test_activation_respects_max_active_widgets(assistant):
+async def test_reactivating_an_active_widget_is_rejected(assistant):
     space, _ = _space(uuid4(), assistant)
     repo = _InMemoryRepo()
-    user = _user(
-        Permission.WIDGETS, Permission.ADMIN, widget_policy={"max_active_widgets": 1}
-    )
-    service = _service(user, space, repo=repo)
-    first = await service.create_widget(
+    service = _service(_user(Permission.WIDGETS, Permission.ADMIN), space, repo=repo)
+    view = await service.create_widget(
         space_id=space.id, target_id=assistant.id, name="a"
     )
-    second = await service.create_widget(
-        space_id=space.id, target_id=assistant.id, name="b"
-    )
-    for view in (first, second):
-        await service.update_widget(
-            view.widget.id, {"allowed_origins": ["https://a.se"]}
-        )
-
-    await service.activate_widget(first.widget.id)
-    with pytest.raises(BadRequestException) as exc:
-        await service.activate_widget(second.widget.id)
-    assert "max_active_widgets_reached" in str(exc.value)
-
-    # Re-activating an already active widget is rejected by the transition
-    # rule, not by the quota.
-    with pytest.raises(BadRequestException) as exc:
-        await service.activate_widget(first.widget.id)
-    assert "max_active_widgets" not in str(exc.value)
+    await service.update_widget(view.widget.id, {"allowed_origins": ["https://a.se"]})
+    await service.activate_widget(view.widget.id)
+    with pytest.raises(BadRequestException):
+        await service.activate_widget(view.widget.id)
 
 
 async def test_update_enforces_tenant_policy(assistant):
@@ -227,10 +203,10 @@ async def test_pause_is_allowed_for_editors_and_admins(assistant):
 async def test_policy_update_merges_and_validates(assistant):
     space, _ = _space(uuid4(), assistant)
     service = _service(
-        _user(Permission.ADMIN, widget_policy={"max_active_widgets": 3}), space
+        _user(Permission.ADMIN, widget_policy={"max_retention_days": 90}), space
     )
     policy = await service.update_policy({"max_daily_token_budget": 10_000})
-    assert policy.max_active_widgets == 3
+    assert policy.max_retention_days == 90
     assert policy.max_daily_token_budget == 10_000
 
     with pytest.raises(BadRequestException):

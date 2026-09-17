@@ -225,19 +225,19 @@ async def test_widget_permissions(
 async def test_widget_policy_endpoints(client, admin_token, regular_user_token):
     resp = await client.get("/api/v1/admin/widget-policy/", headers=_auth(admin_token))
     assert resp.status_code == 200, resp.text
-    assert resp.json()["max_active_widgets"] == 5
+    assert resp.json()["max_daily_token_budget"] == 2_000_000
 
     resp = await client.patch(
         "/api/v1/admin/widget-policy/",
-        json={"max_active_widgets": 2, "max_retention_days": 90},
+        json={"max_daily_token_budget": 500_000, "max_retention_days": 90},
         headers=_auth(admin_token),
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json()["max_active_widgets"] == 2
+    assert resp.json()["max_daily_token_budget"] == 500_000
     assert resp.json()["max_retention_days"] == 90
 
     resp = await client.get("/api/v1/admin/widget-policy/", headers=_auth(admin_token))
-    assert resp.json()["max_active_widgets"] == 2
+    assert resp.json()["max_daily_token_budget"] == 500_000
 
     resp = await client.patch(
         "/api/v1/admin/widget-policy/",
@@ -343,3 +343,78 @@ async def test_widget_templates(
         headers=_auth(admin_token),
     )
     assert resp.status_code == 404
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_widget_overview(
+    client, admin_token, regular_user_token, space_with_assistant, db_container
+):
+    from datetime import date, timedelta
+
+    from eneo.widgets.infrastructure.widget_usage_repo_impl import WidgetUsageRepoImpl
+
+    space_id, assistant_id = space_with_assistant
+    await _publish(client, admin_token, assistant_id)
+    created = []
+    for name in ("Översikt A", "Översikt B"):
+        resp = await client.post(
+            f"/api/v1/spaces/{space_id}/widgets/",
+            json={"target_id": assistant_id, "name": name},
+            headers=_auth(admin_token),
+        )
+        assert resp.status_code == 201, resp.text
+        created.append(resp.json())
+    await client.patch(
+        f"/api/v1/widgets/{created[0]['id']}/",
+        json={"allowed_origins": ["https://www.kommun.se"]},
+        headers=_auth(admin_token),
+    )
+    resp = await client.post(
+        f"/api/v1/widgets/{created[0]['id']}/activate/", headers=_auth(admin_token)
+    )
+    assert resp.status_code == 200, resp.text
+
+    async with db_container() as container:
+        usage = WidgetUsageRepoImpl(container.session())
+        today = date.today()
+        await usage.record(
+            created[0]["id"], today, questions=3, input_tokens=30, output_tokens=12
+        )
+        await usage.record(
+            created[0]["id"],
+            today - timedelta(days=10),
+            questions=5,
+            input_tokens=50,
+            output_tokens=20,
+            blocked_rate=2,
+        )
+        await usage.record(created[0]["id"], today - timedelta(days=40), questions=9)
+        await container.session().commit()
+
+    resp = await client.get("/api/v1/admin/widgets/", headers=_auth(regular_user_token))
+    assert resp.status_code == 403
+
+    resp = await client.get("/api/v1/admin/widgets/", headers=_auth(admin_token))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    by_name = {item["name"]: item for item in body["items"]}
+    active = by_name["Översikt A"]
+    assert active["status"] == "active"
+    assert active["assistant_name"] == "Kommunassistenten"
+    assert active["space_name"]
+    assert active["questions_7d"] == 3
+    assert active["questions_30d"] == 8
+    assert active["input_tokens_30d"] == 80
+    assert active["output_tokens_30d"] == 32
+    assert active["blocked_30d"] == 2
+    assert active["last_activity"] == today.isoformat()
+    assert active["daily_token_budget"] == 500_000
+    draft = by_name["Översikt B"]
+    assert draft["status"] == "draft"
+    assert draft["questions_30d"] == 0
+    assert draft["last_activity"] is None
+    # Active widgets sort first.
+    assert body["items"][0]["status"] == "active"
+    assert body["totals"]["active"] >= 1
+    assert body["totals"]["questions_30d"] >= 8

@@ -4,6 +4,7 @@
 -->
 <script lang="ts">
   import type { WidgetPolicy, WidgetPolicyUpdate, WidgetTemplate } from "@eneo/eneo-js";
+  import WidgetOverviewTable from "$lib/features/widget/admin/WidgetOverviewTable.svelte";
   import { Button, Dialog, Input } from "@eneo/ui";
   import { goto } from "$app/navigation";
   import { localizeHref } from "$lib/paraglide/runtime";
@@ -129,22 +130,17 @@
   </Page.Header>
   <Page.Main>
     <Settings.Page>
-      <Settings.Group title={m.widget_admin_policy()}>
+      <Settings.Group title={m.widget_admin_overview()}>
         <Settings.Row
-          title={m.widget_admin_policy_max_active()}
-          description={m.widget_admin_policy_max_active_description()}
-          let:aria
+          title={m.widget_admin_overview()}
+          description={m.widget_admin_overview_description()}
+          fullWidth
         >
-          <input
-            type="number"
-            class={inputClass}
-            min="0"
-            max="1000"
-            {...aria}
-            value={policy.max_active_widgets}
-            oninput={(event) => number(event, (value) => patch({ max_active_widgets: value }))}
-          />
+          <WidgetOverviewTable overview={data.overview} />
         </Settings.Row>
+      </Settings.Group>
+
+      <Settings.Group title={m.widget_admin_policy()}>
         <Settings.Row
           title={m.widget_admin_policy_max_budget()}
           description={m.widget_admin_policy_max_budget_description()}

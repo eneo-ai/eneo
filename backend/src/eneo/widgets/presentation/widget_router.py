@@ -13,14 +13,19 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.main.container.container import Container
 from eneo.main.models import PaginatedResponse
+from eneo.roles.permissions import Permission, validate_permission
 from eneo.server import protocol
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.widgets.application.widget_service import WidgetView
+from eneo.widgets.domain.widget import WidgetStatus
 from eneo.widgets.domain.widget_template import WidgetTemplate
 from eneo.widgets.presentation.widget_models import (
     WidgetApplyTemplate,
     WidgetCreate,
+    WidgetOverviewItem,
+    WidgetOverviewPublic,
+    WidgetOverviewTotals,
     WidgetPolicyPublic,
     WidgetPolicyUpdate,
     WidgetPreviewToken,
@@ -40,6 +45,7 @@ router = APIRouter()
 policy_router = APIRouter()
 templates_router = APIRouter()
 admin_templates_router = APIRouter()
+overview_router = APIRouter()
 
 _ContainerWithUser = Annotated[Container, Depends(get_container(with_user=True))]
 
@@ -362,6 +368,66 @@ async def update_widget_policy(body: WidgetPolicyUpdate, container: _ContainerWi
         ),
     )
     return assembler.from_policy(policy)
+
+
+# --- overview --------------------------------------------------------------
+
+
+@overview_router.get(
+    "/",
+    response_model=WidgetOverviewPublic,
+    description=(
+        "Every widget in the organisation with where it lives and its usage"
+        " over the last 7 and 30 days. Tenant admins only."
+    ),
+    responses=responses.get_responses([403]),
+)
+async def get_widget_overview(container: _ContainerWithUser):
+    user = container.user()
+    validate_permission(user, Permission.ADMIN)
+    rows = await container.widget_overview_repo().list_tenant(user.tenant_id)
+    budget = container.widget_budget()
+    repo = container.widget_repo()
+    items: list[WidgetOverviewItem] = []
+    for row in rows:
+        used_today = 0
+        if row.status == WidgetStatus.ACTIVE.value:
+            widget = await repo.get(row.id)
+            if widget is not None:
+                used_today = await budget.used_today(widget)
+        items.append(
+            WidgetOverviewItem(
+                id=row.id,
+                public_id=row.public_id,
+                name=row.name,
+                status=WidgetStatus(row.status),
+                space_id=row.space_id,
+                space_name=row.space_name,
+                target_id=row.target_id,
+                assistant_name=row.assistant_name,
+                allowed_origins=row.allowed_origins,
+                activated_at=row.activated_at,
+                paused_at=row.paused_at,
+                updated_at=row.updated_at,
+                questions_7d=row.questions_7d,
+                questions_30d=row.questions_30d,
+                input_tokens_30d=row.input_tokens_30d,
+                output_tokens_30d=row.output_tokens_30d,
+                blocked_30d=row.blocked_30d,
+                last_activity=row.last_activity,
+                daily_token_budget=row.daily_token_budget,
+                budget_used_today=used_today,
+            )
+        )
+    totals = WidgetOverviewTotals(
+        widgets=len(items),
+        active=sum(1 for i in items if i.status == WidgetStatus.ACTIVE),
+        questions_7d=sum(i.questions_7d for i in items),
+        questions_30d=sum(i.questions_30d for i in items),
+        tokens_30d=sum(i.input_tokens_30d + i.output_tokens_30d for i in items),
+        blocked_30d=sum(i.blocked_30d for i in items),
+    )
+    return WidgetOverviewPublic(items=items, totals=totals)
 
 
 # --- templates -------------------------------------------------------------

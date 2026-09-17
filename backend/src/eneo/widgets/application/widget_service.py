@@ -196,10 +196,6 @@ class WidgetService:
         space = await self.space_service.get_space(widget.space_id)
         view = self._view(space, widget)
         blockers = list(view.activation_blockers)
-        policy = self.get_policy()
-        active = await self.repo.count_active(self.user.tenant_id)
-        if widget.status != WidgetStatus.ACTIVE and active >= policy.max_active_widgets:
-            blockers.append("max_active_widgets_reached")
         if blockers:
             raise BadRequestException(
                 "Widget cannot be activated: " + ", ".join(blockers)

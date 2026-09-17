@@ -118,7 +118,7 @@ Retention: a worker cron job (`purge_widget_sessions`, daily 03:30 UTC, one tran
 
 `Permission.WIDGETS` is a new tenant role permission (default in Owner/Admin and any role that already has `API_KEYS`), so tenants can delegate widget *configuration* without granting activation.
 
-`WidgetPolicy` (tenant, sysadmin-managed like API-key policy): `max_active_widgets`, `max_daily_token_budget`, `allow_bot_protection_none`, `min_retention_days`/`max_retention_days`.
+`WidgetPolicy` (tenant, sysadmin-managed like API-key policy): `max_daily_token_budget`, `allow_bot_protection_none`, `min_retention_days`/`max_retention_days`. (`max_active_widgets` was dropped during Phase 4, see 04-review D22; `GET /admin/widgets/` gives admins the overview instead.)
 
 ## Audit, observability, insights
 

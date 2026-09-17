@@ -4,6 +4,7 @@
 /** @typedef {import('../types/resources').WidgetUsage} WidgetUsage */
 /** @typedef {import('../types/resources').WidgetPreviewToken} WidgetPreviewToken */
 /** @typedef {import('../types/resources').WidgetTemplate} WidgetTemplate */
+/** @typedef {import('../types/resources').WidgetOverview} WidgetOverview */
 
 /**
  * Admin side of embeddable widgets: the objects editors configure in a space
@@ -154,6 +155,16 @@ export function initWidgets(client) {
         params: { path: { id: widget.id } },
         requestBody: { "application/json": { template_id: templateId } }
       });
+      return res;
+    },
+
+    /**
+     * Every widget in the organisation with its recent usage (admins only).
+     * @returns {Promise<WidgetOverview>}
+     * @throws {EneoError}
+     */
+    overview: async () => {
+      const res = await client.fetch("/api/v1/admin/widgets/", { method: "get" });
       return res;
     },
 

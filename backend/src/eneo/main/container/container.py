@@ -402,6 +402,9 @@ from eneo.widgets.application.widget_ask_service import WidgetAskService
 from eneo.widgets.application.widget_limits import WidgetBudget, WidgetLimiter
 from eneo.widgets.application.widget_service import WidgetService
 from eneo.widgets.application.widget_template_service import WidgetTemplateService
+from eneo.widgets.infrastructure.widget_overview_repo_impl import (
+    WidgetOverviewRepoImpl,
+)
 from eneo.widgets.infrastructure.widget_repo_impl import WidgetRepoImpl
 from eneo.widgets.infrastructure.widget_template_repo_impl import (
     WidgetTemplateRepoImpl,
@@ -674,6 +677,7 @@ class Container(containers.DeclarativeContainer):
     governance_policy_assembler = providers.Factory(GovernancePolicyAssembler)
     widget_repo = providers.Factory(WidgetRepoImpl, session=session)
     widget_template_repo = providers.Factory(WidgetTemplateRepoImpl, session=session)
+    widget_overview_repo = providers.Factory(WidgetOverviewRepoImpl, session=session)
     widget_assembler = providers.Factory(WidgetAssembler)
     widget_usage_repo = providers.Factory(WidgetUsageRepoImpl, session=session)
     widget_visitor_token_service = providers.Factory(VisitorTokenService)

@@ -115,6 +115,47 @@ class WidgetTemplatePublic(BaseModel):
     updated_at: datetime
 
 
+class WidgetOverviewItem(BaseModel):
+    """One row of the admin overview: where a widget lives and how it is used."""
+
+    id: UUID
+    public_id: str
+    name: str
+    status: WidgetStatus
+    space_id: UUID
+    space_name: Optional[str] = None
+    target_id: UUID
+    assistant_name: Optional[str] = None
+    allowed_origins: list[str]
+    activated_at: Optional[datetime] = None
+    paused_at: Optional[datetime] = None
+    updated_at: datetime
+    questions_7d: int
+    questions_30d: int
+    input_tokens_30d: int
+    output_tokens_30d: int
+    blocked_30d: int
+    last_activity: Optional[date] = None
+    daily_token_budget: int
+    budget_used_today: int = Field(
+        description="Live counter from Redis for active widgets; 0 otherwise."
+    )
+
+
+class WidgetOverviewTotals(BaseModel):
+    widgets: int
+    active: int
+    questions_7d: int
+    questions_30d: int
+    tokens_30d: int
+    blocked_30d: int
+
+
+class WidgetOverviewPublic(BaseModel):
+    items: list[WidgetOverviewItem]
+    totals: WidgetOverviewTotals
+
+
 class WidgetPreviewToken(BaseModel):
     """Visitor token for the admin page's live preview of the embed page."""
 
@@ -141,7 +182,6 @@ class WidgetUsagePublic(BaseModel):
 
 
 class WidgetPolicyPublic(BaseModel):
-    max_active_widgets: int
     max_daily_token_budget: int
     allow_bot_protection_none: bool
     min_retention_days: int
@@ -151,7 +191,6 @@ class WidgetPolicyPublic(BaseModel):
 class WidgetPolicyUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    max_active_widgets: Optional[int] = Field(default=None, ge=0, le=1000)
     max_daily_token_budget: Optional[int] = Field(default=None, ge=1_000)
     allow_bot_protection_none: Optional[bool] = None
     min_retention_days: Optional[int] = Field(default=None, ge=0, le=3650)

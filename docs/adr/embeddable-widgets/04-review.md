@@ -73,6 +73,7 @@ A self-review of the first draft of this plan against current practice (OpenAI C
 |---|---|---|---|
 | D20 | Nonce-based `style-src` on the embed page | `style-src` left unrestricted; `base-uri`, `object-src`, `form-action` and `frame-src` locked down instead | See above; nothing inline is attacker-controlled (all texts render as text nodes). |
 | D21 | Load test ≈200 concurrent visitors against staging | Run against the isolated E2E stack with the mock model (no provider cost), script checked in | Same limiter, budget and Redis code paths; the mock model keeps the run deterministic and free. |
+| D22 | Tenant policy caps the number of active widgets (`max_active_widgets`, default 5) | Cap removed (migration `202609171400` strips the key; the model ignores it). Replaced by an admin overview, `GET /admin/widgets/`: every widget with space, assistant, status, allowed-origin count, questions 7/30 days, tokens and blocked requests 30 days, today's budget and last activity, shown on Admin → Webbwidgetar. | Max on 2026-09-17: the cap is superfluous; visibility and statistics over the active widgets are what admins need. Activation stays an admin decision, so exposure remains a conscious choice per widget. |
 
 ### Draft What's new entry
 

@@ -3471,6 +3471,26 @@ export interface paths {
     patch: operations["update_widget_policy_api_v1_admin_widget_policy__patch"];
     trace?: never;
   };
+  "/api/v1/admin/widgets/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Widget Overview
+     * @description Every widget in the organisation with where it lives and its usage over the last 7 and 30 days. Tenant admins only.
+     */
+    get: operations["get_widget_overview_api_v1_admin_widgets__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/widget-templates/": {
     parameters: {
       query?: never;
@@ -22184,10 +22204,89 @@ export interface components {
        */
       max_session_turns?: number;
     };
+    /**
+     * WidgetOverviewItem
+     * @description One row of the admin overview: where a widget lives and how it is used.
+     */
+    WidgetOverviewItem: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Public Id */
+      public_id: string;
+      /** Name */
+      name: string;
+      status: components["schemas"]["WidgetStatus"];
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
+      /** Space Name */
+      space_name?: string | null;
+      /**
+       * Target Id
+       * Format: uuid
+       */
+      target_id: string;
+      /** Assistant Name */
+      assistant_name?: string | null;
+      /** Allowed Origins */
+      allowed_origins: string[];
+      /** Activated At */
+      activated_at?: string | null;
+      /** Paused At */
+      paused_at?: string | null;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+      /** Questions 7D */
+      questions_7d: number;
+      /** Questions 30D */
+      questions_30d: number;
+      /** Input Tokens 30D */
+      input_tokens_30d: number;
+      /** Output Tokens 30D */
+      output_tokens_30d: number;
+      /** Blocked 30D */
+      blocked_30d: number;
+      /** Last Activity */
+      last_activity?: string | null;
+      /** Daily Token Budget */
+      daily_token_budget: number;
+      /**
+       * Budget Used Today
+       * @description Live counter from Redis for active widgets; 0 otherwise.
+       */
+      budget_used_today: number;
+    };
+    /** WidgetOverviewPublic */
+    WidgetOverviewPublic: {
+      /** Items */
+      items: components["schemas"]["WidgetOverviewItem"][];
+      totals: components["schemas"]["WidgetOverviewTotals"];
+    };
+    /** WidgetOverviewTotals */
+    WidgetOverviewTotals: {
+      /** Widgets */
+      widgets: number;
+      /** Active */
+      active: number;
+      /** Questions 7D */
+      questions_7d: number;
+      /** Questions 30D */
+      questions_30d: number;
+      /** Tokens 30D */
+      tokens_30d: number;
+      /** Blocked 30D */
+      blocked_30d: number;
+    };
     /** WidgetPolicyPublic */
     WidgetPolicyPublic: {
-      /** Max Active Widgets */
-      max_active_widgets: number;
       /** Max Daily Token Budget */
       max_daily_token_budget: number;
       /** Allow Bot Protection None */
@@ -22199,8 +22298,6 @@ export interface components {
     };
     /** WidgetPolicyUpdate */
     WidgetPolicyUpdate: {
-      /** Max Active Widgets */
-      max_active_widgets?: number | null;
       /** Max Daily Token Budget */
       max_daily_token_budget?: number | null;
       /** Allow Bot Protection None */
@@ -36284,6 +36381,35 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_widget_overview_api_v1_admin_widgets__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WidgetOverviewPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };

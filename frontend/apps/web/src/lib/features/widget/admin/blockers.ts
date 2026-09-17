@@ -11,8 +11,6 @@ export function blockerLabel(code: string): string {
       return m.widget_admin_blocker_target_not_published();
     case "archived":
       return m.widget_admin_blocker_archived();
-    case "max_active_widgets_reached":
-      return m.widget_admin_blocker_max_active();
     case "daily_token_budget_exceeds_policy":
       return m.widget_admin_blocker_budget_policy();
     case "retention_below_policy_minimum":
