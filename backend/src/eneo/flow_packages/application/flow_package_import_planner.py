@@ -38,7 +38,7 @@ from eneo.flows.application.flow_draft_materialization import (
     build_flow_draft_metadata_json,
 )
 from eneo.flows.domain.flow_step_validation import FlowGraphIssueCode
-from eneo.flows.flow_authoring_spec import InputSource, InputType
+from eneo.flows.flow_authoring_transcription import requires_audio_transcription
 from eneo.flows.flow_authoring_variable_rewriting import (
     flow_step_validation_views_from_draft_spec,
 )
@@ -122,7 +122,7 @@ def build_flow_package_import_plan(
     default_transcription_model_id: UUID | None = None,
 ) -> FlowPackageImportPlan:
     envelope.validated_resource_contract()
-    audio_transcription_required = _audio_transcription_required(envelope)
+    audio_transcription_required = requires_audio_transcription(envelope.spec.steps)
     effective_transcription_model_id = (
         default_transcription_model_id if audio_transcription_required else None
     )
@@ -190,14 +190,6 @@ def _validate_installable_draft(
     )
     if issue is not None:
         raise _invalid_flow_draft(issue.code.value, issue.message)
-
-
-def _audio_transcription_required(envelope: FlowPackageEnvelope) -> bool:
-    return any(
-        step.input_source is InputSource.FLOW_INPUT
-        and step.input_type is InputType.AUDIO
-        for step in envelope.spec.steps
-    )
 
 
 def _invalid_flow_draft(

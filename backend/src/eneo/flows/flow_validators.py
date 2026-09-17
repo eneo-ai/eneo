@@ -40,6 +40,7 @@ from eneo.flows.domain.step_mapped_execution import (
     FlowStepMappedExecutionConfigurationError,
     resolve_step_mapped_execution,
 )
+from eneo.flows.flow_authoring_transcription import requires_audio_transcription
 from eneo.flows.flow_capability_manifest import (
     FlowOutputMode,
     FlowOutputType,
@@ -1183,7 +1184,12 @@ def _validate_audio_transcription_settings(
     steps: Sequence[FlowStepValidationView],
     metadata_json: FlowPersistedJsonObject | None,
 ) -> None:
-    if not any(step.input_type == "audio" for step in steps):
+    try:
+        transcription_required = requires_audio_transcription(steps)
+    except BadRequestException:
+        # Step input validation already reports malformed runtime upload config.
+        return
+    if not transcription_required:
         return
 
     try:

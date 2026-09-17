@@ -44,6 +44,8 @@ from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageRequirementSet,
     FlowPackageTemplateAssetRequirement,
 )
+from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.flows.domain.flow_step_validation import FlowGraphIssueCode
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -53,11 +55,15 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
+from eneo.flows.flow_authoring_variable_rewriting import (
+    flow_step_validation_views_from_draft_spec,
+)
 from eneo.flows.flow_resource_bindings import (
     LocalResourceKind,
     ResourceSlotKind,
     ResourceSlotRef,
 )
+from eneo.flows.flow_validators import collect_step_graph_issues
 
 
 def test_planner_returns_unresolved_required_when_no_matching_model_exists() -> None:
@@ -425,11 +431,31 @@ def test_planner_rejects_empty_flow_before_reporting_publishable() -> None:
     assert exc_info.value.context == {"reason": "no_executable_steps"}
 
 
-def test_planner_exposes_audio_target_state_and_blocks_missing_default_model() -> None:
+@pytest.mark.parametrize(
+    "input_type, input_config",
+    [
+        (InputType.AUDIO, None),
+        (
+            InputType.DOCUMENT,
+            {
+                "runtime_input": {
+                    "enabled": True,
+                    "required": True,
+                    "input_format": "audio",
+                }
+            },
+        ),
+    ],
+)
+def test_planner_exposes_audio_target_state_and_blocks_missing_default_model(
+    input_type: InputType,
+    input_config: FlowPersistedJsonObject | None,
+) -> None:
     envelope = _envelope(
         requirements=[],
         assistant=AssistantSpec(instructions="Transcribe audio."),
-        input_type=InputType.AUDIO,
+        input_type=input_type,
+        input_config=input_config,
     )
 
     blocked = build_flow_package_import_plan(
@@ -451,6 +477,21 @@ def test_planner_exposes_audio_target_state_and_blocks_missing_default_model() -
     assert ready.target_state.audio_transcription_required is True
     assert ready.target_state.default_transcription_model_id == model_id
     assert ready.can_install_as_draft is True
+
+
+def test_audio_upload_graph_requires_transcription_model() -> None:
+    envelope = _envelope(
+        requirements=[],
+        input_type=InputType.DOCUMENT,
+        input_config={"runtime_input": {"enabled": True, "input_format": "audio"}},
+    )
+    steps = flow_step_validation_views_from_draft_spec(envelope.spec.steps)
+    issues = collect_step_graph_issues(
+        steps, metadata_json={"wizard": {"transcription_enabled": True}}
+    )
+    assert FlowGraphIssueCode.FLOW_AUDIO_TRANSCRIPTION_MODEL_REQUIRED in {
+        issue.code for issue in issues
+    }
 
 
 def test_planner_omits_model_slot_that_no_step_reads() -> None:
@@ -562,6 +603,7 @@ def _envelope(
     assistant: AssistantSpec | None = None,
     extra_steps: list[StepSpec] | None = None,
     input_type: InputType = InputType.TEXT,
+    input_config: FlowPersistedJsonObject | None = None,
 ) -> FlowPackageEnvelope:
     default_assistant = AssistantSpec(
         instructions="Extract facts.",
@@ -583,6 +625,7 @@ def _envelope(
                 assistant_spec=assistant or default_assistant,
                 input_source=InputSource.FLOW_INPUT,
                 input_type=input_type,
+                input_config=input_config,
             ),
             *(extra_steps or []),
         ],

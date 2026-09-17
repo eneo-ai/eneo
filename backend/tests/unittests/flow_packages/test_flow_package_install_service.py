@@ -7,6 +7,9 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from eneo.flow_packages.application.flow_package_export_service import (
+    build_flow_package_export_envelope,
+)
 from eneo.flow_packages.application.flow_package_import_planner import (
     FlowPackageImportPlannerCandidates,
     build_flow_package_import_plan,
@@ -49,7 +52,9 @@ from eneo.flow_packages.domain.flow_package_requirements import (
 from eneo.flow_packages.infrastructure.flow_package_zip_reader import read_flow_package
 from eneo.flow_packages.infrastructure.flow_package_zip_writer import write_flow_package
 from eneo.flows.application.flow_service import FlowService
-from eneo.flows.domain.flow import Flow
+from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshot
+from eneo.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
+from eneo.flows.domain.runtime_input import parse_runtime_input_config
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -67,6 +72,7 @@ from eneo.flows.flow_resource_bindings import (
     ResourceSlotKind,
     ResourceSlotRef,
 )
+from eneo.flows.transcription_config import parse_transcription_config
 
 
 @pytest.mark.asyncio
@@ -987,3 +993,105 @@ async def test_install_normalizes_literal_disabled_config_without_changing_envel
     )
     assert service.update_flow.await_args.kwargs["steps"][0].input_config is None
     assert envelope.model_dump(mode="json") == original
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target_has_model", [False, True])
+@pytest.mark.parametrize(
+    "input_config, transcription_required",
+    [
+        (
+            {
+                "runtime_input": {
+                    "enabled": True,
+                    "required": True,
+                    "input_format": "audio",
+                }
+            },
+            True,
+        ),
+        ({"runtime_input": {"enabled": False, "input_format": "audio"}}, False),
+        ({"runtime_input": {"enabled": True, "input_format": "document"}}, False),
+        (None, False),
+    ],
+)
+async def test_export_install_preserves_upload_transcription_dependency(
+    target_has_model: bool,
+    input_config: FlowPersistedJsonObject | None,
+    transcription_required: bool,
+) -> None:
+    assistant_id = uuid4()
+    source = Flow(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        space_id=uuid4(),
+        name="Upload flow",
+        steps=[
+            FlowStep(
+                assistant_id=assistant_id,
+                step_order=1,
+                user_description="Upload",
+                input_source="flow_input",
+                input_type="document",
+                output_mode="pass_through",
+                output_type="text",
+                input_config=input_config,
+            )
+        ],
+    )
+    template = _envelope(
+        requirements=[], assistant=AssistantSpec(instructions="Pass through.")
+    )
+    exported = build_flow_package_export_envelope(
+        flow=source,
+        assistant_snapshots={
+            assistant_id: AssistantAuthoringSnapshot(instructions="Pass through.")
+        },
+        resource_bindings=(),
+        manifest_metadata=template.manifest,
+        provenance=template.provenance,
+    )
+    envelope = read_flow_package(write_flow_package(exported))
+    target_model_id = uuid4() if target_has_model else None
+    candidates = _candidates()
+    plan = build_flow_package_import_plan(
+        envelope,
+        candidates=candidates,
+        default_transcription_model_id=target_model_id,
+    )
+    assert plan.target_state.audio_transcription_required is transcription_required
+    service = _flow_service()
+    if transcription_required and not target_has_model:
+        assert plan.can_install_as_draft is False
+        with pytest.raises(FlowPackageValidationError) as exc_info:
+            await _install_as_draft(
+                envelope=envelope,
+                flow_service=service,
+                space_id=uuid4(),
+                selected_bindings=(),
+                candidates=candidates,
+            )
+        assert (
+            exc_info.value.code
+            is FlowPackageErrorCode.IMPORT_UNAVAILABLE_LOCAL_RESOURCE
+        )
+        assert exc_info.value.context["slot_ref"] == "model.flow_input_transcription"
+        service.create_flow.assert_not_awaited()
+        return
+    await _install_as_draft(
+        envelope=envelope,
+        flow_service=service,
+        space_id=uuid4(),
+        selected_bindings=(),
+        candidates=candidates,
+        default_transcription_model_id=target_model_id,
+    )
+    config = parse_transcription_config(
+        service.create_flow.await_args.kwargs["metadata_json"]
+    )
+    assert config.enabled is transcription_required
+    assert config.model_id == (target_model_id if transcription_required else None)
+    installed_step = service.update_flow.await_args.kwargs["steps"][0]
+    assert parse_runtime_input_config(
+        installed_step.input_config
+    ) == parse_runtime_input_config(input_config)

@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from uuid import UUID
 
 from eneo.flows.domain.flow import FlowPersistedJsonObject, clone_json_object
+from eneo.flows.domain.flow_step_validation import FlowStepValidationView
+from eneo.flows.domain.runtime_input import parse_runtime_input_config
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
     InputSource,
     InputType,
+    StepSpec,
 )
 
 
@@ -16,7 +20,7 @@ def apply_audio_transcription_defaults(
     spec: FlowDraftSpecCore,
     default_transcription_model_id: UUID | None,
 ) -> FlowPersistedJsonObject | None:
-    if not _uses_audio_flow_input(spec):
+    if not requires_audio_transcription(spec.steps):
         return _cleanup_transcription_metadata(metadata)
 
     updated_metadata = dict(metadata or {})
@@ -41,12 +45,18 @@ def apply_audio_transcription_defaults(
     return updated_metadata
 
 
-def _uses_audio_flow_input(spec: FlowDraftSpecCore) -> bool:
-    return any(
-        step.input_source == InputSource.FLOW_INPUT
-        and step.input_type == InputType.AUDIO
-        for step in spec.steps
-    )
+def requires_audio_transcription(
+    steps: Sequence[StepSpec | FlowStepValidationView],
+) -> bool:
+    for step in steps:
+        if step.input_source != InputSource.FLOW_INPUT:
+            continue
+        if step.input_type == InputType.AUDIO:
+            return True
+        runtime_input = parse_runtime_input_config(step.input_config)
+        if runtime_input.enabled and runtime_input.input_format == "audio":
+            return True
+    return False
 
 
 _TRANSCRIPTION_WIZARD_KEYS = {
