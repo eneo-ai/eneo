@@ -295,7 +295,18 @@ export function mapFlowPackageImportError(error: unknown): string | null {
 export function mapFlowPackageExportError(error: unknown): string | null {
   const code = getFlowPackageResponseCode(error);
   if (!code || !isFlowPackageExportErrorCode(code)) return null;
-  return m[flowPackageErrorMessageKey(code)]();
+  const message = m[flowPackageErrorMessageKey(code)]();
+  // The server names the refused step and settings field, never their values.
+  const context = getFlowPackageResponseContext(error);
+  const step = context?.step_order;
+  if (typeof step !== "number" || !Number.isInteger(step) || step < 1) return message;
+  const args = { message, step: String(step) };
+  if (context?.config_field === "input_config")
+    return m.flow_package_export_error_in_step_input(args);
+  if (context?.config_field === "output_config") {
+    return m.flow_package_export_error_in_step_output(args);
+  }
+  return m.flow_package_export_error_in_step(args);
 }
 
 function indexFlowPackageCandidatesBySlot(
@@ -342,6 +353,11 @@ function getFlowPackageResponseCode(error: unknown): string | null {
     return error.response.code;
   }
   return typeof error.code === "string" ? error.code : null;
+}
+
+function getFlowPackageResponseContext(error: unknown): Record<string, unknown> | null {
+  if (!(error instanceof EneoError) || !isObject(error.response)) return null;
+  return isObject(error.response.context) ? error.response.context : null;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

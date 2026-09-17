@@ -243,6 +243,26 @@ describe("flowPackageTransfer", () => {
     }
   });
 
+  it("names the refused step and settings field from the export error context", () => {
+    const code = "flow_package_export_step_config_not_portable";
+    const exportError = (context: unknown) =>
+      new EneoError(code, "RESPONSE", 400, 0, { code, context }, { endpoint: "POST@test" });
+    const message = expectedFlowPackageErrorMessage(code);
+
+    expect(
+      mapFlowPackageExportError(exportError({ step_order: 3, config_field: "input_config" }))
+    ).toBe(m.flow_package_export_error_in_step_input({ message, step: "3" }));
+    expect(
+      mapFlowPackageExportError(exportError({ step_order: 2, config_field: "output_config" }))
+    ).toBe(m.flow_package_export_error_in_step_output({ message, step: "2" }));
+    expect(mapFlowPackageExportError(exportError({ step_order: 1 }))).toBe(
+      m.flow_package_export_error_in_step({ message, step: "1" })
+    );
+    for (const context of [{ step_order: 0 }, { step_order: "3" }, { step_order: 1.5 }, null]) {
+      expect(mapFlowPackageExportError(exportError(context))).toBe(message);
+    }
+  });
+
   it("maps package error codes from legacy client code fields when response codes are absent", () => {
     const importError = new EneoError(
       "missing binding",
