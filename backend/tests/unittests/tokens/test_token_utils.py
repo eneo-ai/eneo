@@ -898,3 +898,32 @@ def test_count_message_tokens_prices_images_by_provider_formula():
 
     assert anthropic_delta == 1568
     assert openai_delta == 1105
+
+
+def test_provider_reserve_includes_response_format_with_conservative_fallback():
+    messages = [{"role": "user", "content": "hi"}]
+    response_format = {
+        "type": "json_schema",
+        "json_schema": {"name": "result", "schema": {"type": "string"}},
+    }
+    with patch.object(
+        litellm, "token_counter", side_effect=RuntimeError("unavailable")
+    ):
+        base = measure_provider_input_reserve(messages, [], "unknown")
+        schema = measure_provider_input_reserve(
+            [
+                {
+                    "role": "system",
+                    "content": json.dumps(
+                        response_format, ensure_ascii=False, separators=(",", ":")
+                    ),
+                }
+            ],
+            [],
+            "unknown",
+        )
+        complete = measure_provider_input_reserve(
+            messages, [], "unknown", response_format=response_format
+        )
+    assert complete.tokens == base.tokens + schema.tokens
+    assert complete.source == TokenCountSource.FALLBACK_ESTIMATE

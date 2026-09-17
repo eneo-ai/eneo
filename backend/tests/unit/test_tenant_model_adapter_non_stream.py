@@ -36,7 +36,9 @@ class _FakeMCPProxy:
 def _make_adapter() -> TenantModelAdapter:
     adapter = object.__new__(TenantModelAdapter)
     adapter.litellm_model = "openai/test-model"
-    adapter.model = SimpleNamespace(name="test-model", token_limit=8000)
+    adapter.model = SimpleNamespace(
+        name="test-model", token_limit=8000, max_output_tokens=4000
+    )
     adapter.provider_type = "openai"
 
     adapter._prepare_kwargs = lambda model_kwargs, **kwargs: {}
@@ -532,3 +534,61 @@ async def test_base_observer_error_from_completion_is_not_reported_as_pre_io():
     completion_call.assert_awaited_once()
     observer.completed.assert_awaited_once()
     assert exc_info.value.code == "provider_error"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("final_tool_count", [0, 1])
+async def test_each_tool_round_counts_results_and_the_refreshed_catalogue(
+    final_tool_count,
+):
+    adapter = _make_adapter()
+    adapter.model.max_output_tokens = 8000
+    proxy = _FakeMCPProxy()
+    proxy.refresh_tools = AsyncMock(return_value=True)
+    adapter._merge_mcp_tools = lambda tools, mcp, skill_runtime=None: [
+        {"type": "function", "function": {"name": "server__tool"}}
+    ] * (
+        10
+        if proxy.call_count == 1
+        else (final_tool_count if proxy.call_count > 1 else 1)
+    )
+    observed_inputs = []
+
+    def reserve(messages, tools, model, *, response_format=None):
+        result_count = sum(message["role"] == "tool" for message in messages)
+        observed_inputs.append((result_count, len(tools)))
+        return SimpleNamespace(tokens=10 + 20 * len(tools) + 50 * result_count)
+
+    with (
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter.measure_provider_input_reserve",
+            side_effect=reserve,
+        ),
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+            AsyncMock(
+                side_effect=[
+                    _response(
+                        response_id="first",
+                        tool_calls=[_tool_call()],
+                        finish_reason="tool_calls",
+                    ),
+                    _response(
+                        response_id="second",
+                        tool_calls=[_tool_call()],
+                        finish_reason="tool_calls",
+                    ),
+                    _response(response_id="final", content="done"),
+                ]
+            ),
+        ) as transport,
+    ):
+        await adapter.get_response(
+            context=SimpleNamespace(), model_kwargs={}, mcp_proxy=proxy
+        )
+    assert observed_inputs == [(0, 1), (1, 10), (2, final_tool_count)]
+    assert [call.kwargs["max_tokens"] for call in transport.await_args_list] == [
+        7970,
+        7740,
+        7890 - 20 * final_tool_count,
+    ]

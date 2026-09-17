@@ -209,7 +209,9 @@ def _make_adapter() -> TenantModelAdapter:
     adapter = object.__new__(TenantModelAdapter)
     adapter.litellm_model = "openai/test-model"
     adapter.provider_type = "openai"
-    adapter.model = SimpleNamespace(name="test-model", token_limit=8000)
+    adapter.model = SimpleNamespace(
+        name="test-model", token_limit=8000, max_output_tokens=4000
+    )
     return adapter
 
 
@@ -636,7 +638,7 @@ def test_tool_result_budget_admits_until_exhausted_then_withholds():
 @pytest.mark.asyncio
 async def test_non_streaming_withholds_tool_results_after_budget_exhaustion():
     adapter = _make_completion_adapter()
-    adapter.model.token_limit = 2
+    adapter.get_token_limit_of_model = lambda: 2
     mcp_proxy = _FakeMCPProxy()
     responses = [
         _response(
@@ -675,7 +677,7 @@ async def test_non_streaming_withholds_tool_results_after_budget_exhaustion():
 @pytest.mark.asyncio
 async def test_iterate_stream_withholds_tool_results_after_budget_exhaustion():
     adapter = _make_adapter()
-    adapter.model.token_limit = 2
+    adapter.get_token_limit_of_model = lambda: 2
     mcp_proxy = _FakeMCPProxy()
     messages: list[dict] = []
     follow_ups = [
@@ -1494,6 +1496,7 @@ async def test_iterate_stream_approved_tools_execute_and_continue():
 
 async def test_non_streaming_round_cap_refuses_calls_and_forces_final_answer():
     adapter = _make_completion_adapter()
+    adapter.model.max_output_tokens = 8000
     mcp_proxy = _FakeMCPProxy()
     max_rounds = TenantModelAdapter.MAX_TOOL_ROUNDS
     responses = [
@@ -1505,10 +1508,18 @@ async def test_non_streaming_round_cap_refuses_calls_and_forces_final_answer():
     ]
     responses.append(_response(content="answer from gathered context"))
 
-    with patch(
-        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
-        AsyncMock(side_effect=responses),
-    ) as completion_call:
+    reserves = [100 + 10 * index for index in range(max_rounds + 2)]
+    reserves[-1] = 50
+    with (
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter.measure_provider_input_reserve",
+            side_effect=[SimpleNamespace(tokens=value) for value in reserves],
+        ),
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+            AsyncMock(side_effect=responses),
+        ) as completion_call,
+    ):
         completion = await adapter.get_response(
             context=SimpleNamespace(),
             model_kwargs={},
@@ -1522,6 +1533,9 @@ async def test_non_streaming_round_cap_refuses_calls_and_forces_final_answer():
     assert len(mcp_proxy.calls) == max_rounds
     # Initial call + one follow-up per executed round + the forced final.
     assert completion_call.await_count == max_rounds + 2
+    assert [call.kwargs["max_tokens"] for call in completion_call.await_args_list] == [
+        8000 - value for value in reserves
+    ]
     final_call = completion_call.await_args_list[-1]
     assert final_call.kwargs["tool_choice"] == "none"
     refusals = [
@@ -1562,6 +1576,7 @@ async def test_non_streaming_round_cap_fails_when_forced_final_requests_tools():
 
 async def test_iterate_stream_round_cap_refuses_calls_and_forces_final_answer():
     adapter = _make_adapter()
+    adapter.model.max_output_tokens = 8000
     mcp_proxy = _FakeMCPProxy()
     messages: list[dict] = []
     max_rounds = TenantModelAdapter.MAX_TOOL_ROUNDS
@@ -1583,10 +1598,18 @@ async def test_iterate_stream_round_cap_refuses_calls_and_forces_final_answer():
         },
     )
 
-    with patch(
-        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
-        AsyncMock(side_effect=follow_ups),
-    ) as completion_call:
+    reserves = [100 + 10 * index for index in range(max_rounds + 1)]
+    reserves[-1] = 50
+    with (
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter.measure_provider_input_reserve",
+            side_effect=[SimpleNamespace(tokens=value) for value in reserves],
+        ),
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+            AsyncMock(side_effect=follow_ups),
+        ) as completion_call,
+    ):
         completions = await _collect(
             adapter,
             stream,
@@ -1600,6 +1623,9 @@ async def test_iterate_stream_round_cap_refuses_calls_and_forces_final_answer():
     assert len(mcp_proxy.calls) == max_rounds
     # One follow-up per executed round + the forced toolless final.
     assert completion_call.await_count == max_rounds + 1
+    assert [call.kwargs["max_tokens"] for call in completion_call.await_args_list] == [
+        8000 - value for value in reserves
+    ]
     assert completion_call.await_args_list[-1].kwargs["tool_choice"] == "none"
     refusals = [
         message
@@ -1681,3 +1707,33 @@ async def test_forced_final_surfaces_ignored_tool_calls_as_terminal_error():
     assert len(errors) == 1
     assert errors[0].stop is True
     assert "tool round limit" in (errors[0].error or "")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing_output", [False, True])
+async def test_stream_follow_up_capacity_refusal_is_terminal_before_io(missing_output):
+    adapter = _make_adapter()
+    adapter.model.token_limit = 1
+    if missing_output:
+        adapter.model.max_output_tokens = None
+    proxy = _FakeMCPProxy()
+    stream = PreparedModelStream(
+        stream=_AsyncChunkStream([_tool_call_chunk()]),
+        messages=[],
+        kwargs={},
+        mcp_proxy=proxy,
+        has_tools=True,
+        eneo_tools=[],
+    )
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(),
+    ) as dispatch:
+        completions = [chunk async for chunk in adapter.iterate_stream(stream)]
+    dispatch.assert_not_awaited()
+    assert completions[-1].response_type == ResponseType.ERROR
+    assert completions[-1].stop is True
+    assert completions[-1].error_code == (422 if missing_output else 413)
+    assert (
+        "max_output_tokens" if missing_output else "context exceeds"
+    ) in completions[-1].error

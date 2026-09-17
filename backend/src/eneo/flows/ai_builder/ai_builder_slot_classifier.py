@@ -350,21 +350,9 @@ def _slot_classification_request_tokens(
 ) -> int:
     """The request measured whole, response schema included, by the reserving counter."""
 
-    request_tokens = measure_provider_input_reserve(messages, [], litellm_model).tokens
-    if response_format:
-        request_tokens += measure_provider_input_reserve(
-            [
-                {
-                    "role": "system",
-                    "content": json.dumps(
-                        response_format, ensure_ascii=False, separators=(",", ":")
-                    ),
-                }
-            ],
-            [],
-            litellm_model,
-        ).tokens
-    return request_tokens
+    return measure_provider_input_reserve(
+        messages, [], litellm_model, response_format=response_format
+    ).tokens
 
 
 def _protected_slot_classification_input(

@@ -194,12 +194,15 @@ class ResolvedCompletionModelRoute:
                 self.supported_model_kwargs
             ).model_dump(exclude_none=True)
         )
-        return normalize_reasoning_effort(
+        provider_kwargs = normalize_reasoning_effort(
             litellm_model=self.litellm_model,
             provider_type=self.provider_type,
             model_kwargs=provider_kwargs,
             openai_absent_effort="none",
         )
+        if effective_request.reasoning_effort not in (None, ""):
+            provider_kwargs["reasoning_effort"] = effective_request.reasoning_effort
+        return provider_kwargs
 
     def incident_evidence(self) -> CompletionRouteEvidence:
         configuration_fields: list[CompletionEvidenceField] = []
@@ -743,7 +746,12 @@ class CompletionService:
         mcp_servers = [server for server in mcp_servers if server.is_enabled]
         model_adapter = await self._get_adapter(model)
         if model_kwargs is not None:
+            requested_effort = model_kwargs.reasoning_effort
             model_kwargs = model_kwargs.filter_unsupported(model.supported_model_kwargs)
+            if requested_effort not in (None, ""):
+                model_kwargs = model_kwargs.model_copy(
+                    update={"reasoning_effort": requested_effort}
+                )
         initial_skill_tokens = (
             skill_runtime.snapshot().measurement.tokens
             if skill_runtime is not None

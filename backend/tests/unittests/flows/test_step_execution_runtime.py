@@ -1272,6 +1272,70 @@ async def test_complete_step_execution_translates_context_window_failure():
 
 
 @pytest.mark.asyncio
+async def test_complete_step_execution_translates_missing_capacity():
+    from eneo.completion_models.domain.model_capacity import UnknownModelCapacityError
+
+    run = _run()
+    state = _state()
+    step = _step(output_type="text")
+    assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
+    assistant.completion_model_kwargs = MagicMock(name="model_kwargs")
+    assistant.get_response = AsyncMock(
+        side_effect=UnknownModelCapacityError(("max_output_tokens",))
+    )
+    prepared = PreparedStepExecution(
+        assistant=assistant,
+        step_input=StepInputValue(
+            text="large source",
+            source_text="large source",
+            input_source="flow_input",
+            runtime_input_metadata={"files": [{"name": "large-source.pdf"}]},
+        ),
+        effective_prompt="Prompt",
+        input_payload_for_result={
+            "text": "large source",
+            "source_text": "large source",
+            "input_source": "flow_input",
+            "runtime_input": {"files": [{"name": "large-source.pdf"}]},
+        },
+        contract_validation=None,
+        diagnostics=[],
+        llm_files=[],
+    )
+    deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1_000_000,
+        variable_resolver=FlowVariableResolver(),
+        completion_service=object(),
+        load_assistant=AsyncMock(),
+        resolve_step_input=AsyncMock(),
+        retrieve_rag_chunks=AsyncMock(
+            return_value=([], {"status": "skipped_no_service"}, [])
+        ),
+        process_typed_output=AsyncMock(return_value=_typed_output_result()),
+        apply_output_cap=AsyncMock(return_value=("unused", [])),
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await complete_step_execution(
+            step=step,
+            run=run,
+            state=state,
+            prepared=prepared,
+            deps=deps,
+        )
+
+    assert getattr(exc_info.value, "rejected_output", None) is None
+    assert exc_info.value.code == "flow_model_capacity_undeclared"
+    assert "max_output_tokens" in str(exc_info.value)
+    assert getattr(exc_info.value, "effective_prompt") == "Prompt"
+    assert getattr(exc_info.value, "input_payload_json")["runtime_input"] == {
+        "files": [{"name": "large-source.pdf"}]
+    }
+    assert assistant.get_response.await_args.kwargs["reject_context_over_limit"] is True
+
+
+@pytest.mark.asyncio
 async def test_complete_step_execution_shares_deadline_across_json_mode_retry(
     monkeypatch: pytest.MonkeyPatch,
 ):

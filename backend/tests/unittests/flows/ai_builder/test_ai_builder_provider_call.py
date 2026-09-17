@@ -1207,3 +1207,23 @@ def test_non_finite_durations_are_refused(ceiling: float) -> None:
                 request=_REQUEST,
             )
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("code", ["unsupported_parameter", "unsupported_value"])
+async def test_explicit_reasoning_rejection_is_not_retried_without_effort(code):
+    error = _rejection({"error": {"param": "reasoning_effort", "code": code}})
+    client = SimpleNamespace(acompletion=AsyncMock(side_effect=error))
+    retry = MagicMock(return_value=True)
+    with pytest.raises(BadRequestError) as raised:
+        await complete_with_silence_deadline(
+            client,
+            silence_deadline_seconds=5.0,
+            ceiling_seconds=10.0,
+            request={**_REQUEST, "reasoning_effort": "high", "max_tokens": 50},
+            retry_without_refused_control=retry,
+        )
+    assert raised.value is error
+    client.acompletion.assert_awaited_once()
+    assert client.acompletion.await_args.kwargs["reasoning_effort"] == "high"
+    retry.assert_not_called()

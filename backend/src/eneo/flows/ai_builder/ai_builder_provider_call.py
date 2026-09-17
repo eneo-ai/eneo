@@ -252,7 +252,7 @@ def _sampling_controls() -> frozenset[str]:
         SupportedModelKwargs,
     )
 
-    return frozenset(SupportedModelKwargs.model_fields)
+    return frozenset(SupportedModelKwargs.model_fields) - {"reasoning_effort"}
 
 
 def provider_error_fields(error: BaseException) -> ProviderRejection:

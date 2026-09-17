@@ -606,8 +606,10 @@ def measure_provider_input_reserve(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]],
     model_name: str = "",
+    *,
+    response_format: dict[str, Any] | None = None,
 ) -> TokenCount:
-    """Reserve context for one provider call's messages and tools.
+    """Reserve context for one provider call's messages, tools and response schema.
 
     The admission counterpart of `measure_provider_input_tokens`: a gate that
     under-reserves admits a request the provider then refuses, so both halves
@@ -620,12 +622,27 @@ def measure_provider_input_reserve(
         messages, model_name, fallback=_fallback_message_reserve_tokens
     )
     tool_reserve = measure_tool_tokens(tools, model_name)
-    estimated = TokenCountSource.FALLBACK_ESTIMATE in (
-        message_reserve.source,
-        tool_reserve.source,
+    reserves = [message_reserve, tool_reserve]
+    if response_format:
+        reserves.append(
+            _measure_messages(
+                [
+                    {
+                        "role": "system",
+                        "content": json.dumps(
+                            response_format, ensure_ascii=False, separators=(",", ":")
+                        ),
+                    }
+                ],
+                model_name,
+                fallback=_fallback_message_reserve_tokens,
+            )
+        )
+    estimated = any(
+        reserve.source is TokenCountSource.FALLBACK_ESTIMATE for reserve in reserves
     )
     return TokenCount(
-        tokens=message_reserve.tokens + tool_reserve.tokens,
+        tokens=sum(reserve.tokens for reserve in reserves),
         source=(
             TokenCountSource.FALLBACK_ESTIMATE
             if estimated

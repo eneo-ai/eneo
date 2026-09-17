@@ -10,6 +10,7 @@ from typing import Any, Awaitable, Final, Literal, Protocol, Sequence, cast
 from uuid import UUID
 
 from eneo.ai_models.completion_models.completion_model import Completion, ModelKwargs
+from eneo.completion_models.domain.model_capacity import UnknownModelCapacityError
 from eneo.completion_models.infrastructure.completion_service import CompletionService
 from eneo.completion_models.infrastructure.context_builder import (
     ContextWindowExceededError,
@@ -498,6 +499,24 @@ def _typed_context_window_error(
     )
 
 
+def _typed_missing_capacity_error(
+    exc: UnknownModelCapacityError,
+    *,
+    step: RuntimeStep,
+    prepared: PreparedStepExecution,
+    effective_prompt: str,
+) -> TypedIOValidationException:
+    return attach_typed_failure_context(
+        TypedIOValidationException(
+            f"Step {step.step_order}: the selected model is missing token limits "
+            f"({', '.join(exc.missing_dimensions)}). Ask an administrator to configure both limits.",
+            code=FlowApiErrorCode.MODEL_CAPACITY_UNDECLARED.value,
+        ),
+        input_payload_for_result=prepared.input_payload_for_result,
+        effective_prompt=effective_prompt,
+    )
+
+
 async def call_assistant_with_timeout(
     *,
     step: RuntimeStep,
@@ -712,6 +731,13 @@ async def call_assistant_with_timeout(
             if llm_task in done:
                 try:
                     return llm_task.result()
+                except UnknownModelCapacityError as exc:
+                    raise _typed_missing_capacity_error(
+                        exc,
+                        step=step,
+                        prepared=prepared,
+                        effective_prompt=prompt_override,
+                    ) from exc
                 except ContextWindowExceededError as exc:
                     raise _typed_context_window_error(
                         exc,
@@ -1369,6 +1395,10 @@ async def preview_step_execution_context(
             prompt_override=prompt_override,
             version=2 if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR else 1,
         )
+    except UnknownModelCapacityError as exc:
+        raise _typed_missing_capacity_error(
+            exc, step=step, prepared=prepared, effective_prompt=prompt_override
+        ) from exc
     except ContextWindowExceededError as exc:
         raise _typed_context_window_error(
             exc,

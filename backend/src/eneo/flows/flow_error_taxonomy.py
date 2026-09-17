@@ -683,6 +683,13 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Report the obstructing revision; reducing the row limit cannot make this comparison fit.",
         user_action="Use the evidence export to inspect this revision if the export fits its size limit.",
     ),
+    FlowApiErrorCode.MODEL_CAPACITY_UNDECLARED: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The selected model is missing an input or output token limit.",
+        consumer_action="Stop retrying until an administrator configures both model token limits.",
+        user_action="Ask an administrator to configure the model token limits, then start a new run.",
+    ),
     FlowApiErrorCode.LLM_REQUEST_TIMEOUT: _entry(
         category="Typed input/output",
         surfaced_through="Run error payload",

@@ -55,29 +55,44 @@ def test_input_decisions_refuse_unknown_with_dimension(consumer):
     assert error.value.missing_dimensions == ("max_input_tokens",)
 
 
+@pytest.mark.parametrize("method", ["get_response", "prepare_streaming"])
 @pytest.mark.parametrize(
-    "kwargs", [None, {}, {"temperature": 0.5}, {"max_tokens": None}]
+    "kwargs", [None, {}, {"max_tokens": 50}, {"max_completion_tokens": 50}]
 )
-def test_provider_refuses_unknown_output_without_explicit_cap(kwargs):
+async def test_dispatch_refuses_missing_output_even_with_explicit_cap(
+    method, kwargs, monkeypatch
+):
+    from unittest.mock import AsyncMock, Mock
+
+    from eneo.completion_models.infrastructure.adapters.base_adapter import (
+        ProviderInput,
+    )
+
+    adapter = _adapter(input_tokens=100)
+    adapter.prepare_provider_input = Mock(
+        return_value=ProviderInput(messages=[], tools=[], built_in_tools=[])
+    )
+    observer = SimpleNamespace(started=AsyncMock())
+    transport = AsyncMock()
+    monkeypatch.setattr(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        transport,
+    )
     with pytest.raises(UnknownModelCapacityError) as error:
-        _adapter()._prepare_kwargs(model_kwargs=kwargs)
+        await getattr(adapter, method)(
+            context=SimpleNamespace(),
+            model_kwargs=kwargs,
+            **(
+                {"provider_call_observer": observer} if method == "get_response" else {}
+            ),
+        )
     assert error.value.missing_dimensions == ("max_output_tokens",)
-
-
-@pytest.mark.parametrize("field", ["max_tokens", "max_completion_tokens"])
-def test_explicit_output_cap_does_not_require_declared_output(field):
-    assert _adapter()._prepare_kwargs(model_kwargs={field: 50})[field] == 50
-    assert _adapter()._prepare_kwargs(**{field: 50})[field] == 50
+    transport.assert_not_awaited()
+    observer.started.assert_not_awaited()
 
 
 def test_known_dimension_does_not_require_other_dimensions():
-    assert _adapter(input_tokens=100).get_token_limit_of_model() == 100
-    assert (
-        _adapter(output=80)._prepare_kwargs(model_kwargs={"temperature": 0.5})[
-            "max_tokens"
-        ]
-        == 80
-    )
+    assert _adapter(input_tokens=100).get_token_limit_of_model() == 99
     assert (
         skill_context_token_allowance(max_input_tokens=100, context_share_percent=10)
         == 10

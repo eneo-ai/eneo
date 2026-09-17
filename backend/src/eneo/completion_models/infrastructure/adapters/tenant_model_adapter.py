@@ -36,7 +36,11 @@ from eneo.ai_models.completion_models.completion_model import (
     ToolCallMetadata,
     function_definition_to_tool,
 )
-from eneo.completion_models.domain.model_capacity import ModelCapacity
+from eneo.completion_models.domain.model_capacity import (
+    ModelCapacity,
+    ModelCapacityNoFit,
+    UnknownModelCapacityError,
+)
 from eneo.completion_models.domain.skill_activation import (
     SKILL_ACTIVATION_TOOL_NAME,
     InvalidSkillToolCallError,
@@ -51,6 +55,7 @@ from eneo.completion_models.infrastructure.adapters.base_adapter import (
 )
 from eneo.completion_models.infrastructure.context_builder import (
     MIN_PERCENTAGE_KNOWLEDGE,
+    ContextWindowExceededError,
 )
 from eneo.completion_models.infrastructure.message_payload import (
     build_content,
@@ -92,7 +97,11 @@ from eneo.model_providers.infrastructure.litellm_provider import (
 from eneo.model_providers.infrastructure.tenant_model_credential_resolver import (
     TenantModelCredentialResolver,
 )
-from eneo.tokens.token_utils import count_tokens, measure_provider_input_tokens
+from eneo.tokens.token_utils import (
+    count_tokens,
+    measure_provider_input_reserve,
+    measure_provider_input_tokens,
+)
 
 logger = get_logger(__name__)
 
@@ -1040,6 +1049,8 @@ class TenantModelAdapter(CompletionModelAdapter):
         )
         if refreshed_tools:
             litellm_kwargs["tools"] = refreshed_tools
+        else:
+            litellm_kwargs.pop("tools", None)
         return mcp_proxy.get_allowed_tool_names()
 
     def _create_messages_from_context(self, context: "Context") -> list[dict[str, Any]]:
@@ -1136,6 +1147,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                         f"Scaled temperature for Anthropic: {temp} -> {temp / 2}"
                     )
 
+            requested_effort = model_kwargs_dict.get("reasoning_effort")
             model_kwargs_dict = normalize_reasoning_effort(
                 litellm_model=self.litellm_model,
                 provider_type=self.provider_type,
@@ -1143,25 +1155,8 @@ class TenantModelAdapter(CompletionModelAdapter):
                 openai_absent_effort="low",
             )
 
-            # Ensure max_tokens is set - some APIs (e.g., vLLM, OpenAI-compatible)
-            # require it explicitly or return empty responses
-            has_explicit_output_cap = (
-                "max_tokens" in model_kwargs_dict
-                or "max_completion_tokens" in model_kwargs_dict
-            )
-            should_defer_to_litellm = (
-                self.provider_type == "anthropic"
-                and "reasoning_effort" in model_kwargs_dict
-                and not has_explicit_output_cap
-            )
-            if (
-                not has_explicit_output_cap
-                and not should_defer_to_litellm
-                and self.model.max_output_tokens is not None
-            ):
-                model_kwargs_dict["max_tokens"] = self.model.max_output_tokens
-                logger.debug(f"Added default max_tokens={self.model.max_output_tokens}")
-
+            if requested_effort not in (None, ""):
+                model_kwargs_dict["reasoning_effort"] = requested_effort
             kwargs.update(model_kwargs_dict)
 
         # Remove non-serializable params that must not reach litellm
@@ -1170,13 +1165,59 @@ class TenantModelAdapter(CompletionModelAdapter):
 
         # Merge with additional kwargs
         kwargs.update(additional_kwargs)
-        if self.model.max_output_tokens is None and not any(
-            kwargs.get(name) is not None
-            for name in ("max_tokens", "max_completion_tokens")
-        ):
-            ModelCapacity(None, None).require_output_tokens()
-
         return kwargs
+
+    def _prepare_dispatch_kwargs(
+        self, messages: list[dict[str, Any]], kwargs: dict[str, Any]
+    ) -> dict[str, Any]:
+        capacity = ModelCapacity(self.model.token_limit, self.model.max_output_tokens)
+        prepared = dict(kwargs)
+        caller_caps: list[int] = []
+        for name in ("max_tokens", "max_completion_tokens"):
+            value = prepared.pop(name, None)
+            if value is not None:
+                if type(value) is not int or value < 1:
+                    raise ProviderRejectedRequestException(
+                        "The output token cap must be a positive integer.",
+                        code="provider_rejected_request",
+                        details={"reason": "invalid_output_cap", "retryable": False},
+                    )
+                caller_caps.append(value)
+        reserve = measure_provider_input_reserve(
+            messages,
+            prepared.get("tools") or [],
+            self.litellm_model,
+            response_format=prepared.get("response_format"),
+        )
+        cap = capacity.resolve_output_cap(
+            input_tokens=reserve.tokens,
+            safety_tokens=0,
+            caller_cap=min(caller_caps) if caller_caps else None,
+        )
+        if isinstance(cap, ModelCapacityNoFit):
+            raise ContextWindowExceededError(
+                estimated_tokens=reserve.tokens,
+                max_tokens=capacity.input_allowance(
+                    output_reserve_tokens=1, safety_tokens=0
+                ),
+            )
+        supported = _get_supported_openai_params(self.litellm_model) or []
+        cap_parameter = next(
+            (
+                name
+                for name in ("max_tokens", "max_completion_tokens")
+                if name in supported
+            ),
+            None,
+        )
+        if cap_parameter is None:
+            raise ProviderRejectedRequestException(
+                "The selected model route cannot enforce an output token cap.",
+                code="provider_rejected_request",
+                details={"reason": "output_cap_unsupported", "retryable": False},
+            )
+        prepared[cap_parameter] = cap
+        return prepared
 
     @override
     async def get_response(
@@ -1510,6 +1551,16 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 meta=result.get("meta") or None,
                             )
                         )
+                    if external_calls:
+                        assert mcp_proxy is not None
+                        await self._refresh_mcp_tools_after_round(
+                            mcp_proxy=mcp_proxy,
+                            eneo_tools=provider_input.built_in_tools,
+                            tool_names=[call.name for call in external_calls],
+                            litellm_kwargs=litellm_kwargs,
+                            allowed_tools=mcp_proxy.get_allowed_tool_names(),
+                            skill_runtime=skill_runtime,
+                        )
                     if not await _follow_up_completion():
                         break
 
@@ -1548,7 +1599,12 @@ class TenantModelAdapter(CompletionModelAdapter):
             )
             if isinstance(
                 exc,
-                (OpenAIException, APIKeyNotConfiguredException),
+                (
+                    OpenAIException,
+                    APIKeyNotConfiguredException,
+                    UnknownModelCapacityError,
+                    ContextWindowExceededError,
+                ),
             ):
                 raise
             litellm_transport.raise_public_litellm_error(
@@ -1570,6 +1626,7 @@ class TenantModelAdapter(CompletionModelAdapter):
         reason: ProviderCallReason,
         retry_without_capability_safe: bool,
     ) -> _LiteLLMResponse:
+        litellm_kwargs = self._prepare_dispatch_kwargs(messages, litellm_kwargs)
         call_id: UUID | None = None
         if observer is not None:
             request = build_provider_call_request_facts(
@@ -1705,7 +1762,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                     stream=True,
                     drop_params=True,
                     stream_options={"include_usage": True},
-                    **litellm_kwargs,
+                    **self._prepare_dispatch_kwargs(messages, litellm_kwargs),
                 ),
             )
 
@@ -1728,7 +1785,12 @@ class TenantModelAdapter(CompletionModelAdapter):
             )
             if isinstance(
                 exc,
-                (OpenAIException, APIKeyNotConfiguredException),
+                (
+                    OpenAIException,
+                    APIKeyNotConfiguredException,
+                    UnknownModelCapacityError,
+                    ContextWindowExceededError,
+                ),
             ):
                 raise
             litellm_transport.raise_public_litellm_error(
@@ -2162,7 +2224,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 stream=True,
                                 drop_params=True,
                                 stream_options={"include_usage": True},
-                                **litellm_kwargs,
+                                **self._prepare_dispatch_kwargs(
+                                    messages, litellm_kwargs
+                                ),
                             ),
                         )
                         async for comp in _drain_stream(
@@ -2558,7 +2622,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                             stream=True,
                             drop_params=True,
                             stream_options={"include_usage": True},
-                            **litellm_kwargs,
+                            **self._prepare_dispatch_kwargs(messages, litellm_kwargs),
                         ),
                     )
 
@@ -2638,7 +2702,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                             stream=True,
                             drop_params=True,
                             stream_options={"include_usage": True},
-                            **litellm_kwargs,
+                            **self._prepare_dispatch_kwargs(messages, litellm_kwargs),
                         ),
                     )
                     async for comp in _drain_stream(
@@ -2715,7 +2779,13 @@ class TenantModelAdapter(CompletionModelAdapter):
 
         except Exception as exc:
             # Mid-stream errors: yield error event instead of raising
-            if _is_provider_unavailable_error(exc):
+            if isinstance(exc, ContextWindowExceededError):
+                error = str(exc)
+                error_code = 413
+            elif isinstance(exc, UnknownModelCapacityError):
+                error = str(exc)
+                error_code = 422
+            elif _is_provider_unavailable_error(exc):
                 self._record_provider_unavailable(phase="stream_iteration", exc=exc)
                 # Streaming Completion events expose numeric error_code, not JSON details.
                 error = PROVIDER_UNAVAILABLE_MESSAGE
@@ -2742,16 +2812,10 @@ class TenantModelAdapter(CompletionModelAdapter):
 
     @override
     def get_token_limit_of_model(self) -> int:
-        """
-        Get token limit for tenant model.
-
-        Returns max_input_tokens directly, as admins configure this value
-        to represent the actual input budget at model setup time.
-
-        Returns:
-            int: Maximum tokens available for input context
-        """
-        return ModelCapacity(self.model.token_limit, None).require_input_tokens()
+        """Reserve at least one output token when packing runtime input."""
+        return ModelCapacity(self.model.token_limit, None).input_allowance(
+            output_reserve_tokens=1, safety_tokens=0
+        )
 
     @override
     def get_logging_details(

@@ -76,6 +76,7 @@ export declare const FLOW_API_ERROR_CODE: Readonly<{
   EVIDENCE_AUDIT_LOGGING_FAILED: "flow_evidence_audit_logging_failed";
   EVIDENCE_EXPORT_REASON_REQUIRED: "flow_evidence_export_reason_required";
   EVIDENCE_EXPORT_TOO_LARGE: "flow_evidence_export_too_large";
+  MODEL_CAPACITY_UNDECLARED: "flow_model_capacity_undeclared";
   LLM_REQUEST_TIMEOUT: "flow_llm_request_timeout";
   RUNTIME_INPUT_NOT_CONSUMED: "flow_runtime_input_not_consumed";
   MAPPED_PROVIDER_CALL_LIMIT_EXCEEDED: "flow_mapped_provider_call_limit_exceeded";
@@ -241,6 +242,7 @@ export type FlowApiErrorCode =
   | "flow_evidence_audit_logging_failed"
   | "flow_evidence_export_reason_required"
   | "flow_evidence_export_too_large"
+  | "flow_model_capacity_undeclared"
   | "flow_llm_request_timeout"
   | "flow_runtime_input_not_consumed"
   | "flow_mapped_provider_call_limit_exceeded"

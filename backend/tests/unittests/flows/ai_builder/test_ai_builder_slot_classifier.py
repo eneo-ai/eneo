@@ -3739,8 +3739,20 @@ def test_near_limit_admission_uses_the_selected_response_format_size(
         patch.object(
             classifier,
             "measure_provider_input_reserve",
-            side_effect=lambda messages, _tools, _model: TokenCount(
-                tokens=len(messages[0]["content"]) if len(messages) == 1 else 100,
+            side_effect=lambda messages,
+            _tools,
+            _model,
+            response_format=None: TokenCount(
+                tokens=100
+                + (
+                    len(
+                        json.dumps(
+                            response_format, ensure_ascii=False, separators=(",", ":")
+                        )
+                    )
+                    if response_format
+                    else 0
+                ),
                 source=TokenCountSource.LITELLM,
             ),
         ),
@@ -4197,6 +4209,48 @@ async def test_luna_classification_uses_explicit_reasoning_control() -> None:
     assert call_kwargs["reasoning_effort"] == "none"
 
 
+@pytest.mark.asyncio
+async def test_classification_preserves_selected_reasoning_effort() -> None:
+    from dataclasses import replace
+
+    from eneo.ai_models.completion_models.completion_model import ModelKwargs
+
+    litellm_client = AsyncMock()
+    litellm_client.acompletion.return_value = _make_response(
+        json.dumps(
+            {
+                "slots": [
+                    {
+                        "slot_name": "terminal_output",
+                        "value": "pdf_document",
+                        "confidence": "high",
+                        "reason": "PDF report requested",
+                        "evidence": [_evidence("selected-high-pdf")],
+                        "evidence_level": "explicit",
+                    }
+                ]
+            }
+        )
+    )
+
+    await classify_slots(
+        litellm_client=litellm_client,
+        completion_model_route=replace(
+            _route(model="openai/reasoning-test-model"),
+            requested_model_kwargs=ModelKwargs(reasoning_effort="high"),
+        ),
+        classification_input=_classification_input("selected-high-pdf"),
+        allowed_slot_values={"terminal_output": {"pdf_document"}},
+        tenant_id=uuid4(),
+        max_output_tokens=512,
+    )
+
+    call_kwargs = litellm_client.acompletion.await_args.kwargs
+    assert call_kwargs["reasoning_effort"] == "high"
+
+    assert call_kwargs["max_tokens"] == 512
+
+
 def test_classification_prompt_emphasizes_the_biased_target_slot() -> None:
     messages = classifier._build_slot_classification_prompt(
         classification_input=_classification_input("en fil jag kan ladda ner"),
@@ -4516,7 +4570,7 @@ async def test_classify_slots_sends_the_room_the_request_leaves_below_the_ceilin
     with patch.object(
         classifier,
         "measure_provider_input_reserve",
-        return_value=TokenCount(tokens=60, source=TokenCountSource.LITELLM),
+        return_value=TokenCount(tokens=120, source=TokenCountSource.LITELLM),
     ) as measure:
         await classify_slots(
             litellm_client=litellm_client,
@@ -4532,10 +4586,7 @@ async def test_classify_slots_sends_the_room_the_request_leaves_below_the_ceilin
         )
 
     sent = litellm_client.acompletion.await_args.kwargs
-    # The patched counter charges 60 tokens per measurement: the packed request
-    # is its messages plus the response schema, 120 tokens in a 900-token
-    # usable window, so the model may write 780 of its 800-token ceiling.
-    assert measure.call_count >= 2
+    assert measure.call_args.kwargs["response_format"]
     assert sent["max_tokens"] == 1_000 - 100 - 120
     assert sent["max_tokens"] < 800
 
@@ -5272,10 +5323,20 @@ async def test_classify_slots_records_the_allocation_its_optional_sources_were_p
         current_user_message_id="user-1",
     )
 
-    def measured(messages, _tools, _model):
+    def measured(messages, _tools, _model, response_format=None):
         return TokenCount(
             tokens=sum(len(str(message.get("content", ""))) for message in messages)
-            // 10,
+            // 10
+            + (
+                len(
+                    json.dumps(
+                        response_format, ensure_ascii=False, separators=(",", ":")
+                    )
+                )
+                // 10
+                if response_format
+                else 0
+            ),
             source=TokenCountSource.LITELLM,
         )
 
