@@ -2146,3 +2146,47 @@ async def test_sdk_inventory_counts_unknown_fields_without_publishing_their_name
         client.acompletion.call_args.kwargs
     )
     assert "private" not in json.dumps(evidence)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("effort", ["high", "none"])
+async def test_local_reasoning_refusal_preserves_known_rejection_without_starting_turn_call(
+    effort,
+):
+    client = SimpleNamespace(acompletion=AsyncMock())
+    before_provider_call = AsyncMock()
+    tracker = ProposalTurnTelemetry(
+        request_id="req-local-refusal",
+        model="mistral/plain-model",
+        target_kind=TargetKind.CREATE,
+    )
+    budget = ProposalCallBudget()
+    request = _completion_request(
+        messages=[{"role": "user", "content": "Build a summary flow"}],
+        tool_schemas=[],
+        route=_route(
+            model="mistral/plain-model",
+            provider_type="mistral",
+            requested=ModelKwargs(reasoning_effort=effort),
+        ),
+        max_output_tokens=1024,
+        temperature=0.2,
+        call_budget=budget,
+    )
+    completion = make_usage_tracked_proposal_completion(
+        litellm_client=client,
+        usage_tracker=tracker,
+        before_provider_call=before_provider_call,
+    )
+    with pytest.raises(AIBuilderKnownProviderRejectionException) as error:
+        await completion(request)
+    assert error.value.public_error.code is AIBuilderErrorCode.PLANNER_UPSTREAM_ERROR
+    assert error.value.public_error.details["provider_disposition"] == "known_rejection"
+    assert error.value.public_error.details["reason"] == "reasoning_effort_unsupported"
+    assert error.value.public_error.details["another_call_permitted"] is False
+    assert error.value.public_error.request_id == "req-local-refusal"
+    assert budget.calls_started == 0
+    assert tracker.call_records == []
+    assert tracker.proposal_attempts == []
+    before_provider_call.assert_not_awaited()
+    client.acompletion.assert_not_awaited()

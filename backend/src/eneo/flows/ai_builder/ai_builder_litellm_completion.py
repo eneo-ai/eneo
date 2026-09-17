@@ -17,6 +17,7 @@ from eneo.completion_models.infrastructure.completion_service import (
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderProviderRequestEvidence,
     classify_ai_builder_provider_failure,
+    prepare_ai_builder_provider_kwargs,
     record_ai_builder_provider_failure,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
@@ -97,11 +98,14 @@ async def call_proposal_completion(
         replan=request.counts_as_repair,
     )
     messages = flatten_proposal_message_groups(fitted_message_groups)
+    provider_kwargs = prepare_ai_builder_provider_kwargs(
+        request.route,
+        ModelKwargs(temperature=request.temperature),
+        stage="proposal_completion",
+        request_id=usage_tracker.request_id if usage_tracker is not None else None,
+    )
     if not request.call_budget.try_start_call():
         raise ProposalCallBudgetExhausted
-    provider_kwargs = request.route.prepare_provider_kwargs(
-        ModelKwargs(temperature=request.temperature)
-    )
     provider_kwargs.pop("drop_params", None)
     provider_kwargs.pop("timeout", None)
     # Keep both LiteLLM and provider SDK retries inside the turn's call budget.

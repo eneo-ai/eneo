@@ -8,6 +8,7 @@ import pytest
 from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
     TenantModelAdapter,
 )
+from eneo.main.exceptions import ProviderRejectedRequestException
 
 
 def _make_adapter(
@@ -152,23 +153,16 @@ def test_input_packing_leaves_room_for_a_positive_answer():
 
 
 class TestPrepareKwargsReasoningEffortTranslation:
-    """Translate 'none'/empty reasoning_effort instead of dropping silently.
+    """Preserve or refuse explicit choices; apply defaults only to absent effort."""
 
-    Dropping reasoning_effort lets reasoning models fall back to their
-    default effort (medium/high on the gpt-5 family), which contributes
-    to multi-minute single-call latency. When the caller signals
-    minimum reasoning, translate to the lowest supported value rather
-    than handing the model no signal.
-    """
-
-    def test_openai_translates_none_without_value_support_to_low(self):
+    def test_openai_refuses_none_without_value_support(self):
         adapter = _make_adapter("openai")
         with patch(
             "eneo.completion_models.infrastructure.tenant_model_capabilities.litellm"
         ) as mock_litellm:
             mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
-            result = adapter._prepare_kwargs(model_kwargs={"reasoning_effort": "none"})
-        assert result["reasoning_effort"] == "low"
+            with pytest.raises(ProviderRejectedRequestException):
+                adapter._prepare_kwargs(model_kwargs={"reasoning_effort": "none"})
 
     def test_openai_translates_empty_reasoning_effort_to_low(self):
         adapter = _make_adapter("openai")
@@ -219,14 +213,14 @@ class TestPrepareKwargsReasoningEffortTranslation:
             with pytest.raises(RuntimeError, match="capability registry unavailable"):
                 adapter._prepare_kwargs(model_kwargs={"reasoning_effort": "high"})
 
-    def test_anthropic_drops_none_reasoning_effort(self):
+    def test_anthropic_refuses_unsupported_none_reasoning_effort(self):
         adapter = _make_adapter("anthropic")
         with patch(
             "eneo.completion_models.infrastructure.tenant_model_capabilities.litellm"
         ) as mock_litellm:
             mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
-            result = adapter._prepare_kwargs(model_kwargs={"reasoning_effort": "none"})
-        assert "reasoning_effort" not in result
+            with pytest.raises(ProviderRejectedRequestException):
+                adapter._prepare_kwargs(model_kwargs={"reasoning_effort": "none"})
 
     def test_openai_translates_pydantic_none_reasoning_effort_to_low(self):
         """Production callers pass a Pydantic ModelKwargs, not a dict.

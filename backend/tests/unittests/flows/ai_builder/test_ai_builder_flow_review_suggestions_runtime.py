@@ -532,3 +532,41 @@ async def test_review_forwards_capacity():
         await _generate(client, capacity=capacity, budget_policy=policy)
     factory.assert_called_once_with(capacity=capacity)
     assert len(client.calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("effort", ["high", "none"])
+async def test_local_reasoning_refusal_preserves_known_rejection_before_review(effort):
+    from eneo.ai_models.completion_models.completion_model import ModelKwargs
+    from eneo.completion_models.domain.model_kwargs_capabilities import (
+        SupportedModelKwargs,
+    )
+    from eneo.completion_models.infrastructure.completion_service import (
+        ResolvedCompletionModelRoute,
+    )
+
+    client = _Client()
+    route = ResolvedCompletionModelRoute(
+        litellm_model="mistral/plain-model",
+        provider_type="mistral",
+        litellm_kwargs={},
+        supported_model_kwargs=SupportedModelKwargs(),
+        requested_model_kwargs=ModelKwargs(reasoning_effort=effort),
+    )
+    with pytest.raises(AIBuilderKnownProviderRejectionException) as error:
+        await generate_review_suggestions(
+            sample=_sample(),
+            litellm_client=client,
+            completion_model_route=route,
+            model_id=uuid4(),
+            model_name="plain-model",
+            capacity=ModelCapacity(100_000, 4000),
+            budget_policy=resolve_ai_builder_budget_policy(None),
+            tenant_id=uuid4(),
+            ui_language="sv",
+        )
+    assert error.value.public_error.code is AIBuilderErrorCode.PLANNER_UPSTREAM_ERROR
+    assert error.value.public_error.details["provider_disposition"] == "known_rejection"
+    assert error.value.public_error.details["reason"] == "reasoning_effort_unsupported"
+    assert error.value.public_error.details["another_call_permitted"] is False
+    assert client.calls == []

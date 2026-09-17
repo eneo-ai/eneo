@@ -30,6 +30,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderKnownProviderRejectionException,
     build_ai_builder_request_budget_exhausted_error,
     classify_ai_builder_provider_failure,
+    prepare_ai_builder_provider_kwargs,
     record_ai_builder_provider_failure,
 )
 from eneo.flows.ai_builder.ai_builder_provider_call import (
@@ -199,8 +200,12 @@ async def classify_slots(
         )
 
     started_at = time.perf_counter()
-    completion_kwargs = completion_model_route.prepare_provider_kwargs(
-        ModelKwargs(temperature=0.0)
+    completion_kwargs = prepare_ai_builder_provider_kwargs(
+        completion_model_route,
+        ModelKwargs(temperature=0.0),
+        stage="slot_classification",
+        request_id=usage_tracker.request_id if usage_tracker is not None else None,
+        tenant_id=tenant_id,
     )
     if response_format:
         completion_kwargs["response_format"] = response_format

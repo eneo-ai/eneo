@@ -37,6 +37,7 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderErrorCode,
     AIBuilderKnownProviderRejectionException,
     build_ai_builder_request_budget_exhausted_error,
+    prepare_ai_builder_provider_kwargs,
     record_ai_builder_provider_failure,
 )
 from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
@@ -737,8 +738,11 @@ async def generate_review_suggestions(
         raise AIBuilderKnownProviderRejectionException(
             build_ai_builder_request_budget_exhausted_error(request_id=None)
         )
-    completion_kwargs = completion_model_route.prepare_provider_kwargs(
-        ModelKwargs(temperature=0.0)
+    completion_kwargs = prepare_ai_builder_provider_kwargs(
+        completion_model_route,
+        ModelKwargs(temperature=0.0),
+        stage="review_suggestions",
+        tenant_id=tenant_id,
     )
     if response_format:
         completion_kwargs["response_format"] = response_format

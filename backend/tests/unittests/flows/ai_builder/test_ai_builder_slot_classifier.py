@@ -5411,3 +5411,48 @@ def test_prompt_hash_changes_when_the_input_limit_changes():
     assert slot_classification_prompt_hash(
         **common, capacity=ModelCapacity(4096, 4096)
     ) != slot_classification_prompt_hash(**common, capacity=ModelCapacity(8192, 4096))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("effort", ["high", "none"])
+async def test_local_reasoning_refusal_preserves_known_rejection_before_classification(
+    effort,
+):
+    from eneo.ai_models.completion_models.completion_model import ModelKwargs
+    from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
+
+    client = MagicMock()
+    client.acompletion = AsyncMock()
+    before_provider_call = AsyncMock()
+    tracker = ProposalTurnTelemetry(
+        request_id="req-local-classification",
+        model="mistral/plain-model",
+        target_kind=TargetKind.CREATE,
+    )
+    route = ResolvedCompletionModelRoute(
+        litellm_model="mistral/plain-model",
+        provider_type="mistral",
+        litellm_kwargs={},
+        supported_model_kwargs=SupportedModelKwargs(),
+        requested_model_kwargs=ModelKwargs(reasoning_effort=effort),
+    )
+    with pytest.raises(AIBuilderKnownProviderRejectionException) as error:
+        await classify_slots(
+            litellm_client=client,
+            completion_model_route=route,
+            classification_input=_classification_input(
+                f"local-reasoning-refusal-{uuid4()}"
+            ),
+            allowed_slot_values={"primary_runtime_input": {"audio", "documents"}},
+            tenant_id=uuid4(),
+            usage_tracker=tracker,
+            before_provider_call=before_provider_call,
+        )
+    assert error.value.public_error.code is AIBuilderErrorCode.PLANNER_UPSTREAM_ERROR
+    assert error.value.public_error.details["provider_disposition"] == "known_rejection"
+    assert error.value.public_error.details["reason"] == "reasoning_effort_unsupported"
+    assert error.value.public_error.details["another_call_permitted"] is False
+    assert tracker.call_records == []
+    assert tracker.proposal_attempts == []
+    before_provider_call.assert_not_awaited()
+    client.acompletion.assert_not_awaited()

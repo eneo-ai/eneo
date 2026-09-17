@@ -39,6 +39,7 @@ from eneo.main.exceptions import (
     BadRequestException,
     ErrorCodes,
     NotFoundException,
+    ProviderRejectedRequestException,
     UnauthorizedException,
 )
 from eneo.main.logging import get_logger
@@ -48,9 +49,11 @@ from eneo.observability.failure_events import (
 )
 
 if TYPE_CHECKING:
+    from eneo.ai_models.completion_models.completion_model import ModelKwargs
     from eneo.completion_models.infrastructure.completion_service import (
         CompletionEvidenceField,
         CompletionRouteEvidence,
+        ResolvedCompletionModelRoute,
     )
     from eneo.flows.ai_builder.ai_builder_proposal_telemetry import (
         ProposalTurnTelemetry,
@@ -410,6 +413,8 @@ def classify_ai_builder_provider_failure(
         kind = "transport_ambiguous"
     elif isinstance(error, APIConnectionError):
         kind = "transport_ambiguous"
+    elif isinstance(error, ProviderRejectedRequestException):
+        kind = "rejected"
     elif isinstance(error, _KNOWN_PROVIDER_REJECTION_ERRORS):
         kind = "rejected"
         status_code = _bounded_provider_status(getattr(error, "status_code", None))
@@ -462,10 +467,38 @@ def classify_ai_builder_provider_failure(
             turn_state=turn_state,
             retry_scope=retry_scope,
             request_id=request_id,
+            reason=(
+                "reasoning_effort_unsupported"
+                if isinstance(error, ProviderRejectedRequestException)
+                and (error.details or {}).get("reason")
+                == "reasoning_effort_unsupported"
+                else None
+            ),
         ),
         retry_scope=retry_scope,
         another_call_permitted=False,
     )
+
+
+def prepare_ai_builder_provider_kwargs(
+    route: ResolvedCompletionModelRoute,
+    model_kwargs: ModelKwargs,
+    *,
+    stage: AIBuilderProviderFailureStage,
+    request_id: str | None = None,
+    tenant_id: UUID | str | None = None,
+) -> dict[str, object]:
+    """Translate preparation refusals before a provider attempt is started."""
+    try:
+        return route.prepare_provider_kwargs(model_kwargs)
+    except ProviderRejectedRequestException as error:
+        failure = record_ai_builder_provider_failure(
+            error,
+            stage=stage,
+            request_id=request_id,
+            tenant_id=tenant_id,
+        )
+        raise failure.as_exception() from error
 
 
 def record_ai_builder_provider_failure(
@@ -595,7 +628,7 @@ def _provider_exception_class(
         return "authentication"
     if isinstance(error, BadGatewayError):
         return "bad_gateway"
-    if isinstance(error, BadRequestError):
+    if isinstance(error, (BadRequestError, ProviderRejectedRequestException)):
         return "bad_request"
     if isinstance(error, InternalServerError):
         return "internal_server"
@@ -687,6 +720,7 @@ def _provider_public_error(
     turn_state: AIBuilderProviderTurnState,
     retry_scope: AIBuilderProviderRetryScope,
     request_id: str | None,
+    reason: str | None = None,
 ) -> AIBuilderPublicError:
     disposition: AIBuilderProviderDisposition = (
         "known_rejection" if turn_state == "committed" else "provider_outcome_unknown"
@@ -697,6 +731,8 @@ def _provider_public_error(
         "provider_exception_class": exception_class,
         "retry_scope": retry_scope,
     }
+    if reason is not None:
+        details["reason"] = reason
     if turn_state == "committed":
         message = (
             "The AI provider did not accept this request because of a rate limit. "
