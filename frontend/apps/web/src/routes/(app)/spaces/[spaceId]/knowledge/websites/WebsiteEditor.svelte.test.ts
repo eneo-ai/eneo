@@ -6,6 +6,7 @@ import { m } from "$lib/paraglide/messages";
 const createWebsite = vi.hoisted(() => vi.fn());
 const updateWebsite = vi.hoisted(() => vi.fn());
 const checkUrl = vi.hoisted(() => vi.fn());
+const webhook = vi.hoisted(() => vi.fn());
 const refreshCurrentSpace = vi.hoisted(() => vi.fn());
 
 vi.mock("$lib/core/Eneo", () => ({
@@ -13,7 +14,8 @@ vi.mock("$lib/core/Eneo", () => ({
     websites: {
       create: createWebsite,
       update: updateWebsite,
-      checkUrl
+      checkUrl,
+      webhook
     }
   })
 }));
@@ -51,6 +53,9 @@ describe("WebsiteEditor", () => {
     updateWebsite.mockReset().mockResolvedValue({});
     checkUrl.mockReset().mockResolvedValue(null);
     refreshCurrentSpace.mockReset();
+    webhook
+      .mockReset()
+      .mockResolvedValue({ enabled: false, pending: false, url: "https://eneo.example/webhook" });
   });
 
   it("keeps the dialog actions clear of the bottom edge", async () => {
@@ -63,6 +68,35 @@ describe("WebsiteEditor", () => {
     expect(footer!.classList).toContain("mb-0");
     expect(footer!.classList).not.toContain("-mb-4");
     expect(footer!.classList).toContain("py-4");
+  });
+
+  it("keeps a newly created webhook website open for token setup", async () => {
+    const website = {
+      id: "",
+      name: "Sitemap",
+      url: "https://example.com/sitemap.xml",
+      crawl_type: "sitemap",
+      update_interval: "webhook",
+      download_files: false,
+      requires_http_auth: false,
+      embedding_model: { id: "model-1" }
+    };
+    createWebsite.mockResolvedValue({ ...website, id: "created-site" });
+    render(WebsiteEditor, { mode: "create", website: website as never });
+    await page.getByRole("button", { name: m.connect_website(), exact: true }).click();
+    await page.getByRole("button", { name: m.create_website(), exact: true }).click();
+    await expect
+      .element(page.getByRole("button", { name: m.website_webhook_generate(), exact: true }))
+      .toBeVisible();
+    expect(webhook).toHaveBeenCalledWith({ id: "created-site" });
+    await page.getByRole("button", { name: m.cancel(), exact: true }).click();
+    await expect
+      .element(page.getByRole("button", { name: m.connect_website(), exact: true }))
+      .toBeVisible();
+    await page.getByRole("button", { name: m.connect_website(), exact: true }).click();
+    await expect
+      .element(page.getByRole("textbox", { name: m.url_required(), exact: true }))
+      .toHaveValue("");
   });
 
   it("submits a valid website with the keyboard", async () => {

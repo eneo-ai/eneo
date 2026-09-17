@@ -35,8 +35,8 @@ crawler. `429` includes `Retry-After`; retry `503` after a delay. Invalid, revok
 and wrong-crawler tokens return `401`. If the rate limiter is unavailable, the
 request is rejected before it is accepted.
 
-Workers recover committed requests every 10 seconds, also when crawl-feeder is
-disabled. Normal tenant concurrency limits and failure backoff apply. After ten
+Workers recover committed requests every 10 seconds using the Python crawler's
+durable attempts and dispatcher. Normal concurrency limits and failure backoff apply. After ten
 consecutive crawl failures automatic updates stop and the token is revoked.
 Select webhook again and issue a new token to resume. Switching away from webhook
 cancels unstarted webhook runs and revokes the token; it does not interrupt a

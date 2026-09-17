@@ -220,7 +220,8 @@
         ...authFields()
       };
       const updated = await eneo.websites.update({ website: { id: website.id }, update });
-      const newlyEnabledWebhook = website.update_interval !== "webhook" && updated.update_interval === "webhook";
+      const newlyEnabledWebhook =
+        website.update_interval !== "webhook" && updated.update_interval === "webhook";
       website = updated;
       if (!newlyEnabledWebhook) closeDialog();
       await refreshCurrentSpace("knowledge");
@@ -361,7 +362,9 @@
                       {m.every_other_day()}
                     </Select.Item>
                     {#if crawlType === "sitemap"}
-                      <Select.Item value="webhook" label={m.website_webhook()}>{m.website_webhook()}</Select.Item>
+                      <Select.Item value="webhook" label={m.website_webhook()}
+                        >{m.website_webhook()}</Select.Item
+                      >
                     {/if}
                     <Select.Item value="weekly" label={m.every_week()}>{m.every_week()}</Select.Item
                     >

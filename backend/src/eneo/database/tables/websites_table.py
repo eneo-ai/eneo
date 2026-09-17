@@ -32,7 +32,10 @@ from eneo.websites.domain.crawl_run import CrawlType, project_crawl_status
 
 
 class CrawlRuns(BasePublic):
-    webhook_dispatch: Mapped[Optional[dict[str, object]]] = mapped_column(JSONB, nullable=True)
+    # Provenance marker only; executable dispatch data lives on CrawlAttempts.
+    webhook_dispatch: Mapped[Optional[dict[str, object]]] = mapped_column(
+        JSONB(none_as_null=True), nullable=True
+    )
 
     __table_args__ = (
         UniqueConstraint("job_id", name="uq_crawl_runs_job_id"),

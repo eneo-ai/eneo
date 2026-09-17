@@ -1226,6 +1226,24 @@ class CrawlRunRepository:
         if lease_duration <= timedelta(0):
             raise ValueError("A crawl lease duration must be positive")
 
+        from eneo.websites.application.crawl_webhook import (
+            consume_on_start,
+            lock_website,
+        )
+
+        # Serialize request acceptance with worker start using the persisted
+        # attempt identity, never the untrusted Redis delivery's website ID.
+        website_id = await self.session.scalar(
+            sa.select(CrawlRunsTable.website_id)
+            .join(CrawlAttempts, CrawlAttempts.crawl_run_id == CrawlRunsTable.id)
+            .where(CrawlAttempts.id == attempt_id)
+        )
+        if website_id is None:
+            return None
+        website = await lock_website(self.session, website_id)
+        if website is None:
+            return None
+
         pair = await self._lock_current_attempt(attempt_id)
         if pair is None:
             return None
@@ -1261,6 +1279,7 @@ class CrawlRunRepository:
             .values(status=Status.IN_PROGRESS.value, updated_at=now)
         )
         await self.session.flush()
+        await consume_on_start(self.session, website, dispatch_id)
         return task
 
     async def renew_attempt_lease(

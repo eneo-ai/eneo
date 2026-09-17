@@ -1,7 +1,7 @@
 """Durable, coalescing crawl requests. All transitions lock the website first.
 
 The pending bit is consumed at actual worker start, not at enqueue time. The
-outbox lives on CrawlRuns and is committed with its Job, before touching Redis.
+Python crawler persists execution data in CrawlAttempts before touching Redis.
 """
 
 import hashlib
@@ -16,13 +16,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from eneo.database.tables.job_table import Jobs
 from eneo.database.tables.websites_table import CrawlRuns, Websites
 from eneo.main.models import Status
-from eneo.websites.domain.crawl_run import CrawlType, CrawlPhase, CrawlOrigin
+from eneo.websites.domain.crawl_run import CrawlOrigin, CrawlPhase, CrawlType
 from eneo.websites.domain.crawl_run_repo import CrawlRunRepository
 from eneo.websites.domain.website import UpdateInterval
-
-WEBHOOK_CANCELLED = "Webhook disabled before crawl start"
-
-ACTIVE = (Status.QUEUED.value, Status.IN_PROGRESS.value)
 
 
 def issue_token() -> tuple[str, str]:
@@ -50,7 +46,10 @@ async def active_job(session: AsyncSession, website_id: UUID) -> Jobs | None:
     return await session.scalar(
         sa.select(Jobs)
         .join(CrawlRuns, CrawlRuns.job_id == Jobs.id)
-        .where(CrawlRuns.website_id == website_id, CrawlRuns.phase != CrawlPhase.TERMINAL.value)
+        .where(
+            CrawlRuns.website_id == website_id,
+            CrawlRuns.phase != CrawlPhase.TERMINAL.value,
+        )
         .order_by(Jobs.created_at, Jobs.id)
         .limit(1)
     )
@@ -71,7 +70,9 @@ async def cancel_unstarted_webhook_runs(
                 sa.select(CrawlRuns).where(
                     CrawlRuns.website_id == website_id,
                     CrawlRuns.webhook_dispatch.is_not(None),
-                    CrawlRuns.phase.in_([CrawlPhase.PENDING_DISPATCH.value, CrawlPhase.QUEUED.value]),
+                    CrawlRuns.phase.in_(
+                        [CrawlPhase.PENDING_DISPATCH.value, CrawlPhase.QUEUED.value]
+                    ),
                 )
             )
         ).all()
@@ -104,8 +105,15 @@ async def prepare_run(session: AsyncSession, website: Websites) -> Jobs | None:
     user = await container.user_repo().get_user_by_id(website.user_id)
     if user is None:
         return None
-    container.user.override(providers.Object(user))
-    container.tenant.override(providers.Object(user.tenant))
+    container = Container(
+        session=providers.Object(session),
+        user=providers.Object(user),
+        tenant=providers.Object(user.tenant),
+    )
+    # Autoflush of pending/backoff edits expires the server-generated timestamp.
+    # Refresh it explicitly before constructing the synchronous domain object.
+    await session.flush()
+    await session.refresh(website)
     run = await container.crawl_service().crawl(
         WebsiteSparse.to_domain(website),
         origin=CrawlOrigin.SCHEDULED,

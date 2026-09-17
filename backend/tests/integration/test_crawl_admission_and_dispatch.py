@@ -658,7 +658,11 @@ async def test_website_deletion_fence_prevents_late_crawl_admission(
         )
 
     assert admission_task is not None
-    with pytest.raises(sa.exc.IntegrityError):
+    from eneo.main.exceptions import NotFoundException
+
+    # Admission now refreshes the website under the same deletion fence and
+    # reports its removal before attempting a foreign-key insert.
+    with pytest.raises(NotFoundException):
         await asyncio.wait_for(admission_task, timeout=5)
 
 

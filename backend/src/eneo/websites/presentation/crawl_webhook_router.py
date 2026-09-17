@@ -99,7 +99,5 @@ async def trigger_crawl(
     )
     from eneo.worker.crawl_webhook_dispatch import dispatch_after_commit
 
-    background_tasks.add_task(
-        dispatch_after_commit, website_id, container.redis_client()
-    )
+    background_tasks.add_task(dispatch_after_commit, website_id)
     return {"status": status}

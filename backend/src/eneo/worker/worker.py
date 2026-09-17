@@ -1,6 +1,6 @@
-import asyncio
 from __future__ import annotations
 
+import asyncio
 import inspect
 import os
 from functools import wraps

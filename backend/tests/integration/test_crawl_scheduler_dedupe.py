@@ -105,10 +105,16 @@ async def test_scheduler_uses_settings_committed_after_due_query(
         space = await space_factory(session, "Updated scheduler settings")
         embedding_id = await session.scalar(sa.select(EmbeddingModels.id).limit(1))
         site = WebsitesTable(
-            name="Old name", url="https://example.com/old", download_files=False,
-            crawl_type=CrawlType.CRAWL, update_interval=UpdateInterval.DAILY,
-            size=0, tenant_id=admin_user.tenant_id, user_id=admin_user.id,
-            embedding_model_id=embedding_id, space_id=space.id,
+            name="Old name",
+            url="https://example.com/old",
+            download_files=False,
+            crawl_type=CrawlType.CRAWL,
+            update_interval=UpdateInterval.DAILY,
+            size=0,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            embedding_model_id=embedding_id,
+            space_id=space.id,
         )
         session.add(site)
         await session.flush()
@@ -117,9 +123,13 @@ async def test_scheduler_uses_settings_committed_after_due_query(
     async def due_query():
         async with db_session() as session:
             await session.execute(
-                sa.update(WebsitesTable).where(WebsitesTable.id == stale.id).values(
-                    name="Current name", url="https://example.com/new.xml",
-                    download_files=True, crawl_type=CrawlType.SITEMAP,
+                sa.update(WebsitesTable)
+                .where(WebsitesTable.id == stale.id)
+                .values(
+                    name="Current name",
+                    url="https://example.com/new.xml",
+                    download_files=True,
+                    crawl_type=CrawlType.SITEMAP,
                 )
             )
         return [stale]

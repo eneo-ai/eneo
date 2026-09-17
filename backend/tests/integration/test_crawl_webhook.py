@@ -9,10 +9,8 @@ import pytest
 import sqlalchemy as sa
 
 from eneo.database.tables.ai_models_table import EmbeddingModels
-from eneo.database.tables.job_table import Jobs
 from eneo.database.tables.spaces_table import SpacesUsers
-from eneo.database.tables.websites_table import CrawlRuns, Websites
-from eneo.main.models import Status
+from eneo.database.tables.websites_table import CrawlAttempts, CrawlRuns, Websites
 from eneo.websites.application.crawl_webhook import (
     active_job,
     cancel_unstarted_webhook_runs,
@@ -24,7 +22,8 @@ from eneo.websites.application.crawl_webhook import (
     revoke,
     verify_token,
 )
-from eneo.websites.domain.crawl_run import CrawlType
+from eneo.websites.domain.crawl_run import CrawlOutcome, CrawlType
+from eneo.websites.domain.crawl_run_repo import CrawlRunRepository
 from eneo.websites.domain.website import UpdateInterval
 from eneo.websites.domain.website_sparse_repo import WebsiteSparseRepository
 
@@ -66,19 +65,31 @@ async def post(db_session, site_id):
 
 async def start(db_session, site_id):
     async with db_session() as session:
-        site = await lock_website(session, site_id)
+        await lock_website(session, site_id)
         job = await active_job(session, site_id)
-        job.status = Status.IN_PROGRESS.value
-        await consume_on_start(session, site, job.id)
+        attempt_id = await session.scalar(
+            sa.select(CrawlAttempts.id).where(CrawlAttempts.dispatch_id == job.id)
+        )
+        assert await CrawlRunRepository(session).claim_attempt(
+            attempt_id,
+            dispatch_id=job.id,
+            lease_owner="webhook-test",
+            lease_duration=timedelta(minutes=5),
+        )
         return job.id
 
 
 async def finish(db_session, site_id, job_id):
     async with db_session() as session:
         site = await lock_website(session, site_id)
-        job = await session.get(Jobs, job_id)
-        job.status = Status.COMPLETE.value
-        await session.flush()
+        attempt_id = await session.scalar(
+            sa.select(CrawlAttempts.id).where(CrawlAttempts.dispatch_id == job_id)
+        )
+        assert await CrawlRunRepository(session).finish_attempt(
+            attempt_id,
+            lease_owner="webhook-test",
+            outcome=CrawlOutcome.SUCCEEDED,
+        )
         await prepare_run(session, site)
 
 
@@ -223,60 +234,43 @@ async def test_rotation_invalidates_previous_token(db_session, webhook_site):
         assert new_token not in site.webhook_token_hash
 
 
-@pytest.mark.parametrize("feeder_enabled", [True, False])
 async def test_dispatch_recovers_after_redis_failure_without_duplicate_job(
     db_session,
     webhook_site,
     redis_client,
     monkeypatch,
-    test_settings,
-    feeder_enabled,
 ):
-    from arq.jobs import JobStatus
-
+    from eneo.websites.application import crawl_dispatch
     from eneo.worker import crawl_webhook_dispatch as dispatch
 
     site_id, _ = webhook_site
-    monkeypatch.setattr(test_settings, "crawl_feeder_enabled", feeder_enabled)
     await post(db_session, site_id)
     async with db_session() as session:
-        site = await lock_website(session, site_id)
-        tenant_id = site.tenant_id
-        job = await active_job(session, site_id)
-        job_id = job.id
-    await redis_client.delete(f"tenant:{tenant_id}:active_jobs")
-    monkeypatch.setattr(
-        dispatch.job_manager,
-        "get_job_status",
-        AsyncMock(return_value=JobStatus.not_found),
-    )
+        job_id = (await active_job(session, site_id)).id
     enqueue = AsyncMock(side_effect=[ConnectionError("Redis disconnected"), object()])
-    monkeypatch.setattr(dispatch.job_manager, "enqueue", enqueue)
-    with pytest.raises(ConnectionError):
-        await dispatch.dispatch_website(site_id, redis_client)
-    await dispatch.dispatch_website(site_id, redis_client)
+    discard = AsyncMock()
+
+    async def reconcile():
+        return await crawl_dispatch.reconcile_crawl_work(
+            enqueue=enqueue, discard=discard
+        )
+
+    monkeypatch.setattr(dispatch, "reconcile_crawl_work", reconcile)
+    await dispatch.dispatch_website(site_id)
+    async with db_session() as session:
+        await session.execute(
+            sa.update(CrawlAttempts)
+            .where(CrawlAttempts.dispatch_id == job_id)
+            .values(
+                dispatch_attempted_at=datetime.now(timezone.utc) - timedelta(minutes=2)
+            )
+        )
+    await dispatch.dispatch_website(site_id)
     assert enqueue.call_count == 2
     assert {call.args[1] for call in enqueue.call_args_list} == {job_id}
     assert await run_count(db_session, site_id) == 1
-    assert int(await redis_client.get(f"tenant:{tenant_id}:active_jobs")) == 1
-    monkeypatch.setattr(
-        dispatch.job_manager, "get_job_status", AsyncMock(return_value=JobStatus.queued)
-    )
-    await dispatch.dispatch_website(site_id, redis_client)
+    await dispatch.dispatch_website(site_id)
     assert enqueue.call_count == 2
-    # Disable after enqueue: invalidate the stable DB job and remove its
-    # reservation flag without decrementing a reconciled counter on recovery.
-    async with db_session() as session:
-        site = await lock_website(session, site_id)
-        revoke(site)
-        site.update_interval = UpdateInterval.NEVER
-        await cancel_unstarted_webhook_runs(session, site_id)
-    await dispatch.dispatch_website(site_id, redis_client)
-    await redis_client.set(f"tenant:{tenant_id}:active_jobs", 1)  # another job's slot
-    await dispatch.dispatch_website(site_id, redis_client)
-    assert int(await redis_client.get(f"tenant:{tenant_id}:active_jobs")) == 1
-    assert not await redis_client.exists(f"job:{job_id}:slot_preacquired")
-    await redis_client.delete(f"tenant:{tenant_id}:active_jobs")
 
 
 async def test_token_management_and_disable_api(
@@ -488,81 +482,71 @@ async def test_concurrent_settings_edits_in_same_space(
         assert (await session.get(Websites, other_id)).name == "Second edited"
 
 
-@pytest.mark.parametrize("watchdog_first", [True, False])
-async def test_cancel_cleanup_and_watchdog_preserve_live_slot(
-    db_session, webhook_site, redis_client, test_settings, watchdog_first
+async def test_cancelled_webhook_releases_only_its_durable_capacity(
+    db_session,
+    webhook_site,
 ):
-    from eneo.worker.crawl_webhook_dispatch import release_cancelled_runs
-    from eneo.worker.feeder.watchdog import OrphanWatchdog
-
     site_id, _ = webhook_site
     await post(db_session, site_id)
     async with db_session() as session:
+        repo = CrawlRunRepository(session)
+        claims = await repo.claim_dispatch_candidates(
+            concurrency_limit=1,
+            retry_after=timedelta(minutes=1),
+            redeliver_after=timedelta(minutes=5),
+        )
+        assert len(claims) == 1
+        cancelled_id = claims[0].dispatch_id
         site = await lock_website(session, site_id)
-        job = await active_job(session, site_id)
-        cancelled_id = job.id
-        tenant_id = site.tenant_id
         await cancel_unstarted_webhook_runs(session, site_id)
-        # A new request represents another job whose slot must remain counted.
         await request_crawl(session, site)
-    key = f"tenant:{tenant_id}:active_jobs"
-    flag = f"job:{cancelled_id}:slot_preacquired"
-    await redis_client.set(key, 2)
-    await redis_client.set(flag, str(tenant_id))
-
-    async def cleanup():
-        async with db_session() as session:
-            site = await lock_website(session, site_id)
-            await release_cancelled_runs(session, site, redis_client)
-
-    async def reconcile_counter():
-        async with db_session() as session:
-            await OrphanWatchdog(redis_client, test_settings)._reconcile_single_counter(
-                session, key.encode(), Jobs, CrawlRuns, Status, sa.func, sa.select
+    async with db_session() as session:
+        repo = CrawlRunRepository(session)
+        claims = await repo.claim_dispatch_candidates(
+            concurrency_limit=1,
+            retry_after=timedelta(minutes=1),
+            redeliver_after=timedelta(minutes=5),
+        )
+        assert len(claims) == 1
+        assert claims[0].dispatch_id != cancelled_id
+    # Repeated cancellation cleanup must leave the new running attempt alone.
+    await start(db_session, site_id)
+    async with db_session() as session:
+        site = await lock_website(session, site_id)
+        await cancel_unstarted_webhook_runs(session, site_id)
+        job = await active_job(session, site_id)
+        assert job is not None and job.id != cancelled_id
+        assert (
+            await CrawlRunRepository(session).claim_dispatch_candidates(
+                concurrency_limit=1,
+                retry_after=timedelta(minutes=1),
+                redeliver_after=timedelta(minutes=5),
             )
-
-    try:
-        if watchdog_first:
-            await reconcile_counter()
-            await cleanup()
-        else:
-            await cleanup()
-            await reconcile_counter()
-        await cleanup()
-        assert int(await redis_client.get(key)) == 1
-        assert not await redis_client.exists(flag)
-    finally:
-        await redis_client.delete(key, flag)
+            == []
+        )
 
 
 @pytest.mark.parametrize("post_before_start", [True, False])
 async def test_non_webhook_run_preserves_pending_followup(
     db_session, webhook_site, post_before_start
 ):
-    from eneo.jobs.job_models import Task
+    from dependency_injector import providers
+
+    from eneo.main.container.container import Container
+    from eneo.websites.domain.website import WebsiteSparse
 
     site_id, _ = webhook_site
-    job_id = uuid4()
     async with db_session() as session:
         site = await lock_website(session, site_id)
-        session.add(
-            Jobs(
-                id=job_id,
-                user_id=site.user_id,
-                task=Task.CRAWL.value,
-                status=Status.QUEUED.value,
-                name="Initial or manual crawl",
-            )
+        container = Container(session=providers.Object(session))
+        user = await container.user_repo().get_user_by_id(site.user_id)
+        container.user.override(providers.Object(user))
+        container.tenant.override(providers.Object(user.tenant))
+        run = await container.crawl_service().crawl(
+            WebsiteSparse.to_domain(site),
+            reconcile_after_commit=False,
         )
-        await session.flush()
-        session.add(
-            CrawlRuns(
-                id=uuid4(),
-                tenant_id=site.tenant_id,
-                website_id=site_id,
-                job_id=job_id,
-            )
-        )
+        job_id = run.job_id
     if post_before_start:
         await post(db_session, site_id)
     assert await start(db_session, site_id) == job_id

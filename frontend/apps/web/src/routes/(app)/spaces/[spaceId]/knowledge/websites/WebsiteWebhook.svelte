@@ -3,7 +3,7 @@
   import { getEneo } from "$lib/core/Eneo";
   import { toastError } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
-  import { Button } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
 
   export let websiteId: string;
   export let nextRetryAt: string | null | undefined = undefined;
@@ -75,14 +75,14 @@
     <p>{m.website_webhook_secret()}</p>
     <pre
       class="overflow-x-auto whitespace-pre-wrap break-all rounded bg-secondary p-3 text-sm">{example}</pre>
-    <Button type="button" on:click={copy}
+    <Button type="button" onclick={copy}
       >{copied ? m.website_webhook_copied() : m.website_webhook_copy()}</Button
     >
   {:else if enabled}
     <p>{m.website_webhook_ready()}</p>
   {/if}
   {#if enabled}<p class="text-sm">{m.website_webhook_rotate_hint()}</p>{/if}
-  <Button type="button" disabled={busy} on:click={rotate}>
+  <Button type="button" disabled={busy} onclick={rotate}>
     {enabled ? m.website_webhook_rotate() : m.website_webhook_generate()}
   </Button>
 </div>

@@ -344,7 +344,8 @@ async def queue_website_crawls(container: Container):
 
                 locked = await lock_website(website_session, website.id)
                 if locked is None or locked.update_interval in (
-                    UpdateInterval.NEVER, UpdateInterval.WEBHOOK
+                    UpdateInterval.NEVER,
+                    UpdateInterval.WEBHOOK,
                 ):
                     continue
                 website = WebsiteSparse.to_domain(locked)
@@ -429,17 +430,12 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
     try:
         async with sessionmanager.session() as claim_session, claim_session.begin():
-            from eneo.websites.application.crawl_webhook import consume_on_start, lock_website
-
-            locked_website = await lock_website(claim_session, params.website_id)
             claimed_task = await CrawlRunRepository(claim_session).claim_attempt(
                 attempt_id,
                 dispatch_id=job_id,
                 lease_owner=lease_owner,
                 lease_duration=lease_duration,
             )
-            if claimed_task is not None and locked_website is not None:
-                await consume_on_start(claim_session, locked_website, job_id)
     except ValueError:
         # The failed claim transaction must roll back before terminalizing the
         # invalid durable payload, otherwise the rejection is rolled back too.
@@ -512,6 +508,11 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
         *,
         expected_phase: CrawlPhase,
     ) -> None:
+        from eneo.websites.application.crawl_webhook import lock_website
+
+        # Finalization writes website metadata after fencing the attempt. Use
+        # the same website-before-attempt order as admission and worker start.
+        await lock_website(session, params.website_id)
         current = await CrawlRunRepository(session).lock_attempt_lease(
             attempt_id,
             lease_owner=lease_owner,
@@ -1737,4 +1738,4 @@ async def crawl_task(*, job_id: UUID, params: CrawlTask, container: Container):
 
         from eneo.worker.crawl_webhook_dispatch import dispatch_after_commit
 
-        await dispatch_after_commit(params.website_id, container.redis_client())
+        await dispatch_after_commit(params.website_id)
