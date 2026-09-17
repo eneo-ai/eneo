@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import cast
 from uuid import UUID
 
+from eneo.flows.domain.flow_run_recovery_policy import flow_task_hard_timeout_seconds
 from eneo.flows.flow_run_dispatch_request import FlowRunDispatchTaskKwargs
 from eneo.flows.runtime.tasks import (
     deliver_flow_audit_outbox,
@@ -112,7 +113,10 @@ class PlatformExecutionWorkerSettings:
     retry_jobs = execution_worker.retry_jobs
     job_serializer = execution_worker.job_serializer
     job_deserializer = execution_worker.job_deserializer
-    job_timeout = settings.task_execution_timeout_seconds
+    # The task must persist its timeout before ARQ cancels its error handler.
+    job_timeout = flow_task_hard_timeout_seconds(
+        task_timeout_seconds=settings.task_execution_timeout_seconds
+    )
     max_jobs = settings.task_execution_max_jobs
     queue_name = settings.task_execution_queue
     expires_extra_ms = execution_worker.expires_extra_ms

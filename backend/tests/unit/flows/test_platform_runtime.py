@@ -13,7 +13,10 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 
 from eneo.flows.enums import FlowRunLifecycleSource
 from eneo.flows.execution_backend import FlowExecutionDispatchRejected
-from eneo.flows.flow_run_dispatch_request import FlowRunUserDispatchRequest
+from eneo.flows.flow_run_dispatch_request import (
+    FlowRunUserDispatchRequest,
+    flow_run_dispatch_task_kwargs,
+)
 from eneo.flows.runtime.platform_execution_backend import PlatformFlowExecutionBackend
 from eneo.main.exceptions import NotReadyException
 from eneo.tasks.arq_adapter import ArqTaskEnqueuer
@@ -231,6 +234,55 @@ async def test_execute_task_cancels_before_timeout_terminalization(monkeypatch) 
         "execution_cancelled",
         f"terminalize:{FlowRunLifecycleSource.TASK_TIMEOUT}",
     ]
+
+
+async def test_registered_worker_leaves_time_to_persist_execution_timeout(
+    monkeypatch,
+) -> None:
+    from arq.worker import Function
+
+    from eneo.flows.runtime import tasks
+
+    function = PlatformExecutionWorkerSettings.functions[0]
+    assert isinstance(function, Function)
+    worker_timeout = (
+        function.timeout_s
+        if function.timeout_s is not None
+        else PlatformExecutionWorkerSettings.job_timeout
+    )
+    terminalization_margin = (
+        worker_timeout
+        - PlatformExecutionWorkerSettings.settings.task_execution_timeout_seconds
+    )
+    # Shorten execution, preserving the registered outer/inner deadline gap.
+    execution_timeout = 0.01
+    monkeypatch.setattr(
+        tasks,
+        "get_settings",
+        lambda: SimpleNamespace(task_execution_timeout_seconds=execution_timeout),
+    )
+
+    async def execute(**_kwargs: object) -> dict[str, str]:
+        await asyncio.Event().wait()
+        return {"status": "completed"}
+
+    monkeypatch.setattr(tasks, "_execute_flow_run_async", execute)
+    terminalize = AsyncMock()
+    monkeypatch.setattr(tasks, "terminalize_flow_run_failure", terminalize)
+
+    result = await asyncio.wait_for(
+        function.coroutine(
+            {"job_id": str(uuid4())},
+            flow_run_dispatch_task_kwargs(_dispatch_request()),
+        ),
+        timeout=execution_timeout + terminalization_margin,
+    )
+
+    assert result == {"status": "failed", "reason": "timeout"}
+    terminalize.assert_awaited_once()
+    assert (
+        terminalize.await_args.kwargs["source"] is FlowRunLifecycleSource.TASK_TIMEOUT
+    )
 
 
 async def test_execute_task_rejects_malformed_payload_without_terminalizing(
