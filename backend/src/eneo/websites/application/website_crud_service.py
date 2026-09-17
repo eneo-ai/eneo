@@ -140,12 +140,22 @@ class WebsiteCRUDService:
         if not actor.can_edit_websites():
             raise UnauthorizedException()
 
+        import sqlalchemy as sa
+
+        from eneo.database.tables.spaces_table import Spaces
         from eneo.websites.application.crawl_webhook import (
             cancel_unstarted_webhook_runs,
             lock_website,
             revoke,
         )
 
+        # SpaceRepository.update locks the space before its websites. Follow
+        # that order and reload the aggregate after waiting, so concurrent edits
+        # cannot deadlock or overwrite another website with a stale snapshot.
+        await self.crawl_run_repo.session.execute(
+            sa.select(Spaces.id).where(Spaces.id == space.id).with_for_update()
+        )
+        space = await self.space_service.get_space_by_website(id)
         locked = await lock_website(self.crawl_run_repo.session, id)
         website = space.get_website(website_id=id)
         if locked is not None:

@@ -23,6 +23,8 @@ async def dispatch_website(website_id: UUID, redis_client: aioredis.Redis) -> No
         if website is None:
             return
         await prepare_run(session, website)
+    # Python crawler accounts for capacity in durable attempts, so cancelled
+    # webhook runs must not separately decrement a Redis reservation.
     await reconcile_crawl_work()
 
 

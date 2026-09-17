@@ -264,8 +264,8 @@ async def test_dispatch_recovers_after_redis_failure_without_duplicate_job(
     )
     await dispatch.dispatch_website(site_id, redis_client)
     assert enqueue.call_count == 2
-    # Disable after enqueue: the stable DB job is invalidated and its slot
-    # released exactly once, even if recovery is repeated.
+    # Disable after enqueue: invalidate the stable DB job and remove its
+    # reservation flag without decrementing a reconciled counter on recovery.
     async with db_session() as session:
         site = await lock_website(session, site_id)
         revoke(site)
@@ -432,3 +432,104 @@ async def test_webhook_migration_roundtrip(db_session, webhook_site):
     async with db_session() as session:
         connection = await session.connection()
         await connection.run_sync(roundtrip)
+
+
+async def test_concurrent_settings_edits_in_same_space(
+    client, db_session, webhook_site, admin_user_api_key, monkeypatch
+):
+    from eneo.websites.application import crawl_webhook
+
+    site_id, _ = webhook_site
+    other_id = uuid4()
+    async with db_session() as session:
+        site = await session.get(Websites, site_id)
+        session.add(
+            Websites(
+                id=other_id,
+                name="Other",
+                url="https://example.org/sitemap.xml",
+                space_id=site.space_id,
+                tenant_id=site.tenant_id,
+                user_id=site.user_id,
+                embedding_model_id=site.embedding_model_id,
+                size=0,
+                download_files=False,
+                crawl_type=CrawlType.SITEMAP,
+                update_interval=UpdateInterval.NEVER,
+            )
+        )
+
+    original_lock = crawl_webhook.lock_website
+
+    async def slow_lock(session, website_id):
+        result = await original_lock(session, website_id)
+        # Give the other request time to acquire its website lock if the common
+        # space lock was not taken first (the previous implementation deadlocked).
+        await asyncio.sleep(0.3)
+        return result
+
+    monkeypatch.setattr(crawl_webhook, "lock_website", slow_lock)
+    headers = {"X-API-Key": admin_user_api_key.key}
+    responses = await asyncio.wait_for(
+        asyncio.gather(
+            *(
+                client.post(
+                    f"/api/v1/websites/{id}/", headers=headers, json={"name": name}
+                )
+                for id, name in [(site_id, "First edited"), (other_id, "Second edited")]
+            )
+        ),
+        timeout=15,
+    )
+    for response in responses:
+        assert response.status_code == 200, response.text
+    async with db_session() as session:
+        assert (await session.get(Websites, site_id)).name == "First edited"
+        assert (await session.get(Websites, other_id)).name == "Second edited"
+
+
+@pytest.mark.parametrize("watchdog_first", [True, False])
+async def test_cancel_cleanup_and_watchdog_preserve_live_slot(
+    db_session, webhook_site, redis_client, test_settings, watchdog_first
+):
+    from eneo.worker.crawl_webhook_dispatch import release_cancelled_runs
+    from eneo.worker.feeder.watchdog import OrphanWatchdog
+
+    site_id, _ = webhook_site
+    await post(db_session, site_id)
+    async with db_session() as session:
+        site = await lock_website(session, site_id)
+        job = await active_job(session, site_id)
+        cancelled_id = job.id
+        tenant_id = site.tenant_id
+        await cancel_unstarted_webhook_runs(session, site_id)
+        # A new request represents another job whose slot must remain counted.
+        await request_crawl(session, site)
+    key = f"tenant:{tenant_id}:active_jobs"
+    flag = f"job:{cancelled_id}:slot_preacquired"
+    await redis_client.set(key, 2)
+    await redis_client.set(flag, str(tenant_id))
+
+    async def cleanup():
+        async with db_session() as session:
+            site = await lock_website(session, site_id)
+            await release_cancelled_runs(session, site, redis_client)
+
+    async def reconcile_counter():
+        async with db_session() as session:
+            await OrphanWatchdog(redis_client, test_settings)._reconcile_single_counter(
+                session, key.encode(), Jobs, CrawlRuns, Status, sa.func, sa.select
+            )
+
+    try:
+        if watchdog_first:
+            await reconcile_counter()
+            await cleanup()
+        else:
+            await cleanup()
+            await reconcile_counter()
+        await cleanup()
+        assert int(await redis_client.get(key)) == 1
+        assert not await redis_client.exists(flag)
+    finally:
+        await redis_client.delete(key, flag)
