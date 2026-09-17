@@ -62,14 +62,11 @@ TAGS_METADATA = [
         ),
     },
     {
-        "name": "widgets",
-        "description": "Widget operations. Use this to save widget settings and run widgets.",
-    },
-    {
         "name": "allowed-origins",
         "description": (
-            "Allowed Origins operations. Use this to specify the allowed origins from"
-            " where the widgets will be hosted"
+            "Allowed Origins operations. Lists the origins that may make"
+            " cross-origin requests to this API, such as additional frontend"
+            " domains."
         ),
     },
     {
@@ -91,7 +88,8 @@ TAGS_METADATA = [
     {
         "name": "settings",
         "description": (
-            "Settings operations. Currently only houses chatbot widget settings."
+            "Settings operations. Read the current user's settings and the models"
+            " and formats available to them."
         ),
     },
     {
