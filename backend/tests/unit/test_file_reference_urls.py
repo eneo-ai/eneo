@@ -215,15 +215,12 @@ def _reference_settings(base_url: str | None = "http://host.docker.internal:8123
 def _enable_file_references(
     monkeypatch,
     base_url: str | None = "http://host.docker.internal:8123",
-    object_store: bool = True,
 ):
     """Put the deployment in the state URL-only mode requires: a reference base
-    URL to mint against and an object store holding the originals."""
+    URL to mint against. Storage is not part of it: which store holds a file's
+    original is already folded into ``original_available``."""
     monkeypatch.setattr(
         file_reference_mod, "get_settings", lambda: _reference_settings(base_url)
-    )
-    monkeypatch.setattr(
-        file_reference_mod, "object_store_configured", lambda: object_store
     )
 
 
@@ -251,11 +248,13 @@ class TestUrlOnlyFileIds:
         _enable_file_references(monkeypatch, base_url=None)
         assert url_only_file_ids([_stub_file()], inline_file_text=False) == set()
 
-    def test_empty_without_object_storage(self, monkeypatch):
-        """The assistant toggle is locked on inlining without an object store,
-        so a value saved while one was connected must not keep files URL-only."""
-        _enable_file_references(monkeypatch, object_store=False)
-        assert url_only_file_ids([_stub_file()], inline_file_text=False) == set()
+    def test_needs_no_object_store(self, monkeypatch):
+        """A PostgreSQL-backed original is URL-only exactly like an object-store
+        one: the predicate reads the per-file flag and never asks the storage
+        runtime, so the toggle works in deployments without any object store."""
+        _enable_file_references(monkeypatch)
+        stored = _stub_file()
+        assert url_only_file_ids([stored], inline_file_text=False) == {stored.id}
 
     def test_selects_only_text_files_with_original(self, monkeypatch):
         _enable_file_references(monkeypatch)
@@ -288,12 +287,16 @@ class TestReferencedFileIds:
         assert url_only_file_ids([stored], inline_file_text=True) == set()
         assert url_only_file_ids([stored], inline_file_text=False) == ids
 
-    def test_empty_without_base_url_or_object_store(self, monkeypatch):
+    def test_empty_without_base_url(self, monkeypatch):
         _enable_file_references(monkeypatch, base_url=None)
         assert referenced_file_ids([_stub_file()]) == set()
 
-        _enable_file_references(monkeypatch, object_store=False)
-        assert referenced_file_ids([_stub_file()]) == set()
+    def test_unreadable_original_is_never_referenced(self, monkeypatch):
+        """``original_available`` is the loader's verdict that the bytes can be
+        served (object-store rows without a connected store are not); a file
+        it left unavailable inlines instead of getting a dead link."""
+        _enable_file_references(monkeypatch)
+        assert referenced_file_ids([_stub_file(original_available=False)]) == set()
 
 
 class TestSendPathUrlOnlyFiltering:
@@ -513,7 +516,7 @@ class TestBuildFileReferenceUrls:
 
 class TestImageReferenceFileIds:
     def test_attached_and_generated_images_are_referenced(self, monkeypatch):
-        _enable_file_references(monkeypatch, object_store=False)
+        _enable_file_references(monkeypatch)
         uploaded = _stub_file(file_type=FileType.IMAGE, name="photo.png")
         generated = _stub_file(file_type=FileType.IMAGE, name="generated_image.png")
         derived_page = _stub_file(
@@ -526,7 +529,6 @@ class TestImageReferenceFileIds:
             [uploaded, generated, derived_page, unavailable, text]
         )
 
-        # No object store needed: generated artifacts are stored inline.
         assert ids == {uploaded.id, generated.id}
 
     def test_empty_without_base_url(self, monkeypatch):
@@ -587,7 +589,7 @@ class TestImageReferenceRendering:
 
 class TestGeneratedImageMintAudit:
     async def test_previous_turn_generated_images_are_audited_once(self, monkeypatch):
-        _enable_file_references(monkeypatch, object_store=False)
+        _enable_file_references(monkeypatch)
         audit_service = AsyncMock()
         service = CompletionService(
             context_builder=MagicMock(),

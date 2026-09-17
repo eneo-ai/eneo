@@ -183,10 +183,10 @@ async def test_preflight_excludes_url_only_file_text_when_inline_disabled(monkey
         attachment_context_reserve_tokens=0,
     )
     monkeypatch.setattr(conversation_service_mod, "get_settings", lambda: settings)
-    # The URL-only predicate reads settings through the shared helper module,
-    # and only engages while the deployment has an object store connected.
+    # The URL-only predicate reads settings through the shared helper module.
+    # It asks nothing about storage: a stored original is referenceable
+    # whether PostgreSQL or an object store holds its bytes.
     monkeypatch.setattr(file_reference_mod, "get_settings", lambda: settings)
-    monkeypatch.setattr(file_reference_mod, "object_store_configured", lambda: True)
 
     text_file = MagicMock()
     text_file.file_type = FileType.TEXT
@@ -220,7 +220,6 @@ async def test_preflight_honors_governed_file_policy_over_assistant_flag(monkeyp
     )
     monkeypatch.setattr(conversation_service_mod, "get_settings", lambda: settings)
     monkeypatch.setattr(file_reference_mod, "get_settings", lambda: settings)
-    monkeypatch.setattr(file_reference_mod, "object_store_configured", lambda: True)
 
     text_file = MagicMock()
     text_file.file_type = FileType.TEXT
@@ -257,7 +256,6 @@ async def test_preflight_inlines_file_text_when_model_cannot_call_tools(monkeypa
     )
     monkeypatch.setattr(conversation_service_mod, "get_settings", lambda: settings)
     monkeypatch.setattr(file_reference_mod, "get_settings", lambda: settings)
-    monkeypatch.setattr(file_reference_mod, "object_store_configured", lambda: True)
 
     text_file = MagicMock()
     text_file.file_type = FileType.TEXT

@@ -137,6 +137,7 @@ class TestCategoryMappings:
             ActionType.FILE_UPLOADED,
             ActionType.FILE_DELETED,
             ActionType.FILE_ORIGINAL_DOWNLOAD_LINK_CREATED,
+            ActionType.FILE_ORIGINAL_DOWNLOADED,
             ActionType.FILE_SIGNED_URL_MINTED,
         ]
 
@@ -264,7 +265,7 @@ class TestCategoryDistribution:
             "admin_actions": 59,
             "user_actions": 48,
             "security_events": 12,
-            "file_operations": 5,
+            "file_operations": 6,
             "integration_events": 19,
             "system_actions": 3,
             "audit_access": 3,  # Includes AUDIT_SESSION_CREATED

@@ -329,6 +329,10 @@ const ACTION_MESSAGES = {
     name: m.audit_action_file_original_download_link_created,
     description: m.audit_action_file_original_download_link_created_description
   },
+  file_original_downloaded: {
+    name: m.audit_action_file_original_downloaded,
+    description: m.audit_action_file_original_downloaded_description
+  },
   info_blob_original_download_link_created: {
     name: m.audit_action_info_blob_original_download_link_created,
     description: m.audit_action_info_blob_original_download_link_created_description

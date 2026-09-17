@@ -5,7 +5,7 @@ import time
 from collections.abc import AsyncGenerator
 from hashlib import sha256
 from typing import TYPE_CHECKING, cast
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
@@ -157,6 +157,61 @@ async def test_original_text_download_does_not_fall_back_to_extracted_text(
     assert downloaded.headers["content-type"] == media_type
     assert downloaded.headers["content-disposition"].endswith(f'filename="{name}"')
     digest = base64.b64encode(sha256(original).digest()).decode("ascii")
+    assert downloaded.headers["repr-digest"] == f"sha-256=:{digest}:"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_uploaded_document_is_referenceable_and_downloadable_without_object_store(
+    client,
+    db_container,
+    admin_user_api_key,
+) -> None:
+    """The full signed-reference flow on a deployment with no object store.
+
+    An ordinary upload lands in PostgreSQL. The public projection advertises
+    the original (the chat UI's cue that the files tool applies), the loader
+    marks it ``original_available`` (the send path's cue to reference instead
+    of inline), and the signed original-download URL, the capability an
+    assistant or MCP tool receives, returns the exact uploaded bytes.
+    """
+    from eneo.files.file_content_loader import FileContentLoader
+
+    payload = b"id,amount\n1,10\n2,20\n"
+    headers = {"X-API-Key": admin_user_api_key.key}
+
+    uploaded = await client.post(
+        "/api/v1/files/",
+        files={"upload_file": ("ledger.csv", payload, "text/csv")},
+        headers=headers,
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    file_id = UUID(uploaded.json()["id"])
+
+    # The public projection (what the chat composer reads) advertises the
+    # stored original; the upload response itself is the plain file info.
+    fetched = await client.get(f"/api/v1/files/{file_id}/", headers=headers)
+    assert fetched.status_code == 200, fetched.text
+    assert fetched.json()["has_download_reference"] is True
+
+    async with db_container() as container:
+        object_content = container.object_content_service()
+        assert object_content.object_store_configured is False
+        repository = FileRepository(container.session())
+        metadata = await repository.get_by_id(file_id=file_id)
+        references = await repository.get_content_references([file_id])
+        assert {reference.storage_kind for reference in references} == {
+            StorageKind.POSTGRES_INLINE
+        }
+        loaded = await FileContentLoader(repository, object_content).load([metadata])
+        assert loaded[file_id].original_available is True
+
+    downloaded = await _signed_download(client, headers, file_id, original=True)
+
+    assert downloaded.status_code == 200
+    assert downloaded.content == payload
+    assert downloaded.headers["content-type"].startswith("text/csv")
+    digest = base64.b64encode(sha256(payload).digest()).decode("ascii")
     assert downloaded.headers["repr-digest"] == f"sha-256=:{digest}:"
 
 
@@ -693,6 +748,14 @@ async def test_original_audio_range_reads_only_verified_chunks_from_real_store(
                 def file_service(*, user):
                     assert user is None
                     return service
+
+                @staticmethod
+                def session():
+                    return session
+
+                @staticmethod
+                def audit_service():
+                    return AsyncMock()
 
             token = generate_file_original_download_token(
                 file_id=file_id,
