@@ -55,6 +55,7 @@
 {/snippet}
 
 {#if service.modelLoadStatus === "loading"}
+  {@render shownModel()}
   <span class="text-secondary text-[0.8125rem]" role="status">{m.ai_builder_models_loading()}</span>
 {:else if service.modelLoadStatus === "failed"}
   <!-- No turn starts until a listing confirms the model; retrying is the way on. -->

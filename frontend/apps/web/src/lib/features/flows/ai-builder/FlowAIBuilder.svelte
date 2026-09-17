@@ -1017,7 +1017,8 @@
           {editingQuestionId}
           {editingAnsweredOptionIds}
           {editingAnsweredCustomValue}
-          disabled={service.isCreating || service.isStreaming || service.modelSendBlock !== null}
+          disabled={service.isCreating || service.isStreaming}
+          sendBlockedReason={service.modelSendBlockMessage}
           onanswer={handleQuestionAnswer}
           ondelegate={handleDelegateQuestion}
           onedit={handleEditAnswer}

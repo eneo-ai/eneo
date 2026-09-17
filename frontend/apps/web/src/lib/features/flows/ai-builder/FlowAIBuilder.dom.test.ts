@@ -871,6 +871,46 @@ describe("FlowAIBuilder planner controls", () => {
     expect(service().modelSendBlock).toBeNull();
   });
 
+  it("names the retained retry model while the model listing reload is pending", async () => {
+    const sessions = turnSession("failed_before_provider").map((session) => ({
+      ...session,
+      latest_turn: {
+        ...session.latest_turn,
+        retry_request: { ...session.latest_turn.retry_request, model_id: DEFAULT_MODEL_ID }
+      }
+    }));
+    const { fetch } = makeFetch({ sessions: [sessions] });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let modelReads = 0;
+    const slow = vi.fn(async (path: string, init?: Record<string, unknown>) => {
+      if (path.endsWith("/models") && ++modelReads > 1) await held;
+      return fetch(path, init as never);
+    });
+    const { stream, calls } = makeStream(() => "hold");
+    const { service } = renderShell({ fetch: slow, stream, resumeSessionId: "s-turn" });
+    await waitFor(() => expect(service().effectiveModel?.id).toBe(DEFAULT_MODEL_ID));
+    service().selectModel(DEFAULT_MODEL_ID);
+    const modelName = service().effectiveModel!.name;
+    service().seedState({ modelLoadStatus: "failed" });
+    const failedListing = (await screen.findByText(m.failed_to_load_models())).closest(
+      "[role=alert]"
+    )! as HTMLElement;
+    await fireEvent.click(within(failedListing).getByRole("button", { name: m.retry() }));
+    try {
+      expect(await screen.findByText(m.ai_builder_models_loading())).toBeTruthy();
+      const retry = button(m.ai_builder_turn_retry());
+      expect(retry.disabled).toBe(false);
+      expect(screen.getByTestId("ai-builder-shown-model").textContent).toContain(modelName);
+      await fireEvent.click(retry);
+      await waitFor(() => expect(calls).toHaveLength(1));
+      expect(calls[0]!.body).toMatchObject({ model_id: DEFAULT_MODEL_ID, client_turn_id: TURN_ID });
+      calls[0]!.finish();
+    } finally {
+      release();
+    }
+  });
+
   it("retries the model read once however fast the button is clicked", async () => {
     // Two in-flight reads can land in either order, and a late failure would
     // erase an earlier success. The status leaves "failed" before awaiting.
@@ -1013,6 +1053,123 @@ describe("FlowAIBuilder planner controls", () => {
 });
 
 describe("FlowAIBuilder discovery screens", () => {
+  it.each([
+    ["question", "custom"],
+    ["question", "fields"],
+    ["confirm", "custom"],
+    ["confirm", "fields"]
+  ] as const)(
+    "keeps %s %s answers editable while model submission is blocked",
+    async (view, kind) => {
+      const pending =
+        kind === "custom"
+          ? CUSTOM_QUESTION
+          : question(
+              "runtime_metadata_field_details",
+              "Vad ska den som kör flödet fylla i?",
+              [{ id: "interpret_input", label: "Använd för att förstå indata" }],
+              {
+                input_field_collection: true,
+                options: [
+                  {
+                    id: "interpret_input",
+                    label: "Använd för att förstå indata",
+                    value: "interpret_input"
+                  }
+                ]
+              }
+            );
+      const savedAnswer =
+        kind === "custom"
+          ? { custom_value: "Hela nämnden" }
+          : {
+              input_fields: [
+                {
+                  value: { name: "ort", label: "Ort", type: "text", required: false, options: [] },
+                  purpose: "interpret_input"
+                }
+              ]
+            };
+      const session =
+        view === "question"
+          ? questionSession(pending)
+          : makeSession({
+              conversation: [
+                userMessage("u1", "Sammanfatta rapporter"),
+                assistantMessage("a1", "", { question: pending }),
+                userMessage("u2", "Tidigare svar", {
+                  question_answer: {
+                    kind: "structured_question_answer",
+                    question_id: pending.question_id,
+                    ...savedAnswer
+                  }
+                }),
+                assistantMessage("a2", "", {
+                  requirements_summary: {
+                    ...SUMMARY,
+                    key_decisions: [
+                      { topic: "Svar", decision: "Tidigare svar", question_id: pending.question_id }
+                    ]
+                  }
+                })
+              ]
+            });
+      const { fetch } = makeFetch({ sessions: [session] });
+      const { stream, calls } = makeStream(() => "hold");
+      const { service } = renderShell({ fetch, stream, resumeSessionId: "s-1" });
+      await waitFor(() => expect(service().effectiveModel?.id).toBe(DEFAULT_MODEL_ID));
+      service().selectModel(DEFAULT_MODEL_ID);
+      const readyModel = service().effectiveModel!;
+      service().seedState({
+        availableModels: [{ ...readyModel, availability: { state: "capacity_too_small" } }]
+      });
+      if (view === "confirm") {
+        const edit = (await screen.findByRole("button", {
+          name: m.ai_builder_confirm_change_row_aria({ topic: "Svar" })
+        })) as HTMLButtonElement;
+        expect(edit.disabled).toBe(false);
+        await fireEvent.click(edit);
+      } else if (kind === "custom") {
+        await fireEvent.click(
+          (await screen.findByText(m.ai_builder_question_custom())).closest("button")!
+        );
+      }
+      const input = await screen.findByRole("textbox", {
+        name:
+          kind === "custom" ? m.ai_builder_question_custom() : m.ai_builder_question_field_label()
+      });
+      await waitFor(() => expect(service().modelSendBlock).toBe("model_capacity_too_small"));
+      expect((input as HTMLInputElement).disabled).toBe(false);
+      await fireEvent.input(input, { target: { value: "Nytt svar" } });
+      if (kind === "fields") {
+        const purpose = screen.getByLabelText(
+          m.ai_builder_question_field_purpose()
+        ) as HTMLSelectElement;
+        expect(purpose.disabled).toBe(false);
+        await fireEvent.change(purpose, { target: { value: "interpret_input" } });
+      }
+      const confirm = button(m.ai_builder_question_confirm());
+      expect(confirm.getAttribute("aria-disabled")).toBe("true");
+      expect(screen.getAllByText(service().modelSendBlockMessage!).length).toBeGreaterThan(0);
+      await fireEvent.click(confirm);
+      await fireEvent.keyDown(input, { key: "Enter" });
+      expect(calls).toHaveLength(0);
+      expect((input as HTMLInputElement).value).toBe("Nytt svar");
+      service().seedState({ availableModels: [readyModel] });
+      await waitFor(() => expect(confirm.getAttribute("aria-disabled")).toBe("false"));
+      await fireEvent.click(confirm);
+      await waitFor(() => expect(calls).toHaveLength(1));
+      expect(calls[0]!.body).toMatchObject({
+        model_id: DEFAULT_MODEL_ID,
+        question_answer:
+          kind === "custom"
+            ? { custom_value: "Nytt svar" }
+            : { input_fields: [{ value: { label: "Nytt svar" }, purpose: "interpret_input" }] }
+      });
+      calls[0]!.finish();
+    }
+  );
+
   it("names the reading and understanding phases on the reply screen without leaving it", async () => {
     const { fetch } = makeFetch();
     const { stream, calls } = makeStream(() => "hold");
@@ -1419,6 +1576,34 @@ describe("FlowAIBuilder discovery screens", () => {
         })
       })
     ).toBeNull();
+  });
+
+  it("blocks delegation with the model reason until the model is ready", async () => {
+    const recommended = { ...FORMAT_QUESTION, recommended_option_id: "pdf" };
+    const { fetch } = makeFetch({ sessions: [questionSession(recommended)] });
+    const { stream, calls } = makeStream(() => "hold");
+    const { service } = renderShell({ fetch, stream, resumeSessionId: "s-1" });
+    const delegate = (await screen.findByRole("button", {
+      name: m.ai_builder_question_delegate()
+    })) as HTMLButtonElement;
+    for (const modelLoadStatus of ["loading", "failed"] as const) {
+      service().seedState({ modelLoadStatus });
+      await waitFor(() => expect(delegate.disabled).toBe(true));
+      expect(screen.getAllByText(service().modelSendBlockMessage!).length).toBeGreaterThan(0);
+      await fireEvent.click(delegate);
+      expect(calls).toHaveLength(0);
+      expect((screen.getByRole("radio", { name: /Som text/ }) as HTMLButtonElement).disabled).toBe(
+        false
+      );
+    }
+    service().seedState({ modelLoadStatus: "loaded" });
+    await waitFor(() => expect(delegate.disabled).toBe(false));
+    await fireEvent.click(delegate);
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]!.body).toMatchObject({
+      question_answer: { kind: "delegated_question_answer", question_id: "output_format" }
+    });
+    calls[0]!.finish();
   });
 
   it("preselects Eneo's recommendation and can hand the question back", async () => {

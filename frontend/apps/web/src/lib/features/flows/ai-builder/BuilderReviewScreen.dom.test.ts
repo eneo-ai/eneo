@@ -334,7 +334,7 @@ describe("BuilderReviewScreen plan document", () => {
       llm_calls_made_total: 2,
       token_usage_estimated: false,
       last_request_id: "request-2",
-      last_model: "openai/gpt-5.6-luna",
+      last_model: "Model A",
       last_finish_reason: "tool_calls",
       last_outcome_kind: "dispatched",
       last_token_usage_source: "provider",

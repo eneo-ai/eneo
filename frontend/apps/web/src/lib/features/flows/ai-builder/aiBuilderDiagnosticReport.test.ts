@@ -14,7 +14,7 @@ const session: AIBuilderDiagnosticReportSession = {
   latest_plan_id: "plan-1",
   telemetry: {
     last_request_id: "request-last",
-    last_model: "gpt-5.4",
+    last_model: "model-a",
     last_outcome_kind: "planned"
   }
 };
@@ -51,7 +51,7 @@ describe("aiBuilderDiagnosticReport", () => {
       request_id: "request-error",
       flow_id: "flow-from-error",
       target_kind: "edit",
-      model: "gpt-5.4",
+      model: "model-a",
       outcome_kind: "planned"
     });
     expect(report.details).toEqual({ published_version: 4, auth_layer: "flow" });

@@ -41,6 +41,7 @@
     /** Interaction lock projected from the service (e.g. while a flow is
      *  being created) — controls must LOOK disabled, not silently no-op. */
     disabled?: boolean;
+    sendBlockedReason?: string | null;
     /** Ordinal of this question in the interview, shown as "Fråga n". */
     questionNumber?: number | null;
     /** The assistant's sentence that came with the question: "Därför frågar jag". */
@@ -70,6 +71,7 @@
     answered = false,
     answerLabel = null,
     disabled = false,
+    sendBlockedReason = null,
     questionNumber = null,
     why = null,
     onanswer,
@@ -84,6 +86,7 @@
   // Generated once per instance so radiogroup + its label can link without colliding.
   const questionLabelId = `ai-builder-q-${Math.random().toString(36).slice(2, 10)}`;
 
+  const submissionDisabled = $derived(disabled || sendBlockedReason !== null);
   const reducedMotion = prefersReducedMotion();
   const schemaDirectionVisibleOptionLimit = 24;
 
@@ -457,8 +460,7 @@
   }
 
   function handleConfirm() {
-    if (!canConfirm || disabled) return;
-    if (!canConfirm || disabled) return;
+    if (!canConfirm || submissionDisabled) return;
     if (isInputFieldCollection) {
       const completedFields: StructuredInputFieldAnswer[] = [];
       for (const field of inputFields) {
@@ -929,10 +931,23 @@
       </div>
     {/if}
 
+    {#if sendBlockedReason !== null}
+      <p id="{questionLabelId}-send-block" class="text-secondary px-4 text-sm" role="status">
+        {sendBlockedReason}
+      </p>
+    {/if}
+
     <div class="actions-row">
       {#if canDelegate}
         <span class="delegate-block">
-          <button type="button" class="delegate-action" onclick={() => ondelegate?.()}>
+          <button
+            type="button"
+            class="delegate-action"
+            disabled={submissionDisabled}
+            onclick={() => {
+              if (!submissionDisabled) ondelegate?.();
+            }}
+          >
             {m.ai_builder_question_delegate()}
           </button>
           <span class="delegate-note">{m.ai_builder_question_delegate_note()}</span>
@@ -944,12 +959,16 @@
         variant="default"
         class="ml-auto max-sm:ml-0 max-sm:h-[44px] max-sm:w-full max-sm:text-sm"
         onclick={handleConfirm}
-        aria-disabled={!canConfirm || disabled}
-        aria-describedby={!canConfirm && !disabled ? `${questionLabelId}-confirm-hint` : undefined}
+        aria-disabled={!canConfirm || submissionDisabled}
+        aria-describedby={sendBlockedReason !== null
+          ? `${questionLabelId}-send-block`
+          : !canConfirm && !disabled
+            ? `${questionLabelId}-confirm-hint`
+            : undefined}
       >
         {confirmLabel}
       </Button>
-      {#if !canConfirm && !disabled}
+      {#if !canConfirm && !submissionDisabled}
         <span id="{questionLabelId}-confirm-hint" class="sr-only">
           {m.ai_builder_question_confirm_hint()}
         </span>

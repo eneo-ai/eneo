@@ -29,6 +29,7 @@
     editingAnsweredOptionIds?: string[] | null;
     editingAnsweredCustomValue?: string | null;
     disabled?: boolean;
+    sendBlockedReason?: string | null;
     onanswer: (payload: StructuredQuestionAnswerPayload) => void;
     /** Hand this question back to Eneo; only offered with a recommendation. */
     ondelegate?: (questionId: string) => void;
@@ -46,6 +47,7 @@
     editingAnsweredOptionIds = null,
     editingAnsweredCustomValue = null,
     disabled = false,
+    sendBlockedReason = null,
     onanswer,
     ondelegate,
     isEdit = false,
@@ -129,6 +131,7 @@
           plannedRemaining={questionMessage.question?.questions_planned_remaining ?? null}
           {why}
           {disabled}
+          {sendBlockedReason}
           {onanswer}
           {isEdit}
           ondelegate={editingQuestionId ? undefined : () => ondelegate?.(question.question_id)}

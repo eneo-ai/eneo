@@ -502,7 +502,8 @@
             answeredCustomValue={editingAnsweredCustomValue}
             {isEdit}
             why={editingQuestion.content.trim() || null}
-            disabled={actionsDisabled}
+            {disabled}
+            {sendBlockedReason}
             onanswer={(payload) => onanswer?.(payload)}
           />
         {/key}
@@ -631,7 +632,7 @@
                       class="justify-self-start sm:justify-self-end"
                       aria-label={m.ai_builder_confirm_change_row_aria({ topic: decision.topic })}
                       data-edit-question={settledBy ?? undefined}
-                      disabled={actionsDisabled}
+                      {disabled}
                       onclick={(event) =>
                         settledBy
                           ? reopenQuestion(settledBy, event.currentTarget)
@@ -836,7 +837,7 @@
                   size="sm"
                   class="ml-auto"
                   data-edit-question={runtimeFieldsQuestionId}
-                  disabled={actionsDisabled}
+                  {disabled}
                   onclick={(event) => reopenQuestion(runtimeFieldsQuestionId, event.currentTarget)}
                 >
                   {m.ai_builder_requirements_runtime_fields_change()}

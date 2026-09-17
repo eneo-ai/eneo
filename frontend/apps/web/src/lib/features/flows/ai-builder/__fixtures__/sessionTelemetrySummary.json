@@ -13,7 +13,7 @@
   "llm_calls_made_total": 2,
   "token_usage_estimated": false,
   "last_request_id": "req-telemetry-contract",
-  "last_model": "openai/gpt-5.4-nano",
+  "last_model": "openai/model-a",
   "last_finish_reason": "tool_calls",
   "last_outcome_kind": "dispatched",
   "last_token_usage_source": "provider",

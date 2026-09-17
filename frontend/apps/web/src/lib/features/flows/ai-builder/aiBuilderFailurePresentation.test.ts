@@ -79,14 +79,14 @@ describe("describeFailure", () => {
       }).primary?.label;
 
     expect(replay("failed_before_provider", null)).toBe(m.ai_builder_turn_retry());
-    expect(replay("failed_before_provider", "Luna")).toBe(
-      m.ai_builder_turn_retry_with_model({ model: "Luna" })
+    expect(replay("failed_before_provider", "Model A")).toBe(
+      m.ai_builder_turn_retry_with_model({ model: "Model A" })
     );
     expect(replay("failed_before_provider", "previous")).toBe(
       m.ai_builder_turn_retry_previous_model()
     );
-    expect(replay("provider_outcome_unknown", "Luna")).toBe(
-      m.ai_builder_turn_retry_with_model_and_cost_acknowledgement({ model: "Luna" })
+    expect(replay("provider_outcome_unknown", "Model A")).toBe(
+      m.ai_builder_turn_retry_with_model_and_cost_acknowledgement({ model: "Model A" })
     );
     expect(replay("provider_outcome_unknown", "previous")).toBe(
       m.ai_builder_turn_retry_previous_model_and_cost_acknowledgement()

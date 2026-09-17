@@ -52,7 +52,7 @@ function makeTelemetry(
     llm_calls_made_total: 2,
     token_usage_estimated: false,
     last_request_id: "request-1",
-    last_model: "gpt-5.4-nano",
+    last_model: "model-a",
     last_finish_reason: "tool_calls",
     last_outcome_kind: "dispatched",
     last_token_usage_source: "provider",
@@ -76,7 +76,7 @@ describe("flowAIBuilderTokenUsage", () => {
       completion: 300,
       llmCalls: 2,
       estimated: false,
-      model: "gpt-5.4-nano"
+      model: "model-a"
     });
   });
 
@@ -85,12 +85,12 @@ describe("flowAIBuilderTokenUsage", () => {
       makeTelemetry({
         token_usage_estimated: true,
         last_token_usage_estimated: true,
-        last_model: "gpt-5.4-mini"
+        last_model: "model-b"
       })
     );
 
     expect(view?.estimated).toBe(true);
-    expect(view?.model).toBe("gpt-5.4-mini");
+    expect(view?.model).toBe("model-b");
   });
 
   it("accepts the backend SessionTelemetrySummary wire shape", () => {
@@ -102,7 +102,7 @@ describe("flowAIBuilderTokenUsage", () => {
       completion: 240,
       llmCalls: 2,
       estimated: false,
-      model: "openai/gpt-5.4-nano"
+      model: "openai/model-a"
     });
   });
 

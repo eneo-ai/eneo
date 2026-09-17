@@ -2822,7 +2822,7 @@ describe("FlowAIBuilderDriver", () => {
             llm_calls_made_total: 2,
             token_usage_estimated: false,
             last_request_id: "request-1",
-            last_model: "gpt-5.4-nano",
+            last_model: "model-a",
             last_finish_reason: "tool_calls",
             last_outcome_kind: "dispatched",
             last_token_usage_source: "provider",
@@ -2838,7 +2838,7 @@ describe("FlowAIBuilderDriver", () => {
 
     expect(driver.state.session?.telemetry?.total_tokens_total).toBe(1500);
     expect(driver.state.session?.telemetry?.prompt_tokens_total).toBe(1200);
-    expect(driver.state.session?.telemetry?.last_model).toBe("gpt-5.4-nano");
+    expect(driver.state.session?.telemetry?.last_model).toBe("model-a");
   });
 
   it("refreshes session telemetry after a plan stream without usage event", async () => {
@@ -2860,7 +2860,7 @@ describe("FlowAIBuilderDriver", () => {
         llm_calls_made_total: 1,
         token_usage_estimated: false,
         last_request_id: "request-plan",
-        last_model: "gpt-5.4-nano",
+        last_model: "model-a",
         last_finish_reason: "tool_calls",
         last_outcome_kind: "dispatched",
         last_token_usage_source: "provider",

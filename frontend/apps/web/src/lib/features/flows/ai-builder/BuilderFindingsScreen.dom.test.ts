@@ -230,7 +230,7 @@ describe("BuilderFindingsScreen suggestions", () => {
   function makeSuggestions() {
     return {
       model_id: "model-1",
-      model_name: "GPT-test",
+      model_name: "Model A",
       unverified_count: 0,
       generated_at: "2026-09-05T12:00:00Z",
       flow_version: 4,
@@ -368,7 +368,7 @@ describe("BuilderFindingsScreen suggestions", () => {
       .getAllByRole("button")
       .map((button) => button.getAttribute("aria-label") ?? "")
       .find((label) => label.includes(coverage));
-    expect(readingNote).toContain("GPT-test");
+    expect(readingNote).toContain("Model A");
 
     await fireEvent.click(
       screen.getByRole("button", { name: m.ai_builder_review_suggestion_investigate() })
