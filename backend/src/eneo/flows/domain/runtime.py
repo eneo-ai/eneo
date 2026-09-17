@@ -23,8 +23,13 @@ from eneo.flows.flow_run_provenance import (
 )
 
 if TYPE_CHECKING:
+    from eneo.collections.domain.collection import Collection
     from eneo.files.file_models import File
+    from eneo.integration.domain.entities.integration_knowledge import (
+        IntegrationKnowledge,
+    )
     from eneo.spaces.space import Space
+    from eneo.websites.domain.website import Website
 
 
 def _empty_step_diagnostics() -> list["StepDiagnostic"]:
@@ -40,6 +45,18 @@ def _empty_step_ref_mapping() -> dict[str, int]:
 
 
 def _empty_attempt_start_by_step() -> dict[UUID, FlowStepAttemptStart]:
+    return {}
+
+
+def _empty_collection_cache() -> dict[UUID, Collection]:
+    return {}
+
+
+def _empty_website_cache() -> dict[UUID, Website]:
+    return {}
+
+
+def _empty_integration_knowledge_cache() -> dict[UUID, IntegrationKnowledge]:
     return {}
 
 
@@ -156,6 +173,13 @@ class RunExecutionState:
     file_cache: dict[frozenset[UUID], list[File]]
     flow_id: UUID | None = None
     flow_space: Space | None = None
+    collection_cache: dict[UUID, Collection] = field(
+        default_factory=_empty_collection_cache
+    )
+    website_cache: dict[UUID, Website] = field(default_factory=_empty_website_cache)
+    integration_knowledge_cache: dict[UUID, IntegrationKnowledge] = field(
+        default_factory=_empty_integration_knowledge_cache
+    )
     space_cache: dict[UUID, Space] = field(default_factory=_empty_space_cache)
     attempt_start_by_step: dict[UUID, FlowStepAttemptStart] = field(
         default_factory=_empty_attempt_start_by_step

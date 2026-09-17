@@ -7,9 +7,12 @@ from uuid import UUID
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import aliased, selectinload
+from sqlalchemy.orm import aliased, raiseload, selectinload
 from sqlalchemy.sql.dml import ReturningInsert, ReturningUpdate
 
+from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.assistants.assistant import Assistant
+from eneo.collections.domain.collection import Collection
 from eneo.database.database import AsyncSession
 from eneo.database.tables.ai_models_table import (
     CompletionModels,
@@ -73,6 +76,12 @@ from eneo.database.tables.websites_table import CrawlRuns as CrawlRunsTable
 from eneo.database.tables.websites_table import Websites as WebsitesTable
 from eneo.files.file_content_loader import FileAttachmentGroup, FileContentLoader
 from eneo.files.file_models import File, FileMetadata
+from eneo.integration.domain.entities.integration_knowledge import (
+    IntegrationKnowledge as IntegrationKnowledgeEntity,
+)
+from eneo.integration.domain.factories.integration_knowledge_factory import (
+    IntegrationKnowledgeFactory,
+)
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -80,12 +89,19 @@ from eneo.main.exceptions import (
 )
 from eneo.main.logging import get_logger
 from eneo.mcp_servers.domain.entities.mcp_server import GENERAL_PURPOSE
+from eneo.mcp_servers.infrastructure.mappers.mcp_server_mapper import MCPServerMapper
+from eneo.prompts.prompt_factory import PromptFactory
+from eneo.security_classifications.domain.entities.security_classification import (
+    SecurityClassification,
+)
 from eneo.spaces.api.space_models import SpaceGroupMember, SpaceMember
 from eneo.spaces.space import Space
 from eneo.spaces.space_applications_projection import SpaceApplicationsProjection
 from eneo.spaces.space_factory import SpaceFactory
 from eneo.spaces.space_flow_delete_blockers import space_has_flow_delete_blockers
 from eneo.user_groups.user_group import UserGroupState
+from eneo.users.user import UserSparse
+from eneo.websites.domain.website import Website
 
 logger = get_logger(__name__)
 
@@ -105,9 +121,7 @@ class _HasId(Protocol):
 
 if TYPE_CHECKING:
     from eneo.apps import AppRepository
-    from eneo.assistants.assistant import Assistant
     from eneo.assistants.assistant_repo import AssistantRepository
-    from eneo.collections.domain.collection import Collection
     from eneo.completion_models.domain.completion_model_repo import (
         CompletionModelRepository,
     )
@@ -125,7 +139,6 @@ if TYPE_CHECKING:
     )
     from eneo.users.user import UserInDB
     from eneo.websites.domain.http_auth_credentials import HttpAuthCredentials
-    from eneo.websites.domain.website import Website
     from eneo.websites.infrastructure.http_auth_encryption import (
         HttpAuthEncryptionService,
     )
@@ -1956,6 +1969,164 @@ class SpaceRepository:
             raise NotFoundException()
 
         return space
+
+    async def get_execution_space(self, space_id: UUID) -> Space:
+        """Read classification context without hydrating application content."""
+        record = await self.session.scalar(
+            sa.select(Spaces)
+            .where(Spaces.id == space_id, Spaces.tenant_id == self.tenant_id)
+            .options(
+                raiseload("*"),
+                selectinload(Spaces.security_classification).selectinload(
+                    SecurityClassificationDBModel.tenant
+                ),
+            )
+        )
+        if record is None:
+            raise NotFoundException()
+        return Space(
+            id=record.id,
+            tenant_id=record.tenant_id,
+            tenant_space_id=record.tenant_space_id,
+            user_id=record.user_id,
+            name=record.name,
+            description=record.description,
+            embedding_models=[],
+            completion_models=[],
+            transcription_models=[],
+            mcp_servers=[],
+            default_assistant=None,
+            assistants=[],
+            apps=[],
+            services=[],
+            websites=[],
+            collections=[],
+            integration_knowledge_list=[],
+            members={},
+            security_classification=SecurityClassification.to_domain(
+                record.security_classification
+            ),
+        )
+
+    async def get_execution_assistant(
+        self, *, space_id: UUID, assistant_id: UUID
+    ) -> Assistant | None:
+        """Read live metadata and MCP configuration without mutable selections."""
+        record = await self.session.scalar(
+            sa.select(Assistants)
+            .join(Spaces, Spaces.id == Assistants.space_id)
+            .where(
+                Assistants.id == assistant_id,
+                Spaces.id == space_id,
+                Spaces.tenant_id == self.tenant_id,
+            )
+            .options(
+                raiseload("*"),
+                selectinload(Assistants.mcp_servers),
+            )
+        )
+        if record is None:
+            return None
+        prompt = await self.session.scalar(
+            sa.select(Prompts)
+            .join(PromptsAssistants)
+            .where(
+                PromptsAssistants.assistant_id == assistant_id,
+                PromptsAssistants.is_selected,
+                Prompts.tenant_id == self.tenant_id,
+            )
+            .options(selectinload(Prompts.user))
+        )
+        mcp_servers = MCPServerMapper.to_entities(record.mcp_servers)
+        if mcp_servers:
+            mcp_servers = await self._load_assistant_mcp_server_tools_with_overrides(
+                space_id=space_id, assistant_id=assistant_id, mcp_servers=mcp_servers
+            )
+        return Assistant(
+            id=record.id,
+            space_id=space_id,
+            user=UserSparse.model_validate(self.user)
+            if self.user is not None
+            else None,
+            name=record.name,
+            prompt=PromptFactory.create_prompt_from_db(prompt, is_selected=True)
+            if prompt
+            else None,
+            completion_model=None,
+            completion_model_kwargs=ModelKwargs(),
+            logging_enabled=record.logging_enabled,
+            websites=[],
+            collections=[],
+            attachments=[],
+            published=record.published,
+            mcp_servers=[
+                server for server in mcp_servers if server.purpose == GENERAL_PURPOSE
+            ],
+        )
+
+    async def get_collection(self, collection_id: UUID) -> Collection:
+        record = await self.session.scalar(
+            sa.select(CollectionsTable).where(
+                CollectionsTable.id == collection_id,
+                CollectionsTable.tenant_id == self.tenant_id,
+            )
+        )
+        if record is None or record.embedding_model_id is None:
+            raise NotFoundException()
+        embedding_model = await self.embedding_model_repo.one(record.embedding_model_id)
+        count = await self.session.scalar(
+            sa.select(sa.func.count(InfoBlobs.id)).where(
+                InfoBlobs.group_id == record.id, active_info_blob_version()
+            )
+        )
+        return Collection.to_domain(
+            record, embedding_model=embedding_model, num_info_blobs=count or 0
+        )
+
+    async def get_website(self, website_id: UUID) -> Website:
+        mapper = sa.inspect(WebsitesTable)
+        assert mapper is not None
+        record = await self.session.scalar(
+            sa.select(WebsitesTable)
+            .where(
+                WebsitesTable.id == website_id,
+                WebsitesTable.tenant_id == self.tenant_id,
+            )
+            .options(
+                selectinload(
+                    mapper.relationships["latest_crawl"].class_attribute
+                ).selectinload(CrawlRunsTable.job)
+            )
+        )
+        if record is None:
+            raise NotFoundException()
+        embedding_model = await self.embedding_model_repo.one(record.embedding_model_id)
+        return Website.to_domain(
+            record,
+            embedding_model=embedding_model,
+            http_auth=self._decrypt_website_auth(record),
+        )
+
+    async def get_integration_knowledge(
+        self, resource_id: UUID
+    ) -> IntegrationKnowledgeEntity:
+        record = await self.session.scalar(
+            sa.select(IntegrationKnowledge)
+            .where(
+                IntegrationKnowledge.id == resource_id,
+                IntegrationKnowledge.tenant_id == self.tenant_id,
+            )
+            .options(
+                selectinload(IntegrationKnowledge.user_integration)
+                .selectinload(UserIntegrationDBModel.tenant_integration)
+                .selectinload(TenantIntegrationDBModel.integration),
+                selectinload(IntegrationKnowledge.sharepoint_subscription),
+            )
+        )
+        if record is None:
+            raise NotFoundException()
+        embedding_model = await self.embedding_model_repo.one(record.embedding_model_id)
+        return IntegrationKnowledgeFactory.create_entity(record, embedding_model)
 
     async def get_space_by_collection(self, collection_id: UUID) -> Space:
         query = (

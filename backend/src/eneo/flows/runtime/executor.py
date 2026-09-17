@@ -220,6 +220,10 @@ from eneo.model_providers.domain.provider_call_observer import (
 from eneo.model_providers.infrastructure.litellm_provider import (
     load_active_litellm_provider,
 )
+from eneo.object_content.content import (
+    ObjectContentIntegrityError,
+    ObjectContentUnavailableError,
+)
 from eneo.prompts.prompt import Prompt
 from eneo.settings.encryption_service import EncryptionService
 from eneo.spaces.space_repo import SpaceRepository
@@ -2300,27 +2304,23 @@ class FlowRunExecutor:
                 flow = await self.flow_repo.get(
                     flow_id=state.flow_id, tenant_id=self.runtime_actor.tenant_id
                 )
-                space = await self.space_repo.one(
-                    flow.space_id, include_hidden_assistants=True
-                )
+                space = await self.space_repo.get_execution_space(flow.space_id)
                 if space.tenant_id != self.runtime_actor.tenant_id:
                     raise NotFoundException()
                 state.flow_space = space
             space = state.flow_space
-            live = next(
-                (item for item in space.assistants if item.id == assistant_id), None
+            if space.id is None:
+                raise NotFoundException()
+            live = await self.space_repo.get_execution_assistant(
+                space_id=space.id, assistant_id=assistant_id
             )
-            if (
-                space.default_assistant is not None
-                and space.default_assistant.id == assistant_id
-            ):
-                live = space.default_assistant
             if live is not None:
                 self._reject_flow_mcp_assistant(live)
             assistant = await self._load_frozen_assistant(
                 space=space,
                 live=live,
                 snapshot=AssistantExecutionSnapshotV2.model_validate(validated),
+                state=state,
             )
         else:
             space = await self._load_space_for_assistant(
@@ -2338,6 +2338,7 @@ class FlowRunExecutor:
         space: Space,
         live: Assistant | None,
         snapshot: AssistantExecutionSnapshotV2,
+        state: RunExecutionState,
     ) -> Assistant:
         if space.id is None:
             raise NotFoundException()
@@ -2381,35 +2382,23 @@ class FlowRunExecutor:
         for ref in snapshot.knowledge_refs:
             resource_id = UUID(ref.id)
             if ref.kind == "collection":
-                resource_space = await self.space_repo.get_space_by_collection(
-                    resource_id
-                )
-                if resource_space.tenant_id != self.runtime_actor.tenant_id:
-                    raise NotFoundException()
-                collection = resource_space.get_collection(resource_id)
-                if collection.tenant_id != self.runtime_actor.tenant_id:
-                    raise NotFoundException()
-                collections.append(collection)
-            elif ref.kind == "website":
-                resource_space = await self.space_repo.get_space_by_website(resource_id)
-                if resource_space.tenant_id != self.runtime_actor.tenant_id:
-                    raise NotFoundException()
-                website = resource_space.get_website(resource_id)
-                if website.tenant_id != self.runtime_actor.tenant_id:
-                    raise NotFoundException()
-                websites.append(website)
-            else:
-                resource_space = (
-                    await self.space_repo.get_space_by_integration_knowledge(
+                if resource_id not in state.collection_cache:
+                    state.collection_cache[
                         resource_id
-                    )
-                )
-                if resource_space.tenant_id != self.runtime_actor.tenant_id:
-                    raise NotFoundException()
-                integration = resource_space.get_integration_knowledge(resource_id)
-                if integration.tenant_id != self.runtime_actor.tenant_id:
-                    raise NotFoundException()
-                integrations.append(integration)
+                    ] = await self.space_repo.get_collection(resource_id)
+                collections.append(state.collection_cache[resource_id])
+            elif ref.kind == "website":
+                if resource_id not in state.website_cache:
+                    state.website_cache[
+                        resource_id
+                    ] = await self.space_repo.get_website(resource_id)
+                websites.append(state.website_cache[resource_id])
+            else:
+                if resource_id not in state.integration_knowledge_cache:
+                    state.integration_knowledge_cache[
+                        resource_id
+                    ] = await self.space_repo.get_integration_knowledge(resource_id)
+                integrations.append(state.integration_knowledge_cache[resource_id])
         metadata: list[FileMetadata] = []
         for attachment in snapshot.attachments:
             file = await self.file_repo.get_by_id(
@@ -2514,10 +2503,17 @@ class FlowRunExecutor:
                     NotFoundException,
                     ProviderNotFoundException,
                     ProviderInactiveException,
+                    ObjectContentIntegrityError,
                 ) as exc:
                     raise BadRequestException(
                         "Assistant snapshot resource is missing, inaccessible, or inactive.",
                         code=FlowApiErrorCode.ASSISTANT_SNAPSHOT_RESOURCE_INVALID.value,
+                        context={"step_order": step.step_order},
+                    ) from exc
+                except ObjectContentUnavailableError as exc:
+                    raise BadRequestException(
+                        "Assistant snapshot attachment content is unavailable.",
+                        code=FlowApiErrorCode.TYPED_IO_FILE_NOT_FOUND.value,
                         context={"step_order": step.step_order},
                     ) from exc
                 continue

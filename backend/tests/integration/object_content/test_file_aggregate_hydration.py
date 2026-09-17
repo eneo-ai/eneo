@@ -290,6 +290,26 @@ async def test_space_applications_view_does_not_read_attachment_content(
             f"/api/v1/spaces/{space_id}/applications/",
             headers=headers,
         )
+        from eneo.object_content.content import ObjectContentUnavailableError
+
+        async def unavailable_attachment_content(self, groups):
+            raise ObjectContentUnavailableError(
+                "Unrelated application attachment is unreadable"
+            )
+
+        monkeypatch.setattr(
+            FileContentLoader, "load_attachment_groups", unavailable_attachment_content
+        )
+        async with db_container() as container:
+            repo = container.space_repo()
+            execution_space = await repo.get_execution_space(UUID(space_id))
+            execution_assistant = await repo.get_execution_assistant(
+                space_id=UUID(space_id), assistant_id=UUID(assistant_id)
+            )
+            assert execution_space.id == UUID(space_id)
+            assert execution_assistant is not None
+            assert execution_assistant.id == UUID(assistant_id)
+            assert execution_assistant.attachments == []
     finally:
         sa.event.remove(
             sync_engine,
@@ -300,3 +320,108 @@ async def test_space_applications_view_does_not_read_attachment_content(
     assert applications.status_code == 200, applications.text
     assert applications.json() == expected_applications
     assert (byte_loads, attachment_queries, matched_attachment_tables) == (0, [], set())
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("foreign", [False, True])
+async def test_selected_knowledge_loads_without_space_hydration(
+    db_container,
+    admin_user,
+    space_factory,
+    tenant_factory,
+    embedding_model_factory,
+    user_integration_factory,
+    monkeypatch,
+    foreign,
+):
+    from unittest.mock import AsyncMock, Mock
+
+    from eneo.database.tables.collections_table import CollectionsTable
+    from eneo.database.tables.integration_table import IntegrationKnowledge
+    from eneo.database.tables.model_providers_table import ModelProviders
+    from eneo.database.tables.websites_table import Websites
+    from eneo.main.exceptions import NotFoundException
+    from eneo.object_content.content import ObjectContentUnavailableError
+    from eneo.websites.domain.crawl_run import CrawlType
+
+    async with db_container() as container:
+        session = container.session()
+        tenant_id = (
+            (await tenant_factory(session)).id if foreign else admin_user.tenant_id
+        )
+        space = await space_factory(session, "Selected resources", tenant_id=tenant_id)
+        provider = ModelProviders(
+            tenant_id=tenant_id,
+            name="Knowledge provider",
+            provider_type="provider-a",
+            credentials={},
+        )
+        session.add(provider)
+        await session.flush()
+        model = await embedding_model_factory(
+            session, tenant_id=tenant_id, provider_id=provider.id
+        )
+        integration = await user_integration_factory(session, tenant_id=tenant_id)
+        collection = CollectionsTable(
+            name="Selected collection",
+            size=0,
+            space_id=space.id,
+            tenant_id=tenant_id,
+            user_id=admin_user.id,
+            embedding_model_id=model.id,
+        )
+        website = Websites(
+            name="Selected website",
+            url="https://example.test",
+            size=0,
+            space_id=space.id,
+            tenant_id=tenant_id,
+            user_id=admin_user.id,
+            embedding_model_id=model.id,
+            download_files=False,
+            crawl_type=CrawlType.CRAWL,
+            update_interval="never",
+        )
+        knowledge = IntegrationKnowledge(
+            name="Selected integration",
+            space_id=space.id,
+            tenant_id=tenant_id,
+            embedding_model_id=model.id,
+            user_integration_id=integration.id,
+            size=0,
+        )
+        session.add_all([collection, website, knowledge])
+        await session.flush()
+        ids = collection.id, website.id, knowledge.id
+        model_id = model.id
+
+    async with db_container() as container:
+        repo = container.space_repo()
+        hydrate_space = Mock(
+            side_effect=AssertionError("Whole space hydration reached")
+        )
+        monkeypatch.setattr(repo.factory, "create_space_from_db", hydrate_space)
+        load_attachments = AsyncMock(
+            side_effect=ObjectContentUnavailableError("Unrelated attachment")
+        )
+        monkeypatch.setattr(
+            repo.file_content_loader, "load_attachment_groups", load_attachments
+        )
+        embedding_lookup = AsyncMock(wraps=repo.embedding_model_repo.one)
+        monkeypatch.setattr(repo.embedding_model_repo, "one", embedding_lookup)
+        for loader, resource_id in zip(
+            (repo.get_collection, repo.get_website, repo.get_integration_knowledge), ids
+        ):
+            if foreign:
+                with pytest.raises(NotFoundException):
+                    await loader(resource_id)
+            else:
+                selected = await loader(resource_id)
+                assert selected.id == resource_id
+                assert selected.tenant_id == admin_user.tenant_id
+                assert selected.embedding_model.id == model_id
+        if foreign:
+            embedding_lookup.assert_not_awaited()
+        hydrate_space.assert_not_called()
+        load_attachments.assert_not_awaited()

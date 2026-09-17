@@ -6284,6 +6284,10 @@ def _v2_executor_run(user, snapshot, model):
     )
     executor.space_repo.get_space_by_assistant = AsyncMock(return_value=space)
     executor.space_repo.one = AsyncMock(return_value=space)
+    executor.space_repo.get_execution_space = AsyncMock(return_value=space)
+    executor.space_repo.get_execution_assistant = AsyncMock(
+        side_effect=lambda **_: next(iter(space.assistants), None)
+    )
     executor.flow_repo.get = AsyncMock(return_value=SimpleNamespace(space_id=space.id))
     executor.space_repo.completion_model_repo.one = AsyncMock(return_value=model)
     executor.references_service = AsyncMock()
@@ -6377,6 +6381,11 @@ async def test_v2_frozen_prompt_and_nickname_reach_completion(
     snapshot = _v2_snapshot(assistant_id, model)
     executor, run, live = _v2_executor_run(user, snapshot, model)
     if scenario == "resources":
+        from eneo.object_content.content import ObjectContentUnavailableError
+
+        executor.space_repo.one.side_effect = ObjectContentUnavailableError(
+            "Unrelated application attachment is unreadable"
+        )
         from eneo.files.file_models import File, FileMetadata
         from eneo.flows.assistant_execution_snapshot import (
             build_assistant_execution_snapshot_v2,
@@ -6421,18 +6430,10 @@ async def test_v2_frozen_prompt_and_nickname_reach_completion(
         live.prompt.text = _DEFAULT_SNAPSHOT_PROMPT
         live.completion_model_kwargs.temperature = 0.7
         live.inline_file_text = True
-        resource_space = SimpleNamespace(
-            tenant_id=user.tenant_id,
-            get_collection=lambda _: resources[0],
-            get_website=lambda _: resources[1],
-            get_integration_knowledge=lambda _: resources[2],
-        )
-        for method in (
-            "get_space_by_collection",
-            "get_space_by_website",
-            "get_space_by_integration_knowledge",
+        for method, resource in zip(
+            ("get_collection", "get_website", "get_integration_knowledge"), resources
         ):
-            setattr(executor.space_repo, method, AsyncMock(return_value=resource_space))
+            setattr(executor.space_repo, method, AsyncMock(return_value=resource))
         metadata = {
             file.id: FileMetadata.model_validate(file.model_dump()) for file in files
         }
@@ -6501,12 +6502,21 @@ async def test_v2_frozen_prompt_and_nickname_reach_completion(
     )
 
     steps = [step]
-    if scenario in {"two_snapshots", "mixed"}:
+    if scenario in {"two_snapshots", "mixed", "resources"}:
         other_snapshot = (
             _v2_snapshot(assistant_id, model, prompt="Second frozen instructions")
             if scenario == "two_snapshots"
             else build_assistant_execution_snapshot(assistant=live)
         )
+        if scenario == "resources":
+            other_snapshot = {**snapshot, "instructions": "Second frozen instructions"}
+            other_snapshot["execution_surface_hash"] = canonical_json_hash(
+                {
+                    key: value
+                    for key, value in other_snapshot.items()
+                    if key != "execution_surface_hash"
+                }
+            )
         steps.append(
             replace(
                 step, step_id=uuid4(), step_order=2, assistant_snapshot=other_snapshot
@@ -6547,6 +6557,10 @@ async def test_v2_frozen_prompt_and_nickname_reach_completion(
             else _DEFAULT_SNAPSHOT_PROMPT
         )
     if scenario == "resources":
+        executor.space_repo.one.assert_not_awaited()
+        for method in ("get_collection", "get_website", "get_integration_knowledge"):
+            getattr(executor.space_repo, method).assert_awaited_once()
+        assert calls[1].kwargs["prompt"] == "Second frozen instructions"
         retrieved = executor.references_service.get_references.await_args.kwargs
         assert retrieved["collections"] == [resources[0]]
         assert retrieved["websites"] == [resources[1]]
@@ -6625,14 +6639,7 @@ async def test_v2_resource_integrity_refused_before_provider_io(
             )
         }
     else:
-        if failure == "missing_knowledge":
-            executor.space_repo.get_space_by_collection.side_effect = (
-                NotFoundException()
-            )
-        else:
-            executor.space_repo.get_space_by_collection.return_value = SimpleNamespace(
-                tenant_id=uuid4(),
-            )
+        executor.space_repo.get_collection.side_effect = NotFoundException()
 
     result = await executor.execute(
         run_id=run.id,
@@ -6740,3 +6747,155 @@ async def test_v2_space_cache_does_not_change_v1_classification(user, monkeypatc
     levels = await executor._resolve_step_output_levels(steps=steps, state=state)
 
     assert levels == {1: 5, 2: 2}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failure", "code"),
+    [
+        ("integrity", "flow_assistant_snapshot_resource_invalid"),
+        ("unavailable", "typed_io_file_not_found"),
+    ],
+)
+async def test_v2_attachment_storage_failure_terminalizes(
+    user, monkeypatch, failure, code
+):
+    from eneo.object_content.content import (
+        ObjectContentIntegrityError,
+        ObjectContentUnavailableError,
+    )
+
+    model = _v2_model(user)
+    snapshot = _v2_snapshot(uuid4(), model)
+    file_id = uuid4()
+    snapshot["attachments"] = [{"file_id": str(file_id), "checksum": "original"}]
+    snapshot["execution_surface_hash"] = canonical_json_hash(
+        {
+            key: value
+            for key, value in snapshot.items()
+            if key != "execution_surface_hash"
+        }
+    )
+    executor, run, _ = _v2_executor_run(user, snapshot, model)
+    monkeypatch.setattr(
+        executor_module,
+        "load_active_litellm_provider",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                id=model.provider_id, provider_type=model.provider_type
+            )
+        ),
+    )
+    executor.file_repo.get_by_id.return_value = SimpleNamespace(
+        id=file_id, tenant_id=user.tenant_id
+    )
+    executor.file_content_loader.load.side_effect = (
+        ObjectContentIntegrityError("corrupt")
+        if failure == "integrity"
+        else ObjectContentUnavailableError("offline")
+    )
+
+    result = await executor.execute(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=user.tenant_id,
+        run_revision=run.revision,
+        dispatch_task_id="task-1",
+        retry_count=0,
+    )
+
+    assert result == {"status": "failed", "error": code}
+    assert (
+        executor.flow_run_terminalizer.terminalize_run.await_args.kwargs[
+            "target_status"
+        ]
+        == FlowRunStatus.FAILED
+    )
+    executor.flow_run_repo.claim_step_result.assert_not_awaited()
+    executor.completion_service.get_response.assert_not_awaited()
+    executor.references_service.get_references.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["collection", "website", "integration_knowledge"])
+async def test_v2_foreign_knowledge_is_refused_at_repository_boundary(
+    user, monkeypatch, kind
+):
+    from unittest.mock import Mock
+
+    from eneo.spaces.space_repo import SpaceRepository
+
+    model = _v2_model(user)
+    snapshot = _v2_snapshot(uuid4(), model)
+    resource_id = uuid4()
+    snapshot["knowledge_refs"] = [{"kind": kind, "id": str(resource_id)}]
+    snapshot["execution_surface_hash"] = canonical_json_hash(
+        {
+            key: value
+            for key, value in snapshot.items()
+            if key != "execution_surface_hash"
+        }
+    )
+    executor, run, _ = _v2_executor_run(user, snapshot, model)
+    mock_repo = executor.space_repo
+    session = AsyncMock()
+
+    async def select_foreign_resource(query):
+        compiled = query.compile()
+        assert "tenant_id =" in str(query.whereclause)
+        assert user.tenant_id in compiled.params.values()
+        assert resource_id in compiled.params.values()
+        return None
+
+    session.scalar.side_effect = select_foreign_resource
+    repo = SpaceRepository(
+        session=session,
+        tenant=user.tenant,
+        factory=Mock(),
+        file_content_loader=executor.file_content_loader,
+        app_repo=Mock(),
+        assistant_repo=Mock(),
+        completion_model_repo=mock_repo.completion_model_repo,
+        transcription_model_repo=Mock(),
+        embedding_model_repo=AsyncMock(),
+        http_auth_encryption=Mock(),
+    )
+    repo.one = mock_repo.one
+    repo.get_execution_space = mock_repo.one
+    repo.get_execution_assistant = AsyncMock(
+        return_value=mock_repo.one.return_value.assistants[0]
+    )
+    repo._get_from_query = AsyncMock(
+        side_effect=AssertionError("Foreign space hydration reached")
+    )
+    executor.space_repo = repo
+    monkeypatch.setattr(
+        executor_module,
+        "load_active_litellm_provider",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                id=model.provider_id, provider_type=model.provider_type
+            )
+        ),
+    )
+
+    result = await executor.execute(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=user.tenant_id,
+        run_revision=run.revision,
+        dispatch_task_id="task-1",
+        retry_count=0,
+    )
+
+    assert result == {
+        "status": "failed",
+        "error": "flow_assistant_snapshot_resource_invalid",
+    }
+    session.scalar.assert_awaited_once()
+    repo._get_from_query.assert_not_awaited()
+    repo.embedding_model_repo.one.assert_not_awaited()
+    repo.factory.create_space_from_db.assert_not_called()
+    executor.flow_run_repo.claim_step_result.assert_not_awaited()
+    executor.references_service.get_references.assert_not_awaited()
+    executor.completion_service.get_response.assert_not_awaited()
