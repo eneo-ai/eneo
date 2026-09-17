@@ -4,6 +4,17 @@ import { m } from "$lib/paraglide/messages";
 import FlowStructuredReviewEditor from "./FlowStructuredReviewEditor.svelte";
 import { parseReviewValue } from "../structuredReview";
 
+// The select primitive needs pointer capture and scrolling, which jsdom omits.
+Element.prototype.animate ??= (() => ({
+  cancel() {},
+  finished: Promise.resolve(),
+  onfinish: null
+})) as never;
+Element.prototype.hasPointerCapture ??= () => false;
+Element.prototype.setPointerCapture ??= () => undefined;
+Element.prototype.releasePointerCapture ??= () => undefined;
+Object.defineProperty(Element.prototype, "scrollIntoView", { configurable: true, value: () => {} });
+
 afterEach(cleanup);
 
 describe("FlowStructuredReviewEditor", () => {
@@ -43,10 +54,15 @@ describe("FlowStructuredReviewEditor", () => {
       disabled: false,
       onChange: vi.fn()
     });
+    const section = screen.getByText("Anteckningar").closest("details");
+    if (!section) throw new Error("Missing section disclosure");
+    expect(section.open).toBe(false);
     expect(
       screen.getByText(m.flow_run_review_collection_count({ label: "Uppgifter", count: 1 }))
     ).toBeTruthy();
     expect(screen.getByText("Kompletteringar").closest("details")?.open).toBe(false);
+    section.open = true;
+    await fireEvent(section, new Event("toggle"));
     const row = screen.getByText("Kontrollera uppgiften").closest("details");
     if (!row) throw new Error("Missing fact disclosure");
     row.open = true;
@@ -59,7 +75,7 @@ describe("FlowStructuredReviewEditor", () => {
     expect(screen.getByText("Behåll villkoren i underlaget.")).toBeTruthy();
   });
 
-  it("keeps a section's heading and extra fields visible when it contains more than a fixed heading and list", () => {
+  it("keeps a section's extra fields visible without repeating its heading inside it", async () => {
     render(FlowStructuredReviewEditor, {
       text: JSON.stringify({
         section: { heading: "Anteckningar", entries: [], qualification: "Endast vid behov" }
@@ -80,7 +96,11 @@ describe("FlowStructuredReviewEditor", () => {
       disabled: false,
       onChange: vi.fn()
     });
-    expect(screen.getByText("Rubrik")).toBeTruthy();
+    const section = screen.getByText("Anteckningar").closest("details");
+    if (!section) throw new Error("Missing section disclosure");
+    section.open = true;
+    await fireEvent(section, new Event("toggle"));
+    expect(screen.queryByText("Rubrik")).toBeNull();
     expect(screen.getByText("Qualification")).toBeTruthy();
     expect(screen.getByText("Endast vid behov")).toBeTruthy();
     expect(screen.getByText("Uppgifter").closest("details")?.open).toBe(false);
@@ -151,21 +171,45 @@ describe("FlowStructuredReviewEditor", () => {
         .getByRole("button", { name: m.flow_run_review_remove_item({ number: 1 }) })
         .hasAttribute("disabled")
     ).toBe(true);
-    expect((screen.getByLabelText("Status") as HTMLSelectElement).value).toBe('""');
-    expect((screen.getByLabelText("Bekräftat") as HTMLSelectElement).value).toBe("false");
+    const press = async (element: HTMLElement) => {
+      await fireEvent.pointerDown(element, { pointerType: "mouse", button: 0 });
+      await fireEvent.pointerUp(element, { pointerType: "mouse", button: 0 });
+      await fireEvent.click(element);
+    };
+    const choose = async (field: string, option: string) => {
+      await press(screen.getByRole("button", { name: field }));
+      await press(screen.getByRole("option", { name: option }));
+    };
+    // A row is summarised by its own content, so it is reached through its
+    // remove control rather than through a positional label.
+    const openRow = async () => {
+      const row = screen
+        .getByRole("button", { name: m.flow_run_review_remove_item({ number: 1 }) })
+        .closest("[data-review-item]")
+        ?.querySelector("details");
+      if (!row) throw new Error("Missing row disclosure");
+      if (row.open) return;
+      row.open = true;
+      await fireEvent(row, new Event("toggle"));
+    };
+    await openRow();
+    // The contract offers the empty string as a choice, so it reads as chosen.
+    expect(screen.getByRole("button", { name: "Status" }).textContent?.trim()).toBe(
+      m.flow_run_review_empty_value()
+    );
+    expect(screen.getByRole("button", { name: "Bekräftat" }).textContent?.trim()).toBe(m.no());
     expect(screen.queryByLabelText("Identifier")).toBeNull();
 
     await fireEvent.input(screen.getByLabelText("Namn"), { target: { value: "Ändrat namn" } });
     const renamed = [{ ...original[0], name: "Ändrat namn" }];
     expect(parseReviewValue(onChange.mock.lastCall![0])).toEqual(renamed);
     await rerender({ ...props, text: JSON.stringify(renamed) });
-    await fireEvent.change(screen.getByLabelText("Status"), {
-      target: { value: '"egen_uppgift"' }
-    });
+    await openRow();
+    await choose("Status", "Egen uppgift");
     expect(parseReviewValue(onChange.mock.lastCall![0])).toEqual([
       { ...renamed[0], status: "egen_uppgift" }
     ]);
-    await fireEvent.change(screen.getByLabelText("Bekräftat"), { target: { value: "true" } });
+    await choose("Bekräftat", m.yes());
     expect(parseReviewValue(onChange.mock.lastCall![0])).toEqual([{ ...renamed[0], agreed: true }]);
     await fireEvent.input(screen.getByLabelText("Antal"), { target: { value: "3" } });
     expect(parseReviewValue(onChange.mock.lastCall![0])).toEqual([{ ...renamed[0], quantity: 3 }]);

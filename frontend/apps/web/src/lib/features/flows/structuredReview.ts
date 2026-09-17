@@ -159,7 +159,9 @@ export function reviewCollectionCounts(schema: ReviewSchema, value: ReviewValue 
   if (!isReviewObject(value)) return [];
   return reviewObjectFields(schema, value).flatMap((field) => {
     const entries = value[field.key];
-    return Array.isArray(entries)
+    // An empty list tells the reviewer nothing; listing every zero buries the
+    // one count that does carry work.
+    return Array.isArray(entries) && entries.length > 0
       ? [{ label: reviewFieldLabel(field.schema, field.key), count: entries.length }]
       : [];
   });

@@ -6,6 +6,7 @@
     Eneo
   } from "@eneo/eneo-js";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
+  import ChevronRight from "lucide-svelte/icons/chevron-right";
   import { onMount } from "svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
@@ -78,6 +79,7 @@
   let historyLoading = $state(false);
   let historyError: string | null = $state(null);
   let selectedHistoryRevision = $state<number | null>(null);
+  let rejectExpanded = $state(false);
   // Which checkpoint and cursor the next history page is for, so a retry
   // re-asks the same question.
   let historyRequest: { checkpointId: string; afterRevision: number | null } | null = $state(null);
@@ -589,7 +591,9 @@
 {:else}
   <!-- The panel renders inside a table cell that keeps its own text on one
        line; review prose must wrap. -->
-  <div class="bg-primary flex min-w-0 flex-col gap-5 rounded-lg p-3 whitespace-normal sm:p-5">
+  <div
+    class="bg-primary flex max-w-[53.75rem] min-w-0 flex-col gap-5 rounded-lg p-3 whitespace-normal sm:p-5 2xl:max-w-[62.5rem]"
+  >
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div class="min-w-0">
         <h3 class="text-primary text-sm font-semibold">
@@ -814,8 +818,14 @@
     >
       <summary
         id="flow-review-history-title"
-        class="text-primary focus-visible:ring-accent-default cursor-pointer py-2 text-sm font-medium focus-visible:ring-2"
+        class="text-primary focus-visible:ring-accent-default flex min-h-10 cursor-pointer list-none items-center py-2 text-sm font-medium focus-visible:ring-2 [&::-webkit-details-marker]:hidden"
       >
+        <ChevronRight
+          class="text-secondary mr-2 size-4 shrink-0 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {historyExpanded
+            ? 'rotate-90'
+            : ''}"
+          aria-hidden="true"
+        />
         {m.flow_run_review_history_title()}
         {#if history}<span class="text-secondary ml-2 tabular-nums"
             >({history.items.length}{history.truncated ? "+" : ""})</span
@@ -922,8 +932,16 @@
       {/if}
     </details>
 
-    <details class="text-secondary border-default border-t text-sm">
-      <summary class="focus-visible:ring-accent-default cursor-pointer py-3 focus-visible:ring-2">
+    <details bind:open={rejectExpanded} class="text-secondary border-default border-t text-sm">
+      <summary
+        class="focus-visible:ring-accent-default flex min-h-10 cursor-pointer list-none items-center py-3 focus-visible:ring-2 [&::-webkit-details-marker]:hidden"
+      >
+        <ChevronRight
+          class="mr-2 size-4 shrink-0 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {rejectExpanded
+            ? 'rotate-90'
+            : ''}"
+          aria-hidden="true"
+        />
         {isTranscriptReview ? m.flow_transcript_editor_reject() : m.flow_run_review_reject_open()}
       </summary>
       <div class="flex flex-col gap-3 pb-2">

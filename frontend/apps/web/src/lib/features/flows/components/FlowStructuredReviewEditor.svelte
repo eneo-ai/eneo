@@ -43,49 +43,49 @@
   const id = $props.id();
 </script>
 
-<div class="flex min-w-0 flex-col gap-4">
-  <div class="flex flex-wrap items-start justify-between gap-3">
-    <div class="flex flex-col gap-1">
+<div class="flex max-w-[53.75rem] min-w-0 flex-col gap-4 2xl:max-w-[62.5rem]">
+  <div class="flex min-w-0 flex-col gap-1">
+    <div class="flex min-h-10 items-center justify-between gap-3">
       {#if !original}
-        <h3 class="text-primary text-sm font-semibold">
+        <h3 class="text-primary min-w-0 text-sm font-semibold">
           {showOriginal
             ? m.flow_run_review_original_payload()
             : m.flow_run_review_current_payload()}
         </h3>
-        {#if showOriginal || !disabled}<p
-            class="text-secondary max-w-prose text-sm leading-relaxed"
-          >
-            {showOriginal ? m.flow_run_review_original_help() : m.flow_run_review_fields_help()}
-          </p>{/if}
       {/if}
-    </div>
-    <div class="flex flex-wrap items-center gap-1">
-      {#if originalValue !== undefined && !original}
+      <div class="flex shrink-0 items-center gap-1">
+        {#if originalValue !== undefined && !original}
+          <Button
+            type="button"
+            variant={showOriginal ? "secondary" : "outline"}
+            class="min-h-10"
+            aria-pressed={showOriginal}
+            onclick={() => {
+              showOriginal = !showOriginal;
+              advanced = false;
+            }}
+          >
+            {showOriginal ? m.flow_run_review_back_to_edit() : m.flow_run_review_show_original()}
+          </Button>
+        {/if}
         <Button
           type="button"
-          variant="outline"
+          variant={advanced ? "secondary" : "outline"}
           class="min-h-10"
-          aria-pressed={showOriginal}
-          onclick={() => {
-            showOriginal = !showOriginal;
-            advanced = false;
-          }}
+          disabled={!readable}
+          aria-pressed={advanced}
+          onclick={() => (advanced = !advanced)}
+          >{advanced || !readable
+            ? m.flow_run_review_show_fields()
+            : m.flow_run_review_show_json()}</Button
         >
-          {showOriginal ? m.flow_run_review_back_to_edit() : m.flow_run_review_show_original()}
-        </Button>
-      {/if}
-      <Button
-        type="button"
-        variant="ghost"
-        class="min-h-10"
-        disabled={!readable}
-        aria-pressed={advanced}
-        onclick={() => (advanced = !advanced)}
-        >{advanced || !readable
-          ? m.flow_run_review_show_fields()
-          : m.flow_run_review_show_json()}</Button
-      >
+      </div>
     </div>
+    {#if !original && (showOriginal || !disabled)}
+      <p class="text-secondary max-w-prose text-sm leading-relaxed">
+        {showOriginal ? m.flow_run_review_original_help() : m.flow_run_review_fields_help()}
+      </p>
+    {/if}
   </div>
   {#if advanced || !readable}
     <Field.Field>
