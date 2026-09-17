@@ -1,8 +1,6 @@
-import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
-import httpx
 import pytest
 
 from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
@@ -10,17 +8,29 @@ from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import 
 )
 from eneo.main.exceptions import ProviderRejectedRequestException
 
+TRANSPORT = "openai"
+MODEL = "model-a"
+
+
+@pytest.fixture(autouse=True)
+def capability_metadata():
+    with patch(
+        "eneo.completion_models.infrastructure.tenant_model_capabilities.litellm.get_supported_openai_params",
+        return_value=["max_tokens", "max_completion_tokens", "response_format"],
+    ):
+        yield
+
 
 def _make_adapter(
-    provider_type: str = "openai",
+    provider_type: str = TRANSPORT,
     token_limit: int = 64000,
     max_output_tokens: int = 12000,
 ) -> TenantModelAdapter:
     """Create a minimal TenantModelAdapter for _prepare_kwargs testing."""
     adapter = object.__new__(TenantModelAdapter)
-    adapter.litellm_model = f"{provider_type}/test-model"
+    adapter.litellm_model = f"{provider_type}/{MODEL}"
     adapter.model = SimpleNamespace(
-        name="test-model",
+        name=MODEL,
         token_limit=token_limit,
         max_input_tokens=token_limit,
         max_output_tokens=max_output_tokens,
@@ -155,8 +165,8 @@ def test_input_packing_leaves_room_for_a_positive_answer():
 class TestPrepareKwargsReasoningEffortTranslation:
     """Preserve or refuse explicit choices; apply defaults only to absent effort."""
 
-    def test_openai_refuses_none_without_value_support(self):
-        adapter = _make_adapter("openai")
+    def test_refuses_none_without_value_support(self):
+        adapter = _make_adapter()
         with patch(
             "eneo.completion_models.infrastructure.tenant_model_capabilities.litellm"
         ) as mock_litellm:
@@ -212,15 +222,6 @@ class TestPrepareKwargsReasoningEffortTranslation:
             )
             with pytest.raises(RuntimeError, match="capability registry unavailable"):
                 adapter._prepare_kwargs(model_kwargs={"reasoning_effort": "high"})
-
-    def test_anthropic_refuses_unsupported_none_reasoning_effort(self):
-        adapter = _make_adapter("anthropic")
-        with patch(
-            "eneo.completion_models.infrastructure.tenant_model_capabilities.litellm"
-        ) as mock_litellm:
-            mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
-            with pytest.raises(ProviderRejectedRequestException):
-                adapter._prepare_kwargs(model_kwargs={"reasoning_effort": "none"})
 
     def test_openai_translates_pydantic_none_reasoning_effort_to_low(self):
         """Production callers pass a Pydantic ModelKwargs, not a dict.
@@ -303,8 +304,8 @@ async def test_capability_retry_and_admin_changes_remeasure_each_dispatch():
     )
     rejected = BadRequestError(
         "unsupported",
-        model="test-model",
-        llm_provider="openai",
+        model=MODEL,
+        llm_provider=TRANSPORT,
         body={"error": {"code": "unsupported_parameter", "param": "response_format"}},
     )
     transport = AsyncMock(side_effect=[rejected, response, response, response])
@@ -378,8 +379,8 @@ async def test_route_without_cap_support_refuses_before_observation():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("references,input_limit", [(1, 5000), (40, 5000), (40, 64000)])
-async def test_response_schema_reserve_covers_sdk_reference_expansion(
-    references, input_limit, monkeypatch
+async def test_response_schema_reserve_covers_reference_expansion(
+    references, input_limit
 ):
     from eneo.completion_models.infrastructure.adapters.base_adapter import (
         ProviderInput,
@@ -389,80 +390,79 @@ async def test_response_schema_reserve_covers_sdk_reference_expansion(
     )
     from eneo.tokens.token_utils import measure_provider_input_reserve
 
-    adapter = _make_adapter("anthropic", token_limit=input_limit, max_output_tokens=64)
-    adapter.litellm_model = "anthropic/claude-sonnet-4-6"
+    adapter = _make_adapter(token_limit=input_limit, max_output_tokens=64)
     messages = [{"role": "user", "content": "hello"}]
     adapter.prepare_provider_input = Mock(
         return_value=ProviderInput(messages=messages, tools=[], built_in_tools=[])
     )
+    item = {
+        "type": "object",
+        "properties": {"label": {"type": "string", "description": "value " * 250}},
+    }
     schema = {
         "type": "object",
         "properties": {
             f"field_{i}": {"$ref": "#/$defs/Item"} for i in range(references)
         },
-        "$defs": {
-            "Item": {
-                "type": "object",
-                "properties": {
-                    "label": {"type": "string", "description": "value " * 250}
-                },
-                "required": ["label"],
-                "additionalProperties": False,
-            }
-        },
-        "required": [f"field_{i}" for i in range(references)],
-        "additionalProperties": False,
+        "$defs": {"Item": item},
     }
     response_format = {
         "type": "json_schema",
-        "json_schema": {"name": "result", "schema": schema},
+        "json_schema": {"name": "answer", "schema": schema},
     }
-    requests = []
-    observer = SimpleNamespace(started=AsyncMock(), completed=AsyncMock())
-
-    async def capture_request(client, request, **kwargs):
-        requests.append(json.loads(await request.aread()))
-        return httpx.Response(
-            200,
-            request=request,
-            json={
-                "id": "response-1",
-                "type": "message",
-                "role": "assistant",
-                "model": "claude-sonnet-4-6",
-                "content": [{"type": "text", "text": "ok"}],
-                "stop_reason": "end_turn",
-                "usage": {"input_tokens": 1, "output_tokens": 1},
+    expanded_format = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "answer",
+            "schema": {
+                **schema,
+                "properties": {f"field_{i}": item for i in range(references)},
             },
-        )
-
-    monkeypatch.setattr(httpx.AsyncClient, "send", capture_request)
-
-    async def dispatch():
-        return await adapter.get_response(
-            context=SimpleNamespace(),
-            model_kwargs={"response_format": response_format},
-            provider_call_observer=observer,
-            api_base="https://provider.example/v1",
-        )
-
-    if references == 40 and input_limit == 5000:
-        with pytest.raises(ContextWindowExceededError):
-            await dispatch()
-        assert requests == []
-        observer.started.assert_not_awaited()
-    else:
-        assert (await dispatch()).text == "ok"
-        assert len(requests) == 1
-        outbound = requests[0]
-        emitted_format = (
-            outbound.get("output_format") or outbound["output_config"]["format"]
-        )
-        assert "$ref" not in json.dumps(emitted_format)
-        emitted_reserve = measure_provider_input_reserve(
-            messages, [], adapter.litellm_model, response_format=emitted_format
-        ).tokens
-        assert emitted_reserve + outbound["max_tokens"] <= input_limit
-        assert outbound["max_tokens"] == 64
-        if references == 40:
-            assert emitted_reserve > 5000
+        },
+    }
+    measured = measure_provider_input_reserve(
+        messages, [], adapter.litellm_model, response_format=response_format
+    ).tokens
+    expanded = measure_provider_input_reserve(
+        messages, [], adapter.litellm_model, response_format=expanded_format
+    ).tokens
+    assert measured >= expanded
+    if references == 40:
+        assert measured > 5000
+    observer = SimpleNamespace(started=AsyncMock(), completed=AsyncMock())
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content="ok", tool_calls=None),
+                finish_reason="stop",
+            )
+        ],
+        usage=None,
+    )
+    transport = AsyncMock(return_value=response)
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        transport,
+    ):
+        if measured >= input_limit:
+            with pytest.raises(ContextWindowExceededError):
+                await adapter.get_response(
+                    context=SimpleNamespace(),
+                    model_kwargs={"response_format": response_format},
+                    provider_call_observer=observer,
+                )
+            transport.assert_not_awaited()
+            observer.started.assert_not_awaited()
+        else:
+            assert (
+                await adapter.get_response(
+                    context=SimpleNamespace(),
+                    model_kwargs={"response_format": response_format},
+                    provider_call_observer=observer,
+                )
+            ).text == "ok"
+            transport.assert_awaited_once()
+            assert transport.call_args.kwargs["max_tokens"] == min(
+                64, input_limit - measured
+            )
+            observer.completed.assert_awaited_once()

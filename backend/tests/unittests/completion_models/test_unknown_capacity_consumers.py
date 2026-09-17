@@ -59,6 +59,7 @@ def test_input_decisions_refuse_unknown_with_dimension(consumer):
 @pytest.mark.parametrize(
     "kwargs", [None, {}, {"max_tokens": 50}, {"max_completion_tokens": 50}]
 )
+@pytest.mark.usefixtures("declared_capabilities")
 async def test_dispatch_refuses_missing_output_even_with_explicit_cap(
     method, kwargs, monkeypatch
 ):
@@ -151,3 +152,11 @@ async def test_provider_refuses_unknown_input_before_transport(method, monkeypat
         )
     assert error.value.missing_dimensions == ("max_input_tokens",)
     adapter._observed_provider_call.assert_not_awaited()
+
+
+@pytest.fixture
+def declared_capabilities(monkeypatch):
+    monkeypatch.setattr(
+        "litellm.get_supported_openai_params",
+        lambda **kwargs: ["max_tokens", "max_completion_tokens"],
+    )

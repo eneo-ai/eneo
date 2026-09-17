@@ -3081,6 +3081,10 @@ async def test_failed_rejected_output_is_unavailable_to_later_step_variables():
     provider.assert_not_called()
 
 
+TRANSPORT = "openai"
+MODEL = "model-a"
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("finish_reason", "output_type", "text"),
@@ -3094,14 +3098,23 @@ async def test_failed_rejected_output_is_unavailable_to_later_step_variables():
 async def test_reduced_cap_terminal_reason_controls_flow_consumption(
     finish_reason, output_type, text, monkeypatch
 ):
+    monkeypatch.setattr(
+        "litellm.get_supported_openai_params",
+        lambda **kwargs: [
+            "max_tokens",
+            "max_completion_tokens",
+            "stream",
+            "max_retries",
+        ],
+    )
     adapter = object.__new__(TenantModelAdapter)
-    adapter.litellm_model = "openai/test-model"
-    adapter.provider_type = "openai"
+    adapter.litellm_model = f"{TRANSPORT}/{MODEL}"
+    adapter.provider_type = TRANSPORT
     messages = [{"role": "user", "content": "hello"}]
     reserve = measure_provider_input_reserve(messages, [], adapter.litellm_model).tokens
     adapter.model = SimpleNamespace(token_limit=reserve + 1, max_output_tokens=64)
     adapter.credential_resolver = SimpleNamespace(
-        provider_type="openai",
+        provider_type=TRANSPORT,
         get_api_key=lambda **kwargs: "test-key",
         get_credential_field=lambda **kwargs: None,
     )
@@ -3125,7 +3138,7 @@ async def test_reduced_cap_terminal_reason_controls_flow_consumption(
                 "id": "response-1",
                 "object": "chat.completion",
                 "created": 1,
-                "model": "test-model",
+                "model": MODEL,
                 "choices": [
                     {
                         "index": 0,

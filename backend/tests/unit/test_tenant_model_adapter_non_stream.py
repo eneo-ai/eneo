@@ -538,6 +538,7 @@ async def test_base_observer_error_from_completion_is_not_reported_as_pre_io():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("final_tool_count", [0, 1])
+@pytest.mark.usefixtures("declared_capabilities")
 async def test_each_tool_round_counts_results_and_the_refreshed_catalogue(
     final_tool_count,
 ):
@@ -596,6 +597,7 @@ async def test_each_tool_round_counts_results_and_the_refreshed_catalogue(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("finish_reason", ["length", "stop", "tool_calls", None])
+@pytest.mark.usefixtures("declared_capabilities")
 async def test_completion_preserves_provider_finish_reason(finish_reason):
     adapter = _make_adapter()
     with patch(
@@ -614,6 +616,7 @@ async def test_completion_preserves_provider_finish_reason(finish_reason):
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("declared_capabilities")
 async def test_length_response_does_not_execute_incomplete_tool_calls():
     adapter = _make_adapter()
     mcp_proxy = _FakeMCPProxy()
@@ -631,3 +634,11 @@ async def test_length_response_does_not_execute_incomplete_tool_calls():
         )
     assert mcp_proxy.call_count == 0
     provider_call.assert_awaited_once()
+
+
+@pytest.fixture
+def declared_capabilities(monkeypatch):
+    monkeypatch.setattr(
+        "litellm.get_supported_openai_params",
+        lambda **kwargs: ["max_tokens", "max_completion_tokens"],
+    )

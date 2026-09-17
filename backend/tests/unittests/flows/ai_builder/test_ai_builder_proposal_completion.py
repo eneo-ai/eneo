@@ -2152,12 +2152,17 @@ async def test_sdk_inventory_counts_unknown_fields_without_publishing_their_name
 @pytest.mark.parametrize("effort", ["high", "none"])
 async def test_local_reasoning_refusal_preserves_known_rejection_without_starting_turn_call(
     effort,
+    monkeypatch,
 ):
+    monkeypatch.setattr(
+        "eneo.completion_models.infrastructure.tenant_model_capabilities.get_supported_openai_params",
+        lambda **kwargs: [],
+    )
     client = SimpleNamespace(acompletion=AsyncMock())
     before_provider_call = AsyncMock()
     tracker = ProposalTurnTelemetry(
         request_id="req-local-refusal",
-        model="mistral/plain-model",
+        model="model-a",
         target_kind=TargetKind.CREATE,
     )
     budget = ProposalCallBudget()
@@ -2165,8 +2170,8 @@ async def test_local_reasoning_refusal_preserves_known_rejection_without_startin
         messages=[{"role": "user", "content": "Build a summary flow"}],
         tool_schemas=[],
         route=_route(
-            model="mistral/plain-model",
-            provider_type="mistral",
+            model="model-a",
+            provider_type="provider-a",
             requested=ModelKwargs(reasoning_effort=effort),
         ),
         max_output_tokens=1024,

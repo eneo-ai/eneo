@@ -243,6 +243,10 @@ def test_provider_rejected_request_maps_to_400_despite_openai_subclassing():
     assert payload["details"]["retryable"] is False
 
 
+TRANSPORT = "openai"
+MODEL = "model-a"
+
+
 @pytest.mark.parametrize("method", ["get_response", "prepare_streaming"])
 @pytest.mark.parametrize(
     "input_limit,output_limit,status,code",
@@ -264,14 +268,23 @@ def test_initial_capacity_refusal_uses_registered_http_handler(
         TenantModelAdapter,
     )
 
+    monkeypatch.setattr(
+        "litellm.get_supported_openai_params",
+        lambda **kwargs: [
+            "max_tokens",
+            "max_completion_tokens",
+            "stream",
+            "max_retries",
+        ],
+    )
     adapter = object.__new__(TenantModelAdapter)
-    adapter.litellm_model = "openai/plain-model"
-    adapter.provider_type = "openai"
+    adapter.litellm_model = f"{TRANSPORT}/{MODEL}"
+    adapter.provider_type = TRANSPORT
     adapter.model = SimpleNamespace(
         token_limit=input_limit, max_output_tokens=output_limit
     )
     adapter.credential_resolver = SimpleNamespace(
-        provider_type="openai",
+        provider_type=TRANSPORT,
         get_api_key=lambda **kwargs: "test-key",
         get_credential_field=lambda **kwargs: None,
     )

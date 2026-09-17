@@ -4210,11 +4210,15 @@ async def test_luna_classification_uses_explicit_reasoning_control() -> None:
 
 
 @pytest.mark.asyncio
-async def test_classification_preserves_selected_reasoning_effort() -> None:
+async def test_classification_preserves_selected_reasoning_effort(monkeypatch) -> None:
     from dataclasses import replace
 
     from eneo.ai_models.completion_models.completion_model import ModelKwargs
 
+    monkeypatch.setattr(
+        "eneo.completion_models.infrastructure.tenant_model_capabilities.get_supported_openai_params",
+        lambda **kwargs: ["reasoning_effort"],
+    )
     litellm_client = AsyncMock()
     litellm_client.acompletion.return_value = _make_response(
         json.dumps(
@@ -4236,7 +4240,7 @@ async def test_classification_preserves_selected_reasoning_effort() -> None:
     await classify_slots(
         litellm_client=litellm_client,
         completion_model_route=replace(
-            _route(model="openai/reasoning-test-model"),
+            _route(model="model-a", provider_type="provider-a"),
             requested_model_kwargs=ModelKwargs(reasoning_effort="high"),
         ),
         classification_input=_classification_input("selected-high-pdf"),
@@ -5417,7 +5421,12 @@ def test_prompt_hash_changes_when_the_input_limit_changes():
 @pytest.mark.parametrize("effort", ["high", "none"])
 async def test_local_reasoning_refusal_preserves_known_rejection_before_classification(
     effort,
+    monkeypatch,
 ):
+    monkeypatch.setattr(
+        "eneo.completion_models.infrastructure.tenant_model_capabilities.get_supported_openai_params",
+        lambda **kwargs: [],
+    )
     from eneo.ai_models.completion_models.completion_model import ModelKwargs
     from eneo.flows.ai_builder.ai_builder_error_contract import AIBuilderErrorCode
 
@@ -5426,12 +5435,12 @@ async def test_local_reasoning_refusal_preserves_known_rejection_before_classifi
     before_provider_call = AsyncMock()
     tracker = ProposalTurnTelemetry(
         request_id="req-local-classification",
-        model="mistral/plain-model",
+        model="model-a",
         target_kind=TargetKind.CREATE,
     )
     route = ResolvedCompletionModelRoute(
-        litellm_model="mistral/plain-model",
-        provider_type="mistral",
+        litellm_model="model-a",
+        provider_type="provider-a",
         litellm_kwargs={},
         supported_model_kwargs=SupportedModelKwargs(),
         requested_model_kwargs=ModelKwargs(reasoning_effort=effort),

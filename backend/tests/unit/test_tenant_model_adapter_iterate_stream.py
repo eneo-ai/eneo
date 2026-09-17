@@ -636,6 +636,7 @@ def test_tool_result_budget_admits_until_exhausted_then_withholds():
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("declared_capabilities")
 async def test_non_streaming_withholds_tool_results_after_budget_exhaustion():
     adapter = _make_completion_adapter()
     adapter.get_token_limit_of_model = lambda: 2
@@ -1442,6 +1443,7 @@ async def test_iterate_stream_denied_tools_produce_structured_denial_payload():
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("declared_capabilities")
 async def test_iterate_stream_approved_tools_execute_and_continue():
     adapter = _make_adapter()
     mcp_proxy = _FakeMCPProxy()
@@ -1494,6 +1496,7 @@ async def test_iterate_stream_approved_tools_execute_and_continue():
     assert execution_events
 
 
+@pytest.mark.usefixtures("declared_capabilities")
 async def test_non_streaming_round_cap_refuses_calls_and_forces_final_answer():
     adapter = _make_completion_adapter()
     adapter.model.max_output_tokens = 8000
@@ -1548,6 +1551,7 @@ async def test_non_streaming_round_cap_refuses_calls_and_forces_final_answer():
     assert refusals[0]["tool_call_id"] == f"call_{max_rounds}"
 
 
+@pytest.mark.usefixtures("declared_capabilities")
 async def test_non_streaming_round_cap_fails_when_forced_final_requests_tools():
     adapter = _make_completion_adapter()
     mcp_proxy = _FakeMCPProxy()
@@ -1574,6 +1578,7 @@ async def test_non_streaming_round_cap_fails_when_forced_final_requests_tools():
     assert exc_info.value.code == "tool_round_limit"
 
 
+@pytest.mark.usefixtures("declared_capabilities")
 async def test_iterate_stream_round_cap_refuses_calls_and_forces_final_answer():
     adapter = _make_adapter()
     adapter.model.max_output_tokens = 8000
@@ -1711,6 +1716,7 @@ async def test_forced_final_surfaces_ignored_tool_calls_as_terminal_error():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("missing_output", [False, True])
+@pytest.mark.usefixtures("declared_capabilities")
 async def test_stream_follow_up_capacity_refusal_is_terminal_before_io(missing_output):
     adapter = _make_adapter()
     adapter.model.token_limit = 1
@@ -1737,3 +1743,11 @@ async def test_stream_follow_up_capacity_refusal_is_terminal_before_io(missing_o
     assert (
         "max_output_tokens" if missing_output else "context exceeds"
     ) in completions[-1].error
+
+
+@pytest.fixture
+def declared_capabilities(monkeypatch):
+    monkeypatch.setattr(
+        "litellm.get_supported_openai_params",
+        lambda **kwargs: ["max_tokens", "max_completion_tokens"],
+    )

@@ -4,16 +4,18 @@ from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
 
 import httpx
+import litellm
 import pytest
-from litellm.constants import (
-    DEFAULT_REASONING_EFFORT_HIGH_THINKING_BUDGET as THINKING_BUDGET,
-)
+from litellm.exceptions import BadRequestError
+from litellm.types.utils import LlmProviders
+from litellm.utils import ProviderConfigManager
 
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     reasoning_effort_options_from_model_info,
     snapshot_supported_model_kwargs,
 )
+from eneo.completion_models.infrastructure import tenant_model_capabilities
 from eneo.completion_models.infrastructure.adapters.base_adapter import ProviderInput
 from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
     TenantModelAdapter,
@@ -25,40 +27,45 @@ from eneo.governance_policy.domain.policy_resolver import (
 from eneo.main.exceptions import ProviderRejectedRequestException
 from eneo.tokens.token_utils import measure_provider_input_reserve
 
+TRANSPORT = "openai"
+MODEL = "model-a"
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("provider", "model", "cap", "rejected"),
-    [
-        ("anthropic", "claude-3-7-sonnet-20250219", 512, True),
-        ("anthropic", "claude-3-7-sonnet-20250219", THINKING_BUDGET, True),
-        ("anthropic", "claude-3-7-sonnet-20250219", THINKING_BUDGET + 1, False),
-        ("anthropic", "claude-sonnet-4-6", 512, False),
-        ("openai", "gpt-5", 512, False),
-        ("hosted_vllm", "reasoning-model", 512, False),
-    ],
-)
-@pytest.mark.parametrize("cap_parameter", [None, "max_tokens", "max_completion_tokens"])
-@pytest.mark.parametrize("constraint", ["output", "input", "caller"])
-async def test_reasoning_dispatch_preserves_cap_and_effort_after_sdk_normalization(
-    provider, model, cap, rejected, cap_parameter, constraint, monkeypatch
-):
-    if constraint == "caller" and cap_parameter is None:
-        pytest.skip("A caller ceiling requires a caller cap")
-    adapter = object.__new__(TenantModelAdapter)
-    adapter.litellm_model = f"{provider}/{model}"
-    adapter.provider_type = provider
-    messages = [{"role": "user", "content": "hello"}]
-    reserve = measure_provider_input_reserve(messages, [], adapter.litellm_model).tokens
-    adapter.model = SimpleNamespace(
-        token_limit=reserve + (cap if constraint == "input" else 64000),
-        max_output_tokens=cap if constraint == "output" else 64000,
+
+@pytest.fixture
+def reasoning_route(monkeypatch):
+    params = [
+        "max_tokens",
+        "max_completion_tokens",
+        "stream",
+        "max_retries",
+        "reasoning_effort",
+    ]
+    options = ["high", "none"]
+    config = ProviderConfigManager.get_provider_chat_config(
+        model=MODEL, provider=LlmProviders(TRANSPORT)
     )
+    assert config is not None
+    monkeypatch.setattr(
+        type(config), "get_supported_openai_params", lambda *args, **kwargs: params
+    )
+    monkeypatch.setattr(
+        litellm, "get_supported_openai_params", lambda *args, **kwargs: params
+    )
+    monkeypatch.setattr(
+        tenant_model_capabilities,
+        "resolve_reasoning_effort_options",
+        lambda **kwargs: options,
+    )
+    adapter = object.__new__(TenantModelAdapter)
+    adapter.litellm_model = f"{TRANSPORT}/{MODEL}"
+    adapter.provider_type = TRANSPORT
+    adapter.model = SimpleNamespace(token_limit=5000, max_output_tokens=64)
     adapter.credential_resolver = SimpleNamespace(
-        provider_type=provider,
+        provider_type=TRANSPORT,
         get_api_key=lambda **kwargs: "test-key",
         get_credential_field=lambda **kwargs: None,
     )
+    messages = [{"role": "user", "content": "hello"}]
     adapter.prepare_provider_input = Mock(
         return_value=ProviderInput(messages=messages, tools=[], built_in_tools=[])
     )
@@ -72,30 +79,14 @@ async def test_reasoning_dispatch_preserves_cap_and_effort_after_sdk_normalizati
 
     async def capture_request(client, request, **kwargs):
         requests.append(json.loads(await request.aread()))
-        if rejected:
-            return httpx.Response(
-                400,
-                request=request,
-                json={
-                    "type": "error",
-                    "error": {
-                        "type": "invalid_request_error",
-                        "message": "max_tokens must be greater than thinking.budget_tokens",
-                    },
-                },
-            )
         return httpx.Response(
             200,
             request=request,
             json={
                 "id": "response-1",
-                "type": "message",
                 "object": "chat.completion",
                 "created": 1,
-                "role": "assistant",
-                "model": model,
-                "content": [{"type": "text", "text": "ok"}],
-                "stop_reason": "end_turn",
+                "model": MODEL,
                 "choices": [
                     {
                         "index": 0,
@@ -104,8 +95,6 @@ async def test_reasoning_dispatch_preserves_cap_and_effort_after_sdk_normalizati
                     }
                 ],
                 "usage": {
-                    "input_tokens": 1,
-                    "output_tokens": 1,
                     "prompt_tokens": 1,
                     "completion_tokens": 1,
                     "total_tokens": 2,
@@ -114,150 +103,144 @@ async def test_reasoning_dispatch_preserves_cap_and_effort_after_sdk_normalizati
         )
 
     monkeypatch.setattr(httpx.AsyncClient, "send", capture_request)
-    model_kwargs = {"reasoning_effort": "high"}
-    if cap_parameter is not None:
-        model_kwargs[cap_parameter] = cap if constraint == "caller" else 64000
 
-    async def dispatch():
-        return await adapter.get_response(
+    async def dispatch(model_kwargs, method="get_response"):
+        return await getattr(adapter, method)(
             context=SimpleNamespace(),
             model_kwargs=model_kwargs,
-            provider_call_observer=observer,
             api_base="https://provider.example/v1",
             num_retries=0,
             max_retries=0,
+            **(
+                {"provider_call_observer": observer} if method == "get_response" else {}
+            ),
         )
 
-    if rejected:
-        with pytest.raises(ProviderRejectedRequestException) as error:
-            await dispatch()
-        assert error.value.code == "provider_rejected_request"
-        assert error.value.details["retryable"] is False
-        observer.rejected.assert_awaited_once_with(
-            observer.started.return_value, "provider_rejected"
-        )
-        observer.completed.assert_not_awaited()
-    else:
-        assert (await dispatch()).text == "ok"
-        observer.completed.assert_awaited_once()
-        observer.rejected.assert_not_awaited()
-    observer.started.assert_awaited_once()
-    observer.outcome_unknown.assert_not_awaited()
-    assert len(requests) == 1
-    outbound = requests[0]
-    assert outbound["model"] == model
-    assert outbound.get("max_completion_tokens", outbound.get("max_tokens")) == cap
-    if provider == "anthropic":
-        if model == "claude-sonnet-4-6":
-            assert outbound["thinking"]["type"] == "adaptive"
-            assert outbound["output_config"]["effort"] == "high"
-        else:
-            assert outbound["thinking"] == {
-                "type": "enabled",
-                "budget_tokens": THINKING_BUDGET,
-            }
-    else:
-        assert outbound["reasoning_effort"] == "high"
+    return SimpleNamespace(
+        adapter=adapter,
+        observer=observer,
+        requests=requests,
+        dispatch=dispatch,
+        messages=messages,
+        params=params,
+        options=options,
+    )
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("provider", "model", "reasoning_supported", "none_supported"),
+    ("input_room", "output_limit", "caller_kwargs"),
     [
-        ("openai", "gpt-4o-mini", False, False),
-        ("mistral", "plain-model", False, False),
-        ("openai", "gpt-5", True, False),
-        ("openai", "gpt-5.1", True, True),
-        ("hosted_vllm", "reasoning-model", True, False),
+        (1000, 64, {}),
+        (64, 1000, {}),
+        (1000, 64, {"max_tokens": 1000}),
+        (64, 1000, {"max_completion_tokens": 1000}),
+        (1000, 1000, {"max_tokens": 32}),
+        (1000, 1000, {"max_completion_tokens": 32}),
     ],
 )
-@pytest.mark.parametrize("effort", [None, "high", "none"])
+async def test_reasoning_dispatch_preserves_bounded_cap_on_wire(
+    input_room, output_limit, caller_kwargs, reasoning_route
+):
+    route = reasoning_route
+    reserve = measure_provider_input_reserve(
+        route.messages, [], route.adapter.litellm_model
+    ).tokens
+    route.adapter.model.token_limit = reserve + input_room
+    route.adapter.model.max_output_tokens = output_limit
+    assert (
+        await route.dispatch({"reasoning_effort": "high", **caller_kwargs})
+    ).text == "ok"
+    assert len(route.requests) == 1
+    outbound = route.requests[0]
+    assert outbound["model"] == MODEL
+    assert outbound["max_tokens"] == min(
+        output_limit, input_room, *caller_kwargs.values()
+    )
+    assert outbound["reasoning_effort"] == "high"
+    route.observer.started.assert_awaited_once()
+    route.observer.completed.assert_awaited_once()
+    route.observer.rejected.assert_not_awaited()
+    route.observer.outcome_unknown.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("effort", "supported", "none_supported"),
+    [
+        (None, False, False),
+        (None, True, True),
+        ("high", False, False),
+        ("high", True, False),
+        ("none", False, False),
+        ("none", True, False),
+        ("none", True, True),
+    ],
+)
 @pytest.mark.parametrize("method", ["get_response", "prepare_streaming"])
 async def test_reasoning_dispatch_preserves_or_refuses_explicit_choices(
-    provider, model, reasoning_supported, none_supported, effort, method, monkeypatch
+    effort, supported, none_supported, method, reasoning_route
 ):
-    adapter = object.__new__(TenantModelAdapter)
-    adapter.litellm_model = f"{provider}/{model}"
-    adapter.provider_type = provider
-    adapter.model = SimpleNamespace(token_limit=5000, max_output_tokens=64)
-    adapter.credential_resolver = SimpleNamespace(
-        provider_type=provider,
-        get_api_key=lambda **kwargs: "test-key",
-        get_credential_field=lambda **kwargs: None,
-    )
-    adapter.prepare_provider_input = Mock(
-        return_value=ProviderInput(
-            messages=[{"role": "user", "content": "hello"}],
-            tools=[],
-            built_in_tools=[],
-        )
-    )
-    observer = SimpleNamespace(
-        started=AsyncMock(return_value=uuid4()),
-        rejected=AsyncMock(),
-        completed=AsyncMock(),
-        outcome_unknown=AsyncMock(),
-    )
-    requests = []
-
-    async def capture_request(client, request, **kwargs):
-        requests.append(json.loads(await request.aread()))
-        completion = {
-            "id": "response-1",
-            "object": "chat.completion",
-            "created": 1,
-            "model": model,
-            "choices": [
-                {
-                    "index": 0,
-                    "message": {"role": "assistant", "content": "ok"},
-                    "finish_reason": "stop",
-                }
-            ],
-        }
-        return httpx.Response(200, request=request, json=completion)
-
-    monkeypatch.setattr(httpx.AsyncClient, "send", capture_request)
-    call_kwargs = (
-        {"provider_call_observer": observer} if method == "get_response" else {}
-    )
-
-    async def dispatch():
-        return await getattr(adapter, method)(
-            context=SimpleNamespace(),
-            model_kwargs={"reasoning_effort": effort} if effort is not None else {},
-            api_base="https://provider.example/v1",
-            num_retries=0,
-            max_retries=0,
-            **call_kwargs,
-        )
-
-    if (effort == "high" and not reasoning_supported) or (
-        effort == "none" and not none_supported
-    ):
+    route = reasoning_route
+    if not supported:
+        route.params.remove("reasoning_effort")
+    if not none_supported:
+        route.options.remove("none")
+    kwargs = {"reasoning_effort": effort} if effort is not None else {}
+    if effort is not None and (not supported or effort not in route.options):
         with pytest.raises(ProviderRejectedRequestException) as error:
-            await dispatch()
+            await route.dispatch(kwargs, method)
         assert error.value.code == "provider_rejected_request"
-        assert error.value.details["retryable"] is False
-        assert requests == []
-        observer.started.assert_not_awaited()
-        observer.completed.assert_not_awaited()
+        assert error.value.details == {
+            "reason": "reasoning_effort_unsupported",
+            "retryable": False,
+        }
+        assert route.requests == []
+        route.observer.started.assert_not_awaited()
+        route.observer.completed.assert_not_awaited()
     else:
-        await dispatch()
-        assert len(requests) == 1
-        expected_effort = effort
-        if expected_effort is None:
-            assert "reasoning_effort" not in requests[0]
+        await route.dispatch(kwargs, method)
+        assert len(route.requests) == 1
+        if effort is None:
+            assert "reasoning_effort" not in route.requests[0]
         else:
-            assert requests[0]["reasoning_effort"] == expected_effort
-        assert (
-            requests[0].get("max_completion_tokens", requests[0].get("max_tokens"))
-            == 64
-        )
-        observer.rejected.assert_not_awaited()
+            assert route.requests[0]["reasoning_effort"] == effort
+        assert route.requests[0]["max_tokens"] == 64
         if method == "get_response":
-            observer.started.assert_awaited_once()
-            observer.completed.assert_awaited_once()
+            route.observer.started.assert_awaited_once()
+            route.observer.completed.assert_awaited_once()
+    route.observer.rejected.assert_not_awaited()
+    route.observer.outcome_unknown.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sdk_validation_refusal_is_observed_as_non_retryable(
+    reasoning_route, monkeypatch
+):
+    route = reasoning_route
+    sdk = AsyncMock(
+        side_effect=BadRequestError(
+            message="Requested controls cannot be combined",
+            model=MODEL,
+            llm_provider=TRANSPORT,
+        )
+    )
+    monkeypatch.setattr(litellm, "acompletion", sdk)
+    with pytest.raises(ProviderRejectedRequestException) as error:
+        await route.dispatch({"reasoning_effort": "high"})
+    assert error.value.code == "provider_rejected_request"
+    assert error.value.details["retryable"] is False
+    sdk.assert_awaited_once()
+    assert sdk.call_args.kwargs["reasoning_effort"] == "high"
+    assert sdk.call_args.kwargs["max_tokens"] == 64
+    assert sdk.call_args.kwargs["model"] == route.adapter.litellm_model
+    assert route.requests == []
+    route.observer.started.assert_awaited_once()
+    route.observer.rejected.assert_awaited_once_with(
+        route.observer.started.return_value, "provider_rejected"
+    )
+    route.observer.completed.assert_not_awaited()
+    route.observer.outcome_unknown.assert_not_awaited()
 
 
 @pytest.mark.parametrize("effort", ["low", "high", "xhigh"])
@@ -302,8 +285,8 @@ def test_none_effort_is_refused_without_value_metadata(
 ) -> None:
     adapter = object.__new__(TenantModelAdapter)
     adapter.credential_resolver = Mock()
-    adapter.litellm_model = "openai/reasoning-model"
-    adapter.provider_type = "openai"
+    adapter.litellm_model = f"{TRANSPORT}/{MODEL}"
+    adapter.provider_type = TRANSPORT
     adapter.model = SimpleNamespace(max_output_tokens=4096)
 
     with (

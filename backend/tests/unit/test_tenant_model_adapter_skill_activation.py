@@ -264,6 +264,7 @@ def _reasoning_chunk(reasoning: str) -> object:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("declared_capabilities")
 async def test_non_streaming_activates_skill_before_follow_up() -> None:
     adapter = _adapter()
     adapter.model.max_output_tokens = 128000
@@ -680,6 +681,7 @@ async def test_accepted_activation_defers_external_sibling_call() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("declared_capabilities")
 async def test_rejected_activation_keeps_external_sibling_dispatchable() -> None:
     adapter = _adapter()
     runtime = _runtime()
@@ -721,6 +723,7 @@ async def test_rejected_activation_keeps_external_sibling_dispatchable() -> None
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("declared_capabilities")
 async def test_streaming_activates_skill_without_mcp_proxy() -> None:
     adapter = _adapter()
     adapter.model.max_output_tokens = 128000
@@ -1376,4 +1379,12 @@ async def test_streaming_reports_always_active_skills_as_steps() -> None:
             next(c for c in output if c.response_type is ResponseType.TOOL_CALL)
         )
         == 0
+    )
+
+
+@pytest.fixture
+def declared_capabilities(monkeypatch):
+    monkeypatch.setattr(
+        "litellm.get_supported_openai_params",
+        lambda **kwargs: ["max_tokens", "max_completion_tokens"],
     )

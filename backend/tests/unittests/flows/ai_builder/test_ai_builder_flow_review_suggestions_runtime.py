@@ -536,7 +536,13 @@ async def test_review_forwards_capacity():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("effort", ["high", "none"])
-async def test_local_reasoning_refusal_preserves_known_rejection_before_review(effort):
+async def test_local_reasoning_refusal_preserves_known_rejection_before_review(
+    effort, monkeypatch
+):
+    monkeypatch.setattr(
+        "eneo.completion_models.infrastructure.tenant_model_capabilities.get_supported_openai_params",
+        lambda **kwargs: [],
+    )
     from eneo.ai_models.completion_models.completion_model import ModelKwargs
     from eneo.completion_models.domain.model_kwargs_capabilities import (
         SupportedModelKwargs,
@@ -547,8 +553,8 @@ async def test_local_reasoning_refusal_preserves_known_rejection_before_review(e
 
     client = _Client()
     route = ResolvedCompletionModelRoute(
-        litellm_model="mistral/plain-model",
-        provider_type="mistral",
+        litellm_model="model-a",
+        provider_type="provider-a",
         litellm_kwargs={},
         supported_model_kwargs=SupportedModelKwargs(),
         requested_model_kwargs=ModelKwargs(reasoning_effort=effort),
@@ -559,7 +565,7 @@ async def test_local_reasoning_refusal_preserves_known_rejection_before_review(e
             litellm_client=client,
             completion_model_route=route,
             model_id=uuid4(),
-            model_name="plain-model",
+            model_name="model-a",
             capacity=ModelCapacity(100_000, 4000),
             budget_policy=resolve_ai_builder_budget_policy(None),
             tenant_id=uuid4(),
