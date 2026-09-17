@@ -3,7 +3,7 @@
 # Licensed under the MIT License.
 
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 from uuid import UUID
 
@@ -73,6 +73,23 @@ class WidgetPublic(BaseModel):
     paused_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
+
+
+class WidgetUsageDayPublic(BaseModel):
+    day: date
+    questions: int
+    input_tokens: int
+    output_tokens: int
+    blocked_budget: int
+    blocked_rate: int
+
+
+class WidgetUsagePublic(BaseModel):
+    days: list[WidgetUsageDayPublic]
+    budget_used_today: int = Field(
+        description="Tokens charged against today's budget, including reservations in flight."
+    )
+    daily_token_budget: int
 
 
 class WidgetPolicyPublic(BaseModel):

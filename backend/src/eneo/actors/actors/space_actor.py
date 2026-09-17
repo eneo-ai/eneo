@@ -518,6 +518,13 @@ class SpaceActor:
         return permission_map.get(resource_type)
 
     def _get_role(self):
+        # Widget visitors have no membership either: the widget is the only
+        # access path, and only into its own space, as a viewer — which lets
+        # them read (ask) published assistants and nothing else.
+        widget = getattr(self.user, "active_widget", None)
+        if widget is not None:
+            return SpaceRole.VIEWER if widget.space_id == self.space.id else None
+
         # Service keys have no user membership — the key is the only access
         # path into any space.
         if self._is_service_api_key():

@@ -36,6 +36,7 @@ CATEGORY_MAPPINGS = {
     ActionType.WIDGET_PAUSED.value: "admin_actions",
     ActionType.WIDGET_ARCHIVED.value: "admin_actions",
     ActionType.WIDGET_POLICY_UPDATED.value: "admin_actions",
+    ActionType.WIDGET_BUDGET_EXHAUSTED.value: "admin_actions",
     ActionType.CREDENTIALS_UPDATED.value: "admin_actions",
     ActionType.FEDERATION_UPDATED.value: "admin_actions",
     ActionType.MODULE_ADDED.value: "admin_actions",

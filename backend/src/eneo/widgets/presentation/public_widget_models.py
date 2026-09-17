@@ -58,6 +58,15 @@ class VisitorSessionRequest(BaseModel):
     )
 
 
+class WidgetAsk(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    question: str = Field(min_length=1, max_length=8_000)
+    session_id: Optional[UUID] = Field(
+        default=None, description="Continue one of the visitor's own sessions."
+    )
+
+
 class VisitorSession(BaseModel):
     token: str
     expires_in: int = Field(description="Seconds until the token expires.")

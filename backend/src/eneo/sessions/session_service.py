@@ -199,30 +199,38 @@ class SessionService:
         async with session.begin():
             yield
 
-    def _principal_columns(self) -> tuple[UUID | None, UUID | None]:
-        """Return (user_id, api_key_id) for the current authenticated principal.
+    def _principal_columns(
+        self,
+    ) -> tuple[UUID | None, UUID | None, UUID | None, UUID | None]:
+        """Return (user_id, api_key_id, widget_id, visitor_id) for the current
+        authenticated principal.
 
         Service keys resolve to a synthetic UserInDB whose id is not in the
-        users table, so we cannot persist self.user.id as sessions.user_id.
-        Instead we record the API key id; the resolver-supplied UserInDB
-        carries it on .active_api_key.
+        users table, so we cannot persist self.user.id as sessions.user_id;
+        we record the API key id instead. Widget visitors are likewise
+        synthetic and are recorded as widget + visitor id.
 
-        Exactly one of the returned values is non-None.
+        Exactly one principal (user, key, or widget+visitor) is non-None.
         """
+        widget = getattr(self.user, "active_widget", None)
+        if widget is not None:
+            return None, None, widget.widget_id, widget.visitor_id
         if is_service_api_key(self.user):
             key = self.user.active_api_key
             assert key is not None  # guaranteed by is_service_api_key
-            return None, key.id
-        return self.user.id, None
+            return None, key.id, None, None
+        return self.user.id, None, None, None
 
     def _is_owner(self, session: SessionInDB) -> bool:
         """Match the session's principal against the current request's principal.
 
-        Both branches require a non-None match; we never treat NULL == NULL
+        Every branch requires a non-None match; we never treat NULL == NULL
         as a match (defends against the synthetic-user/no-user trap where two
         unrelated NULL fields would otherwise compare equal).
         """
-        user_id, api_key_id = self._principal_columns()
+        user_id, api_key_id, widget_id, visitor_id = self._principal_columns()
+        if widget_id is not None:
+            return session.widget_id == widget_id and session.visitor_id == visitor_id
         if user_id is not None:
             return session.user_id == user_id
         if api_key_id is not None:
@@ -292,11 +300,13 @@ class SessionService:
         previous: bool = False,
         name_filter: str | None = None,
     ) -> tuple[list[SessionInDB], int]:
-        user_id, api_key_id = self._principal_columns()
+        user_id, api_key_id, widget_id, visitor_id = self._principal_columns()
         return await self.session_repo.get_by_assistant(
             assistant_id=assistant_id,
             user_id=user_id,
             api_key_id=api_key_id,
+            widget_id=widget_id,
+            visitor_id=visitor_id,
             limit=limit,
             cursor=cursor,
             previous=previous,
@@ -347,11 +357,13 @@ class SessionService:
         assistant_id: UUID | None,
         group_chat_id: UUID | None,
     ) -> SessionAdd:
-        user_id, api_key_id = self._principal_columns()
+        user_id, api_key_id, widget_id, visitor_id = self._principal_columns()
         return SessionAdd(
             name=name,
             user_id=user_id,
             api_key_id=api_key_id,
+            widget_id=widget_id,
+            visitor_id=visitor_id,
             assistant_id=assistant_id,
             group_chat_id=group_chat_id,
         )
@@ -541,11 +553,13 @@ class SessionService:
         previous: bool = False,
         name_filter: str | None = None,
     ) -> tuple[list[SessionInDB], int]:
-        user_id, api_key_id = self._principal_columns()
+        user_id, api_key_id, widget_id, visitor_id = self._principal_columns()
         return await self.session_repo.get_by_group_chat(
             group_chat_id=group_chat_id,
             user_id=user_id,
             api_key_id=api_key_id,
+            widget_id=widget_id,
+            visitor_id=visitor_id,
             limit=limit,
             cursor=cursor,
             previous=previous,

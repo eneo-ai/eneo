@@ -596,6 +596,10 @@ const ACTION_MESSAGES = {
   widget_policy_updated: {
     name: m.audit_action_widget_policy_updated,
     description: m.audit_action_widget_policy_updated_description
+  },
+  widget_budget_exhausted: {
+    name: m.audit_action_widget_budget_exhausted,
+    description: m.audit_action_widget_budget_exhausted_description
   }
 } satisfies Record<ActionType, { name: MessageFn; description: MessageFn }>;
 

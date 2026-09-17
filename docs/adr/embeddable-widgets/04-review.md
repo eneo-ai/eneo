@@ -32,6 +32,17 @@ A self-review of the first draft of this plan against current practice (OpenAI C
 - **Partitioned storage** as a feature, not a bug: continuity on one site, no cross-site tracking.
 - **Same-origin API from the iframe**: removes CORS and host-CSP `connect-src` requirements; nothing in the host page ever holds a credential.
 
+## Deviations recorded during implementation
+
+| # | Plan said | Implementation | Why |
+|---|---|---|---|
+| D1 | Widget principal as a `WidgetPrincipal` dataclass, never a synthetic `UserInDB` (#11) | The public `ask` runs with a synthetic visitor `UserInDB` carrying `active_widget` (same pattern as service keys' `active_api_key`); `WidgetPrincipal` is what the token dependency produces and what widget code reasons about | `AssistantService.ask` is ~400 lines coupled to the container user (space actor, governance, skills, files, streaming, persistence). Reimplementing it for a second principal type was the larger risk. The one place ownership is decided — `SessionService._principal_columns` — now returns widget + visitor, the space actor grants the visitor `VIEWER` only in the widget's own space, and the synthetic user has no permissions, so the leakage concern in #11 is contained to a role rather than a user. |
+| D2 | 30-second generation cache backed by Redis | The widget row is read per request by unique `public_id` | One indexed lookup that is needed anyway for status and limits; pause takes effect immediately. |
+| D3 | `config/` in the ask PR | Delivered with the visitor-token PR | The embed page needs it before the ask path exists. |
+| D4 | Widget sessions included in Insights tagged `source=widget` | Deferred | The Insights repository inner-joins `users` on `sessions.user_id` in eleven places; widening it is its own change and is tracked as a follow-up on the epic. |
+| D5 | `retention_days=0` never creates a session row | The session is created for the streaming turn and deleted when the stream finishes | The streaming pipeline persists placeholder rows before the model answers (stream-abort fix); deleting after settlement keeps that path intact and leaves nothing behind. |
+| D6 | Budget reservation from the model's `max_completion_tokens` | Fixed `widget_budget_reservation_tokens` (default 8 000), settled to the real prompt + completion tokens of the last question | Simple and sufficient to prevent overshoot; tunable per deployment. |
+
 ## Still open after review
 
 - Exact split of `ConversationView` dependencies on `(app)` context is unknown until the Phase 2 spike; the plan budgets it as a task, not a risk to the architecture.

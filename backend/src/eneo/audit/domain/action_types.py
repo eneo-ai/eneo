@@ -171,3 +171,4 @@ class ActionType(str, Enum):
     WIDGET_PAUSED = "widget_paused"
     WIDGET_ARCHIVED = "widget_archived"
     WIDGET_POLICY_UPDATED = "widget_policy_updated"
+    WIDGET_BUDGET_EXHAUSTED = "widget_budget_exhausted"
