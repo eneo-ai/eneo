@@ -3159,6 +3159,138 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/spaces/{space_id}/widgets/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Space Widgets
+     * @description List the widgets configured in a space.
+     */
+    get: operations["list_space_widgets_api_v1_spaces__space_id__widgets__get"];
+    put?: never;
+    /**
+     * Create Space Widget
+     * @description Create a widget draft for an assistant in the space. Requires the `widgets` permission and edit rights in the space; activation is a separate tenant-admin step.
+     */
+    post: operations["create_space_widget_api_v1_spaces__space_id__widgets__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/widgets/{id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Widget
+     * @description Get a widget's configuration and activation state.
+     */
+    get: operations["get_widget_api_v1_widgets__id___get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Update Widget
+     * @description Update a widget's configuration. Changes to allowed origins, limits, privacy or bot protection invalidate outstanding visitor tokens.
+     */
+    patch: operations["update_widget_api_v1_widgets__id___patch"];
+    trace?: never;
+  };
+  "/api/v1/widgets/{id}/activate/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Activate Widget
+     * @description Activate a widget so it serves visitors. Tenant admins only; fails with the list of blockers when the configuration is incomplete.
+     */
+    post: operations["activate_widget_api_v1_widgets__id__activate__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/widgets/{id}/pause/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Pause Widget
+     * @description Pause a widget immediately. Visitors get a paused notice and existing visitor tokens stop validating.
+     */
+    post: operations["pause_widget_api_v1_widgets__id__pause__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/widgets/{id}/archive/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Archive Widget
+     * @description Archive a widget permanently. Tenant admins only.
+     */
+    post: operations["archive_widget_api_v1_widgets__id__archive__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/widget-policy/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Widget Policy
+     * @description Get the tenant's widget policy (defaults apply when unset).
+     */
+    get: operations["get_widget_policy_api_v1_admin_widget_policy__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Update Widget Policy
+     * @description Update the tenant's widget policy guardrails.
+     */
+    patch: operations["update_widget_policy_api_v1_admin_widget_policy__patch"];
+    trace?: never;
+  };
   "/api/v1/allowed-origins/": {
     parameters: {
       query?: never;
@@ -8621,7 +8753,13 @@ export interface components {
       | "system_maintenance"
       | "audit_session_created"
       | "audit_log_viewed"
-      | "audit_log_exported";
+      | "audit_log_exported"
+      | "widget_created"
+      | "widget_updated"
+      | "widget_activated"
+      | "widget_paused"
+      | "widget_archived"
+      | "widget_policy_updated";
     /**
      * ActionUpdate
      * @description Represents an action-level configuration change request.
@@ -10587,6 +10725,11 @@ export interface components {
       file: string;
     };
     /**
+     * BotProtection
+     * @enum {string}
+     */
+    BotProtection: "altcha" | "none";
+    /**
      * BulkCrawlRequest
      * @description Request model for triggering crawls on multiple websites.
      */
@@ -12521,7 +12664,8 @@ export interface components {
       | "session"
       | "mcp_server"
       | "mcp_server_tool"
-      | "user_group";
+      | "user_group"
+      | "widget";
     /**
      * ErrorCodes
      * @enum {integer}
@@ -16248,6 +16392,19 @@ export interface components {
        */
       readonly count: number;
     };
+    /** PaginatedResponse[WidgetPublic] */
+    PaginatedResponse_WidgetPublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["WidgetPublic"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
     /** PaginatedResponse[str] */
     PaginatedResponse_str_: {
       /**
@@ -16718,6 +16875,7 @@ export interface components {
       | "api_keys"
       | "storage"
       | "modules"
+      | "widgets"
       | "assistant_debug"
       | "web_search"
       | "image_generation";
@@ -19770,6 +19928,10 @@ export interface components {
       api_key_policy?: {
         [key: string]: unknown;
       };
+      /** Widget Policy */
+      widget_policy?: {
+        [key: string]: unknown;
+      };
       /** Favorite Providers */
       favorite_providers?: string[];
     };
@@ -20157,6 +20319,10 @@ export interface components {
       };
       /** Api Key Policy */
       api_key_policy?: {
+        [key: string]: unknown;
+      };
+      /** Widget Policy */
+      widget_policy?: {
         [key: string]: unknown;
       };
       /** Favorite Providers */
@@ -21592,6 +21758,239 @@ export interface components {
        * @description Password for HTTP Basic Authentication. Set to null to remove auth. Must be provided with username.
        */
       http_auth_password?: string | null;
+    };
+    /**
+     * WidgetColorScheme
+     * @enum {string}
+     */
+    WidgetColorScheme: "auto" | "light" | "dark";
+    /** WidgetCreate */
+    WidgetCreate: {
+      /**
+       * Target Id
+       * Format: uuid
+       * @description Assistant in the space to publish.
+       */
+      target_id: string;
+      /** Name */
+      name: string;
+      /** @default auto */
+      language?: components["schemas"]["WidgetLanguage"];
+    };
+    /**
+     * WidgetLanguage
+     * @enum {string}
+     */
+    WidgetLanguage: "sv" | "en" | "auto";
+    /**
+     * WidgetLauncher
+     * @enum {string}
+     */
+    WidgetLauncher: "bubble" | "bar" | "none";
+    /** WidgetLimits */
+    WidgetLimits: {
+      /**
+       * Messages Per Visitor 10Min
+       * @default 10
+       */
+      messages_per_visitor_10min?: number;
+      /**
+       * Messages Per Ip Hour
+       * @default 60
+       */
+      messages_per_ip_hour?: number;
+      /**
+       * Daily Token Budget
+       * @default 500000
+       */
+      daily_token_budget?: number;
+      /**
+       * Max Question Chars
+       * @default 2000
+       */
+      max_question_chars?: number;
+      /**
+       * Max Session Turns
+       * @default 30
+       */
+      max_session_turns?: number;
+    };
+    /** WidgetPolicyPublic */
+    WidgetPolicyPublic: {
+      /** Max Active Widgets */
+      max_active_widgets: number;
+      /** Max Daily Token Budget */
+      max_daily_token_budget: number;
+      /** Allow Bot Protection None */
+      allow_bot_protection_none: boolean;
+      /** Min Retention Days */
+      min_retention_days: number;
+      /** Max Retention Days */
+      max_retention_days: number;
+    };
+    /** WidgetPolicyUpdate */
+    WidgetPolicyUpdate: {
+      /** Max Active Widgets */
+      max_active_widgets?: number | null;
+      /** Max Daily Token Budget */
+      max_daily_token_budget?: number | null;
+      /** Allow Bot Protection None */
+      allow_bot_protection_none?: boolean | null;
+      /** Min Retention Days */
+      min_retention_days?: number | null;
+      /** Max Retention Days */
+      max_retention_days?: number | null;
+    };
+    /**
+     * WidgetPosition
+     * @enum {string}
+     */
+    WidgetPosition: "bottom-right" | "bottom-left";
+    /** WidgetPrivacy */
+    WidgetPrivacy: {
+      /**
+       * Retention Days
+       * @default 30
+       */
+      retention_days?: number;
+      /**
+       * Store Feedback Text
+       * @default false
+       */
+      store_feedback_text?: boolean;
+    };
+    /** WidgetPublic */
+    WidgetPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Public Id */
+      public_id: string;
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
+      target_type: components["schemas"]["WidgetTargetType"];
+      /**
+       * Target Id
+       * Format: uuid
+       */
+      target_id: string;
+      status: components["schemas"]["WidgetStatus"];
+      /** Token Generation */
+      token_generation: number;
+      /** Name */
+      name: string;
+      texts: components["schemas"]["WidgetTexts"];
+      theme: components["schemas"]["WidgetTheme"];
+      limits: components["schemas"]["WidgetLimits"];
+      privacy: components["schemas"]["WidgetPrivacy"];
+      language: components["schemas"]["WidgetLanguage"];
+      /** Allowed Origins */
+      allowed_origins: string[];
+      bot_protection: components["schemas"]["BotProtection"];
+      /**
+       * Activation Blockers
+       * @description Empty when the widget can be activated as configured.
+       */
+      activation_blockers: string[];
+      /** Created By User Id */
+      created_by_user_id?: string | null;
+      /** Activated By User Id */
+      activated_by_user_id?: string | null;
+      /** Activated At */
+      activated_at?: string | null;
+      /** Paused At */
+      paused_at?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
+     * WidgetStatus
+     * @enum {string}
+     */
+    WidgetStatus: "draft" | "active" | "paused" | "archived";
+    /**
+     * WidgetTargetType
+     * @enum {string}
+     */
+    WidgetTargetType: "assistant";
+    /** WidgetTexts */
+    WidgetTexts: {
+      /**
+       * Title
+       * @default
+       */
+      title?: string;
+      /**
+       * Welcome
+       * @default
+       */
+      welcome?: string;
+      /**
+       * Placeholder
+       * @default
+       */
+      placeholder?: string;
+      /** Suggested Questions */
+      suggested_questions?: string[];
+      /**
+       * Ai Disclosure
+       * @default Du chattar med en AI-assistent. Svaren kan innehålla fel – kontrollera viktig information.
+       */
+      ai_disclosure?: string;
+      /**
+       * Personal Data Notice
+       * @default
+       */
+      personal_data_notice?: string;
+      /** Privacy Url */
+      privacy_url?: string | null;
+    };
+    /** WidgetTheme */
+    WidgetTheme: {
+      /**
+       * Primary Color
+       * @default #1F4E79
+       */
+      primary_color?: string;
+      /** @default auto */
+      color_scheme?: components["schemas"]["WidgetColorScheme"];
+      /** @default bottom-right */
+      position?: components["schemas"]["WidgetPosition"];
+      /** @default bubble */
+      launcher?: components["schemas"]["WidgetLauncher"];
+      /**
+       * Radius
+       * @default 12
+       */
+      radius?: number;
+      /** Logo File Id */
+      logo_file_id?: string | null;
+    };
+    /** WidgetUpdate */
+    WidgetUpdate: {
+      /** Name */
+      name?: string | null;
+      texts?: components["schemas"]["WidgetTexts"] | null;
+      theme?: components["schemas"]["WidgetTheme"] | null;
+      limits?: components["schemas"]["WidgetLimits"] | null;
+      privacy?: components["schemas"]["WidgetPrivacy"] | null;
+      language?: components["schemas"]["WidgetLanguage"] | null;
+      /** Allowed Origins */
+      allowed_origins?: string[] | null;
+      bot_protection?: components["schemas"]["BotProtection"] | null;
     };
     /**
      * WizardType
@@ -34039,6 +34438,482 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_space_widgets_api_v1_spaces__space_id__widgets__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        space_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_WidgetPublic_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  create_space_widget_api_v1_spaces__space_id__widgets__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        space_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WidgetCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WidgetPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_widget_api_v1_widgets__id___get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WidgetPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  update_widget_api_v1_widgets__id___patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WidgetUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WidgetPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  activate_widget_api_v1_widgets__id__activate__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WidgetPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  pause_widget_api_v1_widgets__id__pause__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WidgetPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  archive_widget_api_v1_widgets__id__archive__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WidgetPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_widget_policy_api_v1_admin_widget_policy__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WidgetPolicyPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  update_widget_policy_api_v1_admin_widget_policy__patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WidgetPolicyUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WidgetPolicyPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };

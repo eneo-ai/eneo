@@ -162,3 +162,11 @@ class ActionType(str, Enum):
     AUDIT_SESSION_CREATED = "audit_session_created"
     AUDIT_LOG_VIEWED = "audit_log_viewed"
     AUDIT_LOG_EXPORTED = "audit_log_exported"
+
+    # Widget Actions
+    WIDGET_CREATED = "widget_created"
+    WIDGET_UPDATED = "widget_updated"
+    WIDGET_ACTIVATED = "widget_activated"
+    WIDGET_PAUSED = "widget_paused"
+    WIDGET_ARCHIVED = "widget_archived"
+    WIDGET_POLICY_UPDATED = "widget_policy_updated"

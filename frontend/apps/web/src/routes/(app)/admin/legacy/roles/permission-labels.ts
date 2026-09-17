@@ -83,6 +83,11 @@ export function getPermissionCopy(name: string, fallbackDescription: string): En
         label: m.permission_modules(),
         description: m.permission_modules_description()
       };
+    case "widgets":
+      return {
+        label: m.permission_widgets(),
+        description: m.permission_widgets_description()
+      };
     case "web_search":
       return {
         label: m.permission_web_search(),
