@@ -11,7 +11,7 @@ import re
 import typing
 from collections.abc import Sequence
 
-from starlette.datastructures import Headers, MutableHeaders
+from starlette.datastructures import URL, Headers, MutableHeaders
 from starlette.responses import PlainTextResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -32,7 +32,7 @@ class CORSMiddleware:
         expose_headers: Sequence[str] = (),
         max_age: int = 600,
         callback: typing.Optional[
-            typing.Callable[[str, Headers, bool], typing.Awaitable[bool]]
+            typing.Callable[[str, Headers, bool, URL | None], typing.Awaitable[bool]]
         ] = None,
     ) -> None:
         super().__init__()
@@ -105,7 +105,9 @@ class CORSMiddleware:
             await response(scope, receive, send)
             return
 
-        if not await self.is_allowed_origin(origin=origin, request_headers=headers):
+        if not await self.is_allowed_origin(
+            origin=origin, request_headers=headers, request_url=URL(scope=scope)
+        ):
             response = PlainTextResponse(
                 "Disallowed CORS origin",
                 status_code=400,
@@ -128,6 +130,7 @@ class CORSMiddleware:
         request_headers: Headers | None = None,
         *,
         is_preflight: bool = False,
+        request_url: URL | None = None,
     ) -> bool:
         if self.allow_all_origins:
             return True
@@ -142,7 +145,7 @@ class CORSMiddleware:
 
         if self.callback is not None:
             return await self.callback(
-                origin, request_headers or Headers(), is_preflight
+                origin, request_headers or Headers(), is_preflight, request_url
             )
 
         return False

@@ -62,7 +62,8 @@ async def test_cors_exposes_both_trace_headers(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_500_exposes_trace_headers(app, allowed_origin):
+@pytest.mark.parametrize("same_origin", [False, True])
+async def test_500_exposes_trace_headers(app, allowed_origin, same_origin):
     """An unhandled 500 must still expose the trace headers via CORS and carry
     error_id, exercising the manual CORS block in the Exception handler that
     reuses _TRACE_EXPOSE_HEADERS (server/main.py).
@@ -79,14 +80,15 @@ async def test_500_exposes_trace_headers(app, allowed_origin):
         raise RuntimeError("forced error for integration test")
 
     transport = ASGITransport(app=app, raise_app_exceptions=False)
+    request_origin = "http://test.local" if same_origin else allowed_origin
     async with AsyncClient(transport=transport, base_url="http://test.local") as client:
         response = await client.get(
             "/api/v1/_test_force_500",
-            headers={"Origin": allowed_origin},
+            headers={"Origin": request_origin},
         )
 
     assert response.status_code == 500
-    assert response.headers["access-control-allow-origin"] == allowed_origin
+    assert response.headers["access-control-allow-origin"] == request_origin
     assert "error_id" in response.json(), "error_id must be present on 500 responses"
 
     expose = response.headers.get("access-control-expose-headers", "").lower()

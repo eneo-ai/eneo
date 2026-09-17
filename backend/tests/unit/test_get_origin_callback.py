@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import pytest
+from httpx import ASGITransport, AsyncClient
 from starlette.datastructures import Headers
 
 from eneo.allowed_origins import get_origin_callback as callback_module
@@ -72,6 +73,56 @@ def test_tenant_origin_requirement_is_enabled_by_default():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("origin", "extra_headers", "expected_status"),
+    [
+        ("https://api.example.com", {}, 204),
+        ("https://api.example.com:443", {}, 204),
+        ("http://api.example.com", {}, 400),
+        ("https://api.example.com:8443", {}, 400),
+        ("https://other.example.com", {}, 400),
+        ("https://api.example.com", {"Authorization": "Bearer token"}, 204),
+        ("https://api.example.com", {"X-Widget-Key": "invalid"}, 400),
+        ("https://api.example.com:bad", {}, 400),
+        ("https://api.example.com/path", {}, 400),
+        (
+            "http://other.example.com",
+            {"X-Forwarded-Host": "other.example.com", "X-Forwarded-Proto": "http"},
+            400,
+        ),
+    ],
+)
+async def test_cors_uses_request_origin_without_bypassing_api_keys(
+    monkeypatch, origin, extra_headers, expected_status
+):
+    _install_common_fakes(monkeypatch)
+    settings = _settings()
+    settings.api_key_header_name = "X-Widget-Key"
+    monkeypatch.setattr(callback_module, "get_settings", lambda: settings)
+    reached_paths = []
+
+    async def app(scope, receive, send):  # noqa: ARG001
+        reached_paths.append(scope["path"])
+        await send({"type": "http.response.start", "status": 204, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    cors = CORSMiddleware(app, callback=callback_module.get_origin)
+    async with AsyncClient(
+        transport=ASGITransport(app=cors), base_url="https://api.example.com"
+    ) as client:
+        response = await client.post(
+            "/api/v1/users/login/token/",
+            headers={"Origin": origin, **extra_headers},
+            data={"username": "test@example.com", "password": "test-only"},
+        )
+
+    assert response.status_code == expected_status
+    assert reached_paths == (
+        ["/api/v1/users/login/token/"] if expected_status == 204 else []
+    )
+
+
+@pytest.mark.asyncio
 async def test_actual_request_cannot_use_preflight_origin_allowlist(monkeypatch):
     _install_common_fakes(monkeypatch)
     monkeypatch.setattr(callback_module, "get_settings", _settings)
@@ -107,6 +158,7 @@ async def test_actual_request_cannot_use_preflight_origin_allowlist(monkeypatch)
     )
     scope = {
         "type": "http",
+        "path": "/",
         "method": "OPTIONS",
         "headers": [
             (b"origin", b"https://key.example"),
@@ -128,7 +180,7 @@ async def test_actual_request_cannot_use_preflight_origin_allowlist(monkeypatch)
 async def test_cors_middleware_passes_preflight_headers_to_callback():
     captured = None
 
-    async def callback(origin, headers, is_preflight):
+    async def callback(origin, headers, is_preflight, request_url):
         nonlocal captured
         captured = (origin, headers.get("access-control-request-headers"), is_preflight)
         return True
@@ -161,7 +213,7 @@ async def test_cors_middleware_rejects_origin_before_calling_application():
     application_called = False
     sent_messages = []
 
-    async def callback(origin, headers, is_preflight):
+    async def callback(origin, headers, is_preflight, request_url):
         assert origin == "https://denied.example"
         assert headers["x-api-key"] == "pk_example"
         assert not is_preflight
@@ -181,6 +233,7 @@ async def test_cors_middleware_rejects_origin_before_calling_application():
     await cors(
         {
             "type": "http",
+            "path": "/",
             "method": "POST",
             "headers": [
                 (b"origin", b"https://denied.example"),
@@ -200,7 +253,7 @@ async def test_cors_middleware_calls_application_after_origin_is_allowed():
     application_called = False
     sent_messages = []
 
-    async def callback(origin, headers, is_preflight):  # noqa: ARG001
+    async def callback(origin, headers, is_preflight, request_url):  # noqa: ARG001
         return True
 
     async def app(scope, receive, send):  # noqa: ARG001
@@ -219,6 +272,7 @@ async def test_cors_middleware_calls_application_after_origin_is_allowed():
     await cors(
         {
             "type": "http",
+            "path": "/",
             "method": "POST",
             "headers": [(b"origin", b"https://allowed.example")],
         },

@@ -413,11 +413,43 @@ async def test_admin_can_relax_tenant_origin_requirement(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_same_origin_password_login_without_tenant_origin(
+    client, patch_auth_service_jwt
+):
+    origin = "https://api.example.com"
+    client.base_url = origin
+    response = await client.post(
+        "/api/v1/users/login/token/",
+        data={"username": "test@example.com", "password": "IntegrationPass123!"},
+        headers={"Origin": origin},
+    )
+    assert response.status_code == 200, response.text
+    token = response.json()["access_token"]
+
+    response = await client.get(
+        "/api/v1/users/me/",
+        headers={"Origin": origin, "Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200, response.text
+
+    response = await client.post(
+        "/api/v1/users/login/token/",
+        data={"username": "test@example.com", "password": "IntegrationPass123!"},
+        headers={"Origin": "https://other.example.com"},
+    )
+    assert response.status_code == 400, response.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("same_origin", [False, True])
 async def test_public_key_cors_obeys_tenant_policy_and_revocation(
-    client, default_user_token, monkeypatch
+    client, default_user_token, monkeypatch, same_origin
 ):
     monkeypatch.setattr(origin_callback, "_preflight_key_origin_cache_expires_at", 0.0)
     origin = f"https://widget-{uuid4().hex}.example.com"
+    if same_origin:
+        client.base_url = origin
     admin_headers = {"Authorization": f"Bearer {default_user_token}"}
     policy_url = "/api/v1/admin/api-key-policy"
     response = await client.post(
