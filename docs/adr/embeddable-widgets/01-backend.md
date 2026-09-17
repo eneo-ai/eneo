@@ -1,0 +1,133 @@
+# Embeddable Widgets — Backend
+
+Companion to [00-overview.md](00-overview.md). Paths are relative to `backend/src/eneo/`.
+
+## Data model
+
+### `widgets`
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID PK | internal id, used by admin routes |
+| `public_id` | text, unique | `wgt_` + 22 base62 chars, generated server-side; the only identifier in page source |
+| `tenant_id` | UUID FK tenants | data partition |
+| `space_id` | UUID FK spaces ON DELETE CASCADE | owning space; editors manage it there |
+| `target_type` | text | `assistant` in v1; enum kept open for `group_chat`, `app` |
+| `target_id` | UUID | FK enforced in service layer per `target_type`; assistant deletion cascades via a trigger-free nightly consistency check + `ON DELETE` handled in `AssistantService.delete` |
+| `status` | text | `draft` → `active` → `paused` → `archived`; only `active` serves visitors |
+| `token_generation` | int, default 0 | bumped on pause/archive/config change that must invalidate outstanding visitor tokens |
+| `name` | text | internal label |
+| `texts` | JSONB | `title`, `welcome`, `placeholder`, `suggested_questions[]` (max 4), `ai_disclosure` (non-removable, editable wording), `personal_data_notice`, `privacy_url` |
+| `theme` | JSONB | `primary_color`, `color_scheme` (`auto`/`light`/`dark`), `position` (`bottom-right`/`bottom-left`), `launcher` (`bubble`/`bar`/`none`), `radius`, `logo_file_id` |
+| `language` | text | `sv`, `en` or `auto` (follow host `<html lang>`) |
+| `allowed_origins` | JSONB list | validated with `_validate_origin_format` rules; wildcards `https://*.kommun.se` allowed; at least one required to activate |
+| `limits` | JSONB | `messages_per_visitor_10min` (default 10), `messages_per_ip_hour` (60), `daily_token_budget` (500k), `max_question_chars` (2000), `max_session_turns` (30) |
+| `privacy` | JSONB | `retention_days` (30; `0` = do not persist), `store_feedback_text` (bool) |
+| `bot_protection` | text | `altcha` (default) or `none` (sysadmin policy may forbid `none`) |
+| `created_by`, `activated_by`, `activated_at`, `paused_at`, `created_at`, `updated_at` | | audit convenience; the audit log is the source of truth |
+
+Indexes: `(tenant_id, status)`, unique `(public_id)`, `(space_id)`, `(target_type, target_id)`.
+
+### `sessions` extensions
+
+- `widget_id UUID NULL FK widgets ON DELETE CASCADE`, `visitor_id UUID NULL`.
+- Replace the XOR check with *exactly one of* `user_id`, `api_key_id`, `widget_id`; `visitor_id IS NOT NULL` iff `widget_id IS NOT NULL`.
+- Index `(widget_id, visitor_id, created_at DESC)` for follow-up ownership checks and retention.
+- `SessionAdd`/`sessions_repo` get `widget_id`/`visitor_id` alongside the existing `api_key_id` principal scoping (`sessions_repo.py:228-290`).
+
+### `widget_daily_usage`
+
+`(widget_id, day) PK`, `questions int`, `input_tokens int`, `output_tokens int`, `blocked_budget int`, `blocked_rate int`. Written from the ask path after settlement; Redis holds the live counters (below). Used by the admin usage endpoint and the daily budget gate's warm-up on Redis loss.
+
+## Public API (`/api/v1/widgets/{public_id}/…`, no Eneo auth)
+
+All routes: `response_model`/`responses.get_responses` per the route-metadata ratchet, `Cache-Control: no-store` except `config`, structured 4xx codes below, and a dedicated FastAPI dependency `get_widget_principal` that replaces `get_container(with_user=…)`.
+
+| Method & path | Auth | Purpose |
+|---|---|---|
+| `GET config/` | none | `WidgetPublicConfig`: texts, theme, language, `bot_protection`, `limits.max_question_chars`, assistant display name, `token_generation`. `ETag` + `Cache-Control: public, max-age=60`. 404 unless `status=active`. Never includes `allowed_origins`, internal ids or model names. |
+| `GET challenge/` | none | ALTCHA challenge (`algorithm`, `challenge`, `salt`, `signature`, `maxnumber`). Rate limited per IP. |
+| `POST visitor-sessions/` | none | Body: `{visitor_id?, altcha?, previous_token?}`. Returns `{token, expires_in, visitor_id}`. Exactly one of `altcha` (new/expired visitor) or `previous_token` (silent rotation; accepted while the old token is valid or expired < 60 min and its `gen` still matches). |
+| `POST ask/` | visitor Bearer | Body `{question, session_id?}`. Always streams (`text/event-stream`), reusing the existing SSE event types. `session_id` must belong to `(widget_id, visitor_id)`. |
+| `GET sessions/{session_id}/` | visitor Bearer | `SessionPublic` for the visitor's own session (history restore after reload). |
+| `POST sessions/{session_id}/feedback/` | visitor Bearer | `SessionFeedback` (thumbs, optional text if `store_feedback_text`). |
+
+Error codes: `widget_not_active` (404), `challenge_invalid`/`challenge_replayed` (400), `visitor_token_invalid` (401), `visitor_token_stale` (401, generation bumped — client re-mints), `rate_limited_visitor`/`rate_limited_ip` (429 + `Retry-After`), `budget_exhausted` (429, `Retry-After` until midnight tenant-local), `question_too_long` (400), `session_not_owned` (404 — never reveal existence).
+
+### Visitor token
+
+Signed with the existing `AuthService` primitives (same key/alg as `create_scoped_mcp_token`), claims:
+
+```
+token_use = "widget_visitor"
+aud       = "eneo-widget:<widget.id>"
+sub       = <visitor_id>          # UUIDv4, server-generated on first mint
+wid       = <widget.id>, tid = <tenant_id>
+gen       = <widget.token_generation>
+iat, exp  = 15 min, jti
+```
+
+Verification: signature, `exp`, `aud`, `token_use`, and `gen == widget.token_generation` read from a 30-second in-process cache backed by Redis (`widget:gen:<id>`), so pausing takes effect within seconds without a DB read per request. No refresh tokens: the client re-mints with `previous_token`.
+
+### ALTCHA (proof of work)
+
+- Server-side with the `altcha` Python library: challenge = HMAC-signed `salt` + target; `maxnumber` tuned so a phone solves it in roughly 200–500 ms (start at 100 000; make it a setting).
+- Replay protection: solved `salt` values are stored in Redis `SETNX` with the challenge's expiry (5 min).
+- Challenge issuance is itself rate limited per IP (60/min) and per widget.
+- `bot_protection=none` skips the challenge; the tenant policy (`WidgetPolicy`) may forbid it.
+
+### Limits and budget (Redis, atomic)
+
+All keys are namespaced `widget:<id>:…` and use `check_rate_limit` from `audit/infrastructure/rate_limiting.py`:
+
+| Key | Window | Default |
+|---|---|---|
+| `visitor:<vid>` | 10 min | 10 questions |
+| `ip:<ip>` | 60 min | 60 questions |
+| `ip:<ip>:challenge` | 1 min | 60 |
+| `budget:<day>` | until end of day (tenant-local, from `tenant.timezone` or `Europe/Stockholm`) | 500 000 tokens |
+
+Budget uses **reserve-then-settle**: before calling the model, `INCRBY` the day counter by the reservation (`prompt tokens + max_completion_tokens` from the resolved model settings); if the result exceeds the budget, `DECRBY` and fail with `budget_exhausted`. After the answer, adjust by `actual − reserved`. Redis loss follows the API-key precedent: fail closed unless `widget_rate_limit_fail_open=true` (default false), because an unmetered public LLM endpoint is a cost incident.
+
+Client IP comes from `resolve_client_ip` (same trusted-proxy rules as API keys). IP limits are a backstop, not the primary control — CGNAT and campus networks share IPs.
+
+### Ask path
+
+`WidgetAskService` composes the existing services instead of duplicating them:
+
+1. Resolve widget (`active`), verify token, enforce limits and budget, validate `question` length.
+2. Load the target assistant through `AssistantService` **as the widget principal**: a `WidgetPrincipal` dataclass (not a synthetic `UserInDB`) carrying `tenant_id`, `widget_id`, `visitor_id`. `SpaceActor`/permission checks are bypassed by construction because the widget was authorized at activation time by a tenant admin; the ask path only needs the assistant's resolved config.
+3. Build the `AskAssistant` payload with `stream=True`, `files=[]`, `tools=None`, every `CapabilityPurpose` disabled except plain completion + knowledge retrieval, and all MCP servers disabled. Governance `effective_config` still applies (model allowlist, prompt library, security classification).
+4. Create/continue the session with `widget_id`/`visitor_id` and stream through the same `response_stream` layers as today (so new SSE event types keep flowing; see the three chunk-filter layers note in `docs/`).
+5. Settle the budget; upsert `widget_daily_usage`.
+
+Retention: a worker job (same scheduler as crawls) deletes widget sessions older than `privacy.retention_days` nightly; `retention_days=0` short-circuits persistence in step 4 (no session row, no follow-ups, `session_id` never returned).
+
+## Admin API (Eneo session auth)
+
+| Method & path | Permission | Notes |
+|---|---|---|
+| `GET /spaces/{space_id}/widgets/` | space member | list with status and 7-day usage |
+| `POST /spaces/{space_id}/widgets/` | space editor + `Permission.WIDGETS` | create as `draft` for an assistant in that space |
+| `GET/PATCH /widgets/{id}/` | space editor | config; PATCH bumps `token_generation` when `allowed_origins`, `limits`, `privacy` or `bot_protection` change |
+| `POST /widgets/{id}/activate/` | tenant admin | requires `allowed_origins` non-empty, `ai_disclosure` non-empty, assistant published; audited |
+| `POST /widgets/{id}/pause/` · `archive/` | tenant admin (pause also space editor, so an editor can stop an incident) | bumps generation; audited |
+| `GET /widgets/{id}/usage/?days=30` | space member | from `widget_daily_usage` |
+| `POST /widgets/{id}/preview-token/` | space editor | visitor token whose `aud` carries `preview=1`; ask works only from Eneo's own origin and does not count towards the budget beyond a small preview allowance |
+| `GET /widgets/{id}/snippet/` | space member | canonical embed snippet + pinned-version SRI hash (see 02-frontend) |
+
+`Permission.WIDGETS` is a new tenant role permission (default in Owner/Admin and any role that already has `API_KEYS`), so tenants can delegate widget *configuration* without granting activation.
+
+`WidgetPolicy` (tenant, sysadmin-managed like API-key policy): `max_active_widgets`, `max_daily_token_budget`, `allow_bot_protection_none`, `min_retention_days`/`max_retention_days`.
+
+## Audit, observability, insights
+
+- Audit events: `widget.created`, `widget.updated` (diff of non-secret fields), `widget.activated`, `widget.paused`, `widget.archived`, `widget.budget_exhausted` (once per day), `widget.policy_updated`.
+- Metrics (OTEL): questions, blocked (by reason), latency to first token, tokens, per `widget_id`; no question text in logs or spans.
+- Insights: widget sessions are included in the assistant's Insights with `source=widget`, never in a user's conversation list (they have no `user_id`).
+
+## Testing
+
+- Unit: policy validation, origin → CSP conversion, token claims/generation, ALTCHA verify + replay, reserve/settle arithmetic incl. Redis loss.
+- Integration (testcontainers): full mint → ask → follow-up → feedback; cross-visitor session access returns 404; pause invalidates within the cache window; retention job; `retention_days=0`.
+- Contract: `schema.d.ts` regenerated canonically (pre-push byte gate); route-metadata ratchet green.
