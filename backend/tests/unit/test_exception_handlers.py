@@ -1,4 +1,6 @@
 import json
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi import FastAPI, Request
@@ -239,3 +241,68 @@ def test_provider_rejected_request_maps_to_400_despite_openai_subclassing():
     assert payload["eneo_error_code"] == ErrorCodes.PROVIDER_REJECTED_REQUEST
     assert payload["code"] == "provider_rejected_request"
     assert payload["details"]["retryable"] is False
+
+
+@pytest.mark.parametrize("method", ["get_response", "prepare_streaming"])
+@pytest.mark.parametrize(
+    "input_limit,output_limit,status,code",
+    [
+        (10, 64, 413, "context_window_exceeded"),
+        (None, 64, 400, "unknown_model_capacity"),
+        (5000, None, 400, "unknown_model_capacity"),
+    ],
+)
+def test_initial_capacity_refusal_uses_registered_http_handler(
+    method, input_limit, output_limit, status, code, monkeypatch
+):
+    import httpx
+
+    from eneo.completion_models.infrastructure.adapters.base_adapter import (
+        ProviderInput,
+    )
+    from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
+        TenantModelAdapter,
+    )
+
+    adapter = object.__new__(TenantModelAdapter)
+    adapter.litellm_model = "openai/plain-model"
+    adapter.provider_type = "openai"
+    adapter.model = SimpleNamespace(
+        token_limit=input_limit, max_output_tokens=output_limit
+    )
+    adapter.credential_resolver = SimpleNamespace(
+        provider_type="openai",
+        get_api_key=lambda **kwargs: "test-key",
+        get_credential_field=lambda **kwargs: None,
+    )
+    adapter.prepare_provider_input = Mock(
+        return_value=ProviderInput(
+            messages=[{"role": "user", "content": "capacity " * 100}],
+            tools=[],
+            built_in_tools=[],
+        )
+    )
+    transport = AsyncMock()
+    monkeypatch.setattr(httpx.AsyncClient, "send", transport)
+    observer = SimpleNamespace(started=AsyncMock())
+    app = FastAPI()
+    add_exception_handlers(app)
+
+    @app.get("/complete")
+    async def complete():
+        return await getattr(adapter, method)(
+            context=SimpleNamespace(),
+            model_kwargs={},
+            **(
+                {"provider_call_observer": observer} if method == "get_response" else {}
+            ),
+        )
+
+    response = TestClient(app, raise_server_exceptions=False).get("/complete")
+    assert response.status_code == status
+    assert response.json()["code"] == code
+    assert response.json()["eneo_error_code"] == (
+        ErrorCodes.BAD_REQUEST if status == 413 else ErrorCodes.UNKNOWN_MODEL_CAPACITY
+    )
+    transport.assert_not_awaited()
+    observer.started.assert_not_awaited()

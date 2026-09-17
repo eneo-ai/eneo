@@ -1147,16 +1147,6 @@ class TenantModelAdapter(CompletionModelAdapter):
                         f"Scaled temperature for Anthropic: {temp} -> {temp / 2}"
                     )
 
-            requested_effort = model_kwargs_dict.get("reasoning_effort")
-            model_kwargs_dict = normalize_reasoning_effort(
-                litellm_model=self.litellm_model,
-                provider_type=self.provider_type,
-                model_kwargs=model_kwargs_dict,
-                openai_absent_effort="low",
-            )
-
-            if requested_effort not in (None, ""):
-                model_kwargs_dict["reasoning_effort"] = requested_effort
             kwargs.update(model_kwargs_dict)
 
         # Remove non-serializable params that must not reach litellm
@@ -1165,6 +1155,13 @@ class TenantModelAdapter(CompletionModelAdapter):
 
         # Merge with additional kwargs
         kwargs.update(additional_kwargs)
+        if model_kwargs or kwargs.get("reasoning_effort") not in (None, ""):
+            kwargs = normalize_reasoning_effort(
+                litellm_model=self.litellm_model,
+                provider_type=self.provider_type,
+                model_kwargs=kwargs,
+                openai_absent_effort="low",
+            )
         return kwargs
 
     def _prepare_dispatch_kwargs(

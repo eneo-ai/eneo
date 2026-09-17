@@ -7,11 +7,13 @@ from typing import Literal, cast
 
 import litellm
 
+from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
     SupportedModelKwargs,
     reasoning_effort_options_from_model_info,
 )
+from eneo.main.exceptions import ProviderRejectedRequestException
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
@@ -214,6 +216,21 @@ def selectable_reasoning_effort_options(
     )
 
 
+def filter_request_model_kwargs(
+    model_kwargs: ModelKwargs, supported: SupportedModelKwargs
+) -> ModelKwargs:
+    """Keep explicit reasoning for route validation instead of silently filtering it."""
+    return ModelKwargs.model_validate(
+        {
+            name: value
+            for name, value in model_kwargs.model_dump(exclude_none=True).items()
+            if name == "reasoning_effort"
+            or name not in SupportedModelKwargs.model_fields
+            or getattr(supported, name).accepts(value)
+        }
+    )
+
+
 def normalize_reasoning_effort(
     *,
     litellm_model: str,
@@ -234,35 +251,28 @@ def normalize_reasoning_effort(
 
     normalized = dict(model_kwargs)
     supported_params = get_supported_openai_params(
-        model=litellm_model,
+        model=litellm_model.removeprefix(f"{provider_type}/"),
         custom_llm_provider=provider_type,
     )
     reasoning_supported = (
         supported_params is not None and "reasoning_effort" in supported_params
     )
-    absent_effort = openai_absent_effort
+    if normalized.get("reasoning_effort") not in (None, ""):
+        if not reasoning_supported:
+            raise ProviderRejectedRequestException(
+                "The selected model route cannot honour the requested reasoning effort.",
+                code="provider_rejected_request",
+                details={"reason": "reasoning_effort_unsupported", "retryable": False},
+            )
+        return normalized
+
+    normalized.pop("reasoning_effort", None)
     if reasoning_supported and provider_type == "openai":
-        requested_absent_effort: Literal["none", "low"] = (
-            "none"
-            if normalized.get("reasoning_effort") == "none"
-            else openai_absent_effort
-        )
-        absent_effort = _resolve_openai_absent_effort(
+        normalized["reasoning_effort"] = _resolve_openai_absent_effort(
             litellm_model=litellm_model,
             provider_type=provider_type,
-            requested=requested_absent_effort,
+            requested=openai_absent_effort,
         )
-    if "reasoning_effort" in normalized:
-        is_off_signal = normalized["reasoning_effort"] in (None, "none", "")
-        if not reasoning_supported:
-            normalized.pop("reasoning_effort")
-        elif is_off_signal:
-            if provider_type == "openai":
-                normalized["reasoning_effort"] = absent_effort
-            else:
-                normalized.pop("reasoning_effort")
-    elif reasoning_supported and provider_type == "openai":
-        normalized["reasoning_effort"] = absent_effort
     return normalized
 
 

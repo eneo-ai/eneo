@@ -8,6 +8,9 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 
 from eneo.completion_models.domain.model_capacity import UnknownModelCapacityError
+from eneo.completion_models.infrastructure.context_builder import (
+    ContextWindowExceededError,
+)
 from eneo.files.file_models import (
     FileInUseError,
     FileOriginalNotFoundError,
@@ -226,6 +229,7 @@ logger = logging.getLogger(__name__)
 # dependency. One map, so "where do I register this?" has one answer.
 DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] = {
     UnknownModelCapacityError: (400, None, ErrorCodes.UNKNOWN_MODEL_CAPACITY),
+    ContextWindowExceededError: (413, None, ErrorCodes.BAD_REQUEST),
     # --- Object content and files ---
     ObjectContentUnavailableError: (503, None, ErrorCodes.RESOURCE_NOT_READY),
     ObjectContentIntegrityError: (503, None, ErrorCodes.RESOURCE_NOT_READY),
@@ -363,7 +367,11 @@ def add_exception_handlers(app: FastAPI):
                 message = _default_message_for_status(status_code)
             request_id = extract_request_id(request)
             context = _exception_context(status_code=status_code, exc=exc)
-            raw_code = getattr(exc, "code", None)
+            raw_code = (
+                "context_window_exceeded"
+                if isinstance(exc, ContextWindowExceededError)
+                else getattr(exc, "code", None)
+            )
             public_code = (
                 raw_code
                 if isinstance(raw_code, str) and raw_code.strip()

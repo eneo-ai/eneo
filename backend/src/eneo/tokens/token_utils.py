@@ -602,6 +602,35 @@ def measure_tool_tokens(
         )
 
 
+def _response_format_reserve_payload(
+    response_format: dict[str, Any],
+) -> _ToolReservePayload:
+    schema_container = response_format.get("json_schema")
+    schema = (
+        cast("dict[str, Any]", schema_container).get("schema")
+        if isinstance(schema_container, dict)
+        else response_format.get("response_schema")
+    )
+    budget = _ExpansionBudget(_MAX_TOOL_SCHEMA_EXPANSION_CHARS)
+    try:
+        expanded = _expand_schema_references(
+            response_format,
+            definitions=(
+                cast("dict[str, Any]", schema).get("$defs")
+                if isinstance(schema, dict)
+                else None
+            ),
+            active=frozenset(),
+            budget=budget,
+            depth=0,
+        )
+        if budget.incomplete:
+            return _ToolReservePayload(text="", bounded=False)
+        return _ToolReservePayload(text=_serialized(expanded), bounded=True)
+    except (RecursionError, ValueError, TypeError):
+        return _ToolReservePayload(text="", bounded=False)
+
+
 def measure_provider_input_reserve(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]],
@@ -624,14 +653,18 @@ def measure_provider_input_reserve(
     tool_reserve = measure_tool_tokens(tools, model_name)
     reserves = [message_reserve, tool_reserve]
     if response_format:
+        payload = _response_format_reserve_payload(response_format)
+        if not payload.bounded:
+            return TokenCount(
+                tokens=_UNBOUNDED_TOOL_SCHEMA_TOKENS,
+                source=TokenCountSource.FALLBACK_ESTIMATE,
+            )
         reserves.append(
             _measure_messages(
                 [
                     {
                         "role": "system",
-                        "content": json.dumps(
-                            response_format, ensure_ascii=False, separators=(",", ":")
-                        ),
+                        "content": payload.text,
                     }
                 ],
                 model_name,

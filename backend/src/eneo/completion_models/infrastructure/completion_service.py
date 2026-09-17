@@ -29,6 +29,7 @@ from eneo.completion_models.infrastructure.context_builder import ContextBuilder
 from eneo.completion_models.infrastructure.tenant_model_capabilities import (
     StructuredOutputCapabilityDecision,
     enrich_reasoning_effort_capability,
+    filter_request_model_kwargs,
     normalize_reasoning_effort,
 )
 from eneo.files.file_models import File
@@ -190,8 +191,8 @@ class ResolvedCompletionModelRoute:
             update=requested.model_dump(exclude_none=True)
         )
         provider_kwargs.update(
-            effective_request.filter_unsupported(
-                self.supported_model_kwargs
+            filter_request_model_kwargs(
+                effective_request, self.supported_model_kwargs
             ).model_dump(exclude_none=True)
         )
         provider_kwargs = normalize_reasoning_effort(
@@ -200,8 +201,6 @@ class ResolvedCompletionModelRoute:
             model_kwargs=provider_kwargs,
             openai_absent_effort="none",
         )
-        if effective_request.reasoning_effort not in (None, ""):
-            provider_kwargs["reasoning_effort"] = effective_request.reasoning_effort
         return provider_kwargs
 
     def incident_evidence(self) -> CompletionRouteEvidence:
@@ -746,12 +745,9 @@ class CompletionService:
         mcp_servers = [server for server in mcp_servers if server.is_enabled]
         model_adapter = await self._get_adapter(model)
         if model_kwargs is not None:
-            requested_effort = model_kwargs.reasoning_effort
-            model_kwargs = model_kwargs.filter_unsupported(model.supported_model_kwargs)
-            if requested_effort not in (None, ""):
-                model_kwargs = model_kwargs.model_copy(
-                    update={"reasoning_effort": requested_effort}
-                )
+            model_kwargs = filter_request_model_kwargs(
+                model_kwargs, model.supported_model_kwargs
+            )
         initial_skill_tokens = (
             skill_runtime.snapshot().measurement.tokens
             if skill_runtime is not None

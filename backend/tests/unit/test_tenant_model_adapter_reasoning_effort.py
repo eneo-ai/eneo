@@ -160,6 +160,86 @@ async def test_reasoning_dispatch_preserves_cap_and_effort_after_sdk_normalizati
         assert outbound["reasoning_effort"] == "high"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("provider", "model"), [("openai", "gpt-4o-mini"), ("mistral", "plain-model")]
+)
+@pytest.mark.parametrize("effort", [None, "high", "none"])
+@pytest.mark.parametrize("method", ["get_response", "prepare_streaming"])
+async def test_unsupported_reasoning_is_refused_before_sdk_dispatch(
+    provider, model, effort, method, monkeypatch
+):
+    adapter = object.__new__(TenantModelAdapter)
+    adapter.litellm_model = f"{provider}/{model}"
+    adapter.provider_type = provider
+    adapter.model = SimpleNamespace(token_limit=5000, max_output_tokens=64)
+    adapter.credential_resolver = SimpleNamespace(
+        provider_type=provider,
+        get_api_key=lambda **kwargs: "test-key",
+        get_credential_field=lambda **kwargs: None,
+    )
+    adapter.prepare_provider_input = Mock(
+        return_value=ProviderInput(
+            messages=[{"role": "user", "content": "hello"}],
+            tools=[],
+            built_in_tools=[],
+        )
+    )
+    observer = SimpleNamespace(
+        started=AsyncMock(return_value=uuid4()),
+        rejected=AsyncMock(),
+        completed=AsyncMock(),
+        outcome_unknown=AsyncMock(),
+    )
+    requests = []
+
+    async def capture_request(client, request, **kwargs):
+        requests.append(json.loads(await request.aread()))
+        completion = {
+            "id": "response-1",
+            "object": "chat.completion",
+            "created": 1,
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "ok"},
+                    "finish_reason": "stop",
+                }
+            ],
+        }
+        return httpx.Response(200, request=request, json=completion)
+
+    monkeypatch.setattr(httpx.AsyncClient, "send", capture_request)
+    call_kwargs = (
+        {"provider_call_observer": observer} if method == "get_response" else {}
+    )
+
+    async def dispatch():
+        return await getattr(adapter, method)(
+            context=SimpleNamespace(),
+            model_kwargs={"reasoning_effort": effort} if effort is not None else {},
+            api_base="https://provider.example/v1",
+            num_retries=0,
+            max_retries=0,
+            **call_kwargs,
+        )
+
+    if effort is not None:
+        with pytest.raises(ProviderRejectedRequestException) as error:
+            await dispatch()
+        assert error.value.code == "provider_rejected_request"
+        assert error.value.details["retryable"] is False
+        assert requests == []
+        observer.started.assert_not_awaited()
+        observer.completed.assert_not_awaited()
+    else:
+        await dispatch()
+        assert len(requests) == 1
+        assert "reasoning_effort" not in requests[0]
+        assert requests[0]["max_tokens"] == 64
+
+
 @pytest.mark.parametrize("effort", ["low", "high", "xhigh"])
 def test_reasoning_effort_reaches_litellm_when_the_model_supports_it(
     effort: str,
