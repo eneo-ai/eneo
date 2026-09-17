@@ -494,6 +494,7 @@ def _model_candidate(model_id: UUID) -> FlowPackageModelCandidate:
         label="Structured Model",
         model_kind=FlowPackageModelKind.COMPLETION_MODEL,
         identity=FlowPackageModelIdentity(provider="test", model="structured"),
+        max_input_tokens=64000,
     )
 
 
