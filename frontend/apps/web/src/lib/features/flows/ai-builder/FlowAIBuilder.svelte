@@ -966,7 +966,7 @@
         <BuilderFindingsScreen
           review={service.review}
           suggestions={service.suggestions}
-          disabled={!service.canSendMessage}
+          disabled={!service.canSendMessage || service.modelSendBlock !== null}
           onprepare={prepareChangeFromFinding}
           onsuggest={() => void service.requestSuggestions()}
           onclose={() => service.closeReview()}
@@ -1020,6 +1020,7 @@
           pending={summaryRevisionPending}
           isEdit={targetKind === "edit"}
           disabled={service.isCreating || service.isStreaming}
+          sendBlockedReason={service.modelSendBlockMessage}
           editingQuestion={editingQuestionMessage}
           editingFields={editingQuestionMessage?.question?.question_id ===
           confirmedFieldAnswer?.questionId

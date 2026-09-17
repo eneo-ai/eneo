@@ -1525,6 +1525,7 @@
             bind:open={changeOpen}
             scopeLabel={changeScopeLabel}
             disabled={isLocked || !service.canSendMessage}
+            sendBlockedReason={service.modelSendBlockMessage}
             onclearscope={() => (changeScope = null)}
             onsend={handleChangeSend}
           />

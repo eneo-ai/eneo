@@ -25,8 +25,14 @@ function makeModel(overrides: Partial<AIBuilderModel> = {}): AIBuilderModel {
     name: "Test model",
     provider: "openai",
     reasoning_effort_options: [],
+    availability: { state: "ready" },
     ...overrides
   };
+}
+
+/** A listing whose default is ready, so a turn has a model to run. */
+function readyListing() {
+  return { models: [makeModel()], default_model_id: DEFAULT_MODEL_ID };
 }
 
 function makeSession(overrides: Partial<AIBuilderSession> = {}): AIBuilderSession {
@@ -168,7 +174,11 @@ function makeDriver(
   const stream = options.streamImpl ?? vi.fn();
 
   const driver = new FlowAIBuilderDriver({ fetch, stream }, "space-1", "flow-1");
-  driver.seedState({ availableModels: [makeModel()] });
+  driver.seedState({
+    availableModels: [makeModel()],
+    defaultModelId: DEFAULT_MODEL_ID,
+    modelLoadStatus: "loaded"
+  });
 
   return {
     driver,
@@ -201,14 +211,32 @@ describe("FlowAIBuilderDriver", () => {
     });
   });
 
-  it("lets the server pick the model for suggestions when the composer selected none", async () => {
+  it("sends the default the composer shows with a suggestions request", async () => {
     const fetch = vi.fn(async () => ({ suggestions: [] }));
     const { driver } = makeDriver({ fetchImpl: fetch });
 
     await driver.fetchFlowReviewSuggestions();
 
     const [, init] = fetch.mock.calls[0] as unknown as [string, { requestBody?: unknown }];
-    expect(init.requestBody).toEqual({ "application/json": {} });
+    expect(init.requestBody).toEqual({ "application/json": { model_id: DEFAULT_MODEL_ID } });
+  });
+
+  it("asks for no suggestions while the shown model cannot run", async () => {
+    const fetch = vi.fn(async () => ({ suggestions: [] }));
+    const { driver } = makeDriver({ fetchImpl: fetch });
+    driver.seedState({
+      availableModels: [
+        makeModel({
+          availability: {
+            state: "capacity_undeclared",
+            missing_dimensions: ["context_window_tokens"]
+          }
+        })
+      ]
+    });
+
+    await expect(driver.fetchFlowReviewSuggestions()).rejects.toThrow();
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("keeps stream event contracts derived from generated types", () => {
@@ -437,7 +465,7 @@ describe("FlowAIBuilderDriver", () => {
       .mockResolvedValueOnce(
         makeSession({ session_id: "create-1", target_kind: "create", flow_id: null })
       )
-      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce(readyListing())
       .mockResolvedValueOnce(
         makeSession({ session_id: "create-1", target_kind: "create", flow_id: null })
       )
@@ -461,11 +489,11 @@ describe("FlowAIBuilderDriver", () => {
       markStaleRequestStarted = resolve;
     });
     let resolveStaleModels!: (value: {
-      models: { id: string; name: string; provider: string }[];
+      models: AIBuilderModel[];
       default_model_id: string;
     }) => void;
     const staleModels = new Promise<{
-      models: { id: string; name: string; provider: string }[];
+      models: AIBuilderModel[];
       default_model_id: string;
     }>((resolve) => {
       resolveStaleModels = resolve;
@@ -485,7 +513,7 @@ describe("FlowAIBuilderDriver", () => {
             return await staleModels;
           }
           return {
-            models: [{ id: currentModelId, name: "Current model", provider: "openai" }],
+            models: [makeModel({ id: currentModelId, name: "Current model" })],
             default_model_id: currentModelId
           };
         }
@@ -508,14 +536,14 @@ describe("FlowAIBuilderDriver", () => {
 
     expect(driver.state.session?.session_id).toBe(currentSession.session_id);
     resolveStaleModels({
-      models: [{ id: staleModelId, name: "Stale model", provider: "openai" }],
+      models: [makeModel({ id: staleModelId, name: "Stale model" })],
       default_model_id: staleModelId
     });
     await staleCreate;
 
     expect(driver.state.session?.session_id).toBe(currentSession.session_id);
     expect(driver.state.availableModels).toEqual([
-      { id: currentModelId, name: "Current model", provider: "openai" }
+      makeModel({ id: currentModelId, name: "Current model" })
     ]);
   });
 
@@ -524,11 +552,11 @@ describe("FlowAIBuilderDriver", () => {
     // sending while /models is pending must not throw the valid answer away.
     const session = makeSession({ session_id: "session-models", latest_plan_id: null });
     let resolveModels!: (value: {
-      models: { id: string; name: string; provider: string }[];
+      models: AIBuilderModel[];
       default_model_id: string | null;
     }) => void;
     const models = new Promise<{
-      models: { id: string; name: string; provider: string }[];
+      models: AIBuilderModel[];
       default_model_id: string | null;
     }>((resolve) => {
       resolveModels = resolve;
@@ -553,17 +581,24 @@ describe("FlowAIBuilderDriver", () => {
     });
 
     await driver.createSession("create");
+    // A turn needs a listed model; an earlier listing supplied one while the
+    // refresh this session started is still pending.
+    driver.seedState({
+      availableModels: [makeModel()],
+      defaultModelId: DEFAULT_MODEL_ID,
+      modelLoadStatus: "loaded"
+    });
     const send = driver.sendMessage("Sammanfatta rapporter");
     expect(driver.isStreaming).toBe(true);
 
     resolveModels({
-      models: [{ id: "model-late", name: "Late model", provider: "openai" }],
+      models: [makeModel({ id: "model-late", name: "Late model" })],
       default_model_id: "model-late"
     });
     await Promise.resolve();
     await Promise.resolve();
     expect(driver.state.availableModels).toEqual([
-      { id: "model-late", name: "Late model", provider: "openai" }
+      makeModel({ id: "model-late", name: "Late model" })
     ]);
 
     releaseStream();
@@ -575,7 +610,7 @@ describe("FlowAIBuilderDriver", () => {
     const staleSession = makeSession({ session_id: "stale-rejected-model-session" });
     const currentSession = makeSession({ session_id: "current-model-session" });
     const staleModels = Promise.withResolvers<{
-      models: { id: string; name: string; provider: string }[];
+      models: AIBuilderModel[];
       default_model_id: string;
     }>();
     const staleRequestStarted = Promise.withResolvers<void>();
@@ -595,7 +630,7 @@ describe("FlowAIBuilderDriver", () => {
             return await staleModels.promise;
           }
           return {
-            models: [{ id: currentModelId, name: "Current model", provider: "openai" }],
+            models: [makeModel({ id: currentModelId, name: "Current model" })],
             default_model_id: currentModelId
           };
         }
@@ -618,7 +653,7 @@ describe("FlowAIBuilderDriver", () => {
 
     expect(driver.state.session?.session_id).toBe(currentSession.session_id);
     expect(driver.state.availableModels).toEqual([
-      { id: currentModelId, name: "Current model", provider: "openai" }
+      makeModel({ id: currentModelId, name: "Current model" })
     ]);
 
     staleModels.reject(new Error("stale model request failed"));
@@ -626,7 +661,7 @@ describe("FlowAIBuilderDriver", () => {
 
     expect(driver.state.session?.session_id).toBe(currentSession.session_id);
     expect(driver.state.availableModels).toEqual([
-      { id: currentModelId, name: "Current model", provider: "openai" }
+      makeModel({ id: currentModelId, name: "Current model" })
     ]);
   });
 
@@ -650,15 +685,15 @@ describe("FlowAIBuilderDriver", () => {
       return result;
     }
 
-    it("omits model_id while the server default stands", async () => {
-      // Staying silent lets the server apply its own default. Pinning the
-      // default explicitly would freeze it for the rest of the session.
+    it("sends the default the composer shows", async () => {
+      // An omitted id would let the server resolve a default the user never
+      // saw; the turn runs exactly the model on screen or is refused.
       const { driver, stream } = makeSendableDriver();
 
       await driver.sendMessage("Sammanfatta rapporter");
 
       const body = stream.mock.calls[0]?.[1].requestBody["application/json"];
-      expect(body.model_id).toBeUndefined();
+      expect(body.model_id).toBe(DEFAULT_MODEL_ID);
       expect(body.reasoning_effort).toBeUndefined();
     });
 
@@ -687,24 +722,139 @@ describe("FlowAIBuilderDriver", () => {
       expect(body.reasoning_effort).toBeUndefined();
     });
 
-    it("still sends when the model list never arrives", async () => {
-      // Selection is a refinement, never a precondition: an unread list leaves
-      // the request exactly as it was before these controls existed.
-      const { driver, stream } = makeDriver({
-        streamImpl: vi.fn(async (_path, _init, handlers) => {
-          completeStream(handlers);
-        })
-      });
+    it.each(["loading", "failed"] as const)(
+      "starts no turn while the model list is %s",
+      async (modelLoadStatus) => {
+        // Until a listing names the model, there is no model on screen for a
+        // turn to run, and the server must not pick one.
+        const { driver, stream } = makeSendableDriver();
+        driver.seedState({ modelLoadStatus });
+
+        expect(await driver.sendMessage("Sammanfatta rapporter")).toBe("not_started");
+        expect(stream).not.toHaveBeenCalled();
+        expect(driver.modelSendBlock).toBe(`models_${modelLoadStatus}`);
+      }
+    );
+
+    it("starts no turn when no listed model is ready", async () => {
+      const { driver, stream } = makeSendableDriver();
       driver.seedState({
-        session: makeSession({ latest_plan_id: null }),
-        availableModels: [],
+        availableModels: [
+          makeModel({
+            availability: {
+              state: "capacity_undeclared",
+              missing_dimensions: ["context_window_tokens"]
+            }
+          })
+        ],
         defaultModelId: null
       });
 
-      await driver.sendMessage("Sammanfatta rapporter");
-
-      expect(stream).toHaveBeenCalledOnce();
+      expect(await driver.sendMessage("Sammanfatta rapporter")).toBe("not_started");
+      expect(stream).not.toHaveBeenCalled();
       expect(driver.effectiveModel).toBeNull();
+      expect(driver.modelSendBlock).toBe("no_ready_model");
+    });
+
+    it("never selects a model whose capacity is undeclared", () => {
+      const { driver } = makeSendableDriver();
+      driver.seedState({
+        availableModels: [
+          makeModel(),
+          makeModel({
+            id: ALTERNATE_MODEL_ID,
+            availability: {
+              state: "capacity_undeclared",
+              missing_dimensions: ["max_output_tokens"]
+            }
+          })
+        ]
+      });
+
+      driver.selectModel(ALTERNATE_MODEL_ID);
+
+      expect(driver.state.selectedModelId).toBeNull();
+      expect(driver.effectiveModel?.id).toBe(DEFAULT_MODEL_ID);
+    });
+
+    it("keeps a choice a later listing omits, names it and blocks turns until the user picks again", async () => {
+      const unready = makeModel({
+        id: ALTERNATE_MODEL_ID,
+        name: "Alternate model",
+        availability: {
+          state: "capacity_undeclared",
+          missing_dimensions: ["context_window_tokens"]
+        }
+      });
+      const listings = [
+        { models: [makeModel()], default_model_id: DEFAULT_MODEL_ID },
+        { models: [makeModel(), unready], default_model_id: DEFAULT_MODEL_ID }
+      ];
+      const stream = vi.fn(async (_path, _init, handlers) => {
+        completeStream(handlers);
+      });
+      const { driver } = makeDriver({
+        fetchImpl: vi.fn(async () => listings.shift()),
+        streamImpl: stream
+      });
+      driver.seedState({
+        session: makeSession({ latest_plan_id: null }),
+        availableModels: [
+          makeModel(),
+          makeModel({ id: ALTERNATE_MODEL_ID, name: "Alternate model" })
+        ]
+      });
+      driver.selectModel(ALTERNATE_MODEL_ID);
+
+      // Dropped from the listing: still chosen and named, and no turn starts.
+      await driver.openReviewListing(1);
+      expect(driver.state.selectedModelId).toBe(ALTERNATE_MODEL_ID);
+      expect(driver.effectiveModel?.name).toBe("Alternate model");
+      expect(driver.modelSendBlock).toBe("model_not_listed");
+      expect(await driver.sendMessage("Hej")).toBe("not_started");
+
+      // Listed again without declared capacity: still chosen, still blocked.
+      await driver.closeReviewListing();
+      expect(driver.state.selectedModelId).toBe(ALTERNATE_MODEL_ID);
+      expect(driver.modelSendBlock).toBe("model_capacity_undeclared");
+      expect(await driver.sendMessage("Hej")).toBe("not_started");
+      expect(stream).not.toHaveBeenCalled();
+
+      // The user's next choice is what runs.
+      driver.selectModel(DEFAULT_MODEL_ID);
+      expect(driver.modelSendBlock).toBeNull();
+      await driver.sendMessage("Hej");
+      expect(stream.mock.calls[0]?.[1].requestBody["application/json"].model_id).toBe(
+        DEFAULT_MODEL_ID
+      );
+    });
+
+    it("keeps the choice and its effort when a listing fails", async () => {
+      const fetch = vi.fn(async () => {
+        throw new Error("listing failed");
+      });
+      const { driver } = makeDriver({ fetchImpl: fetch });
+      driver.seedState({
+        session: makeSession({ latest_plan_id: null }),
+        availableModels: [
+          makeModel(),
+          makeModel({
+            id: ALTERNATE_MODEL_ID,
+            name: "Alternate model",
+            reasoning_effort_options: ["high"]
+          })
+        ]
+      });
+      driver.selectModel(ALTERNATE_MODEL_ID);
+      driver.selectReasoningEffort("high");
+
+      await driver.openReviewListing(1);
+
+      expect(driver.state.modelLoadStatus).toBe("failed");
+      expect(driver.state.selectedModelId).toBe(ALTERNATE_MODEL_ID);
+      expect(driver.state.selectedReasoningEffort).toBe("high");
+      expect(driver.effectiveModel?.name).toBe("Alternate model");
+      expect(driver.modelSendBlock).toBe("models_failed");
     });
 
     it("reads efforts from the server default before any override", () => {
@@ -749,7 +899,7 @@ describe("FlowAIBuilderDriver", () => {
         })
       )
       .mockResolvedValueOnce(makePlan({ plan_id: "plan-9", status: "approved" }))
-      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce(readyListing())
       .mockResolvedValueOnce({
         sessions: [makeDraft({ session_id: "session-2", latest_plan_id: "plan-9" })]
       });
@@ -811,7 +961,7 @@ describe("FlowAIBuilderDriver", () => {
       return { driver, modelQueries };
     }
 
-    it("is ready at the packet's level before the review is, and drops a choice below it", async () => {
+    it("is ready at the packet's level before the review is, and keeps a choice below it", async () => {
       const { driver, modelQueries } = makeReviewDriver();
       driver.selectModel("model-low");
 
@@ -823,8 +973,11 @@ describe("FlowAIBuilderDriver", () => {
       // ready already sees the list its judgement is held to.
       expect(modelQueries).toEqual([{ evidence_level: 2 }]);
       expect(driver.state.availableModels).toEqual([highModel]);
-      expect(driver.state.selectedModelId).toBeNull();
-      expect(driver.effectiveModel?.id).toBe("model-high");
+      // The user's choice is not replaced by the review's default: it stays on
+      // screen and review actions wait until the user picks a listed model.
+      expect(driver.state.selectedModelId).toBe("model-low");
+      expect(driver.effectiveModel?.id).toBe("model-low");
+      expect(driver.modelSendBlock).toBe("model_not_listed");
     });
 
     it("asks the server whether a failed step can be repaired, by run and step", async () => {
@@ -957,7 +1110,7 @@ describe("FlowAIBuilderDriver", () => {
         return makeSession({ session_id: "session-2", latest_plan_id: "plan-9" });
       }
       if (path === "/api/v1/flows/ai-builder/plans/{plan_id}") return await heldPlan;
-      if (path.endsWith("/models")) return { models: [], default_model_id: null };
+      if (path.endsWith("/models")) return readyListing();
       if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "get") {
         return { sessions: [] };
       }
@@ -1083,7 +1236,7 @@ describe("FlowAIBuilderDriver", () => {
       if (path === "/api/v1/flows/ai-builder/sessions" && init?.method === "get") {
         return { sessions: [] };
       }
-      if (path.endsWith("/models")) return { models: [], default_model_id: null };
+      if (path.endsWith("/models")) return readyListing();
       throw new Error(`Unexpected request: ${path}`);
     });
     const { driver } = makeDriver({ fetchImpl: fetch });
@@ -1118,7 +1271,7 @@ describe("FlowAIBuilderDriver", () => {
         })
       )
       .mockResolvedValueOnce(makePlan({ plan_id: "plan-9", status: "approved" }))
-      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce(readyListing())
       .mockResolvedValueOnce({
         sessions: [makeDraft({ session_id: "session-2", latest_plan_id: "plan-9" })]
       });
@@ -1152,7 +1305,7 @@ describe("FlowAIBuilderDriver", () => {
     const fetch = vi
       .fn()
       .mockResolvedValueOnce(makeSession({ session_id: "session-fresh", latest_plan_id: null }))
-      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce(readyListing())
       .mockResolvedValueOnce(makeSession({ session_id: "session-fresh", latest_plan_id: null }))
       .mockResolvedValueOnce({ sessions: [makeDraft({ session_id: "session-fresh" })] });
     const { driver } = makeDriver({ fetchImpl: fetch });
@@ -1170,7 +1323,7 @@ describe("FlowAIBuilderDriver", () => {
       .mockRejectedValueOnce(new Error("create refused"))
       .mockResolvedValueOnce({ sessions: [makeDraft({ session_id: "session-old" })] })
       .mockResolvedValueOnce(makeSession({ session_id: "session-fresh", latest_plan_id: null }))
-      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce(readyListing())
       .mockResolvedValueOnce(makeSession({ session_id: "session-fresh", latest_plan_id: null }))
       .mockResolvedValueOnce({ sessions: [makeDraft({ session_id: "session-fresh" })] });
     const { driver } = makeDriver({ fetchImpl: fetch });
@@ -1222,7 +1375,7 @@ describe("FlowAIBuilderDriver", () => {
           conversation: []
         })
       )
-      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce(readyListing())
       .mockResolvedValueOnce(
         makeSession({
           session_id: "session-fresh",
@@ -1578,7 +1731,7 @@ describe("FlowAIBuilderDriver", () => {
       .fn()
       .mockReturnValueOnce(delayedOldRefresh.promise)
       .mockResolvedValueOnce(newSession)
-      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce(readyListing())
       .mockResolvedValueOnce({ sessions: [] });
     const { driver } = makeDriver({ fetchImpl: fetchSession });
     driver.seedState({ session: oldSession });
@@ -1604,7 +1757,7 @@ describe("FlowAIBuilderDriver", () => {
       .mockResolvedValueOnce(oldSession)
       .mockReturnValueOnce(delayedOldPlan.promise)
       .mockResolvedValueOnce(newSession)
-      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce(readyListing())
       .mockResolvedValueOnce({ sessions: [] });
     const { driver } = makeDriver({ fetchImpl: fetch });
     driver.seedState({ session: oldSession });
@@ -1631,9 +1784,9 @@ describe("FlowAIBuilderDriver", () => {
       .fn()
       .mockReturnValueOnce(delayedOldResume.promise)
       .mockReturnValueOnce(delayedNewResume.promise)
-      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce(readyListing())
       .mockResolvedValueOnce({ sessions: [] })
-      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce(readyListing())
       .mockResolvedValueOnce({ sessions: [] });
     const { driver } = makeDriver({ fetchImpl: fetch });
 
@@ -1658,7 +1811,7 @@ describe("FlowAIBuilderDriver", () => {
       .fn()
       .mockReturnValueOnce(delayedOldResume.promise)
       .mockReturnValueOnce(delayedReplacementResume.promise)
-      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce(readyListing())
       .mockResolvedValueOnce({ sessions: [] });
     const { driver } = makeDriver({ fetchImpl: fetch });
 
@@ -1715,9 +1868,9 @@ describe("FlowAIBuilderDriver", () => {
       .fn()
       .mockReturnValueOnce(delayedCreate.promise)
       .mockReturnValueOnce(delayedResume.promise)
-      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce(readyListing())
       .mockResolvedValueOnce({ sessions: [] })
-      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce(readyListing())
       .mockResolvedValueOnce(createdSession)
       .mockResolvedValueOnce({ sessions: [] });
     const { driver } = makeDriver({ fetchImpl: fetch });
@@ -1743,7 +1896,7 @@ describe("FlowAIBuilderDriver", () => {
       .fn()
       .mockReturnValueOnce(delayedOldDrafts.promise)
       .mockResolvedValueOnce(resumedSession)
-      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce(readyListing())
       .mockResolvedValueOnce({ sessions: [currentDraft] });
     const { driver } = makeDriver({ fetchImpl: fetch });
 
@@ -1877,7 +2030,7 @@ describe("FlowAIBuilderDriver", () => {
       .fn()
       .mockReturnValueOnce(delayedDetach.promise)
       .mockResolvedValueOnce(currentSession)
-      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce(readyListing())
       .mockResolvedValueOnce({ sessions: [] });
     const { driver } = makeDriver({ fetchImpl: fetch });
     driver.seedState({
@@ -1905,7 +2058,7 @@ describe("FlowAIBuilderDriver", () => {
       .fn()
       .mockReturnValueOnce(delayedRevision.promise)
       .mockResolvedValueOnce(currentSession)
-      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce(readyListing())
       .mockResolvedValueOnce(currentPlan)
       .mockResolvedValueOnce({ sessions: [] });
     const { driver } = makeDriver({ fetchImpl: fetch });
@@ -1935,7 +2088,7 @@ describe("FlowAIBuilderDriver", () => {
       .fn()
       .mockReturnValueOnce(delayedCancellation.promise)
       .mockResolvedValueOnce(resumedSession)
-      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce(readyListing())
       .mockResolvedValueOnce({ sessions: [resumedDraft] })
       .mockResolvedValueOnce({ sessions: [] });
     const { driver } = makeDriver({ fetchImpl: fetch });
@@ -1964,7 +2117,7 @@ describe("FlowAIBuilderDriver", () => {
       .mockReturnValueOnce(delayedCancellation.promise)
       .mockReturnValueOnce(delayedResume.promise)
       .mockResolvedValueOnce({ sessions: [] })
-      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce(readyListing())
       .mockResolvedValueOnce({ sessions: [] });
     const { driver } = makeDriver({ fetchImpl: fetch });
     driver.seedState({
@@ -1995,7 +2148,7 @@ describe("FlowAIBuilderDriver", () => {
       .mockReturnValueOnce(delayedCancellation.promise)
       .mockReturnValueOnce(delayedResume.promise)
       .mockResolvedValueOnce({ sessions: [replacementDraft] })
-      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce(readyListing())
       .mockResolvedValueOnce({ sessions: [replacementDraft] });
     const { driver } = makeDriver({ fetchImpl: fetch });
     driver.seedState({
@@ -2026,7 +2179,7 @@ describe("FlowAIBuilderDriver", () => {
       .fn()
       .mockReturnValueOnce(delayedCancellation.promise)
       .mockResolvedValueOnce(replacementSession)
-      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce(readyListing())
       .mockImplementationOnce(() => {
         resumeDraftLoadStarted.resolve();
         return delayedResumeDrafts.promise;
@@ -2062,7 +2215,7 @@ describe("FlowAIBuilderDriver", () => {
       .fn()
       .mockReturnValueOnce(delayedCancellation.promise)
       .mockResolvedValueOnce(replacementSession)
-      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce(readyListing())
       .mockResolvedValueOnce({ sessions: [cancelledDraft, replacementDraft] })
       .mockResolvedValueOnce({ sessions: [replacementDraft] });
     const { driver } = makeDriver({ fetchImpl: fetch });
@@ -2197,7 +2350,7 @@ describe("FlowAIBuilderDriver", () => {
         return { sessions: [] };
       }
       if (path.endsWith("/models")) {
-        return { models: [], default_model_id: null };
+        return readyListing();
       }
       if (path === "/api/v1/flows/ai-builder/sessions/{session_id}") {
         throw new Error("session refresh unavailable");
@@ -2453,7 +2606,7 @@ describe("FlowAIBuilderDriver", () => {
         if (path === "/api/v1/flows/ai-builder/sessions/{session_id}") {
           return committedSession;
         }
-        if (path.endsWith("/models")) return { models: [], default_model_id: null };
+        if (path.endsWith("/models")) return readyListing();
         if (path === "/api/v1/flows/ai-builder/sessions") return { sessions: [] };
         throw new Error(`Unexpected fetch: ${path}`);
       })
@@ -3395,7 +3548,7 @@ describe("FlowAIBuilderDriver", () => {
     const fetch = vi
       .fn()
       .mockResolvedValueOnce(makeSession({ session_id: "session-2", latest_plan_id: null }))
-      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce(readyListing())
       .mockResolvedValueOnce(makeSession({ session_id: "session-2", latest_plan_id: null }))
       .mockResolvedValueOnce({ sessions: [] });
     const { driver } = makeDriver({ fetchImpl: fetch });
@@ -3431,7 +3584,7 @@ describe("FlowAIBuilderDriver", () => {
     const fetch = vi
       .fn()
       .mockResolvedValueOnce(makeSession({ session_id: "edit-session-1", target_kind: "edit" }))
-      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce(readyListing())
       .mockResolvedValueOnce(makeSession({ session_id: "edit-session-1", target_kind: "edit" }))
       .mockResolvedValueOnce({ sessions: [] });
     const { driver } = makeDriver({ fetchImpl: fetch });
@@ -3543,7 +3696,7 @@ describe("FlowAIBuilderDriver", () => {
           ]
         })
       )
-      .mockResolvedValueOnce({ models: [], default_model_id: null })
+      .mockResolvedValueOnce(readyListing())
       .mockResolvedValueOnce({ sessions: [] });
     const { driver } = makeDriver({ fetchImpl: fetch });
 
@@ -3654,7 +3807,7 @@ describe("FlowAIBuilderDriver client error reporting", () => {
     const session = makeRecoverableSession("failed_before_provider");
     const fetch = vi.fn().mockImplementation((route: string) => {
       if (route === CLIENT_ERRORS_ROUTE) return Promise.resolve(undefined);
-      if (route.endsWith("/models")) return Promise.resolve({ models: [], default_model_id: null });
+      if (route.endsWith("/models")) return Promise.resolve(readyListing());
       return Promise.resolve(session);
     });
     const { driver } = makeDriver({ fetchImpl: fetch });
@@ -3775,7 +3928,7 @@ describe("FlowAIBuilderDriver conversation hydration", () => {
   it("hydrates a public question_answer into the typed ChatMessage field", async () => {
     const { driver } = makeDriver({
       fetchImpl: vi.fn(async (path: string) => {
-        if (path.endsWith("/models")) return { models: [], default_model_id: null };
+        if (path.endsWith("/models")) return readyListing();
         return makeSession({
           conversation: [
             {
@@ -3808,7 +3961,7 @@ describe("FlowAIBuilderDriver conversation hydration", () => {
   it("hydrates runtime metadata field purpose from the public conversation", async () => {
     const { driver } = makeDriver({
       fetchImpl: vi.fn(async (path: string) => {
-        if (path.endsWith("/models")) return { models: [], default_model_id: null };
+        if (path.endsWith("/models")) return readyListing();
         return makeSession({
           conversation: [
             {

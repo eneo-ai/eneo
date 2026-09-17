@@ -76,7 +76,13 @@ const PLAN_ROUTE = "/api/v1/flows/ai-builder/plans/{plan_id}";
 const DEFAULT_MODEL_ID = "11111111-1111-4111-8111-111111111199";
 const DEFAULT_MODEL_RESPONSE = {
   models: [
-    { id: DEFAULT_MODEL_ID, name: "Test model", provider: "openai", reasoning_effort_options: [] }
+    {
+      id: DEFAULT_MODEL_ID,
+      name: "Test model",
+      provider: "openai",
+      reasoning_effort_options: [],
+      availability: { state: "ready" }
+    }
   ],
   default_model_id: DEFAULT_MODEL_ID
 };
@@ -735,13 +741,15 @@ describe("FlowAIBuilder planner controls", () => {
                 id: DEFAULT_MODEL_ID,
                 name: "Test model",
                 provider: "openai",
-                reasoning_effort_options: reasoning
+                reasoning_effort_options: reasoning,
+                availability: { state: "ready" }
               },
               {
                 id: SECOND_MODEL_ID,
                 name: "Second model",
                 provider: "openai",
-                reasoning_effort_options: []
+                reasoning_effort_options: [],
+                availability: { state: "ready" }
               }
             ],
             default_model_id: DEFAULT_MODEL_ID
@@ -800,7 +808,7 @@ describe("FlowAIBuilder planner controls", () => {
     expect(await screen.findByText(m.no_completion_model_description())).toBeTruthy();
   });
 
-  it("says so and retries when the model read fails, without blocking the send", async () => {
+  it("says so and retries when the model read fails, keeping typing open but starting no turn", async () => {
     const { fetch } = makeFetch();
     let failNext = true;
     const flaky = vi.fn(async (path: string, init?: Record<string, unknown>) => {
@@ -815,13 +823,15 @@ describe("FlowAIBuilder planner controls", () => {
             id: DEFAULT_MODEL_ID,
             name: "Test model",
             provider: "openai",
-            reasoning_effort_options: []
+            reasoning_effort_options: [],
+            availability: { state: "ready" }
           },
           {
             id: SECOND_MODEL_ID,
             name: "Second model",
             provider: "openai",
-            reasoning_effort_options: []
+            reasoning_effort_options: [],
+            availability: { state: "ready" }
           }
         ],
         default_model_id: DEFAULT_MODEL_ID
@@ -830,8 +840,10 @@ describe("FlowAIBuilder planner controls", () => {
     const { service } = renderShell({ fetch: flaky, stream: makeStream().stream });
 
     expect(await screen.findByText(m.failed_to_load_models())).toBeTruthy();
-    // The failure explains itself; it never reaches the send path.
+    // The failure explains itself. Typing stays open, but no turn starts
+    // until a listing names the model it would run.
     await waitFor(() => expect(service().canSendMessage).toBe(true));
+    expect(service().modelSendBlock).toBe("models_failed");
 
     await fireEvent.click(button(m.retry()));
 
@@ -841,6 +853,7 @@ describe("FlowAIBuilder planner controls", () => {
       })
     ).toBeTruthy();
     expect(screen.queryByText(m.failed_to_load_models())).toBeNull();
+    expect(service().modelSendBlock).toBeNull();
   });
 
   it("retries the model read once however fast the button is clicked", async () => {
@@ -888,6 +901,79 @@ describe("FlowAIBuilder planner controls", () => {
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0]!.body).toMatchObject({ model_id: SECOND_MODEL_ID });
     calls[0]!.finish();
+  });
+
+  /** A space whose listing carries models without declared capacity. */
+  function withUnreadyModels(defaultReady: boolean) {
+    const { fetch } = makeFetch();
+    const unready = {
+      provider: "openai",
+      reasoning_effort_options: [],
+      availability: {
+        state: "capacity_undeclared",
+        missing_dimensions: ["context_window_tokens"]
+      }
+    };
+    return vi.fn(async (path: string, init?: Record<string, unknown>) =>
+      path.endsWith("/models")
+        ? {
+            models: [
+              defaultReady
+                ? {
+                    id: DEFAULT_MODEL_ID,
+                    name: "Test model",
+                    provider: "openai",
+                    reasoning_effort_options: [],
+                    availability: { state: "ready" }
+                  }
+                : { ...unready, id: DEFAULT_MODEL_ID, name: "Test model" },
+              { ...unready, id: SECOND_MODEL_ID, name: "Second model" }
+            ],
+            default_model_id: defaultReady ? DEFAULT_MODEL_ID : null
+          }
+        : fetch(path as string, init as never)
+    );
+  }
+
+  it("lists a model without declared capacity as disabled, with the reason, and never selects it", async () => {
+    const { service } = renderShell({
+      fetch: withUnreadyModels(true),
+      stream: makeStream().stream
+    });
+
+    await fireEvent.click(
+      await screen.findByRole("button", { name: `${m.ai_builder_model_label()}: Test model` })
+    );
+    const option = await screen.findByRole("option", { name: /Second model/ });
+    expect(option.getAttribute("aria-disabled")).toBe("true");
+    expect(within(option).getByText(m.ai_builder_model_capacity_undeclared_short())).toBeTruthy();
+
+    await fireEvent.click(option);
+
+    expect(service().effectiveModel?.id).toBe(DEFAULT_MODEL_ID);
+    expect(service().modelSendBlock).toBeNull();
+  });
+
+  it("says why and starts no turn while no listed model is ready, with the picker and typing still open", async () => {
+    const { stream, calls } = makeStream(() => "hold");
+    renderShell({ fetch: withUnreadyModels(false), stream });
+
+    expect(await screen.findByText(m.ai_builder_no_ready_model())).toBeTruthy();
+    const trigger = screen.getByRole("button", {
+      name: `${m.ai_builder_model_label()}: ${m.choose_a_completion_model()}`
+    }) as HTMLButtonElement;
+    expect(trigger.disabled).toBe(false);
+
+    await screen.findByRole("heading", { name: m.ai_builder_task_title() });
+    const input = textbox() as HTMLTextAreaElement;
+    expect(input.disabled).toBe(false);
+    await fireEvent.input(input, { target: { value: "Sammanfatta rapporter" } });
+    const send = button(m.ai_builder_send());
+    expect(send.disabled).toBe(true);
+    await fireEvent.click(send);
+
+    expect(calls).toHaveLength(0);
+    expect(input.value).toBe("Sammanfatta rapporter");
   });
 });
 

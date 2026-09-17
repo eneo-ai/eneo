@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { m } from "$lib/paraglide/messages";
+
 import { FlowAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
 import type {
   AIBuilderDraftSession,
@@ -422,7 +424,8 @@ describe("FlowAIBuilderService", () => {
       {
         id: "model-1",
         name: "Model",
-        provider: "openai"
+        provider: "openai",
+        availability: { state: "ready" }
       }
     ];
     const draftSessions = [makeDraft({ session_id: "draft-2" })];
@@ -570,12 +573,27 @@ describe("FlowAIBuilderService", () => {
       );
       return { service, fetch };
     }
+    /** A listed ready default, so the composer has a model a request can run. */
+    function seedReadyModel(service: FlowAIBuilderService) {
+      service.seedState({
+        availableModels: [
+          { id: "model-low", name: "Low", provider: "openai", availability: { state: "ready" } }
+        ],
+        defaultModelId: "model-low",
+        modelLoadStatus: "loaded"
+      });
+    }
 
     it("drops a review packet that arrives after the review closed", async () => {
       const { service, fetch } = makeReviewService();
       // An active session with a listing; a review's packet would raise the
       // listing's floor, so a discarded packet must leave it untouched.
-      const lowModel = { id: "model-low", name: "Low", provider: "openai" };
+      const lowModel = {
+        id: "model-low",
+        name: "Low",
+        provider: "openai",
+        availability: { state: "ready" }
+      };
       service.seedState({
         session: makeSession({ session_id: "s-review", flow_id: "flow-1" }),
         availableModels: [lowModel as never],
@@ -605,6 +623,7 @@ describe("FlowAIBuilderService", () => {
         .mockResolvedValueOnce(packet(1))
         .mockReturnValueOnce(pendingSuggestions.promise)
         .mockResolvedValueOnce(packet(2));
+      seedReadyModel(service);
 
       await service.openReview();
       const requested = service.requestSuggestions();
@@ -620,6 +639,7 @@ describe("FlowAIBuilderService", () => {
       const { service, fetch } = makeReviewService();
       const pendingSuggestions = deferred<object>();
       fetch.mockResolvedValueOnce(packet(1)).mockReturnValueOnce(pendingSuggestions.promise);
+      seedReadyModel(service);
 
       await service.openReview();
       const requested = service.requestSuggestions();
@@ -632,7 +652,12 @@ describe("FlowAIBuilderService", () => {
 
     it("opens a failure repair at its evidence level and drops a launch that answers after it closed", async () => {
       const { service, fetch } = makeReviewService();
-      const lowModel = { id: "model-low", name: "Low", provider: "openai" };
+      const lowModel = {
+        id: "model-low",
+        name: "Low",
+        provider: "openai",
+        availability: { state: "ready" }
+      };
       service.seedState({
         session: makeSession({ session_id: "s-repair", flow_id: "flow-1" }),
         availableModels: [lowModel as never],
@@ -714,11 +739,40 @@ describe("FlowAIBuilderService", () => {
     it("keeps suggestions that answer the review still open", async () => {
       const { service, fetch } = makeReviewService();
       fetch.mockResolvedValueOnce(packet(1)).mockResolvedValueOnce(judged(1));
+      seedReadyModel(service);
 
       await service.openReview();
       await service.requestSuggestions();
 
       expect(service.suggestions).toEqual({ status: "ready", suggestions: judged(1) });
+    });
+
+    it("requests no suggestions while the shown model cannot run, and says why", async () => {
+      const { service, fetch } = makeReviewService();
+      fetch.mockResolvedValueOnce(packet(1));
+      service.seedState({
+        availableModels: [
+          {
+            id: "model-low",
+            name: "Low",
+            provider: "openai",
+            availability: {
+              state: "capacity_undeclared",
+              missing_dimensions: ["context_window_tokens"]
+            }
+          }
+        ],
+        defaultModelId: null,
+        modelLoadStatus: "loaded"
+      });
+
+      await service.openReview();
+      await service.requestSuggestions();
+
+      expect(service.suggestions).toEqual({ status: "closed" });
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(service.modelSendBlock).toBe("no_ready_model");
+      expect(service.modelSendBlockMessage).toBe(m.ai_builder_no_ready_model());
     });
   });
 

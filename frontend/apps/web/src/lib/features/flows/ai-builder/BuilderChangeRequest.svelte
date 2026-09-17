@@ -11,6 +11,8 @@
     /** "Steg 3: Rendera PDF" when the request is scoped to one step. */
     scopeLabel?: string | null;
     disabled?: boolean;
+    /** Why sending is refused while typing stays possible; shown as the hint. */
+    sendBlockedReason?: string | null;
     /** What this box rewrites. Defaults to the plan; the confirmation screen
      *  passes its own words because it rewrites the summary instead. */
     title?: string;
@@ -31,6 +33,7 @@
     text = $bindable(""),
     scopeLabel = null,
     disabled = false,
+    sendBlockedReason = null,
     title = m.ai_builder_change_request_title(),
     example = m.ai_builder_change_request_example(),
     placeholder = m.ai_builder_change_request_placeholder(),
@@ -42,7 +45,7 @@
 
   let textarea = $state<HTMLTextAreaElement | null>(null);
 
-  const canSend = $derived(!disabled && text.trim().length > 0);
+  const canSend = $derived(!disabled && !sendBlockedReason && text.trim().length > 0);
 
   // The caller opens the box in the same tick, so the textarea does not exist
   // yet when this runs.
@@ -109,7 +112,12 @@
         onkeydown={handleKeydown}
       />
       <div class="mt-2.5 flex flex-wrap items-center gap-2.5">
-        <span class="text-secondary text-xs text-pretty">{hint}</span>
+        <span
+          class="text-secondary text-xs text-pretty"
+          role={sendBlockedReason ? "status" : undefined}
+        >
+          {sendBlockedReason ?? hint}
+        </span>
         <Button size="sm" class="ml-auto max-sm:w-full" disabled={!canSend} onclick={send}>
           {m.ai_builder_send()}
         </Button>

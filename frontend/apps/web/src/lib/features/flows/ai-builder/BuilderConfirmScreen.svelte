@@ -74,6 +74,8 @@
      *  moving away from what the flow runs on today. */
     isEdit?: boolean;
     disabled?: boolean;
+    /** Why a change request cannot start a turn on the composer's model. */
+    sendBlockedReason?: string | null;
     /** The answer being changed, edited here instead of walking back through
      *  the questions; the card below it stays visible the whole time. */
     editingQuestion?: ChatMessage | null;
@@ -118,6 +120,7 @@
     readOnly = false,
     isEdit = false,
     disabled = false,
+    sendBlockedReason = null,
     editingQuestion = null,
     editingQuestionNumber = null,
     editingAnsweredOptionIds = null,
@@ -1233,6 +1236,7 @@
           scopeLabel={changeTopic}
           onclearscope={() => (changeTopic = null)}
           {disabled}
+          {sendBlockedReason}
           title={m.ai_builder_confirm_change_answers()}
           example={m.ai_builder_confirm_change_example()}
           placeholder={m.ai_builder_confirm_change_hint()}

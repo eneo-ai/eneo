@@ -6,6 +6,7 @@ import type { StructuredQuestionAnswerMetadata } from "./structuredQuestionAnswe
 import {
   FlowAIBuilderDriver,
   type AIBuilderClientTransport,
+  type AIBuilderModelSendBlock,
   type AIBuilderStreamState,
   type CreateFailureOutcome,
   type FlowAIBuilderState,
@@ -304,11 +305,33 @@ export class FlowAIBuilderService {
     return this.#state.availableModels;
   }
 
-  /** The model the composer names — the override when set, else the advertised
-   *  default. Null when neither is known. */
+  /** The model the composer names and a turn runs — the user's choice when
+   *  set, else the advertised default. Null when neither is known. */
   get effectiveModel(): AIBuilderModel | null {
     void this.#state;
     return this.#driver.effectiveModel;
+  }
+
+  /** Why no turn may start on the model the composer shows, or null. Separate
+   *  from `canSendMessage`: typing, attachments and the picker stay usable. */
+  get modelSendBlock(): AIBuilderModelSendBlock | null {
+    void this.#state;
+    return this.#driver.modelSendBlock;
+  }
+
+  /** The sentence shown wherever a turn would start. Loading and a failed
+   *  read say so next to the picker on their own. */
+  get modelSendBlockMessage(): string | null {
+    switch (this.modelSendBlock) {
+      case "model_not_listed":
+        return m.ai_builder_model_not_listed();
+      case "model_capacity_undeclared":
+        return m.ai_builder_model_capacity_undeclared();
+      case "no_ready_model":
+        return m.ai_builder_no_ready_model();
+      default:
+        return null;
+    }
   }
 
   get modelLoadStatus(): ModelLoadStatus {
@@ -504,6 +527,7 @@ export class FlowAIBuilderService {
   suggestions: AIBuilderFlowReviewSuggestionsState = $state({ status: "closed" });
 
   async requestSuggestions(): Promise<void> {
+    if (this.modelSendBlock !== null) return;
     const generation = this.#reviewGeneration;
     this.suggestions = { status: "loading" };
     try {

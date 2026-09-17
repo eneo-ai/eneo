@@ -117,6 +117,16 @@ function turnObservationKey(subject: Extract<DisplayedFailure, { kind: "turn" }>
 }
 export type ModelLoadStatus = "loading" | "loaded" | "failed";
 
+/** Why no turn may start on the model the composer shows. A turn runs exactly
+ *  that model or does not start: the server never picks one the user did not
+ *  see. */
+export type AIBuilderModelSendBlock =
+  | "models_loading"
+  | "models_failed"
+  | "no_ready_model"
+  | "model_not_listed"
+  | "model_capacity_undeclared";
+
 export interface FlowAIBuilderState {
   session: AIBuilderSession | null;
   messages: ChatMessage[];
@@ -131,20 +141,18 @@ export interface FlowAIBuilderState {
   /** Display names for per-step model refs, and the choices behind the
    *  composer's planner controls. */
   availableModels: AIBuilderModel[];
-  /** The planner default the server advertised when the list was read. Display
-   *  data only: an omitted model_id is resolved again at send time, so this
-   *  names what was advertised, not what a later turn is guaranteed to use. */
+  /** The ready planner default the server advertised when the list was read:
+   *  what the composer shows until the user chooses, and what a turn then
+   *  sends as its model_id. */
   defaultModelId: string | null;
-  /** An explicit planner override, or null to let the server default apply.
-   *  Never a precondition for sending — an unread model list simply leaves it
-   *  null, which is the same request the client sent before the control
-   *  existed. */
+  /** The user's explicit planner choice. It stays until the user changes it,
+   *  even when a later listing omits it; the composer keeps naming it and
+   *  refuses to start a turn instead of switching to another model. */
   selectedModelId: string | null;
   selectedReasoningEffort: string | null;
-  /** Whether the model read has landed. Sending never waits on it, but the
-   *  composer has to tell "not yet" from "none configured" from "the read
-   *  broke" — silently showing nothing is the complaint these controls
-   *  answer. */
+  /** Whether the model read has landed. The composer has to tell "not yet"
+   *  from "none configured" from "the read broke", and no turn starts before
+   *  it knows which model it would run. */
   modelLoadStatus: ModelLoadStatus;
   draftSessions: AIBuilderDraftSession[];
   pendingOperation: PendingPlanOperation | null;
@@ -348,17 +356,40 @@ export class FlowAIBuilderDriver {
     return this.#state.streamState === "streaming";
   }
 
-  /** The model the composer names: the user's override when there is one,
-   *  otherwise the advertised default. An omitted model_id is resolved by the
-   *  server at send time, so this is what we can show, not a guarantee of what
-   *  will run. */
+  /** The model the composer names and a turn runs: the user's choice when
+   *  there is one, otherwise the advertised default. A choice a later listing
+   *  omits is still named, from the last listing that had it. */
   get effectiveModel(): AIBuilderModel | null {
     const id = this.#state.selectedModelId ?? this.#state.defaultModelId;
-    return this.#state.availableModels.find((model) => model.id === id) ?? null;
+    if (id === null) return null;
+    const listed = this.#state.availableModels.find((model) => model.id === id);
+    if (listed) return listed;
+    return this.#lastListedSelection?.id === id ? this.#lastListedSelection : null;
+  }
+
+  /** The last listed version of the user's choice, so a listing that drops it
+   *  still shows which model the user picked. */
+  #lastListedSelection: AIBuilderModel | null = null;
+
+  get modelSendBlock(): AIBuilderModelSendBlock | null {
+    const { modelLoadStatus, selectedModelId, availableModels } = this.#state;
+    if (modelLoadStatus === "loading") return "models_loading";
+    if (modelLoadStatus === "failed") return "models_failed";
+    if (
+      selectedModelId !== null &&
+      !availableModels.some((model) => model.id === selectedModelId)
+    ) {
+      return "model_not_listed";
+    }
+    const shown = this.effectiveModel;
+    if (shown === null) return "no_ready_model";
+    return shown.availability.state === "ready" ? null : "model_capacity_undeclared";
   }
 
   selectModel(modelId: string): void {
-    if (!this.#state.availableModels.some((model) => model.id === modelId)) return;
+    const model = this.#state.availableModels.find((candidate) => candidate.id === modelId);
+    if (!model || model.availability.state !== "ready") return;
+    this.#lastListedSelection = model;
     this.#state.selectedModelId = modelId;
     // Efforts are named per model; carrying one across a switch could send a
     // value the new model does not accept.
@@ -833,6 +864,9 @@ export class FlowAIBuilderDriver {
     if (!this.#flowId) {
       throw new Error("A flow review needs an edit session's flow.");
     }
+    if (this.modelSendBlock !== null) {
+      throw new Error("The model the composer shows cannot run a review.");
+    }
     return (await this.#transport.fetch(FLOW_AI_BUILDER_ROUTES.flowReviewSuggestions, {
       method: "post",
       params: {
@@ -854,7 +888,8 @@ export class FlowAIBuilderDriver {
       !this.#state.session ||
       this.isStreaming ||
       this.#state.pendingOperation !== null ||
-      !this.canStartNewTurn
+      !this.canStartNewTurn ||
+      this.modelSendBlock !== null
     ) {
       return "not_started";
     }
@@ -924,7 +959,8 @@ export class FlowAIBuilderDriver {
       !retained ||
       this.#state.pendingOperation !== null ||
       this.isStreaming ||
-      !this.canStartNewTurn
+      !this.canStartNewTurn ||
+      this.modelSendBlock !== null
     ) {
       return "not_started";
     }
@@ -943,16 +979,13 @@ export class FlowAIBuilderDriver {
     );
   }
 
-  /** The planner controls as a request would carry them. Silence lets the
-   *  server apply its own default, so an unchanged composer never pins a
-   *  model. An effort is the exception: it is one of the options a
-   *  particular model advertised, so it has to name that model. Sent alone,
-   *  the server would judge it against whatever its default resolves to now,
-   *  and either apply the choice to a different model or refuse the turn. */
+  /** The planner controls as a request carries them: always the model the
+   *  composer shows, chosen or default. The server runs exactly that model or
+   *  refuses with a reason; an omitted id would let it resolve a default the
+   *  user never saw. Every caller checks `modelSendBlock` first. */
   #plannerSelection(): Pick<AIBuilderSendMessageRequest, "model_id" | "reasoning_effort"> {
     const reasoningEffort = this.#state.selectedReasoningEffort;
-    const modelId =
-      this.#state.selectedModelId ?? (reasoningEffort ? (this.effectiveModel?.id ?? null) : null);
+    const modelId = this.effectiveModel?.id ?? null;
     return {
       ...(modelId ? { model_id: modelId } : {}),
       ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {})
@@ -1789,14 +1822,10 @@ export class FlowAIBuilderDriver {
       // in flight keeps its effort.
       const modelBefore = this.effectiveModel?.id ?? null;
       this.#state.availableModels = result.models;
-      // A choice the floor no longer lists would be refused on send; the
-      // composer falls back to the default the server now advertises.
-      if (
-        this.#state.selectedModelId !== null &&
-        !result.models.some((model) => model.id === this.#state.selectedModelId)
-      ) {
-        this.#state.selectedModelId = null;
-      }
+      // A choice this listing omits stays chosen: the composer keeps naming it
+      // and refuses to start a turn until the user picks another model.
+      const selection = result.models.find((model) => model.id === this.#state.selectedModelId);
+      if (selection) this.#lastListedSelection = selection;
       this.#state.defaultModelId = result.models.some(
         (model) => model.id === result.default_model_id
       )
@@ -1811,10 +1840,10 @@ export class FlowAIBuilderDriver {
       this.#notify();
     } catch {
       if (!this.#ownsSessionIdentity(owner) || sequence !== this.#modelListingSequence) return;
+      // The user's choice and its effort survive a failed read; no turn starts
+      // until a listing confirms what the composer shows.
       this.#state.availableModels = [];
       this.#state.defaultModelId = null;
-      this.#state.selectedModelId = null;
-      this.#state.selectedReasoningEffort = null;
       this.#state.modelLoadStatus = "failed";
       this.#notify();
     }
@@ -1868,6 +1897,7 @@ export class FlowAIBuilderDriver {
     this.#authoritativeRefreshError = false;
     this.#isRecoveringLatestTurn = false;
     this.#turnObservation = null;
+    this.#lastListedSelection = null;
     this.#state = createInitialFlowAIBuilderState();
   }
 

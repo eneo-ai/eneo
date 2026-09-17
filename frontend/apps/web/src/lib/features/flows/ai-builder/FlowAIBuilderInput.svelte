@@ -197,6 +197,7 @@
   const canSubmit = $derived(
     (inputValue.trim().length > 0 || completedUploads.length > 0 || restoredFiles.length > 0) &&
       service.canSendMessage &&
+      service.modelSendBlock === null &&
       !$isUploading &&
       !overLimit
   );
@@ -255,6 +256,7 @@
     if (
       (!trimmed && uploadedFileIds.length === 0) ||
       !service.canSendMessage ||
+      service.modelSendBlock !== null ||
       $isUploading ||
       overLimit
     ) {
