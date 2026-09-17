@@ -5005,8 +5005,7 @@
   "widget_admin_template_apply_description": "Kopiera en malls texter, utseende och språk till den här widgeten. Övriga inställningar behålls; senare ändringar av mallen påverkar inte widgeten.",
   "widget_admin_template_none": "Ingen mall",
   "widget_admin_template_create_help": "Mallens texter och utseende kopieras till den nya widgeten. Du kan ändra allt efteråt.",
-  "widget_admin_overview": "Alla widgetar",
-  "widget_admin_overview_description": "Organisationens alla widgetar, aktiva först, med användning de senaste 7 och 30 dagarna. Öppna en widget för att konfigurera eller pausa den.",
+  "widget_admin_overview_description": "Organisationens alla widgetar, aktiva först, med användning de senaste 7 och 30 dagarna. Öppna en widget för att konfigurera eller pausa den; aktivering görs från widgetens sida.",
   "widget_admin_overview_empty": "Inga widgetar än. Redaktörer skapar dem från en assistents sida.",
   "widget_admin_overview_only_active": "Visa bara aktiva",
   "widget_admin_overview_questions_7d": "Frågor, 7 dagar",
@@ -5016,7 +5015,6 @@
   "widget_admin_overview_budget_today": "Budget i dag",
   "widget_admin_overview_last_activity": "Senaste aktivitet",
   "widget_admin_overview_never": "Aldrig",
-  "widget_admin_overview_totals": "{widgets} widgetar, {active} aktiva. {questions30} frågor och {tokens30} tokens på 30 dagar, {blocked30} blockerade av begränsningar.",
   "widget_admin_overview_origins": "{count} tillåtna webbplatser",
   "widget_admin_overview_caption": "Widgetar med placering, status och användning",
   "widget_admin_preview_scheme_pinned": "Widgeten är inställd på {scheme} läge, så förhandsgranskningen visar alltid det. Ändra under Utseende → Färgschema.",
@@ -5058,5 +5056,9 @@
   "widget_admin_policy_description": "Tak som alla organisationens widgetar måste hålla sig inom. Redaktörer ser överträdelser som aktiveringsblockerare.",
   "widget_admin_template_unset_default": "Ta bort som standard",
   "widget_admin_overview_open": "Öppna {name}",
-  "widget_admin_overview_budget_inactive": "Svarar inte besökare (budget {budget} tokens)"
+  "widget_admin_overview_budget_inactive": "Svarar inte besökare (budget {budget} tokens)",
+  "widget_admin_tab_widgets": "Widgetar",
+  "widget_admin_tab_policy": "Policy",
+  "widget_admin_stat_widgets": "Widgetar",
+  "widget_admin_stat_active": "{count} aktiva"
 }

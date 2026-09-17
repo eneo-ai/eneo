@@ -54,23 +54,12 @@
 </script>
 
 <div class="flex flex-col gap-4">
-  <div class="flex flex-wrap items-center justify-between gap-3">
-    <p class="text-secondary text-sm">
-      {m.widget_admin_overview_totals({
-        widgets: number.format(overview.totals.widgets),
-        active: number.format(overview.totals.active),
-        questions30: number.format(overview.totals.questions_30d),
-        tokens30: number.format(overview.totals.tokens_30d),
-        blocked30: number.format(overview.totals.blocked_30d)
-      })}
-    </p>
-    {#if overview.items.length > 0}
-      <div class="flex items-center gap-2">
-        <Label for="widget-overview-only-active">{m.widget_admin_overview_only_active()}</Label>
-        <Switch id="widget-overview-only-active" bind:checked={onlyActive} />
-      </div>
-    {/if}
-  </div>
+  {#if overview.items.length > 0}
+    <div class="flex items-center justify-end gap-2">
+      <Label for="widget-overview-only-active">{m.widget_admin_overview_only_active()}</Label>
+      <Switch id="widget-overview-only-active" bind:checked={onlyActive} />
+    </div>
+  {/if}
 
   {#if overview.items.length === 0}
     <p class="text-secondary text-sm">{m.widget_admin_overview_empty()}</p>
