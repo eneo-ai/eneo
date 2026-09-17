@@ -181,6 +181,12 @@
   // Counts completed run-list reads; the expanded progress panel re-reads
   // step statuses on each one so it moves with the row.
   let runListRefreshTick = $state(0);
+  const runStartedFormat = $derived(
+    new Intl.DateTimeFormat(getLocale(), { dateStyle: "short", timeStyle: "short" })
+  );
+  // Clock for runs that have not finished. It moves with the poll, so an
+  // elapsed time is never older than one refresh.
+  let nowMs = $state(Date.now());
 
   async function loadRuns(mode: "refresh" | "more" = "refresh") {
     const result = await loadFlowRunHistory(history, {
@@ -202,6 +208,7 @@
 
     if (result.kind === "loaded") {
       runListRefreshTick += 1;
+      nowMs = Date.now();
       const nextRuns = result.runs;
       const confirmedOptimisticRunIds = getConfirmedOptimisticFlowRunIds(nextRuns, optimisticRuns);
       if (confirmedOptimisticRunIds.length > 0) {
@@ -246,11 +253,28 @@
     };
   });
 
+  function formatDurationMs(ms: number): string {
+    const value = Math.max(ms, 0);
+    if (value < 1000) return `${value}ms`;
+    if (value < 60_000) return `${(value / 1000).toFixed(1)}s`;
+    if (value < 3_600_000) return `${(value / 60_000).toFixed(1)}m`;
+    // A review can wait overnight; minutes stop being readable long before that.
+    if (value < 86_400_000) return `${(value / 3_600_000).toFixed(1)}h`;
+    return `${(value / 86_400_000).toFixed(1)}d`;
+  }
+
   function formatDuration(start: string, end: string): string {
-    const ms = new Date(end).getTime() - new Date(start).getTime();
-    if (ms < 1000) return `${ms}ms`;
-    if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-    return `${(ms / 60000).toFixed(1)}m`;
+    return formatDurationMs(new Date(end).getTime() - new Date(start).getTime());
+  }
+
+  // A run still going has no end time, and with several going at once how long
+  // each has been waiting is the fact the reviewer is after.
+  function formatElapsed(start: string): string {
+    return formatDurationMs(nowMs - new Date(start).getTime());
+  }
+
+  function isRunInFlight(status: FlowRunSummary["status"]): boolean {
+    return isFlowRunActive(status) || isFlowRunAwaitingReview(status);
   }
 
   async function redispatchRun(run: FlowRunSummary) {
@@ -444,7 +468,8 @@
         type="button"
         variant="outline"
         size="sm"
-        class="h-8 rounded-full px-3.5 text-[0.8rem] {statusFilter === null
+        class="focus-visible:ring-accent-default h-8 rounded-full px-3.5 text-[0.8rem] {statusFilter ===
+        null
           ? 'border-accent-default/40 bg-accent-default/10 text-accent-stronger hover:bg-accent-default/15 hover:text-accent-stronger'
           : 'text-secondary'}"
         aria-pressed={statusFilter === null}
@@ -460,7 +485,8 @@
             type="button"
             variant="outline"
             size="sm"
-            class="h-8 rounded-full px-3.5 text-[0.8rem] {statusFilter === status
+            class="focus-visible:ring-accent-default h-8 rounded-full px-3.5 text-[0.8rem] {statusFilter ===
+            status
               ? 'border-accent-default/40 bg-accent-default/10 text-accent-stronger hover:bg-accent-default/15 hover:text-accent-stronger'
               : 'text-secondary'}"
             aria-pressed={statusFilter === status}
@@ -531,7 +557,7 @@
                   <Button
                     type="button"
                     variant="ghost"
-                    class="text-muted hover:text-primary h-11 w-full justify-start gap-1 rounded-none px-4 text-xs font-medium"
+                    class="text-muted hover:text-primary focus-visible:ring-accent-default h-11 w-full justify-start gap-1 rounded-none px-4 text-xs font-medium focus-visible:ring-inset"
                     onclick={() => toggleSort("status")}
                   >
                     {m.status()}
@@ -560,7 +586,7 @@
                   <Button
                     type="button"
                     variant="ghost"
-                    class="text-muted hover:text-primary h-11 w-full justify-start gap-1 rounded-none px-4 text-xs font-medium"
+                    class="text-muted hover:text-primary focus-visible:ring-accent-default h-11 w-full justify-start gap-1 rounded-none px-4 text-xs font-medium focus-visible:ring-inset"
                     onclick={() => toggleSort("started")}
                   >
                     {m.flow_run_started()}
@@ -586,7 +612,7 @@
                   <Button
                     type="button"
                     variant="ghost"
-                    class="text-muted hover:text-primary h-11 w-full justify-start gap-1 rounded-none px-4 text-xs font-medium"
+                    class="text-muted hover:text-primary focus-visible:ring-accent-default h-11 w-full justify-start gap-1 rounded-none px-4 text-xs font-medium focus-visible:ring-inset"
                     onclick={() => toggleSort("duration")}
                   >
                     {m.duration()}
@@ -634,13 +660,15 @@
                   {getRunVersionLabel(run)}
                 </Table.Cell>
                 <Table.Cell class="text-secondary px-4 py-3 align-middle tabular-nums">
-                  {new Date(run.created_at).toLocaleString(getLocale())}
+                  {runStartedFormat.format(new Date(run.created_at))}
                 </Table.Cell>
                 <Table.Cell
                   class="text-secondary hidden px-4 py-3 align-middle tabular-nums lg:table-cell"
                 >
                   {#if run.status === "completed" || run.status === "failed"}
                     {formatDuration(run.created_at, run.updated_at)}
+                  {:else if isRunInFlight(run.status)}
+                    {formatElapsed(run.created_at)}
                   {:else}
                     <span aria-hidden="true">—</span>
                   {/if}
@@ -683,9 +711,9 @@
                     {/if}
                     {#if isFlowRunCancellable(run.status)}
                       <Button
-                        variant="destructive"
+                        variant="ghost"
                         size="sm"
-                        class="text-negative-stronger hover:text-negative-stronger"
+                        class="text-negative-stronger hover:bg-negative-dimmer/50 hover:text-negative-stronger"
                         disabled={cancellingRunId === run.id}
                         onclick={() => requestCancelRun(run.id)}
                       >
@@ -734,16 +762,16 @@
               </div>
               <div class="flex items-center justify-between gap-2">
                 <p class="text-secondary truncate text-sm tabular-nums">
-                  {new Date(run.created_at).toLocaleString(getLocale())}
+                  {runStartedFormat.format(new Date(run.created_at))}
                 </p>
                 <div class="flex shrink-0 items-center gap-1.5">
                   {#if run.status === "completed" || run.status === "failed"}
                     <p class="text-muted text-xs tabular-nums">
                       {formatDuration(run.created_at, run.updated_at)}
                     </p>
-                  {:else if isFlowRunAwaitingReview(run.status)}
-                    <p class="text-accent-stronger text-xs">
-                      {getRunStatusLabel(run.status)}
+                  {:else if isRunInFlight(run.status)}
+                    <p class="text-muted text-xs tabular-nums">
+                      {formatElapsed(run.created_at)}
                     </p>
                   {/if}
                 </div>
@@ -765,9 +793,9 @@
                   </Button>
                 {/if}
                 <Button
-                  variant="destructive"
+                  variant="ghost"
                   size="sm"
-                  class="text-negative-stronger hover:text-negative-stronger flex-1"
+                  class="text-negative-stronger hover:bg-negative-dimmer/50 hover:text-negative-stronger flex-1"
                   disabled={cancellingRunId === run.id}
                   onclick={() => requestCancelRun(run.id)}
                 >
