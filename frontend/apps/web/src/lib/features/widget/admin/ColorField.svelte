@@ -7,6 +7,7 @@
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import { m } from "$lib/paraglide/messages";
+  import { untrack } from "svelte";
   import { contrastVerdict, DEFAULT_PRIMARY_COLOR, isHexColor } from "../contrast";
 
   type Props = {
@@ -31,9 +32,21 @@
     checkContrast = false
   }: Props = $props();
 
-  const current = $derived(value ?? "");
+  // What is typed stays local until it is a complete hex colour; the server
+  // only ever sees valid values, so no error appears mid-typing.
+  let draft = $state(untrack(() => value ?? ""));
+  $effect(() => {
+    if ((value ?? "") !== draft && (isHexColor(draft) || draft === "")) draft = value ?? "";
+  });
+  const current = $derived(draft);
   const pickerValue = $derived(isHexColor(current) ? current : DEFAULT_PRIMARY_COLOR);
   const contrast = $derived(checkContrast && current ? contrastVerdict(current) : null);
+
+  function typed(raw: string) {
+    draft = raw.trim();
+    if (draft === "" && clearable) onChange(null);
+    else if (isHexColor(draft)) onChange(draft.toUpperCase());
+  }
   const contrastLabel = $derived.by(() => {
     if (!contrast) return "";
     const ratio = contrast.ratio.toFixed(1);
@@ -59,7 +72,7 @@
       class="border-default h-8 w-12 shrink-0 cursor-pointer rounded-lg border bg-transparent p-0.5"
       aria-label={m.widget_admin_primary_color_picker()}
       value={pickerValue}
-      oninput={(event) => onChange(event.currentTarget.value.toUpperCase())}
+      oninput={(event) => typed(event.currentTarget.value)}
     />
     <Input
       {id}
@@ -69,15 +82,25 @@
       aria-invalid={invalid}
       aria-describedby={`${id}-description`}
       value={current}
-      oninput={(event) => onChange(event.currentTarget.value.trim() || null)}
+      oninput={(event) => typed(event.currentTarget.value)}
     />
     {#if clearable && current}
-      <Button variant="ghost" size="sm" onclick={() => onChange(null)}>
+      <Button
+        variant="ghost"
+        size="sm"
+        onclick={() => {
+          draft = "";
+          onChange(null);
+        }}
+      >
         {m.widget_admin_color_reset()}
       </Button>
     {/if}
   </div>
   <Field.Description id={`${id}-description`}>{description}</Field.Description>
+  {#if invalid}
+    <Field.Error>{m.widget_admin_contrast_invalid()}</Field.Error>
+  {/if}
   {#if contrastLabel}
     <p
       class={[

@@ -5041,7 +5041,7 @@
   "widget_admin_header_color_none": "Ingen",
   "widget_admin_color_reset": "Rensa",
   "widget_admin_logo_url": "Logga",
-  "widget_admin_logo_url_description": "Adress till en bild på er webbplats, visas i panelens sidhuvud (kvadratisk, minst 64 px). Tills ni anger en visas Eneos logga där er kommer att hamna.",
+  "widget_admin_logo_url_description": "Adress till en bild på er webbplats, visas i panelens sidhuvud. Sparas när du lämnar fältet.",
   "widget_admin_logo_preview_alt": "Nuvarande logga",
   "widget_admin_template_pick_title": "Utgå från en mall",
   "widget_admin_template_none_description": "Utgå från Eneos standard och konfigurera allt själv.",
@@ -5060,5 +5060,8 @@
   "widget_admin_tab_widgets": "Widgetar",
   "widget_admin_tab_policy": "Policy",
   "widget_admin_stat_widgets": "Widgetar",
-  "widget_admin_stat_active": "{count} aktiva"
+  "widget_admin_stat_active": "{count} aktiva",
+  "widget_admin_url_invalid": "Ange en fullständig adress som börjar med https:// eller http://.",
+  "widget_admin_logo_broken": "Bilden kunde inte laddas från den adressen. Kontrollera att den är publik och att webbplatsen tillåter att den visas på andra sidor.",
+  "widget_admin_logo_url_default": "Ingen logga angiven: Eneos logga visas i sidhuvudet tills ni anger adressen till en egen bild (kvadratisk, minst 64 px, på er webbplats). Sparas när du lämnar fältet."
 }

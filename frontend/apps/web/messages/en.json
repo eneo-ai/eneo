@@ -5041,7 +5041,7 @@
   "widget_admin_header_color_none": "None",
   "widget_admin_color_reset": "Clear",
   "widget_admin_logo_url": "Logo",
-  "widget_admin_logo_url_description": "Address of an image hosted on your website, shown in the panel header (square, at least 64 px). Until you set one, Eneo's logo shows where yours will go.",
+  "widget_admin_logo_url_description": "Address of an image hosted on your website, shown in the panel header. Saved when you leave the field.",
   "widget_admin_logo_preview_alt": "Current logo",
   "widget_admin_template_pick_title": "Start from a template",
   "widget_admin_template_none_description": "Start from Eneo's defaults and configure everything yourself.",
@@ -5060,5 +5060,8 @@
   "widget_admin_tab_widgets": "Widgets",
   "widget_admin_tab_policy": "Policy",
   "widget_admin_stat_widgets": "Widgets",
-  "widget_admin_stat_active": "{count} active"
+  "widget_admin_stat_active": "{count} active",
+  "widget_admin_url_invalid": "Enter a full address starting with https:// or http://.",
+  "widget_admin_logo_broken": "The image could not be loaded from that address. Check that it is public and that the site allows it to be shown elsewhere.",
+  "widget_admin_logo_url_default": "No logo set: Eneo's logo shows in the header until you enter the address of your own image (square, at least 64 px, hosted on your website). Saved when you leave the field."
 }

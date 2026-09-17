@@ -5,6 +5,8 @@
   import { Input } from "$lib/components/ui/input/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { m } from "$lib/paraglide/messages";
+  import { untrack } from "svelte";
+  import { isHttpUrl } from "../urls";
   import SuggestedQuestionsEditor from "./SuggestedQuestionsEditor.svelte";
 
   type Props = {
@@ -18,6 +20,24 @@
   let { texts, onChange, showSuggestions = true, idPrefix = "widget" }: Props = $props();
 
   const id = (name: string) => `${idPrefix}-${name}`;
+
+  // The privacy link is committed when the field is left, never per keystroke.
+  let privacyDraft = $state(untrack(() => texts.privacy_url ?? ""));
+  let privacyInvalid = $state(false);
+  $effect(() => {
+    const saved = texts.privacy_url ?? "";
+    if (saved !== privacyDraft && !privacyInvalid) privacyDraft = saved;
+  });
+  function commitPrivacy() {
+    const trimmed = privacyDraft.trim();
+    if (trimmed === "") {
+      privacyInvalid = false;
+      if (texts.privacy_url) onChange({ privacy_url: null });
+      return;
+    }
+    privacyInvalid = !isHttpUrl(trimmed);
+    if (!privacyInvalid && trimmed !== texts.privacy_url) onChange({ privacy_url: trimmed });
+  }
 </script>
 
 <Field.Group class="grid gap-6">
@@ -111,18 +131,28 @@
     >
   </Field.Field>
 
-  <Field.Field>
+  <Field.Field data-invalid={privacyInvalid || undefined}>
     <Field.Label for={id("privacy-url")}>{m.widget_admin_text_privacy_url()}</Field.Label>
     <Input
       id={id("privacy-url")}
       type="url"
       maxlength={500}
-      value={texts.privacy_url ?? ""}
+      aria-invalid={privacyInvalid}
       aria-describedby={id("privacy-url-help")}
-      oninput={(event) => onChange({ privacy_url: event.currentTarget.value.trim() || null })}
+      bind:value={privacyDraft}
+      onchange={commitPrivacy}
+      onkeydown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          commitPrivacy();
+        }
+      }}
     />
     <Field.Description id={id("privacy-url-help")}
       >{m.widget_admin_text_privacy_url_description()}</Field.Description
     >
+    {#if privacyInvalid}
+      <Field.Error>{m.widget_admin_url_invalid()}</Field.Error>
+    {/if}
   </Field.Field>
 </Field.Group>
