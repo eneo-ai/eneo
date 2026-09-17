@@ -9,9 +9,11 @@ origin or the tool-facing reference base URL both resolve.
 from uuid import uuid4
 
 from eneo.authentication.signed_urls import (
+    REDACTED_TOKEN,
     build_signed_original_download_url,
     looks_like_reference_url,
     parse_file_reference_url,
+    redact_reference_tokens,
 )
 
 
@@ -78,3 +80,51 @@ class TestLooksLikeReferenceUrl:
         assert not looks_like_reference_url("https://example.com/report.pdf")
         assert not looks_like_reference_url("not a url at all")
         assert not looks_like_reference_url("")
+
+
+class TestRedactReferenceTokens:
+    """The signed token is a bearer credential; once a tool has used a link
+    the token must not survive in anything persisted or displayed."""
+
+    def test_token_is_replaced_but_the_link_stays_recognizable(self):
+        file_id = uuid4()
+        url = _signed_url(file_id)
+
+        redacted = redact_reference_tokens(url)
+
+        assert isinstance(redacted, str)
+        assert redacted.endswith(f"token={REDACTED_TOKEN}")
+        assert url.split("token=")[1] not in redacted
+        assert redacted.startswith(f"https://eneo.example/api/v1/files/{file_id}/")
+        assert looks_like_reference_url(redacted)
+
+    def test_walks_nested_arguments_and_leaves_other_values_alone(self):
+        url = _signed_url(uuid4())
+        arguments = {
+            "urls": [url, "https://example.org/page?token=keep-me"],
+            "offset": 0,
+            "nested": {"note": f"see {url} and {url}"},
+        }
+
+        redacted = redact_reference_tokens(arguments)
+
+        assert isinstance(redacted, dict)
+        assert redacted["offset"] == 0
+        assert redacted["urls"][1] == "https://example.org/page?token=keep-me"
+        assert redacted["urls"][0].endswith(f"token={REDACTED_TOKEN}")
+        assert redacted["nested"]["note"].count(REDACTED_TOKEN) == 2
+        assert "token=ey" not in redacted["nested"]["note"]
+
+    def test_result_text_embedding_the_link_is_redacted(self):
+        url = _signed_url(uuid4())
+        result = '{"files":[{"url":"' + url + '","status":"ready"}]}'
+
+        redacted = redact_reference_tokens(result)
+
+        assert isinstance(redacted, str)
+        assert url.split("token=")[1] not in redacted
+        assert f'token={REDACTED_TOKEN}","status":"ready"' in redacted
+
+    def test_non_string_values_pass_through(self):
+        assert redact_reference_tokens(None) is None
+        assert redact_reference_tokens(7) == 7

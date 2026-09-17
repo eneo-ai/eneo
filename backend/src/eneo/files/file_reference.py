@@ -1,11 +1,13 @@
 """Shared predicate for URL-only file surfacing (signed file references).
 
-A TEXT file is "URL-only" when the deployment has object storage connected, the
+A TEXT file is "URL-only" when a reference base URL is configured, the
 assistant has ``inline_file_text`` disabled, and the file's exact original is
-durably stored (an ORIGINAL content reference exists) so a signed
-original-download URL can serve it. Such a file reaches the model as a signed
-URL instead of its extracted text, and its derived vision images are skipped as
-well.
+durably stored and readable (``File.original_available``) so a signed
+original-download URL can serve it. Which store holds the bytes (PostgreSQL
+inline or an object store) is the content service's concern: the download
+endpoint dispatches to either, so the reference surface never asks. Such a
+file reaches the model as a signed URL instead of its extracted text, and its
+derived vision images are skipped as well.
 
 This predicate must stay identical everywhere it is applied — the completion
 send path (assistant_service / context_builder), the preflight token count,
@@ -37,29 +39,18 @@ def file_reference_base_url(settings: Optional["Settings"] = None) -> str | None
     return settings.file_reference_base_url or settings.public_origin
 
 
-def object_store_configured() -> bool:
-    """Whether this deployment has an object-store connection.
-
-    Imported lazily: this predicate sits in the completion send path, and the
-    object-content runtime should not be pulled in by every module that needs
-    to ask about URL-only files.
-    """
-    from eneo.object_content.runtime import object_content_runtime
-
-    return object_content_runtime.object_store_configured
-
-
 def referenced_file_ids(files: Iterable["File"]) -> set[UUID]:
     """Ids of TEXT files a signed reference URL can actually serve.
 
     These files get a JSON reference entry in the prompt whatever the
     assistant's inlining mode, so the built-in ``read_file`` consumer attaches
     whenever this set is non-empty. Empty when no reference base URL is
-    configured or no object store is connected. Images and audio never carry
-    reference URLs, and files without a stored original (rows predating
-    durable originals) only ever inline.
+    configured. Images and audio never carry reference URLs, and files
+    without a readable stored original (rows predating durable originals, or
+    object-store content whose store is no longer connected) only ever
+    inline.
     """
-    if not file_reference_base_url() or not object_store_configured():
+    if not file_reference_base_url():
         return set()
     return {
         file.id
@@ -74,10 +65,9 @@ def image_reference_file_ids(files: Iterable["File"]) -> set[UUID]:
     Covers user-attached images (stored original) and generated images (the
     generated artifact is the original). Derived images (rendered document
     pages, embedded images) are excluded: they belong to their parent document
-    and are never edit inputs. No object-store requirement: generated artifacts
-    are inline, and uploads without a stored original are simply not marked
-    available. Images are never URL-only; the reference is an extra handle
-    next to the vision input, not a replacement for it.
+    and are never edit inputs. Uploads without a readable stored original are
+    simply not marked available. Images are never URL-only; the reference is
+    an extra handle next to the vision input, not a replacement for it.
     """
     if not file_reference_base_url():
         return set()
@@ -112,13 +102,10 @@ def inline_file_text_for_model(
 def url_only_file_ids(files: Iterable["File"], inline_file_text: bool) -> set[UUID]:
     """Ids of TEXT files that reach the model as a signed URL only.
 
-    Empty when inlining is on, no reference base URL is configured, or no
-    object store is connected: without one the assistant toggle is locked on
-    inlining, so honoring a stale disabled value would surface files as URLs
-    the administrator can no longer opt out of. Images and audio are never
-    URL-only: the toggle suppresses extracted text, and only TEXT files carry
-    it. Files without a stored original (rows predating durable originals)
-    always inline so the model still sees them.
+    Empty when inlining is on or no reference base URL is configured. Images
+    and audio are never URL-only: the toggle suppresses extracted text, and
+    only TEXT files carry it. Files without a readable stored original (rows
+    predating durable originals) always inline so the model still sees them.
     """
     if inline_file_text:
         return set()

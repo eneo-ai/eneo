@@ -16,9 +16,9 @@ from eneo.files.file_repo import (
     LegacyFileInfoRecord,
     binary_file_variants,
     legacy_primary_file_variant,
-    original_download_variants,
     primary_file_variants,
     project_file_media_type,
+    readable_original_reference,
     select_binary_file_reference,
 )
 from eneo.main.exceptions import NotFoundException
@@ -204,10 +204,17 @@ class FileContentLoader:
                 text_reference=text_reference,
                 blob_reference=blob_reference,
                 transcription_reference=transcription_reference,
-                original_available=any(
-                    self._first_content(file_references, [], variant) is not None
-                    for variant in original_download_variants(file.file_type)
+                # A stored original is advertised only while its bytes can be
+                # served: inline content always, object-store content only
+                # with a connected store. Legacy originals live in PostgreSQL.
+                original_available=readable_original_reference(
+                    file.file_type,
+                    file_references,
+                    object_store_configured=(
+                        self._object_content.object_store_configured
+                    ),
                 )
+                is not None
                 or self._legacy_original_available(legacy_info_by_file.get(file.id)),
             )
             selections[file.id] = selection
