@@ -61,7 +61,7 @@ class PlannerCallRecordMetadata(BaseModel):
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     total_tokens: int | None = None
-    context_window_tokens: int | None = None
+    request_budget_tokens: int | None = None
     model_output_ceiling_tokens: int | None = None
     output_reserve_tokens: int | None = None
     provider_output_cap_tokens: int | None = None

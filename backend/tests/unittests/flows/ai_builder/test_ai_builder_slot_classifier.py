@@ -22,6 +22,7 @@ from litellm.exceptions import (
 from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
 
 from eneo.ai_models.completion_models.completion_model import CompletionModel
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
     SupportedModelKwargs,
@@ -91,8 +92,9 @@ def _resolved_slots(
 
 
 async def classify_slots(**kwargs: Any):
-    kwargs.setdefault("max_input_tokens", 100_000)
-    kwargs.setdefault("max_output_tokens", 4_096)
+    input_tokens = kwargs.pop("max_input_tokens", 100_000)
+    output_tokens = kwargs.pop("max_output_tokens", 4_096)
+    kwargs.setdefault("capacity", ModelCapacity(input_tokens, output_tokens))
     kwargs.setdefault(
         "budget_policy",
         AIBuilderBudgetPolicy(
@@ -803,8 +805,7 @@ async def test_classifier_admission_uses_safe_reserve_when_tokenizer_is_unavaila
                 classification_input=_classification_input("漢字" * 10_000),
                 allowed_slot_values={},
                 tenant_id=uuid4(),
-                max_input_tokens=40_000,
-                max_output_tokens=16_000,
+                capacity=ModelCapacity(40_000, 16_000),
             )
     client.acompletion.assert_not_awaited()
 
@@ -2647,8 +2648,7 @@ async def test_classifier_timeout_does_not_repeat_provider_work(
             classification_input=_classification_input(f"Create a flow {uuid4()}"),
             allowed_slot_values={"primary_runtime_input": {"audio", "documents"}},
             tenant_id=uuid4(),
-            max_input_tokens=1_000_000,
-            max_output_tokens=128_000,
+            capacity=ModelCapacity(1_000_000, 128_000),
         )
 
     assert len(requests) == 1
@@ -2830,7 +2830,7 @@ async def test_slot_classification_provider_failure_uses_typed_disposition(
     assert payload["request_id"] == "req-slot-failure"
     assert payload["failure_kind"] == expected_kind
     assert payload["tenant_id"] == str(tenant_id)
-    assert payload["safe_detail"]["context_window_tokens"] == 100_000
+    assert payload["safe_detail"]["request_budget_tokens"] == 100_000
     assert payload["safe_detail"]["fixed_input_tokens"] > 0
     assert payload["safe_detail"]["model_output_ceiling_tokens"] == 4_096
     assert payload["safe_detail"]["timeout_seconds"] == 300.0
@@ -3728,8 +3728,7 @@ def test_near_limit_admission_uses_the_selected_response_format_size(
         "ui_language": "en",
         "bias": None,
         "litellm_model": "openai/gpt-test",
-        "max_input_tokens": 5_000,
-        "max_output_tokens": 4_096,
+        "capacity": ModelCapacity(5_000, 4_096),
         "budget_policy": AIBuilderBudgetPolicy(
             conversation_safety_buffer_tokens=0,
             minimum_conversation_budget_tokens=0,
@@ -3764,7 +3763,7 @@ def test_prompt_hash_changes_with_model_input_budget() -> None:
         litellm_model="openai/gpt-test",
         provider="openai",
         supported_model_kwargs=_route().supported_model_kwargs,
-        max_input_tokens=4096,
+        capacity=ModelCapacity(4096, 4096),
     )
     changed_hash = slot_classification_prompt_hash(
         classification_input=_classification_input("Also add priority."),
@@ -3773,7 +3772,7 @@ def test_prompt_hash_changes_with_model_input_budget() -> None:
         litellm_model="openai/gpt-test",
         provider="openai",
         supported_model_kwargs=_route().supported_model_kwargs,
-        max_input_tokens=8192,
+        capacity=ModelCapacity(8192, 4096),
     )
     safety_hash = slot_classification_prompt_hash(
         classification_input=_classification_input("Also add priority."),
@@ -3782,7 +3781,7 @@ def test_prompt_hash_changes_with_model_input_budget() -> None:
         litellm_model="openai/gpt-test",
         provider="openai",
         supported_model_kwargs=_route().supported_model_kwargs,
-        max_input_tokens=4096,
+        capacity=ModelCapacity(4096, 4096),
         safety_buffer_tokens=128,
     )
 
@@ -3862,7 +3861,7 @@ def test_prompt_hash_changes_with_source_model_and_provider_identity() -> None:
         litellm_model="openai/gpt-test",
         provider="openai",
         supported_model_kwargs=_route().supported_model_kwargs,
-        max_output_tokens=4096,
+        capacity=ModelCapacity(None, 4096),
     )
 
     assert source_hash != base_hash
@@ -4493,8 +4492,7 @@ async def test_classify_slots_rejects_request_that_cannot_fit_selected_model() -
             classification_input=_classification_input("Return JSON with case_id."),
             allowed_slot_values={"terminal_output": {"structured_json"}},
             tenant_id=uuid4(),
-            max_input_tokens=1,
-            max_output_tokens=1024,
+            capacity=ModelCapacity(1, 1024),
         )
 
     assert (
@@ -4526,8 +4524,7 @@ async def test_classify_slots_sends_the_room_the_request_leaves_below_the_ceilin
             classification_input=_classification_input("Return JSON with case_id."),
             allowed_slot_values={"terminal_output": {"structured_json"}},
             tenant_id=uuid4(),
-            max_input_tokens=1_000,
-            max_output_tokens=800,
+            capacity=ModelCapacity(1_000, 800),
             budget_policy=AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=100,
                 minimum_conversation_budget_tokens=0,
@@ -4563,8 +4560,7 @@ async def test_classify_slots_sends_the_models_full_output_ceiling() -> None:
             classification_input=_classification_input("Return JSON with case_id."),
             allowed_slot_values={"terminal_output": {"structured_json"}},
             tenant_id=uuid4(),
-            max_input_tokens=100_000,
-            max_output_tokens=16_000,
+            capacity=ModelCapacity(100_000, 16_000),
             budget_policy=AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=100,
                 minimum_conversation_budget_tokens=0,
@@ -5293,8 +5289,7 @@ async def test_classify_slots_records_the_allocation_its_optional_sources_were_p
             allowed_slot_values={"terminal_output": {"structured_json"}},
             tenant_id=uuid4(),
             usage_tracker=tracker,
-            max_input_tokens=4_000,
-            max_output_tokens=4_000,
+            capacity=ModelCapacity(4_000, 4_000),
             budget_policy=AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=0,
                 minimum_conversation_budget_tokens=0,
@@ -5314,3 +5309,44 @@ async def test_classify_slots_records_the_allocation_its_optional_sources_were_p
         4_000, 4_000 - budget.fixed_input_tokens
     )
     assert budget.provider_output_cap_tokens >= budget.reserved_output_tokens
+
+
+@pytest.mark.asyncio
+async def test_classification_forwards_capacity():
+    capacity = ModelCapacity(32_000, 4_000)
+    policy = AIBuilderBudgetPolicy(
+        conversation_safety_buffer_tokens=1_000,
+        minimum_conversation_budget_tokens=4_000,
+    )
+    client = AsyncMock()
+    client.acompletion.return_value = _make_response("{}")
+    with patch.object(
+        AIBuilderBudgetPolicy,
+        "classification_request_budget",
+        wraps=policy.classification_request_budget,
+    ) as factory:
+        await classify_slots(
+            litellm_client=client,
+            completion_model_route=_route(),
+            classification_input=_classification_input(f"capacity-{uuid4()}"),
+            allowed_slot_values={"terminal_output": {"pdf_document"}},
+            tenant_id=uuid4(),
+            capacity=capacity,
+            budget_policy=policy,
+        )
+    factory.assert_called_once_with(capacity=capacity)
+    client.acompletion.assert_awaited_once()
+
+
+def test_prompt_hash_changes_when_the_input_limit_changes():
+    common = dict(
+        classification_input=_classification_input("Also add priority."),
+        ui_language="en",
+        allowed_slot_values={},
+        litellm_model="openai/gpt-test",
+        provider="openai",
+        supported_model_kwargs=_route().supported_model_kwargs,
+    )
+    assert slot_classification_prompt_hash(
+        **common, capacity=ModelCapacity(4096, 4096)
+    ) != slot_classification_prompt_hash(**common, capacity=ModelCapacity(8192, 4096))

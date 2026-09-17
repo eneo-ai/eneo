@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     SupportedModelKwargs,
 )
@@ -203,8 +204,7 @@ async def test_empty_classifier_response_keeps_deterministic_slot_fallbacks(
         ),
         tenant_id=uuid4(),
         ui_language="sv",
-        max_input_tokens=100_000,
-        max_output_tokens=2_000,
+        capacity=ModelCapacity(100_000, 2_000),
     )
     analysis = analyze_discovery(
         conversation,
@@ -260,8 +260,7 @@ async def test_empty_classifier_response_reopens_heuristic_architecture_slots(
         ),
         tenant_id=uuid4(),
         ui_language="sv",
-        max_input_tokens=100_000,
-        max_output_tokens=2_000,
+        capacity=ModelCapacity(100_000, 2_000),
     )
     # The classifier read nothing, so the document scope is the policy's
     # assumption and the layout that rests on it is assumed with it, as a
@@ -337,8 +336,7 @@ async def test_classifier_primary_path_merges_result_into_planning_state(
         ),
         tenant_id=uuid4(),
         ui_language="sv",
-        max_input_tokens=100_000,
-        max_output_tokens=2_000,
+        capacity=ModelCapacity(100_000, 2_000),
     )
     analysis = analyze_discovery(
         conversation,

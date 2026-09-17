@@ -15,6 +15,7 @@ import pytest
 from pydantic import ValidationError
 
 from eneo.authentication.principal_types import PrincipalType
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
     SupportedModelKwargs,
@@ -398,6 +399,7 @@ async def _prepare_planner_request_for_test(
     attachment_files: list[File] | None = None,
     max_input_tokens: int = 100_000,
     max_output_tokens: int = 1024,
+    capacity: ModelCapacity | None = None,
     budget_policy: AIBuilderBudgetPolicy | None = None,
     base_planning_state_version: int = 0,
     plan_edit_context: object = None,
@@ -418,8 +420,7 @@ async def _prepare_planner_request_for_test(
             flow=cast(Any, flow),
             assistant_snapshots=cast(Any, assistant_snapshots),
             attachment_files=attachment_files or [],
-            max_input_tokens=max_input_tokens,
-            max_output_tokens=max_output_tokens,
+            capacity=capacity or ModelCapacity(max_input_tokens, max_output_tokens),
             mapped_execution_policy=(
                 mapped_execution_policy or FlowMappedExecutionPolicy()
             ),
@@ -561,12 +562,11 @@ def _budget_policy() -> AIBuilderBudgetPolicy:
 
 def _proposal_budget(
     *,
-    context_window_tokens: int = 4_096,
+    request_budget_tokens: int = 4_096,
     model_output_ceiling_tokens: int = 1_024,
 ) -> AIBuilderRequestBudget:
     return _budget_policy().proposal_request_budget(
-        context_window_tokens=context_window_tokens,
-        model_output_ceiling_tokens=model_output_ceiling_tokens,
+        capacity=ModelCapacity(request_budget_tokens, model_output_ceiling_tokens),
     )
 
 
@@ -590,8 +590,7 @@ def _build_create_proposal_for_architecture(
         plan_edit_context=None,
         prior_plan_for_revision=None,
         litellm_model="openai/gpt-5.4",
-        max_input_tokens=4096,
-        max_output_tokens=1024,
+        capacity=ModelCapacity(4096, 1024),
         budget_policy=_budget_policy(),
         attachment_file_count=0,
         current_turn_start=0,
@@ -879,8 +878,7 @@ def test_named_report_sections_flow_from_request_preparation_into_lowering() -> 
         plan_edit_context=None,
         prior_plan_for_revision=None,
         litellm_model="openai/gpt-5.4",
-        max_input_tokens=4096,
-        max_output_tokens=1024,
+        capacity=ModelCapacity(4096, 1024),
         budget_policy=_budget_policy(),
         attachment_file_count=0,
         current_turn_start=0,
@@ -1018,8 +1016,7 @@ def test_example_document_headings_stay_guidance_and_never_become_topology() -> 
         plan_edit_context=None,
         prior_plan_for_revision=None,
         litellm_model="openai/gpt-5.4",
-        max_input_tokens=4096,
-        max_output_tokens=1024,
+        capacity=ModelCapacity(4096, 1024),
         budget_policy=_budget_policy(),
         attachment_file_count=1,
         current_turn_start=0,
@@ -1143,8 +1140,7 @@ async def _collect_send_message_events(
                 flow=None,
                 assistant_snapshots=None,
                 attachment_files=None,
-                max_input_tokens=100_000,
-                max_output_tokens=4_096,
+                capacity=ModelCapacity(100_000, 4_096),
                 budget_policy=_budget_policy(),
             )
         )
@@ -1220,8 +1216,7 @@ async def test_requirements_confirmation_reuses_latest_saved_step_scope(
         },
         completion_model_route=_route(),
         flow=cast(Any, SimpleNamespace(id=uuid4())),
-        max_input_tokens=4096,
-        max_output_tokens=1024,
+        capacity=ModelCapacity(4096, 1024),
         budget_policy=_budget_policy(),
     )
 
@@ -1260,8 +1255,7 @@ async def test_accepted_turn_persists_the_evidence_floor_it_was_held_to(
         evidence_floor=3,
         completion_model_route=_route(),
         flow=cast(Any, SimpleNamespace(id=uuid4())),
-        max_input_tokens=4096,
-        max_output_tokens=1024,
+        capacity=ModelCapacity(4096, 1024),
         budget_policy=_budget_policy(),
     )
     with pytest.raises(RuntimeError, match="accepted"):
@@ -1301,8 +1295,7 @@ async def test_accepted_turn_persists_that_the_session_acts_on_a_review(
         acts_on_review=True,
         completion_model_route=_route(),
         flow=cast(Any, SimpleNamespace(id=uuid4())),
-        max_input_tokens=4096,
-        max_output_tokens=1024,
+        capacity=ModelCapacity(4096, 1024),
         budget_policy=_budget_policy(),
     )
     with pytest.raises(RuntimeError, match="accepted"):
@@ -1541,8 +1534,7 @@ async def test_prepare_planner_request_skips_prompt_for_server_owned_action() ->
             available_kbs=None,
             flow=None,
             assistant_snapshots=None,
-            max_input_tokens=100_000,
-            max_output_tokens=4_096,
+            capacity=ModelCapacity(100_000, 4_096),
             budget_policy=AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=128,
                 minimum_conversation_budget_tokens=256,
@@ -1808,8 +1800,7 @@ async def test_send_message_builds_attachment_context_once_before_request_prepar
         message="Build a flow",
         completion_model_route=_route(),
         attachment_files=attachments,
-        max_input_tokens=4096,
-        max_output_tokens=1024,
+        capacity=ModelCapacity(4096, 1024),
         budget_policy=_budget_policy(),
     )
 
@@ -1821,7 +1812,7 @@ async def test_send_message_builds_attachment_context_once_before_request_prepar
         attachments,
         policy=AIBuilderAttachmentContextPolicy(),
         model_name="openai/gpt-5.4",
-        max_input_tokens=4096,
+        capacity=ModelCapacity(4096, 1024),
         answer_reserve_tokens=1024,
         safety_buffer_tokens=128,
         minimum_conversation_tokens=256,
@@ -1867,8 +1858,7 @@ async def test_send_message_rejects_schema_overflow_before_accepting_turn(
         message=message,
         completion_model_route=_route(),
         attachment_files=[],
-        max_input_tokens=4096,
-        max_output_tokens=1024,
+        capacity=ModelCapacity(4096, 1024),
         budget_policy=_budget_policy(),
     )
 
@@ -2020,8 +2010,7 @@ async def test_server_action_policy_overrides_stale_discovery_question() -> None
             available_kbs=None,
             flow=None,
             assistant_snapshots=None,
-            max_input_tokens=100_000,
-            max_output_tokens=4_096,
+            capacity=ModelCapacity(100_000, 4_096),
             budget_policy=AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=128,
                 minimum_conversation_budget_tokens=256,
@@ -2094,8 +2083,7 @@ async def test_prepare_planner_request_asks_for_model_medium_output_before_commi
             available_kbs=None,
             flow=None,
             assistant_snapshots=None,
-            max_input_tokens=4096,
-            max_output_tokens=1024,
+            capacity=ModelCapacity(4096, 1024),
             budget_policy=AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=128,
                 minimum_conversation_budget_tokens=256,
@@ -2181,8 +2169,7 @@ async def test_prepare_planner_request_passes_attachment_context_into_discovery_
             flow=None,
             assistant_snapshots=None,
             attachment_files=[_make_file()],
-            max_input_tokens=4096,
-            max_output_tokens=1024,
+            capacity=ModelCapacity(4096, 1024),
             budget_policy=AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=128,
                 minimum_conversation_budget_tokens=256,
@@ -2197,7 +2184,10 @@ async def test_prepare_planner_request_passes_attachment_context_into_discovery_
         build_discovery_runtime_result.call_args.kwargs["attachment_context"]
         is attachment_context
     )
-    assert build_discovery_runtime_result.call_args.kwargs["max_output_tokens"] == 1024
+    assert (
+        build_discovery_runtime_result.call_args.kwargs["capacity"].max_output_tokens
+        == 1024
+    )
 
 
 @pytest.mark.asyncio
@@ -2269,8 +2259,7 @@ async def test_prepare_planner_request_passes_attachment_context_into_proposal_p
             attachment_files=[_make_file()],
             # The create tool schema alone costs thousands of tokens, so a
             # window that cannot hold it leaves no room for attachment text.
-            max_input_tokens=32_768,
-            max_output_tokens=1024,
+            capacity=ModelCapacity(32_768, 1024),
             budget_policy=AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=128,
                 minimum_conversation_budget_tokens=256,
@@ -2352,8 +2341,7 @@ async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -
             flow=None,
             assistant_snapshots=None,
             attachment_files=[],
-            max_input_tokens=100_000,
-            max_output_tokens=4_096,
+            capacity=ModelCapacity(100_000, 4_096),
             budget_policy=AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=128,
                 minimum_conversation_budget_tokens=256,
@@ -2417,7 +2405,6 @@ def test_real_proposal_boundary_fits_attachments_and_protects_current_turn() -> 
         "plan_edit_context": None,
         "prior_plan_for_revision": None,
         "litellm_model": model_name,
-        "max_output_tokens": 1_024,
         "budget_policy": policy,
         "attachment_file_count": 1,
     }
@@ -2425,7 +2412,7 @@ def test_real_proposal_boundary_fits_attachments_and_protects_current_turn() -> 
         **common,
         conversation=[current_turn],
         attachment_context=None,
-        max_input_tokens=100_000,
+        capacity=ModelCapacity(100_000, 1_024),
         current_turn_start=0,
     )
     tool_schema = baseline.proposal_tool_schema
@@ -2442,7 +2429,7 @@ def test_real_proposal_boundary_fits_attachments_and_protects_current_turn() -> 
         **common,
         conversation=[history, current_turn],
         attachment_context=attachment_context,
-        max_input_tokens=tight_context_window,
+        capacity=ModelCapacity(tight_context_window, 1_024),
         current_turn_start=1,
     )
     assert prepared.proposal_tool_schema == tool_schema
@@ -2486,7 +2473,10 @@ def test_real_proposal_boundary_fits_attachments_and_protects_current_turn() -> 
     # provider work; a window short of the full ceiling alone is not.
     impossible_budget = replace(
         baseline.request_budget.unplanned(),
-        context_window_tokens=irreducible_request_tokens - 1_024 - 1,
+        capacity=replace(
+            baseline.request_budget.capacity,
+            max_input_tokens=irreducible_request_tokens - 1_024 - 1,
+        ),
     )
     with pytest.raises(AIBuilderKnownProviderRejectionException):
         fit_proposal_request_budget(
@@ -2542,7 +2532,6 @@ def test_proposal_attachment_fitting_reserves_the_whole_create_schema() -> None:
         "plan_edit_context": None,
         "prior_plan_for_revision": None,
         "litellm_model": model_name,
-        "max_output_tokens": 256,
         "budget_policy": policy,
         "attachment_file_count": 1,
     }
@@ -2550,7 +2539,7 @@ def test_proposal_attachment_fitting_reserves_the_whole_create_schema() -> None:
         **common,
         conversation=[current_turn],
         attachment_context=None,
-        max_input_tokens=100_000,
+        capacity=ModelCapacity(100_000, 256),
         current_turn_start=0,
     )
     tool_schema = cast(dict[str, Any], baseline.proposal_tool_schema)
@@ -2574,7 +2563,10 @@ def test_proposal_attachment_fitting_reserves_the_whole_create_schema() -> None:
         build_proposal_prepared(
             **common,
             conversation=[current_turn],
-            max_input_tokens=required + policy.conversation_safety_buffer_tokens,
+            capacity=ModelCapacity(
+                required + policy.conversation_safety_buffer_tokens,
+                256,
+            ),
             attachment_context=attachment_context,
             current_turn_start=0,
         )
@@ -2583,7 +2575,10 @@ def test_proposal_attachment_fitting_reserves_the_whole_create_schema() -> None:
     prepared = build_proposal_prepared(
         **common,
         conversation=[current_turn],
-        max_input_tokens=required + policy.conversation_safety_buffer_tokens + 1,
+        capacity=ModelCapacity(
+            required + policy.conversation_safety_buffer_tokens + 1,
+            256,
+        ),
         attachment_context=attachment_context,
         current_turn_start=0,
     )
@@ -2636,14 +2631,13 @@ def test_confirmed_requirements_without_history_are_prepared_on_a_tight_window()
         "plan_edit_context": None,
         "prior_plan_for_revision": None,
         "litellm_model": model_name,
-        "max_output_tokens": 256,
         "budget_policy": policy,
         "attachment_file_count": 0,
         "attachment_context": None,
         "conversation": conversation,
         "current_turn_start": 1,
     }
-    wide = build_proposal_prepared(**common, max_input_tokens=100_000)
+    wide = build_proposal_prepared(**common, capacity=ModelCapacity(100_000, 256))
     wide_prompt = wide.llm_messages[0]["content"]
     assert isinstance(wide_prompt, str)
     assert "Use text input" in wide_prompt
@@ -2661,7 +2655,10 @@ def test_confirmed_requirements_without_history_are_prepared_on_a_tight_window()
 
     prepared = build_proposal_prepared(
         **common,
-        max_input_tokens=required + policy.conversation_safety_buffer_tokens + 1,
+        capacity=ModelCapacity(
+            required + policy.conversation_safety_buffer_tokens + 1,
+            256,
+        ),
     )
 
     prompt = prepared.llm_messages[0]["content"]
@@ -2718,8 +2715,7 @@ def test_proposal_boundary_rejects_confirmed_primary_input_shadow() -> None:
             plan_edit_context=None,
             prior_plan_for_revision=None,
             litellm_model="gpt-4o-mini",
-            max_input_tokens=4096,
-            max_output_tokens=256,
+            capacity=ModelCapacity(4096, 256),
             budget_policy=AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=128,
                 minimum_conversation_budget_tokens=256,
@@ -2768,8 +2764,7 @@ def test_proposal_boundary_defaults_missing_runtime_type_to_text() -> None:
             plan_edit_context=None,
             prior_plan_for_revision=None,
             litellm_model="gpt-4o-mini",
-            max_input_tokens=4096,
-            max_output_tokens=256,
+            capacity=ModelCapacity(4096, 256),
             budget_policy=AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=128,
                 minimum_conversation_budget_tokens=256,
@@ -2836,8 +2831,7 @@ async def test_prepare_planner_request_logs_prompt_metrics() -> None:
             flow=None,
             assistant_snapshots=None,
             attachment_files=None,
-            max_input_tokens=100_000,
-            max_output_tokens=4_096,
+            capacity=ModelCapacity(100_000, 4_096),
             budget_policy=AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=128,
                 minimum_conversation_budget_tokens=256,
@@ -2877,8 +2871,7 @@ async def test_send_message_rejects_when_another_send_is_already_in_progress() -
             flow=None,
             assistant_snapshots=None,
             attachment_files=None,
-            max_input_tokens=4096,
-            max_output_tokens=1024,
+            capacity=ModelCapacity(4096, 1024),
             budget_policy=AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=128,
                 minimum_conversation_budget_tokens=256,
@@ -3145,8 +3138,7 @@ async def test_a_transient_status_reaches_the_client_before_the_provider_returns
         flow=None,
         assistant_snapshots=None,
         attachment_files=None,
-        max_input_tokens=100_000,
-        max_output_tokens=4_096,
+        capacity=ModelCapacity(100_000, 4_096),
         budget_policy=_budget_policy(),
     )
     seen: list[str] = []
@@ -3393,8 +3385,7 @@ async def test_send_message_refuses_unsupported_architecture_without_provider_or
                 flow=None,
                 assistant_snapshots=None,
                 attachment_files=None,
-                max_input_tokens=4096,
-                max_output_tokens=1024,
+                capacity=ModelCapacity(4096, 1024),
                 budget_policy=_budget_policy(),
             )
         )
@@ -3505,8 +3496,7 @@ async def test_send_message_requires_one_template_before_proposal_without_provid
                 flow=None,
                 assistant_snapshots=None,
                 attachment_files=None,
-                max_input_tokens=100_000,
-                max_output_tokens=4_096,
+                capacity=ModelCapacity(100_000, 4_096),
                 budget_policy=_budget_policy(),
             )
         )
@@ -3567,8 +3557,7 @@ async def test_send_message_releases_lease_when_request_preparation_fails(
         flow=None,
         assistant_snapshots=None,
         attachment_files=None,
-        max_input_tokens=4096,
-        max_output_tokens=1024,
+        capacity=ModelCapacity(4096, 1024),
         budget_policy=_budget_policy(),
     )
 
@@ -3620,8 +3609,7 @@ async def test_send_message_rejects_legacy_mcp_revision_before_provider_work(
         flow=None,
         assistant_snapshots=None,
         attachment_files=None,
-        max_input_tokens=4096,
-        max_output_tokens=1024,
+        capacity=ModelCapacity(4096, 1024),
         budget_policy=_budget_policy(),
     )
 
@@ -3698,8 +3686,7 @@ async def test_send_message_releases_lease_when_stream_is_cancelled(
         flow=None,
         assistant_snapshots=None,
         attachment_files=None,
-        max_input_tokens=4096,
-        max_output_tokens=1024,
+        capacity=ModelCapacity(4096, 1024),
         budget_policy=_budget_policy(),
     )
 
@@ -3806,8 +3793,7 @@ async def test_send_message_proposal_catalog_uses_prior_plan_bindings(
                 flow=None,
                 assistant_snapshots=None,
                 attachment_files=None,
-                max_input_tokens=4096,
-                max_output_tokens=1024,
+                capacity=ModelCapacity(4096, 1024),
                 budget_policy=AIBuilderBudgetPolicy(
                     conversation_safety_buffer_tokens=128,
                     minimum_conversation_budget_tokens=256,
@@ -3923,8 +3909,7 @@ async def test_send_message_rejects_closed_session_before_claiming_lock() -> Non
             flow=None,
             assistant_snapshots=None,
             attachment_files=None,
-            max_input_tokens=4096,
-            max_output_tokens=1024,
+            capacity=ModelCapacity(4096, 1024),
             budget_policy=AIBuilderBudgetPolicy(
                 conversation_safety_buffer_tokens=128,
                 minimum_conversation_budget_tokens=256,
@@ -3986,8 +3971,7 @@ async def test_send_message_replays_the_exact_committed_error_without_provider_w
                 message="Build a flow",
                 completion_model_route=_route(),
                 turn_preflight=preflight,
-                max_input_tokens=100_000,
-                max_output_tokens=4_096,
+                capacity=ModelCapacity(100_000, 4_096),
             )
         )
     ]
@@ -4564,8 +4548,7 @@ def _proposal_prepared_for_test(
             ),
         ),
         litellm_model=_route().litellm_model,
-        max_input_tokens=32000,
-        max_output_tokens=2048,
+        capacity=ModelCapacity(32000, 2048),
         budget_policy=AIBuilderBudgetPolicy(
             conversation_safety_buffer_tokens=128,
             minimum_conversation_budget_tokens=256,
@@ -5014,8 +4997,7 @@ def test_example_output_headings_never_become_requested_output_sections() -> Non
         plan_edit_context=None,
         prior_plan_for_revision=None,
         litellm_model="openai/gpt-5.4",
-        max_input_tokens=100_000,
-        max_output_tokens=1024,
+        capacity=ModelCapacity(100_000, 1024),
         budget_policy=_budget_policy(),
         attachment_file_count=0,
         current_turn_start=0,
@@ -5563,8 +5545,7 @@ def test_a_handoff_turn_is_offered_the_review_scoped_edit_tool() -> None:
         plan_edit_context=None,
         prior_plan_for_revision=None,
         litellm_model="openai/gpt-5.4",
-        max_input_tokens=60_000,
-        max_output_tokens=1024,
+        capacity=ModelCapacity(60_000, 1024),
         budget_policy=policy,
         attachment_file_count=0,
         current_turn_start=0,
@@ -5583,6 +5564,7 @@ def _build_review_backed_proposal(
     *,
     review_evidence_max_input_tokens: int | None,
     window: int = 60_000,
+    capacity: ModelCapacity | None = None,
     output_ceiling: int = 1024,
     review_investigation_evidence_max_tokens: int = 16_000,
     excerpt_chars: int = 200_000,
@@ -5613,8 +5595,7 @@ def _build_review_backed_proposal(
         plan_edit_context=None,
         prior_plan_for_revision=None,
         litellm_model="openai/gpt-5.4",
-        max_input_tokens=window,
-        max_output_tokens=output_ceiling,
+        capacity=capacity or ModelCapacity(window, output_ceiling),
         budget_policy=policy,
         attachment_file_count=0,
         current_turn_start=0,
@@ -5625,12 +5606,12 @@ def test_a_review_backed_proposal_is_bounded_by_the_tenant_cap_at_the_request() 
     # The cap shrinks the budget every later step and the provider boundary
     # use, and the excerpt that cannot fit is marked, not silently dropped.
     prepared = _build_review_backed_proposal(review_evidence_max_input_tokens=12_000)
-    assert prepared.request_budget.context_window_tokens == 60_000
+    assert prepared.request_budget.request_budget_tokens == 60_000
     assert prepared.request_budget.available_input_tokens == 12_000
     system = prepared.message_groups[0].messages[0]["content"]
     assert "avklippt efter" in system
     uncapped = _build_review_backed_proposal(review_evidence_max_input_tokens=None)
-    assert uncapped.request_budget.context_window_tokens == 60_000
+    assert uncapped.request_budget.request_budget_tokens == 60_000
 
 
 def test_a_review_backed_proposal_whose_scaffold_exceeds_the_cap_is_refused() -> None:
@@ -5652,7 +5633,7 @@ def test_a_review_backed_proposal_reports_its_evidence_fit_in_the_prompt_metrics
         for call in logger_mock.info.call_args_list
         if call.args and call.args[0] == "AI Builder plan proposal prompt metrics"
     )
-    assert metrics["context_window_tokens"] == 60_000
+    assert metrics["request_budget_tokens"] == 60_000
     assert metrics["input_cap_tokens"] == 12_000
     assert isinstance(metrics["review_evidence_fit_ms"], int)
     assert metrics["review_excerpts_truncated"] == 1
@@ -5764,8 +5745,7 @@ def _saved_step_prepared_for_test(
         plan_edit_context=context,
         prior_plan_for_revision=None,
         litellm_model="gpt-4o-mini",
-        max_input_tokens=max_input_tokens,
-        max_output_tokens=1024,
+        capacity=ModelCapacity(max_input_tokens, 1024),
         budget_policy=AIBuilderBudgetPolicy(
             conversation_safety_buffer_tokens=64, minimum_conversation_budget_tokens=128
         ),
@@ -5943,8 +5923,7 @@ async def test_failure_repair_scope_mismatch_stops_before_provider_and_turn_writ
             message="Repair the instruction",
             completion_model_route=_route(),
             flow=flow,
-            max_input_tokens=4096,
-            max_output_tokens=1024,
+            capacity=ModelCapacity(4096, 1024),
             review_evidence=evidence,
             edit_context=AIBuilderSavedFlowStepEditContext(
                 flow_step_id=flow.steps[1].id
@@ -5960,3 +5939,19 @@ async def test_failure_repair_scope_mismatch_stops_before_provider_and_turn_writ
         assert caught.value.context["step_id"] == str(evidence.steps[0].step_id)
     planner.litellm_client.acompletion.assert_not_awaited()
     planner.repo.accept_session_turn.assert_not_awaited()
+
+
+def test_proposal_forwards_capacity():
+    capacity = ModelCapacity(32_000, 4_000)
+    with patch.object(
+        AIBuilderBudgetPolicy,
+        "proposal_request_budget",
+        autospec=True,
+        side_effect=AIBuilderBudgetPolicy.proposal_request_budget,
+    ) as factory:
+        prepared = _build_review_backed_proposal(
+            review_evidence_max_input_tokens=None, capacity=capacity
+        )
+    assert factory.call_args.kwargs["capacity"] is capacity
+    assert prepared.request_budget.capacity is capacity
+    assert prepared.request_budget.available_input_tokens == 27_872

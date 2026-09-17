@@ -17,6 +17,7 @@ from uuid import UUID
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
     SupportedModelKwargs,
@@ -82,8 +83,7 @@ CORPUS_PATH = (
 
 
 async def classify_slots(**kwargs: Any):
-    kwargs.setdefault("max_input_tokens", 100_000)
-    kwargs.setdefault("max_output_tokens", 4_096)
+    kwargs.setdefault("capacity", ModelCapacity(100_000, 4_096))
     kwargs.setdefault(
         "budget_policy",
         AIBuilderBudgetPolicy(

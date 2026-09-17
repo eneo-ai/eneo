@@ -10,6 +10,7 @@ from uuid import uuid4
 import jsonschema
 import pytest
 
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.flows.ai_builder.ai_builder_architecture_commit import (
     finalize_architecture_commit,
 )
@@ -4222,8 +4223,7 @@ async def test_saved_step_partial_revision_requires_current_saved_revision(
                     completion_model_route=_route(),
                     flow=flow,
                     assistant_snapshots=snapshots,
-                    max_input_tokens=100_000,
-                    max_output_tokens=4096,
+                    capacity=ModelCapacity(100_000, 4096),
                     budget_policy=_budget_policy(),
                 )
             ]

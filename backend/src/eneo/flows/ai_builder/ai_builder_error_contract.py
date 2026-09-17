@@ -266,10 +266,7 @@ class AIBuilderBadRequestException(BadRequestException):
 def translate_unknown_model_capacity(
     error: UnknownModelCapacityError,
 ) -> AIBuilderBadRequestException:
-    if any(
-        dimension in error.missing_dimensions
-        for dimension in ("max_input_tokens", "context_window_tokens")
-    ):
+    if "max_input_tokens" in error.missing_dimensions:
         code = AIBuilderErrorCode.PLANNER_MODEL_MISSING_CONTEXT_WINDOW
         message = "Planner model is missing a usable context window. Configure max_input_tokens for the model."
     else:
@@ -513,7 +510,7 @@ def record_ai_builder_provider_failure(
             safe_detail["provider_parameter"] = failure.parameter
     if request_budget is not None:
         safe_detail.update(
-            context_window_tokens=request_budget.context_window_tokens,
+            request_budget_tokens=request_budget.request_budget_tokens,
             fixed_input_tokens=request_budget.fixed_input_tokens,
             required_input_tokens=request_budget.required_input_tokens,
             model_output_ceiling_tokens=request_budget.model_output_ceiling_tokens,

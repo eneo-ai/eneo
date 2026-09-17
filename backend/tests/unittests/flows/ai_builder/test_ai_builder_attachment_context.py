@@ -3,12 +3,13 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 from typing import get_args
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 from uuid import UUID, uuid4
 
 import pytest
 
 from eneo.authentication.principal_types import PrincipalType
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.domain.model_kwargs_capabilities import SupportedModelKwargs
 from eneo.completion_models.infrastructure.completion_service import (
     ResolvedCompletionModelRoute,
@@ -130,7 +131,7 @@ def test_attachment_text_admission_scales_with_selected_model_context() -> None:
         files,
         policy=policy,
         model_name="gpt-4o-mini",
-        max_input_tokens=2_000,
+        capacity=ModelCapacity(2_000, 500),
         answer_reserve_tokens=500,
         safety_buffer_tokens=250,
         minimum_conversation_tokens=500,
@@ -139,7 +140,7 @@ def test_attachment_text_admission_scales_with_selected_model_context() -> None:
         files,
         policy=policy,
         model_name="gpt-4o-mini",
-        max_input_tokens=8_000,
+        capacity=ModelCapacity(8_000, 500),
         answer_reserve_tokens=500,
         safety_buffer_tokens=250,
         minimum_conversation_tokens=500,
@@ -204,8 +205,7 @@ async def test_classifier_attachments_preserve_answer_room_and_model_capacity(
         bias=None,
         structured_output_mode=mode,
         litellm_model=route.litellm_model,
-        max_input_tokens=window,
-        max_output_tokens=output_ceiling,
+        capacity=ModelCapacity(window, output_ceiling),
         budget_policy=policy,
     )
     client = SimpleNamespace(
@@ -220,8 +220,7 @@ async def test_classifier_attachments_preserve_answer_room_and_model_capacity(
         tenant_id=uuid4(),
         structured_output_mode=mode,
         ui_language="en",
-        max_input_tokens=window,
-        max_output_tokens=output_ceiling,
+        capacity=ModelCapacity(window, output_ceiling),
         budget_policy=policy,
     )
 
@@ -1077,3 +1076,27 @@ def test_zero_excerpt_budget_keeps_inventory_and_marks_context_truncated() -> No
     assert result.truncated is True
     assert result.evidence[0].coverage == "inventory_only"
     assert result.evidence[0].excerpt is None
+
+
+def test_attachment_packing_uses_capacity_allowance():
+    capacity = ModelCapacity(8_000, 2_000)
+    with patch.object(
+        ModelCapacity,
+        "input_allowance",
+        autospec=True,
+        side_effect=ModelCapacity.input_allowance,
+    ) as allowance:
+        context = build_ai_builder_attachment_context_for_model(
+            [_make_file(name="evidence.txt", text="evidence " * 20_000)],
+            policy=AIBuilderAttachmentContextPolicy(),
+            model_name="gpt-4o-mini",
+            capacity=capacity,
+            answer_reserve_tokens=2_000,
+            safety_buffer_tokens=250,
+            minimum_conversation_tokens=500,
+        )
+    allowance.assert_called_once_with(
+        capacity, output_reserve_tokens=2_000, safety_tokens=250
+    )
+    assert context is not None
+    assert context.truncated

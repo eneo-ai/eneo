@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any, Literal, TypeAlias
 from uuid import UUID
 
+from pydantic import BaseModel, ConfigDict, Field
+
 from eneo.completion_models.domain.model_capacity import (
+    CapacityDimension,
     ModelCapacity,
     UnknownModelCapacityError,
 )
@@ -40,8 +43,7 @@ class AIBuilderPlannerContext:
     model: "CompletionModel"
     available_models: list[AIBuilderAvailableModelResource]
     available_kbs: list[AIBuilderAvailableKnowledgeBaseResource]
-    max_input_tokens: int
-    max_output_tokens: int
+    capacity: ModelCapacity
     budget_policy: AIBuilderBudgetPolicy
     attachment_context_policy: AIBuilderAttachmentContextPolicy
     mapped_execution_policy: FlowMappedExecutionPolicy
@@ -115,10 +117,54 @@ def eligible_planner_models(
     ]
 
 
+class AIBuilderModelReady(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    state: Literal["ready"] = "ready"
+
+
+class AIBuilderModelCapacityUndeclared(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    state: Literal["capacity_undeclared"] = "capacity_undeclared"
+    missing_dimensions: list[CapacityDimension]
+
+
+class AIBuilderModelCapacityTooSmall(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    state: Literal["capacity_too_small"] = "capacity_too_small"
+
+
+AIBuilderModelAvailability: TypeAlias = Annotated[
+    AIBuilderModelReady
+    | AIBuilderModelCapacityUndeclared
+    | AIBuilderModelCapacityTooSmall,
+    Field(discriminator="state"),
+]
+
+
+def planner_model_availability(
+    model: "CompletionModel", *, budget_policy: AIBuilderBudgetPolicy
+) -> AIBuilderModelAvailability:
+    capacity = model.capacity
+    state = capacity.availability(
+        safety_tokens=budget_policy.conversation_safety_buffer_tokens
+    )
+    if state == "capacity_undeclared":
+        return AIBuilderModelCapacityUndeclared(
+            missing_dimensions=list(capacity.missing_dimensions())
+        )
+    if state == "capacity_too_small":
+        return AIBuilderModelCapacityTooSmall()
+    return AIBuilderModelReady()
+
+
 def select_default_planner_model(
     space: "Space",
     *,
     active_provider_ids: AbstractSet[UUID],
+    budget_policy: AIBuilderBudgetPolicy,
     minimum_level: int = 0,
 ) -> "CompletionModel | None":
     """The model an omitted `model_id` resolves to, or None if there is none.
@@ -127,9 +173,16 @@ def select_default_planner_model(
     models are allowed to be candidates.
     """
     return space.select_default_completion_model(
-        eligible_planner_models(
-            space, active_provider_ids=active_provider_ids, minimum_level=minimum_level
-        )
+        [
+            model
+            for model in eligible_planner_models(
+                space,
+                active_provider_ids=active_provider_ids,
+                minimum_level=minimum_level,
+            )
+            if planner_model_availability(model, budget_policy=budget_policy).state
+            == "ready"
+        ]
     )
 
 
@@ -137,10 +190,14 @@ def resolve_planner_model(
     space: "Space",
     *,
     active_provider_ids: AbstractSet[UUID],
+    budget_policy: AIBuilderBudgetPolicy,
     minimum_level: int = 0,
 ) -> "CompletionModel":
     model = select_default_planner_model(
-        space, active_provider_ids=active_provider_ids, minimum_level=minimum_level
+        space,
+        active_provider_ids=active_provider_ids,
+        minimum_level=minimum_level,
+        budget_policy=budget_policy,
     )
     if model is None:
         raise AIBuilderBadRequestException(
@@ -156,11 +213,15 @@ def resolve_requested_model(
     *,
     model_id: UUID | None,
     active_provider_ids: AbstractSet[UUID],
+    budget_policy: AIBuilderBudgetPolicy,
     minimum_level: int = 0,
 ) -> "CompletionModel":
     if model_id is None:
         return resolve_planner_model(
-            space, active_provider_ids=active_provider_ids, minimum_level=minimum_level
+            space,
+            active_provider_ids=active_provider_ids,
+            minimum_level=minimum_level,
+            budget_policy=budget_policy,
         )
     candidates = eligible_planner_models(space, active_provider_ids=active_provider_ids)
     model = next(
@@ -182,6 +243,18 @@ def resolve_requested_model(
                 "model_level": _model_level(model),
             },
         )
+    availability = planner_model_availability(model, budget_policy=budget_policy)
+    if availability.state == "capacity_undeclared":
+        error = UnknownModelCapacityError(tuple(availability.missing_dimensions))
+        raise translate_unknown_model_capacity(error) from error
+    if availability.state == "capacity_too_small":
+        raise AIBuilderBadRequestException(
+            "This model's input limit cannot accommodate the configured safety "
+            "buffer plus input and an answer. Choose a model with a larger input "
+            "limit, or ask an administrator to correct the model limits or safety "
+            "buffer policy.",
+            code=AIBuilderErrorCode.PLANNER_MODEL_INCOMPATIBLE_TOKEN_LIMITS,
+        )
     return model
 
 
@@ -193,13 +266,14 @@ def build_planner_context(
     tenant_flow_settings: dict[str, Any] | None = None,
     minimum_level: int = 0,
 ) -> AIBuilderPlannerContext:
+    budget_policy = resolve_ai_builder_budget_policy(tenant_flow_settings)
     model = resolve_requested_model(
         space,
         model_id=model_id,
         active_provider_ids=active_provider_ids,
         minimum_level=minimum_level,
+        budget_policy=budget_policy,
     )
-    budget_policy = resolve_ai_builder_budget_policy(tenant_flow_settings)
     attachment_context_policy = AIBuilderAttachmentContextPolicy(
         max_template_uncompressed_bytes=(
             budget_policy.max_template_inspection_uncompressed_bytes
@@ -207,39 +281,13 @@ def build_planner_context(
         max_template_placeholders=budget_policy.max_template_placeholders,
     )
     mapped_execution_policy = resolve_flow_mapped_execution_policy(tenant_flow_settings)
-    capacity = ModelCapacity(model.max_input_tokens, model.max_output_tokens)
-    try:
-        max_input_tokens = capacity.require_input_tokens()
-        max_output_tokens = capacity.require_output_tokens()
-    except UnknownModelCapacityError as error:
-        raise translate_unknown_model_capacity(error) from error
-
-    # Request-independent: the window, less the configured safety buffer, must
-    # leave room for some request at all. Whether a particular request fits is
-    # decided where that request is measured, before its provider call.
-    if (
-        budget_policy.classification_request_budget(
-            context_window_tokens=max_input_tokens,
-            model_output_ceiling_tokens=max_output_tokens,
-        ).plan(required_input_tokens=0)
-        is None
-    ):
-        raise AIBuilderBadRequestException(
-            "This model's context window does not exceed the configured safety "
-            "buffer, so no AI Builder request can fit. Choose a model with a larger "
-            "context window, or ask an administrator to correct inaccurate model "
-            "limits or the safety buffer policy.",
-            code=AIBuilderErrorCode.PLANNER_MODEL_INCOMPATIBLE_TOKEN_LIMITS,
-        )
-
     available_models = serialize_space_models(space)
     available_kbs = serialize_space_kbs(space)
     return AIBuilderPlannerContext(
         model=model,
         available_models=available_models,
         available_kbs=available_kbs,
-        max_input_tokens=max_input_tokens,
-        max_output_tokens=max_output_tokens,
+        capacity=model.capacity,
         budget_policy=budget_policy,
         attachment_context_policy=attachment_context_policy,
         mapped_execution_policy=mapped_execution_policy,

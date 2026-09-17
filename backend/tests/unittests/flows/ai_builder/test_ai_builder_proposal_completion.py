@@ -24,6 +24,7 @@ from eneo.ai_models.completion_models.completion_model import (
     CompletionModel,
     ModelKwargs,
 )
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
     SupportedModelKwargs,
@@ -130,8 +131,7 @@ def _completion_request(
     request_budget = kwargs.pop(
         "request_budget",
         AIBuilderRequestBudget(
-            context_window_tokens=100_000,
-            model_output_ceiling_tokens=max_output_tokens,
+            capacity=ModelCapacity(100_000, max_output_tokens),
             safety_buffer_tokens=0,
             timeout_seconds=180.0,
         ),
@@ -152,15 +152,14 @@ def _completion_request(
 
 def _request_budget(
     *,
-    context_window_tokens: int,
+    request_budget_tokens: int,
     output_tokens: int,
     safety_buffer_tokens: int = 0,
     timeout_seconds: float = 180.0,
     request_id: str | None = None,
 ) -> AIBuilderRequestBudget:
     return AIBuilderRequestBudget(
-        context_window_tokens=context_window_tokens,
-        model_output_ceiling_tokens=output_tokens,
+        capacity=ModelCapacity(request_budget_tokens, output_tokens),
         safety_buffer_tokens=safety_buffer_tokens,
         timeout_seconds=timeout_seconds,
         request_id=request_id,
@@ -938,7 +937,7 @@ async def test_proposal_enforces_its_deadline_without_repeating_provider_work() 
         max_output_tokens=4096,
         temperature=0.2,
         request_budget=_request_budget(
-            context_window_tokens=128_000,
+            request_budget_tokens=128_000,
             output_tokens=4096,
             timeout_seconds=0.01,
         ),
@@ -1278,8 +1277,7 @@ async def test_the_proposal_is_sent_with_the_selected_models_output_ceiling() ->
             max_output_tokens=16_000,
             temperature=0.2,
             request_budget=AIBuilderRequestBudget(
-                context_window_tokens=100_000,
-                model_output_ceiling_tokens=16_000,
+                capacity=ModelCapacity(100_000, 16_000),
                 safety_buffer_tokens=0,
                 timeout_seconds=180.0,
             ),
@@ -1306,7 +1304,7 @@ async def test_a_ceiling_equal_to_the_window_gets_the_room_the_request_leaves() 
             max_output_tokens=100,
             temperature=0.2,
             request_budget=_request_budget(
-                context_window_tokens=100,
+                request_budget_tokens=100,
                 output_tokens=100,
             ),
         ),
@@ -1325,7 +1323,7 @@ async def test_protected_only_overflow_rejects_before_provider_work_or_call_slot
     call_budget = ProposalCallBudget()
     # Eleven protected tokens in a window of eleven: no room for any answer.
     request_budget = _request_budget(
-        context_window_tokens=11,
+        request_budget_tokens=11,
         output_tokens=10,
         request_id="req-budget-overflow",
     )
@@ -1409,7 +1407,7 @@ async def test_final_strict_tool_payload_is_admitted_before_provider_work(
         # The strict schema costs eleven tokens as sent; a window of eleven
         # leaves no room for an answer only if that outbound cost is measured.
         proposal_request_budget=_request_budget(
-            context_window_tokens=11,
+            request_budget_tokens=11,
             output_tokens=10,
             request_id="req-strict-payload-overflow",
         ),
@@ -1491,7 +1489,7 @@ def test_request_budget_evicts_oldest_optional_groups_and_preserves_repair_conte
         lambda _tools, _model: 0,
     )
     budget = _request_budget(
-        context_window_tokens=45,
+        request_budget_tokens=45,
         output_tokens=1,
         request_id="req-repair-budget",
     )
@@ -1544,10 +1542,9 @@ def test_optional_history_yields_to_the_reserved_answer_room_not_the_ceiling(
         lambda _tools, _model: 0,
     )
 
-    def budget(context_window_tokens: int) -> AIBuilderRequestBudget:
+    def budget(request_budget_tokens: int) -> AIBuilderRequestBudget:
         return AIBuilderRequestBudget(
-            context_window_tokens=context_window_tokens,
-            model_output_ceiling_tokens=60,
+            capacity=ModelCapacity(request_budget_tokens, 60),
             safety_buffer_tokens=0,
             timeout_seconds=180.0,
         )
@@ -1614,7 +1611,7 @@ def test_an_all_protected_request_is_measured_once(
     )
 
     fitted, resolved = fit_proposal_request_budget(
-        budget=_request_budget(context_window_tokens=100, output_tokens=10),
+        budget=_request_budget(request_budget_tokens=100, output_tokens=10),
         message_groups=groups,
         tool_schemas=[],
         model_name="test",
@@ -1681,7 +1678,7 @@ async def test_repair_time_overflow_uses_same_completion_boundary_rejection(
             ),
         ),
         proposal_request_budget=_request_budget(
-            context_window_tokens=70,
+            request_budget_tokens=70,
             output_tokens=20,
             request_id="req-repair-overflow",
         ),
@@ -1744,7 +1741,7 @@ async def test_second_repair_overflow_rechecks_the_shared_completion_boundary(
     )
     call_budget = ProposalCallBudget()
     request_budget = _request_budget(
-        context_window_tokens=50,
+        request_budget_tokens=50,
         output_tokens=1,
         request_id="req-second-repair-overflow",
     )
@@ -1859,8 +1856,7 @@ async def test_turn_usage_aggregates_real_auxiliary_initial_and_repair_calls() -
         tenant_id=uuid4(),
         structured_output_mode=StructuredOutputMode.STRICT_JSON_SCHEMA,
         usage_tracker=tracker,
-        max_input_tokens=100_000,
-        max_output_tokens=4_096,
+        capacity=ModelCapacity(100_000, 4_096),
         budget_policy=AIBuilderBudgetPolicy(
             conversation_safety_buffer_tokens=0,
             minimum_conversation_budget_tokens=0,
@@ -1937,7 +1933,7 @@ def test_completion_keeps_the_prepared_allocation_and_only_a_repair_plans_again(
         "eneo.flows.ai_builder.ai_builder_proposal_tool_contracts.count_tool_tokens",
         lambda _tools, _model: 0,
     )
-    planned = _request_budget(context_window_tokens=100, output_tokens=100).plan(
+    planned = _request_budget(request_budget_tokens=100, output_tokens=100).plan(
         required_input_tokens=20
     )
     assert planned is not None

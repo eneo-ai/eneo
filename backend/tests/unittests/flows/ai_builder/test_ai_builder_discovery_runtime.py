@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
 
 from eneo.authentication.principal_types import PrincipalType
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
     SupportedModelKwargs,
@@ -282,8 +283,7 @@ async def test_carried_commit_auto_accepts_the_mapped_limit_and_asks_real_gaps()
             ),
         ],
         tenant_id=uuid4(),
-        max_input_tokens=100_000,
-        max_output_tokens=2_000,
+        capacity=ModelCapacity(100_000, 2_000),
         allow_classification=False,
         mapped_execution_policy=FlowMappedExecutionPolicy(
             max_provider_calls_per_mapped_step=8,
@@ -522,8 +522,7 @@ async def test_runtime_classifies_corrective_text_sent_with_structured_answer(
         litellm_client=AsyncMock(),
         completion_model_route=_route(),
         tenant_id=uuid4(),
-        max_input_tokens=100_000,
-        max_output_tokens=2_000,
+        capacity=ModelCapacity(100_000, 2_000),
     )
 
     classify.assert_awaited_once()
@@ -576,8 +575,7 @@ async def test_runtime_applies_exact_structured_answer_without_model_call(
         litellm_client=AsyncMock(),
         completion_model_route=_route(),
         tenant_id=uuid4(),
-        max_input_tokens=100_000,
-        max_output_tokens=2_000,
+        capacity=ModelCapacity(100_000, 2_000),
     )
 
     terminal_output = context.planning_state.resolved_slots["terminal_output"]
@@ -625,8 +623,7 @@ async def test_runtime_retains_named_results_until_structured_output_choice(
         litellm_client=AsyncMock(),
         completion_model_route=_route(),
         tenant_id=uuid4(),
-        max_input_tokens=100_000,
-        max_output_tokens=2_000,
+        capacity=ModelCapacity(100_000, 2_000),
     )
 
     assert "terminal_output" not in first_context.planning_state.resolved_slots
@@ -666,8 +663,7 @@ async def test_runtime_retains_named_results_until_structured_output_choice(
         litellm_client=AsyncMock(),
         completion_model_route=_route(),
         tenant_id=uuid4(),
-        max_input_tokens=100_000,
-        max_output_tokens=2_000,
+        capacity=ModelCapacity(100_000, 2_000),
     )
 
     assert second_context.planning_state.named_result_obligations == (
@@ -865,8 +861,7 @@ async def test_runtime_preserves_current_turn_and_scales_optional_history(
             litellm_client=AsyncMock(),
             completion_model_route=_route(),
             tenant_id=uuid4(),
-            max_input_tokens=max_input_tokens,
-            max_output_tokens=1_000,
+            capacity=ModelCapacity(max_input_tokens, 1_000),
             budget_policy=_budget_policy(
                 safety_buffer_tokens=1_000,
                 minimum_conversation_tokens=4_000,
@@ -970,8 +965,7 @@ async def test_runtime_planning_state_classifies_current_turn_when_slots_are_str
             litellm_client=litellm_client,
             completion_model_route=_route(),
             tenant_id=uuid4(),
-            max_input_tokens=100_000,
-            max_output_tokens=2_000,
+            capacity=ModelCapacity(100_000, 2_000),
         )
     ).planning_state
 
@@ -1028,8 +1022,7 @@ async def test_runtime_planning_state_classifies_weak_existing_slots(
             litellm_client=litellm_client,
             completion_model_route=_route(),
             tenant_id=uuid4(),
-            max_input_tokens=100_000,
-            max_output_tokens=2_000,
+            capacity=ModelCapacity(100_000, 2_000),
         )
     ).planning_state
 
@@ -1049,8 +1042,7 @@ async def test_runtime_planning_state_skips_model_when_freeform_text_is_empty() 
         litellm_client=litellm_client,
         completion_model_route=_route(),
         tenant_id=uuid4(),
-        max_input_tokens=100_000,
-        max_output_tokens=2_000,
+        capacity=ModelCapacity(100_000, 2_000),
     )
 
     litellm_client.acompletion.assert_not_awaited()
@@ -1088,8 +1080,7 @@ async def test_runtime_planning_state_keeps_uploaded_file_roles_without_classifi
             litellm_client=AsyncMock(),
             completion_model_route=_route(),
             tenant_id=uuid4(),
-            max_input_tokens=100_000,
-            max_output_tokens=2_000,
+            capacity=ModelCapacity(100_000, 2_000),
             attachment_context=attachment_context,
         )
     ).planning_state
@@ -1160,8 +1151,7 @@ async def test_degraded_turn_replays_semantic_role_over_fresh_attachment_facts()
                 )
             ],
             tenant_id=uuid4(),
-            max_input_tokens=100_000,
-            max_output_tokens=2_000,
+            capacity=ModelCapacity(100_000, 2_000),
             allow_classification=False,
             attachment_context=AIBuilderAttachmentContext(
                 context=None,
@@ -1213,8 +1203,7 @@ async def test_runtime_planning_state_uses_structural_template_for_docx_mode() -
             litellm_client=AsyncMock(),
             completion_model_route=_route(),
             tenant_id=uuid4(),
-            max_input_tokens=100_000,
-            max_output_tokens=2_000,
+            capacity=ModelCapacity(100_000, 2_000),
             ui_language="sv",
             allow_classification=False,
             attachment_context=AIBuilderAttachmentContext(
@@ -1390,8 +1379,7 @@ async def _template_turn_state(
         litellm_client=litellm_client,
         completion_model_route=_route(),
         tenant_id=uuid4(),
-        max_input_tokens=100_000,
-        max_output_tokens=2_000,
+        capacity=ModelCapacity(100_000, 2_000),
         ui_language="sv",
         attachment_context=_template_attachment_context(file_ids),
     )
@@ -1439,8 +1427,7 @@ async def test_same_turn_placeholder_template_settles_docx_mode() -> None:
         litellm_client=litellm_client,
         completion_model_route=_route(),
         tenant_id=uuid4(),
-        max_input_tokens=100_000,
-        max_output_tokens=2_000,
+        capacity=ModelCapacity(100_000, 2_000),
         ui_language="sv",
         attachment_context=AIBuilderAttachmentContext(
             context=None,
@@ -1517,8 +1504,7 @@ async def test_classified_second_template_withdraws_structural_docx_mode() -> No
         litellm_client=litellm_client,
         completion_model_route=_route(),
         tenant_id=uuid4(),
-        max_input_tokens=100_000,
-        max_output_tokens=2_000,
+        capacity=ModelCapacity(100_000, 2_000),
         ui_language="sv",
         attachment_context=AIBuilderAttachmentContext(
             context=None,
@@ -1687,8 +1673,7 @@ async def test_second_template_in_a_later_turn_reopens_docx_mode() -> None:
         litellm_client=litellm_client,
         completion_model_route=_route(),
         tenant_id=uuid4(),
-        max_input_tokens=100_000,
-        max_output_tokens=2_000,
+        capacity=ModelCapacity(100_000, 2_000),
         ui_language="sv",
         attachment_context=_template_attachment_context(
             (first_file_id, second_file_id)
@@ -1715,8 +1700,7 @@ async def test_runtime_retains_attachment_schema_as_unassigned_candidate() -> No
     context = await build_runtime_discovery_context(
         [],
         tenant_id=uuid4(),
-        max_input_tokens=100_000,
-        max_output_tokens=2_000,
+        capacity=ModelCapacity(100_000, 2_000),
         allow_classification=False,
         attachment_context=AIBuilderAttachmentContext(
             context=None,
@@ -1783,8 +1767,7 @@ async def test_runtime_input_schema_does_not_override_requested_docx_output() ->
         litellm_client=litellm_client,
         completion_model_route=_route(),
         tenant_id=uuid4(),
-        max_input_tokens=100_000,
-        max_output_tokens=2_000,
+        capacity=ModelCapacity(100_000, 2_000),
         attachment_context=AIBuilderAttachmentContext(
             context=None,
             evidence=(),
@@ -1861,8 +1844,7 @@ async def test_attachment_only_direction_citation_does_not_assign_schema() -> No
         litellm_client=litellm_client,
         completion_model_route=_route(),
         tenant_id=uuid4(),
-        max_input_tokens=100_000,
-        max_output_tokens=2_000,
+        capacity=ModelCapacity(100_000, 2_000),
         attachment_context=AIBuilderAttachmentContext(
             context=excerpt,
             evidence=(
@@ -1930,8 +1912,7 @@ async def test_runtime_does_not_treat_template_placeholders_as_json_terminal() -
                 )
             ],
             tenant_id=uuid4(),
-            max_input_tokens=100_000,
-            max_output_tokens=2_000,
+            capacity=ModelCapacity(100_000, 2_000),
             allow_classification=False,
             attachment_context=AIBuilderAttachmentContext(
                 context=None,
@@ -2017,8 +1998,7 @@ async def test_runtime_infers_schema_only_after_example_output_classification() 
                 litellm_client=AsyncMock(),
                 completion_model_route=_route(),
                 tenant_id=uuid4(),
-                max_input_tokens=100_000,
-                max_output_tokens=2_000,
+                capacity=ModelCapacity(100_000, 2_000),
                 attachment_context=attachment_context,
             )
         ).planning_state
@@ -2112,8 +2092,7 @@ async def test_runtime_records_incomplete_example_json_without_guessing_schema()
                 litellm_client=AsyncMock(),
                 completion_model_route=_route(),
                 tenant_id=uuid4(),
-                max_input_tokens=100_000,
-                max_output_tokens=2_000,
+                capacity=ModelCapacity(100_000, 2_000),
                 attachment_context=attachment_context,
             )
         ).planning_state
@@ -2135,8 +2114,7 @@ async def test_runtime_planning_state_skips_model_when_classification_is_disable
         litellm_client=litellm_client,
         completion_model_route=_route(),
         tenant_id=uuid4(),
-        max_input_tokens=100_000,
-        max_output_tokens=2_000,
+        capacity=ModelCapacity(100_000, 2_000),
         allow_classification=False,
     )
 
@@ -2159,8 +2137,7 @@ async def test_runtime_rejects_when_protected_current_turn_cannot_fit() -> None:
             litellm_client=litellm_client,
             completion_model_route=_route(),
             tenant_id=uuid4(),
-            max_input_tokens=100,
-            max_output_tokens=70,
+            capacity=ModelCapacity(100, 70),
             budget_policy=_budget_policy(
                 safety_buffer_tokens=20,
                 minimum_conversation_tokens=10,
@@ -2194,7 +2171,7 @@ async def test_runtime_refits_saturated_attachment_before_admitting_transcript()
         [attachment],
         policy=AIBuilderAttachmentContextPolicy(),
         model_name="gpt-test",
-        max_input_tokens=16_000,
+        capacity=ModelCapacity(16_000, 1_000),
         answer_reserve_tokens=1_000,
         safety_buffer_tokens=1_000,
         minimum_conversation_tokens=4_000,
@@ -2217,8 +2194,7 @@ async def test_runtime_refits_saturated_attachment_before_admitting_transcript()
         litellm_client=litellm_client,
         completion_model_route=_route(),
         tenant_id=uuid4(),
-        max_input_tokens=16_000,
-        max_output_tokens=1_000,
+        capacity=ModelCapacity(16_000, 1_000),
         budget_policy=_budget_policy(
             safety_buffer_tokens=1_000,
             minimum_conversation_tokens=4_000,
@@ -2273,8 +2249,7 @@ async def test_runtime_persists_exact_admitted_source_inventory(
         litellm_client=AsyncMock(),
         completion_model_route=_route(),
         tenant_id=uuid4(),
-        max_input_tokens=12_000,
-        max_output_tokens=1_000,
+        capacity=ModelCapacity(12_000, 1_000),
         budget_policy=_budget_policy(
             safety_buffer_tokens=200,
             minimum_conversation_tokens=500,
@@ -2358,8 +2333,7 @@ async def test_runtime_persists_classifier_attempt_outcomes_before_state_mutatio
         litellm_client=litellm_client,
         completion_model_route=_route(),
         tenant_id=uuid4(),
-        max_input_tokens=100_000,
-        max_output_tokens=2_000,
+        capacity=ModelCapacity(100_000, 2_000),
     )
 
     assert context.slot_classification_metadata is not None
@@ -2444,8 +2418,7 @@ async def test_resolved_session_classifies_current_checkpoint_change(
         litellm_client=litellm_client,
         completion_model_route=_route(),
         tenant_id=uuid4(),
-        max_input_tokens=100_000,
-        max_output_tokens=2_000,
+        capacity=ModelCapacity(100_000, 2_000),
     )
 
     litellm_client.acompletion.assert_awaited_once()
@@ -2510,8 +2483,7 @@ async def test_runtime_does_not_mutate_planning_state_when_metadata_admission_fa
             litellm_client=litellm_client,
             completion_model_route=_route(),
             tenant_id=uuid4(),
-            max_input_tokens=100_000,
-            max_output_tokens=2_000,
+            capacity=ModelCapacity(100_000, 2_000),
         )
 
     assert state.resolved_slots == {}
@@ -2576,8 +2548,7 @@ async def test_runtime_discards_orphan_named_result_delta_atomically(
         litellm_client=AsyncMock(),
         completion_model_route=_route(),
         tenant_id=uuid4(),
-        max_input_tokens=100_000,
-        max_output_tokens=2_000,
+        capacity=ModelCapacity(100_000, 2_000),
     )
 
     assert context.planning_state.resolved_slots["terminal_output"].value == (
@@ -2651,8 +2622,7 @@ async def test_runtime_classifies_named_results_after_slots_are_resolved(
         litellm_client=litellm_client,
         completion_model_route=_route(),
         tenant_id=uuid4(),
-        max_input_tokens=100_000,
-        max_output_tokens=2_000,
+        capacity=ModelCapacity(100_000, 2_000),
     )
 
     litellm_client.acompletion.assert_awaited_once()
@@ -2792,8 +2762,7 @@ async def test_runtime_atomically_resolves_json_terminal_and_named_fields(
         litellm_client=litellm_client,
         completion_model_route=_route(),
         tenant_id=uuid4(),
-        max_input_tokens=100_000,
-        max_output_tokens=2_000,
+        capacity=ModelCapacity(100_000, 2_000),
     )
 
     assert context.planning_state.resolved_slots["terminal_output"].value == (
@@ -2927,8 +2896,7 @@ async def test_runtime_materializes_incremental_named_result_addition_and_remova
         litellm_client=litellm_client,
         completion_model_route=_route(),
         tenant_id=uuid4(),
-        max_input_tokens=100_000,
-        max_output_tokens=2_000,
+        capacity=ModelCapacity(100_000, 2_000),
         ui_language="en",
     )
 
@@ -3064,8 +3032,7 @@ async def test_runtime_retains_named_result_evidence_for_non_json_terminal_outpu
         litellm_client=litellm_client,
         completion_model_route=_route(),
         tenant_id=uuid4(),
-        max_input_tokens=100_000,
-        max_output_tokens=2_000,
+        capacity=ModelCapacity(100_000, 2_000),
     )
 
     assert [
@@ -3146,8 +3113,7 @@ async def test_runtime_planning_state_overlays_heuristic_slots_with_model_eviden
             litellm_client=litellm_client,
             completion_model_route=_route(),
             tenant_id=uuid4(),
-            max_input_tokens=100_000,
-            max_output_tokens=2_000,
+            capacity=ModelCapacity(100_000, 2_000),
             ui_language="sv",
         )
     ).planning_state
@@ -3210,8 +3176,7 @@ async def test_runtime_planning_state_lets_classifier_correct_heuristic_input_gu
             litellm_client=litellm_client,
             completion_model_route=_route(),
             tenant_id=uuid4(),
-            max_input_tokens=100_000,
-            max_output_tokens=2_000,
+            capacity=ModelCapacity(100_000, 2_000),
             ui_language="sv",
         )
     ).planning_state
@@ -3240,8 +3205,7 @@ async def test_runtime_planning_state_passes_uploaded_file_evidence_to_classifie
         litellm_client=litellm_client,
         completion_model_route=_route(),
         tenant_id=uuid4(),
-        max_input_tokens=100_000,
-        max_output_tokens=2_000,
+        capacity=ModelCapacity(100_000, 2_000),
         ui_language="sv",
         attachment_context=_attachment_context(),
     )
@@ -3291,8 +3255,7 @@ async def test_runtime_planning_state_uses_classifier_for_semantic_file_roles() 
             litellm_client=litellm_client,
             completion_model_route=_route(),
             tenant_id=uuid4(),
-            max_input_tokens=100_000,
-            max_output_tokens=2_000,
+            capacity=ModelCapacity(100_000, 2_000),
             ui_language="sv",
             attachment_context=AIBuilderAttachmentContext(
                 context=None,
@@ -3416,8 +3379,7 @@ async def test_runtime_planning_state_classifies_example_output_shape_in_one_cal
         litellm_client=litellm_client,
         completion_model_route=_route(),
         tenant_id=uuid4(),
-        max_input_tokens=100_000,
-        max_output_tokens=2_000,
+        capacity=ModelCapacity(100_000, 2_000),
         ui_language="sv",
         attachment_context=AIBuilderAttachmentContext(
             context=None,
@@ -3477,8 +3439,7 @@ async def test_uploaded_docx_evidence_alone_does_not_deterministically_resolve_t
             litellm_client=litellm_client,
             completion_model_route=_route(),
             tenant_id=uuid4(),
-            max_input_tokens=100_000,
-            max_output_tokens=2_000,
+            capacity=ModelCapacity(100_000, 2_000),
             ui_language="sv",
             attachment_context=_attachment_context(),
         )
@@ -3534,8 +3495,7 @@ async def test_runtime_planning_state_accepts_model_classified_json_input(
             litellm_client=litellm_client,
             completion_model_route=_route(),
             tenant_id=uuid4(),
-            max_input_tokens=100_000,
-            max_output_tokens=2_000,
+            capacity=ModelCapacity(100_000, 2_000),
             ui_language="sv",
         )
     ).planning_state
@@ -3603,8 +3563,7 @@ async def test_runtime_planning_state_clears_nonprotected_output_guess_on_uncert
             litellm_client=litellm_client,
             completion_model_route=_route(),
             tenant_id=uuid4(),
-            max_input_tokens=100_000,
-            max_output_tokens=2_000,
+            capacity=ModelCapacity(100_000, 2_000),
             ui_language="sv",
         )
     ).planning_state
@@ -3668,8 +3627,7 @@ async def test_runtime_planning_state_does_not_let_model_override_structured_ans
             litellm_client=litellm_client,
             completion_model_route=_route(),
             tenant_id=uuid4(),
-            max_input_tokens=100_000,
-            max_output_tokens=2_000,
+            capacity=ModelCapacity(100_000, 2_000),
             ui_language="sv",
         )
     ).planning_state
@@ -3750,8 +3708,7 @@ async def test_runtime_discovery_uses_llm_baseline_for_natural_swedish_support_f
             kwargs=provider_kwargs,
         ),
         tenant_id=uuid4(),
-        max_input_tokens=100_000,
-        max_output_tokens=2_000,
+        capacity=ModelCapacity(100_000, 2_000),
         ui_language="sv",
     )
     analysis = result.discovery_analysis
@@ -3815,8 +3772,7 @@ async def test_runtime_discovery_blocks_output_classification_when_user_is_uncer
         litellm_client=litellm_client,
         completion_model_route=_route(),
         tenant_id=uuid4(),
-        max_input_tokens=100_000,
-        max_output_tokens=2_000,
+        capacity=ModelCapacity(100_000, 2_000),
         ui_language="sv",
     )
     analysis = result.discovery_analysis
@@ -3901,8 +3857,7 @@ async def test_runtime_discovery_uses_llm_baseline_for_swedish_document_json_flo
         litellm_client=litellm_client,
         completion_model_route=_route(),
         tenant_id=uuid4(),
-        max_input_tokens=100_000,
-        max_output_tokens=2_000,
+        capacity=ModelCapacity(100_000, 2_000),
         ui_language="sv",
     )
     analysis = result.discovery_analysis
@@ -3982,8 +3937,7 @@ async def test_runtime_uses_one_classification_for_state_and_default_assumption(
         litellm_client=litellm_client,
         completion_model_route=_route(),
         tenant_id=uuid4(),
-        max_input_tokens=100_000,
-        max_output_tokens=2_000,
+        capacity=ModelCapacity(100_000, 2_000),
         ui_language="sv",
     )
     assert result.discovery_analysis.next_issue is None
@@ -4091,8 +4045,7 @@ async def test_persisted_uncertainty_survives_the_completion() -> None:
     context = await build_runtime_discovery_context(
         [ConversationMessage(role="user", content=brief)],
         tenant_id=uuid4(),
-        max_input_tokens=100_000,
-        max_output_tokens=2_000,
+        capacity=ModelCapacity(100_000, 2_000),
         allow_classification=False,
         persisted_planning_state=persisted,
         attached_file_ids=frozenset(),
@@ -4104,3 +4057,32 @@ async def test_persisted_uncertainty_survives_the_completion() -> None:
     # The rest of the state is complete: what the persisted turn carried in
     # and what the policy assumed on top of it.
     assert "document_material_scope" in state.resolved_slots
+
+
+@pytest.mark.asyncio
+async def test_discovery_forwards_capacity_to_admission_and_classification(monkeypatch):
+    capacity = ModelCapacity(32_000, 4_000)
+    policy = _budget_policy(
+        safety_buffer_tokens=1_000, minimum_conversation_tokens=4_000
+    )
+    classify = AsyncMock(return_value=SlotClassificationAttempt(outcome="parse_failed"))
+    monkeypatch.setattr(runtime, "classify_slots", classify)
+    with patch.object(
+        type(policy),
+        "classification_request_budget",
+        wraps=policy.classification_request_budget,
+    ) as factory:
+        await build_runtime_discovery_context(
+            [
+                ConversationMessage(
+                    role="user", content="Build a flow to summarize documents"
+                )
+            ],
+            litellm_client=AsyncMock(),
+            completion_model_route=_route(),
+            tenant_id=uuid4(),
+            capacity=capacity,
+            budget_policy=policy,
+        )
+    factory.assert_called_once_with(capacity=capacity)
+    assert classify.await_args.kwargs["capacity"] is capacity

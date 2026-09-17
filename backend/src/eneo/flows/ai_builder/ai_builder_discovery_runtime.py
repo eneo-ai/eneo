@@ -8,6 +8,7 @@ from uuid import UUID
 
 from pydantic import ValidationError
 
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.infrastructure.tenant_model_capabilities import (
     resolve_structured_output_capability,
 )
@@ -533,8 +534,7 @@ async def build_runtime_discovery_context(
     before_provider_call: Callable[[], Awaitable[None]] | None = None,
     mapped_execution_policy: FlowMappedExecutionPolicy | None = None,
     prepared_schema_candidates: tuple[DeclaredSchemaCandidate, ...] | None = None,
-    max_input_tokens: int,
-    max_output_tokens: int,
+    capacity: ModelCapacity,
     budget_policy: AIBuilderBudgetPolicy | None = None,
     persisted_planning_state: PlanningState | None = None,
     attached_file_ids: Collection[UUID] = (),
@@ -707,8 +707,7 @@ async def build_runtime_discovery_context(
         bias=bias,
         structured_output_mode=structured_output_mode,
         litellm_model=completion_model_route.litellm_model,
-        max_input_tokens=max_input_tokens,
-        max_output_tokens=max_output_tokens,
+        capacity=capacity,
         budget_policy=budget_policy,
     )
     prior_named_result_classification = _latest_matching_named_result_classification(
@@ -725,8 +724,7 @@ async def build_runtime_discovery_context(
         provider=provider,
         supported_model_kwargs=completion_model_route.supported_model_kwargs,
         bias=bias,
-        max_input_tokens=max_input_tokens,
-        max_output_tokens=max_output_tokens,
+        capacity=capacity,
         safety_buffer_tokens=budget_policy.conversation_safety_buffer_tokens,
         structured_output_mode=structured_output_mode,
     )
@@ -743,8 +741,7 @@ async def build_runtime_discovery_context(
         structured_output_mode=structured_output_mode,
         usage_tracker=usage_tracker,
         before_provider_call=before_provider_call,
-        max_input_tokens=max_input_tokens,
-        max_output_tokens=max_output_tokens,
+        capacity=capacity,
         budget_policy=budget_policy,
     )
     if attempt.outcome != "resolved":
@@ -988,8 +985,7 @@ async def build_discovery_runtime_result(
     prepared_schema_candidates: tuple[DeclaredSchemaCandidate, ...] | None = None,
     persisted_planning_state: PlanningState | None = None,
     attached_file_ids: Collection[UUID] = frozenset(),
-    max_input_tokens: int,
-    max_output_tokens: int,
+    capacity: ModelCapacity,
     budget_policy: AIBuilderBudgetPolicy | None = None,
 ) -> DiscoveryRuntimeResult:
     context = await build_runtime_discovery_context(
@@ -1005,8 +1001,7 @@ async def build_discovery_runtime_result(
         before_provider_call=before_provider_call,
         mapped_execution_policy=mapped_execution_policy,
         prepared_schema_candidates=prepared_schema_candidates,
-        max_input_tokens=max_input_tokens,
-        max_output_tokens=max_output_tokens,
+        capacity=capacity,
         budget_policy=budget_policy,
         persisted_planning_state=persisted_planning_state,
         attached_file_ids=attached_file_ids,

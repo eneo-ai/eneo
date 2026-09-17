@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
     SupportedModelKwargs,
@@ -424,8 +425,7 @@ def _make_container(
         planner_context=SimpleNamespace(
             available_models=[],
             available_kbs=[],
-            max_input_tokens=4096,
-            max_output_tokens=2048,
+            capacity=ModelCapacity(4096, 2048),
             budget_policy=SimpleNamespace(),
             attachment_context_policy=AIBuilderAttachmentContextPolicy(),
             mapped_execution_policy=None,
@@ -1721,6 +1721,7 @@ class TestGetSessionModelsEndpoint:
 
         model = MagicMock()
         model.id = uuid4()
+        model.capacity = ModelCapacity(32_000, 4_000)
         model.name = "GPT-4"
         model.nickname = "Municipal drafting model"
         model.provider_type = "openai"
@@ -1772,6 +1773,7 @@ class TestGetSessionModelsEndpoint:
         def _model(name: str, *, level: int, org_default: bool) -> MagicMock:
             model = MagicMock()
             model.id = uuid4()
+            model.capacity = ModelCapacity(32_000, 4_000)
             model.name = name
             model.nickname = None
             model.provider_type = "openai"
@@ -1830,6 +1832,7 @@ class TestGetSessionModelsEndpoint:
 
         model = MagicMock()
         model.id = uuid4()
+        model.capacity = ModelCapacity(32_000, 4_000)
         model.name = "GPT without configurable reasoning"
         model.nickname = None
         model.provider_type = "openai"
@@ -1886,6 +1889,7 @@ class TestGetSessionModelsEndpoint:
         container.ai_builder_service.return_value.get_session.return_value = session
         model = MagicMock()
         model.id = uuid4()
+        model.capacity = ModelCapacity(32_000, 4_000)
         model.provider_id = uuid4()
         model.name = "Unavailable model"
         model.nickname = None
@@ -1919,6 +1923,7 @@ class TestGetSessionModelsEndpoint:
         service.get_session.return_value = session
         model = MagicMock()
         model.id = uuid4()
+        model.capacity = ModelCapacity(32_000, 4_000)
         model.name = "Reasoning model"
         model.nickname = None
         model.provider_type = "openai"
@@ -2392,8 +2397,7 @@ class TestSendMessageEndpoint:
                         "description": "Documentation",
                     }
                 ],
-                max_input_tokens=4096,
-                max_output_tokens=2048,
+                capacity=ModelCapacity(4096, 2048),
                 budget_policy=SimpleNamespace(),
                 attachment_context_policy=AIBuilderAttachmentContextPolicy(),
                 mapped_execution_policy=None,
@@ -2839,8 +2843,7 @@ class TestSendMessageEndpoint:
                     {"id": str(model.id), "name": "GPT-4", "provider": "azure"}
                 ],
                 available_kbs=[],
-                max_input_tokens=4096,
-                max_output_tokens=4096,
+                capacity=ModelCapacity(4096, 4096),
                 budget_policy=SimpleNamespace(),
                 attachment_context_policy=AIBuilderAttachmentContextPolicy(),
                 mapped_execution_policy=None,
@@ -3971,3 +3974,258 @@ async def test_streams_unknown_capacity_as_configuration_error(dimension, code):
     assert error["phase"] == "planner"
     assert error["details"]["missing_dimensions"] == dimension
     assert "try again" not in error["message"].lower()
+
+
+@pytest.mark.anyio
+async def test_unknown_input_limit_refuses_before_provider_and_same_turn_can_retry():
+    from eneo.flows.ai_builder.ai_builder_context import build_planner_context
+
+    container = _make_container()
+    model = _configure_space_with_planner_model(container)
+    model.id = uuid4()
+    model.name = "planner"
+    model.provider_type = "openai"
+    model.capacity = ModelCapacity(None, 4_000)
+    model.can_access = True
+    model.is_deprecated = False
+    model.security_classification = None
+    session = _make_session_domain(actor_user_id=container.user.return_value.id)
+    before = session.model_dump()
+    service = container.ai_builder_service.return_value
+    service.get_session.return_value = session
+    prepared = service.prepare_message_context.return_value
+    space = container.space_service.return_value.get_space.return_value
+    space.collections = []
+
+    async def prepare(**kwargs):
+        prepared.planner_context = build_planner_context(
+            space, model_id=model.id, active_provider_ids={model.provider_id}
+        )
+        return prepared
+
+    service.prepare_message_context.side_effect = prepare
+    body = _send_message_request("Build a flow")
+
+    async def send():
+        response = await send_message(
+            request=_make_request(),
+            session_id=session.id,
+            body=body,
+            container=container,
+        )
+        return await _read_sse_events(response)
+
+    events = await send()
+    assert [event["event"] for event in events] == ["error", "done"]
+    assert events[0]["data"]["code"] == "planner_model_missing_context_window"
+    assert events[0]["data"]["details"]["missing_dimensions"] == "max_input_tokens"
+    service.send_message.assert_not_called()
+    assert session.model_dump() == before
+
+    model.capacity = ModelCapacity(32_000, 4_000)
+
+    async def accepted_events():
+        yield build_done_event()
+
+    service.send_message.return_value = accepted_events()
+    events = await send()
+    assert [event["event"] for event in events] == ["done"]
+    service.send_message.assert_called_once()
+    assert service.send_message.call_args.kwargs["capacity"] is model.capacity
+    assert (
+        service.send_message.call_args.kwargs["client_turn_id"] == body.client_turn_id
+    )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("preparation_race", [False, True])
+async def test_committed_turn_replays_even_if_capacity_is_now_unknown(preparation_race):
+    from dataclasses import replace
+
+    from eneo.completion_models.domain.model_capacity import UnknownModelCapacityError
+    from eneo.flows.ai_builder.ai_builder_error_contract import (
+        translate_unknown_model_capacity,
+    )
+
+    container = _make_container()
+    _configure_space_with_planner_model(container)
+    session = _make_session_domain(actor_user_id=container.user.return_value.id)
+    service = container.ai_builder_service.return_value
+    service.get_session.return_value = session
+    preflight = await service.preflight_message_turn()
+    committed = replace(preflight, replayed=True)
+    service.preflight_message_turn.side_effect = (
+        [preflight, committed] if preparation_race else [committed]
+    )
+    service.prepare_message_context.side_effect = translate_unknown_model_capacity(
+        UnknownModelCapacityError(("max_input_tokens",))
+    )
+    response = await send_message(
+        request=_make_request(),
+        session_id=session.id,
+        body=_send_message_request("Build a flow"),
+        container=container,
+    )
+    events = await _read_sse_events(response)
+    assert [event["event"] for event in events] == ["done"]
+    assert service.prepare_message_context.await_count == int(preparation_race)
+    service.send_message.assert_not_called()
+
+
+@pytest.fixture
+def capacity_listing():
+    from tests.unittests.flows.ai_builder.test_ai_builder_context import (
+        _classification,
+        _model,
+        _space,
+    )
+
+    container = _make_container()
+    session = _make_session_domain(actor_user_id=container.user.return_value.id)
+    container.ai_builder_service.return_value.get_session.return_value = session
+    provider_id = uuid4()
+    models = [
+        _model(
+            provider_id=provider_id,
+            name="undeclared",
+            is_org_default=True,
+            classification=_classification(3),
+        ),
+        _model(
+            provider_id=provider_id, name="ready", classification=_classification(3)
+        ),
+        _model(
+            provider_id=provider_id, name="lower", classification=_classification(1)
+        ),
+    ]
+    models[0].max_input_tokens = None
+    for model in models:
+        model.nickname = None
+        model.reasoning = False
+        model.model_kwargs_capabilities = None
+        model.supported_model_kwargs = SupportedModelKwargs()
+        model.get_model_route = lambda **_: "openai/gpt-test"
+    space = _space(models, classification=_classification(3))
+    space.id = session.space_id
+    space.tenant_id = container.user.return_value.tenant_id
+    container.space_service.return_value.get_space.return_value = space
+    container.model_provider_repository.return_value.all.return_value = [
+        SimpleNamespace(id=provider_id)
+    ]
+    return container, session, models
+
+
+@pytest.mark.anyio
+async def test_listing_disables_capacity_but_excludes_security_ineligible(
+    capacity_listing,
+):
+    container, session, (unready, ready, lower) = capacity_listing
+    response = await get_session_models(
+        request=_make_request(), session_id=session.id, container=container
+    )
+    assert [model.id for model in response.models] == [unready.id, ready.id]
+    assert response.default_model_id == ready.id
+    assert response.models[0].model_dump()["availability"] == {
+        "state": "capacity_undeclared",
+        "missing_dimensions": ["max_input_tokens"],
+    }
+    assert response.models[1].model_dump()["availability"] == {"state": "ready"}
+
+
+@pytest.mark.anyio
+async def test_listing_with_all_capacity_undeclared_has_no_default(capacity_listing):
+    container, session, (unready, ready, lower) = capacity_listing
+    ready.max_input_tokens = None
+    ready.max_output_tokens = None
+    response = await get_session_models(
+        request=_make_request(), session_id=session.id, container=container
+    )
+    assert [model.id for model in response.models] == [unready.id, ready.id]
+    assert response.default_model_id is None
+    assert response.models[1].model_dump()["availability"] == {
+        "state": "capacity_undeclared",
+        "missing_dimensions": [
+            "max_input_tokens",
+            "max_output_tokens",
+        ],
+    }
+
+
+def test_session_model_availability_is_required_and_closed_in_schema():
+    from pydantic import ValidationError
+
+    from eneo.flows.ai_builder.ai_builder_api_models import SessionModelOption
+
+    common = {"id": uuid4(), "name": "planner", "provider": "openai"}
+    for extra in (
+        {},
+        {"availability": {"state": "disabled"}},
+        {
+            "availability": {
+                "state": "capacity_undeclared",
+                "missing_dimensions": ["other"],
+            }
+        },
+    ):
+        with pytest.raises(ValidationError):
+            SessionModelOption.model_validate({**common, **extra})
+    schema = SessionModelOption.model_json_schema()
+    assert "availability" in schema["required"]
+    availability = schema["properties"]["availability"]
+    assert availability["discriminator"]["propertyName"] == "state"
+    assert set(availability["discriminator"]["mapping"]) == {
+        "ready",
+        "capacity_undeclared",
+        "capacity_too_small",
+    }
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "safety_tokens,state", [(99, "ready"), (100, "capacity_too_small")]
+)
+async def test_listing_default_and_send_share_the_current_tenant_policy(
+    capacity_listing, safety_tokens, state
+):
+    from eneo.flows.ai_builder.ai_builder_context import build_planner_context
+
+    container, session, (selected, ready, lower) = capacity_listing
+    selected.max_input_tokens = 101
+    tenant_repo = container.tenant_repo.return_value
+    tenant_repo.get.return_value.flow_settings = {
+        "ai_builder": {"conversation_safety_buffer_tokens": safety_tokens}
+    }
+    response = await get_session_models(
+        request=_make_request(), session_id=session.id, container=container
+    )
+    tenant_repo.get.assert_awaited_once_with(container.user.return_value.tenant_id)
+    assert [model.id for model in response.models] == [selected.id, ready.id]
+    assert response.models[0].availability.state == state
+    assert response.default_model_id == (selected.id if state == "ready" else ready.id)
+    space = container.space_service.return_value.get_space.return_value
+    kwargs = dict(
+        active_provider_ids={selected.provider_id},
+        tenant_flow_settings=tenant_repo.get.return_value.flow_settings,
+    )
+    assert build_planner_context(space, **kwargs).model.id == response.default_model_id
+    if state == "ready":
+        assert (
+            build_planner_context(space, model_id=selected.id, **kwargs).model
+            is selected
+        )
+    else:
+        with pytest.raises(AIBuilderBadRequestException) as error:
+            build_planner_context(space, model_id=selected.id, **kwargs)
+        assert (
+            error.value.code
+            is AIBuilderErrorCode.PLANNER_MODEL_INCOMPATIBLE_TOKEN_LIMITS
+        )
+        ready.max_input_tokens = 101
+        response = await get_session_models(
+            request=_make_request(), session_id=session.id, container=container
+        )
+        assert response.default_model_id is None
+        assert all(
+            model.availability.state == "capacity_too_small"
+            for model in response.models
+        )

@@ -36,6 +36,7 @@ from eneo.assistants.assistant_update import AssistantUpdateCommand
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
     SupportedModelKwargs,
@@ -48,7 +49,7 @@ from eneo.database.database import (
     get_session_with_transaction,
     sessionmanager,
 )
-from eneo.database.tables.ai_models_table import TranscriptionModels
+from eneo.database.tables.ai_models_table import CompletionModels, TranscriptionModels
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 from eneo.database.tables.files_table import Files
@@ -4951,8 +4952,7 @@ async def test_send_message_releases_the_lock_when_the_client_disconnects(
                 flow=None,
                 assistant_snapshots=None,
                 attachment_files=[],
-                max_input_tokens=128_000,
-                max_output_tokens=4096,
+                capacity=ModelCapacity(128_000, 4096),
                 budget_policy=AIBuilderBudgetPolicy(
                     conversation_safety_buffer_tokens=512,
                     minimum_conversation_budget_tokens=2048,
@@ -5070,8 +5070,7 @@ async def test_send_message_status_jump_under_lock_uses_lease(
                 flow=None,
                 assistant_snapshots=None,
                 attachment_files=[],
-                max_input_tokens=4096,
-                max_output_tokens=512,
+                capacity=ModelCapacity(4096, 512),
                 budget_policy=AIBuilderBudgetPolicy(
                     conversation_safety_buffer_tokens=128,
                     minimum_conversation_budget_tokens=256,
@@ -5804,8 +5803,7 @@ async def test_classified_output_drift_revises_before_persisting_question(
                 flow=None,
                 assistant_snapshots=None,
                 attachment_files=[],
-                max_input_tokens=8000,
-                max_output_tokens=1024,
+                capacity=ModelCapacity(8000, 1024),
                 budget_policy=AIBuilderBudgetPolicy(
                     conversation_safety_buffer_tokens=128,
                     minimum_conversation_budget_tokens=256,
@@ -7118,8 +7116,7 @@ async def test_handle_edit_flow_with_lost_lease_rolls_back(
                         conversation_safety_buffer_tokens=128,
                         minimum_conversation_budget_tokens=256,
                     ).proposal_request_budget(
-                        context_window_tokens=100_000,
-                        model_output_ceiling_tokens=2_048,
+                        capacity=ModelCapacity(100_000, 2_048),
                     ),
                     proposal_temperature=0.3,
                     request_id="req-edit-lost-lease",
@@ -10640,3 +10637,165 @@ async def test_ai_builder_api_edit_of_template_fill_flow_inherits_its_template(
     assert applied_config is not None
     assert applied_config["template_asset_id"] == str(asset.id)
     assert asset_ids == [asset.id]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "input_tokens,output_tokens,availability,error_code,missing_dimension",
+    [
+        (
+            None,
+            4096,
+            {
+                "state": "capacity_undeclared",
+                "missing_dimensions": ["max_input_tokens"],
+            },
+            "planner_model_missing_context_window",
+            "max_input_tokens",
+        ),
+        (
+            128_000,
+            None,
+            {
+                "state": "capacity_undeclared",
+                "missing_dimensions": ["max_output_tokens"],
+            },
+            "planner_model_missing_output_tokens",
+            "max_output_tokens",
+        ),
+        (
+            1,
+            4096,
+            {"state": "capacity_too_small"},
+            "planner_model_incompatible_token_limits",
+            None,
+        ),
+    ],
+)
+async def test_capacity_availability_tracks_admin_edits_and_preserves_turn_replay(
+    client,
+    bearer_token,
+    db_container,
+    completion_model_factory,
+    input_tokens,
+    output_tokens,
+    availability,
+    error_code,
+    missing_dimension,
+):
+    space_id = await _create_space_with_planner_model(
+        client=client,
+        bearer_token=bearer_token,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_name="Builder capacity availability",
+        planner_model_overrides={
+            "max_input_tokens": input_tokens,
+            "max_output_tokens": output_tokens,
+        },
+        planner_model_is_only_space_model=True,
+    )
+    session_id = await _create_ai_builder_session(
+        client=client, bearer_token=bearer_token, space_id=space_id
+    )
+    headers = {"Authorization": f"Bearer {bearer_token}"}
+    base_url = f"/api/v1/flows/ai-builder/sessions/{session_id}"
+
+    async def listing():
+        response = await client.get(f"{base_url}/models", headers=headers)
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    async def session_row():
+        async with db_container() as container:
+            result = await container.session().execute(
+                select(BuilderSessions.__table__).where(
+                    BuilderSessions.id == UUID(session_id)
+                )
+            )
+            return dict(result.mappings().one())
+
+    initial = await listing()
+    (model,) = initial["models"]
+    unready = availability
+    assert model["availability"] == unready
+    assert initial["default_model_id"] is None
+    turn_id = uuid4()
+    body = {
+        "client_turn_id": str(turn_id),
+        "model_id": model["id"],
+        "message": "Build a flow",
+        "ui_language": "en",
+    }
+
+    async def send(payload):
+        response = await client.post(
+            f"{base_url}/messages", json=payload, headers=headers
+        )
+        assert response.status_code == 200, response.text
+        return _parse_sse_payload(response.text)
+
+    async def declare_limits(input_limit, output_limit):
+        async with db_container() as container:
+            await container.session().execute(
+                update(CompletionModels)
+                .where(CompletionModels.id == UUID(model["id"]))
+                .values(max_input_tokens=input_limit, max_output_tokens=output_limit)
+            )
+
+    with (
+        patch(
+            "eneo.completion_models.infrastructure.completion_service.CompletionService.resolve_model_route",
+            new=AsyncMock(return_value=_route(kwargs={"api_key": "sk-test"})),
+        ) as resolve_route,
+        patch("litellm.acompletion", new_callable=AsyncMock) as provider_call,
+    ):
+        provider_call.return_value = _make_llm_response(
+            content=json.dumps(
+                {
+                    "slots": [],
+                    "file_roles": [],
+                    "checkpoint_updates": [],
+                    "form_intake": None,
+                    "named_result_evidence": None,
+                    "example_output_constraints": None,
+                    "schema_direction": None,
+                    "secondary_obligations": [],
+                }
+            )
+        )
+        before = await session_row()
+        refused = await send(body)
+        assert [event["event"] for event in refused] == ["error", "done"]
+        assert refused[0]["data"]["code"] == error_code
+        if missing_dimension is not None:
+            assert (
+                refused[0]["data"]["details"]["missing_dimensions"] == missing_dimension
+            )
+        assert await session_row() == before
+        provider_call.assert_not_awaited()
+        resolve_route.assert_not_awaited()
+
+        await declare_limits(128_000, 4096)
+        ready = await listing()
+        assert ready["models"][0]["availability"] == {"state": "ready"}
+        assert ready["default_model_id"] == model["id"]
+        accepted = await send(body)
+        assert "error" not in [event["event"] for event in accepted], accepted
+        provider_call.assert_awaited_once()
+        committed = await session_row()
+        assert committed["latest_turn_id"] == turn_id
+        assert committed["latest_turn_state"] == "committed"
+
+        await declare_limits(input_tokens, output_tokens)
+        unavailable = await listing()
+        assert unavailable["models"][0]["availability"] == unready
+        assert unavailable["default_model_id"] is None
+        replayed = await send(body)
+        assert [event["event"] for event in replayed] == ["done"]
+        assert await session_row() == committed
+        refused_again = await send({**body, "client_turn_id": str(uuid4())})
+        assert refused_again[0]["data"]["code"] == error_code
+        assert await session_row() == committed
+        provider_call.assert_awaited_once()

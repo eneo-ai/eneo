@@ -4,11 +4,12 @@ import asyncio
 import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
 
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
@@ -135,6 +136,7 @@ async def _generate(
     *,
     max_input_tokens: int = 100_000,
     max_output_tokens: int = 4000,
+    capacity: ModelCapacity | None = None,
     sample=None,
     budget_policy: AIBuilderBudgetPolicy | None = None,
 ):
@@ -144,8 +146,7 @@ async def _generate(
         completion_model_route=_route(),
         model_id=uuid4(),
         model_name="gpt-test",
-        max_input_tokens=max_input_tokens,
-        max_output_tokens=max_output_tokens,
+        capacity=capacity or ModelCapacity(max_input_tokens, max_output_tokens),
         budget_policy=budget_policy or resolve_ai_builder_budget_policy(None),
         tenant_id=uuid4(),
         ui_language="sv",
@@ -328,7 +329,10 @@ async def test_the_evidence_is_fitted_to_the_models_window_and_marked():
 @pytest.mark.asyncio
 async def test_the_answer_is_sent_with_the_models_full_output_ceiling():
     client = _Client(content=json.dumps({"suggestions": []}))
-    await _generate(client, max_input_tokens=100_000, max_output_tokens=16_000)
+    await _generate(
+        client,
+        capacity=ModelCapacity(100_000, 16_000),
+    )
     (call,) = client.calls
     assert call["max_tokens"] == 16_000
 
@@ -353,8 +357,7 @@ async def test_a_tenant_cap_bounds_the_evidence_below_the_models_window():
         completion_model_route=_route(),
         model_id=uuid4(),
         model_name="gpt-test",
-        max_input_tokens=1_000_000,
-        max_output_tokens=4000,
+        capacity=ModelCapacity(1_000_000, 4000),
         budget_policy=policy,
         tenant_id=uuid4(),
         ui_language="sv",
@@ -372,7 +375,8 @@ async def test_a_ceiling_above_the_window_gets_the_room_the_request_leaves():
     """
     client = _Client(content=json.dumps({"suggestions": []}))
     result = await _generate(
-        client, max_input_tokens=100_000, max_output_tokens=200_000
+        client,
+        capacity=ModelCapacity(100_000, 200_000),
     )
     (call,) = client.calls
     assert 0 < call["max_tokens"] < 200_000
@@ -393,8 +397,7 @@ async def test_review_input_cap_can_equal_the_full_model_output_ceiling():
     client = _Client(content=json.dumps({"suggestions": []}))
     result = await _generate(
         client,
-        max_input_tokens=1_000_000,
-        max_output_tokens=128_000,
+        capacity=ModelCapacity(1_000_000, 128_000),
         sample=_long_sample(600_000),
         budget_policy=resolve_ai_builder_budget_policy(
             {"ai_builder": {"review_evidence_max_input_tokens": 128_000}}
@@ -514,3 +517,18 @@ async def test_complete_shared_instructions_fit_the_measured_suggestions_cap():
     assert result.sample.excerpts_omitted_by_budget == 0
     assert client.calls[0]["messages"] == full_messages
     assert request_tokens(client.calls[0]["messages"]) == cap
+
+
+@pytest.mark.asyncio
+async def test_review_forwards_capacity():
+    capacity = ModelCapacity(32_000, 4_000)
+    policy = resolve_ai_builder_budget_policy(None)
+    client = _Client(content=json.dumps({"suggestions": []}))
+    with patch.object(
+        AIBuilderBudgetPolicy,
+        "review_request_budget",
+        wraps=policy.review_request_budget,
+    ) as factory:
+        await _generate(client, capacity=capacity, budget_policy=policy)
+    factory.assert_called_once_with(capacity=capacity)
+    assert len(client.calls) == 1

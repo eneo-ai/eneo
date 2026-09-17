@@ -24,6 +24,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.infrastructure.completion_service import (
     ResolvedCompletionModelRoute,
 )
@@ -653,8 +654,7 @@ async def generate_review_suggestions(
     completion_model_route: ResolvedCompletionModelRoute,
     model_id: UUID,
     model_name: str,
-    max_input_tokens: int,
-    max_output_tokens: int,
+    capacity: ModelCapacity,
     budget_policy: AIBuilderBudgetPolicy,
     tenant_id: UUID,
     ui_language: str | None,
@@ -693,8 +693,7 @@ async def generate_review_suggestions(
         litellm_model,
     ).tokens
     request_budget = budget_policy.review_request_budget(
-        context_window_tokens=max_input_tokens,
-        model_output_ceiling_tokens=max_output_tokens,
+        capacity=capacity,
     )
 
     prompt_groups = review_prompt_groups(sample.excerpts)
@@ -814,7 +813,7 @@ async def generate_review_suggestions(
             "problem_codes": list(parsed.problems),
             "kinds": sorted({item.kind for item in parsed.suggestions}),
             "request_tokens": request_tokens,
-            "context_window_tokens": request_budget.context_window_tokens,
+            "request_budget_tokens": request_budget.request_budget_tokens,
             "input_cap_tokens": request_budget.input_cap_tokens,
             "model_output_ceiling_tokens": resolved_budget.model_output_ceiling_tokens,
             "reserved_output_tokens": resolved_budget.reserved_output_tokens,

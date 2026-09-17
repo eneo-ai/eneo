@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     SupportedModelKwargs,
 )
@@ -2286,8 +2287,7 @@ class TestExtendedClarificationHints:
                     supported_model_kwargs=SupportedModelKwargs(),
                 ),
                 tenant_id=uuid4(),
-                max_input_tokens=100_000,
-                max_output_tokens=2_000,
+                capacity=ModelCapacity(100_000, 2_000),
             )
 
         analysis = analyze_discovery(
@@ -2608,8 +2608,7 @@ class TestExtendedClarificationHints:
                     supported_model_kwargs=SupportedModelKwargs(),
                 ),
                 tenant_id=uuid4(),
-                max_input_tokens=100_000,
-                max_output_tokens=2_000,
+                capacity=ModelCapacity(100_000, 2_000),
             )
 
         assert "structured_analysis_need" not in captured_allowed_values
@@ -2664,8 +2663,7 @@ class TestExtendedClarificationHints:
                     supported_model_kwargs=SupportedModelKwargs(),
                 ),
                 tenant_id=uuid4(),
-                max_input_tokens=100_000,
-                max_output_tokens=2_000,
+                capacity=ModelCapacity(100_000, 2_000),
             )
 
         analysis = analyze_discovery(
@@ -2736,8 +2734,7 @@ class TestExtendedClarificationHints:
                     supported_model_kwargs=SupportedModelKwargs(),
                 ),
                 tenant_id=uuid4(),
-                max_input_tokens=100_000,
-                max_output_tokens=2_000,
+                capacity=ModelCapacity(100_000, 2_000),
             )
 
         goal = context.planning_state.resolved_slots["post_processing_goal"]
@@ -3572,8 +3569,7 @@ class TestPlannerDiscoveryQuestionDispatch:
             ),
             available_models=None,
             available_kbs=None,
-            max_input_tokens=128000,
-            max_output_tokens=4096,
+            capacity=ModelCapacity(128000, 4096),
         ):
             events.append(encode_ai_builder_stream_event(event))
 
@@ -3640,8 +3636,7 @@ class TestPlannerDiscoveryQuestionDispatch:
             ),
             available_models=None,
             available_kbs=None,
-            max_input_tokens=128000,
-            max_output_tokens=4096,
+            capacity=ModelCapacity(128000, 4096),
         ):
             events.append(encode_ai_builder_stream_event(event))
 

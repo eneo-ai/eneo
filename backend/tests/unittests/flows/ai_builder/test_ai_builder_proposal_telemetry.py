@@ -24,6 +24,7 @@ from litellm.exceptions import (
     UnprocessableEntityError,
 )
 
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.infrastructure.completion_service import (
     CompletionEvidenceField,
     CompletionRouteEvidence,
@@ -183,8 +184,7 @@ def test_turn_call_records_are_the_usage_and_call_count_owner() -> None:
         "proposal_repair",
     )
     request_budget = AIBuilderRequestBudget(
-        context_window_tokens=32_000,
-        model_output_ceiling_tokens=16_000,
+        capacity=ModelCapacity(32_000, 16_000),
         safety_buffer_tokens=2_000,
         timeout_seconds=180.0,
     ).resolve_whole(input_tokens=6_000)
@@ -218,7 +218,7 @@ def test_turn_call_records_are_the_usage_and_call_count_owner() -> None:
         "attempt": 1,
         "token_usage_source": "provider",
         "token_usage_estimated": False,
-        "context_window_tokens": 32_000,
+        "request_budget_tokens": 32_000,
         "model_output_ceiling_tokens": 16_000,
         # Half of the room the 6 000-token request leaves in the 30 000 usable
         # tokens was kept for the answer; the model may write its whole ceiling.
@@ -1210,8 +1210,7 @@ def test_call_records_an_older_build_wrote_in_another_shape_are_counted_as_skipp
 
 def _classification_budget_at_the_gateway() -> AIBuilderResolvedRequestBudget:
     resolved = AIBuilderRequestBudget(
-        context_window_tokens=131_072,
-        model_output_ceiling_tokens=16_384,
+        capacity=ModelCapacity(131_072, 16_384),
         safety_buffer_tokens=2_000,
         timeout_seconds=180.0,
     ).resolve_whole(input_tokens=112_688)
@@ -1238,6 +1237,7 @@ def test_a_gateway_status_before_the_deadline_is_named_as_an_upstream_timeout() 
 
     assert failure.turn_state == "provider_outcome_unknown"
     safe_detail = event_logger.info.call_args.kwargs["extra"]["safe_detail"]
+    assert safe_detail["request_budget_tokens"] == 131_072
     assert safe_detail["provider_status_code"] == 504
     assert safe_detail["provider_elapsed_ms"] == 125_172
     assert safe_detail["deadline_reached"] is False

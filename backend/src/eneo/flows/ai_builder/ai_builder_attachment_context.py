@@ -7,6 +7,7 @@ from itertools import islice
 from typing import NoReturn, cast
 from uuid import UUID
 
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.files.docx_template_validation import docx_template_archive_metrics
 from eneo.files.file_models import File, FileType
 from eneo.flows.ai_builder.ai_builder_error_contract import (
@@ -525,7 +526,7 @@ def build_ai_builder_attachment_context_for_model(
     *,
     policy: AIBuilderAttachmentContextPolicy,
     model_name: str,
-    max_input_tokens: int,
+    capacity: ModelCapacity,
     answer_reserve_tokens: int,
     safety_buffer_tokens: int,
     minimum_conversation_tokens: int,
@@ -539,9 +540,10 @@ def build_ai_builder_attachment_context_for_model(
 
     attachment_token_budget = max(
         0,
-        max_input_tokens
-        - answer_reserve_tokens
-        - safety_buffer_tokens
+        capacity.input_allowance(
+            output_reserve_tokens=answer_reserve_tokens,
+            safety_tokens=safety_buffer_tokens,
+        )
         - minimum_conversation_tokens,
     )
 

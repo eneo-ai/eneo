@@ -204,8 +204,8 @@ def _call_record_metadata(record: ProposalCallRecord) -> PlannerCallRecordMetada
         prompt_tokens=record.usage.prompt_tokens,
         completion_tokens=record.usage.completion_tokens,
         total_tokens=record.usage.total_tokens,
-        context_window_tokens=(
-            budget.context_window_tokens if budget is not None else None
+        request_budget_tokens=(
+            budget.request_budget_tokens if budget is not None else None
         ),
         model_output_ceiling_tokens=(
             budget.model_output_ceiling_tokens if budget is not None else None

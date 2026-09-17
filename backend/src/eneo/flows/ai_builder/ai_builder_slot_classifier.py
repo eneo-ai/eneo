@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     SupportedModelKwargs,
 )
@@ -139,14 +140,9 @@ async def classify_slots(
     structured_output_mode: StructuredOutputMode,
     usage_tracker: ProposalTurnTelemetry | None = None,
     before_provider_call: Callable[[], Awaitable[None]] | None = None,
-    max_input_tokens: int,
-    max_output_tokens: int,
+    capacity: ModelCapacity,
     budget_policy: AIBuilderBudgetPolicy,
 ) -> SlotClassificationAttempt:
-    if max_input_tokens < 1:
-        raise ValueError("Slot classification max input tokens must be positive")
-    if max_output_tokens < 1:
-        raise ValueError("Slot classification max output tokens must be positive")
     slot_values = normalize_slot_classification_values(allowed_slot_values)
     if not slot_classification_input_is_valid(classification_input):
         raise ValueError("Slot classification input must contain unique, valid sources")
@@ -182,8 +178,7 @@ async def classify_slots(
         provider=provider,
         supported_model_kwargs=completion_model_route.supported_model_kwargs,
         bias=bias,
-        max_input_tokens=max_input_tokens,
-        max_output_tokens=max_output_tokens,
+        capacity=capacity,
         safety_buffer_tokens=budget_policy.conversation_safety_buffer_tokens,
         structured_output_mode=structured_output_mode,
     )
@@ -227,8 +222,7 @@ async def classify_slots(
         ),
         response_format=response_format,
         litellm_model=litellm_model,
-        max_input_tokens=max_input_tokens,
-        max_output_tokens=max_output_tokens,
+        capacity=capacity,
         budget_policy=budget_policy,
     )
     if request_budget is None:
@@ -397,8 +391,7 @@ def _resolve_slot_classification_request_budget(
     protected_messages: list[dict[str, Any]],
     response_format: dict[str, object],
     litellm_model: str,
-    max_input_tokens: int,
-    max_output_tokens: int,
+    capacity: ModelCapacity,
     budget_policy: AIBuilderBudgetPolicy,
 ) -> AIBuilderResolvedRequestBudget | None:
     """The budget of an admitted classification request.
@@ -409,8 +402,7 @@ def _resolve_slot_classification_request_budget(
     """
 
     planned = budget_policy.classification_request_budget(
-        context_window_tokens=max_input_tokens,
-        model_output_ceiling_tokens=max_output_tokens,
+        capacity=capacity,
     ).plan(
         required_input_tokens=_slot_classification_request_tokens(
             messages=protected_messages,
@@ -440,8 +432,7 @@ def admit_slot_classification_input(
     bias: SlotClassificationBias | None,
     structured_output_mode: StructuredOutputMode,
     litellm_model: str,
-    max_input_tokens: int,
-    max_output_tokens: int,
+    capacity: ModelCapacity,
     budget_policy: AIBuilderBudgetPolicy,
 ) -> SlotClassificationInput:
     normalized_values = normalize_slot_classification_values(allowed_slot_values)
@@ -468,8 +459,7 @@ def admit_slot_classification_input(
         )
 
     request_budget = budget_policy.classification_request_budget(
-        context_window_tokens=max_input_tokens,
-        model_output_ceiling_tokens=max_output_tokens,
+        capacity=capacity,
     )
 
     protected_input = _protected_slot_classification_input(classification_input)
@@ -693,8 +683,7 @@ def slot_classification_prompt_hash(
     schema_candidates: tuple[DeclaredSchemaCandidate, ...] = (),
     active_checkpoint_producers: tuple[CheckpointProducerKind, ...] = (),
     bias: SlotClassificationBias | None = None,
-    max_input_tokens: int | None = None,
-    max_output_tokens: int | None = None,
+    capacity: ModelCapacity | None = None,
     safety_buffer_tokens: int = 0,
     structured_output_mode: StructuredOutputMode,
 ) -> str:
@@ -713,8 +702,7 @@ def slot_classification_prompt_hash(
                 )
             ),
             bias=bias,
-            max_input_tokens=max_input_tokens,
-            max_output_tokens=max_output_tokens,
+            capacity=capacity,
             safety_buffer_tokens=safety_buffer_tokens,
             structured_output_mode=structured_output_mode,
         ).encode("utf-8")
@@ -1084,8 +1072,7 @@ def _classification_cache_payload(
     provider: str,
     effective_optional_kwargs_fingerprint: str,
     bias: SlotClassificationBias | None = None,
-    max_input_tokens: int | None = None,
-    max_output_tokens: int | None = None,
+    capacity: ModelCapacity | None = None,
     safety_buffer_tokens: int = 0,
     structured_output_mode: StructuredOutputMode,
 ) -> str:
@@ -1107,8 +1094,10 @@ def _classification_cache_payload(
         "effective_optional_kwargs_fingerprint": (
             effective_optional_kwargs_fingerprint
         ),
-        "max_input_tokens": max_input_tokens,
-        "max_output_tokens": max_output_tokens,
+        "max_input_tokens": capacity.max_input_tokens if capacity is not None else None,
+        "max_output_tokens": capacity.max_output_tokens
+        if capacity is not None
+        else None,
         "safety_buffer_tokens": safety_buffer_tokens,
         "model": litellm_model,
         "prompt": prompt,

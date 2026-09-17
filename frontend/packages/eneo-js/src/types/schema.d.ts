@@ -4321,7 +4321,7 @@ export interface paths {
     };
     /**
      * List Session Models
-     * @description Return the completion models a turn of this session may run on: the space's models with an active provider that clear the conversation's evidence floor, and the one an omitted `model_id` resolves to. Pass `evidence_level` with a review packet's level before reading it, so the listing is the one that judgement is held to.
+     * @description Return the eligible completion models and their capacity availability: the space's models with an active provider that clear the conversation's evidence floor, and the ready model an omitted `model_id` resolves to. Pass `evidence_level` with a review packet's level before reading it, so the listing is the one that judgement is held to.
      */
     get: operations["get_ai_builder_models"];
     put?: never;
@@ -10630,6 +10630,32 @@ export interface components {
       | "requirements"
       | "router"
       | "self_correction";
+    /** AIBuilderModelCapacityTooSmall */
+    AIBuilderModelCapacityTooSmall: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      state: "capacity_too_small";
+    };
+    /** AIBuilderModelCapacityUndeclared */
+    AIBuilderModelCapacityUndeclared: {
+      /** Missing Dimensions */
+      missing_dimensions: ("max_input_tokens" | "max_output_tokens")[];
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      state: "capacity_undeclared";
+    };
+    /** AIBuilderModelReady */
+    AIBuilderModelReady: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      state: "ready";
+    };
     /**
      * AIBuilderPlanEditContext
      * @description Structured intent for revising an already proposed AI Builder plan.
@@ -30731,6 +30757,11 @@ export interface components {
     };
     /** SessionModelOption */
     SessionModelOption: {
+      /** Availability */
+      availability:
+        | components["schemas"]["AIBuilderModelReady"]
+        | components["schemas"]["AIBuilderModelCapacityUndeclared"]
+        | components["schemas"]["AIBuilderModelCapacityTooSmall"];
       /**
        * Id
        * Format: uuid
@@ -30755,6 +30786,9 @@ export interface components {
      *       "default_model_id": "00000000-0000-0000-0000-000000000710",
      *       "models": [
      *         {
+     *           "availability": {
+     *             "state": "ready"
+     *           },
      *           "id": "00000000-0000-0000-0000-000000000710",
      *           "name": "gpt-5.4",
      *           "provider": "openai"
@@ -30765,12 +30799,12 @@ export interface components {
     SessionModelsResponse: {
       /**
        * Default Model Id
-       * @description The model an omitted `model_id` resolves to at that floor.
+       * @description The ready model an omitted `model_id` resolves to at that floor, or null when none is ready.
        */
       default_model_id?: string | null;
       /**
        * Models
-       * @description The models a turn of this session may run on: accessible, with an active provider, and clearing the evidence floor the listing was asked at.
+       * @description The eligible models and their capacity availability: accessible, with an active provider, and clearing the evidence floor the listing was asked at.
        */
       models: components["schemas"]["SessionModelOption"][];
     };

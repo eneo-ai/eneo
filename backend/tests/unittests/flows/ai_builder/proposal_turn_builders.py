@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
     SupportedModelKwargs,
@@ -74,8 +75,7 @@ def _proposal_request_budget(
         conversation_safety_buffer_tokens=0,
         minimum_conversation_budget_tokens=0,
     ).proposal_request_budget(
-        context_window_tokens=100_000,
-        model_output_ceiling_tokens=model_output_ceiling_tokens,
+        capacity=ModelCapacity(100_000, model_output_ceiling_tokens),
     )
 
 

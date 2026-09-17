@@ -59,6 +59,8 @@ from eneo.flows.ai_builder.ai_builder_api_models import (
 )
 from eneo.flows.ai_builder.ai_builder_context import (
     eligible_planner_models,
+    planner_model_availability,
+    select_default_planner_model,
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     conversation_acts_on_a_review,
@@ -124,6 +126,7 @@ from eneo.flows.ai_builder.ai_builder_service import (
     AIBuilderService,
     PreparedMessageContext,
 )
+from eneo.flows.ai_builder.ai_builder_settings import resolve_ai_builder_budget_policy
 from eneo.flows.ai_builder.ai_builder_telemetry import (
     planner_call_records_from_metadata,
     summarize_session_telemetry,
@@ -1518,12 +1521,7 @@ async def send_message(
                     flow=prepared_context.flow,
                     assistant_snapshots=prepared_context.assistant_snapshots,
                     attachment_files=prepared_context.attachment_files,
-                    max_input_tokens=(
-                        prepared_context.planner_context.max_input_tokens
-                    ),
-                    max_output_tokens=(
-                        prepared_context.planner_context.max_output_tokens
-                    ),
+                    capacity=prepared_context.planner_context.capacity,
                     budget_policy=prepared_context.planner_context.budget_policy,
                     attachment_context_policy=(
                         prepared_context.planner_context.attachment_context_policy
@@ -1884,9 +1882,9 @@ async def detach_session_attachment(
     operation_id="get_ai_builder_models",
     summary="List Session Models",
     description=(
-        "Return the completion models a turn of this session may run on: the "
-        "space's models with an active provider that clear the conversation's "
-        "evidence floor, and the one an omitted `model_id` resolves to. Pass "
+        "Return the eligible completion models and their capacity availability: "
+        "the space's models with an active provider that clear the conversation's "
+        "evidence floor, and the ready model an omitted `model_id` resolves to. Pass "
         "`evidence_level` with a review packet's level before reading it, so "
         "the listing is the one that judgement is held to."
     ),
@@ -1925,7 +1923,7 @@ async def get_session_models(
         ),
     ] = 0,
 ):
-    """Return the completion models a turn of this session may run on."""
+    """Return eligible models, their availability and the ready default."""
     service = _get_ai_builder_service(container)
     session: BuilderSession = await service.get_session(session_id)
     authorization = await _authorize_ai_builder_request(
@@ -1937,19 +1935,29 @@ async def get_session_models(
         require_creator=True,
     )
     space = _authorized_space(authorization)
-    # Eligibility is computed once and the default chosen from it, by the same
-    # rule the send path applies, so the advertised default is the model an
+    # The default follows the same eligibility and availability rules as the
+    # send path, so the advertised default is the model an
     # omitted `model_id` resolves to when nothing has changed in between. That
     # rule includes the evidence floor: what the conversation has already read
     # and what the caller is about to read. Without it the composer shows one
     # model and the turn silently runs another.
     floor = max(conversation_evidence_floor(session.conversation), evidence_level)
+    tenant = await _get_tenant_repo(container).get(container.user().tenant_id)
+    budget_policy = resolve_ai_builder_budget_policy(
+        tenant.flow_settings if tenant else None
+    )
+    active_provider_ids = await _active_provider_ids(container)
     models = eligible_planner_models(
         space,
-        active_provider_ids=await _active_provider_ids(container),
+        active_provider_ids=active_provider_ids,
         minimum_level=floor,
     )
-    default_model = space.select_default_completion_model(models)
+    default_model = select_default_planner_model(
+        space,
+        active_provider_ids=active_provider_ids,
+        minimum_level=floor,
+        budget_policy=budget_policy,
+    )
     default_model_id = default_model.id if default_model is not None else None
 
     resolved_models: list[SessionModelOption] = []
@@ -1964,6 +1972,9 @@ async def get_session_models(
         resolved_models.append(
             SessionModelOption.from_completion_model(
                 model,
+                availability=planner_model_availability(
+                    model, budget_policy=budget_policy
+                ),
                 supported_model_kwargs=supported_model_kwargs,
             )
         )

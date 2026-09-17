@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.flows.ai_builder.ai_builder_flow_review import (
     FlowReviewCohort,
     FlowReviewEvidence,
@@ -1015,8 +1016,7 @@ def _prepare_instruction_evidence(evidence: FlowReviewEvidence | None, cap: int 
         plan_edit_context=None,
         prior_plan_for_revision=None,
         litellm_model="openai/gpt-test",
-        max_input_tokens=20000,
-        max_output_tokens=1024,
+        capacity=ModelCapacity(20000, 1024),
         budget_policy=AIBuilderBudgetPolicy(
             conversation_safety_buffer_tokens=128,
             minimum_conversation_budget_tokens=256,

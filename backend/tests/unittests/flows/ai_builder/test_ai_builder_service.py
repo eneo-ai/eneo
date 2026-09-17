@@ -37,6 +37,7 @@ from litellm.exceptions import BadRequestError, RateLimitError
 
 from eneo.authentication.auth_models import ApiKeyPermission, ApiKeyScopeType
 from eneo.authentication.principal_types import PrincipalType
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
     SupportedModelKwargs,
@@ -623,6 +624,7 @@ def _make_model() -> MagicMock:
     model.provider_id = uuid4()
     model.max_input_tokens = 32_000
     model.max_output_tokens = 4_000
+    model.capacity = ModelCapacity(32_000, 4_000)
     return model
 
 
@@ -1069,6 +1071,7 @@ class TestPlannerContextPreparation:
         model = _make_model()
         model.max_input_tokens = 4096
         model.max_output_tokens = 2048
+        model.capacity = ModelCapacity(4096, 2048)
         model.provider_type = "openai"
 
         space = MagicMock()
@@ -1161,6 +1164,7 @@ class TestPlannerContextPreparation:
         model = _make_model()
         model.max_input_tokens = 4096
         model.max_output_tokens = 2048
+        model.capacity = ModelCapacity(4096, 2048)
         model.provider_type = "openai"
         space = MagicMock()
         space.completion_models = [model]
@@ -1204,6 +1208,7 @@ class TestPlannerContextPreparation:
         model = _make_model()
         model.max_input_tokens = 4096
         model.max_output_tokens = 2048
+        model.capacity = ModelCapacity(4096, 2048)
         model.provider_type = "openai"
         space = MagicMock()
         space.completion_models = [model]
@@ -1245,6 +1250,7 @@ class TestPlannerContextPreparation:
         model = _make_model()
         model.max_input_tokens = 4096
         model.max_output_tokens = 2048
+        model.capacity = ModelCapacity(4096, 2048)
         model.provider_type = "openai"
         space = MagicMock()
         space.completion_models = [model]
@@ -1297,6 +1303,7 @@ class TestPlannerContextPreparation:
         model = _make_model()
         model.max_input_tokens = 4096
         model.max_output_tokens = 2048
+        model.capacity = ModelCapacity(4096, 2048)
         model.provider_type = "openai"
         space = MagicMock()
         space.completion_models = [model]
@@ -1347,6 +1354,7 @@ class TestPlannerContextPreparation:
         model = _make_model()
         model.max_input_tokens = 4096
         model.max_output_tokens = 2048
+        model.capacity = ModelCapacity(4096, 2048)
         model.provider_type = "openai"
         space = MagicMock()
         space.completion_models = [model]
@@ -1472,8 +1480,7 @@ class TestSendMessage:
                     request_snapshot=_test_request_snapshot("Hello"),
                     message="Hello",
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
-                    max_input_tokens=128_000,
-                    max_output_tokens=16_384,
+                    capacity=ModelCapacity(128_000, 16_384),
                 )
             )
 
@@ -1510,8 +1517,7 @@ class TestSendMessage:
                     request_snapshot=_test_request_snapshot("Change step 2"),
                     message="Change step 2",
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
-                    max_input_tokens=128_000,
-                    max_output_tokens=16_384,
+                    capacity=ModelCapacity(128_000, 16_384),
                 )
             )
 
@@ -1588,8 +1594,7 @@ class TestSendMessage:
                     message="Hello",
                     question_answer=_make_requirements_confirmation(),
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
-                    max_input_tokens=128_000,
-                    max_output_tokens=16_384,
+                    capacity=ModelCapacity(128_000, 16_384),
                 )
             )
 
@@ -1657,8 +1662,7 @@ class TestSendMessage:
                     message="",
                     question_answer=_make_requirements_confirmation(),
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
-                    max_input_tokens=128_000,
-                    max_output_tokens=16_384,
+                    capacity=ModelCapacity(128_000, 16_384),
                 )
             )
 
@@ -1722,8 +1726,7 @@ class TestSendMessage:
                         message="Hello",
                         question_answer=_make_requirements_confirmation(),
                         completion_model_route=_route(kwargs={"api_key": "sk-test"}),
-                        max_input_tokens=128_000,
-                        max_output_tokens=16_384,
+                        capacity=ModelCapacity(128_000, 16_384),
                     )
                 )
 
@@ -1754,8 +1757,7 @@ class TestSendMessageToolCall:
                     request_snapshot=_test_request_snapshot("Build from plain text"),
                     message="Build from plain text",
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
-                    max_input_tokens=128_000,
-                    max_output_tokens=16_384,
+                    capacity=ModelCapacity(128_000, 16_384),
                 )
             )
 
@@ -1878,8 +1880,7 @@ class TestSendMessageToolCall:
                     request_snapshot=_test_request_snapshot(message),
                     message=message,
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
-                    max_input_tokens=128_000,
-                    max_output_tokens=16_384,
+                    capacity=ModelCapacity(128_000, 16_384),
                 )
             )
 
@@ -2016,8 +2017,7 @@ class TestSendMessageToolCall:
                     message="",
                     question_answer=_make_requirements_confirmation(),
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
-                    max_input_tokens=128_000,
-                    max_output_tokens=16_384,
+                    capacity=ModelCapacity(128_000, 16_384),
                 )
             )
 
@@ -2071,8 +2071,7 @@ class TestSendMessageToolCall:
                     message="",
                     question_answer=_make_requirements_confirmation(),
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
-                    max_input_tokens=128_000,
-                    max_output_tokens=16_384,
+                    capacity=ModelCapacity(128_000, 16_384),
                 )
             )
 
@@ -2147,8 +2146,7 @@ class TestSendMessageToolCall:
                     message="",
                     question_answer=_make_requirements_confirmation(),
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
-                    max_input_tokens=128_000,
-                    max_output_tokens=16_384,
+                    capacity=ModelCapacity(128_000, 16_384),
                 )
             )
 
@@ -2385,8 +2383,7 @@ class TestSendMessageStructuredQuestion:
                     message="Bygg planen",
                     question_answer=None,
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
-                    max_input_tokens=128_000,
-                    max_output_tokens=16_384,
+                    capacity=ModelCapacity(128_000, 16_384),
                 )
             )
 
@@ -2567,8 +2564,7 @@ class TestSendMessageStructuredQuestion:
                         "ui_language": "sv",
                     },
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
-                    max_input_tokens=128_000,
-                    max_output_tokens=16_384,
+                    capacity=ModelCapacity(128_000, 16_384),
                 )
             )
 
@@ -2625,8 +2621,7 @@ class TestSendMessageStructuredQuestion:
                     ),
                     message="Jag vill ladda upp flera PDF-filer och jämföra innehållet mellan dokumenten.",
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
-                    max_input_tokens=128_000,
-                    max_output_tokens=16_384,
+                    capacity=ModelCapacity(128_000, 16_384),
                 )
             )
 
@@ -2740,8 +2735,7 @@ class TestSendMessageStructuredQuestion:
                         "ui_language": "sv",
                     },
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
-                    max_input_tokens=128_000,
-                    max_output_tokens=16_384,
+                    capacity=ModelCapacity(128_000, 16_384),
                 )
             )
 
@@ -2800,8 +2794,7 @@ class TestSendMessageStructuredQuestion:
                     ),
                     message="Bygg ett flöde som sammanfattar ett dokument.",
                     completion_model_route=_route(kwargs={"api_key": "sk-test"}),
-                    max_input_tokens=128_000,
-                    max_output_tokens=16_384,
+                    capacity=ModelCapacity(128_000, 16_384),
                 )
             )
 
@@ -2921,6 +2914,7 @@ async def test_prepare_message_context_stages_new_files_and_builds_attachment_co
     model.name = "gpt-5.4"
     model.max_input_tokens = 8192
     model.max_output_tokens = 2048
+    model.capacity = ModelCapacity(8192, 2048)
     model.litellm_model_name = "openai/gpt-5.4"
     space.select_default_completion_model.return_value = model
     space.completion_models = [model]
@@ -2975,6 +2969,7 @@ async def test_prepare_message_context_does_not_persist_new_files_before_message
     model.name = "gpt-5.4"
     model.max_input_tokens = 8192
     model.max_output_tokens = 2048
+    model.capacity = ModelCapacity(8192, 2048)
     model.litellm_model_name = "openai/gpt-5.4"
     space.select_default_completion_model.return_value = model
     space.completion_models = [model]
@@ -3036,6 +3031,7 @@ async def test_prepare_message_context_rejects_missing_or_unavailable_file_ids()
     model.name = "gpt-5.4"
     model.max_input_tokens = 8192
     model.max_output_tokens = 2048
+    model.capacity = ModelCapacity(8192, 2048)
     model.litellm_model_name = "openai/gpt-5.4"
     space.select_default_completion_model.return_value = model
     space.completion_models = [model]

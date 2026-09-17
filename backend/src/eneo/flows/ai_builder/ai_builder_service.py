@@ -16,6 +16,7 @@ from pydantic import ValidationError
 
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.authentication.auth_models import ApiKeyPermission, ApiKeyScopeType
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.infrastructure.tenant_model_capabilities import (
     selectable_reasoning_effort_options,
 )
@@ -174,8 +175,7 @@ class PreparedReviewJudgement:
     completion_model_route: ResolvedCompletionModelRoute
     model_id: UUID
     model_name: str
-    max_input_tokens: int
-    max_output_tokens: int
+    capacity: ModelCapacity
     budget_policy: AIBuilderBudgetPolicy
 
 
@@ -664,8 +664,7 @@ class AIBuilderService:
         flow: "Flow | None" = None,
         assistant_snapshots: AssistantAuthoringSnapshots | None = None,
         attachment_files: list[File] | None = None,
-        max_input_tokens: int,
-        max_output_tokens: int,
+        capacity: ModelCapacity,
         budget_policy: AIBuilderBudgetPolicy | None = None,
         attachment_context_policy: AIBuilderAttachmentContextPolicy | None = None,
         mapped_execution_policy: FlowMappedExecutionPolicy | None = None,
@@ -702,8 +701,7 @@ class AIBuilderService:
             assistant_snapshots=assistant_snapshots,
             attachment_files=attachment_files or [],
             file_ids=file_ids,
-            max_input_tokens=max_input_tokens,
-            max_output_tokens=max_output_tokens,
+            capacity=capacity,
             budget_policy=budget_policy,
             attachment_context_policy=attachment_context_policy,
             mapped_execution_policy=mapped_execution_policy,
@@ -854,8 +852,7 @@ class AIBuilderService:
             completion_model_route=route,
             model_id=planner_context.model.id,
             model_name=planner_context.model.name,
-            max_input_tokens=planner_context.max_input_tokens,
-            max_output_tokens=planner_context.max_output_tokens,
+            capacity=planner_context.capacity,
             budget_policy=planner_context.budget_policy,
         )
 
@@ -874,8 +871,7 @@ class AIBuilderService:
             completion_model_route=prepared.completion_model_route,
             model_id=prepared.model_id,
             model_name=prepared.model_name,
-            max_input_tokens=prepared.max_input_tokens,
-            max_output_tokens=prepared.max_output_tokens,
+            capacity=prepared.capacity,
             budget_policy=prepared.budget_policy,
             tenant_id=self.user.tenant_id,
             ui_language=ui_language,

@@ -7,6 +7,7 @@ from uuid import UUID
 
 from pydantic import ValidationError
 
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.files.file_models import File
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AIBuilderAttachmentContextPolicy,
@@ -289,8 +290,7 @@ class AIBuilderPlanner:
         flow: "Flow | None" = None,
         assistant_snapshots: AssistantAuthoringSnapshots | None = None,
         attachment_files: list[File] | None = None,
-        max_input_tokens: int,
-        max_output_tokens: int,
+        capacity: ModelCapacity,
         budget_policy: AIBuilderBudgetPolicy | None = None,
         attachment_context_policy: AIBuilderAttachmentContextPolicy | None = None,
         mapped_execution_policy: FlowMappedExecutionPolicy | None = None,
@@ -413,10 +413,9 @@ class AIBuilderPlanner:
             attachment_files or [],
             policy=attachment_context_policy,
             model_name=litellm_model,
-            max_input_tokens=max_input_tokens,
+            capacity=capacity,
             answer_reserve_tokens=budget_policy.answer_reserve_tokens(
-                context_window_tokens=max_input_tokens,
-                model_output_ceiling_tokens=max_output_tokens,
+                capacity=capacity,
                 required_input_tokens=budget_policy.minimum_conversation_budget_tokens,
             ),
             safety_buffer_tokens=budget_policy.conversation_safety_buffer_tokens,
@@ -548,8 +547,7 @@ class AIBuilderPlanner:
                         flow=flow,
                         assistant_snapshots=assistant_snapshots,
                         attachment_files=attachment_files or [],
-                        max_input_tokens=max_input_tokens,
-                        max_output_tokens=max_output_tokens,
+                        capacity=capacity,
                         budget_policy=budget_policy,
                         attachment_context_policy=attachment_context_policy,
                         mapped_execution_policy=mapped_execution_policy,
@@ -700,8 +698,7 @@ class AIBuilderPlanner:
                             plan_edit_context=plan_edit_context,
                             prior_plan_for_revision=prior_plan_for_revision,
                             litellm_model=litellm_model,
-                            max_input_tokens=max_input_tokens,
-                            max_output_tokens=max_output_tokens,
+                            capacity=capacity,
                             budget_policy=budget_policy,
                             attachment_file_count=len(attachment_files or []),
                             current_turn_start=new_messages_start,

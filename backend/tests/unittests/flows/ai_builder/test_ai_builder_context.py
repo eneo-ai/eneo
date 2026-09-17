@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.flows.ai_builder.ai_builder_context import (
     build_planner_context,
     eligible_planner_models,
@@ -19,10 +20,16 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
 )
+from eneo.flows.ai_builder.ai_builder_settings import AIBuilderBudgetPolicy
 from eneo.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
 from eneo.spaces.space import Space
+
+_POLICY = AIBuilderBudgetPolicy(
+    conversation_safety_buffer_tokens=2_000,
+    minimum_conversation_budget_tokens=4_000,
+)
 
 
 def test_serialize_space_models_keeps_local_id_for_catalog_input() -> None:
@@ -67,6 +74,12 @@ def test_serialize_space_kbs_keeps_local_id_for_catalog_input() -> None:
     ]
 
 
+class _Model(SimpleNamespace):
+    @property
+    def capacity(self):
+        return ModelCapacity(self.max_input_tokens, self.max_output_tokens)
+
+
 def _model(
     *,
     provider_id,
@@ -76,7 +89,7 @@ def _model(
     created_at: datetime | None = None,
     classification: "SecurityClassification | None" = None,
 ):
-    return SimpleNamespace(
+    return _Model(
         id=uuid4(),
         name=name,
         provider_id=provider_id,
@@ -147,10 +160,13 @@ def test_listing_and_omitted_model_resolve_the_same_model() -> None:
 
     listed = eligible_planner_models(space, active_provider_ids=active_provider_ids)
     advertised_default = select_default_planner_model(
-        space, active_provider_ids=active_provider_ids
+        space, budget_policy=_POLICY, active_provider_ids=active_provider_ids
     )
     sent = resolve_requested_model(
-        space, model_id=None, active_provider_ids=active_provider_ids
+        space,
+        budget_policy=_POLICY,
+        model_id=None,
+        active_provider_ids=active_provider_ids,
     )
 
     assert listed == [active_alternate]
@@ -167,6 +183,7 @@ def test_explicitly_requesting_an_inactive_model_is_rejected_as_unavailable() ->
     with pytest.raises(AIBuilderBadRequestException) as excinfo:
         resolve_requested_model(
             space,
+            budget_policy=_POLICY,
             model_id=inactive.id,
             active_provider_ids={active_provider_id},
         )
@@ -179,9 +196,14 @@ def test_no_eligible_model_is_named_rather_than_silently_substituted() -> None:
     space = _space([only_inactive])
 
     assert eligible_planner_models(space, active_provider_ids=set()) == []
-    assert select_default_planner_model(space, active_provider_ids=set()) is None
+    assert (
+        select_default_planner_model(
+            space, budget_policy=_POLICY, active_provider_ids=set()
+        )
+        is None
+    )
     with pytest.raises(AIBuilderBadRequestException) as excinfo:
-        resolve_planner_model(space, active_provider_ids=set())
+        resolve_planner_model(space, budget_policy=_POLICY, active_provider_ids=set())
 
     assert excinfo.value.code == AIBuilderErrorCode.NO_PLANNER_MODEL_AVAILABLE
 
@@ -203,13 +225,18 @@ def test_fallback_never_crosses_the_space_security_classification() -> None:
     )
 
     listed = eligible_planner_models(space, active_provider_ids={provider_id})
-    fallback = select_default_planner_model(space, active_provider_ids={provider_id})
+    fallback = select_default_planner_model(
+        space, budget_policy=_POLICY, active_provider_ids={provider_id}
+    )
 
     assert listed == [permitted]
     assert fallback is permitted
     with pytest.raises(AIBuilderBadRequestException) as excinfo:
         resolve_requested_model(
-            space, model_id=below_bar.id, active_provider_ids={provider_id}
+            space,
+            budget_policy=_POLICY,
+            model_id=below_bar.id,
+            active_provider_ids={provider_id},
         )
     assert excinfo.value.code == AIBuilderErrorCode.MODEL_NOT_AVAILABLE
 
@@ -225,7 +252,10 @@ def test_inaccessible_models_are_neither_listed_nor_runnable() -> None:
     assert eligible_planner_models(space, active_provider_ids={provider_id}) == [usable]
     with pytest.raises(AIBuilderBadRequestException) as excinfo:
         resolve_requested_model(
-            space, model_id=locked.id, active_provider_ids={provider_id}
+            space,
+            budget_policy=_POLICY,
+            model_id=locked.id,
+            active_provider_ids={provider_id},
         )
     assert excinfo.value.code == AIBuilderErrorCode.MODEL_NOT_AVAILABLE
 
@@ -249,7 +279,9 @@ def test_fallback_prefers_the_organisation_default_then_the_newest() -> None:
     without_default = _space([oldest, newest])
     assert (
         select_default_planner_model(
-            without_default, active_provider_ids=active_provider_ids
+            without_default,
+            budget_policy=_POLICY,
+            active_provider_ids=active_provider_ids,
         )
         is newest
     )
@@ -258,7 +290,7 @@ def test_fallback_prefers_the_organisation_default_then_the_newest() -> None:
     with_default = _space([oldest, newest])
     assert (
         select_default_planner_model(
-            with_default, active_provider_ids=active_provider_ids
+            with_default, budget_policy=_POLICY, active_provider_ids=active_provider_ids
         )
         is oldest
     )
@@ -309,12 +341,20 @@ def test_an_evidence_floor_narrows_the_candidates_and_refuses_a_lower_named_mode
     ] == ["high"]
     with pytest.raises(AIBuilderBadRequestException) as refused:
         resolve_requested_model(
-            space, model_id=low.id, active_provider_ids={provider_id}, minimum_level=3
+            space,
+            budget_policy=_POLICY,
+            model_id=low.id,
+            active_provider_ids={provider_id},
+            minimum_level=3,
         )
     assert refused.value.code == AIBuilderErrorCode.PLANNER_MODEL_BELOW_EVIDENCE_LEVEL
     assert (
         resolve_requested_model(
-            space, model_id=high.id, active_provider_ids={provider_id}, minimum_level=3
+            space,
+            budget_policy=_POLICY,
+            model_id=high.id,
+            active_provider_ids={provider_id},
+            minimum_level=3,
         ).name
         == "high"
     )
@@ -341,6 +381,7 @@ def test_a_window_within_the_safety_buffer_has_a_distinct_error(
     with pytest.raises(AIBuilderBadRequestException) as error:
         build_planner_context(
             _space([model]),
+            model_id=model.id,
             active_provider_ids={provider_id},
             tenant_flow_settings=_BUDGET_SETTINGS,
         )
@@ -363,8 +404,8 @@ def test_a_declared_output_ceiling_at_or_above_the_window_is_not_refused(
         active_provider_ids={provider_id},
         tenant_flow_settings=_BUDGET_SETTINGS,
     )
-    assert context.max_input_tokens == 128_000
-    assert context.max_output_tokens == output_tokens
+    assert context.capacity.max_input_tokens == 128_000
+    assert context.capacity.max_output_tokens == output_tokens
 
 
 @pytest.mark.parametrize("dimension", ["max_input_tokens", "max_output_tokens"])
@@ -375,10 +416,54 @@ def test_planner_boundary_refuses_undeclared_capacity_even_for_catalogue_model(
     model = _model(provider_id=provider_id, name="gpt-4o")
     setattr(model, dimension, None)
     with pytest.raises(AIBuilderBadRequestException) as error:
-        build_planner_context(_space([model]), active_provider_ids={provider_id})
+        build_planner_context(
+            _space([model]), model_id=model.id, active_provider_ids={provider_id}
+        )
     assert error.value.code is (
         AIBuilderErrorCode.PLANNER_MODEL_MISSING_CONTEXT_WINDOW
         if dimension == "max_input_tokens"
         else AIBuilderErrorCode.PLANNER_MODEL_MISSING_OUTPUT_TOKENS
     )
     assert error.value.context == {"missing_dimensions": dimension}
+
+
+@pytest.mark.parametrize(
+    "input_tokens,output_tokens,error_code",
+    [
+        (None, 100, AIBuilderErrorCode.PLANNER_MODEL_MISSING_CONTEXT_WINDOW),
+        (101, 100, AIBuilderErrorCode.PLANNER_MODEL_INCOMPATIBLE_TOKEN_LIMITS),
+    ],
+)
+def test_default_and_explicit_choice_use_tenant_capacity_policy(
+    input_tokens, output_tokens, error_code
+):
+    provider_id = uuid4()
+    unready = _model(provider_id=provider_id, is_org_default=True)
+    unready.max_input_tokens = input_tokens
+    unready.max_output_tokens = output_tokens
+    ready = _model(provider_id=provider_id)
+    space = _space([unready, ready])
+    policy = AIBuilderBudgetPolicy(
+        conversation_safety_buffer_tokens=100,
+        minimum_conversation_budget_tokens=1,
+    )
+    assert (
+        select_default_planner_model(
+            space, active_provider_ids={provider_id}, budget_policy=policy
+        )
+        is ready
+    )
+    with pytest.raises(AIBuilderBadRequestException) as excinfo:
+        resolve_requested_model(
+            space,
+            model_id=unready.id,
+            active_provider_ids={provider_id},
+            budget_policy=policy,
+        )
+    assert excinfo.value.code is error_code
+    assert (
+        select_default_planner_model(
+            _space([unready]), active_provider_ids={provider_id}, budget_policy=policy
+        )
+        is None
+    )

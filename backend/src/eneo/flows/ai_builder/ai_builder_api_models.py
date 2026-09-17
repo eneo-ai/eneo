@@ -20,6 +20,7 @@ from eneo.files.file_models import FilePublic
 from eneo.flows.ai_builder.ai_builder_attachment_context import (
     AI_BUILDER_MAX_ATTACHMENTS,
 )
+from eneo.flows.ai_builder.ai_builder_context import AIBuilderModelAvailability
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     AIBuilderQuestionAnswerRequest,
     NamedContentFieldsEditRequest,
@@ -145,6 +146,7 @@ AI_BUILDER_SESSION_MODELS_RESPONSE_EXAMPLE: FlowPersistedJsonObject = {
             "id": "00000000-0000-0000-0000-000000000710",
             "name": "gpt-5.4",
             "provider": "openai",
+            "availability": {"state": "ready"},
         }
     ],
     "default_model_id": "00000000-0000-0000-0000-000000000710",
@@ -772,6 +774,7 @@ class SessionListResponse(BaseModel):
 
 
 class SessionModelOption(BaseModel):
+    availability: AIBuilderModelAvailability
     id: UUID
     name: str = Field(
         description="Human-readable model nickname, falling back to its name."
@@ -790,6 +793,7 @@ class SessionModelOption(BaseModel):
         cls,
         model: CompletionModel,
         *,
+        availability: AIBuilderModelAvailability,
         supported_model_kwargs: SupportedModelKwargs | None = None,
     ) -> "SessionModelOption":
         capability = (
@@ -805,6 +809,7 @@ class SessionModelOption(BaseModel):
             id=model.id,
             name=model.nickname or model.name,
             provider=model.provider_type or "unknown",
+            availability=availability,
             reasoning_effort_options=options,
         )
 
@@ -816,14 +821,17 @@ class SessionModelsResponse(BaseModel):
 
     models: list[SessionModelOption] = Field(
         description=(
-            "The models a turn of this session may run on: accessible, with an "
+            "The eligible models and their capacity availability: accessible, with an "
             "active provider, and clearing the evidence floor the listing was "
             "asked at."
         )
     )
     default_model_id: UUID | None = Field(
         default=None,
-        description="The model an omitted `model_id` resolves to at that floor.",
+        description=(
+            "The ready model an omitted `model_id` resolves to at that floor, "
+            "or null when none is ready."
+        ),
     )
 
 

@@ -51,6 +51,7 @@ from eneo.ai_models.completion_models.completion_model import ModelKwargs  # noq
 from eneo.completion_models.domain.completion_model_repo import (  # noqa: E402
     CompletionModelRepository,
 )
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.infrastructure.completion_service import (  # noqa: E402
     CompletionService,
     ResolvedCompletionModelRoute,
@@ -976,13 +977,16 @@ async def run_probe_call(
         "num_retries",
     ):
         provider_kwargs.pop(removed_key, None)
+    measurement_request_budget_tokens = (
+        _MAX_MEASUREMENT_PROMPT_BYTES
+        + _MAX_MEASUREMENT_SCHEMA_BYTES
+        + measured.max_output_tokens
+    )
     request_budget = AIBuilderRequestBudget(
-        context_window_tokens=(
-            _MAX_MEASUREMENT_PROMPT_BYTES
-            + _MAX_MEASUREMENT_SCHEMA_BYTES
-            + measured.max_output_tokens
+        capacity=ModelCapacity(
+            measurement_request_budget_tokens,
+            measured.max_output_tokens,
         ),
-        model_output_ceiling_tokens=measured.max_output_tokens,
         safety_buffer_tokens=0,
         timeout_seconds=_PROBE_TIMEOUT_SECONDS,
     )

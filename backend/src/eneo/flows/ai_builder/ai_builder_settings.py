@@ -4,6 +4,11 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
+from eneo.completion_models.domain.model_capacity import (
+    ModelCapacity,
+    ModelCapacityNoFit,
+    UnknownModelCapacityError,
+)
 from eneo.flows.ai_builder.ai_builder_error_contract import (
     AIBuilderBadRequestException,
     AIBuilderErrorCode,
@@ -29,10 +34,9 @@ AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS = 300.0
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class AIBuilderRequestBudget:
-    """One provider call's window, allocated from the selected model's limits.
+    """One provider call's budget, allocated from the selected model's limits.
 
-    The model contributes two facts: its context window and its output
-    ceiling. Input and answer share the window, so a request is allocated in
+    Input and answer share the model's input limit, so a request is allocated in
     two steps. ``plan`` reserves answer room once the required input is
     measured: the ceiling when it fits within the policy share of the room the
     required input leaves, otherwise that share, so optional input never
@@ -41,8 +45,7 @@ class AIBuilderRequestBudget:
     most it may write in the room that remains, never a fixed number.
     """
 
-    context_window_tokens: int
-    model_output_ceiling_tokens: int
+    capacity: ModelCapacity
     safety_buffer_tokens: int
     # Silence deadline: the longest wait for the provider's next chunk.
     timeout_seconds: float
@@ -56,13 +59,9 @@ class AIBuilderRequestBudget:
     input_cap_tokens: int | None = None
 
     def __post_init__(self) -> None:
-        positive_values = {
-            "context window": self.context_window_tokens,
-            "model output ceiling": self.model_output_ceiling_tokens,
-        }
-        for name, value in positive_values.items():
-            if value < 1:
-                raise ValueError(f"AI Builder {name} must be positive")
+        missing = self.capacity.missing_dimensions()
+        if missing:
+            raise UnknownModelCapacityError(missing)
         if self.input_cap_tokens is not None and self.input_cap_tokens < 1:
             raise ValueError("AI Builder input cap must be positive")
         if self.safety_buffer_tokens < 0:
@@ -83,15 +82,23 @@ class AIBuilderRequestBudget:
             )
 
     @property
-    def usable_window_tokens(self) -> int:
+    def request_budget_tokens(self) -> int:
+        return self.capacity.require_input_tokens()
+
+    @property
+    def model_output_ceiling_tokens(self) -> int:
+        return self.capacity.require_output_tokens()
+
+    @property
+    def usable_request_budget_tokens(self) -> int:
         """What input and answer share once the safety buffer is set aside."""
 
-        return max(0, self.context_window_tokens - self.safety_buffer_tokens)
+        return self.request_budget_tokens - self.safety_buffer_tokens
 
     def plan(
         self, *, required_input_tokens: int
     ) -> AIBuilderPlannedRequestBudget | None:
-        """Allocate the window for a request whose required input is measured.
+        """Allocate the request budget for a request whose required input is measured.
 
         None when that input leaves no room for any answer, or already exceeds
         the tenant input cap: nothing optional can be dropped to recover, so
@@ -105,19 +112,21 @@ class AIBuilderRequestBudget:
             and required_input_tokens > self.input_cap_tokens
         ):
             return None
-        room = self.usable_window_tokens - required_input_tokens
+        room = self.usable_request_budget_tokens - required_input_tokens
         if room < 1:
             return None
         reserved_output_tokens = min(
             self.model_output_ceiling_tokens,
-            max(1, math.ceil(room * self.answer_reserve_share)),
+            math.ceil(room * self.answer_reserve_share),
         )
-        available_input_tokens = self.usable_window_tokens - reserved_output_tokens
+        available_input_tokens = self.capacity.input_allowance(
+            output_reserve_tokens=reserved_output_tokens,
+            safety_tokens=self.safety_buffer_tokens,
+        )
         if self.input_cap_tokens is not None:
             available_input_tokens = min(available_input_tokens, self.input_cap_tokens)
         return AIBuilderPlannedRequestBudget(
-            context_window_tokens=self.context_window_tokens,
-            model_output_ceiling_tokens=self.model_output_ceiling_tokens,
+            capacity=self.capacity,
             safety_buffer_tokens=self.safety_buffer_tokens,
             answer_reserve_share=self.answer_reserve_share,
             ceiling_seconds=self.ceiling_seconds,
@@ -170,8 +179,7 @@ class AIBuilderPlannedRequestBudget(AIBuilderRequestBudget):
         """The model and policy facts alone, for a deliberately new plan."""
 
         return AIBuilderRequestBudget(
-            context_window_tokens=self.context_window_tokens,
-            model_output_ceiling_tokens=self.model_output_ceiling_tokens,
+            capacity=self.capacity,
             safety_buffer_tokens=self.safety_buffer_tokens,
             answer_reserve_share=self.answer_reserve_share,
             ceiling_seconds=self.ceiling_seconds,
@@ -192,13 +200,13 @@ class AIBuilderPlannedRequestBudget(AIBuilderRequestBudget):
             raise ValueError("AI Builder input tokens cannot be negative")
         if input_tokens > self.available_input_tokens:
             return None
-        provider_output_cap_tokens = min(
-            self.model_output_ceiling_tokens,
-            self.usable_window_tokens - input_tokens,
+        provider_output_cap_tokens = self.capacity.resolve_output_cap(
+            input_tokens=input_tokens, safety_tokens=self.safety_buffer_tokens
         )
+        if isinstance(provider_output_cap_tokens, ModelCapacityNoFit):
+            return None
         return AIBuilderResolvedRequestBudget(
-            context_window_tokens=self.context_window_tokens,
-            model_output_ceiling_tokens=self.model_output_ceiling_tokens,
+            capacity=self.capacity,
             safety_buffer_tokens=self.safety_buffer_tokens,
             answer_reserve_share=self.answer_reserve_share,
             ceiling_seconds=self.ceiling_seconds,
@@ -252,25 +260,23 @@ class AIBuilderBudgetPolicy:
     def answer_reserve_tokens(
         self,
         *,
-        context_window_tokens: int,
-        model_output_ceiling_tokens: int,
+        capacity: ModelCapacity,
         required_input_tokens: int,
     ) -> int:
         """The answer room packing keeps free beside ``required_input_tokens``.
 
         For a packer that runs before the request's prompt exists (attached
         sources are read first), with the policy's conversation minimum
-        standing in for the input it cannot measure yet. A window with no room
+        standing in for the input it cannot measure yet. A budget with no room
         keeps the whole ceiling: such a packer admits nothing, and the request
         is refused where it is measured.
         """
 
         planned = self.proposal_request_budget(
-            context_window_tokens=context_window_tokens,
-            model_output_ceiling_tokens=model_output_ceiling_tokens,
+            capacity=capacity,
         ).plan(required_input_tokens=required_input_tokens)
         return (
-            model_output_ceiling_tokens
+            capacity.require_output_tokens()
             if planned is None
             else planned.reserved_output_tokens
         )
@@ -278,13 +284,11 @@ class AIBuilderBudgetPolicy:
     def classification_request_budget(
         self,
         *,
-        context_window_tokens: int,
-        model_output_ceiling_tokens: int,
+        capacity: ModelCapacity,
         request_id: str | None = None,
     ) -> AIBuilderRequestBudget:
         return AIBuilderRequestBudget(
-            context_window_tokens=context_window_tokens,
-            model_output_ceiling_tokens=model_output_ceiling_tokens,
+            capacity=capacity,
             safety_buffer_tokens=self.conversation_safety_buffer_tokens,
             answer_reserve_share=self.answer_reserve_share,
             ceiling_seconds=self.provider_call_ceiling_seconds,
@@ -299,16 +303,14 @@ class AIBuilderBudgetPolicy:
     def review_request_budget(
         self,
         *,
-        context_window_tokens: int,
-        model_output_ceiling_tokens: int,
+        capacity: ModelCapacity,
         request_id: str | None = None,
     ) -> AIBuilderRequestBudget:
         """Review uses the selected model's limits and the tenant's evidence cap."""
 
         return AIBuilderRequestBudget(
-            context_window_tokens=context_window_tokens,
+            capacity=capacity,
             input_cap_tokens=self.review_evidence_max_input_tokens,
-            model_output_ceiling_tokens=model_output_ceiling_tokens,
             safety_buffer_tokens=self.conversation_safety_buffer_tokens,
             answer_reserve_share=self.answer_reserve_share,
             ceiling_seconds=self.provider_call_ceiling_seconds,
@@ -319,19 +321,17 @@ class AIBuilderBudgetPolicy:
     def proposal_request_budget(
         self,
         *,
-        context_window_tokens: int,
-        model_output_ceiling_tokens: int,
+        capacity: ModelCapacity,
         request_id: str | None = None,
         carries_review_evidence: bool = False,
     ) -> AIBuilderRequestBudget:
         return AIBuilderRequestBudget(
-            context_window_tokens=context_window_tokens,
+            capacity=capacity,
             input_cap_tokens=(
                 self.review_evidence_max_input_tokens
                 if carries_review_evidence
                 else None
             ),
-            model_output_ceiling_tokens=model_output_ceiling_tokens,
             safety_buffer_tokens=self.conversation_safety_buffer_tokens,
             answer_reserve_share=self.answer_reserve_share,
             ceiling_seconds=self.provider_call_ceiling_seconds,

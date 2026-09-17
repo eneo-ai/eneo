@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeAlias
 from uuid import UUID
 
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.files.file_models import File
 from eneo.flows.ai_builder.ai_builder_action_policy import (
     named_result_projection,
@@ -181,8 +182,7 @@ class PlannerRequestPreparationInput:
     flow: Flow | None
     assistant_snapshots: AssistantAuthoringSnapshots | None
     attachment_files: list[File]
-    max_input_tokens: int
-    max_output_tokens: int
+    capacity: ModelCapacity
     budget_policy: AIBuilderBudgetPolicy
     attachment_context_policy: AIBuilderAttachmentContextPolicy
     mapped_execution_policy: FlowMappedExecutionPolicy
@@ -280,10 +280,9 @@ async def prepare_planner_request(
             request.attachment_files,
             policy=request.attachment_context_policy,
             model_name=request.completion_model_route.litellm_model,
-            max_input_tokens=request.max_input_tokens,
+            capacity=request.capacity,
             answer_reserve_tokens=request.budget_policy.answer_reserve_tokens(
-                context_window_tokens=request.max_input_tokens,
-                model_output_ceiling_tokens=request.max_output_tokens,
+                capacity=request.capacity,
                 required_input_tokens=(
                     request.budget_policy.minimum_conversation_budget_tokens
                 ),
@@ -325,8 +324,7 @@ async def prepare_planner_request(
             attachment_context=attachment_context_result,
             mapped_execution_policy=request.mapped_execution_policy,
             prepared_schema_candidates=schema_candidates,
-            max_input_tokens=request.max_input_tokens,
-            max_output_tokens=request.max_output_tokens,
+            capacity=request.capacity,
             budget_policy=request.budget_policy,
             persisted_planning_state=request.persisted_planning_state,
             attached_file_ids={file.id for file in request.attachment_files},
@@ -363,8 +361,7 @@ async def prepare_planner_request(
             prepared_schema_candidates=schema_candidates,
             persisted_planning_state=request.persisted_planning_state,
             attached_file_ids={file.id for file in request.attachment_files},
-            max_input_tokens=request.max_input_tokens,
-            max_output_tokens=request.max_output_tokens,
+            capacity=request.capacity,
             budget_policy=request.budget_policy,
         )
         discovery_analysis = discovery_runtime.discovery_analysis
@@ -461,8 +458,7 @@ async def prepare_planner_request(
         supports_strict_tool_schema=(
             request.completion_model_route.supports_strict_tool_schema
         ),
-        max_input_tokens=request.max_input_tokens,
-        max_output_tokens=request.max_output_tokens,
+        capacity=request.capacity,
         budget_policy=request.budget_policy,
         attachment_file_count=len(request.attachment_files),
         current_turn_start=request.current_turn_start,
@@ -595,8 +591,7 @@ def build_proposal_prepared(
     plan_edit_context: ResolvedAIBuilderEditContext | None,
     prior_plan_for_revision: BuilderPlan | None,
     litellm_model: str,
-    max_input_tokens: int,
-    max_output_tokens: int,
+    capacity: ModelCapacity,
     budget_policy: AIBuilderBudgetPolicy,
     attachment_file_count: int,
     current_turn_start: int,
@@ -702,8 +697,7 @@ def build_proposal_prepared(
     # cap bounds this whole request (prompt, attachments, conversation, tools)
     # through the one budget every later step and the provider boundary use.
     proposal_request_budget = budget_policy.proposal_request_budget(
-        context_window_tokens=max_input_tokens,
-        model_output_ceiling_tokens=max_output_tokens,
+        capacity=capacity,
         carries_review_evidence=review_evidence is not None,
     )
     incompatible_field_names = (
@@ -915,7 +909,7 @@ def build_proposal_prepared(
                 if replayed_requirements is not None
                 else 0
             ),
-            "context_window_tokens": proposal_request_budget.context_window_tokens,
+            "request_budget_tokens": proposal_request_budget.request_budget_tokens,
             "input_cap_tokens": proposal_request_budget.input_cap_tokens,
             "reserved_output_tokens": planned_request_budget.reserved_output_tokens,
             "available_input_tokens": planned_request_budget.available_input_tokens,
