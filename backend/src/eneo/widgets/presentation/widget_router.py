@@ -17,21 +17,29 @@ from eneo.server import protocol
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.widgets.application.widget_service import WidgetView
+from eneo.widgets.domain.widget_template import WidgetTemplate
 from eneo.widgets.presentation.widget_models import (
+    WidgetApplyTemplate,
     WidgetCreate,
     WidgetPolicyPublic,
     WidgetPolicyUpdate,
     WidgetPreviewToken,
     WidgetPublic,
+    WidgetTemplateCreate,
+    WidgetTemplatePublic,
+    WidgetTemplateUpdate,
     WidgetUpdate,
     WidgetUsageDayPublic,
     WidgetUsagePublic,
 )
 
-# Mounted under /spaces, /widgets and /admin/widget-policy respectively.
+# Mounted under /spaces, /widgets, /admin/widget-policy, /widget-templates
+# and /admin/widget-templates respectively.
 space_widgets_router = APIRouter()
 router = APIRouter()
 policy_router = APIRouter()
+templates_router = APIRouter()
+admin_templates_router = APIRouter()
 
 _ContainerWithUser = Annotated[Container, Depends(get_container(with_user=True))]
 
@@ -104,17 +112,49 @@ async def create_space_widget(
 ):
     service = container.widget_service()
     assembler = container.widget_assembler()
+    template = None
+    if body.template_id is not None:
+        template = await container.widget_template_service().get_template(
+            body.template_id
+        )
     view = await service.create_widget(
         space_id=space_id,
         target_id=body.target_id,
         name=body.name,
         language=body.language,
+        template=template,
     )
     await _audit(
         container,
         action=ActionType.WIDGET_CREATED,
         view=view,
         description=f"Created widget '{view.widget.name}'",
+        changes={"new": _widget_snapshot(view)},
+    )
+    return assembler.from_view(view)
+
+
+@router.post(
+    "/{id}/apply-template/",
+    response_model=WidgetPublic,
+    description=(
+        "Copy a template's texts, appearance and language onto the widget."
+        " A snapshot: later template edits do not affect the widget."
+    ),
+    responses=responses.get_responses([400, 403, 404]),
+)
+async def apply_widget_template(
+    id: UUID, body: WidgetApplyTemplate, container: _ContainerWithUser
+):
+    service = container.widget_service()
+    assembler = container.widget_assembler()
+    template = await container.widget_template_service().get_template(body.template_id)
+    view = await service.apply_template(id, template)
+    await _audit(
+        container,
+        action=ActionType.WIDGET_UPDATED,
+        view=view,
+        description=f"Applied template '{template.name}' to widget '{view.widget.name}'",
         changes={"new": _widget_snapshot(view)},
     )
     return assembler.from_view(view)
@@ -322,3 +362,148 @@ async def update_widget_policy(body: WidgetPolicyUpdate, container: _ContainerWi
         ),
     )
     return assembler.from_policy(policy)
+
+
+# --- templates -------------------------------------------------------------
+
+
+def _template_public(template: WidgetTemplate) -> WidgetTemplatePublic:
+    assert template.id is not None
+    assert template.created_at is not None and template.updated_at is not None
+    return WidgetTemplatePublic(
+        id=template.id,
+        name=template.name,
+        description=template.description,
+        texts=template.texts,
+        theme=template.theme,
+        language=template.language,
+        is_default=template.is_default,
+        created_by_user_id=template.created_by_user_id,
+        created_at=template.created_at,
+        updated_at=template.updated_at,
+    )
+
+
+def _template_snapshot(template: WidgetTemplate) -> dict[str, Any]:
+    return {
+        "name": template.name,
+        "language": template.language.value,
+        "is_default": template.is_default,
+        "texts": template.texts.model_dump(mode="json"),
+        "theme": template.theme.model_dump(mode="json"),
+    }
+
+
+async def _audit_template(
+    container: Container,
+    *,
+    action: ActionType,
+    template: WidgetTemplate,
+    description: str,
+    changes: dict[str, Any] | None = None,
+) -> None:
+    user = container.user()
+    assert template.id is not None
+    await container.audit_service().log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=action,
+        entity_type=EntityType.WIDGET_TEMPLATE,
+        entity_id=template.id,
+        description=description,
+        metadata=AuditMetadata.standard(actor=user, target=template, changes=changes),
+    )
+
+
+@templates_router.get(
+    "/",
+    response_model=PaginatedResponse[WidgetTemplatePublic],
+    description=(
+        "Widget templates of the organisation, default first. Readable by"
+        " everyone with the widgets permission."
+    ),
+    responses=responses.get_responses([403]),
+)
+async def list_widget_templates(container: _ContainerWithUser):
+    templates = await container.widget_template_service().list_templates()
+    return protocol.to_paginated_response([_template_public(t) for t in templates])
+
+
+@admin_templates_router.post(
+    "/",
+    response_model=WidgetTemplatePublic,
+    status_code=201,
+    description="Create a widget template. Tenant admins only.",
+    responses=responses.get_responses([400, 403]),
+)
+async def create_widget_template(
+    body: WidgetTemplateCreate, container: _ContainerWithUser
+):
+    template = await container.widget_template_service().create_template(
+        name=body.name, language=body.language, is_default=body.is_default
+    )
+    await _audit_template(
+        container,
+        action=ActionType.WIDGET_TEMPLATE_CREATED,
+        template=template,
+        description=f"Created widget template '{template.name}'",
+        changes={"new": _template_snapshot(template)},
+    )
+    return _template_public(template)
+
+
+@admin_templates_router.get(
+    "/{id}/",
+    response_model=WidgetTemplatePublic,
+    description="A widget template. Tenant admins only.",
+    responses=responses.get_responses([403, 404]),
+)
+async def get_widget_template(id: UUID, container: _ContainerWithUser):
+    template = await container.widget_template_service().get_template(id)
+    return _template_public(template)
+
+
+@admin_templates_router.patch(
+    "/{id}/",
+    response_model=WidgetTemplatePublic,
+    description=(
+        "Update a widget template. Setting `is_default` clears the previous"
+        " default. Existing widgets are never changed."
+    ),
+    responses=responses.get_responses([400, 403, 404]),
+)
+async def update_widget_template(
+    id: UUID, body: WidgetTemplateUpdate, container: _ContainerWithUser
+):
+    service = container.widget_template_service()
+    before = await service.get_template(id)
+    template = await service.update_template(id, body.model_dump(exclude_unset=True))
+    await _audit_template(
+        container,
+        action=ActionType.WIDGET_TEMPLATE_UPDATED,
+        template=template,
+        description=f"Updated widget template '{template.name}'",
+        changes={
+            "old": _template_snapshot(before),
+            "new": _template_snapshot(template),
+        },
+    )
+    return _template_public(template)
+
+
+@admin_templates_router.delete(
+    "/{id}/",
+    status_code=204,
+    response_model=None,
+    description="Delete a widget template. Widgets created from it are kept.",
+    responses=responses.get_responses([403, 404]),
+)
+async def delete_widget_template(id: UUID, container: _ContainerWithUser) -> None:
+    template = await container.widget_template_service().delete_template(id)
+    await _audit_template(
+        container,
+        action=ActionType.WIDGET_TEMPLATE_DELETED,
+        template=template,
+        description=f"Deleted widget template '{template.name}'",
+        changes={"old": _template_snapshot(template)},
+    )

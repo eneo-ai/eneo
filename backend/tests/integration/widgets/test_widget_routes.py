@@ -250,3 +250,96 @@ async def test_widget_policy_endpoints(client, admin_token, regular_user_token):
         "/api/v1/admin/widget-policy/", headers=_auth(regular_user_token)
     )
     assert resp.status_code == 403, resp.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_widget_templates(
+    client, admin_token, regular_user_token, space_with_assistant
+):
+    space_id, assistant_id = space_with_assistant
+
+    resp = await client.post(
+        "/api/v1/admin/widget-templates/",
+        json={"name": "Kommunblå", "is_default": True},
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 201, resp.text
+    template = resp.json()
+    assert template["is_default"] is True
+
+    resp = await client.patch(
+        f"/api/v1/admin/widget-templates/{template['id']}/",
+        json={
+            "description": "Husstil",
+            "theme": {**template["theme"], "primary_color": "#123456", "radius": 4},
+            "texts": {**template["texts"], "title": "Fråga oss"},
+        },
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["theme"]["primary_color"] == "#123456"
+
+    # Editors can list but not write.
+    resp = await client.get(
+        "/api/v1/widget-templates/", headers=_auth(regular_user_token)
+    )
+    assert resp.status_code == 403
+    resp = await client.post(
+        "/api/v1/admin/widget-templates/",
+        json={"name": "Nej"},
+        headers=_auth(regular_user_token),
+    )
+    assert resp.status_code == 403
+    resp = await client.get("/api/v1/widget-templates/", headers=_auth(admin_token))
+    assert resp.status_code == 200
+    assert [t["name"] for t in resp.json()["items"]] == ["Kommunblå"]
+
+    # Create from template copies texts/theme; the template can change afterwards.
+    resp = await client.post(
+        f"/api/v1/spaces/{space_id}/widgets/",
+        json={
+            "target_id": assistant_id,
+            "name": "Chatt",
+            "template_id": template["id"],
+        },
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 201, resp.text
+    widget = resp.json()
+    assert widget["theme"]["primary_color"] == "#123456"
+    assert widget["texts"]["title"] == "Fråga oss"
+
+    resp = await client.patch(
+        f"/api/v1/admin/widget-templates/{template['id']}/",
+        json={"theme": {**template["theme"], "primary_color": "#654321"}},
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 200
+    resp = await client.get(
+        f"/api/v1/widgets/{widget['id']}/", headers=_auth(admin_token)
+    )
+    assert resp.json()["theme"]["primary_color"] == "#123456"
+
+    resp = await client.post(
+        f"/api/v1/widgets/{widget['id']}/apply-template/",
+        json={"template_id": template["id"]},
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["theme"]["primary_color"] == "#654321"
+
+    resp = await client.delete(
+        f"/api/v1/admin/widget-templates/{template['id']}/", headers=_auth(admin_token)
+    )
+    assert resp.status_code == 204
+    resp = await client.get(
+        f"/api/v1/widgets/{widget['id']}/", headers=_auth(admin_token)
+    )
+    assert resp.status_code == 200
+    resp = await client.post(
+        f"/api/v1/widgets/{widget['id']}/apply-template/",
+        json={"template_id": template["id"]},
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 404

@@ -3183,6 +3183,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/widgets/{id}/apply-template/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Apply Widget Template
+     * @description Copy a template's texts, appearance and language onto the widget. A snapshot: later template edits do not affect the widget.
+     */
+    post: operations["apply_widget_template_api_v1_widgets__id__apply_template__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/widgets/{id}/": {
     parameters: {
       query?: never;
@@ -3449,6 +3469,74 @@ export interface paths {
      * @description Update the tenant's widget policy guardrails.
      */
     patch: operations["update_widget_policy_api_v1_admin_widget_policy__patch"];
+    trace?: never;
+  };
+  "/api/v1/widget-templates/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Widget Templates
+     * @description Widget templates of the organisation, default first. Readable by everyone with the widgets permission.
+     */
+    get: operations["list_widget_templates_api_v1_widget_templates__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/widget-templates/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Create Widget Template
+     * @description Create a widget template. Tenant admins only.
+     */
+    post: operations["create_widget_template_api_v1_admin_widget_templates__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/widget-templates/{id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Widget Template
+     * @description A widget template. Tenant admins only.
+     */
+    get: operations["get_widget_template_api_v1_admin_widget_templates__id___get"];
+    put?: never;
+    post?: never;
+    /**
+     * Delete Widget Template
+     * @description Delete a widget template. Widgets created from it are kept.
+     */
+    delete: operations["delete_widget_template_api_v1_admin_widget_templates__id___delete"];
+    options?: never;
+    head?: never;
+    /**
+     * Update Widget Template
+     * @description Update a widget template. Setting `is_default` clears the previous default. Existing widgets are never changed.
+     */
+    patch: operations["update_widget_template_api_v1_admin_widget_templates__id___patch"];
     trace?: never;
   };
   "/api/v1/allowed-origins/": {
@@ -8920,7 +9008,10 @@ export interface components {
       | "widget_paused"
       | "widget_archived"
       | "widget_policy_updated"
-      | "widget_budget_exhausted";
+      | "widget_budget_exhausted"
+      | "widget_template_created"
+      | "widget_template_updated"
+      | "widget_template_deleted";
     /**
      * ActionUpdate
      * @description Represents an action-level configuration change request.
@@ -12857,7 +12948,8 @@ export interface components {
       | "mcp_server"
       | "mcp_server_tool"
       | "user_group"
-      | "widget";
+      | "widget"
+      | "widget_template";
     /**
      * ErrorCodes
      * @enum {integer}
@@ -16591,6 +16683,19 @@ export interface components {
        * @description List of items returned in the response
        */
       items: components["schemas"]["WidgetPublic"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
+    /** PaginatedResponse[WidgetTemplatePublic] */
+    PaginatedResponse_WidgetTemplatePublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["WidgetTemplatePublic"][];
       /**
        * Count
        * @description Number of items returned in the response
@@ -21986,6 +22091,14 @@ export interface components {
        */
       http_auth_password?: string | null;
     };
+    /** WidgetApplyTemplate */
+    WidgetApplyTemplate: {
+      /**
+       * Template Id
+       * Format: uuid
+       */
+      template_id: string;
+    };
     /** WidgetAsk */
     WidgetAsk: {
       /** Question */
@@ -22027,6 +22140,11 @@ export interface components {
       name: string;
       /** @default auto */
       language?: components["schemas"]["WidgetLanguage"];
+      /**
+       * Template Id
+       * @description Template whose texts, theme and language are copied onto the new widget.
+       */
+      template_id?: string | null;
     };
     /**
      * WidgetLanguage
@@ -22216,6 +22334,59 @@ export interface components {
      * @enum {string}
      */
     WidgetTargetType: "assistant";
+    /** WidgetTemplateCreate */
+    WidgetTemplateCreate: {
+      /** Name */
+      name: string;
+      /** @default auto */
+      language?: components["schemas"]["WidgetLanguage"];
+      /**
+       * Is Default
+       * @default false
+       */
+      is_default?: boolean;
+    };
+    /** WidgetTemplatePublic */
+    WidgetTemplatePublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Description */
+      description: string;
+      texts: components["schemas"]["WidgetTexts"];
+      theme: components["schemas"]["WidgetTheme"];
+      language: components["schemas"]["WidgetLanguage"];
+      /** Is Default */
+      is_default: boolean;
+      /** Created By User Id */
+      created_by_user_id?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /** WidgetTemplateUpdate */
+    WidgetTemplateUpdate: {
+      /** Name */
+      name?: string | null;
+      /** Description */
+      description?: string | null;
+      texts?: components["schemas"]["WidgetTexts"] | null;
+      theme?: components["schemas"]["WidgetTheme"] | null;
+      language?: components["schemas"]["WidgetLanguage"] | null;
+      /** Is Default */
+      is_default?: boolean | null;
+    };
     /** WidgetTexts */
     WidgetTexts: {
       /**
@@ -34921,6 +35092,68 @@ export interface operations {
       };
     };
   };
+  apply_widget_template_api_v1_widgets__id__apply_template__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WidgetApplyTemplate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WidgetPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   get_widget_api_v1_widgets__id___get: {
     parameters: {
       query?: never;
@@ -36037,6 +36270,244 @@ export interface operations {
       };
       /** @description Forbidden */
       403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_widget_templates_api_v1_widget_templates__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_WidgetTemplatePublic_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  create_widget_template_api_v1_admin_widget_templates__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WidgetTemplateCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WidgetTemplatePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_widget_template_api_v1_admin_widget_templates__id___get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WidgetTemplatePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_widget_template_api_v1_admin_widget_templates__id___delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  update_widget_template_api_v1_admin_widget_templates__id___patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WidgetTemplateUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WidgetTemplatePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
         headers: {
           [name: string]: unknown;
         };

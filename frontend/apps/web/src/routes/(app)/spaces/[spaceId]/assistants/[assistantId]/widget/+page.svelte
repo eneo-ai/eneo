@@ -17,6 +17,7 @@
 
   let widget = $state<Widget | null>(untrack(() => data.widget));
   let name = $state(untrack(() => data.assistant.name));
+  let templateId = $state(untrack(() => data.templates.find((t) => t.is_default)?.id ?? ""));
 
   const create = createAsyncState(async () => {
     try {
@@ -24,7 +25,8 @@
         spaceId: data.currentSpace.id,
         target_id: data.assistant.id,
         name: name.trim() || data.assistant.name,
-        language: "auto"
+        language: "auto",
+        template_id: templateId || null
       });
     } catch (error) {
       toastError(error, m.widget_admin_could_not_create());
@@ -58,6 +60,7 @@
             isAdmin={data.isAdmin}
             policy={data.policy}
             release={data.release}
+            templates={data.templates}
           />
         {/key}
       {:else}
@@ -86,6 +89,27 @@
                 bind:value={name}
               />
             </label>
+            {#if data.templates.length > 0}
+              <label class="flex flex-col gap-1 text-sm font-medium">
+                {m.widget_admin_template()}
+                <select
+                  class="border-default bg-primary ring-default rounded-lg border px-3 py-2 font-normal shadow focus-visible:ring-2"
+                  bind:value={templateId}
+                >
+                  <option value="">{m.widget_admin_template_none()}</option>
+                  {#each data.templates as template (template.id)}
+                    <option value={template.id}>
+                      {template.name}{template.is_default
+                        ? ` (${m.widget_admin_template_default()})`
+                        : ""}
+                    </option>
+                  {/each}
+                </select>
+                <span class="text-secondary text-xs font-normal"
+                  >{m.widget_admin_template_create_help()}</span
+                >
+              </label>
+            {/if}
             <div>
               <Button variant="primary" type="submit" disabled={create.isLoading}
                 >{m.widget_admin_create()}</Button

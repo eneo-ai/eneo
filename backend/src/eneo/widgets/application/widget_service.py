@@ -25,6 +25,7 @@ from eneo.widgets.domain.widget import (
 )
 from eneo.widgets.domain.widget_policy import WidgetPolicy
 from eneo.widgets.domain.widget_repo import WidgetRepo
+from eneo.widgets.domain.widget_template import WidgetTemplate
 
 if TYPE_CHECKING:
     from eneo.actors.actor_manager import ActorManager
@@ -136,6 +137,7 @@ class WidgetService:
         target_id: UUID,
         name: str,
         language: WidgetLanguage = WidgetLanguage.AUTO,
+        template: Optional[WidgetTemplate] = None,
     ) -> WidgetView:
         validate_permission(self.user, Permission.WIDGETS)
         space = await self._space_for_edit(space_id)
@@ -146,10 +148,31 @@ class WidgetService:
             space_id=space_id,
             target_id=target_id,
             name=name,
-            language=language,
+            language=template.language if template else language,
             created_by_user_id=self.user.id,
         )
+        if template is not None:
+            self._copy_template(widget, template)
         widget = await self.repo.add(widget)
+        return self._view(space, widget)
+
+    @staticmethod
+    def _copy_template(widget: Widget, template: WidgetTemplate) -> None:
+        """A snapshot: later template edits never touch existing widgets."""
+        widget.texts = template.texts.model_copy(deep=True)
+        widget.theme = template.theme.model_copy(deep=True)
+        widget.language = template.language
+
+    async def apply_template(
+        self, widget_id: UUID, template: WidgetTemplate
+    ) -> WidgetView:
+        validate_permission(self.user, Permission.WIDGETS)
+        widget = await self._owned_widget(widget_id)
+        space = await self._space_for_edit(widget.space_id)
+        if widget.status == WidgetStatus.ARCHIVED:
+            raise BadRequestException("Archived widgets cannot be changed.")
+        self._copy_template(widget, template)
+        widget = await self.repo.update(widget)
         return self._view(space, widget)
 
     async def update_widget(

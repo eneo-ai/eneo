@@ -1,11 +1,9 @@
-import type { Widget, WidgetUpdate } from "@eneo/eneo-js";
+import type { Widget, WidgetTemplate, WidgetTemplateUpdate, WidgetUpdate } from "@eneo/eneo-js";
 
 export type AutosaveStatus = "idle" | "saving" | "saved" | "error";
 
-type Save = (update: WidgetUpdate) => Promise<Widget>;
-
 /**
- * Debounced autosave for the widget settings form.
+ * Debounced autosave for a settings form.
  *
  * Edits are applied to `widget` immediately (so the preview and the form stay
  * responsive) and coalesced into one PATCH after a short pause. Nested groups
@@ -13,19 +11,23 @@ type Save = (update: WidgetUpdate) => Promise<Widget>;
  * replaces them as units. A failed save keeps the pending changes so the
  * editor can retry; the server's answer is always the source of truth.
  */
-export class WidgetAutosave {
-  widget = $state<Widget>() as Widget;
+export class Autosave<Resource extends object, Update extends object> {
+  widget = $state<Resource>() as Resource;
   status = $state<AutosaveStatus>("idle");
   error = $state<unknown>(null);
 
-  #save: Save;
+  #save: (update: Update) => Promise<Resource>;
   #delay: number;
-  #pending: WidgetUpdate = {};
+  #pending: Update = {} as Update;
   #timer: ReturnType<typeof setTimeout> | null = null;
   #inflight: Promise<void> | null = null;
   #dirtyWhileSaving = false;
 
-  constructor(widget: Widget, save: Save, options: { delay?: number } = {}) {
+  constructor(
+    widget: Resource,
+    save: (update: Update) => Promise<Resource>,
+    options: { delay?: number } = {}
+  ) {
     this.widget = widget;
     this.#save = save;
     this.#delay = options.delay ?? 600;
@@ -36,8 +38,8 @@ export class WidgetAutosave {
   }
 
   /** Merge a change into the widget and schedule a save. */
-  patch(update: WidgetUpdate): void {
-    this.widget = { ...this.widget, ...(update as Partial<Widget>) };
+  patch(update: Update): void {
+    this.widget = { ...this.widget, ...(update as Partial<Resource>) };
     this.#pending = { ...this.#pending, ...update };
     if (this.#inflight) {
       this.#dirtyWhileSaving = true;
@@ -47,10 +49,10 @@ export class WidgetAutosave {
   }
 
   /** Replace the widget with a server response from another action (activate, pause…). */
-  replace(widget: Widget): void {
+  replace(widget: Resource): void {
     if (this.hasPending) {
       // Keep the editor's unsaved values on top of the new lifecycle state.
-      this.widget = { ...widget, ...(this.#pending as Partial<Widget>) };
+      this.widget = { ...widget, ...(this.#pending as Partial<Resource>) };
     } else {
       this.widget = widget;
     }
@@ -90,13 +92,13 @@ export class WidgetAutosave {
 
   async #run(): Promise<void> {
     const update = this.#pending;
-    this.#pending = {};
+    this.#pending = {} as Update;
     this.status = "saving";
     this.error = null;
     try {
       const saved = await this.#save(update);
       // Newer edits win over what the server echoes back for the same keys.
-      this.widget = { ...saved, ...(this.#pending as Partial<Widget>) };
+      this.widget = { ...saved, ...(this.#pending as Partial<Resource>) };
       this.status = "saved";
     } catch (error) {
       this.#pending = { ...update, ...this.#pending };
@@ -105,3 +107,7 @@ export class WidgetAutosave {
     }
   }
 }
+
+export class WidgetAutosave extends Autosave<Widget, WidgetUpdate> {}
+
+export class WidgetTemplateAutosave extends Autosave<WidgetTemplate, WidgetTemplateUpdate> {}

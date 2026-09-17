@@ -3,16 +3,73 @@
   organisation must stay within. Saved as you type.
 -->
 <script lang="ts">
-  import type { WidgetPolicy, WidgetPolicyUpdate } from "@eneo/eneo-js";
-  import { Input } from "@eneo/ui";
+  import type { WidgetPolicy, WidgetPolicyUpdate, WidgetTemplate } from "@eneo/eneo-js";
+  import { Button, Dialog, Input } from "@eneo/ui";
+  import { goto } from "$app/navigation";
+  import { localizeHref } from "$lib/paraglide/runtime";
   import { Page, Settings } from "$lib/components/layout";
+  import { Badge } from "$lib/components/ui/badge/index.js";
+  import * as Table from "$lib/components/ui/table/index.js";
   import { toastError } from "$lib/core/errors";
+  import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { m } from "$lib/paraglide/messages";
   import { untrack } from "svelte";
+  import { writable } from "svelte/store";
 
   let { data } = $props();
 
   let policy = $state<WidgetPolicy>(untrack(() => data.policy));
+  let templates = $state<WidgetTemplate[]>(untrack(() => data.templates));
+  let templateToDelete = $state<WidgetTemplate | null>(null);
+  const showDelete = writable(false);
+
+  const createTemplate = createAsyncState(async () => {
+    try {
+      const created = await data.eneo.widgets.templates.create({
+        name: m.widget_admin_template_new_name(),
+        is_default: templates.length === 0
+      });
+      // eslint-disable-next-line svelte/no-navigation-without-resolve -- localized href built from a typed route segment
+      await goto(localizeHref(`/admin/widgets/templates/${created.id}`));
+    } catch (error) {
+      toastError(error, m.widget_admin_template_could_not_create());
+    }
+  });
+
+  async function setDefault(template: WidgetTemplate) {
+    try {
+      const updated = await data.eneo.widgets.templates.update({
+        template: { id: template.id },
+        update: { is_default: true }
+      });
+      templates = templates.map((t) =>
+        t.id === updated.id ? updated : { ...t, is_default: false }
+      );
+    } catch (error) {
+      toastError(error, m.widget_admin_save_failed());
+    }
+  }
+
+  const deleteTemplate = createAsyncState(async () => {
+    const target = templateToDelete;
+    if (!target) return;
+    try {
+      await data.eneo.widgets.templates.delete({ id: target.id });
+      templates = templates.filter((t) => t.id !== target.id);
+      $showDelete = false;
+      templateToDelete = null;
+    } catch (error) {
+      toastError(error, m.widget_admin_template_could_not_delete());
+    }
+  });
+
+  function languageLabel(language: WidgetTemplate["language"]) {
+    return language === "sv"
+      ? m.widget_admin_language_sv()
+      : language === "en"
+        ? m.widget_admin_language_en()
+        : m.widget_admin_language_auto();
+  }
   let status = $state<"idle" | "saving" | "saved" | "error">("idle");
   let pending: WidgetPolicyUpdate = {};
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -148,6 +205,94 @@
           </div>
         </Settings.Row>
       </Settings.Group>
+
+      <Settings.Group title={m.widget_admin_templates()}>
+        <Settings.Row
+          title={m.widget_admin_templates()}
+          description={m.widget_admin_templates_description()}
+          fullWidth
+        >
+          <div class="flex flex-col gap-3">
+            <div>
+              <Button
+                variant="primary-outlined"
+                onclick={createTemplate}
+                disabled={createTemplate.isLoading}>{m.widget_admin_template_new()}</Button
+              >
+            </div>
+            {#if templates.length === 0}
+              <p class="text-secondary text-sm">{m.widget_admin_templates_empty()}</p>
+            {:else}
+              <Table.Root>
+                <caption class="sr-only">{m.widget_admin_templates()}</caption>
+                <Table.Header>
+                  <Table.Row>
+                    <Table.Head>{m.name()}</Table.Head>
+                    <Table.Head>{m.widget_admin_language()}</Table.Head>
+                    <Table.Head class="text-right">{m.actions()}</Table.Head>
+                  </Table.Row>
+                </Table.Header>
+                <Table.Body>
+                  {#each templates as template (template.id)}
+                    <Table.Row>
+                      <Table.Cell>
+                        <div class="flex items-center gap-2">
+                          <!-- eslint-disable svelte/no-navigation-without-resolve -- localized href built from a typed route segment -->
+                          <a
+                            class="font-medium underline-offset-2 hover:underline"
+                            href={localizeHref(`/admin/widgets/templates/${template.id}`)}
+                            >{template.name}</a
+                          >
+                          <!-- eslint-enable svelte/no-navigation-without-resolve -->
+                          {#if template.is_default}
+                            <Badge variant="outline">{m.widget_admin_template_default()}</Badge>
+                          {/if}
+                        </div>
+                        {#if template.description}
+                          <p class="text-secondary text-sm">{template.description}</p>
+                        {/if}
+                      </Table.Cell>
+                      <Table.Cell>{languageLabel(template.language)}</Table.Cell>
+                      <Table.Cell class="text-right">
+                        <div class="flex justify-end gap-2">
+                          {#if !template.is_default}
+                            <Button variant="outlined" onclick={() => setDefault(template)}
+                              >{m.widget_admin_template_set_default()}</Button
+                            >
+                          {/if}
+                          <Button
+                            variant="destructive"
+                            onclick={() => {
+                              templateToDelete = template;
+                              $showDelete = true;
+                            }}
+                            aria-label={m.widget_admin_template_delete_named({
+                              name: template.name
+                            })}>{m.delete()}</Button
+                          >
+                        </div>
+                      </Table.Cell>
+                    </Table.Row>
+                  {/each}
+                </Table.Body>
+              </Table.Root>
+            {/if}
+          </div>
+        </Settings.Row>
+      </Settings.Group>
     </Settings.Page>
   </Page.Main>
 </Page.Root>
+
+<Dialog.Root openController={showDelete}>
+  <Dialog.Content>
+    <Dialog.Title>{m.widget_admin_template_delete_title()}</Dialog.Title>
+    <Dialog.Description>{m.widget_admin_template_delete_description()}</Dialog.Description>
+    <Dialog.Controls>
+      <Button onclick={() => ($showDelete = false)}>{m.cancel()}</Button>
+      <Button variant="destructive" onclick={deleteTemplate} disabled={deleteTemplate.isLoading}
+        >{m.delete()}</Button
+      >
+    </Dialog.Controls>
+  </Dialog.Content>
+</Dialog.Root>

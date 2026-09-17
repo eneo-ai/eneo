@@ -3,6 +3,7 @@
 /** @typedef {import('../types/resources').WidgetPolicy} WidgetPolicy */
 /** @typedef {import('../types/resources').WidgetUsage} WidgetUsage */
 /** @typedef {import('../types/resources').WidgetPreviewToken} WidgetPreviewToken */
+/** @typedef {import('../types/resources').WidgetTemplate} WidgetTemplate */
 
 /**
  * Admin side of embeddable widgets: the objects editors configure in a space
@@ -139,6 +140,88 @@ export function initWidgets(client) {
         params: { path: { id } }
       });
       return res;
+    },
+
+    /**
+     * Copy a template's texts, appearance and language onto the widget (a snapshot).
+     * @param {{widget: {id: string}; templateId: string}} params
+     * @returns {Promise<Widget>}
+     * @throws {EneoError}
+     */
+    applyTemplate: async ({ widget, templateId }) => {
+      const res = await client.fetch("/api/v1/widgets/{id}/apply-template/", {
+        method: "post",
+        params: { path: { id: widget.id } },
+        requestBody: { "application/json": { template_id: templateId } }
+      });
+      return res;
+    },
+
+    templates: {
+      /**
+       * Templates of the organisation, default first (widgets permission).
+       * @returns {Promise<WidgetTemplate[]>}
+       * @throws {EneoError}
+       */
+      list: async () => {
+        const res = await client.fetch("/api/v1/widget-templates/", { method: "get" });
+        return res.items;
+      },
+
+      /**
+       * @param {import('../types/fetch').JSONRequestBody<"post", "/api/v1/admin/widget-templates/">} template
+       * @returns {Promise<WidgetTemplate>}
+       * @throws {EneoError}
+       */
+      create: async (template) => {
+        const res = await client.fetch("/api/v1/admin/widget-templates/", {
+          method: "post",
+          requestBody: { "application/json": template }
+        });
+        return res;
+      },
+
+      /**
+       * @param {{id: string}} template
+       * @returns {Promise<WidgetTemplate>}
+       * @throws {EneoError}
+       */
+      get: async ({ id }) => {
+        const res = await client.fetch("/api/v1/admin/widget-templates/{id}/", {
+          method: "get",
+          params: { path: { id } }
+        });
+        return res;
+      },
+
+      /**
+       * @param {Object} params
+       * @param {{id: string}} params.template
+       * @param {import('../types/fetch').JSONRequestBody<"patch", "/api/v1/admin/widget-templates/{id}/">} params.update
+       * @returns {Promise<WidgetTemplate>}
+       * @throws {EneoError}
+       */
+      update: async ({ template, update }) => {
+        const res = await client.fetch("/api/v1/admin/widget-templates/{id}/", {
+          method: "patch",
+          params: { path: { id: template.id } },
+          requestBody: { "application/json": update }
+        });
+        return res;
+      },
+
+      /**
+       * @param {{id: string}} template
+       * @returns status 204 on success; should throw on error
+       * @throws {EneoError}
+       */
+      delete: async ({ id }) => {
+        const res = await client.fetch("/api/v1/admin/widget-templates/{id}/", {
+          method: "delete",
+          params: { path: { id } }
+        });
+        return res;
+      }
     },
 
     policy: {

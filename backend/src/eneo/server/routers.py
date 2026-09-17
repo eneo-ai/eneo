@@ -158,11 +158,17 @@ from eneo.widgets.presentation.public_widget_router import (
     router as public_widgets_router,
 )
 from eneo.widgets.presentation.widget_router import (
+    admin_templates_router as admin_widget_templates_router,
+)
+from eneo.widgets.presentation.widget_router import (
     policy_router as widget_policy_router,
 )
 from eneo.widgets.presentation.widget_router import router as widgets_router
 from eneo.widgets.presentation.widget_router import (
     space_widgets_router,
+)
+from eneo.widgets.presentation.widget_router import (
+    templates_router as widget_templates_router,
 )
 
 router = APIRouter()
@@ -382,6 +388,15 @@ router.include_router(public_widgets_router, prefix="/widgets", tags=["widgets"]
 router.include_router(
     widget_policy_router,
     prefix="/admin/widget-policy",
+    tags=["admin", "widgets"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+router.include_router(
+    widget_templates_router, prefix="/widget-templates", tags=["widgets"]
+)
+router.include_router(
+    admin_widget_templates_router,
+    prefix="/admin/widget-templates",
     tags=["admin", "widgets"],
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )

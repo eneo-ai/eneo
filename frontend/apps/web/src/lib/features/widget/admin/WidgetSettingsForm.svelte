@@ -4,27 +4,40 @@
   them as units.
 -->
 <script lang="ts">
-  import type { WidgetPolicy } from "@eneo/eneo-js";
-  import { Input } from "@eneo/ui";
+  import type { WidgetPolicy, WidgetTemplate } from "@eneo/eneo-js";
+  import { Button, Input } from "@eneo/ui";
   import { Settings } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
   import { untrack } from "svelte";
-  import { contrastVerdict, DEFAULT_PRIMARY_COLOR, isHexColor } from "./contrast";
+  import { inputClass, textareaClass } from "./fieldStyles";
   import type { WidgetAutosave } from "./widgetAutosave.svelte";
+  import WidgetTextsFields from "./WidgetTextsFields.svelte";
+  import WidgetThemeFields from "./WidgetThemeFields.svelte";
 
   type Props = {
     autosave: WidgetAutosave;
     policy: WidgetPolicy | null;
     assistantPublished: boolean;
+    templates: WidgetTemplate[];
+    onApplyTemplate: (templateId: string) => Promise<void>;
   };
 
-  let { autosave, policy, assistantPublished }: Props = $props();
+  let { autosave, policy, assistantPublished, templates, onApplyTemplate }: Props = $props();
 
   const widget = $derived(autosave.widget);
 
-  const inputClass =
-    "border-default bg-primary ring-default rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2 w-full";
-  const textareaClass = `${inputClass} min-h-24 placeholder:text-muted`;
+  let selectedTemplate = $state("");
+  let applying = $state(false);
+
+  async function applyTemplate() {
+    if (!selectedTemplate) return;
+    applying = true;
+    try {
+      await onApplyTemplate(selectedTemplate);
+    } finally {
+      applying = false;
+    }
+  }
 
   function texts(change: Partial<typeof widget.texts>) {
     autosave.patch({ texts: { ...widget.texts, ...change } });
@@ -44,33 +57,15 @@
     if (Number.isFinite(value)) apply(value);
   }
 
-  const lines = (values: string[] | undefined) => (values ?? []).join("\n");
   const fromLines = (value: string) =>
     value
       .split("\n")
       .map((line) => line.trim())
       .filter(Boolean);
 
-  // Local text for the origins and suggestions so a trailing newline is not
-  // eaten while typing; the widget gets the parsed list.
-  let originsText = $state(untrack(() => lines(autosave.widget.allowed_origins)));
-  let suggestionsText = $state(untrack(() => lines(autosave.widget.texts.suggested_questions)));
-
-  const primaryColor = $derived(widget.theme.primary_color ?? DEFAULT_PRIMARY_COLOR);
-  const contrast = $derived(contrastVerdict(primaryColor));
-  const contrastLabel = $derived.by(() => {
-    const ratio = contrast.ratio.toFixed(1);
-    switch (contrast.verdict) {
-      case "text":
-        return m.widget_admin_contrast_ok({ ratio });
-      case "graphics":
-        return m.widget_admin_contrast_graphics_only({ ratio });
-      case "fail":
-        return m.widget_admin_contrast_fail({ ratio });
-      default:
-        return m.widget_admin_contrast_invalid();
-    }
-  });
+  // Local text for the origins so a trailing newline is not eaten while
+  // typing; the widget gets the parsed list.
+  let originsText = $state(untrack(() => (autosave.widget.allowed_origins ?? []).join("\n")));
 
   const languages = $derived([
     { value: "auto", label: m.widget_admin_language_auto() },
@@ -108,6 +103,32 @@
         {/each}
       </select>
     </Settings.Row>
+    {#if templates.length > 0 && widget.status !== "archived"}
+      <Settings.Row
+        title={m.widget_admin_template()}
+        description={m.widget_admin_template_apply_description()}
+        let:aria
+      >
+        <div class="flex flex-col gap-2 sm:flex-row">
+          <select class={inputClass} {...aria} bind:value={selectedTemplate}>
+            <option value="">{m.widget_admin_template_choose()}</option>
+            {#each templates as template (template.id)}
+              <option value={template.id}>
+                {template.name}{template.is_default
+                  ? ` (${m.widget_admin_template_default()})`
+                  : ""}
+              </option>
+            {/each}
+          </select>
+          <Button
+            variant="outlined"
+            onclick={applyTemplate}
+            disabled={!selectedTemplate || applying}
+            aria-disabled={!selectedTemplate}>{m.widget_admin_template_apply()}</Button
+          >
+        </div>
+      </Settings.Row>
+    {/if}
     {#if !assistantPublished}
       <Settings.Row
         title={m.widget_admin_assistant_unpublished_title()}
@@ -119,186 +140,11 @@
   </Settings.Group>
 
   <Settings.Group title={m.widget_admin_texts()}>
-    <Settings.Row
-      title={m.widget_admin_text_title()}
-      description={m.widget_admin_text_title_description()}
-      let:aria
-    >
-      <input
-        type="text"
-        class={inputClass}
-        maxlength="80"
-        {...aria}
-        value={widget.texts.title}
-        oninput={(event) => texts({ title: event.currentTarget.value })}
-      />
-    </Settings.Row>
-    <Settings.Row
-      title={m.widget_admin_text_welcome()}
-      description={m.widget_admin_text_welcome_description()}
-      let:aria
-    >
-      <textarea
-        class={textareaClass}
-        maxlength="500"
-        {...aria}
-        value={widget.texts.welcome}
-        oninput={(event) => texts({ welcome: event.currentTarget.value })}></textarea>
-    </Settings.Row>
-    <Settings.Row
-      title={m.widget_admin_text_placeholder()}
-      description={m.widget_admin_text_placeholder_description()}
-      let:aria
-    >
-      <input
-        type="text"
-        class={inputClass}
-        maxlength="120"
-        {...aria}
-        value={widget.texts.placeholder}
-        oninput={(event) => texts({ placeholder: event.currentTarget.value })}
-      />
-    </Settings.Row>
-    <Settings.Row
-      title={m.widget_admin_text_suggestions()}
-      description={m.widget_admin_text_suggestions_description()}
-      let:aria
-    >
-      <textarea
-        class={textareaClass}
-        {...aria}
-        bind:value={suggestionsText}
-        oninput={() => texts({ suggested_questions: fromLines(suggestionsText).slice(0, 5) })}
-      ></textarea>
-    </Settings.Row>
-    <Settings.Row
-      title={m.widget_admin_text_disclosure()}
-      description={m.widget_admin_text_disclosure_description()}
-      let:aria
-    >
-      <textarea
-        class={textareaClass}
-        maxlength="300"
-        required
-        aria-required="true"
-        aria-invalid={!(widget.texts.ai_disclosure ?? "").trim()}
-        {...aria}
-        value={widget.texts.ai_disclosure}
-        oninput={(event) => texts({ ai_disclosure: event.currentTarget.value })}></textarea>
-    </Settings.Row>
-    <Settings.Row
-      title={m.widget_admin_text_personal_data()}
-      description={m.widget_admin_text_personal_data_description()}
-      let:aria
-    >
-      <textarea
-        class={textareaClass}
-        maxlength="300"
-        {...aria}
-        value={widget.texts.personal_data_notice}
-        oninput={(event) => texts({ personal_data_notice: event.currentTarget.value })}></textarea>
-    </Settings.Row>
-    <Settings.Row
-      title={m.widget_admin_text_privacy_url()}
-      description={m.widget_admin_text_privacy_url_description()}
-      let:aria
-    >
-      <input
-        type="url"
-        class={inputClass}
-        maxlength="500"
-        {...aria}
-        value={widget.texts.privacy_url ?? ""}
-        oninput={(event) => texts({ privacy_url: event.currentTarget.value.trim() || null })}
-      />
-    </Settings.Row>
+    <WidgetTextsFields texts={widget.texts} onChange={texts} />
   </Settings.Group>
 
   <Settings.Group title={m.widget_admin_appearance()}>
-    <Settings.Row
-      title={m.widget_admin_primary_color()}
-      description={m.widget_admin_primary_color_description()}
-      let:aria
-    >
-      <div class="flex items-center gap-3">
-        <input
-          type="color"
-          class="border-default h-10 w-14 cursor-pointer rounded-lg border"
-          aria-label={m.widget_admin_primary_color_picker()}
-          value={isHexColor(primaryColor) ? primaryColor : DEFAULT_PRIMARY_COLOR}
-          oninput={(event) => theme({ primary_color: event.currentTarget.value })}
-        />
-        <input
-          type="text"
-          class={inputClass}
-          pattern="#[0-9a-fA-F]{6}"
-          maxlength="7"
-          aria-invalid={contrast.verdict === "invalid"}
-          {...aria}
-          value={primaryColor}
-          oninput={(event) => theme({ primary_color: event.currentTarget.value.trim() })}
-        />
-      </div>
-      <p
-        class={[
-          "mt-2 text-sm",
-          contrast.verdict === "text" ? "text-positive-default" : "text-warning-stronger"
-        ]}
-        aria-live="polite"
-      >
-        {contrastLabel}
-      </p>
-    </Settings.Row>
-    <Settings.Row
-      title={m.widget_admin_color_scheme()}
-      description={m.widget_admin_color_scheme_description()}
-      let:aria
-    >
-      <select
-        class={inputClass}
-        {...aria}
-        value={widget.theme.color_scheme}
-        onchange={(event) =>
-          theme({ color_scheme: event.currentTarget.value as typeof widget.theme.color_scheme })}
-      >
-        <option value="auto">{m.widget_admin_scheme_auto()}</option>
-        <option value="light">{m.widget_admin_scheme_light()}</option>
-        <option value="dark">{m.widget_admin_scheme_dark()}</option>
-      </select>
-    </Settings.Row>
-    <Settings.Row
-      title={m.widget_admin_position()}
-      description={m.widget_admin_position_description()}
-      let:aria
-    >
-      <select
-        class={inputClass}
-        {...aria}
-        value={widget.theme.position}
-        onchange={(event) =>
-          theme({ position: event.currentTarget.value as typeof widget.theme.position })}
-      >
-        <option value="bottom-right">{m.widget_admin_position_right()}</option>
-        <option value="bottom-left">{m.widget_admin_position_left()}</option>
-      </select>
-    </Settings.Row>
-    <Settings.Row
-      title={m.widget_admin_radius()}
-      description={m.widget_admin_radius_description()}
-      let:aria
-    >
-      <input
-        type="number"
-        class={inputClass}
-        min="0"
-        max="24"
-        step="1"
-        {...aria}
-        value={widget.theme.radius}
-        oninput={(event) =>
-          number(event, (value) => theme({ radius: Math.min(24, Math.max(0, value)) }))}
-      />
-    </Settings.Row>
+    <WidgetThemeFields theme={widget.theme} onChange={theme} />
   </Settings.Group>
 
   <Settings.Group title={m.widget_admin_placement()}>

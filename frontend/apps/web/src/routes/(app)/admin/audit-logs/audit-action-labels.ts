@@ -596,6 +596,18 @@ const ACTION_MESSAGES = {
   widget_budget_exhausted: {
     name: m.audit_action_widget_budget_exhausted,
     description: m.audit_action_widget_budget_exhausted_description
+  },
+  widget_template_created: {
+    name: m.audit_action_widget_template_created,
+    description: m.audit_action_widget_template_created_description
+  },
+  widget_template_updated: {
+    name: m.audit_action_widget_template_updated,
+    description: m.audit_action_widget_template_updated_description
+  },
+  widget_template_deleted: {
+    name: m.audit_action_widget_template_deleted,
+    description: m.audit_action_widget_template_deleted_description
   }
 } satisfies Record<ActionType, { name: MessageFn; description: MessageFn }>;
 

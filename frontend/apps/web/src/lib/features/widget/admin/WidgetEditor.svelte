@@ -3,7 +3,7 @@
   settings on the left, the live preview, snippet and in-app test on the right.
 -->
 <script lang="ts">
-  import type { Assistant, Eneo, Widget, WidgetPolicy } from "@eneo/eneo-js";
+  import type { Assistant, Eneo, Widget, WidgetPolicy, WidgetTemplate } from "@eneo/eneo-js";
   import { beforeNavigate } from "$app/navigation";
   import { page } from "$app/state";
   import { toastError } from "$lib/core/errors";
@@ -25,9 +25,10 @@
     isAdmin: boolean;
     policy: WidgetPolicy | null;
     release: LoaderRelease | null;
+    templates?: WidgetTemplate[];
   };
 
-  let { widget, assistant, eneo, isAdmin, policy, release }: Props = $props();
+  let { widget, assistant, eneo, isAdmin, policy, release, templates = [] }: Props = $props();
 
   const autosave = untrack(
     () =>
@@ -48,6 +49,15 @@
   const lifecycle = (action: (params: { id: string }) => Promise<Widget>) => async () => {
     autosave.replace(await action({ id: widget.id }));
   };
+
+  async function applyTemplate(templateId: string) {
+    try {
+      await autosave.flush();
+      autosave.replace(await eneo.widgets.applyTemplate({ widget: { id: widget.id }, templateId }));
+    } catch (error) {
+      toastError(error, m.widget_admin_template_could_not_apply());
+    }
+  }
 </script>
 
 <div class="flex flex-col gap-6">
@@ -61,7 +71,13 @@
 
   <div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(380px,460px)]">
     <div class="flex min-w-0 flex-col gap-6">
-      <WidgetSettingsForm {autosave} {policy} assistantPublished={assistant.published ?? false} />
+      <WidgetSettingsForm
+        {autosave}
+        {policy}
+        assistantPublished={assistant.published ?? false}
+        {templates}
+        onApplyTemplate={applyTemplate}
+      />
       <WidgetUsage widget={autosave.widget} {eneo} />
     </div>
     <aside class="flex min-w-0 flex-col gap-4 self-start xl:sticky xl:top-4">

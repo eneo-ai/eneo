@@ -102,8 +102,12 @@ class BotProtection(str, Enum):
     NONE = "none"
 
 
-def _clean(value: str) -> str:
+def clean_text(value: str) -> str:
+    """Collapse whitespace; the normalisation every visitor-facing text gets."""
     return " ".join(value.split())
+
+
+_clean = clean_text
 
 
 class WidgetTexts(BaseModel):

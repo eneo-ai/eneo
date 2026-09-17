@@ -12,10 +12,11 @@ export const load: PageLoad = async (event) => {
   }
 
   const isAdmin = hasPermission(user)("admin");
-  const [assistant, widgets, policy] = await Promise.all([
+  const [assistant, widgets, policy, templates] = await Promise.all([
     eneo.assistants.get({ id: assistantId }),
     eneo.widgets.list({ spaceId: currentSpace.id }),
-    isAdmin ? eneo.widgets.policy.get().catch(() => null) : Promise.resolve(null)
+    isAdmin ? eneo.widgets.policy.get().catch(() => null) : Promise.resolve(null),
+    eneo.widgets.templates.list().catch(() => [])
   ]);
 
   return {
@@ -23,6 +24,7 @@ export const load: PageLoad = async (event) => {
     assistant,
     widget: widgets.find((w) => w.target_id === assistantId && w.status !== "archived") ?? null,
     isAdmin,
-    policy
+    policy,
+    templates
   };
 };

@@ -28,6 +28,14 @@ class WidgetCreate(BaseModel):
     target_id: UUID = Field(description="Assistant in the space to publish.")
     name: str = Field(min_length=1, max_length=100)
     language: WidgetLanguage = WidgetLanguage.AUTO
+    template_id: Optional[UUID] = Field(
+        default=None,
+        description="Template whose texts, theme and language are copied onto the new widget.",
+    )
+
+
+class WidgetApplyTemplate(BaseModel):
+    template_id: UUID
 
 
 class WidgetUpdate(BaseModel):
@@ -71,6 +79,38 @@ class WidgetPublic(BaseModel):
     activated_by_user_id: Optional[UUID] = None
     activated_at: Optional[datetime] = None
     paused_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class WidgetTemplateCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=100)
+    language: WidgetLanguage = WidgetLanguage.AUTO
+    is_default: bool = False
+
+
+class WidgetTemplateUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    description: Optional[str] = Field(default=None, max_length=500)
+    texts: Optional[WidgetTexts] = None
+    theme: Optional[WidgetTheme] = None
+    language: Optional[WidgetLanguage] = None
+    is_default: Optional[bool] = None
+
+
+class WidgetTemplatePublic(BaseModel):
+    id: UUID
+    name: str
+    description: str
+    texts: WidgetTexts
+    theme: WidgetTheme
+    language: WidgetLanguage
+    is_default: bool
+    created_by_user_id: Optional[UUID] = None
     created_at: datetime
     updated_at: datetime
 
