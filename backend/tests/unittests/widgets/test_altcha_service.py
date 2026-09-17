@@ -30,6 +30,7 @@ def _settings(**overrides) -> SimpleNamespace:
     base = dict(
         url_signing_key="signing-key",
         widget_altcha_cost=2_000,
+        widget_altcha_key_prefix="00",
         widget_altcha_challenge_ttl_seconds=300,
         widget_rate_limit_fail_open=False,
     )

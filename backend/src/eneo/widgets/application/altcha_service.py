@@ -48,6 +48,7 @@ class AltchaService:
         challenge = _altcha.create_challenge(
             ALGORITHM,
             self.settings.widget_altcha_cost,
+            key_prefix=self.settings.widget_altcha_key_prefix,
             expires_at=int(time.time())
             + self.settings.widget_altcha_challenge_ttl_seconds,
             hmac_secret=self._secret,

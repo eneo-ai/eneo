@@ -455,9 +455,14 @@ class Settings(BaseSettings):
     widget_visitor_token_ttl_seconds: int = Field(default=900, gt=0)
     widget_visitor_token_grace_seconds: int = Field(default=3600, ge=0)
     widget_preview_token_ttl_seconds: int = Field(default=3600, gt=0)
-    # ALTCHA proof-of-work cost (expected hash count). ~0.5 s in Python at
-    # 100k; browsers solve it several times faster.
+    # ALTCHA v2 proof of work: each attempt derives a key with `cost` hash
+    # iterations and must land on `key_prefix`, so the expected work is
+    # 16**len(key_prefix) * cost iterations (256 * 50k by default). Measured:
+    # a solved attempt at cost 1000 took ~0.24 s in headless Chromium on a
+    # GitHub runner and the attempt count is geometric, so keep the budget in
+    # mind for phones; the E2E stack shortens the prefix to "0".
     widget_altcha_cost: int = Field(default=50_000, ge=1_000)
+    widget_altcha_key_prefix: str = Field(default="00", pattern=r"^[0-9a-f]{1,4}$")
     widget_altcha_challenge_ttl_seconds: int = Field(default=300, gt=0)
     widget_challenge_rate_limit_per_minute: int = Field(default=60, gt=0)
     # Fail closed by default: an unmetered public LLM endpoint is a cost
