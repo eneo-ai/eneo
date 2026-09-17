@@ -1095,3 +1095,73 @@ async def test_export_install_preserves_upload_transcription_dependency(
     assert parse_runtime_input_config(
         installed_step.input_config
     ) == parse_runtime_input_config(input_config)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target_has_model", [False, True])
+async def test_install_preserves_previous_step_audio_upload_transcription(
+    target_has_model: bool,
+) -> None:
+    envelope = _envelope(
+        requirements=[],
+        assistant=AssistantSpec(instructions="Pass through."),
+        extra_steps=[
+            StepSpec(
+                plan_step_ref="upload",
+                name="Upload audio",
+                assistant_spec=AssistantSpec(instructions="Pass through."),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                input_config={
+                    "runtime_input": {
+                        "enabled": True,
+                        "required": True,
+                        "input_format": "audio",
+                    }
+                },
+            )
+        ],
+    )
+    envelope = read_flow_package(write_flow_package(envelope))
+    target_model_id = uuid4() if target_has_model else None
+    candidates = _candidates()
+    plan = build_flow_package_import_plan(
+        envelope,
+        candidates=candidates,
+        default_transcription_model_id=target_model_id,
+    )
+    assert plan.target_state.audio_transcription_required is True
+    assert plan.target_state.default_transcription_model_id == target_model_id
+    service = _flow_service()
+    if not target_has_model:
+        assert plan.can_install_as_draft is False
+        with pytest.raises(FlowPackageValidationError) as exc_info:
+            await _install_as_draft(
+                envelope=envelope,
+                flow_service=service,
+                space_id=uuid4(),
+                selected_bindings=(),
+                candidates=candidates,
+            )
+        assert (
+            exc_info.value.code
+            is FlowPackageErrorCode.IMPORT_UNAVAILABLE_LOCAL_RESOURCE
+        )
+        assert exc_info.value.context["slot_ref"] == "model.flow_input_transcription"
+        service.create_flow.assert_not_awaited()
+        return
+    await _install_as_draft(
+        envelope=envelope,
+        flow_service=service,
+        space_id=uuid4(),
+        selected_bindings=(),
+        candidates=candidates,
+        default_transcription_model_id=target_model_id,
+    )
+    config = parse_transcription_config(
+        service.create_flow.await_args.kwargs["metadata_json"]
+    )
+    assert config.enabled is True
+    assert config.model_id == target_model_id
+    installed_step = service.update_flow.await_args.kwargs["steps"][1]
+    assert installed_step.input_config == envelope.spec.steps[1].input_config

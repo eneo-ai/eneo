@@ -49,9 +49,10 @@ def requires_audio_transcription(
     steps: Sequence[StepSpec | FlowStepValidationView],
 ) -> bool:
     for step in steps:
-        if step.input_source != InputSource.FLOW_INPUT:
-            continue
-        if step.input_type == InputType.AUDIO:
+        if (
+            step.input_source == InputSource.FLOW_INPUT
+            and step.input_type == InputType.AUDIO
+        ):
             return True
         runtime_input = parse_runtime_input_config(step.input_config)
         if runtime_input.enabled and runtime_input.input_format == "audio":

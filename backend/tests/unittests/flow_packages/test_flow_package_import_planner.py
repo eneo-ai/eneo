@@ -479,11 +479,33 @@ def test_planner_exposes_audio_target_state_and_blocks_missing_default_model(
     assert ready.can_install_as_draft is True
 
 
-def test_audio_upload_graph_requires_transcription_model() -> None:
+@pytest.mark.parametrize(
+    "input_source", [InputSource.FLOW_INPUT, InputSource.PREVIOUS_STEP]
+)
+def test_audio_upload_graph_requires_transcription_model(
+    input_source: InputSource,
+) -> None:
+    upload_config: FlowPersistedJsonObject = {
+        "runtime_input": {"enabled": True, "required": True, "input_format": "audio"},
+    }
     envelope = _envelope(
         requirements=[],
-        input_type=InputType.DOCUMENT,
-        input_config={"runtime_input": {"enabled": True, "input_format": "audio"}},
+        input_type=InputType.DOCUMENT
+        if input_source is InputSource.FLOW_INPUT
+        else InputType.TEXT,
+        input_config=upload_config if input_source is InputSource.FLOW_INPUT else None,
+        extra_steps=[
+            StepSpec(
+                plan_step_ref="upload",
+                name="Upload audio",
+                assistant_spec=AssistantSpec(instructions="Pass through."),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                input_config=upload_config,
+            )
+        ]
+        if input_source is InputSource.PREVIOUS_STEP
+        else None,
     )
     steps = flow_step_validation_views_from_draft_spec(envelope.spec.steps)
     issues = collect_step_graph_issues(
