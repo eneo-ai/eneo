@@ -35,8 +35,13 @@
   // What is typed stays local until it is a complete hex colour; the server
   // only ever sees valid values, so no error appears mid-typing.
   let draft = $state(untrack(() => value ?? ""));
+  let lastSaved = untrack(() => value ?? "");
   $effect(() => {
-    if ((value ?? "") !== draft && (isHexColor(draft) || draft === "")) draft = value ?? "";
+    const saved = value ?? "";
+    if (saved !== lastSaved) {
+      lastSaved = saved;
+      draft = saved;
+    }
   });
   const current = $derived(draft);
   const pickerValue = $derived(isHexColor(current) ? current : DEFAULT_PRIMARY_COLOR);
@@ -67,16 +72,28 @@
 <Field.Field data-invalid={invalid || undefined}>
   <Field.Label for={id}>{label}</Field.Label>
   <div class="flex items-center gap-2">
-    <input
-      type="color"
-      class="border-default h-8 w-12 shrink-0 cursor-pointer rounded-lg border bg-transparent p-0.5"
-      aria-label={m.widget_admin_primary_color_picker()}
-      value={pickerValue}
-      oninput={(event) => typed(event.currentTarget.value)}
-    />
+    <span class="relative h-8 w-12 shrink-0">
+      {#if clearable && !current}
+        <!-- No colour chosen: an empty, dashed swatch instead of a misleading default. -->
+        <span
+          class="border-default absolute inset-0 rounded-lg border border-dashed"
+          aria-hidden="true"
+        ></span>
+      {/if}
+      <input
+        type="color"
+        class={[
+          "border-default h-8 w-12 cursor-pointer rounded-lg border bg-transparent p-0.5",
+          clearable && !current && "opacity-0"
+        ]}
+        aria-label={m.widget_admin_primary_color_picker()}
+        value={pickerValue}
+        oninput={(event) => typed(event.currentTarget.value)}
+      />
+    </span>
     <Input
       {id}
-      class="max-w-40 font-mono uppercase"
+      class="max-w-40 font-mono"
       maxlength={7}
       placeholder={clearable ? m.widget_admin_header_color_none() : DEFAULT_PRIMARY_COLOR}
       aria-invalid={invalid}

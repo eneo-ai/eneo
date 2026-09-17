@@ -211,7 +211,7 @@
       {:else}
         <!-- Eneo's mark stands in until the organisation sets its own logo. -->
         <span class="flex h-8 w-8 shrink-0 items-center justify-center" aria-hidden="true">
-          <IconEneo size="md" />
+          <IconEneo size="md" class="text-brand-eneo" viewBox="0 -21 214 214" />
         </span>
       {/if}
       <div class="min-w-0">

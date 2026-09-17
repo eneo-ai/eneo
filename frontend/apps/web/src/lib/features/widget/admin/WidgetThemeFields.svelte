@@ -34,9 +34,16 @@
   let logoDraft = $state(untrack(() => theme.logo_url ?? ""));
   let logoInvalid = $state(false);
   let logoBroken = $state(false);
+  let lastSavedLogo = untrack(() => theme.logo_url ?? "");
   $effect(() => {
+    // Follow a new saved value (template applied, other tab) without ever
+    // touching what is being typed.
     const saved = theme.logo_url ?? "";
-    if (saved !== logoDraft && !logoInvalid) logoDraft = saved;
+    if (saved !== lastSavedLogo) {
+      lastSavedLogo = saved;
+      logoDraft = saved;
+      logoInvalid = false;
+    }
   });
 
   function commitLogo() {
@@ -96,7 +103,7 @@
             onload={() => (logoBroken = false)}
           />
         {:else}
-          <IconEneo size="md" />
+          <IconEneo size="md" class="text-brand-eneo" viewBox="0 -21 214 214" />
         {/if}
       </span>
       <Input

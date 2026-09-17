@@ -24,9 +24,14 @@
   // The privacy link is committed when the field is left, never per keystroke.
   let privacyDraft = $state(untrack(() => texts.privacy_url ?? ""));
   let privacyInvalid = $state(false);
+  let lastSavedPrivacy = untrack(() => texts.privacy_url ?? "");
   $effect(() => {
     const saved = texts.privacy_url ?? "";
-    if (saved !== privacyDraft && !privacyInvalid) privacyDraft = saved;
+    if (saved !== lastSavedPrivacy) {
+      lastSavedPrivacy = saved;
+      privacyDraft = saved;
+      privacyInvalid = false;
+    }
   });
   function commitPrivacy() {
     const trimmed = privacyDraft.trim();
