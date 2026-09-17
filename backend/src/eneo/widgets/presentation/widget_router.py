@@ -6,7 +6,7 @@
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
@@ -23,6 +23,8 @@ from eneo.widgets.presentation.widget_models import (
     WidgetPolicyUpdate,
     WidgetPublic,
     WidgetUpdate,
+    WidgetUsageDayPublic,
+    WidgetUsagePublic,
 )
 
 # Mounted under /spaces, /widgets and /admin/widget-policy respectively.
@@ -156,6 +158,39 @@ async def update_widget(id: UUID, body: WidgetUpdate, container: _ContainerWithU
         },
     )
     return assembler.from_view(view)
+
+
+@router.get(
+    "/{id}/usage/",
+    response_model=WidgetUsagePublic,
+    description="Daily usage for a widget: questions, tokens and blocked requests.",
+    responses=responses.get_responses([403, 404]),
+)
+async def get_widget_usage(
+    id: UUID,
+    container: _ContainerWithUser,
+    days: Annotated[int, Query(ge=1, le=90)] = 30,
+):
+    service = container.widget_service()
+    view = await service.get_widget(id)
+    assert view.widget.id is not None
+    rows = await container.widget_usage_repo().list_days(view.widget.id, days=days)
+    used_today = await container.widget_budget().used_today(view.widget)
+    return WidgetUsagePublic(
+        days=[
+            WidgetUsageDayPublic(
+                day=row.day,
+                questions=row.questions,
+                input_tokens=row.input_tokens,
+                output_tokens=row.output_tokens,
+                blocked_budget=row.blocked_budget,
+                blocked_rate=row.blocked_rate,
+            )
+            for row in rows
+        ],
+        budget_used_today=used_today,
+        daily_token_budget=view.widget.limits.daily_token_budget,
+    )
 
 
 @router.post(

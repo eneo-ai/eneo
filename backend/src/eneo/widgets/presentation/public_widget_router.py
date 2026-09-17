@@ -3,22 +3,28 @@
 # Licensed under the MIT License.
 
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Request, Response
 
+from eneo.assistants.api import assistant_protocol
 from eneo.main.config import get_settings
 from eneo.server.dependencies.widget_auth import (
     ActiveWidget,
     PublicContainer,
+    VisitorContainer,
     client_ip,
 )
 from eneo.server.protocol import responses
+from eneo.sessions.session import AskResponse, SessionFeedback, SessionPublic
+from eneo.sessions.session_protocol import to_session_public
 from eneo.widgets.domain.exceptions import ChallengeInvalidError
+from eneo.widgets.domain.visitor import WidgetPrincipal
 from eneo.widgets.domain.widget import BotProtection
 from eneo.widgets.presentation.public_widget_models import (
     VisitorSession,
     VisitorSessionRequest,
+    WidgetAsk,
     WidgetChallenge,
     WidgetPublicConfig,
 )
@@ -124,3 +130,65 @@ async def create_visitor_session(
 
     token, expires_in = tokens.mint(widget, visitor_id)
     return VisitorSession(token=token, expires_in=expires_in, visitor_id=visitor_id)
+
+
+def _principal(request: Request) -> WidgetPrincipal:
+    return request.state.widget_principal
+
+
+@router.post(
+    "/{public_id}/ask/",
+    response_model=AskResponse,
+    description=(
+        "Ask the widget's assistant as a visitor. Always streams Server-Sent"
+        " Events. Pass `session_id` to continue one of the visitor's own"
+        " sessions; tools, uploads and MCP servers are never available here."
+    ),
+    responses=responses.streaming_response(AskResponse, [400, 401, 404, 429, 503]),
+)
+async def ask_widget(request: Request, body: WidgetAsk, container: VisitorContainer):
+    response = await container.widget_ask_service().ask(
+        _principal(request),
+        question=body.question,
+        session_id=body.session_id,
+        client_ip=client_ip(request),
+    )
+    return await assistant_protocol.to_response(
+        response=response, stream=True, show_pricing=False
+    )
+
+
+@router.get(
+    "/{public_id}/sessions/{session_id}/",
+    response_model=SessionPublic,
+    description="Restore one of the visitor's own sessions after a reload.",
+    responses=responses.get_responses([401, 404]),
+)
+async def get_widget_session(
+    request: Request, session_id: UUID, container: VisitorContainer
+):
+    session = await container.widget_ask_service().get_session(
+        _principal(request), session_id
+    )
+    return to_session_public(session)
+
+
+@router.post(
+    "/{public_id}/sessions/{session_id}/feedback/",
+    response_model=SessionPublic,
+    description=(
+        "Leave feedback on one of the visitor's own sessions. Free text is"
+        " dropped unless the widget stores feedback text."
+    ),
+    responses=responses.get_responses([401, 404]),
+)
+async def leave_widget_feedback(
+    request: Request,
+    session_id: UUID,
+    feedback: SessionFeedback,
+    container: VisitorContainer,
+):
+    session = await container.widget_ask_service().leave_feedback(
+        _principal(request), session_id, feedback
+    )
+    return to_session_public(session)

@@ -3207,6 +3207,26 @@ export interface paths {
     patch: operations["update_widget_api_v1_widgets__id___patch"];
     trace?: never;
   };
+  "/api/v1/widgets/{id}/usage/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Widget Usage
+     * @description Daily usage for a widget: questions, tokens and blocked requests.
+     */
+    get: operations["get_widget_usage_api_v1_widgets__id__usage__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/widgets/{id}/activate/": {
     parameters: {
       query?: never;
@@ -3321,6 +3341,66 @@ export interface paths {
      * @description Mint a short-lived visitor token. A new visitor sends a solved challenge; an existing visitor rotates silently with `previous_token` while it is valid or recently expired.
      */
     post: operations["create_visitor_session_api_v1_widgets__public_id__visitor_sessions__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/widgets/{public_id}/ask/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Ask Widget
+     * @description Ask the widget's assistant as a visitor. Always streams Server-Sent Events. Pass `session_id` to continue one of the visitor's own sessions; tools, uploads and MCP servers are never available here.
+     */
+    post: operations["ask_widget_api_v1_widgets__public_id__ask__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/widgets/{public_id}/sessions/{session_id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Widget Session
+     * @description Restore one of the visitor's own sessions after a reload.
+     */
+    get: operations["get_widget_session_api_v1_widgets__public_id__sessions__session_id___get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/widgets/{public_id}/sessions/{session_id}/feedback/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Leave Widget Feedback
+     * @description Leave feedback on one of the visitor's own sessions. Free text is dropped unless the widget stores feedback text.
+     */
+    post: operations["leave_widget_feedback_api_v1_widgets__public_id__sessions__session_id__feedback__post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -8819,7 +8899,8 @@ export interface components {
       | "widget_activated"
       | "widget_paused"
       | "widget_archived"
-      | "widget_policy_updated";
+      | "widget_policy_updated"
+      | "widget_budget_exhausted";
     /**
      * ActionUpdate
      * @description Represents an action-level configuration change request.
@@ -21063,6 +21144,7 @@ export interface components {
       user_groups?: components["schemas"]["UserGroupInDBRead"][];
       tenant: components["schemas"]["TenantInDB"];
       active_api_key?: components["schemas"]["ApiKeyV2InDB"] | null;
+      active_widget?: components["schemas"]["WidgetVisitorContext"] | null;
       /**
        * Roles
        * @default []
@@ -21241,6 +21323,7 @@ export interface components {
       user_groups?: components["schemas"]["UserGroupInDBRead"][];
       tenant: components["schemas"]["TenantInDB"];
       active_api_key?: components["schemas"]["ApiKeyV2InDB"] | null;
+      active_widget?: components["schemas"]["WidgetVisitorContext"] | null;
       /**
        * Roles
        * @default []
@@ -21852,6 +21935,16 @@ export interface components {
        */
       http_auth_password?: string | null;
     };
+    /** WidgetAsk */
+    WidgetAsk: {
+      /** Question */
+      question: string;
+      /**
+       * Session Id
+       * @description Continue one of the visitor's own sessions.
+       */
+      session_id?: string | null;
+    };
     /**
      * WidgetChallenge
      * @description ALTCHA v2 challenge as produced by the ``altcha`` library.
@@ -22117,6 +22210,70 @@ export interface components {
       /** Allowed Origins */
       allowed_origins?: string[] | null;
       bot_protection?: components["schemas"]["BotProtection"] | null;
+    };
+    /** WidgetUsageDayPublic */
+    WidgetUsageDayPublic: {
+      /**
+       * Day
+       * Format: date
+       */
+      day: string;
+      /** Questions */
+      questions: number;
+      /** Input Tokens */
+      input_tokens: number;
+      /** Output Tokens */
+      output_tokens: number;
+      /** Blocked Budget */
+      blocked_budget: number;
+      /** Blocked Rate */
+      blocked_rate: number;
+    };
+    /** WidgetUsagePublic */
+    WidgetUsagePublic: {
+      /** Days */
+      days: components["schemas"]["WidgetUsageDayPublic"][];
+      /**
+       * Budget Used Today
+       * @description Tokens charged against today's budget, including reservations in flight.
+       */
+      budget_used_today: number;
+      /** Daily Token Budget */
+      daily_token_budget: number;
+    };
+    /**
+     * WidgetVisitorContext
+     * @description Carried on the synthetic visitor ``UserInDB`` (``active_widget``).
+     *
+     *     Mirrors ``active_api_key`` for service keys: the only access path into a
+     *     space is the widget itself, and sessions are owned by widget + visitor.
+     */
+    WidgetVisitorContext: {
+      /**
+       * Widget Id
+       * Format: uuid
+       */
+      widget_id: string;
+      /**
+       * Visitor Id
+       * Format: uuid
+       */
+      visitor_id: string;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
+      /**
+       * Target Id
+       * Format: uuid
+       */
+      target_id: string;
     };
     /**
      * WizardType
@@ -34804,6 +34961,57 @@ export interface operations {
       };
     };
   };
+  get_widget_usage_api_v1_widgets__id__usage__get: {
+    parameters: {
+      query?: {
+        days?: number;
+      };
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WidgetUsagePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   activate_widget_api_v1_widgets__id__activate__post: {
     parameters: {
       query?: never;
@@ -35159,6 +35367,482 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  ask_widget_api_v1_widgets__public_id__ask__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        public_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WidgetAsk"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AskResponse"];
+          "text/event-stream": {
+            /** Id */
+            id?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+            completion_model?: components["schemas"]["CompletionModelPublic"] | null;
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+            /** Question */
+            question: string;
+            /** Answer */
+            answer: string;
+            /** Files */
+            files: components["schemas"]["FilePublic"][];
+            /** Generated Files */
+            generated_files: components["schemas"]["FilePublic"][];
+            /** References */
+            references: components["schemas"]["InfoBlobAskAssistantPublic"][];
+            tools: components["schemas"]["UseTools"];
+            /**
+             * Mcp Tool References
+             * @default []
+             */
+            mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
+            model?: components["schemas"]["CompletionModelPublic"] | null;
+            $defs: {
+              /** CompletionModelPublic */
+              CompletionModelPublic: {
+                /** Created At */
+                created_at?: string | null;
+                /** Updated At */
+                updated_at?: string | null;
+                /**
+                 * Id
+                 * Format: uuid
+                 */
+                id: string;
+                /** Name */
+                name: string;
+                /** Nickname */
+                nickname?: string | null;
+                /** Family */
+                family?: string | null;
+                /** Max Input Tokens */
+                max_input_tokens: number;
+                /** Max Output Tokens */
+                max_output_tokens: number;
+                /** Is Deprecated */
+                is_deprecated: boolean;
+                /** Nr Billion Parameters */
+                nr_billion_parameters?: number | null;
+                /** Hf Link */
+                hf_link?: string | null;
+                /** Stability */
+                stability?: string | null;
+                /** Hosting */
+                hosting?: string | null;
+                /** Open Source */
+                open_source?: boolean | null;
+                /** Description */
+                description?: string | null;
+                /** Deployment Name */
+                deployment_name?: string | null;
+                /** Org */
+                org?: string | null;
+                /** Vision */
+                vision: boolean;
+                /** Reasoning */
+                reasoning: boolean;
+                /**
+                 * Supports Tool Calling
+                 * @default false
+                 */
+                supports_tool_calling?: boolean;
+                /** Base Url */
+                base_url?: string | null;
+                /** Litellm Model Name */
+                litellm_model_name?: string | null;
+                model_kwargs_capabilities?: components["schemas"]["SupportedModelKwargs"] | null;
+                /** Input Cost Per Token */
+                input_cost_per_token?: number | string | null;
+                /** Output Cost Per Token */
+                output_cost_per_token?: number | string | null;
+                /**
+                 * Is Org Enabled
+                 * @default false
+                 */
+                is_org_enabled?: boolean;
+                /**
+                 * Is Org Default
+                 * @default false
+                 */
+                is_org_default?: boolean;
+                /** Tenant Id */
+                tenant_id?: string | null;
+                /** Provider Id */
+                provider_id?: string | null;
+                /** Provider Type */
+                provider_type?: string | null;
+                /** Migrated To Model Id */
+                migrated_to_model_id?: string | null;
+                /**
+                 * Can Access
+                 * @default false
+                 */
+                can_access?: boolean;
+                /**
+                 * Is Locked
+                 * @default true
+                 */
+                is_locked?: boolean;
+                /** Lock Reason */
+                lock_reason?: string | null;
+                /** Credential Provider */
+                credential_provider?: string | null;
+                security_classification?:
+                  components["schemas"]["SecurityClassificationPublic"] | null;
+                /** Provider Name */
+                provider_name?: string | null;
+                /** Deprecation Date */
+                deprecation_date?: string | null;
+              };
+              /** FilePublic */
+              FilePublic: {
+                /** Created At */
+                created_at?: string | null;
+                /** Updated At */
+                updated_at?: string | null;
+                /**
+                 * Id
+                 * Format: uuid
+                 */
+                id: string;
+                /** Name */
+                name: string;
+                /** Mimetype */
+                mimetype: string;
+                /** Size */
+                size: number;
+                /** Transcription */
+                transcription?: string | null;
+                /** Token Count */
+                token_count?: number | null;
+                /**
+                 * Has Download Reference
+                 * @default false
+                 */
+                has_download_reference?: boolean;
+              };
+              /** InfoBlobAskAssistantPublic */
+              InfoBlobAskAssistantPublic: {
+                /** Created At */
+                created_at?: string | null;
+                /** Updated At */
+                updated_at?: string | null;
+                /**
+                 * Id
+                 * Format: uuid
+                 */
+                id: string;
+                metadata: components["schemas"]["InfoBlobMetadata"];
+                /** Group Id */
+                group_id?: string | null;
+                /** Website Id */
+                website_id?: string | null;
+                /** Original Available */
+                original_available: boolean;
+                /** Score */
+                score: number;
+              };
+              /** InfoBlobMetadata */
+              InfoBlobMetadata: {
+                /** Url */
+                url?: string | null;
+                /** Title */
+                title?: string | null;
+                /**
+                 * Embedding Model Id
+                 * Format: uuid
+                 */
+                embedding_model_id: string;
+                /** Size */
+                size: number;
+              };
+              /**
+               * McpToolReferencePublic
+               * @description One MCP resource block captured from a tool call.
+               *
+               *     Generic across MCP servers: only `uri`, `mime_type`, `content`, and the
+               *     raw `meta` dict are exposed. Frontend may read generic keys from `meta`
+               *     (e.g. `sourceType`, `title`) to drive richer affordances but must degrade
+               *     gracefully when meta is empty.
+               */
+              McpToolReferencePublic: {
+                /** Created At */
+                created_at?: string | null;
+                /** Updated At */
+                updated_at?: string | null;
+                /**
+                 * Id
+                 * Format: uuid
+                 */
+                id: string;
+                /** Uri */
+                uri: string;
+                /** Mime Type */
+                mime_type?: string | null;
+                /** Content */
+                content?: string | null;
+                /**
+                 * Meta
+                 * @default {}
+                 */
+                meta?: {
+                  [key: string]: unknown;
+                };
+                /** Tool Call Id */
+                tool_call_id?: string | null;
+                /** Mcp Tool Name */
+                mcp_tool_name?: string | null;
+              };
+              /** ModelKwargCapability */
+              ModelKwargCapability: {
+                /**
+                 * Supported
+                 * @default false
+                 */
+                supported?: boolean;
+                /** Control */
+                control?: ("slider" | "select") | null;
+                /** Minimum */
+                minimum?: number | null;
+                /** Maximum */
+                maximum?: number | null;
+                /** Step */
+                step?: number | null;
+                /** Options */
+                options?: string[] | null;
+              };
+              /**
+               * SecurityClassificationPublic
+               * @description Basic security classification information.
+               */
+              SecurityClassificationPublic: {
+                /** Created At */
+                created_at?: string | null;
+                /** Updated At */
+                updated_at?: string | null;
+                /**
+                 * Id
+                 * Format: uuid
+                 */
+                id: string;
+                /** Name */
+                name: string;
+                /** Description */
+                description: string | null;
+                /** Security Level */
+                security_level: number;
+              };
+              /** SupportedModelKwargs */
+              SupportedModelKwargs: {
+                temperature?: components["schemas"]["ModelKwargCapability"];
+                top_p?: components["schemas"]["ModelKwargCapability"];
+                reasoning_effort?: components["schemas"]["ModelKwargCapability"];
+                verbosity?: components["schemas"]["ModelKwargCapability"];
+                presence_penalty?: components["schemas"]["ModelKwargCapability"];
+                frequency_penalty?: components["schemas"]["ModelKwargCapability"];
+                top_k?: components["schemas"]["ModelKwargCapability"];
+              };
+              /** ToolAssistant */
+              ToolAssistant: {
+                /**
+                 * Id
+                 * Format: uuid
+                 */
+                id: string;
+                /** Handle */
+                handle: string;
+              };
+              /** UseTools */
+              UseTools: {
+                /** Assistants */
+                assistants: components["schemas"]["ToolAssistant"][];
+              };
+            };
+          };
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_widget_session_api_v1_widgets__public_id__sessions__session_id___get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        session_id: string;
+        public_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SessionPublic"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  leave_widget_feedback_api_v1_widgets__public_id__sessions__session_id__feedback__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        session_id: string;
+        public_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SessionFeedback"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SessionPublic"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };

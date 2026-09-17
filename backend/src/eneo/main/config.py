@@ -463,6 +463,10 @@ class Settings(BaseSettings):
     # incident, so Redis loss blocks widget traffic unless overridden.
     widget_rate_limit_fail_open: bool = False
     widget_budget_timezone: str = "Europe/Stockholm"
+    # Tokens reserved against the daily budget before a widget answer starts;
+    # settled to the real usage afterwards. Sized for a RAG prompt plus a
+    # full answer so concurrent bursts cannot overshoot the cap.
+    widget_budget_reservation_tokens: int = Field(default=8_000, gt=0)
     trusted_proxy_count: int = 0
     trusted_proxy_headers: list[str] = ["x-forwarded-for", "x-real-ip"]
     jwt_audience: str

@@ -398,9 +398,11 @@ from eneo.websites.infrastructure.update_website_size_service import (
 from eneo.websites.infrastructure.website_cleaner_service import WebsiteCleanerService
 from eneo.widgets.application.altcha_service import AltchaService
 from eneo.widgets.application.visitor_token_service import VisitorTokenService
+from eneo.widgets.application.widget_ask_service import WidgetAskService
 from eneo.widgets.application.widget_limits import WidgetBudget, WidgetLimiter
 from eneo.widgets.application.widget_service import WidgetService
 from eneo.widgets.infrastructure.widget_repo_impl import WidgetRepoImpl
+from eneo.widgets.infrastructure.widget_usage_repo_impl import WidgetUsageRepoImpl
 from eneo.widgets.presentation.widget_assembler import WidgetAssembler
 from eneo.worker.task_manager import TaskManager
 from eneo.worker.tenant_concurrency import TenantConcurrencyLimiter
@@ -668,6 +670,7 @@ class Container(containers.DeclarativeContainer):
     governance_policy_assembler = providers.Factory(GovernancePolicyAssembler)
     widget_repo = providers.Factory(WidgetRepoImpl, session=session)
     widget_assembler = providers.Factory(WidgetAssembler)
+    widget_usage_repo = providers.Factory(WidgetUsageRepoImpl, session=session)
     widget_visitor_token_service = providers.Factory(VisitorTokenService)
     widget_altcha_service = providers.Factory(AltchaService, redis_client=redis_client)
     widget_limiter = providers.Factory(WidgetLimiter, redis_client=redis_client)
@@ -1291,6 +1294,16 @@ class Container(containers.DeclarativeContainer):
         api_key_scope_revoker=api_key_scope_revoker,
         effective_config_service=effective_config_service,
         skill_service=skill_service,
+    )
+    widget_ask_service = providers.Factory(
+        WidgetAskService,
+        user=user,
+        assistant_service=assistant_service,
+        session_service=session_service,
+        widget_limiter=widget_limiter,
+        widget_budget=widget_budget,
+        widget_usage_repo=widget_usage_repo,
+        audit_service=audit_service,
     )
     org_space_assistant_role_service = providers.Factory(
         OrgSpaceAssistantRoleService,

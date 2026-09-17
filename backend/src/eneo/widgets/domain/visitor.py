@@ -7,7 +7,25 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
+from pydantic import BaseModel, ConfigDict
+
 from eneo.widgets.domain.widget import Widget
+
+
+class WidgetVisitorContext(BaseModel):
+    """Carried on the synthetic visitor ``UserInDB`` (``active_widget``).
+
+    Mirrors ``active_api_key`` for service keys: the only access path into a
+    space is the widget itself, and sessions are owned by widget + visitor.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    widget_id: UUID
+    visitor_id: UUID
+    tenant_id: UUID
+    space_id: UUID
+    target_id: UUID
 
 
 @dataclass(frozen=True)

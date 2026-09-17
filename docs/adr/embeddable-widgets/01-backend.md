@@ -101,7 +101,7 @@ Client IP comes from `resolve_client_ip` (same trusted-proxy rules as API keys).
 4. Create/continue the session with `widget_id`/`visitor_id` and stream through the same `response_stream` layers as today (so new SSE event types keep flowing; see the three chunk-filter layers note in `docs/`).
 5. Settle the budget; upsert `widget_daily_usage`.
 
-Retention: a worker job (same scheduler as crawls) deletes widget sessions older than `privacy.retention_days` nightly; `retention_days=0` short-circuits persistence in step 4 (no session row, no follow-ups, `session_id` never returned).
+Retention: a worker cron job (`purge_widget_sessions`, daily 03:30 UTC, one transaction per widget) deletes widget sessions older than `privacy.retention_days`; `retention_days=0` deletes the session as soon as the streamed answer has been settled, so nothing outlives the turn and follow-ups answer 404.
 
 ## Admin API (Eneo session auth)
 
@@ -124,7 +124,7 @@ Retention: a worker job (same scheduler as crawls) deletes widget sessions older
 
 - Audit events: `widget.created`, `widget.updated` (diff of non-secret fields), `widget.activated`, `widget.paused`, `widget.archived`, `widget.budget_exhausted` (once per day), `widget.policy_updated`.
 - Metrics (OTEL): questions, blocked (by reason), latency to first token, tokens, per `widget_id`; no question text in logs or spans.
-- Insights: widget sessions are included in the assistant's Insights with `source=widget`, never in a user's conversation list (they have no `user_id`).
+- Insights: widget sessions never appear in a user's conversation list (they have no `user_id`). Including them in the assistant's Insights is deferred (see 04-review D4).
 
 ## Testing
 
