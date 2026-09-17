@@ -133,6 +133,16 @@ test.describe("embeddable widget", () => {
     baseURL
   }) => {
     test.setTimeout(120_000);
+    // Everything the host page and the iframe log, attached to the report so a
+    // stalled proof of work on a slow runner can be read without a rerun.
+    const consoleLines: string[] = [];
+    page.on("console", (message) => consoleLines.push(`[${message.type()}] ${message.text()}`));
+    page.on("pageerror", (error) => consoleLines.push(`[pageerror] ${error.message}`));
+    const attachConsole = () =>
+      test.info().attach("widget-console", {
+        body: consoleLines.join("\n"),
+        contentType: "text/plain"
+      });
     const widget = await createActiveWidget(page, request);
     const loaderOrigin = baseURL!.replace(/\/$/, "");
 
@@ -186,9 +196,26 @@ test.describe("embeddable widget", () => {
     await expect(launcher).toHaveAttribute("aria-expanded", "true");
 
     // Ask: ALTCHA is solved inside the iframe, the token minted, the mock model streams.
+    const probe = await frame.locator("altcha-widget").evaluate((element) => {
+      const widgetElement = element as unknown as { configure?: (options: object) => void };
+      widgetElement.configure?.({ debug: true });
+      return {
+        origin: location.origin,
+        secureContext: window.isSecureContext,
+        cores: navigator.hardwareConcurrency,
+        subtle: typeof crypto?.subtle
+      };
+    });
+    consoleLines.push(`[probe] ${JSON.stringify(probe)}`);
     await composer.fill("Hej, vad kan du?");
+    const askedAt = Date.now();
     await page.keyboard.press("Enter");
-    await expect(frame.getByText(MOCK_REPLY)).toBeVisible({ timeout: 45_000 });
+    try {
+      await expect(frame.getByText(MOCK_REPLY)).toBeVisible({ timeout: 45_000 });
+    } finally {
+      consoleLines.push(`[probe] answer wait ${Date.now() - askedAt} ms`);
+      await attachConsole();
+    }
     await expect
       .poll(() => page.evaluate(() => (window as never as { __events: string[] }).__events))
       .toContain("conversation_started");
