@@ -21,6 +21,18 @@ describe("withFramePolicy", () => {
     ).toBe("frame-ancestors 'self' https://www.kommun.se; script-src 'self'");
   });
 
+  it("hardens the embed page without overriding directives the app already sets", () => {
+    expect(
+      withFramePolicy("script-src 'self'; object-src 'self'", {
+        frameAncestors: "'self'",
+        harden: true
+      })
+    ).toBe(
+      "script-src 'self'; object-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'self'; frame-src 'none'"
+    );
+    expect(withFramePolicy(null, { frameAncestors: "'none'" })).not.toContain("base-uri");
+  });
+
   it("allows blob workers only when asked", () => {
     expect(
       withFramePolicy("script-src 'self'", { frameAncestors: "'self'", allowBlobWorkers: true })

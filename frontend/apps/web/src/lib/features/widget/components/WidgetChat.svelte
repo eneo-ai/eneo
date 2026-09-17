@@ -229,28 +229,32 @@
         <p class="text-primary text-base whitespace-pre-wrap">{config.texts.welcome}</p>
       {/if}
     {:else}
-      <ol role="log" aria-label={m.widget_conversation_log()} class="flex flex-col gap-6">
-        {#each messages as message, index (index)}
-          <WidgetMessage
-            {message}
-            {index}
-            isLast={index === messages.length - 1}
-            isLoading={chat.askQuestion.isLoading}
-          />
-        {/each}
-        {#if showPending && pendingQuestion !== null}
-          <li class="flex flex-col gap-3">
-            <div class="flex justify-end">
-              <p
-                class="bg-accent-dimmer text-primary max-w-[85%] rounded-2xl rounded-br-sm px-4 py-2 text-base whitespace-pre-wrap"
-              >
-                <span class="sr-only">{m.widget_you()}: </span>{pendingQuestion}
-              </p>
-            </div>
-            <TypingIndicator />
-          </li>
-        {/if}
-      </ol>
+      <!-- The list keeps its semantics; the live-region role sits on a wrapper so
+           list items stay inside a real list (axe: listitem). -->
+      <div role="log" aria-label={m.widget_conversation_log()}>
+        <ol class="flex flex-col gap-6">
+          {#each messages as message, index (index)}
+            <WidgetMessage
+              {message}
+              {index}
+              isLast={index === messages.length - 1}
+              isLoading={chat.askQuestion.isLoading}
+            />
+          {/each}
+          {#if showPending && pendingQuestion !== null}
+            <li class="flex flex-col gap-3">
+              <div class="flex justify-end">
+                <p
+                  class="bg-accent-dimmer text-primary max-w-[85%] rounded-2xl rounded-br-sm px-4 py-2 text-base whitespace-pre-wrap"
+                >
+                  <span class="sr-only">{m.widget_you()}: </span>{pendingQuestion}
+                </p>
+              </div>
+              <TypingIndicator />
+            </li>
+          {/if}
+        </ol>
+      </div>
       {#if chat.currentConversation.id && !chat.askQuestion.isLoading}
         {@const given = feedbackGiven[chat.currentConversation.id]}
         <div

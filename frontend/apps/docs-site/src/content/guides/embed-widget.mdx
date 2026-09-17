@@ -1,0 +1,140 @@
+# Embed an Assistant on Your Website
+
+import { Callout } from 'nextra/components'
+
+A web widget puts a published assistant on an external website, for example a municipality's public site, as a chat bubble in the corner of every page. Visitors are anonymous: no Eneo account, no cookies, and nothing is stored until they send their first message.
+
+This guide covers the editor's side (creating and publishing a widget), the operator's side (policy, templates, security and data protection) and what to publish in your accessibility statement.
+
+## How it works
+
+- Your site includes one small script (the *loader*, about 4 kB) from your Eneo installation. It renders a launcher button and, when opened, an `iframe` with Eneo's chat page.
+- The chat runs entirely on the Eneo origin. The host site never sees the conversation, and the browser only allows the widget on the sites you have listed (`Content-Security-Policy: frame-ancestors`).
+- Before the first message the visitor's browser solves an invisible proof of work (ALTCHA, self-hosted, no third party) and receives a short-lived visitor token. Rate limits per visitor and per IP address, a maximum question length and a daily token budget per widget cap the cost.
+- Tools, MCP servers and file uploads are always off for visitors. The assistant answers from its instructions and knowledge only.
+
+## For editors: publish a widget
+
+You need the **widgets** permission and edit rights on the assistant.
+
+1. Publish the assistant in its space (Assistant → **Publishing**).
+2. On the same page, open **Web widget**. Create the widget, optionally from one of the organisation's templates.
+3. Configure it. Every change is saved automatically:
+   - **Texts**: title, welcome message, suggested questions, the required AI disclosure, a personal-data notice and a link to your privacy policy.
+   - **Appearance**: primary colour (a contrast check tells you when the colour is too light), colour scheme, position and corner radius.
+   - **Placement**: the websites that may show the widget, one origin per line, for example `https://www.kommun.se` or `https://*.kommun.se`. At least one is required.
+   - **Limits**, **Privacy** (retention in days; `0` stores nothing after the answer) and **Protection**.
+4. Check the **Preview** (the real chat page) and, if you like, **Test in Eneo**, which mounts the real widget on the admin page so you can try the button, keyboard navigation and the chat before anything is installed on your site.
+5. When the status bar shows no blockers, a tenant admin activates the widget. Until then the widget is a draft and shows nothing on your site.
+6. Copy the **install snippet** and place it once on the website, preferably just before `</body>`:
+
+```html
+<script
+  async
+  src="https://eneo.example.se/widget/v1/eneo.js"
+  data-widget-id="wgt_…"
+></script>
+```
+
+The floating `v1` address follows Eneo releases. Sites that require Subresource Integrity can copy the pinned variant instead; it must be replaced after each Eneo release.
+
+**Pause** stops the widget immediately for every visitor; any editor can pause. **Archive** (admins) is permanent.
+
+### Optional attributes and API
+
+| Attribute                                         | Effect                                          |
+| ------------------------------------------------- | ----------------------------------------------- |
+| `data-lang="sv"` / `"en"`                         | Fixed interface language (default: the page's)  |
+| `data-position="bottom-left"`                     | Launcher on the left                            |
+| `data-color-scheme="light"` / `"dark"`            | Fixed colour scheme (default: follows the site) |
+| `data-launcher="none"`                            | No button; the site opens the chat itself      |
+| `data-auto-open="true"`                           | Open the panel on page load                     |
+
+The loader also exposes `window.Eneo`, which queues calls made before the script has loaded:
+
+```html
+<script>
+  window.Eneo = window.Eneo || function () { (window.Eneo.q = window.Eneo.q || []).push(arguments); };
+  Eneo("on", "conversation_started", function () { /* analytics */ });
+</script>
+<button onclick="Eneo('open')">Ask us</button>
+```
+
+Commands: `open`, `close`, `toggle`, `on(event, listener)`, `off(event, listener)`, `setContext({ page_url, page_title })`. Page context is only sent when the site calls `setContext`.
+
+A stand-alone version of the chat is available at `/embed/<widget id>?mode=full` for sites that cannot run scripts.
+
+## For operators: policy, templates and security
+
+### Tenant policy
+
+Under **Admin → Web widgets** a tenant admin sets the ceilings every widget must stay within: the number of active widgets, the highest daily token budget, the allowed retention range and whether widgets may run without bot protection (off by default). Editors see policy violations as activation blockers.
+
+### Templates
+
+Templates hold the organisation's house style: texts, appearance and language. Admins create them under **Admin → Web widgets → Templates**; one template can be the default that editors get preselected. Applying a template copies its values onto the widget, so later template edits never change a live widget.
+
+### Security properties
+
+- **Who may frame the chat** is enforced by the visitor's browser from the widget's allowed origins. A site that is not listed gets a blank frame.
+- **Visitor tokens** are JWTs bound to one widget and one pseudonymous visitor id, valid for 15 minutes and rotated silently. Pausing the widget or changing its origins, limits or privacy settings invalidates every outstanding token.
+- **ALTCHA** is a self-hosted proof of work; no CAPTCHA provider, no cookies, no fingerprinting. Widgets without it require the tenant policy to allow it.
+- **Limits fail closed.** If Redis is unavailable, the public endpoints answer `503` instead of letting traffic through unmetered.
+- **The loader** is served from your Eneo origin with `nosniff`, open CORS (required for `integrity`) and an ETag; the pinned variant is immutable.
+- The embed page sends `Referrer-Policy: strict-origin-when-cross-origin`, a restrictive `Permissions-Policy` and a CSP without `unsafe-inline` scripts.
+
+### Personal data and cookies
+
+The widget sets **no cookies**. The visitor's browser keeps a small record in the iframe's own storage (a random visitor id, the current token and the id of the last conversation) so the conversation survives a page reload on the same site. Nothing is written before the first message, and the storage is partitioned per site by the browser.
+
+Suggested sentence for your cookie or privacy page: *"The chat assistant uses no cookies. Your browser stores a random identifier and the current conversation locally so you can continue it while browsing our site. Conversations are stored by [organisation] for [N] days."*
+
+### DPIA checklist
+
+Before activating a widget on a public site, confirm that:
+
+- the AI disclosure and personal-data notice are set and link to your privacy policy;
+- the retention period matches your records schedule (`0` if conversations must not be kept);
+- free-text feedback is only stored if you have a purpose for it (off by default);
+- the assistant's instructions tell visitors not to enter personal data and how to reach a human;
+- the assistant's knowledge contains no personal data or internal material;
+- the daily token budget reflects the cost you accept, and the usage view is reviewed regularly;
+- audit logging is enabled: widget creation, changes, activation, pausing, archiving and budget exhaustion are logged.
+
+## Accessibility
+
+The widget is built for WCAG 2.1 AA: the launcher is a real button with an accessible name and a visible focus ring, the panel is a labelled `iframe`, opening moves focus into the chat, `Escape` closes it and returns focus, answers are announced to screen readers, everything works with the keyboard, colours meet contrast requirements and the panel becomes full-screen on small screens. Editors get a contrast check on the colour they choose.
+
+### Accessibility statement template
+
+Add a section like this to the website's accessibility statement (the template is available in Swedish and English; adapt the bracketed parts):
+
+<details>
+<summary>Svenska</summary>
+
+**Chattassistent**
+
+Webbplatsen innehåller en chattassistent som drivs av [organisationens namn]s AI-plattform. Chatten öppnas med en knapp som går att nå med tangentbord och skärmläsare. Den kan stängas med Escape-tangenten, och fokus återvänder då till knappen. Svaren läses upp av skärmläsare när de är klara. Chatten följer webbläsarens inställningar för ljust och mörkt läge och för minskad rörelse, och den fyller hela skärmen på små skärmar.
+
+Kända begränsningar: svaren skapas av en AI-modell och kan vara felaktiga. Svar kan innehålla länkar till källor som öppnas i en ny flik.
+
+Om du inte kan använda chatten kan du kontakta oss på [alternativ kontaktväg]. Rapportera brister i tillgängligheten till [kontaktuppgift].
+
+</details>
+
+<details>
+<summary>English</summary>
+
+**Chat assistant**
+
+This website includes a chat assistant powered by [organisation]'s AI platform. The chat opens from a button that can be reached with a keyboard and screen readers. It can be closed with the Escape key, after which focus returns to the button. Answers are announced by screen readers when complete. The chat follows the browser's settings for light and dark mode and for reduced motion, and it fills the whole screen on small displays.
+
+Known limitations: answers are generated by an AI model and may be incorrect. Answers may contain links to sources that open in a new tab.
+
+If you cannot use the chat, contact us at [alternative contact]. Report accessibility problems to [contact details].
+
+</details>
+
+<Callout type="info">
+  Design record: `docs/adr/embeddable-widgets/` in the repository documents the architecture, the security and privacy decisions and the deviations made during implementation.
+</Callout>

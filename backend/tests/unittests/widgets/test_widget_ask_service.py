@@ -62,7 +62,9 @@ def _service(*, ask_result=None, session_questions=0, tokens=(120, 80)):
     budget.redis = MagicMock()
     budget.redis.set = AsyncMock(return_value=True)
     usage = MagicMock()
+    usage.session = MagicMock()
     usage.record = AsyncMock()
+    usage.delete_session = AsyncMock()
     audit = MagicMock()
     audit.log_async = AsyncMock()
     settings = SimpleNamespace(
@@ -79,8 +81,7 @@ def _service(*, ask_result=None, session_questions=0, tokens=(120, 80)):
         audit_service=audit,
         settings=settings,
     )
-    # _finish opens its own DB session; stub the token lookup and the
-    # session-level usage repo so the wrapper can be exercised in isolation.
+    # Stub the token lookup so the settlement wrapper can be exercised in isolation.
     service._last_question_tokens = AsyncMock(return_value=tokens)  # type: ignore[method-assign]
     return service, SimpleNamespace(
         assistant_service=assistant_service,
@@ -94,7 +95,7 @@ def _service(*, ask_result=None, session_questions=0, tokens=(120, 80)):
 
 
 class _FakeSessionManager:
-    """Minimal stand-in for sessionmanager.session() inside _finish."""
+    """Minimal stand-in for sessionmanager.session() inside _record_blocked."""
 
     def __init__(self) -> None:
         self.usage_repo = MagicMock()
@@ -139,7 +140,7 @@ async def _drain(response):
     return [chunk.text async for chunk in response.answer]
 
 
-async def test_ask_streams_then_settles_budget_and_records_usage(fake_db):
+async def test_ask_streams_then_settles_budget_and_records_usage():
     widget = _widget()
     service, deps = _service(tokens=(120, 80))
 
@@ -163,19 +164,25 @@ async def test_ask_streams_then_settles_budget_and_records_usage(fake_db):
     deps.budget.reserve.assert_awaited_once_with(widget, 8_000)
     deps.budget.settle.assert_awaited_once()
     assert deps.budget.settle.await_args.args[1] == 200
-    fake_db.usage_repo.record.assert_awaited_once()
-    assert fake_db.usage_repo.record.await_args.kwargs["input_tokens"] == 120
-    fake_db.usage_repo.delete_session.assert_not_awaited()
+    # Settlement reads and writes through the request session so it sees the
+    # answer tokens the pipeline stored in the same (uncommitted) transaction.
+    service._last_question_tokens.assert_awaited_once_with(  # type: ignore[attr-defined]
+        deps.usage.session, deps.session.id
+    )
+    deps.usage.record.assert_awaited_once()
+    assert deps.usage.record.await_args.kwargs["input_tokens"] == 120
+    assert deps.usage.record.await_args.kwargs["output_tokens"] == 80
+    deps.usage.delete_session.assert_not_awaited()
 
 
-async def test_retention_zero_deletes_the_session_after_streaming(fake_db):
+async def test_retention_zero_deletes_the_session_after_streaming():
     widget = _widget(privacy=WidgetPrivacy(retention_days=0))
     service, deps = _service()
     response = await service.ask(
         _principal(widget), question="q", session_id=None, client_ip=None
     )
     await _drain(response)
-    fake_db.usage_repo.delete_session.assert_awaited_once_with(deps.session.id)
+    deps.usage.delete_session.assert_awaited_once_with(deps.session.id)
 
 
 async def test_question_limits():

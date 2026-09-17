@@ -12,6 +12,19 @@ export const EMBED_ROUTE_PREFIX = "/(public)/embed";
 const FRAME_DIRECTIVE = "frame-ancestors";
 const WORKER_DIRECTIVE = "worker-src";
 
+/**
+ * Directives the embed page adds on top of SvelteKit's nonce-based script-src.
+ * `style-src` is deliberately not restricted: server-rendered `style:`
+ * attributes and the ALTCHA widget's shadow-root styles are inline, and a
+ * nonce cannot reach either without patching both.
+ */
+export const EMBED_HARDENING: ReadonlyArray<readonly [string, string]> = [
+  ["base-uri", "'none'"],
+  ["object-src", "'none'"],
+  ["form-action", "'self'"],
+  ["frame-src", "'none'"]
+];
+
 function parse(csp: string | null | undefined): Map<string, string> {
   const directives = new Map<string, string>();
   for (const part of (csp ?? "").split(";")) {
@@ -35,13 +48,18 @@ function serialize(directives: Map<string, string>): string {
  */
 export function withFramePolicy(
   csp: string | null | undefined,
-  options: { frameAncestors: string; allowBlobWorkers?: boolean }
+  options: { frameAncestors: string; allowBlobWorkers?: boolean; harden?: boolean }
 ): string {
   const directives = parse(csp);
   directives.set(FRAME_DIRECTIVE, options.frameAncestors);
   if (options.allowBlobWorkers) {
     // The ALTCHA proof-of-work widget spawns its workers from blob: URLs.
     directives.set(WORKER_DIRECTIVE, "'self' blob:");
+  }
+  if (options.harden) {
+    for (const [name, value] of EMBED_HARDENING) {
+      if (!directives.has(name)) directives.set(name, value);
+    }
   }
   return serialize(directives);
 }

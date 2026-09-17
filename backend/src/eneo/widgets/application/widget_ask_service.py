@@ -201,26 +201,27 @@ class WidgetAskService:
     ) -> None:
         """Settle the budget, record usage and apply "never persist".
 
-        Runs after the stream ends or is aborted; uses its own session because
-        the request session may already be closing.
+        Runs when the answer stream ends. The ask pipeline has by then stored
+        the answer and its token counts, but only inside the request
+        transaction, which commits after the response is sent; reading them
+        through the same session is the only way to see them here.
         """
         assert widget.id is not None
         try:
-            async with sessionmanager.session() as session, session.begin():
-                prompt_tokens, completion_tokens = await self._last_question_tokens(
-                    session, session_id
-                )
-                await self.budget.settle(reservation, prompt_tokens + completion_tokens)
-                usage = WidgetUsageRepoImpl(session)
-                await usage.record(
-                    widget.id,
-                    self._today(),
-                    questions=1,
-                    input_tokens=prompt_tokens,
-                    output_tokens=completion_tokens,
-                )
-                if widget.privacy.retention_days == 0:
-                    await usage.delete_session(session_id)
+            usage = self.usage_repo
+            prompt_tokens, completion_tokens = await self._last_question_tokens(
+                usage.session, session_id
+            )
+            await self.budget.settle(reservation, prompt_tokens + completion_tokens)
+            await usage.record(
+                widget.id,
+                self._today(),
+                questions=1,
+                input_tokens=prompt_tokens,
+                output_tokens=completion_tokens,
+            )
+            if widget.privacy.retention_days == 0:
+                await usage.delete_session(session_id)
         except Exception:
             logger.exception(
                 "Widget answer settlement failed",

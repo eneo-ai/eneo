@@ -395,7 +395,9 @@ jobs:
 
       - name: Build workspace dependencies
         working-directory: frontend
-        run: bun run --filter @eneo/ui build
+        run: |
+          bun run --filter @eneo/ui build
+          bun run --filter @eneo/widget-loader build
 
       # Pin to match apps/web's @playwright/test dependency; a bare
       # `bun x playwright` fetches the latest and installs a browser build the
