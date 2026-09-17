@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from io import BytesIO
 from types import SimpleNamespace
 from typing import cast
+from unittest.mock import AsyncMock, Mock
 from uuid import UUID, uuid4
 
 import pytest
@@ -81,7 +82,8 @@ from eneo.flows.api.flow_access_context import (
     FlowAccessContext,
     FlowSpaceAccessContext,
 )
-from eneo.flows.domain.flow import Flow
+from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshot
+from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.flow_access_policy import FlowApiAction
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_authoring_spec import (
@@ -2003,3 +2005,76 @@ def _zip_docs(docs: Mapping[str, JsonObject]) -> bytes:
         for path, payload in payloads.items():
             package.writestr(path, payload)
     return buffer.getvalue()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "input_config",
+    [
+        {"runtime_input": {"enabled": True}},
+        {"item_map": {"enabled": True, "max_items": 3}},
+        {"runtime_input": {"enabled": False, "unknown": "secret"}},
+        {"auth": {"mode": "none"}},
+        {"auth": {"mode": "bearer_token", "token": "secret"}},
+        {"runtime_input": {"enabled": False, "description": {"$secret": "stored"}}},
+    ],
+)
+async def test_export_nonportable_config_never_writes_or_audits(
+    monkeypatch: pytest.MonkeyPatch,
+    input_config: JsonObject,
+) -> None:
+    flow_id = uuid4()
+    assistant_id = uuid4()
+    flow = _flow(flow_id=flow_id).model_copy(
+        update={
+            "steps": [
+                FlowStep(
+                    assistant_id=assistant_id,
+                    step_order=1,
+                    user_description="Input",
+                    input_source="flow_input",
+                    input_type="text",
+                    output_mode="pass_through",
+                    output_type="text",
+                    input_config=input_config,
+                )
+            ]
+        }
+    )
+    access = FlowAccessContext(
+        flow=flow,
+        actor=cast(SpaceActor, _FakeSpaceActor(can_edit=True)),
+        scope_filter=ScopeFilter(),
+    )
+    monkeypatch.setattr(
+        flow_package_router, "require_flow_edit_access", AsyncMock(return_value=access)
+    )
+    writer = Mock(return_value=b"package")
+    monkeypatch.setattr(flow_package_router, "write_flow_package", writer)
+    service = SimpleNamespace(
+        count_flow_step_assistants_with_mcp_configuration=AsyncMock(return_value=0),
+        get_flow_assistant_snapshots=AsyncMock(
+            return_value={
+                assistant_id: AssistantAuthoringSnapshot(
+                    instructions="Pass through.",
+                    model=None,
+                    knowledge_refs=(),
+                )
+            }
+        ),
+        list_resource_bindings=AsyncMock(return_value=()),
+    )
+    audit = _FakeAuditService()
+    with pytest.raises(BadRequestException) as exc_info:
+        await flow_package_router.export_flow_package(
+            id=flow_id,
+            export_request=_export_request(),
+            request=_request(),
+            container=cast(
+                Container, _FakeContainer(flow_service=service, audit_service=audit)
+            ),
+        )
+    assert exc_info.value.code == "flow_package_export_step_config_not_portable"
+    assert exc_info.value.context == {"step_order": 1, "config_field": "input_config"}
+    writer.assert_not_called()
+    assert audit.events == []

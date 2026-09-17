@@ -10,6 +10,7 @@ from eneo.flow_packages.application.flow_package_import_planner import (
 from eneo.flow_packages.application.flow_package_model_matching import (
     hard_model_candidate_rejection_reasons,
 )
+from eneo.flow_packages.domain.flow_package_draft import normalize_flow_package_spec
 from eneo.flow_packages.domain.flow_package_envelope import FlowPackageEnvelope
 from eneo.flow_packages.domain.flow_package_errors import (
     FlowPackageErrorCode,
@@ -123,7 +124,7 @@ def resolve_flow_package_install_command(
         and not requirement.required
     )
     install_spec = _spec_with_unbound_optional_knowledge_refs_removed(
-        spec=envelope.spec,
+        spec=normalize_flow_package_spec(envelope.spec),
         selected_slot_refs=validated_selection.selected_slot_refs,
         optional_knowledge_slot_refs=optional_knowledge_slot_refs,
     )

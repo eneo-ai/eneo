@@ -46,12 +46,15 @@ from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageRequirementSet,
     FlowPackageTemplateAssetRequirement,
 )
+from eneo.flow_packages.infrastructure.flow_package_zip_reader import read_flow_package
+from eneo.flow_packages.infrastructure.flow_package_zip_writer import write_flow_package
 from eneo.flows.application.flow_service import FlowService
 from eneo.flows.domain.flow import Flow
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
+    InputType,
     OutputMode,
     OutputType,
     StepSpec,
@@ -939,3 +942,48 @@ def _flow_service(
     assistant.id = assistant_id or uuid4()
     service.create_flow_assistant.return_value = (assistant, [])
     return service
+
+
+@pytest.mark.asyncio
+async def test_install_normalizes_literal_disabled_config_without_changing_envelope() -> (
+    None
+):
+    original_envelope = _envelope(
+        requirements=[], assistant=AssistantSpec(instructions="Pass through.")
+    )
+    step = original_envelope.spec.steps[0].model_copy(
+        update={
+            "input_type": InputType.DOCUMENT,
+            "input_config": {"runtime_input": False, "item_map": False},
+        }
+    )
+    envelope = FlowPackageEnvelope.build_for_export(
+        manifest_metadata=original_envelope.manifest,
+        draft=FlowPackageFlowDraft(
+            schema_version=1,
+            spec=original_envelope.spec.model_copy(update={"steps": [step]}),
+        ),
+        requirements=original_envelope.requirements,
+        provenance=original_envelope.provenance,
+    )
+    envelope = read_flow_package(write_flow_package(envelope))
+    original = envelope.model_dump(mode="json")
+    candidates = _candidates()
+    plan = build_flow_package_import_plan(envelope, candidates=candidates)
+    command = resolve_flow_package_install_command(
+        envelope=envelope,
+        import_plan=plan,
+        expected_content_checksum=envelope.content_checksum,
+        expected_target_state=plan.target_state,
+        selection=FlowPackageImportSelection(selected_bindings=[]),
+        candidates=candidates,
+    )
+    assert command.install_spec.steps[0].input_config is None
+    service = _flow_service()
+    await FlowPackageInstallService().install_as_draft(
+        command=command,
+        flow_service=service,
+        space_id=uuid4(),
+    )
+    assert service.update_flow.await_args.kwargs["steps"][0].input_config is None
+    assert envelope.model_dump(mode="json") == original

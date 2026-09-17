@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field
 
 from eneo.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
 from eneo.flows.enums import FlowInputSource, FlowInputType, FlowOutputMode
-from eneo.flows.flow_authoring_runtime_input import resolve_runtime_input_config
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
@@ -438,7 +437,7 @@ def _compile_new_step(
         input_bindings=step_spec.input_bindings,
         input_contract=step_spec.input_contract,
         output_contract=step_spec.output_contract,
-        input_config=resolve_runtime_input_config(step_spec=step_spec),
+        input_config=step_spec.input_config,
         output_config=step_spec.output_config,
         review_policy=step_spec.review_policy,
     )
@@ -468,10 +467,7 @@ def _compile_existing_step(
         input_bindings=effective_spec.input_bindings,
         input_contract=effective_spec.input_contract,
         output_contract=effective_spec.output_contract,
-        input_config=resolve_runtime_input_config(
-            step_spec=effective_spec,
-            existing_input_config=redact_persisted_config(existing_step.input_config),
-        ),
+        input_config=effective_spec.input_config,
         output_config=effective_spec.output_config,
         review_policy=effective_spec.review_policy,
     )

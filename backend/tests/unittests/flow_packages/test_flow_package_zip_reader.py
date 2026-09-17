@@ -832,3 +832,51 @@ def _zip_infos(entries: list[tuple[zipfile.ZipInfo, bytes]]) -> bytes:
                 )
                 package.writestr(info, payload)
     return buffer.getvalue()
+
+
+@pytest.mark.parametrize(
+    "config_field, config",
+    [
+        ("input_config", {"runtime_input": {"enabled": False, "unknown": "secret"}}),
+        ("input_config", {"item_map": {"enabled": False, "unknown": "secret"}}),
+        ("input_config", {"runtime_input": 0}),
+        ("input_config", {"runtime_input": "false"}),
+        ("input_config", {"item_map": True}),
+        ("input_config", {"auth": {"mode": "none"}}),
+        ("input_config", {"runtime_input": {"description": {"$secret": "stored"}}}),
+        ("output_config", {"citation_mode": "unknown"}),
+        ("output_config", {"speaker_mapping": {"unknown": "secret"}}),
+    ],
+)
+def test_package_intake_rejects_nonportable_config(
+    config_field: str, config: JsonObject
+) -> None:
+    spec = _flow_spec()
+    spec.steps[0] = spec.steps[0].model_copy(update={config_field: config})
+    with pytest.raises(FlowPackageValidationError) as exc_info:
+        reader.read_flow_package(_package_bytes(spec=spec))
+    assert exc_info.value.code is FlowPackageErrorCode.FLOW_DRAFT_INVALID
+
+
+def test_package_validation_preserves_literal_disabled_spec_identity() -> None:
+    spec = _flow_spec()
+    spec.steps[0] = spec.steps[0].model_copy(
+        update={
+            "input_config": {"runtime_input": False, "item_map": False},
+        }
+    )
+    envelope = reader.read_flow_package(_package_bytes(spec=spec))
+    assert envelope.spec == spec
+    assert envelope.spec_hash == spec.spec_hash()
+
+
+def test_checksum_mismatch_precedes_portable_config_validation() -> None:
+    spec = _flow_spec()
+    spec.steps[0] = spec.steps[0].model_copy(
+        update={"input_config": {"runtime_input": 0}}
+    )
+    docs = _package_docs(spec=spec)
+    docs[reader.MANIFEST_PATH]["content_checksum"] = "f" * 64
+    with pytest.raises(FlowPackageValidationError) as exc_info:
+        reader.read_flow_package(_zip_docs(docs))
+    assert exc_info.value.code is FlowPackageErrorCode.CHECKSUM_MISMATCH

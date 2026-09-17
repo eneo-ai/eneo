@@ -374,28 +374,40 @@ def _portable_input_config(step: FlowStep) -> FlowPersistedJsonObject | None:
         ) from exc
 
     portable: FlowPersistedJsonObject = {}
-    if (
-        parsed.runtime_input is not None
-        and step.input_source is FlowInputSource.FLOW_INPUT
-        and step.input_type
-        in {FlowInputType.AUDIO, FlowInputType.DOCUMENT, FlowInputType.FILE}
-    ):
-        portable["runtime_input"] = parsed.runtime_input.model_dump(
-            mode="json",
-            exclude_unset=True,
-            exclude_none=True,
+    if parsed.runtime_input is not None:
+        supported = (
+            step.input_source is FlowInputSource.FLOW_INPUT
+            and step.input_type
+            in {FlowInputType.AUDIO, FlowInputType.DOCUMENT, FlowInputType.FILE}
         )
-    if (
-        parsed.item_map is not None
-        and step.input_source is FlowInputSource.PREVIOUS_STEP
-        and step.input_type is FlowInputType.JSON
-        and step.output_mode is FlowOutputMode.PASS_THROUGH
-        and step.output_type is FlowOutputType.JSON
-    ):
-        portable["item_map"] = parsed.item_map.model_dump(
-            mode="json",
-            exclude_unset=True,
+        if parsed.runtime_input.enabled and not supported:
+            raise _step_config_not_portable(
+                step_order=step.step_order,
+                config_field="input_config",
+            )
+        if supported:
+            portable["runtime_input"] = parsed.runtime_input.model_dump(
+                mode="json",
+                exclude_unset=True,
+                exclude_none=True,
+            )
+    if parsed.item_map is not None:
+        supported = (
+            step.input_source is FlowInputSource.PREVIOUS_STEP
+            and step.input_type is FlowInputType.JSON
+            and step.output_mode is FlowOutputMode.PASS_THROUGH
+            and step.output_type is FlowOutputType.JSON
         )
+        if parsed.item_map.enabled and not supported:
+            raise _step_config_not_portable(
+                step_order=step.step_order,
+                config_field="input_config",
+            )
+        if supported:
+            portable["item_map"] = parsed.item_map.model_dump(
+                mode="json",
+                exclude_unset=True,
+            )
     return portable or None
 
 

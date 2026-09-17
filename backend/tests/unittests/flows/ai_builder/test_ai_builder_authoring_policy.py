@@ -14,6 +14,9 @@ from eneo.flows.application.flow_authoring_command import (
     EditFlowAuthoringCommand,
     FlowAuthoringCommandService,
 )
+from eneo.flows.application.flow_draft_materialization import (
+    compile_flow_draft_changeset,
+)
 from eneo.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
@@ -24,6 +27,8 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
+from eneo.flows.http_transport import SECRET_SENTINEL
+from eneo.flows.step_lineage import existing_step_ref_for_order
 
 
 def test_edit_command_requires_explicit_step_and_assistant_update_boundaries() -> None:
@@ -363,3 +368,129 @@ def _async_return(value: object):
         return value
 
     return _inner
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "input_type", [InputType.DOCUMENT, InputType.FILE, InputType.AUDIO]
+)
+async def test_builder_prepare_resolves_new_upload_defaults(
+    input_type: InputType,
+) -> None:
+    step = _spec_step().model_copy(update={"input_type": input_type})
+    spec = _spec(steps=[step])
+    origin = _origin(spec_hash=spec.spec_hash())
+    prepared = await FlowAuthoringCommandService().prepare(
+        command=CreateFlowAuthoringCommand(
+            space_id=uuid4(),
+            spec=spec,
+            origin=origin,
+            default_transcription_model_id=uuid4(),
+        ),
+        flow_service=SimpleNamespace(),
+        origin_policy=AIBuilderAuthoringPolicy(origin),
+    )
+
+    config = prepared.spec.steps[0].input_config
+    assert config is not None
+    assert config["runtime_input"]["enabled"] is True
+    assert config["runtime_input"]["required"] is False
+    assert config["runtime_input"]["input_format"] == input_type.value
+    assert prepared.changeset.compiled_steps[0].input_config == config
+    assert spec.steps[0].input_config is None
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("input_type", [InputType.DOCUMENT, InputType.TEXT])
+async def test_builder_prepare_preserves_upload_edit_transitions(
+    input_type: InputType,
+) -> None:
+    stored = _flow_step(output_type="text").model_copy(
+        update={
+            "input_config": {
+                "runtime_input": {
+                    "enabled": True,
+                    "required": True,
+                    "input_format": "audio",
+                    "description": "Custom upload",
+                    "accepted_mimetypes_override": ["audio/mpeg"],
+                }
+            },
+        }
+    )
+    current_flow = _flow(description="", draft_revision=1, steps=[stored])
+    step = _spec_step(existing_step_ref="existing_step_1").model_copy(
+        update={"input_type": input_type}
+    )
+    spec = _spec(steps=[step])
+    origin = _origin(spec_hash=spec.spec_hash())
+    prepared = await FlowAuthoringCommandService().prepare(
+        command=EditFlowAuthoringCommand(
+            space_id=current_flow.space_id,
+            flow_id=current_flow.id,
+            expected_revision=1,
+            spec=spec,
+            origin=origin,
+            removed_existing_step_refs=frozenset(),
+            updated_existing_step_refs=frozenset({"existing_step_1"}),
+        ),
+        flow_service=SimpleNamespace(get_flow=_async_return(current_flow)),
+        origin_policy=AIBuilderAuthoringPolicy(origin),
+    )
+    expected = (
+        {
+            "runtime_input": {
+                "enabled": True,
+                "required": True,
+                "input_format": "document",
+                "description": "Custom upload",
+            }
+        }
+        if input_type is InputType.DOCUMENT
+        else None
+    )
+    assert prepared.spec.steps[0].input_config == expected
+    assert prepared.changeset.compiled_steps[0].input_config == expected
+    assert stored.input_config is not None
+    assert stored.input_config["runtime_input"]["input_format"] == "audio"
+
+
+def test_modified_step_preserves_stored_http_secrets_as_sentinels() -> None:
+    """Stored credentials must not be resubmitted as if newly authored.
+
+    The compiled step is fed straight back into FlowService.update_flow, which
+    treats every supplied secret as author-typed. Handing back the stored
+    ciphertext would get it encrypted a second time; a sentinel keeps it a
+    reference the merge can resolve.
+    """
+    stored_input_config = {
+        "url": "https://example.org/input",
+        "auth": {"mode": "bearer_token", "token": "enc:fernet:v1:stored"},
+        "custom_headers": [
+            {"name": "X-Secret", "value": "enc:fernet:v1:hdr", "secret": True},
+            {"name": "X-Trace", "value": "visible", "secret": False},
+        ],
+    }
+    existing = _flow_step(output_type="text")
+    existing = existing.model_copy(update={"input_config": stored_input_config})
+    spec = FlowDraftSpecCore(
+        flow_name="Flow",
+        flow_description="",
+        steps=[
+            _spec_step(
+                plan_step_ref="step_a",
+                existing_step_ref=existing_step_ref_for_order(1),
+            )
+        ],
+    )
+
+    current_flow = _flow(description="", draft_revision=1, steps=[existing])
+    policy = AIBuilderAuthoringPolicy(_origin(spec_hash=spec.spec_hash()))
+    effective_spec = policy.effective_spec(spec=spec, current_flow=current_flow)
+    changeset = compile_flow_draft_changeset(effective_spec, current_flow)
+
+    compiled_config = changeset.compiled_steps[0].input_config
+    assert compiled_config is not None
+    assert compiled_config["auth"]["token"] == SECRET_SENTINEL
+    assert compiled_config["custom_headers"][0]["value"] == SECRET_SENTINEL
+    assert compiled_config["custom_headers"][1]["value"] == "visible"

@@ -89,11 +89,16 @@ from eneo.flows.application.flow_authoring_command import (
     FlowPackageAuthoringOrigin,
 )
 from eneo.flows.application.flow_service import FlowService
+from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.flows.domain.runtime_input import build_runtime_input_config
+from eneo.flows.domain.step_item_map import build_step_item_map_config
 from eneo.flows.flow_access_policy import FlowApiAction
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     InputSource,
+    InputType,
+    OutputType,
     StepSpec,
 )
 from eneo.flows.flow_resource_bindings import (
@@ -1100,7 +1105,34 @@ async def test_flow_package_import_lock_serializes_successful_retry_visibility(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+@pytest.mark.parametrize(
+    "input_type, input_config",
+    [
+        (InputType.TEXT, {"runtime_input": False, "item_map": False}),
+        (InputType.TEXT, {"runtime_input": {"enabled": False}}),
+        (InputType.DOCUMENT, {"runtime_input": False}),
+        (InputType.DOCUMENT, {"runtime_input": {"enabled": False}}),
+        (InputType.DOCUMENT, None),
+        (
+            InputType.DOCUMENT,
+            {
+                "runtime_input": {
+                    "enabled": True,
+                    "required": True,
+                    "input_format": "document",
+                    "max_files": 3,
+                    "execution_mode": "single_call",
+                    "accepted_mimetypes_override": ["application/pdf"],
+                    "label": "Documents",
+                    "description": "Upload documents.",
+                }
+            },
+        ),
+    ],
+)
 async def test_flow_package_export_import_route_roundtrip_between_tenants_and_container_instances(
+    input_type: InputType,
+    input_config: FlowPersistedJsonObject | None,
     db_container,
     completion_model_factory,
     space_factory,
@@ -1153,7 +1185,17 @@ async def test_flow_package_export_import_route_roundtrip_between_tenants_and_co
                         model_ref=_model_slot_ref().ref,
                     ),
                     input_source=InputSource.FLOW_INPUT,
-                )
+                    output_type=OutputType.JSON,
+                ),
+                StepSpec(
+                    plan_step_ref="items",
+                    name="Items",
+                    assistant_spec=AssistantSpec(instructions="Pass through items."),
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.JSON,
+                    output_type=OutputType.JSON,
+                    input_config={"item_map": {"enabled": True, "max_items": 12}},
+                ),
             ],
         )
         source_apply = await FlowAuthoringCommandService().apply(
@@ -1174,6 +1216,24 @@ async def test_flow_package_export_import_route_roundtrip_between_tenants_and_co
         exported_flow = await source_container.flow_service().get_flow(
             source_apply.flow_id
         )
+
+        await source_container.flow_service().update_flow(
+            flow_id=source_apply.flow_id,
+            steps=[
+                exported_flow.steps[0].model_copy(
+                    update={
+                        "input_type": input_type,
+                        "input_config": input_config,
+                    }
+                ),
+                *exported_flow.steps[1:],
+            ],
+        )
+        exported_flow = await source_container.flow_service().get_flow(
+            source_apply.flow_id
+        )
+        assert exported_flow.steps[0].input_config == input_config
+        source_runtime = build_runtime_input_config(exported_flow.steps[0].input_config)
 
         async def fake_require_flow_edit_access(
             request: Request,
@@ -1294,7 +1354,7 @@ async def test_flow_package_export_import_route_roundtrip_between_tenants_and_co
         assert import_response.flow_name == "Cross-instance package demo"
         assert import_response.package_id == "se.demo.cross-instance"
         assert import_response.package_version == "1.0.0"
-        assert import_response.steps_created == 1
+        assert import_response.steps_created == 2
         assert import_response.resource_bindings_count == 1
 
         imported_flow = await target_session.scalar(
@@ -1307,9 +1367,24 @@ async def test_flow_package_export_import_route_roundtrip_between_tenants_and_co
         assert imported_flow.published_version is None
 
         imported_step = await target_session.scalar(
-            sa.select(FlowSteps).where(FlowSteps.flow_id == import_response.flow_id)
+            sa.select(FlowSteps).where(
+                FlowSteps.flow_id == import_response.flow_id,
+                FlowSteps.step_order == 1,
+            )
         )
         assert imported_step is not None
+        reloaded = await target_container.flow_service().get_flow(
+            import_response.flow_id
+        )
+        assert (
+            build_runtime_input_config(reloaded.steps[0].input_config) == source_runtime
+        )
+        assert (
+            build_step_item_map_config(reloaded.steps[0].input_config).enabled is False
+        )
+        item_map = build_step_item_map_config(reloaded.steps[1].input_config)
+        assert item_map.enabled is True
+        assert item_map.max_items == 12
         imported_assistant = await target_session.get(
             Assistants,
             imported_step.assistant_id,

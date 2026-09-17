@@ -19,8 +19,6 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
-from eneo.flows.http_transport import SECRET_SENTINEL
-from eneo.flows.step_lineage import existing_step_ref_for_order
 from eneo.main.exceptions import BadRequestException
 
 
@@ -573,39 +571,21 @@ def test_shared_compile_ignores_document_body_writer_refs() -> None:
     ) == compile_flow_draft_changeset(base, current_flow=None)
 
 
-def test_modified_step_preserves_stored_http_secrets_as_sentinels() -> None:
-    """Stored credentials must not be resubmitted as if newly authored.
-
-    The compiled step is fed straight back into FlowService.update_flow, which
-    treats every supplied secret as author-typed. Handing back the stored
-    ciphertext would get it encrypted a second time; a sentinel keeps it a
-    reference the merge can resolve.
-    """
-    stored_input_config = {
-        "url": "https://example.org/input",
-        "auth": {"mode": "bearer_token", "token": "enc:fernet:v1:stored"},
-        "custom_headers": [
-            {"name": "X-Secret", "value": "enc:fernet:v1:hdr", "secret": True},
-            {"name": "X-Trace", "value": "visible", "secret": False},
-        ],
-    }
-    existing = _flow_step(step_order=1)
-    existing = existing.model_copy(update={"input_config": stored_input_config})
-    spec = FlowDraftSpecCore(
-        flow_name="Flow",
-        flow_description="",
-        steps=[
-            _step_spec(
-                plan_step_ref="step_a",
-                existing_step_ref=existing_step_ref_for_order(1),
-            )
-        ],
+@pytest.mark.parametrize("existing", [False, True])
+@pytest.mark.parametrize(
+    "input_config",
+    [None, {"runtime_input": False}, {"runtime_input": {"enabled": False}}],
+)
+def test_shared_compile_preserves_authored_disabled_upload(
+    existing: bool, input_config: dict | None
+) -> None:
+    step = _step_spec(
+        input_type=InputType.DOCUMENT,
+        existing_step_ref="existing_step_1" if existing else None,
+    ).model_copy(update={"input_config": input_config})
+    changeset = compile_flow_draft_changeset(
+        FlowDraftSpecCore(flow_name="Authored flow", steps=[step]),
+        current_flow=_flow(_flow_step(step_order=1)) if existing else None,
     )
 
-    changeset = compile_flow_draft_changeset(spec, _flow(existing))
-
-    compiled_config = changeset.compiled_steps[0].input_config
-    assert compiled_config is not None
-    assert compiled_config["auth"]["token"] == SECRET_SENTINEL
-    assert compiled_config["custom_headers"][0]["value"] == SECRET_SENTINEL
-    assert compiled_config["custom_headers"][1]["value"] == "visible"
+    assert changeset.compiled_steps[0].input_config == input_config

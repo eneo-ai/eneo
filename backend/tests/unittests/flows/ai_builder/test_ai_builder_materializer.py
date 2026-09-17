@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
@@ -9,9 +10,11 @@ from uuid import UUID, uuid4
 import pytest
 
 from eneo.assistants.assistant_update import AssistantUpdateCommand
+from eneo.flows.ai_builder.ai_builder_authoring_policy import AIBuilderAuthoringPolicy
 from eneo.flows.ai_builder.ai_builder_proposal_intent import (
     OrderedEditProposal,
 )
+from eneo.flows.application.flow_authoring_command import AIBuilderFlowAuthoringOrigin
 from eneo.flows.application.flow_draft_materialization import (
     FlowDraftAssistantToCreate as AssistantToCreate,
 )
@@ -61,6 +64,24 @@ from eneo.main.exceptions import BadRequestException
 
 def _edit_proposal(**kwargs: Any) -> OrderedEditProposal:
     return OrderedEditProposal(plan_rationale="Update the flow.", **kwargs)
+
+
+def _compile_builder_changeset(
+    spec: FlowDraftSpecCore,
+    current_flow: Flow | None,
+) -> FlowDraftChangeSet:
+    policy = AIBuilderAuthoringPolicy(
+        AIBuilderFlowAuthoringOrigin(
+            session_id=uuid4(),
+            plan_id=uuid4(),
+            spec_hash=spec.spec_hash(),
+            applied_at=datetime.now(timezone.utc),
+        )
+    )
+    return compile_flow_draft_changeset(
+        policy.effective_spec(spec=spec, current_flow=current_flow),
+        current_flow,
+    )
 
 
 async def execute_draft_materialization(
@@ -372,7 +393,7 @@ class TestCompileCreateFlow:
             ],
         )
 
-        changeset = compile_flow_draft_changeset(spec, current_flow=None)
+        changeset = _compile_builder_changeset(spec, current_flow=None)
 
         step = changeset.compiled_steps[0]
         assert step.input_config == {
@@ -674,7 +695,7 @@ class TestCompileEditFlow:
                 ),
             ],
         )
-        changeset = compile_flow_draft_changeset(spec, current_flow=flow)
+        changeset = _compile_builder_changeset(spec, current_flow=flow)
         step = changeset.compiled_steps[0]
         assert step.input_config == existing_config
         assert step.output_config == existing_output_config
@@ -712,7 +733,7 @@ class TestCompileEditFlow:
             ],
         )
 
-        changeset = compile_flow_draft_changeset(spec, current_flow=flow)
+        changeset = _compile_builder_changeset(spec, current_flow=flow)
 
         assert changeset.compiled_steps[0].input_config == {
             "legacy_marker": "keep-me",

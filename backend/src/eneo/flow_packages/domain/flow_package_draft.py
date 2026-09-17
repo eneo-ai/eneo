@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Annotated, Literal
 
 from pydantic import (
@@ -12,8 +13,12 @@ from pydantic import (
     field_validator,
 )
 
-from eneo.flows.domain.flow import FlowRuntimeInputConfig
-from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
+from eneo.flow_packages.domain.flow_package_errors import (
+    FlowPackageErrorCode,
+    FlowPackageValidationError,
+)
+from eneo.flows.domain.flow import FlowPersistedJsonObject, FlowRuntimeInputConfig
+from eneo.flows.flow_authoring_spec import FlowDraftSpecCore, StepSpec
 
 
 class FlowPackageRuntimeInputConfig(FlowRuntimeInputConfig):
@@ -34,6 +39,11 @@ class FlowPackageStepInputConfig(BaseModel):
 
     runtime_input: FlowPackageRuntimeInputConfig | None = None
     item_map: FlowPackageItemMapConfig | None = None
+
+    @field_validator("runtime_input", "item_map", mode="before")
+    @classmethod
+    def normalize_disabled_literal(cls, value: object) -> object:
+        return None if value is False else value
 
 
 class FlowPackageSpeakerMappingConfig(BaseModel):
@@ -70,3 +80,37 @@ class FlowPackageFlowDraft(BaseModel):
         if type(value) is not int or value != 1:
             raise ValueError("Unsupported schema version.")
         return value
+
+
+def normalize_flow_package_spec(spec: FlowDraftSpecCore) -> FlowDraftSpecCore:
+    steps: list[StepSpec] = []
+    for step in spec.steps:
+        configs: dict[str, FlowPersistedJsonObject | None] = {}
+        for field, raw_config, model in (
+            ("input_config", step.input_config, FlowPackageStepInputConfig),
+            ("output_config", step.output_config, FlowPackageStepOutputConfig),
+        ):
+            if raw_config is None:
+                configs[field] = None
+                continue
+            try:
+                parsed = model.model_validate_json(json.dumps(raw_config))
+            except (TypeError, ValueError) as exc:
+                raise FlowPackageValidationError(
+                    code=FlowPackageErrorCode.FLOW_DRAFT_INVALID,
+                    message="Flow package step configuration is not portable.",
+                    context={
+                        "plan_step_ref": step.plan_step_ref,
+                        "config_field": field,
+                    },
+                ) from exc
+            configs[field] = (
+                parsed.model_dump(
+                    mode="json",
+                    exclude_unset=True,
+                    exclude_none=True,
+                )
+                or None
+            )
+        steps.append(step.model_copy(update=configs))
+    return spec.model_copy(update={"steps": steps})

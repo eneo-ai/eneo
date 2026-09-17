@@ -11,9 +11,13 @@ from eneo.flows.domain.flow import (
     Flow,
     FlowPersistedJsonObject,
 )
+from eneo.flows.flow_authoring_runtime_input import resolve_runtime_input_config
 from eneo.flows.flow_authoring_spec import (
     FlowDraftSpecCore,
+    StepSpec,
 )
+from eneo.flows.http_transport import redact_persisted_config
+from eneo.flows.step_lineage import existing_step_ref_for_order
 
 
 class AIBuilderAuthoringPolicy:
@@ -31,9 +35,32 @@ class AIBuilderAuthoringPolicy:
             current_flow=current_flow,
             description_override_manual=self._origin.description_override_manual,
         )
-        if resolved_description == spec.flow_description:
-            return spec
-        return spec.model_copy(update={"flow_description": resolved_description})
+        existing_by_ref = (
+            {
+                existing_step_ref_for_order(step.step_order): step
+                for step in current_flow.steps
+            }
+            if current_flow is not None
+            else {}
+        )
+        steps: list[StepSpec] = []
+        for step in spec.steps:
+            existing_step = existing_by_ref.get(step.existing_step_ref or "")
+            input_config = resolve_runtime_input_config(
+                step_spec=step,
+                existing_input_config=(
+                    redact_persisted_config(existing_step.input_config)
+                    if existing_step is not None
+                    else None
+                ),
+            )
+            steps.append(step.model_copy(update={"input_config": input_config}))
+        return spec.model_copy(
+            update={
+                "flow_description": resolved_description,
+                "steps": steps,
+            }
+        )
 
     def stamp_metadata(
         self,

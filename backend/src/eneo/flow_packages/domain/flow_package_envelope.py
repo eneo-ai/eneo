@@ -8,7 +8,10 @@ from eneo.flow_packages.domain.flow_package_checksum import (
     compose_content_checksum,
     hash_json_value,
 )
-from eneo.flow_packages.domain.flow_package_draft import FlowPackageFlowDraft
+from eneo.flow_packages.domain.flow_package_draft import (
+    FlowPackageFlowDraft,
+    normalize_flow_package_spec,
+)
 from eneo.flow_packages.domain.flow_package_errors import (
     FlowPackageErrorCode,
     FlowPackageValidationError,
@@ -234,6 +237,8 @@ class FlowPackageEnvelope(BaseModel):
         )
         _validate_portable_step_identity(envelope.spec)
         _reject_unsupported_template_use(envelope.spec)
+        # Validate without replacing the spec covered by the package checksum.
+        normalize_flow_package_spec(envelope.spec)
         envelope.validated_resource_contract()
         return envelope
 

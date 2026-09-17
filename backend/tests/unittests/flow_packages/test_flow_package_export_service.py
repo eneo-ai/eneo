@@ -166,7 +166,27 @@ async def test_export_service_records_persisted_flow_mcp_as_one_typed_omission()
 
 
 @pytest.mark.anyio
-async def test_export_service_rejects_nonportable_config_before_writing_bytes() -> None:
+@pytest.mark.parametrize(
+    "input_config",
+    [
+        {"token": "plaintext-do-not-export"},
+        {"runtime_input": {"enabled": True}},
+        {"item_map": {"enabled": True, "max_items": 3}},
+        {"runtime_input": {"enabled": False, "unknown": "secret"}},
+        {"item_map": {"enabled": False, "unknown": "secret"}},
+        {"auth": {"mode": "none"}},
+        {"auth": {"mode": "bearer_token", "token": "secret"}},
+        {"runtime_input": {"enabled": False, "description": {"$secret": "stored"}}},
+        *[
+            {field: value}
+            for field in ("runtime_input", "item_map")
+            for value in (0, "false", True, "", [])
+        ],
+    ],
+)
+async def test_export_service_rejects_nonportable_config_before_writing_bytes(
+    input_config: FlowPersistedJsonObject,
+) -> None:
     assistant_id = uuid4()
     writes: list[object] = []
 
@@ -190,7 +210,7 @@ async def test_export_service_rejects_nonportable_config_before_writing_bytes() 
                     _step(
                         1,
                         assistant_id=assistant_id,
-                        input_config={"token": "plaintext-do-not-export"},
+                        input_config=input_config,
                     )
                 ]
             ),
@@ -425,7 +445,7 @@ def test_export_drops_a_speaker_mapping_block_on_a_step_that_does_not_map() -> N
     assert envelope.draft.spec.steps[0].output_config is None
 
 
-def test_export_omits_recognized_portable_config_when_mode_irrelevant() -> None:
+def test_export_omits_disabled_portable_config_when_mode_irrelevant() -> None:
     assistant_id = uuid4()
     envelope = _build_envelope(
         flow=_flow(
@@ -436,8 +456,8 @@ def test_export_omits_recognized_portable_config_when_mode_irrelevant() -> None:
                     input_type="text",
                     output_mode="compose_text",
                     input_config={
-                        "runtime_input": {"enabled": True},
-                        "item_map": {"enabled": True},
+                        "runtime_input": {"enabled": False},
+                        "item_map": {"enabled": False},
                     },
                     output_config={"citation_mode": "inline_inref_sidecar"},
                 )
@@ -1448,4 +1468,28 @@ def _provenance() -> FlowPackageProvenance:
         exported_at=datetime(2026, 5, 18, tzinfo=timezone.utc),
         source_instance_id="source-instance",
         omissions=[],
+    )
+
+
+@pytest.mark.parametrize("input_type", ["text", "document"])
+def test_export_omits_literal_disabled_input_blocks(input_type: str) -> None:
+    assistant_id = uuid4()
+    envelope = _build_envelope(
+        flow=_flow(
+            steps=[
+                _step(
+                    1,
+                    assistant_id=assistant_id,
+                    input_type=input_type,
+                    input_config={"runtime_input": False, "item_map": False},
+                )
+            ]
+        ),
+        assistant_snapshots={assistant_id: _snapshot(model_ref=None)},
+        resource_bindings=tuple(),
+    )
+
+    assert (
+        read_flow_package(write_flow_package(envelope)).spec.steps[0].input_config
+        is None
     )
