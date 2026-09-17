@@ -154,6 +154,23 @@
         "svelte": "^5.0.0",
       },
     },
+    "packages/widget-loader": {
+      "name": "@eneo/widget-loader",
+      "version": "1.0.0",
+      "devDependencies": {
+        "@eslint/js": "^9.39.4",
+        "@vitest/browser": "3.2.7",
+        "eslint": "^9.39.4",
+        "eslint-config-prettier": "^10.1.2",
+        "globals": "^16.5.0",
+        "playwright": "1.61.1",
+        "prettier": "3.9.4",
+        "typescript": "^5.9.3",
+        "typescript-eslint": "^8.62.1",
+        "vite": "^6.4.3",
+        "vitest": "3.2.7",
+      },
+    },
   },
   "patchedDependencies": {
     "nextra-theme-docs@4.6.1": "patches/nextra-theme-docs@4.6.1.patch",
@@ -201,6 +218,8 @@
     "@eneo/ui": ["@eneo/ui@workspace:packages/ui"],
 
     "@eneo/web": ["@eneo/web@workspace:apps/web"],
+
+    "@eneo/widget-loader": ["@eneo/widget-loader@workspace:packages/widget-loader"],
 
     "@esbuild/aix-ppc64": ["@esbuild/aix-ppc64@0.28.1", "", { "os": "aix", "cpu": "ppc64" }, "sha512-Svl7tq8k/08+p6CXPpRjQ1fKX+1odH/BQbb48fV6fj3CWHhsoIOoY87w1oHXm0qEpkIK3ZfVgp0hed3XBXzXMQ=="],
 
