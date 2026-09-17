@@ -66,6 +66,17 @@ Key properties:
 - **Nothing long-lived is public.** The page source holds only `public_id`. A visitor token lives 15 minutes, is bound to one widget and one pseudonymous `visitor_id`, and is invalidated the moment the widget is paused.
 - **Visitor state is partition-friendly.** The `visitor_id` lives in the iframe's `localStorage`, which modern browsers partition per top-level site: continuity across pages of the same municipal site, no cross-site tracking.
 
+## Alternatives considered
+
+| Option | Verdict | Why |
+|---|---|---|
+| **Loader + iframe, custom-element launcher** (chosen) | ✅ | Same-origin policy makes the conversation unreadable to the host page and every third-party script on it (tag managers, analytics, cookie tools); reuses the existing chat UI and WCAG work; no CORS and no credential in page source; `frame-ancestors` is browser-enforced; the host site's CSP needs only `script-src` + `frame-src`. Used by OpenAI ChatKit, Intercom, Dify and Stripe Elements. |
+| **Web component with Shadow DOM rendering the whole chat** (Flowise style) | ❌ for v1 | Shadow DOM isolates styles, not security: host JavaScript can read the DOM, wrap `fetch` and take the visitor token; the visitor id would live in the host origin's storage, visible to the site's analytics. Also requires a self-contained bundle that cannot reuse `ConversationView`, CORS plus `connect-src` on the host, and inherits host typography and stacking-context bugs. Its real advantages — auto-height, inline placement in page content, one document for focus — matter for an *inline* question box, not a floating chat. |
+| **Hybrid inline mode** (`mode="inline"`: a small Shadow-DOM question box that hands the answer to the iframe panel) | ⏩ later | Captures the inline-placement benefit without exposing the conversation. Listed under Phase 5; the versioned postMessage protocol and the custom element are designed so it can be added without touching host sites. |
+| **Widget as a module** (own container, BFF with `sk_`) | ❌ | Modules serve signed-in employees through SSO handoff and are stateless; a widget needs anonymous visitors, per-visitor state, limits, budget and retention, and would duplicate the chat UI and core policies. See the introduction. |
+| **`pk_` key in the snippet** | ❌ | Exposes a key that can call every read endpoint in its scope, puts all visitors' sessions on the key owner, and offers no per-visitor isolation, budget or kill switch. |
+| **Cloudflare Turnstile** for bot protection | ❌ | Third-party script and IP transfer on a Swedish municipal site. ALTCHA is self-hosted, MIT, WCAG 2.2 AA and cookie-free. |
+
 ## What already exists in `develop` (verified 2026-09-17)
 
 | Capability | Where | Reuse |
