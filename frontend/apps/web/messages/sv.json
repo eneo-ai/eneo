@@ -5043,7 +5043,7 @@
   "widget_admin_header_color_none": "Ingen",
   "widget_admin_color_reset": "Rensa",
   "widget_admin_logo_url": "Logga",
-  "widget_admin_logo_url_description": "Adress till en bild på er webbplats, visas i panelens sidhuvud (kvadratisk, minst 64 px).",
+  "widget_admin_logo_url_description": "Adress till en bild på er webbplats, visas i panelens sidhuvud (kvadratisk, minst 64 px). Tills ni anger en visas Eneos logga där er kommer att hamna.",
   "widget_admin_logo_preview_alt": "Nuvarande logga",
   "widget_admin_template_pick_title": "Utgå från en mall",
   "widget_admin_template_none_description": "Utgå från Eneos standard och konfigurera allt själv.",

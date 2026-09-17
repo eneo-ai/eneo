@@ -11,6 +11,7 @@
   import { onMount, tick, untrack } from "svelte";
   import { m } from "$lib/paraglide/messages";
   import { getChatService } from "$lib/features/chat/ChatService.svelte";
+  import { IconEneo } from "@eneo/icons/eneo";
   import { IconThumb } from "@eneo/icons/thumb";
   import { IconPlus } from "@eneo/icons/plus";
   import { solveWithAltcha } from "../altcha";
@@ -207,6 +208,11 @@
           width="32"
           height="32"
         />
+      {:else}
+        <!-- Eneo's mark stands in until the organisation sets its own logo. -->
+        <span class="flex h-8 w-8 shrink-0 items-center justify-center" aria-hidden="true">
+          <IconEneo size="md" />
+        </span>
       {/if}
       <div class="min-w-0">
         <h1 class="truncate text-base font-semibold">{config.texts.title || config.name}</h1>

@@ -5043,7 +5043,7 @@
   "widget_admin_header_color_none": "None",
   "widget_admin_color_reset": "Clear",
   "widget_admin_logo_url": "Logo",
-  "widget_admin_logo_url_description": "Address of an image hosted on your website, shown in the panel header (square, at least 64 px).",
+  "widget_admin_logo_url_description": "Address of an image hosted on your website, shown in the panel header (square, at least 64 px). Until you set one, Eneo's logo shows where yours will go.",
   "widget_admin_logo_preview_alt": "Current logo",
   "widget_admin_template_pick_title": "Start from a template",
   "widget_admin_template_none_description": "Start from Eneo's defaults and configure everything yourself.",
