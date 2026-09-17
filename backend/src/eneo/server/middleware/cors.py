@@ -32,7 +32,7 @@ class CORSMiddleware:
         expose_headers: Sequence[str] = (),
         max_age: int = 600,
         callback: typing.Optional[
-            typing.Callable[[str, Headers], typing.Awaitable[bool]]
+            typing.Callable[[str, Headers, bool], typing.Awaitable[bool]]
         ] = None,
     ) -> None:
         super().__init__()
@@ -123,7 +123,11 @@ class CORSMiddleware:
         )
 
     async def is_allowed_origin(
-        self, origin: str, request_headers: Headers | None = None
+        self,
+        origin: str,
+        request_headers: Headers | None = None,
+        *,
+        is_preflight: bool = False,
     ) -> bool:
         if self.allow_all_origins:
             return True
@@ -137,7 +141,9 @@ class CORSMiddleware:
             return True
 
         if self.callback is not None:
-            return await self.callback(origin, request_headers or Headers())
+            return await self.callback(
+                origin, request_headers or Headers(), is_preflight
+            )
 
         return False
 
@@ -153,7 +159,7 @@ class CORSMiddleware:
         failures: list[str] = []
 
         if await self.is_allowed_origin(
-            origin=requested_origin, request_headers=request_headers
+            origin=requested_origin, request_headers=request_headers, is_preflight=True
         ):
             if self.preflight_explicit_allow_origin:
                 # The "else" case is already accounted for in self.preflight_headers

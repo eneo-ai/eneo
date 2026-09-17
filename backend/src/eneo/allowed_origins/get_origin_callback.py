@@ -75,7 +75,9 @@ async def _get_preflight_key_origin_patterns(
         return _preflight_key_origin_patterns
 
 
-async def get_origin(origin: str, request_headers: Headers | None = None) -> bool:
+async def get_origin(
+    origin: str, request_headers: Headers | None = None, is_preflight: bool = False
+) -> bool:
     parsed = urlparse(origin)
     if parsed.hostname in ("localhost", "127.0.0.1", "::1"):
         return True
@@ -92,7 +94,9 @@ async def get_origin(origin: str, request_headers: Headers | None = None) -> boo
         # A preflight may therefore use the global tenant allowlist or origins
         # from active public keys on relaxed tenants. The actual request is
         # checked against its specific key below and by API-key authentication.
-        if _preflight_requests_api_key(headers, settings.api_key_header_name):
+        if is_preflight and _preflight_requests_api_key(
+            headers, settings.api_key_header_name
+        ):
             if not matches:
                 patterns = await _get_preflight_key_origin_patterns(api_key_repo)
                 matches = _matches(origin, patterns)

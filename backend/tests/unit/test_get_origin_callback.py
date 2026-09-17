@@ -72,12 +72,65 @@ def test_tenant_origin_requirement_is_enabled_by_default():
 
 
 @pytest.mark.asyncio
+async def test_actual_request_cannot_use_preflight_origin_allowlist(monkeypatch):
+    _install_common_fakes(monkeypatch)
+    monkeypatch.setattr(callback_module, "get_settings", _settings)
+
+    class ApiKeyRepo:
+        def __init__(self, session):  # noqa: ARG002
+            pass
+
+        async def list_relaxed_tenant_public_key_origin_patterns(self):
+            return ["https://key.example"]
+
+    monkeypatch.setattr(callback_module, "ApiKeysV2Repository", ApiKeyRepo)
+    application_called = False
+    sent_messages = []
+
+    async def app(scope, receive, send):  # noqa: ARG001
+        nonlocal application_called
+        application_called = True
+        await send({"type": "http.response.start", "status": 204, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message):
+        sent_messages.append(message)
+
+    cors = CORSMiddleware(
+        app,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        callback=callback_module.get_origin,
+    )
+    scope = {
+        "type": "http",
+        "method": "OPTIONS",
+        "headers": [
+            (b"origin", b"https://key.example"),
+            (b"access-control-request-method", b"POST"),
+            (b"access-control-request-headers", b"x-api-key"),
+        ],
+    }
+    await cors(scope, receive, send)
+    assert sent_messages[0]["status"] == 200
+    assert not application_called
+
+    sent_messages.clear()
+    await cors({**scope, "method": "POST"}, receive, send)
+    assert sent_messages[0]["status"] == 400
+    assert not application_called
+
+
+@pytest.mark.asyncio
 async def test_cors_middleware_passes_preflight_headers_to_callback():
     captured = None
 
-    async def callback(origin, headers):
+    async def callback(origin, headers, is_preflight):
         nonlocal captured
-        captured = (origin, headers.get("access-control-request-headers"))
+        captured = (origin, headers.get("access-control-request-headers"), is_preflight)
         return True
 
     async def app(scope, receive, send):  # noqa: ARG001
@@ -100,7 +153,7 @@ async def test_cors_middleware_passes_preflight_headers_to_callback():
     )
 
     assert response.status_code == 200
-    assert captured == ("https://key.example", "x-api-key")
+    assert captured == ("https://key.example", "x-api-key", True)
 
 
 @pytest.mark.asyncio
@@ -108,9 +161,10 @@ async def test_cors_middleware_rejects_origin_before_calling_application():
     application_called = False
     sent_messages = []
 
-    async def callback(origin, headers):
+    async def callback(origin, headers, is_preflight):
         assert origin == "https://denied.example"
         assert headers["x-api-key"] == "pk_example"
+        assert not is_preflight
         return False
 
     async def app(scope, receive, send):  # noqa: ARG001
@@ -146,7 +200,7 @@ async def test_cors_middleware_calls_application_after_origin_is_allowed():
     application_called = False
     sent_messages = []
 
-    async def callback(origin, headers):  # noqa: ARG001
+    async def callback(origin, headers, is_preflight):  # noqa: ARG001
         return True
 
     async def app(scope, receive, send):  # noqa: ARG001
@@ -383,7 +437,9 @@ async def test_api_key_preflight_uses_active_public_key_origins(monkeypatch):
             "Access-Control-Request-Headers": "content-type, x-api-key",
         }
     )
-    assert await callback_module.get_origin("https://app.key.example", headers)
+    assert await callback_module.get_origin(
+        "https://app.key.example", headers, is_preflight=True
+    )
 
 
 @pytest.mark.asyncio
@@ -409,8 +465,12 @@ async def test_api_key_preflight_origin_patterns_are_cached(monkeypatch):
             "Access-Control-Request-Headers": "x-api-key",
         }
     )
-    assert await callback_module.get_origin("https://one.key.example", headers)
-    assert await callback_module.get_origin("https://two.key.example", headers)
+    assert await callback_module.get_origin(
+        "https://one.key.example", headers, is_preflight=True
+    )
+    assert await callback_module.get_origin(
+        "https://two.key.example", headers, is_preflight=True
+    )
     assert query_count == 1
 
 
@@ -434,7 +494,9 @@ async def test_bearer_preflight_does_not_use_api_key_origins(monkeypatch):
             "Access-Control-Request-Headers": "authorization, x-api-key",
         }
     )
-    assert not await callback_module.get_origin("https://key.example", headers)
+    assert not await callback_module.get_origin(
+        "https://key.example", headers, is_preflight=True
+    )
 
 
 @pytest.mark.asyncio
@@ -460,4 +522,6 @@ async def test_preflight_without_api_key_header_still_requires_tenant_origin(
             "Access-Control-Request-Headers": "content-type",
         }
     )
-    assert not await callback_module.get_origin("https://key.example", headers)
+    assert not await callback_module.get_origin(
+        "https://key.example", headers, is_preflight=True
+    )

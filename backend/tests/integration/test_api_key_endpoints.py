@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
+from eneo.allowed_origins import get_origin_callback as origin_callback
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2 as ApiKeysV2Table
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 from eneo.main.config import get_settings, set_settings
@@ -189,6 +190,10 @@ async def test_pk_origin_guardrail(
 ):
     await _add_allowed_origin(
         db_container, default_user.tenant_id, "https://app.example.com"
+    )
+    # Let CORS pass so this test exercises the key's narrower origin allowlist.
+    await _add_allowed_origin(
+        db_container, default_user.tenant_id, "https://evil.example.com"
     )
 
     create_response = await client.post(
@@ -404,6 +409,81 @@ async def test_admin_can_relax_tenant_origin_requirement(
     )
     assert response.status_code == 200, response.text
     assert response.json()["require_tenant_allowed_origin"] is False
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_public_key_cors_obeys_tenant_policy_and_revocation(
+    client, default_user_token, monkeypatch
+):
+    monkeypatch.setattr(origin_callback, "_preflight_key_origin_cache_expires_at", 0.0)
+    origin = f"https://widget-{uuid4().hex}.example.com"
+    admin_headers = {"Authorization": f"Bearer {default_user_token}"}
+    policy_url = "/api/v1/admin/api-key-policy"
+    response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": "Widget CORS",
+            "key_type": "pk_",
+            "permission": "read",
+            "scope_type": "tenant",
+            "allowed_origins": [origin],
+        },
+        headers=admin_headers,
+    )
+    assert response.status_code == 201, response.text
+    key_id = response.json()["api_key"]["id"]
+    key_headers = {"Origin": origin, "X-API-Key": response.json()["secret"]}
+    preflight_headers = {
+        "Origin": origin,
+        "Access-Control-Request-Method": "GET",
+        "Access-Control-Request-Headers": "x-api-key",
+    }
+
+    response = await client.get(_AUTH_ENDPOINT, headers=key_headers)
+    assert response.status_code == 400, response.text
+
+    response = await client.patch(
+        policy_url, json={"require_tenant_allowed_origin": False}, headers=admin_headers
+    )
+    assert response.status_code == 200, response.text
+    # Updating another policy field must preserve the administrator's opt-in.
+    response = await client.patch(
+        policy_url, json={"max_delegation_depth": 2}, headers=admin_headers
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["require_tenant_allowed_origin"] is False
+
+    response = await client.options(_AUTH_ENDPOINT, headers=preflight_headers)
+    assert response.status_code == 200, response.text
+    assert response.headers["access-control-allow-origin"] == origin
+    response = await client.get(_AUTH_ENDPOINT, headers=key_headers)
+    assert response.status_code == 200, response.text
+    assert response.headers["access-control-allow-origin"] == origin
+
+    # A cached preflight must not override a subsequent policy change.
+    response = await client.patch(
+        policy_url, json={"require_tenant_allowed_origin": True}, headers=admin_headers
+    )
+    assert response.status_code == 200, response.text
+    response = await client.get(
+        _AUTH_ENDPOINT, headers={**key_headers, **preflight_headers}
+    )
+    assert response.status_code == 400, response.text
+
+    response = await client.patch(
+        policy_url, json={"require_tenant_allowed_origin": False}, headers=admin_headers
+    )
+    assert response.status_code == 200, response.text
+    response = await client.post(
+        f"/api/v1/api-keys/{key_id}/revoke",
+        json={"reason_code": "security_concern"},
+        headers=admin_headers,
+    )
+    assert response.status_code == 200, response.text
+    response = await client.get(_AUTH_ENDPOINT, headers=key_headers)
+    assert response.status_code == 400, response.text
+    assert "access-control-allow-origin" not in response.headers
 
 
 @pytest.mark.integration
