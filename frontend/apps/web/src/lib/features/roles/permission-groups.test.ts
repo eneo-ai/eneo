@@ -10,7 +10,13 @@ vi.mock("$lib/paraglide/messages", () => ({
 }));
 
 import type { Permission } from "@eneo/eneo-js";
-import { groupPermissions, roleMatches, sameSet, summarizeGroups } from "./permission-groups";
+import {
+  groupPermissions,
+  roleMatches,
+  sameSet,
+  sortRoles,
+  summarizeGroups
+} from "./permission-groups";
 
 const catalogue = (
   [
@@ -129,5 +135,28 @@ describe("sameSet", () => {
   test("ignores order and duplicates", () => {
     expect(sameSet(["a", "b", "b"], ["b", "a"])).toBe(true);
     expect(sameSet(["a"], ["a", "b"])).toBe(false);
+  });
+});
+
+describe("sortRoles", () => {
+  const roles = [
+    { id: "b", name: "Bravo", permissions: ["x", "y"] },
+    { id: "a", name: "Alpha", permissions: ["x", "y"] },
+    { id: "o", name: "Owner", permissions: ["x", "y", "z"] },
+    { id: "n", name: "None", permissions: [] }
+  ];
+
+  test("puts the default role first, then the broadest roles, then names", () => {
+    expect(sortRoles(roles, "n", "sv").map((role) => role.id)).toEqual(["n", "o", "a", "b"]);
+  });
+
+  test("without a default role the broadest role leads", () => {
+    expect(sortRoles(roles, null, "sv").map((role) => role.id)).toEqual(["o", "a", "b", "n"]);
+  });
+
+  test("does not mutate the input", () => {
+    const input = [...roles];
+    sortRoles(input, "n", "sv");
+    expect(input.map((role) => role.id)).toEqual(["b", "a", "o", "n"]);
   });
 });

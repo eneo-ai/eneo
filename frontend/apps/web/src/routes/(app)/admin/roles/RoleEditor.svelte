@@ -81,7 +81,6 @@
 
   function applyTemplate(template: Template) {
     selected = [...template.permissions] as Permission[];
-    if (!name.trim()) name = template.name;
   }
 
   function handleOpenChange(next: boolean) {

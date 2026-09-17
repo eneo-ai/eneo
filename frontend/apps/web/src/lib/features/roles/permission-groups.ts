@@ -125,3 +125,17 @@ export function sameSet(a: ReadonlyArray<string>, b: ReadonlyArray<string>): boo
   const right = new Set(b);
   return left.size === right.size && [...left].every((value) => right.has(value));
 }
+
+/** Default role first, then the broadest roles, then by name. */
+export function sortRoles<
+  T extends { id: string; name: string; permissions: ReadonlyArray<string> }
+>(roles: readonly T[], defaultRoleId: string | null, locale?: string): T[] {
+  return [...roles].sort((a, b) => {
+    if (a.id === defaultRoleId) return -1;
+    if (b.id === defaultRoleId) return 1;
+    if (a.permissions.length !== b.permissions.length) {
+      return b.permissions.length - a.permissions.length;
+    }
+    return a.name.localeCompare(b.name, locale);
+  });
+}

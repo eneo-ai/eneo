@@ -16,7 +16,7 @@
   import { getEneo } from "$lib/core/Eneo";
   import { toastError } from "$lib/core/errors";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
-  import { groupPermissions, roleMatches } from "$lib/features/roles/permission-groups";
+  import { groupPermissions, roleMatches, sortRoles } from "$lib/features/roles/permission-groups";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
   import RoleEditor from "./RoleEditor.svelte";
@@ -31,24 +31,11 @@
   let query = $state("");
 
   const groups = $derived(groupPermissions(data.permissions));
-  const templateRank = $derived(
-    new Map(data.templates.map((template, index) => [template.name, index] as const))
-  );
-
-  function compareRoles(a: Role, b: Role) {
-    if (a.id === defaultRoleId) return -1;
-    if (b.id === defaultRoleId) return 1;
-    const rankA = templateRank.get(a.predefined_source ?? "") ?? Number.MAX_SAFE_INTEGER;
-    const rankB = templateRank.get(b.predefined_source ?? "") ?? Number.MAX_SAFE_INTEGER;
-    if (rankA !== rankB) return rankA - rankB;
-    return a.name.localeCompare(b.name, getLocale());
-  }
-
   const visible = $derived(
-    [...data.roles].sort(compareRoles).filter((role) => roleMatches(role, groups, query))
+    sortRoles(data.roles, defaultRoleId, getLocale()).filter((role) =>
+      roleMatches(role, groups, query)
+    )
   );
-  const builtIn = $derived(visible.filter((role) => role.predefined_source));
-  const custom = $derived(visible.filter((role) => !role.predefined_source));
   const defaultRole = $derived(data.roles.find((role) => role.id === defaultRoleId) ?? null);
 
   let editorOpen = $state(false);
@@ -119,22 +106,6 @@
   <title>Eneo.ai – {m.admin()} – {m.roles()}</title>
 </svelte:head>
 
-{#snippet roleList(roles: Role[], label: string)}
-  <ul class="divide-default -mx-4 -my-4 divide-y" aria-label={label}>
-    {#each roles as role (role.id)}
-      <RoleRow
-        {role}
-        {groups}
-        isDefault={role.id === defaultRoleId}
-        onEdit={edit}
-        onDelete={(target) => (pending = { kind: "delete", role: target })}
-        onReset={(target) => (pending = { kind: "reset", role: target })}
-        onSetDefault={(target) => (pending = { kind: "default", role: target })}
-      />
-    {/each}
-  </ul>
-{/snippet}
-
 <Page.Root>
   <Page.Header>
     <Page.Title title={m.roles()} />
@@ -145,7 +116,7 @@
     <div class="mx-auto flex w-full max-w-[1100px] flex-col gap-6 py-6 pr-6">
       <div class="flex flex-wrap items-end justify-between gap-4">
         <div class="text-secondary max-w-[72ch] text-sm">
-          <p>{m.roles_page_description()}</p>
+          <p>{m.roles_page_description()} {m.roles_template_note()}</p>
           <p class="mt-1">
             {#if defaultRole}
               {m.roles_default_role_note({ name: defaultRole.name })}
@@ -169,37 +140,27 @@
         </div>
       </div>
 
-      {#if visible.length === 0}
-        <p class="text-secondary text-sm" role="status">{m.roles_no_match({ query })}</p>
-      {/if}
-
-      {#if builtIn.length > 0}
-        <Card.Root>
-          <Card.Header class="border-b">
-            <Card.Title>{m.roles_builtin_section()}</Card.Title>
-            <Card.Description>{m.roles_builtin_section_description()}</Card.Description>
-          </Card.Header>
-          <Card.Content>
-            {@render roleList(builtIn, m.roles_builtin_section())}
-          </Card.Content>
-        </Card.Root>
-      {/if}
-
-      {#if custom.length > 0 || !query.trim()}
-        <Card.Root>
-          <Card.Header class="border-b">
-            <Card.Title>{m.roles_custom_section()}</Card.Title>
-            <Card.Description>{m.roles_custom_section_description()}</Card.Description>
-          </Card.Header>
-          <Card.Content>
-            {#if custom.length === 0}
-              <p class="text-secondary text-sm">{m.roles_custom_empty()}</p>
-            {:else}
-              {@render roleList(custom, m.roles_custom_section())}
-            {/if}
-          </Card.Content>
-        </Card.Root>
-      {/if}
+      <Card.Root>
+        <Card.Content>
+          {#if visible.length === 0}
+            <p class="text-secondary text-sm" role="status">{m.roles_no_match({ query })}</p>
+          {:else}
+            <ul class="divide-default -mx-4 -my-4 divide-y" aria-label={m.roles()}>
+              {#each visible as role (role.id)}
+                <RoleRow
+                  {role}
+                  {groups}
+                  isDefault={role.id === defaultRoleId}
+                  onEdit={edit}
+                  onDelete={(target) => (pending = { kind: "delete", role: target })}
+                  onReset={(target) => (pending = { kind: "reset", role: target })}
+                  onSetDefault={(target) => (pending = { kind: "default", role: target })}
+                />
+              {/each}
+            </ul>
+          {/if}
+        </Card.Content>
+      </Card.Root>
     </div>
   </Page.Main>
 </Page.Root>

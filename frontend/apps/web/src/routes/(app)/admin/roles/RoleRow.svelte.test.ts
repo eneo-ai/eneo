@@ -92,9 +92,13 @@ describe("RoleRow", () => {
   test("shows the template badge and offers a reset for template roles", async () => {
     const handlers = renderRow();
 
-    await expect.element(page.getByText("roles_template_badge")).toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: /roles_template_badge_named \{"name":"User"\}/ }))
+      .toBeVisible();
     await page.getByRole("button", { name: 'roles_more_actions {"name":"Editor"}' }).click();
-    await page.getByRole("menuitem", { name: "reset_to_template" }).click();
+    await page
+      .getByRole("menuitem", { name: 'roles_reset_to_template_named {"name":"User"}' })
+      .click();
     expect(handlers.onReset).toHaveBeenCalledWith(role);
   });
 

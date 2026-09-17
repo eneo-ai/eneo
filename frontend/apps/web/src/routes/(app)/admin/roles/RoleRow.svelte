@@ -43,9 +43,17 @@
 
   const summary = $derived(summarizeGroups(groups, role.permissions));
   const granted = $derived(new Set<string>(role.permissions));
-  const templateTooltip = $derived(
-    role.predefined_source ? m.template_role_tooltip({ name: role.predefined_source }) : null
-  );
+  // Derived once so the strings can be used inside snippets, where TypeScript
+  // loses the {#if} narrowing of the nullable predefined_source.
+  const template = $derived.by(() => {
+    const name = role.predefined_source;
+    if (!name) return null;
+    return {
+      badge: m.roles_template_badge_named({ name }),
+      tooltip: m.roles_template_badge_tooltip({ name }),
+      reset: m.roles_reset_to_template_named({ name })
+    };
+  });
 </script>
 
 <li class="px-4 py-3">
@@ -83,14 +91,14 @@
               <Tooltip.Content>{m.roles_default_badge_tooltip()}</Tooltip.Content>
             </Tooltip.Root>
           {/if}
-          {#if templateTooltip}
+          {#if template}
             <Tooltip.Root>
               <Tooltip.Trigger class={badgeVariants({ variant: "outline" })}>
                 <LayoutTemplate aria-hidden="true" data-icon="inline-start" />
-                {m.roles_template_badge()}
-                <span class="sr-only">. {templateTooltip}</span>
+                {template.badge}
+                <span class="sr-only">. {template.tooltip}</span>
               </Tooltip.Trigger>
-              <Tooltip.Content>{templateTooltip}</Tooltip.Content>
+              <Tooltip.Content>{template.tooltip}</Tooltip.Content>
             </Tooltip.Root>
           {/if}
         </Tooltip.Provider>
@@ -155,10 +163,10 @@
               {m.set_as_default_role()}
             </DropdownMenu.Item>
           {/if}
-          {#if role.predefined_source}
+          {#if template}
             <DropdownMenu.Item onSelect={() => onReset(role)}>
               <RotateCcw aria-hidden="true" />
-              {m.reset_to_template()}
+              {template.reset}
             </DropdownMenu.Item>
           {/if}
           <DropdownMenu.Separator />
