@@ -1,13 +1,14 @@
 <!--
-  A static rendering of how a template's colours and texts come together:
-  launcher, header, welcome, suggestions and the composer. Templates have no
-  widget behind them, so there is nothing live to frame; the real embed page
-  is previewed on the widget page after the template has been applied.
+  A static rendering of how a template's colours, logo and texts come
+  together: launcher, header, welcome, a sample bubble and the composer.
+  Templates have no widget behind them, so there is nothing live to frame;
+  the real embed page is previewed on the widget page after the template has
+  been applied.
 -->
 <script lang="ts">
   import type { WidgetTexts, WidgetTheme } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
-  import { DEFAULT_PRIMARY_COLOR, isHexColor } from "./contrast";
+  import { DEFAULT_PRIMARY_COLOR, isHexColor, readableOn } from "../contrast";
 
   type Props = {
     name: string;
@@ -20,8 +21,12 @@
   const accent = $derived(
     isHexColor(theme.primary_color ?? "") ? theme.primary_color! : DEFAULT_PRIMARY_COLOR
   );
+  const header = $derived(
+    theme.header_color && isHexColor(theme.header_color) ? theme.header_color : null
+  );
   const radius = $derived(`${theme.radius ?? 12}px`);
   const dark = $derived(theme.color_scheme === "dark");
+  const left = $derived(theme.position === "bottom-left");
 </script>
 
 <section
@@ -34,7 +39,7 @@
   <p class="text-secondary text-sm">{m.widget_admin_template_preview_description()}</p>
 
   <div
-    class="bg-secondary flex justify-end gap-3 rounded-lg p-4"
+    class={["bg-secondary flex items-end gap-3 rounded-lg p-4", left && "flex-row-reverse"]}
     data-theme={dark ? "dark" : "light"}
     role="img"
     aria-label={m.widget_admin_template_preview_alt({ name })}
@@ -42,11 +47,27 @@
     <div
       class="bg-primary text-primary flex w-full max-w-sm flex-col overflow-hidden shadow"
       style:border-radius={radius}
-      style:--widget-accent={accent}
     >
-      <div class="border-default border-b px-4 py-3">
-        <p class="text-base font-semibold">{texts.title || name}</p>
-        <p class="text-secondary text-xs">{texts.ai_disclosure}</p>
+      <div
+        class={["flex items-center gap-3 px-4 py-3", !header && "border-default border-b"]}
+        style:background={header}
+        style:color={header ? readableOn(header) : null}
+      >
+        {#if theme.logo_url}
+          <img
+            class="h-8 w-8 shrink-0 rounded-md object-contain"
+            src={theme.logo_url}
+            alt=""
+            width="32"
+            height="32"
+          />
+        {/if}
+        <div class="min-w-0">
+          <p class="truncate text-base font-semibold">{texts.title || name}</p>
+          <p class={["text-xs", header ? "opacity-85" : "text-secondary"]}>
+            {texts.ai_disclosure}
+          </p>
+        </div>
       </div>
       <div class="flex flex-col gap-3 px-4 py-4">
         {#if texts.welcome}
@@ -54,22 +75,15 @@
         {/if}
         <div class="flex justify-end">
           <span
-            class="text-on-fill max-w-[80%] px-3 py-2 text-sm"
+            class="max-w-[80%] px-3 py-2 text-sm"
             style:background={accent}
+            style:color={readableOn(accent)}
             style:border-radius={radius}
+            style:border-bottom-right-radius="4px"
           >
             {m.widget_admin_template_preview_sample_question()}
           </span>
         </div>
-        {#if texts.suggested_questions?.length}
-          <div class="flex flex-wrap gap-2">
-            {#each texts.suggested_questions.slice(0, 3) as question (question)}
-              <span class="border-default border px-3 py-1 text-xs" style:border-radius={radius}
-                >{question}</span
-              >
-            {/each}
-          </div>
-        {/if}
       </div>
       <div class="border-default flex flex-col gap-2 border-t px-4 py-3">
         <div
@@ -89,7 +103,7 @@
       </div>
     </div>
     <span
-      class="mt-auto inline-block h-14 w-14 shrink-0 rounded-full shadow"
+      class="inline-block h-14 w-14 shrink-0 rounded-full shadow"
       style:background={accent}
       aria-hidden="true"
     ></span>

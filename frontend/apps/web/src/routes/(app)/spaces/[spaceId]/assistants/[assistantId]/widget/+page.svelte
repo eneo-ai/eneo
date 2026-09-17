@@ -1,10 +1,14 @@
 <script lang="ts">
   import type { Widget } from "@eneo/eneo-js";
-  import { Button } from "@eneo/ui";
   import { Page } from "$lib/components/layout";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as Card from "$lib/components/ui/card/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
   import { toastError } from "$lib/core/errors";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager.js";
+  import TemplatePicker from "$lib/features/widget/admin/TemplatePicker.svelte";
   import WidgetEditor from "$lib/features/widget/admin/WidgetEditor.svelte";
   import { m } from "$lib/paraglide/messages";
   import { untrack } from "svelte";
@@ -64,59 +68,51 @@
           />
         {/key}
       {:else}
-        <section
-          aria-labelledby="widget-create-title"
-          class="border-default bg-primary mx-auto flex w-full max-w-xl flex-col gap-4 rounded-xl border p-6"
-        >
-          <h2 id="widget-create-title" class="text-lg font-semibold">
-            {m.widget_admin_create_title()}
-          </h2>
-          <p class="text-secondary text-sm">{m.widget_admin_create_description()}</p>
-          <form
-            class="flex flex-col gap-3"
-            onsubmit={(event) => {
-              event.preventDefault();
-              void create();
-            }}
-          >
-            <label class="flex flex-col gap-1 text-sm font-medium">
-              {m.name()}
-              <input
-                type="text"
-                class="border-default bg-primary ring-default rounded-lg border px-3 py-2 font-normal shadow focus-visible:ring-2"
-                maxlength="100"
-                required
-                bind:value={name}
-              />
-            </label>
-            {#if data.templates.length > 0}
-              <label class="flex flex-col gap-1 text-sm font-medium">
-                {m.widget_admin_template()}
-                <select
-                  class="border-default bg-primary ring-default rounded-lg border px-3 py-2 font-normal shadow focus-visible:ring-2"
-                  bind:value={templateId}
+        <Card.Root class="mx-auto w-full max-w-3xl">
+          <Card.Header>
+            <Card.Title>{m.widget_admin_create_title()}</Card.Title>
+            <Card.Description>{m.widget_admin_create_description()}</Card.Description>
+          </Card.Header>
+          <Card.Content>
+            <form
+              class="flex flex-col gap-6"
+              onsubmit={(event) => {
+                event.preventDefault();
+                void create();
+              }}
+            >
+              <Field.Field>
+                <Field.Label for="widget-create-name">{m.name()}</Field.Label>
+                <Input
+                  id="widget-create-name"
+                  maxlength={100}
+                  required
+                  bind:value={name}
+                  aria-describedby="widget-create-name-help"
+                />
+                <Field.Description id="widget-create-name-help"
+                  >{m.widget_admin_name_description()}</Field.Description
                 >
-                  <option value="">{m.widget_admin_template_none()}</option>
-                  {#each data.templates as template (template.id)}
-                    <option value={template.id}>
-                      {template.name}{template.is_default
-                        ? ` (${m.widget_admin_template_default()})`
-                        : ""}
-                    </option>
-                  {/each}
-                </select>
-                <span class="text-secondary text-xs font-normal"
-                  >{m.widget_admin_template_create_help()}</span
-                >
-              </label>
-            {/if}
-            <div>
-              <Button variant="primary" type="submit" disabled={create.isLoading}
-                >{m.widget_admin_create()}</Button
-              >
-            </div>
-          </form>
-        </section>
+              </Field.Field>
+              {#if data.templates.length > 0}
+                <Field.Field>
+                  <Field.Title>{m.widget_admin_template()}</Field.Title>
+                  <Field.Description>{m.widget_admin_template_create_help()}</Field.Description>
+                  <TemplatePicker
+                    templates={data.templates}
+                    bind:value={templateId}
+                    includeNone
+                    legend={m.widget_admin_template()}
+                    id="widget-create-template"
+                  />
+                </Field.Field>
+              {/if}
+              <div>
+                <Button type="submit" disabled={create.isLoading}>{m.widget_admin_create()}</Button>
+              </div>
+            </form>
+          </Card.Content>
+        </Card.Root>
       {/if}
     </div>
   </Page.Main>

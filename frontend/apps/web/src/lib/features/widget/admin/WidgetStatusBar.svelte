@@ -1,12 +1,13 @@
 <!--
-  Lifecycle of one widget: status, why it cannot be activated yet, and the
-  activate / pause / archive actions. Activation and archiving are for
-  tenant admins; pausing is the kill switch every editor has.
+  Lifecycle of one widget: status, save state, why it cannot be activated
+  yet, and the activate / pause / archive actions. Activation and archiving
+  are for tenant admins; pausing is the kill switch every editor has.
 -->
 <script lang="ts">
-  import { Button, Dialog, Tooltip } from "@eneo/ui";
-  import { writable } from "svelte/store";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { toastError } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
@@ -27,7 +28,7 @@
   const blockers = $derived(widget.activation_blockers ?? []);
   const canActivate = $derived(isAdmin && blockers.length === 0 && !autosave.hasPending);
 
-  const showArchive = writable(false);
+  let archiveOpen = $state(false);
 
   const activate = createAsyncState(async () => {
     try {
@@ -47,7 +48,7 @@
   const archive = createAsyncState(async () => {
     try {
       await onArchive();
-      $showArchive = false;
+      archiveOpen = false;
     } catch (error) {
       toastError(error, m.widget_admin_could_not_archive());
     }
@@ -84,7 +85,7 @@
       ? m.widget_admin_activate_admin_only()
       : blockers.length > 0
         ? m.widget_admin_activate_blocked()
-        : undefined
+        : null
   );
 </script>
 
@@ -93,7 +94,7 @@
   class="border-default bg-primary flex flex-col gap-3 rounded-xl border p-4"
 >
   <div class="flex flex-wrap items-center justify-between gap-3">
-    <div class="flex items-center gap-3">
+    <div class="flex flex-wrap items-center gap-3">
       <h2 id="widget-status-title" class="text-base font-semibold">{m.widget_admin_status()}</h2>
       <Badge
         variant={widget.status === "active"
@@ -105,8 +106,8 @@
       <span class="text-secondary text-sm" aria-live="polite" aria-atomic="true">
         {saveLabel}
         {#if autosave.status === "error"}
-          <button type="button" class="ml-1 underline" onclick={() => autosave.retry()}
-            >{m.widget_admin_retry_save()}</button
+          <Button variant="link" size="sm" onclick={() => autosave.retry()}
+            >{m.widget_admin_retry_save()}</Button
           >
         {/if}
       </span>
@@ -114,23 +115,33 @@
 
     <div class="flex flex-wrap items-center gap-2">
       {#if widget.status === "active"}
-        <Button variant="warning-outlined" onclick={pause} disabled={pause.isLoading}
+        <Button variant="outline" onclick={pause} disabled={pause.isLoading}
           >{m.widget_admin_pause()}</Button
         >
       {:else if widget.status !== "archived"}
-        <Tooltip text={activateTooltip}>
+        {#if activateTooltip}
+          <Tooltip.Root>
+            <Tooltip.Trigger>
+              {#snippet child({ props })}
+                <Button {...props} variant="default" aria-disabled="true" class="opacity-50">
+                  {widget.status === "paused" ? m.widget_admin_resume() : m.widget_admin_activate()}
+                </Button>
+              {/snippet}
+            </Tooltip.Trigger>
+            <Tooltip.Content>{activateTooltip}</Tooltip.Content>
+          </Tooltip.Root>
+        {:else}
           <Button
-            variant="primary"
+            variant="default"
             onclick={activate}
             disabled={!canActivate || activate.isLoading}
-            aria-disabled={!canActivate}
           >
             {widget.status === "paused" ? m.widget_admin_resume() : m.widget_admin_activate()}
           </Button>
-        </Tooltip>
+        {/if}
       {/if}
       {#if isAdmin && widget.status !== "archived"}
-        <Button variant="destructive" onclick={() => ($showArchive = true)}
+        <Button variant="destructive" onclick={() => (archiveOpen = true)}
           >{m.widget_admin_archive()}</Button
         >
       {/if}
@@ -151,15 +162,22 @@
   {/if}
 </section>
 
-<Dialog.Root openController={showArchive}>
-  <Dialog.Content>
-    <Dialog.Title>{m.widget_admin_archive_title()}</Dialog.Title>
-    <Dialog.Description>{m.widget_admin_archive_description()}</Dialog.Description>
-    <Dialog.Controls>
-      <Button onclick={() => ($showArchive = false)}>{m.cancel()}</Button>
-      <Button variant="destructive" onclick={archive} disabled={archive.isLoading}
-        >{m.widget_admin_archive()}</Button
+<AlertDialog.Root bind:open={archiveOpen}>
+  <AlertDialog.Content>
+    <AlertDialog.Header>
+      <AlertDialog.Title>{m.widget_admin_archive_title()}</AlertDialog.Title>
+      <AlertDialog.Description>{m.widget_admin_archive_description()}</AlertDialog.Description>
+    </AlertDialog.Header>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel disabled={archive.isLoading}>{m.cancel()}</AlertDialog.Cancel>
+      <AlertDialog.Action
+        class="bg-negative-default text-on-fill"
+        disabled={archive.isLoading}
+        onclick={(event) => {
+          event.preventDefault();
+          void archive();
+        }}>{m.widget_admin_archive()}</AlertDialog.Action
       >
-    </Dialog.Controls>
-  </Dialog.Content>
-</Dialog.Root>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>

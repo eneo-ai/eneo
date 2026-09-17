@@ -88,8 +88,10 @@ describe("opening", () => {
 
     const frame = frameOf(element)!;
     expect(frame).not.toBeNull();
-    expect(frame.src).toBe(
-      `${location.origin}/en/embed/${WIDGET_ID}?origin=${encodeURIComponent(location.origin)}`
+    expect(frame.src).toMatch(
+      new RegExp(
+        `^${location.origin}/en/embed/${WIDGET_ID}\\?origin=${encodeURIComponent(location.origin)}&scheme=(light|dark)$`
+      )
     );
     expect(frame.getAttribute("sandbox")).toContain("allow-scripts");
     expect(frame.getAttribute("sandbox")).toContain("allow-same-origin");
@@ -105,12 +107,15 @@ describe("opening", () => {
     const element = mount({ "color-scheme": "dark" });
     element.openPanel();
     expect(frameOf(element)!.src).toMatch(/\?origin=[^&]+&scheme=dark$/);
+    expect(element.effectiveScheme).toBe("dark");
   });
 
   it("hands a preview token to the embed page in the fragment", () => {
     const element = mount({ preview: "tok/en" });
     element.openPanel();
-    expect(frameOf(element)!.src).toMatch(/\?origin=[^&]+&preview=1#preview=tok%2Fen$/);
+    expect(frameOf(element)!.src).toMatch(
+      /\?origin=[^&]+&scheme=(light|dark)&preview=1#preview=tok%2Fen$/
+    );
   });
 
   it("uses the Swedish embed route by default", () => {
@@ -132,6 +137,16 @@ describe("opening", () => {
       { ns: BRIDGE_NAMESPACE, v: 1, type: "theme", payload: { scheme: "dark" } },
       { ns: BRIDGE_NAMESPACE, v: 1, type: "open" }
     ]);
+  });
+
+  it("tells the embed page which scheme the host page actually shows", () => {
+    const element = mount();
+    const post = vi.spyOn(element as never, "post" as never);
+    element.openPanel();
+    deliver(element, frameMessage("ready"));
+    const theme = (post.mock.calls[0] as unknown[])[1] as { payload: { scheme: string } };
+    expect(["light", "dark"]).toContain(theme.payload.scheme);
+    expect(theme.payload.scheme).toBe(element.effectiveScheme);
   });
 
   it("emits DOM events hosts can listen to", () => {

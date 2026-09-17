@@ -73,6 +73,8 @@ export class EneoWidgetElement extends HTMLElement {
 
   private readonly onMessage = (event: MessageEvent) => this.receive(event);
   private readonly onViewport = () => this.fitViewport();
+  private readonly onSchemeChange = () => this.sendTheme();
+  private schemeQuery: MediaQueryList | null = null;
 
   get widgetId(): string {
     return this.getAttribute("widget-id") || "";
@@ -99,6 +101,15 @@ export class EneoWidgetElement extends HTMLElement {
     return raw === "light" || raw === "dark" ? raw : "auto";
   }
 
+  /** What the host page actually shows: the attribute, else the visitor's system setting. */
+  get effectiveScheme(): "light" | "dark" {
+    const pinned = this.colorScheme;
+    if (pinned !== "auto") return pinned;
+    return typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches
+      ? "dark"
+      : "light";
+  }
+
   get open(): boolean {
     return this.isOpen;
   }
@@ -106,7 +117,7 @@ export class EneoWidgetElement extends HTMLElement {
   get frameUrl(): string {
     const prefix = this.lang === "en" ? "/en" : "";
     const origin = encodeURIComponent(location.origin);
-    const scheme = this.colorScheme === "auto" ? "" : `&scheme=${this.colorScheme}`;
+    const scheme = `&scheme=${this.effectiveScheme}`;
     // Editors test draft widgets with a preview token; the fragment never
     // reaches a server log and the embed page reads it client-side.
     const preview = this.getAttribute("preview");
@@ -121,19 +132,28 @@ export class EneoWidgetElement extends HTMLElement {
   connectedCallback(): void {
     if (!this.shadowRoot) this.render();
     window.addEventListener("message", this.onMessage);
+    if (typeof matchMedia === "function") {
+      this.schemeQuery = matchMedia("(prefers-color-scheme: dark)");
+      this.schemeQuery.addEventListener("change", this.onSchemeChange);
+    }
     document.dispatchEvent(new CustomEvent(CONNECTED_EVENT, { detail: this }));
     if (this.getAttribute("auto-open") === "true") this.openPanel();
   }
 
   disconnectedCallback(): void {
     window.removeEventListener("message", this.onMessage);
+    this.schemeQuery?.removeEventListener("change", this.onSchemeChange);
     this.unwatchViewport();
+  }
+
+  private sendTheme(): void {
+    this.send({ type: "theme", payload: { scheme: this.effectiveScheme } });
   }
 
   attributeChangedCallback(name: string): void {
     if (!this.shadowRoot) return;
     if (name === "color-scheme") {
-      this.send({ type: "theme", payload: { scheme: this.colorScheme } });
+      this.sendTheme();
     } else {
       this.syncLauncher();
     }
@@ -258,7 +278,7 @@ export class EneoWidgetElement extends HTMLElement {
     switch (message.type) {
       case "ready":
         this.frameReady = true;
-        this.send({ type: "theme", payload: { scheme: this.colorScheme } });
+        this.sendTheme();
         if (this.context) this.send({ type: "context", payload: this.context });
         if (this.pendingOpen) {
           this.pendingOpen = false;

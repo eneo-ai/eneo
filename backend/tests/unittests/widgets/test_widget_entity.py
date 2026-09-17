@@ -165,3 +165,19 @@ def test_apply_update_bumps_generation_only_for_visitor_facing_fields():
         widget.apply_update({"status": WidgetStatus.ACTIVE})
     with pytest.raises(BadRequestException):
         widget.apply_update({"name": "   "})
+
+
+def test_theme_header_colour_and_logo_are_validated():
+    from eneo.widgets.domain.widget import WidgetTheme
+
+    theme = WidgetTheme(
+        header_color=" #abcdef ", logo_url=" https://kommun.se/logo.svg "
+    )
+    assert theme.header_color == "#ABCDEF"
+    assert theme.logo_url == "https://kommun.se/logo.svg"
+    assert WidgetTheme(header_color="", logo_url="").header_color is None
+    assert WidgetTheme(header_color="", logo_url="").logo_url is None
+    with pytest.raises(ValueError):
+        WidgetTheme(header_color="blue")
+    with pytest.raises(ValueError):
+        WidgetTheme(logo_url="javascript:alert(1)")

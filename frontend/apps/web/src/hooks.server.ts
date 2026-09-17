@@ -95,8 +95,18 @@ export const headerFilterHandle: Handle = async ({ event, resolve }) => {
  * SvelteKit's own CSP header (script-src nonces) is merged, not replaced.
  */
 export const framePolicyHandle: Handle = async ({ event, resolve }) => {
-  const response = await resolve(event);
   const isEmbed = event.route.id?.startsWith(EMBED_ROUTE_PREFIX) ?? false;
+  const response = await resolve(event, {
+    // The embed page decides its own scheme (widget setting, then the host
+    // page); lock it so app.html's theme bootstrap leaves it alone.
+    transformPageChunk: isEmbed
+      ? ({ html }) =>
+          html.replace(
+            'data-theme="system">',
+            `data-theme="${event.locals.embedScheme ?? "system"}" data-theme-locked>`
+          )
+      : undefined
+  });
   const frameAncestors = isEmbed ? event.locals.frameAncestors : undefined;
   response.headers.set(
     "content-security-policy",

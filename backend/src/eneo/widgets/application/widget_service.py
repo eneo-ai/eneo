@@ -158,8 +158,15 @@ class WidgetService:
 
     @staticmethod
     def _copy_template(widget: Widget, template: WidgetTemplate) -> None:
-        """A snapshot: later template edits never touch existing widgets."""
-        widget.texts = template.texts.model_copy(deep=True)
+        """A snapshot: later template edits never touch existing widgets.
+
+        Suggested questions are per widget (they depend on the assistant),
+        so the widget keeps its own.
+        """
+        widget.texts = template.texts.model_copy(
+            deep=True,
+            update={"suggested_questions": list(widget.texts.suggested_questions)},
+        )
         widget.theme = template.theme.model_copy(deep=True)
         widget.language = template.language
 

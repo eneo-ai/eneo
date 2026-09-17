@@ -192,10 +192,26 @@
 </script>
 
 <div class="bg-primary text-primary flex h-full min-h-0 flex-col" data-widget-chat>
-  <header class="border-default flex items-center justify-between gap-2 border-b px-4 py-3">
-    <div class="min-w-0">
-      <h1 class="truncate text-base font-semibold">{config.texts.title || config.name}</h1>
-      <p class="text-secondary text-xs">{disclosure}</p>
+  <header
+    class={[
+      "border-default flex items-center justify-between gap-2 border-b px-4 py-3",
+      config.theme.header_color && "widget-header-tinted"
+    ]}
+  >
+    <div class="flex min-w-0 items-center gap-3">
+      {#if config.theme.logo_url}
+        <img
+          class="h-8 w-8 shrink-0 rounded-md object-contain"
+          src={config.theme.logo_url}
+          alt=""
+          width="32"
+          height="32"
+        />
+      {/if}
+      <div class="min-w-0">
+        <h1 class="truncate text-base font-semibold">{config.texts.title || config.name}</h1>
+        <p class="widget-header-muted text-xs">{disclosure}</p>
+      </div>
     </div>
     <div class="flex shrink-0 items-center gap-1">
       {#if messages.length > 0}
@@ -244,9 +260,7 @@
           {#if showPending && pendingQuestion !== null}
             <li class="flex flex-col gap-3">
               <div class="flex justify-end">
-                <p
-                  class="bg-accent-dimmer text-primary max-w-[85%] rounded-2xl rounded-br-sm px-4 py-2 text-base whitespace-pre-wrap"
-                >
+                <p class="widget-bubble max-w-[85%] px-4 py-2 text-base whitespace-pre-wrap">
                   <span class="sr-only">{m.widget_you()}: </span>{pendingQuestion}
                 </p>
               </div>
@@ -349,3 +363,28 @@
     </div>
   {/if}
 </div>
+
+<style>
+  /* A tinted header uses the widget's own colours; text is derived for contrast. */
+  .widget-header-tinted {
+    background: var(--widget-header);
+    color: var(--widget-on-header);
+    border-color: transparent;
+  }
+  .widget-header-tinted :global(button) {
+    color: inherit;
+  }
+  .widget-header-muted {
+    color: var(--text-secondary);
+  }
+  .widget-bubble {
+    background: var(--widget-accent);
+    color: var(--widget-on-accent);
+    border-radius: var(--widget-radius);
+    border-bottom-right-radius: 4px;
+  }
+  .widget-header-tinted .widget-header-muted {
+    color: inherit;
+    opacity: 0.85;
+  }
+</style>

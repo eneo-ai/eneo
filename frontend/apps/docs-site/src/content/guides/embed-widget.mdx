@@ -19,11 +19,11 @@ You need the **widgets** permission and edit rights on the assistant.
 
 1. Publish the assistant in its space (Assistant → **Publishing**).
 2. On the same page, open **Web widget**. Create the widget, optionally from one of the organisation's templates.
-3. Configure it. Every change is saved automatically:
-   - **Texts**: title, welcome message, suggested questions, the required AI disclosure, a personal-data notice and a link to your privacy policy.
-   - **Appearance**: primary colour (a contrast check tells you when the colour is too light), colour scheme, position and corner radius.
-   - **Placement**: the websites that may show the widget, one origin per line, for example `https://www.kommun.se` or `https://*.kommun.se`. At least one is required.
-   - **Limits**, **Privacy** (retention in days; `0` stores nothing after the answer) and **Protection**.
+3. Configure it. Every change is saved automatically. The page is organised in the order you work:
+   - **Content**: name and language, then the texts visitors read: title, welcome message, suggested questions (added one by one, at most five), the required AI disclosure, a personal-data notice and a link to your privacy policy.
+   - **Appearance**: start from one of the organisation's templates if you like, then the primary colour (a contrast check tells you when it is too light), an optional header colour and logo, colour scheme, position and corner radius. Text on your colours is chosen automatically for contrast. The live preview follows the theme you are using in Eneo unless the widget pins light or dark.
+   - **Rules**: the websites that may show the widget (one origin per line, for example `https://www.kommun.se` or `https://*.kommun.se`; at least one is required), limits, privacy (retention in days; `0` stores nothing after the answer) and protection.
+   - **Publish**: the activation checklist, the install snippet, "Test in Eneo" and usage.
 4. Check the **Preview** (the real chat page) and, if you like, **Test in Eneo**, which mounts the real widget on the admin page so you can try the button, keyboard navigation and the chat before anything is installed on your site.
 5. When the status bar shows no blockers, a tenant admin activates the widget. Until then the widget is a draft and shows nothing on your site.
 6. Copy the **install snippet** and place it once on the website, preferably just before `</body>`:
@@ -72,7 +72,7 @@ Under **Admin → Web widgets** a tenant admin sees every widget in the organisa
 
 ### Templates
 
-Templates hold the organisation's house style: texts, appearance and language. Admins create them under **Admin → Web widgets → Templates**; one template can be the default that editors get preselected. Applying a template copies its values onto the widget, so later template edits never change a live widget.
+Templates hold the organisation's house style: texts, colours, logo, shape and language. Admins create them under **Admin → Web widgets → Templates**; at most one template is the default that editors get preselected (switch it off and nothing is preselected). Applying a template copies its values onto the widget, so later template edits never change a live widget. Suggested questions are not part of a template: they depend on the assistant and are set per widget.
 
 ### Security properties
 

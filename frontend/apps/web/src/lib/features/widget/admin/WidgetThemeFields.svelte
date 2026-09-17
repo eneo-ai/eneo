@@ -1,121 +1,147 @@
-<!-- Appearance fields with the contrast check, shared by widget and template editors. -->
+<!-- Appearance: colours, logo, shape and placement of the launcher. -->
 <script lang="ts">
   import type { WidgetTheme } from "@eneo/eneo-js";
-  import { Settings } from "$lib/components/layout";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import * as Select from "$lib/components/ui/select/index.js";
   import { m } from "$lib/paraglide/messages";
-  import { contrastVerdict, DEFAULT_PRIMARY_COLOR, isHexColor } from "./contrast";
-  import { inputClass } from "./fieldStyles";
+  import ColorField from "./ColorField.svelte";
 
   type Props = {
     theme: WidgetTheme;
     onChange: (change: Partial<WidgetTheme>) => void;
+    idPrefix?: string;
   };
 
-  let { theme, onChange }: Props = $props();
+  let { theme, onChange, idPrefix = "widget" }: Props = $props();
+
+  const id = (name: string) => `${idPrefix}-${name}`;
+
+  const schemeLabels = $derived({
+    auto: m.widget_admin_scheme_auto(),
+    light: m.widget_admin_scheme_light(),
+    dark: m.widget_admin_scheme_dark()
+  });
+  const positionLabels = $derived({
+    "bottom-right": m.widget_admin_position_right(),
+    "bottom-left": m.widget_admin_position_left()
+  });
 
   function number(event: Event, apply: (value: number) => void) {
     const value = Number((event.currentTarget as HTMLInputElement).value);
     if (Number.isFinite(value)) apply(value);
   }
-
-  const primaryColor = $derived(theme.primary_color ?? DEFAULT_PRIMARY_COLOR);
-  const contrast = $derived(contrastVerdict(primaryColor));
-  const contrastLabel = $derived.by(() => {
-    const ratio = contrast.ratio.toFixed(1);
-    switch (contrast.verdict) {
-      case "text":
-        return m.widget_admin_contrast_ok({ ratio });
-      case "graphics":
-        return m.widget_admin_contrast_graphics_only({ ratio });
-      case "fail":
-        return m.widget_admin_contrast_fail({ ratio });
-      default:
-        return m.widget_admin_contrast_invalid();
-    }
-  });
 </script>
 
-<Settings.Row
-  title={m.widget_admin_primary_color()}
-  description={m.widget_admin_primary_color_description()}
-  let:aria
->
-  <div class="flex items-center gap-3">
-    <input
-      type="color"
-      class="border-default h-10 w-14 cursor-pointer rounded-lg border"
-      aria-label={m.widget_admin_primary_color_picker()}
-      value={isHexColor(primaryColor) ? primaryColor : DEFAULT_PRIMARY_COLOR}
-      oninput={(event) => onChange({ primary_color: event.currentTarget.value })}
-    />
-    <input
-      type="text"
-      class={inputClass}
-      pattern="#[0-9a-fA-F]{6}"
-      maxlength="7"
-      aria-invalid={contrast.verdict === "invalid"}
-      {...aria}
-      value={primaryColor}
-      oninput={(event) => onChange({ primary_color: event.currentTarget.value.trim() })}
-    />
-  </div>
-  <p
-    class={[
-      "mt-2 text-sm",
-      contrast.verdict === "text" ? "text-positive-default" : "text-warning-stronger"
-    ]}
-    aria-live="polite"
-  >
-    {contrastLabel}
-  </p>
-</Settings.Row>
-<Settings.Row
-  title={m.widget_admin_color_scheme()}
-  description={m.widget_admin_color_scheme_description()}
-  let:aria
->
-  <select
-    class={inputClass}
-    {...aria}
-    value={theme.color_scheme ?? "auto"}
-    onchange={(event) =>
-      onChange({ color_scheme: event.currentTarget.value as WidgetTheme["color_scheme"] })}
-  >
-    <option value="auto">{m.widget_admin_scheme_auto()}</option>
-    <option value="light">{m.widget_admin_scheme_light()}</option>
-    <option value="dark">{m.widget_admin_scheme_dark()}</option>
-  </select>
-</Settings.Row>
-<Settings.Row
-  title={m.widget_admin_position()}
-  description={m.widget_admin_position_description()}
-  let:aria
->
-  <select
-    class={inputClass}
-    {...aria}
-    value={theme.position ?? "bottom-right"}
-    onchange={(event) =>
-      onChange({ position: event.currentTarget.value as WidgetTheme["position"] })}
-  >
-    <option value="bottom-right">{m.widget_admin_position_right()}</option>
-    <option value="bottom-left">{m.widget_admin_position_left()}</option>
-  </select>
-</Settings.Row>
-<Settings.Row
-  title={m.widget_admin_radius()}
-  description={m.widget_admin_radius_description()}
-  let:aria
->
-  <input
-    type="number"
-    class={inputClass}
-    min="0"
-    max="24"
-    step="1"
-    {...aria}
-    value={theme.radius ?? 12}
-    oninput={(event) =>
-      number(event, (value) => onChange({ radius: Math.min(24, Math.max(0, value)) }))}
+<Field.Group class="grid gap-6">
+  <ColorField
+    id={id("primary-color")}
+    label={m.widget_admin_primary_color()}
+    description={m.widget_admin_primary_color_description()}
+    value={theme.primary_color ?? null}
+    checkContrast
+    onChange={(value) => onChange({ primary_color: value ?? "" })}
   />
-</Settings.Row>
+
+  <ColorField
+    id={id("header-color")}
+    label={m.widget_admin_header_color()}
+    description={m.widget_admin_header_color_description()}
+    value={theme.header_color ?? null}
+    clearable
+    onChange={(value) => onChange({ header_color: value })}
+  />
+
+  <Field.Field>
+    <Field.Label for={id("logo-url")}>{m.widget_admin_logo_url()}</Field.Label>
+    <div class="flex items-center gap-3">
+      <Input
+        id={id("logo-url")}
+        type="url"
+        maxlength={500}
+        value={theme.logo_url ?? ""}
+        aria-describedby={id("logo-url-help")}
+        oninput={(event) => onChange({ logo_url: event.currentTarget.value.trim() || null })}
+      />
+      {#if theme.logo_url}
+        <img
+          class="border-default h-8 w-8 shrink-0 rounded-md border object-contain"
+          src={theme.logo_url}
+          alt={m.widget_admin_logo_preview_alt()}
+          width="32"
+          height="32"
+        />
+      {/if}
+    </div>
+    <Field.Description id={id("logo-url-help")}
+      >{m.widget_admin_logo_url_description()}</Field.Description
+    >
+  </Field.Field>
+
+  <Field.Separator />
+
+  <Field.Group class="grid gap-6 sm:grid-cols-2">
+    <Field.Field>
+      <Field.Label for={id("scheme")}>{m.widget_admin_color_scheme()}</Field.Label>
+      <Select.Root
+        type="single"
+        value={theme.color_scheme ?? "auto"}
+        onValueChange={(value) =>
+          onChange({ color_scheme: value as NonNullable<WidgetTheme["color_scheme"]> })}
+      >
+        <Select.Trigger id={id("scheme")} class="w-full" aria-describedby={id("scheme-help")}>
+          <span data-slot="select-value">{schemeLabels[theme.color_scheme ?? "auto"]}</span>
+        </Select.Trigger>
+        <Select.Content>
+          {#each Object.entries(schemeLabels) as [value, label] (value)}
+            <Select.Item {value} {label}>{label}</Select.Item>
+          {/each}
+        </Select.Content>
+      </Select.Root>
+      <Field.Description id={id("scheme-help")}
+        >{m.widget_admin_color_scheme_description()}</Field.Description
+      >
+    </Field.Field>
+
+    <Field.Field>
+      <Field.Label for={id("position")}>{m.widget_admin_position()}</Field.Label>
+      <Select.Root
+        type="single"
+        value={theme.position ?? "bottom-right"}
+        onValueChange={(value) =>
+          onChange({ position: value as NonNullable<WidgetTheme["position"]> })}
+      >
+        <Select.Trigger id={id("position")} class="w-full" aria-describedby={id("position-help")}>
+          <span data-slot="select-value">{positionLabels[theme.position ?? "bottom-right"]}</span>
+        </Select.Trigger>
+        <Select.Content>
+          {#each Object.entries(positionLabels) as [value, label] (value)}
+            <Select.Item {value} {label}>{label}</Select.Item>
+          {/each}
+        </Select.Content>
+      </Select.Root>
+      <Field.Description id={id("position-help")}
+        >{m.widget_admin_position_description()}</Field.Description
+      >
+    </Field.Field>
+
+    <Field.Field>
+      <Field.Label for={id("radius")}>{m.widget_admin_radius()}</Field.Label>
+      <Input
+        id={id("radius")}
+        type="number"
+        min={0}
+        max={24}
+        step={1}
+        class="max-w-32"
+        value={theme.radius ?? 12}
+        aria-describedby={id("radius-help")}
+        oninput={(event) =>
+          number(event, (value) => onChange({ radius: Math.min(24, Math.max(0, value)) }))}
+      />
+      <Field.Description id={id("radius-help")}
+        >{m.widget_admin_radius_description()}</Field.Description
+      >
+    </Field.Field>
+  </Field.Group>
+</Field.Group>

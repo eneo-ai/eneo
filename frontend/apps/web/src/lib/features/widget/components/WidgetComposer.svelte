@@ -66,7 +66,7 @@
         <li>
           <button
             type="button"
-            class="border-default bg-primary text-primary hover:bg-secondary focus-visible:ring-default rounded-full border px-3 py-1.5 text-sm focus-visible:ring-2 focus-visible:outline-none"
+            class="widget-chip bg-primary text-primary hover:bg-secondary focus-visible:ring-default border px-3 py-1.5 text-sm focus-visible:ring-2 focus-visible:outline-none"
             {disabled}
             onclick={() => onSend(suggestion)}
           >
@@ -78,7 +78,7 @@
   {/if}
 
   <form
-    class="border-default bg-primary focus-within:border-stronger flex items-end gap-2 rounded-2xl border px-3 py-2"
+    class="widget-composer border-default bg-primary focus-within:border-stronger flex items-end gap-2 border px-3 py-2"
     onsubmit={(event) => {
       event.preventDefault();
       submit();
@@ -98,7 +98,7 @@
       onkeydown={onKeydown}></textarea>
     <button
       type="submit"
-      class="bg-accent-default text-on-fill hover:bg-accent-stronger focus-visible:ring-default flex h-9 w-9 shrink-0 items-center justify-center rounded-full focus-visible:ring-2 focus-visible:outline-none disabled:opacity-50"
+      class="widget-send focus-visible:ring-default flex h-9 w-9 shrink-0 items-center justify-center rounded-full focus-visible:ring-2 focus-visible:outline-none disabled:opacity-50"
       aria-label={m.widget_send()}
       disabled={!canSend}
     >
@@ -106,3 +106,20 @@
     </button>
   </form>
 </div>
+
+<style>
+  .widget-chip {
+    border-color: var(--widget-accent);
+    border-radius: var(--widget-radius);
+  }
+  .widget-composer {
+    border-radius: calc(var(--widget-radius) + 4px);
+  }
+  .widget-send {
+    background: var(--widget-accent);
+    color: var(--widget-on-accent);
+  }
+  .widget-send:not(:disabled):hover {
+    filter: brightness(0.92);
+  }
+</style>

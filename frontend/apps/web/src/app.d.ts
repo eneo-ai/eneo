@@ -19,6 +19,8 @@ declare global {
       access_token: string | null;
       /** CSP frame-ancestors for this response; set only by the widget embed page. */
       frameAncestors?: string;
+      /** Colour scheme the embed page renders with; it never follows the app's saved theme. */
+      embedScheme?: "light" | "dark" | "system";
     }
     // interface PageData {}
     interface PageState {

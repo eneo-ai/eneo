@@ -46,3 +46,11 @@ export function contrastVerdict(primary: string): { ratio: number; verdict: Cont
     verdict: ratio >= 4.5 ? "text" : ratio >= 3 ? "graphics" : "fail"
   };
 }
+
+/** Text colour that reads on the given background: white on dark, near-black on light. */
+export function readableOn(background: string): "#FFFFFF" | "#111111" {
+  if (!isHexColor(background)) return "#111111";
+  return contrastRatio("#FFFFFF", background) >= contrastRatio("#111111", background)
+    ? "#FFFFFF"
+    : "#111111";
+}

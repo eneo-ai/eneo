@@ -5,7 +5,12 @@
 <script lang="ts">
   import type { WidgetPolicy, WidgetPolicyUpdate, WidgetTemplate } from "@eneo/eneo-js";
   import WidgetOverviewTable from "$lib/features/widget/admin/WidgetOverviewTable.svelte";
-  import { Button, Dialog, Input } from "@eneo/ui";
+  import { Dialog } from "@eneo/ui";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as Card from "$lib/components/ui/card/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import { Switch } from "$lib/components/ui/switch/index.js";
   import { goto } from "$app/navigation";
   import { localizeHref } from "$lib/paraglide/runtime";
   import { Page, Settings } from "$lib/components/layout";
@@ -27,8 +32,7 @@
   const createTemplate = createAsyncState(async () => {
     try {
       const created = await data.eneo.widgets.templates.create({
-        name: m.widget_admin_template_new_name(),
-        is_default: templates.length === 0
+        name: m.widget_admin_template_new_name()
       });
       // eslint-disable-next-line svelte/no-navigation-without-resolve -- localized href built from a typed route segment
       await goto(localizeHref(`/admin/widgets/templates/${created.id}`));
@@ -37,14 +41,14 @@
     }
   });
 
-  async function setDefault(template: WidgetTemplate) {
+  async function setDefault(template: WidgetTemplate, isDefault: boolean) {
     try {
       const updated = await data.eneo.widgets.templates.update({
         template: { id: template.id },
-        update: { is_default: true }
+        update: { is_default: isDefault }
       });
       templates = templates.map((t) =>
-        t.id === updated.id ? updated : { ...t, is_default: false }
+        t.id === updated.id ? updated : isDefault ? { ...t, is_default: false } : t
       );
     } catch (error) {
       toastError(error, m.widget_admin_save_failed());
@@ -74,9 +78,6 @@
   let status = $state<"idle" | "saving" | "saved" | "error">("idle");
   let pending: WidgetPolicyUpdate = {};
   let timer: ReturnType<typeof setTimeout> | null = null;
-
-  const inputClass =
-    "border-default bg-primary ring-default rounded-lg border px-3 py-2 shadow focus-within:ring-2 hover:ring-2 focus-visible:ring-2 w-full";
 
   function patch(update: WidgetPolicyUpdate) {
     policy = { ...policy, ...(update as Partial<WidgetPolicy>) };
@@ -142,63 +143,85 @@
 
       <Settings.Group title={m.widget_admin_policy()}>
         <Settings.Row
-          title={m.widget_admin_policy_max_budget()}
-          description={m.widget_admin_policy_max_budget_description()}
-          let:aria
+          title={m.widget_admin_policy()}
+          description={m.widget_admin_policy_description()}
+          fullWidth
         >
-          <input
-            type="number"
-            class={inputClass}
-            min="1000"
-            step="1000"
-            {...aria}
-            value={policy.max_daily_token_budget}
-            oninput={(event) => number(event, (value) => patch({ max_daily_token_budget: value }))}
-          />
-        </Settings.Row>
-        <Settings.Row
-          title={m.widget_admin_policy_retention()}
-          description={m.widget_admin_policy_retention_description()}
-          let:aria
-        >
-          <div class="grid grid-cols-2 gap-3">
-            <label class="flex flex-col gap-1 text-sm">
-              {m.widget_admin_policy_retention_min()}
-              <input
-                type="number"
-                class={inputClass}
-                min="0"
-                max="3650"
-                {...aria}
-                value={policy.min_retention_days}
-                oninput={(event) => number(event, (value) => patch({ min_retention_days: value }))}
-              />
-            </label>
-            <label class="flex flex-col gap-1 text-sm">
-              {m.widget_admin_policy_retention_max()}
-              <input
-                type="number"
-                class={inputClass}
-                min="0"
-                max="3650"
-                value={policy.max_retention_days}
-                oninput={(event) => number(event, (value) => patch({ max_retention_days: value }))}
-              />
-            </label>
-          </div>
-        </Settings.Row>
-        <Settings.Row
-          title={m.widget_admin_policy_allow_none()}
-          description={m.widget_admin_policy_allow_none_description()}
-        >
-          <div class="border-default flex h-14 items-center border-b">
-            <Input.Switch
-              value={policy.allow_bot_protection_none}
-              sideEffect={({ next }) => patch({ allow_bot_protection_none: next })}
-            >
-              {m.widget_admin_policy_allow_none()}
-            </Input.Switch>
-          </div>
+          <Card.Root>
+            <Card.Content>
+              <Field.Group class="grid gap-6 sm:grid-cols-2">
+                <Field.Field>
+                  <Field.Label for="policy-max-budget"
+                    >{m.widget_admin_policy_max_budget()}</Field.Label
+                  >
+                  <Input
+                    id="policy-max-budget"
+                    type="number"
+                    min={1000}
+                    step={1000}
+                    value={policy.max_daily_token_budget}
+                    aria-describedby="policy-max-budget-help"
+                    oninput={(event) =>
+                      number(event, (value) => patch({ max_daily_token_budget: value }))}
+                  />
+                  <Field.Description id="policy-max-budget-help"
+                    >{m.widget_admin_policy_max_budget_description()}</Field.Description
+                  >
+                </Field.Field>
+                <Field.Field>
+                  <Field.Title>{m.widget_admin_policy_retention()}</Field.Title>
+                  <div class="grid grid-cols-2 gap-3">
+                    <Field.Field>
+                      <Field.Label for="policy-retention-min"
+                        >{m.widget_admin_policy_retention_min()}</Field.Label
+                      >
+                      <Input
+                        id="policy-retention-min"
+                        type="number"
+                        min={0}
+                        max={3650}
+                        value={policy.min_retention_days}
+                        oninput={(event) =>
+                          number(event, (value) => patch({ min_retention_days: value }))}
+                      />
+                    </Field.Field>
+                    <Field.Field>
+                      <Field.Label for="policy-retention-max"
+                        >{m.widget_admin_policy_retention_max()}</Field.Label
+                      >
+                      <Input
+                        id="policy-retention-max"
+                        type="number"
+                        min={0}
+                        max={3650}
+                        value={policy.max_retention_days}
+                        oninput={(event) =>
+                          number(event, (value) => patch({ max_retention_days: value }))}
+                      />
+                    </Field.Field>
+                  </div>
+                  <Field.Description
+                    >{m.widget_admin_policy_retention_description()}</Field.Description
+                  >
+                </Field.Field>
+                <Field.Field orientation="horizontal" class="sm:col-span-2">
+                  <Field.Content>
+                    <Field.Label for="policy-allow-none"
+                      >{m.widget_admin_policy_allow_none()}</Field.Label
+                    >
+                    <Field.Description
+                      >{m.widget_admin_policy_allow_none_description()}</Field.Description
+                    >
+                  </Field.Content>
+                  <Switch
+                    id="policy-allow-none"
+                    checked={policy.allow_bot_protection_none}
+                    onCheckedChange={(checked) => patch({ allow_bot_protection_none: checked })}
+                  />
+                </Field.Field>
+              </Field.Group>
+            </Card.Content>
+          </Card.Root>
         </Settings.Row>
       </Settings.Group>
 
@@ -210,10 +233,8 @@
         >
           <div class="flex flex-col gap-3">
             <div>
-              <Button
-                variant="primary-outlined"
-                onclick={createTemplate}
-                disabled={createTemplate.isLoading}>{m.widget_admin_template_new()}</Button
+              <Button variant="outline" onclick={createTemplate} disabled={createTemplate.isLoading}
+                >{m.widget_admin_template_new()}</Button
               >
             </div>
             {#if templates.length === 0}
@@ -251,11 +272,13 @@
                       <Table.Cell>{languageLabel(template.language)}</Table.Cell>
                       <Table.Cell class="text-right">
                         <div class="flex justify-end gap-2">
-                          {#if !template.is_default}
-                            <Button variant="outlined" onclick={() => setDefault(template)}
-                              >{m.widget_admin_template_set_default()}</Button
-                            >
-                          {/if}
+                          <Button
+                            variant="outline"
+                            onclick={() => setDefault(template, !template.is_default)}
+                            >{template.is_default
+                              ? m.widget_admin_template_unset_default()
+                              : m.widget_admin_template_set_default()}</Button
+                          >
                           <Button
                             variant="destructive"
                             onclick={() => {

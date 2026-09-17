@@ -33,9 +33,7 @@
 
 <li class="flex flex-col gap-3">
   <div class="flex justify-end">
-    <p
-      class="bg-accent-dimmer text-primary max-w-[85%] rounded-2xl rounded-br-sm px-4 py-2 text-base whitespace-pre-wrap"
-    >
+    <p class="widget-bubble max-w-[85%] rounded-br-sm px-4 py-2 text-base whitespace-pre-wrap">
       <span class="sr-only">{m.widget_you()}: </span>{message.question}
     </p>
   </div>
@@ -81,3 +79,12 @@
     {/if}
   </div>
 </li>
+
+<style>
+  .widget-bubble {
+    background: var(--widget-accent);
+    color: var(--widget-on-accent);
+    border-radius: var(--widget-radius);
+    border-bottom-right-radius: 4px;
+  }
+</style>

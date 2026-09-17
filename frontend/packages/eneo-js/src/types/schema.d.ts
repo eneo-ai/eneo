@@ -22534,6 +22534,10 @@ export interface components {
        * @default 12
        */
       radius?: number;
+      /** Header Color */
+      header_color?: string | null;
+      /** Logo Url */
+      logo_url?: string | null;
       /** Logo File Id */
       logo_file_id?: string | null;
     };

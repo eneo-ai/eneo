@@ -45,6 +45,15 @@ export const load: PageServerLoad = async ({ params, url, fetch, locals, setHead
   locals.frameAncestors =
     standalone || !config ? "'self'" : frameAncestorsFor(config.frame_ancestors);
 
+  const hostScheme = parseScheme(url.searchParams.get("scheme"));
+  const pinned = config?.theme.color_scheme;
+  locals.embedScheme =
+    pinned === "light" || pinned === "dark"
+      ? pinned
+      : hostScheme === "light" || hostScheme === "dark"
+        ? hostScheme
+        : "system";
+
   setHeaders({
     "cache-control": "no-store",
     "referrer-policy": "strict-origin-when-cross-origin",
@@ -58,7 +67,7 @@ export const load: PageServerLoad = async ({ params, url, fetch, locals, setHead
     baseUrl,
     hostOrigin: standalone ? null : parseHostOrigin(url.searchParams.get("origin")),
     preview,
-    hostScheme: parseScheme(url.searchParams.get("scheme")),
+    hostScheme,
     standalone
   };
 };

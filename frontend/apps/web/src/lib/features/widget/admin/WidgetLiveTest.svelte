@@ -9,6 +9,7 @@
   import { onDestroy } from "svelte";
   import { toastError } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
+  import { currentAppScheme } from "./appScheme";
 
   type Props = {
     widget: Widget;
@@ -45,7 +46,12 @@
       mounted.setAttribute("widget-id", widget.public_id);
       mounted.setAttribute("preview", token);
       mounted.setAttribute("position", widget.theme.position ?? "bottom-right");
-      mounted.setAttribute("color-scheme", widget.theme.color_scheme ?? "auto");
+      // Follow the admin's current Eneo theme unless the widget pins a scheme.
+      const pinned = widget.theme.color_scheme;
+      mounted.setAttribute(
+        "color-scheme",
+        pinned === "light" || pinned === "dark" ? pinned : currentAppScheme()
+      );
       if (widget.language && widget.language !== "auto") {
         mounted.setAttribute("lang", widget.language);
       }

@@ -9,6 +9,7 @@
   import { toastError } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
   import { previewEmbedPath } from "../preview";
+  import { currentAppScheme } from "./appScheme";
 
   type Scheme = "auto" | "light" | "dark";
 
@@ -26,6 +27,12 @@
   let mobile = $state(false);
 
   const lang = $derived(widget.language === "en" ? "en" : "sv");
+  // A widget pinned to light or dark previews that way whatever the toggle says.
+  const pinnedScheme = $derived(
+    widget.theme.color_scheme === "light" || widget.theme.color_scheme === "dark"
+      ? widget.theme.color_scheme
+      : null
+  );
 
   async function mint(): Promise<void> {
     failed = false;
@@ -47,7 +54,9 @@
   const src = $derived.by(() => {
     if (!token) return null;
     const path = previewEmbedPath(widget.public_id, token, lang);
-    const query = scheme === "auto" ? "" : `&scheme=${scheme}`;
+    // "Auto" follows what the admin sees in Eneo right now.
+    const effective = pinnedScheme ?? (scheme === "auto" ? currentAppScheme() : scheme);
+    const query = `&scheme=${effective}`;
     // updated_at forces a reload after every saved change.
     return path.replace("#", `${query}&v=${encodeURIComponent(widget.updated_at)}#`);
   });
@@ -71,6 +80,7 @@
           <Button
             variant={scheme === option.value ? "primary-outlined" : "outlined"}
             aria-pressed={scheme === option.value}
+            disabled={pinnedScheme !== null}
             onclick={() => (scheme = option.value)}>{option.label()}</Button
           >
         {/each}
@@ -83,7 +93,14 @@
       <Button variant="outlined" onclick={mint}>{m.widget_admin_preview_reload()}</Button>
     </div>
   </div>
-  <p class="text-secondary text-sm">{m.widget_admin_preview_description()}</p>
+  <p class="text-secondary text-sm">
+    {pinnedScheme
+      ? m.widget_admin_preview_scheme_pinned({
+          scheme:
+            pinnedScheme === "dark" ? m.widget_admin_scheme_dark() : m.widget_admin_scheme_light()
+        })
+      : m.widget_admin_preview_description()}
+  </p>
 
   <div class="bg-secondary flex justify-center rounded-lg p-3">
     {#if failed}

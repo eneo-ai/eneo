@@ -113,17 +113,31 @@ async def test_editors_read_but_never_write():
 
 def test_template_copies_onto_a_widget_as_a_snapshot():
     template = WidgetTemplate.create(tenant_id=uuid4(), name="Mall")
-    template.theme = WidgetTheme(primary_color="#ABCDEF", radius=4)
-    template.texts = template.texts.model_copy(update={"title": "Fråga oss"})
+    template.theme = WidgetTheme(
+        primary_color="#ABCDEF",
+        radius=4,
+        header_color="#112233",
+        logo_url="https://x.se/l.png",
+    )
+    template.texts = template.texts.model_copy(
+        update={"title": "Fråga oss", "suggested_questions": ["Mallfråga"]}
+    )
 
     widget = Widget.create(
         tenant_id=template.tenant_id, space_id=uuid4(), target_id=uuid4(), name="w"
+    )
+    widget.texts = widget.texts.model_copy(
+        update={"suggested_questions": ["Egen fråga"]}
     )
     from eneo.widgets.application.widget_service import WidgetService
 
     WidgetService._copy_template(widget, template)
     assert widget.theme.primary_color == "#ABCDEF"
+    assert widget.theme.header_color == "#112233"
+    assert widget.theme.logo_url == "https://x.se/l.png"
     assert widget.texts.title == "Fråga oss"
+    # Suggested questions belong to the widget, not the template.
+    assert widget.texts.suggested_questions == ["Egen fråga"]
 
     template.theme.primary_color = "#000000"
     template.texts = template.texts.model_copy(update={"title": "Ändrad"})

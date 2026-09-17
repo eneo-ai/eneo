@@ -3,17 +3,22 @@
   Autosaved like the widget page; a static preview shows the result.
 -->
 <script lang="ts">
-  import { Input } from "@eneo/ui";
   import { beforeNavigate } from "$app/navigation";
-  import { Page, Settings } from "$lib/components/layout";
+  import { resolve } from "$app/paths";
+  import { Page } from "$lib/components/layout";
+  import * as Card from "$lib/components/ui/card/index.js";
+  import * as Field from "$lib/components/ui/field/index.js";
+  import { Input } from "$lib/components/ui/input/index.js";
+  import * as Select from "$lib/components/ui/select/index.js";
+  import { Switch } from "$lib/components/ui/switch/index.js";
+  import * as Tabs from "$lib/components/ui/tabs/index.js";
+  import { Textarea } from "$lib/components/ui/textarea/index.js";
   import { toastError } from "$lib/core/errors";
-  import { inputClass, textareaClass } from "$lib/features/widget/admin/fieldStyles";
   import { WidgetTemplateAutosave } from "$lib/features/widget/admin/widgetAutosave.svelte";
   import WidgetMockPreview from "$lib/features/widget/admin/WidgetMockPreview.svelte";
   import WidgetTextsFields from "$lib/features/widget/admin/WidgetTextsFields.svelte";
   import WidgetThemeFields from "$lib/features/widget/admin/WidgetThemeFields.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { resolve } from "$app/paths";
   import { untrack } from "svelte";
 
   let { data } = $props();
@@ -48,6 +53,12 @@
           ? m.widget_admin_save_failed()
           : ""
   );
+
+  const languageLabels = $derived({
+    auto: m.widget_admin_language_auto(),
+    sv: m.widget_admin_language_sv(),
+    en: m.widget_admin_language_en()
+  });
 </script>
 
 <svelte:head>
@@ -67,88 +78,118 @@
     </Page.Flex>
   </Page.Header>
   <Page.Main>
-    <div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(380px,460px)]">
-      <div class="min-w-0">
-        <Settings.Page>
-          <Settings.Group title={m.general()}>
-            <Settings.Row
-              title={m.name()}
-              description={m.widget_admin_template_name_description()}
-              let:aria
-            >
-              <input
-                type="text"
-                class={inputClass}
-                maxlength="100"
-                {...aria}
-                value={template.name}
-                oninput={(event) => autosave.patch({ name: event.currentTarget.value })}
-              />
-            </Settings.Row>
-            <Settings.Row
-              title={m.description()}
-              description={m.widget_admin_template_description_description()}
-              let:aria
-            >
-              <textarea
-                class={textareaClass}
-                maxlength="500"
-                {...aria}
-                value={template.description}
-                oninput={(event) => autosave.patch({ description: event.currentTarget.value })}
-              ></textarea>
-            </Settings.Row>
-            <Settings.Row
-              title={m.widget_admin_language()}
-              description={m.widget_admin_language_description()}
-              let:aria
-            >
-              <select
-                class={inputClass}
-                {...aria}
-                value={template.language}
-                onchange={(event) =>
-                  autosave.patch({
-                    language: event.currentTarget.value as typeof template.language
-                  })}
-              >
-                <option value="auto">{m.widget_admin_language_auto()}</option>
-                <option value="sv">{m.widget_admin_language_sv()}</option>
-                <option value="en">{m.widget_admin_language_en()}</option>
-              </select>
-            </Settings.Row>
-            <Settings.Row
-              title={m.widget_admin_template_default()}
-              description={m.widget_admin_template_default_description()}
-            >
-              <div class="border-default flex h-14 items-center border-b">
-                <Input.Switch
-                  value={template.is_default}
-                  disabled={template.is_default}
-                  sideEffect={({ next }) => next && autosave.patch({ is_default: true })}
+    <div
+      class="mx-auto grid w-full max-w-[1400px] gap-6 p-4 xl:grid-cols-[minmax(0,1fr)_minmax(380px,460px)]"
+    >
+      <div class="flex min-w-0 flex-col gap-6">
+        <Card.Root>
+          <Card.Header>
+            <Card.Title>{m.widget_admin_template_details()}</Card.Title>
+            <Card.Description>{m.widget_admin_template_name_description()}</Card.Description>
+          </Card.Header>
+          <Card.Content>
+            <Field.Group class="grid gap-6 sm:grid-cols-2">
+              <Field.Field>
+                <Field.Label for="template-name">{m.name()}</Field.Label>
+                <Input
+                  id="template-name"
+                  maxlength={100}
+                  value={template.name}
+                  oninput={(event) => autosave.patch({ name: event.currentTarget.value })}
+                />
+              </Field.Field>
+              <Field.Field>
+                <Field.Label for="template-language">{m.widget_admin_language()}</Field.Label>
+                <Select.Root
+                  type="single"
+                  value={template.language ?? "auto"}
+                  onValueChange={(value) =>
+                    autosave.patch({ language: value as typeof template.language })}
                 >
-                  {m.widget_admin_template_default()}
-                </Input.Switch>
-              </div>
-            </Settings.Row>
-          </Settings.Group>
+                  <Select.Trigger id="template-language" class="w-full">
+                    <span data-slot="select-value"
+                      >{languageLabels[template.language ?? "auto"]}</span
+                    >
+                  </Select.Trigger>
+                  <Select.Content>
+                    {#each Object.entries(languageLabels) as [value, label] (value)}
+                      <Select.Item {value} {label}>{label}</Select.Item>
+                    {/each}
+                  </Select.Content>
+                </Select.Root>
+              </Field.Field>
+              <Field.Field class="sm:col-span-2">
+                <Field.Label for="template-description">{m.description()}</Field.Label>
+                <Textarea
+                  id="template-description"
+                  maxlength={500}
+                  rows={2}
+                  value={template.description}
+                  aria-describedby="template-description-help"
+                  oninput={(event) => autosave.patch({ description: event.currentTarget.value })}
+                />
+                <Field.Description id="template-description-help"
+                  >{m.widget_admin_template_description_description()}</Field.Description
+                >
+              </Field.Field>
+              <Field.Field orientation="horizontal" class="sm:col-span-2">
+                <Field.Content>
+                  <Field.Label for="template-default"
+                    >{m.widget_admin_template_default()}</Field.Label
+                  >
+                  <Field.Description
+                    >{m.widget_admin_template_default_description()}</Field.Description
+                  >
+                </Field.Content>
+                <Switch
+                  id="template-default"
+                  checked={template.is_default}
+                  onCheckedChange={(checked) => autosave.patch({ is_default: checked })}
+                />
+              </Field.Field>
+            </Field.Group>
+          </Card.Content>
+        </Card.Root>
 
-          <Settings.Group title={m.widget_admin_texts()}>
-            <WidgetTextsFields
-              texts={template.texts}
-              onChange={(change) => autosave.patch({ texts: { ...template.texts, ...change } })}
-            />
-          </Settings.Group>
-
-          <Settings.Group title={m.widget_admin_appearance()}>
-            <WidgetThemeFields
-              theme={template.theme}
-              onChange={(change) => autosave.patch({ theme: { ...template.theme, ...change } })}
-            />
-          </Settings.Group>
-        </Settings.Page>
+        <Tabs.Root value="content" class="gap-6">
+          <Tabs.List variant="line" class="w-full justify-start">
+            <Tabs.Trigger value="content">{m.widget_admin_tab_content()}</Tabs.Trigger>
+            <Tabs.Trigger value="appearance">{m.widget_admin_tab_appearance()}</Tabs.Trigger>
+          </Tabs.List>
+          <Tabs.Content value="content">
+            <Card.Root>
+              <Card.Header>
+                <Card.Title>{m.widget_admin_texts()}</Card.Title>
+                <Card.Description>{m.widget_admin_template_texts_description()}</Card.Description>
+              </Card.Header>
+              <Card.Content>
+                <WidgetTextsFields
+                  texts={template.texts}
+                  showSuggestions={false}
+                  idPrefix="template"
+                  onChange={(change) => autosave.patch({ texts: { ...template.texts, ...change } })}
+                />
+              </Card.Content>
+            </Card.Root>
+          </Tabs.Content>
+          <Tabs.Content value="appearance">
+            <Card.Root>
+              <Card.Header>
+                <Card.Title>{m.widget_admin_appearance()}</Card.Title>
+                <Card.Description>{m.widget_admin_appearance_description()}</Card.Description>
+              </Card.Header>
+              <Card.Content>
+                <WidgetThemeFields
+                  theme={template.theme}
+                  idPrefix="template"
+                  onChange={(change) => autosave.patch({ theme: { ...template.theme, ...change } })}
+                />
+              </Card.Content>
+            </Card.Root>
+          </Tabs.Content>
+        </Tabs.Root>
       </div>
-      <aside class="min-w-0 self-start p-4 xl:sticky xl:top-4">
+      <aside class="min-w-0 self-start xl:sticky xl:top-4">
         <WidgetMockPreview name={template.name} texts={template.texts} theme={template.theme} />
       </aside>
     </div>

@@ -164,6 +164,12 @@ class WidgetTheme(BaseModel):
     position: WidgetPosition = WidgetPosition.BOTTOM_RIGHT
     launcher: WidgetLauncher = WidgetLauncher.BUBBLE
     radius: int = Field(default=12, ge=0, le=24)
+    # Panel header background; None keeps the neutral surface. Text colour on
+    # it is picked automatically for contrast.
+    header_color: Optional[str] = None
+    # Logo shown in the panel header, hosted by the organisation.
+    logo_url: Optional[str] = Field(default=None, max_length=500)
+    # Kept for stored rows from the first schema; never populated.
     logo_file_id: Optional[UUID] = None
 
     @field_validator("primary_color")
@@ -173,6 +179,31 @@ class WidgetTheme(BaseModel):
         if not _HEX_COLOR_RE.match(value):
             raise ValueError("primary_color must be a #RRGGBB hex colour.")
         return value.upper()
+
+    @field_validator("header_color")
+    @classmethod
+    def _header_hex(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            return None
+        if not _HEX_COLOR_RE.match(value):
+            raise ValueError("header_color must be a #RRGGBB hex colour.")
+        return value.upper()
+
+    @field_validator("logo_url")
+    @classmethod
+    def _logo_url(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            return None
+        parsed = urlparse(value)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            raise ValueError("logo_url must be an http(s) URL.")
+        return value
 
 
 class WidgetLimits(BaseModel):
