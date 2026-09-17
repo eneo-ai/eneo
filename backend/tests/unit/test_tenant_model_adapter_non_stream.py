@@ -592,3 +592,42 @@ async def test_each_tool_round_counts_results_and_the_refreshed_catalogue(
         7740,
         7890 - 20 * final_tool_count,
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("finish_reason", ["length", "stop", "tool_calls", None])
+async def test_completion_preserves_provider_finish_reason(finish_reason):
+    adapter = _make_adapter()
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(
+            return_value=_response(
+                response_id="response-1", content="answer", finish_reason=finish_reason
+            )
+        ),
+    ):
+        completion = await adapter.get_response(
+            context=SimpleNamespace(), model_kwargs={}
+        )
+    assert completion.finish_reason == finish_reason
+    assert completion.stop is (finish_reason == "stop")
+
+
+@pytest.mark.asyncio
+async def test_length_response_does_not_execute_incomplete_tool_calls():
+    adapter = _make_adapter()
+    mcp_proxy = _FakeMCPProxy()
+    provider_call = AsyncMock(
+        return_value=_response(
+            response_id="response-1", tool_calls=[_tool_call()], finish_reason="length"
+        )
+    )
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        provider_call,
+    ):
+        await adapter.get_response(
+            context=SimpleNamespace(), model_kwargs={}, mcp_proxy=mcp_proxy
+        )
+    assert mcp_proxy.call_count == 0
+    provider_call.assert_awaited_once()

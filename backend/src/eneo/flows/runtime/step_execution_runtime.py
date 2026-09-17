@@ -1033,6 +1033,8 @@ def infer_finish_reason(
     tool_calls: list[dict[str, Any]] | None,
 ) -> str | None:
     if isinstance(completion, Completion):
+        if completion.finish_reason is not None:
+            return completion.finish_reason
         if completion.stop:
             return "stop"
         if tool_calls:
@@ -1641,6 +1643,16 @@ async def _complete_step_execution(
         )
 
     completion = response.completion
+    if isinstance(completion, Completion) and completion.finish_reason == "length":
+        raise attach_typed_failure_context(
+            TypedIOValidationException(
+                f"Step {step.step_order}: model output was truncated (finish_reason=length).",
+                code=FlowApiErrorCode.LLM_OUTPUT_TRUNCATED.value,
+                context={"finish_reason": completion.finish_reason},
+            ),
+            input_payload_for_result=prepared.input_payload_for_result,
+            effective_prompt=completion_call.effective_prompt,
+        )
     if isinstance(completion, str):
         raw_full_text = completion
         tool_calls = None

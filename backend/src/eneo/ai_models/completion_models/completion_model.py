@@ -168,6 +168,7 @@ class Completion:
     response_type: Optional[ResponseType] = None
     generated_file: Optional[File] = None
     stop: bool = False
+    finish_reason: Optional[str] = None
     error: Optional[str] = None
     error_code: Optional[int] = None
     usage: Optional[TokenUsage] = None

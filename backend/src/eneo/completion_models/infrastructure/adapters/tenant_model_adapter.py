@@ -1380,7 +1380,11 @@ class TenantModelAdapter(CompletionModelAdapter):
                     msg = choice.message
                     return True
 
-                while msg.tool_calls and (mcp_proxy or activation_available):
+                while (
+                    msg.tool_calls
+                    and choice.finish_reason != "length"
+                    and (mcp_proxy or activation_available)
+                ):
                     if tool_round >= self.MAX_TOOL_ROUNDS:
                         if forced_final:
                             logger.warning(
@@ -1571,6 +1575,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                     completion.text = self._strip_thinking_content(msg.content)
                 completion.provider_response_id = extract_provider_response_id(response)
                 completion.stop = choice.finish_reason == "stop"
+                completion.finish_reason = choice.finish_reason
 
             if used_input_estimate:
                 completion.input_token_estimate = cumulative_input_tokens

@@ -86,6 +86,7 @@ class FlowApiErrorCode(str, Enum):
     EVIDENCE_EXPORT_REASON_REQUIRED = "flow_evidence_export_reason_required"
     EVIDENCE_EXPORT_TOO_LARGE = "flow_evidence_export_too_large"
     MODEL_CAPACITY_UNDECLARED = "flow_model_capacity_undeclared"
+    LLM_OUTPUT_TRUNCATED = "flow_llm_output_truncated"
     LLM_REQUEST_TIMEOUT = "flow_llm_request_timeout"
     RUNTIME_INPUT_NOT_CONSUMED = "flow_runtime_input_not_consumed"
     MAPPED_PROVIDER_CALL_LIMIT_EXCEEDED = "flow_mapped_provider_call_limit_exceeded"
@@ -195,6 +196,7 @@ FLOW_API_ERROR_CODES: tuple[FlowApiErrorCode, ...] = tuple(FlowApiErrorCode)
 FLOW_TYPED_IO_ERROR_CODES: frozenset[FlowApiErrorCode] = frozenset(
     {
         FlowApiErrorCode.MODEL_CAPACITY_UNDECLARED,
+        FlowApiErrorCode.LLM_OUTPUT_TRUNCATED,
         FlowApiErrorCode.LLM_REQUEST_TIMEOUT,
         FlowApiErrorCode.RUNTIME_INPUT_NOT_CONSUMED,
         FlowApiErrorCode.MAPPED_PROVIDER_CALL_LIMIT_EXCEEDED,

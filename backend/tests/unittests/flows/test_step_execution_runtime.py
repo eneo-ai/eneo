@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
+import httpx
 import pytest
 
 from eneo.ai_models.completion_models.completion_model import (
@@ -21,6 +23,10 @@ from eneo.authentication.principal_types import PrincipalType
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
     SupportedModelKwargs,
+)
+from eneo.completion_models.infrastructure.adapters.base_adapter import ProviderInput
+from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
+    TenantModelAdapter,
 )
 from eneo.completion_models.infrastructure.completion_service import CompletionService
 from eneo.completion_models.infrastructure.context_builder import (
@@ -54,6 +60,7 @@ from eneo.flows.flow_run_step_result_file import build_step_result_file_referenc
 from eneo.flows.runtime.output_formats import resolve_format_spec
 from eneo.flows.runtime.output_formats.base import append_output_format_instructions
 from eneo.flows.runtime.output_runtime import TypedOutputProcessingResult
+from eneo.flows.runtime.step_attempt_runtime import build_typed_failure_plan
 from eneo.flows.runtime.step_execution_runtime import (
     FlowStepCancelledError,
     PreparedStepExecution,
@@ -71,6 +78,7 @@ from eneo.flows.runtime.step_execution_runtime import (
     json_mode_cache_key,
     prepare_step_execution,
 )
+from eneo.flows.runtime.step_result_builder import build_completed_step_result
 from eneo.flows.variable_resolver import FlowVariableResolver
 from eneo.main.exceptions import (
     ProviderCapabilityRejectedException,
@@ -80,6 +88,7 @@ from eneo.model_providers.domain.provider_call_observer import (
     CompletionCallRequestFacts,
     CompletionCallResultFacts,
 )
+from eneo.tokens.token_utils import measure_provider_input_reserve
 
 
 def _run() -> FlowRun:
@@ -3070,3 +3079,166 @@ async def test_failed_rejected_output_is_unavailable_to_later_step_variables():
         )
     assert caught.value.code == "typed_io_variable_resolution_failed"
     provider.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("finish_reason", "output_type", "text"),
+    [
+        ("length", "text", "Partial"),
+        ("length", "json", '{"title":"A"}'),
+        ("stop", "text", "Done"),
+        ("content_filter", "text", "Answer"),
+    ],
+)
+async def test_reduced_cap_terminal_reason_controls_flow_consumption(
+    finish_reason, output_type, text, monkeypatch
+):
+    adapter = object.__new__(TenantModelAdapter)
+    adapter.litellm_model = "openai/test-model"
+    adapter.provider_type = "openai"
+    messages = [{"role": "user", "content": "hello"}]
+    reserve = measure_provider_input_reserve(messages, [], adapter.litellm_model).tokens
+    adapter.model = SimpleNamespace(token_limit=reserve + 1, max_output_tokens=64)
+    adapter.credential_resolver = SimpleNamespace(
+        provider_type="openai",
+        get_api_key=lambda **kwargs: "test-key",
+        get_credential_field=lambda **kwargs: None,
+    )
+    adapter.prepare_provider_input = MagicMock(
+        return_value=ProviderInput(messages=messages, tools=[], built_in_tools=[])
+    )
+    observer = SimpleNamespace(
+        started=AsyncMock(return_value=uuid4()),
+        completed=AsyncMock(),
+        rejected=AsyncMock(),
+        outcome_unknown=AsyncMock(),
+    )
+    requests = []
+
+    async def capture_request(client, request, **kwargs):
+        requests.append(json.loads(await request.aread()))
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "id": "response-1",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "test-model",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": text},
+                        "finish_reason": finish_reason,
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": reserve,
+                    "completion_tokens": 1,
+                    "total_tokens": reserve + 1,
+                },
+            },
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "send", capture_request)
+
+    async def get_response(**kwargs):
+        completion = await adapter.get_response(
+            context=SimpleNamespace(),
+            model_kwargs={},
+            provider_call_observer=kwargs["provider_call_observer"],
+            api_base="https://provider.example/v1",
+            num_retries=0,
+            max_retries=0,
+        )
+        return SimpleNamespace(completion=completion, total_token_count=reserve + 1)
+
+    assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
+    assistant.completion_model_kwargs = ModelKwargs()
+    assistant.get_response = AsyncMock(side_effect=get_response)
+    prepared = PreparedStepExecution(
+        assistant=assistant,
+        step_input=StepInputValue(
+            text="hello", source_text="hello", input_source="flow_input"
+        ),
+        effective_prompt="Answer",
+        input_payload_for_result={"text": "hello"},
+        contract_validation=None,
+        diagnostics=[],
+        llm_files=[],
+        resolved_input_edge_indexes=(),
+    )
+    process_output = AsyncMock(return_value=_typed_output_result())
+    apply_cap = AsyncMock(return_value=(text, []))
+    deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1_000_000,
+        variable_resolver=FlowVariableResolver(),
+        completion_service=object(),
+        load_assistant=AsyncMock(),
+        resolve_step_input=AsyncMock(),
+        retrieve_rag_chunks=AsyncMock(return_value=([], None, [])),
+        process_typed_output=process_output,
+        apply_output_cap=apply_cap,
+        build_provider_call_observer=lambda *args: observer,
+    )
+    step, run = _step(output_type=output_type), _run()
+    claimed = FlowStepResult(
+        id=uuid4(),
+        flow_run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_id=step.step_id,
+        step_order=step.step_order,
+        assistant_id=step.assistant_id,
+        status=FlowStepResultStatus.RUNNING,
+        created_at=run.created_at,
+        updated_at=run.updated_at,
+    )
+    if finish_reason == "length":
+        with pytest.raises(TypedIOValidationException) as caught:
+            await complete_step_execution(
+                step=step, run=run, state=_state(), prepared=prepared, deps=deps
+            )
+        error = caught.value
+        assert error.code == "flow_llm_output_truncated"
+        assert error.context == {"finish_reason": "length"}
+        assert "length" in str(error)
+        process_output.assert_not_awaited()
+        apply_cap.assert_not_awaited()
+        failure = build_typed_failure_plan(
+            claimed=claimed,
+            error_code=FlowApiErrorCode(error.code),
+            error_message=str(error),
+            input_payload_json=error.input_payload_json,
+            effective_prompt=error.effective_prompt,
+        )
+        assert failure.failed_result.status == FlowStepResultStatus.FAILED
+        assert failure.failed_result.error_code == "flow_llm_output_truncated"
+        assert "length" in failure.failed_result.error_message
+        assert failure.failed_result.output_payload_json is None
+    else:
+        output = await complete_step_execution(
+            step=step, run=run, state=_state(), prepared=prepared, deps=deps
+        )
+        process_output.assert_awaited_once()
+        assert output.full_text == text
+        assert output.finish_reason == finish_reason
+        result = build_completed_step_result(
+            claimed=claimed,
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step=step,
+            output=output,
+            output_payload_json={"text": text},
+            execution_hash="hash",
+        )
+        assert result.status == FlowStepResultStatus.COMPLETED
+    assert len(requests) == 1
+    assert requests[0]["max_tokens"] == 1
+    observer.started.assert_awaited_once()
+    observer.completed.assert_awaited_once()
+    observer.rejected.assert_not_awaited()
+    observer.outcome_unknown.assert_not_awaited()
