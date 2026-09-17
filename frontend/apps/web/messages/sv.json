@@ -7042,6 +7042,7 @@
   "ai_builder_review_suggest": "Låt Eneo föreslå förbättringar",
   "ai_builder_review_suggestions_title": "Eneos förslag",
   "ai_builder_review_suggestions_hint": "Eneo skickar instruktioner, indata och utdata från ett urval körningar till ytans planeringsmodell och föreslår vad som kan förbättras. Förslag, inte konstaterade fel. Inget sparas.",
+  "ai_builder_review_model_eligibility_hint": "Bara modeller som säkerhetsklassificeringen tillåter att läsa körningarna visas här.",
   "ai_builder_review_suggestions_loading": "Eneo läser körningarna …",
   "ai_builder_review_suggestions_lead": "Innehållet i {runs} körningar lästes",
   "ai_builder_review_suggestions_lead_one": "Innehållet i 1 körning lästes",

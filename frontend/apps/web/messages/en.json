@@ -7042,6 +7042,7 @@
   "ai_builder_review_suggest": "Let Eneo suggest improvements",
   "ai_builder_review_suggestions_title": "Eneo's suggestions",
   "ai_builder_review_suggestions_hint": "Eneo sends instructions, inputs and outputs from a sample of runs to the space's planning model and suggests what could be improved. Suggestions, not established defects. Nothing is stored.",
+  "ai_builder_review_model_eligibility_hint": "Only models that the security classification allows to read these runs are shown here.",
   "ai_builder_review_suggestions_loading": "Eneo is reading the runs …",
   "ai_builder_review_suggestions_lead": "The content of {runs} runs was read",
   "ai_builder_review_suggestions_lead_one": "The content of 1 run was read",

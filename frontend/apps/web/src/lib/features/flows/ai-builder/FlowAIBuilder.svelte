@@ -994,6 +994,11 @@
           {#snippet plannerControls()}
             <FlowAIBuilderModelSelect />
             <FlowAIBuilderReasoningSelect />
+            <!-- This listing is held to the runs' classification, so a model the
+                 space offers elsewhere can be missing here. -->
+            <p class="text-secondary basis-full text-[0.8125rem] text-pretty">
+              {m.ai_builder_review_model_eligibility_hint()}
+            </p>
           {/snippet}
         </BuilderFindingsScreen>
       {:else if screen === "task"}
