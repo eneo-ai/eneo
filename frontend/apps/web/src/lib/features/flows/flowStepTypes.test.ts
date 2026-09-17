@@ -81,6 +81,27 @@ describe("getValidInputSources", () => {
 });
 
 describe("getSelectableInputTypeOptions", () => {
+  it.each(["previous_step", "all_previous_steps"] as const)(
+    "offers JSON for explicit structured input with %s as the stored source",
+    (inputSource) => {
+      const options = getSelectableInputTypeOptions({
+        inputSource,
+        previousOutputType: "pdf",
+        inputBindings: {
+          source_refs: [{ step_ref: "step_1", output: "structured", field_path: "plan" }]
+        },
+        currentInputType: "json",
+        isAdvancedMode: false
+      });
+
+      expect(options.find((option) => option.value === "json")).toEqual({
+        value: "json",
+        disabled: false,
+        legacyInvalid: false
+      });
+    }
+  );
+
   it("hides advanced-only types in user mode", () => {
     const options = getSelectableInputTypeOptions({
       inputSource: "flow_input",
@@ -314,6 +335,80 @@ describe("getOutputModeCompatibilityIssue", () => {
 });
 
 describe("getFlowStepValidationIssues", () => {
+  it.each([
+    { source_refs: [{ step_ref: "step_1", output: "structured", field_path: "plan" }] },
+    { question: "{{ step_1.output.structured }}" },
+    { question: '{"plan": {}}' }
+  ])("validates explicit input independently of the preceding PDF: %j", (input_bindings) => {
+    for (const input_source of ["previous_step", "all_previous_steps"] as const) {
+      expect(
+        getFlowStepValidationIssues([
+          { step_order: 1, input_source: "flow_input", input_type: "text", output_type: "json" },
+          { step_order: 2, input_source: "previous_step", input_type: "text", output_type: "pdf" },
+          { step_order: 3, input_source, input_type: "json", output_type: "text", input_bindings }
+        ])
+      ).toEqual([]);
+    }
+  });
+
+  it.each([
+    undefined,
+    null,
+    {},
+    { question: " \n " },
+    { source_refs: [] },
+    {
+      source_refs: [{ step_ref: "step_1", output: "unsupported" }]
+    }
+  ])("keeps implicit type checks for absent, empty or invalid bindings: %j", (input_bindings) => {
+    expect(
+      getFlowStepValidationIssues([
+        { step_order: 1, input_source: "flow_input", input_type: "text", output_type: "pdf" },
+        {
+          step_order: 2,
+          input_source: "previous_step",
+          input_type: "json",
+          output_type: "text",
+          input_bindings
+        }
+      ])
+    ).toContainEqual(
+      expect.objectContaining({ code: "typed_io_incompatible_type_chain", stepOrder: 2 })
+    );
+  });
+
+  it("still rejects JSON concatenation without explicit input", () => {
+    expect(
+      getFlowStepValidationIssues([
+        { step_order: 1, input_source: "flow_input", input_type: "text", output_type: "json" },
+        {
+          step_order: 2,
+          input_source: "all_previous_steps",
+          input_type: "json",
+          output_type: "text"
+        }
+      ])
+    ).toContainEqual(
+      expect.objectContaining({ code: "typed_io_invalid_input_source_combination", stepOrder: 2 })
+    );
+  });
+
+  it("does not bypass the first-step source rule for explicit input", () => {
+    expect(
+      getFlowStepValidationIssues([
+        {
+          step_order: 1,
+          input_source: "previous_step",
+          input_type: "json",
+          output_type: "text",
+          input_bindings: { question: "{}" }
+        }
+      ])
+    ).toContainEqual(
+      expect.objectContaining({ code: "typed_io_invalid_input_source_position", stepOrder: 1 })
+    );
+  });
+
   it("rejects duplicate flow_input steps", () => {
     const issues = getFlowStepValidationIssues([
       { step_order: 1, input_source: "flow_input", input_type: "text", output_type: "text" },

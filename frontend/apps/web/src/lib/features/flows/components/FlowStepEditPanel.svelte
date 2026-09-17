@@ -615,6 +615,7 @@
       ? getSelectableInputTypeOptions({
           inputSource: activeStep.input_source,
           previousOutputType: previousStep?.output_type,
+          inputBindings: activeStep.input_bindings,
           currentInputType: activeStep.input_type,
           isAdvancedMode
         })

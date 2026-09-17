@@ -1,5 +1,6 @@
 import type { FlowStep } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
+import { getFlowStepUnderlag } from "./flowInputBindings";
 
 type InputType = FlowStep["input_type"];
 type InputSource = FlowStep["input_source"];
@@ -85,7 +86,7 @@ export type OutputModeCompatibilityIssue =
 
 export type FlowStepLike = Pick<
   FlowStep,
-  "step_order" | "input_source" | "input_type" | "output_type"
+  "step_order" | "input_source" | "input_type" | "output_type" | "input_bindings"
 >;
 
 export type FlowStepValidationIssue = {
@@ -145,8 +146,15 @@ export function hasOutboundDeliveryOutputMode(outputMode: OutputMode): boolean {
 
 export function getValidInputTypes(
   inputSource: InputSource,
-  previousOutputType?: OutputType
+  previousOutputType?: OutputType,
+  inputBindings?: FlowStep["input_bindings"]
 ): InputType[] {
+  if (
+    (inputSource === "previous_step" || inputSource === "all_previous_steps") &&
+    getFlowStepUnderlag({ input_bindings: inputBindings }) !== null
+  ) {
+    return ["text", "json", "any"];
+  }
   switch (inputSource) {
     case "flow_input":
       return ["text", "json", "document", "file", "audio", "any"];
@@ -204,11 +212,12 @@ function insertInCanonicalOrder(values: InputType[], value: InputType): InputTyp
 export function getSelectableInputTypeOptions(params: {
   inputSource: InputSource;
   previousOutputType?: OutputType;
+  inputBindings?: FlowStep["input_bindings"];
   currentInputType?: InputType;
   isAdvancedMode: boolean;
 }): SelectableInputTypeOption[] {
   const { inputSource, previousOutputType, currentInputType, isAdvancedMode } = params;
-  const valid = getValidInputTypes(inputSource, previousOutputType);
+  const valid = getValidInputTypes(inputSource, previousOutputType, params.inputBindings);
   const visible = INPUT_TYPE_ORDER.filter((value) => {
     if (value === "image") return false;
     if (!valid.includes(value)) return false;
@@ -340,7 +349,12 @@ export function getFlowStepValidationIssues(steps: FlowStepLike[]): FlowStepVali
       continue;
     }
 
-    if (step.input_type === "json" && step.input_source === "all_previous_steps") {
+    const hasExplicitInput = getFlowStepUnderlag(step) !== null;
+    if (
+      step.input_type === "json" &&
+      step.input_source === "all_previous_steps" &&
+      !hasExplicitInput
+    ) {
       issues.push({
         code: "typed_io_invalid_input_source_combination",
         field: "input_type",
@@ -349,7 +363,7 @@ export function getFlowStepValidationIssues(steps: FlowStepLike[]): FlowStepVali
       continue;
     }
 
-    if (step.input_source === "previous_step" && step.step_order > 1) {
+    if (step.input_source === "previous_step" && step.step_order > 1 && !hasExplicitInput) {
       const previousStep = stepByOrder.get(step.step_order - 1);
       if (!previousStep) {
         issues.push({
