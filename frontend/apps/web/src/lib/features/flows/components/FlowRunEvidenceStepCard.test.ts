@@ -136,7 +136,10 @@ describe("FlowRunEvidenceStepCard", () => {
       { ...result, output_payload_json: { text: "[00:00:00 - 00:00:04] SPEAKER_00: Hej Gunnar." } },
       rawContext
     );
-    expect(html).toContain("SPEAKER_00");
+    // A raw diarization label is presented to the reviewer as a speaker name.
+    expect(html).toContain(m.flow_transcript_editor_speaker({ number: 1 }));
+    // The second line exists only in the stored segments, not in this step's
+    // own output text, so finding it proves the segments were rendered.
     expect(html).toContain("Jo tack.");
   });
 
@@ -157,7 +160,8 @@ describe("FlowRunEvidenceStepCard", () => {
       rawContext
     );
     expect(html).toContain("Handläggare");
-    expect(html).not.toContain("SPEAKER_00");
+    // Its own names, not the transcription step's numbered fallback.
+    expect(html).not.toContain(m.flow_transcript_editor_speaker({ number: 1 }));
   });
 
   it("shows a downstream document as authored when it only quotes transcript lines", () => {
