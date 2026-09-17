@@ -5390,6 +5390,8 @@
   "flow_run_download_evidence_export": "Download evidence file",
   "flow_run_download_evidence_export_failed": "Could not download evidence.",
   "flow_run_effective_prompt": "Final prompt",
+  "flow_run_effective_prompt_show_all": "Show the whole prompt",
+  "flow_run_effective_prompt_show_less": "Show less",
   "flow_run_error": "An error occurred",
   "flow_run_error_affected_step": "Affected step:",
   "flow_run_error_affected_steps": "Affected steps:",

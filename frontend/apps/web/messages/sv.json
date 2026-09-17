@@ -5390,6 +5390,8 @@
   "flow_run_download_evidence_export": "Ladda ner bevisunderlag",
   "flow_run_download_evidence_export_failed": "Kunde inte ladda ner bevisunderlag.",
   "flow_run_effective_prompt": "Slutgiltig prompt",
+  "flow_run_effective_prompt_show_all": "Visa hela prompten",
+  "flow_run_effective_prompt_show_less": "Visa mindre",
   "flow_run_error": "Ett fel uppstod",
   "flow_run_error_affected_step": "Berört steg:",
   "flow_run_error_affected_steps": "Berörda steg:",

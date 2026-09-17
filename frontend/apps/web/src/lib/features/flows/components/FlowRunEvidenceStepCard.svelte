@@ -6,6 +6,7 @@
   import { Markdown } from "@eneo/ui";
   import { m } from "$lib/paraglide/messages";
   import { Badge } from "$lib/components/ui/badge/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
   import * as Collapsible from "$lib/components/ui/collapsible/index.js";
   import FlowRunKnowledgeTrace from "./FlowRunKnowledgeTrace.svelte";
@@ -139,6 +140,18 @@
   );
 
   let inputOpen = $state(false);
+  // A long prompt is bounded so it cannot swamp the card, but the bound cut the
+  // text mid-line with nothing to say there was more.
+  let promptExpanded = $state(false);
+  let promptEl = $state<HTMLPreElement | null>(null);
+  let promptClipped = $state(false);
+  $effect(() => {
+    const element = promptEl;
+    if (!element) return;
+    void result.effective_prompt;
+    void promptExpanded;
+    promptClipped = element.scrollHeight > element.clientHeight + 1;
+  });
   const hasResultFiles = $derived(resultFiles.length > 0);
 
   const outputText = $derived(
@@ -198,7 +211,10 @@
         <span class="text-secondary text-xs tabular-nums">{duration}</span>
       {/if}
     </div>
-    <span class="transition-transform" class:rotate-180={expanded}>
+    <span
+      class="motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out)"
+      class:rotate-180={expanded}
+    >
       <IconChevronDown class="size-4" />
     </span>
   </button>
@@ -207,11 +223,13 @@
     <div id={panelId}>
       <Card.Content class="border-default flex min-w-0 flex-col gap-4 border-t px-5 py-4">
         {#if result.effective_prompt}
-          <div>
+          <div class="max-w-[68ch]">
             <div class="flex items-center justify-between">
               <h4 class="text-muted text-xs font-semibold">{m.flow_run_effective_prompt()}</h4>
-              <button
-                class="text-muted hover:bg-hover-default hover:text-secondary focus-visible:ring-accent-default rounded-md p-1.5 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+              <Button
+                variant="ghost"
+                size="icon"
+                class="text-muted hover:text-secondary size-8"
                 aria-label={m.copy()}
                 onclick={() =>
                   void onCopyPayload(
@@ -225,19 +243,37 @@
                 {:else}
                   <IconCopy class="size-3.5" />
                 {/if}
-              </button>
+              </Button>
             </div>
             <pre
-              class="bg-hover-dimmer mt-1.5 max-h-80 overflow-auto rounded-lg p-3 text-sm leading-relaxed break-words whitespace-pre-wrap">{result.effective_prompt}</pre>
+              bind:this={promptEl}
+              class="bg-hover-dimmer mt-1.5 overflow-hidden rounded-lg p-3 font-sans text-sm leading-relaxed break-words whitespace-pre-wrap {promptExpanded
+                ? ''
+                : 'max-h-80'}">{result.effective_prompt}</pre>
+            {#if promptClipped || promptExpanded}
+              <Button
+                variant="link"
+                size="sm"
+                class="mt-1 h-auto min-h-6 px-0 py-1"
+                aria-expanded={promptExpanded}
+                onclick={() => (promptExpanded = !promptExpanded)}
+              >
+                {promptExpanded
+                  ? m.flow_run_effective_prompt_show_less()
+                  : m.flow_run_effective_prompt_show_all()}
+              </Button>
+            {/if}
           </div>
         {/if}
 
         {#if result.output_payload_json}
-          <div>
+          <div class="max-w-[68ch]">
             <div class="flex items-center justify-between">
               <h4 class="text-muted text-xs font-semibold">{m.flow_run_output()}</h4>
-              <button
-                class="text-muted hover:bg-hover-default hover:text-secondary focus-visible:ring-accent-default rounded-md p-1.5 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+              <Button
+                variant="ghost"
+                size="icon"
+                class="text-muted hover:text-secondary size-8"
                 aria-label={m.copy()}
                 onclick={() =>
                   void onCopyPayload(
@@ -251,7 +287,7 @@
                 {:else}
                   <IconCopy class="size-3.5" />
                 {/if}
-              </button>
+              </Button>
             </div>
 
             {#if speakerMapping.length > 0}
@@ -357,13 +393,17 @@
                 aria-controls="step-{result.step_order}-input-panel"
               >
                 <IconChevronDown
-                  class="size-3 transition-transform duration-200 {inputOpen ? 'rotate-180' : ''}"
+                  class="size-3 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {inputOpen
+                    ? 'rotate-180'
+                    : ''}"
                   aria-hidden="true"
                 />
                 {inputOpen ? m.flow_run_hide_input() : m.flow_run_show_input()}
               </Collapsible.Trigger>
-              <button
-                class="text-muted hover:bg-hover-default hover:text-secondary focus-visible:ring-accent-default rounded-md p-1.5 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+              <Button
+                variant="ghost"
+                size="icon"
+                class="text-muted hover:text-secondary size-8"
                 aria-label={m.flow_run_copy_input()}
                 onclick={() =>
                   void onCopyPayload(
@@ -377,7 +417,7 @@
                 {:else}
                   <IconCopy class="size-3.5" />
                 {/if}
-              </button>
+              </Button>
             </div>
             <Collapsible.Content>
               <div id="step-{result.step_order}-input-panel">
@@ -524,8 +564,10 @@
           <div>
             <div class="flex items-center justify-between">
               <h4 class="text-muted text-xs font-semibold">{m.flow_run_attempts()}</h4>
-              <button
-                class="text-muted hover:bg-hover-default hover:text-secondary focus-visible:ring-accent-default rounded-md p-1.5 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+              <Button
+                variant="ghost"
+                size="icon"
+                class="text-muted hover:text-secondary size-8"
                 aria-label={m.copy()}
                 onclick={() =>
                   void onCopyPayload(
@@ -539,7 +581,7 @@
                 {:else}
                   <IconCopy class="size-3.5" />
                 {/if}
-              </button>
+              </Button>
             </div>
             <FlowJsonViewer value={stepAttempts} maxHeightClass="max-h-[300px]" />
           </div>

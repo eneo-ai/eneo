@@ -418,6 +418,8 @@
         </Alert.Action>
       </Alert.Root>
     {/if}
+    <!-- The field sits on the linen page, where a transparent surface reads as
+         inert and drops the placeholder below the contrast floor. -->
     <div class="relative mb-2 max-w-md">
       <Input
         type="search"
@@ -425,7 +427,7 @@
         placeholder={m.flow_history_search_placeholder()}
         aria-label={m.flow_history_search_placeholder()}
         aria-describedby={searchQuery ? searchScopeHintId : undefined}
-        class="h-9"
+        class="bg-primary h-9"
       />
       {#if searchQuery}
         <p id={searchScopeHintId} class="text-muted mt-1 text-xs leading-relaxed">
@@ -438,33 +440,35 @@
       {/if}
     </div>
     <div class="mb-3 flex flex-wrap items-center gap-1.5" role="group" aria-label={m.filter()}>
-      <button
+      <Button
         type="button"
-        class="border-default focus-visible:ring-accent-default/30 inline-flex h-7 items-center gap-1.5 rounded-full border px-3 text-[0.8rem] font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none {statusFilter ===
-        null
-          ? 'bg-accent-default/10 border-accent-default/30 text-accent-stronger'
-          : 'text-secondary hover:bg-hover-dimmer hover:text-primary'}"
+        variant="outline"
+        size="sm"
+        class="h-8 rounded-full px-3.5 text-[0.8rem] {statusFilter === null
+          ? 'border-accent-default/40 bg-accent-default/10 text-accent-stronger hover:bg-accent-default/15 hover:text-accent-stronger'
+          : 'text-secondary'}"
         aria-pressed={statusFilter === null}
         onclick={() => (statusFilter = null)}
       >
         {m.all_categories()}
-        <span class="text-muted tabular-nums">{displayRuns.length}</span>
-      </button>
+        <span class="font-normal tabular-nums">{displayRuns.length}</span>
+      </Button>
       {#each FLOW_RUN_STATUS_FILTER_OPTIONS as status (status)}
         {@const count = statusCounts[status] ?? 0}
         {#if count > 0}
-          <button
+          <Button
             type="button"
-            class="border-default focus-visible:ring-accent-default/30 inline-flex h-7 items-center gap-1.5 rounded-full border px-3 text-[0.8rem] font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none {statusFilter ===
-            status
-              ? 'bg-accent-default/10 border-accent-default/30 text-accent-stronger'
-              : 'text-secondary hover:bg-hover-dimmer hover:text-primary'}"
+            variant="outline"
+            size="sm"
+            class="h-8 rounded-full px-3.5 text-[0.8rem] {statusFilter === status
+              ? 'border-accent-default/40 bg-accent-default/10 text-accent-stronger hover:bg-accent-default/15 hover:text-accent-stronger'
+              : 'text-secondary'}"
             aria-pressed={statusFilter === status}
             onclick={() => (statusFilter = statusFilter === status ? null : status)}
           >
             {getRunStatusLabel(status)}
-            <span class="text-muted tabular-nums">{count}</span>
-          </button>
+            <span class="font-normal tabular-nums">{count}</span>
+          </Button>
         {/if}
       {/each}
     </div>
@@ -524,21 +528,23 @@
                 class="text-muted h-11 px-0 text-xs font-medium"
               >
                 {#if showAdvancedControls}
-                  <button
+                  <Button
                     type="button"
-                    class="text-muted hover:text-primary focus-visible:ring-accent-default/30 inline-flex h-11 w-full items-center gap-1 px-4 text-left text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset"
+                    variant="ghost"
+                    class="text-muted hover:text-primary h-11 w-full justify-start gap-1 rounded-none px-4 text-xs font-medium"
                     onclick={() => toggleSort("status")}
                   >
                     {m.status()}
                     {#if sortState.key === "status"}
                       <IconChevronDown
-                        class="size-3 transition-transform {sortState.dir === 'asc'
+                        class="size-3 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {sortState.dir ===
+                        'asc'
                           ? 'rotate-180'
                           : ''}"
                         aria-hidden="true"
                       />
                     {/if}
-                  </button>
+                  </Button>
                 {:else}
                   <span class="block px-4">{m.status()}</span>
                 {/if}
@@ -551,21 +557,23 @@
                 class="text-muted h-11 px-0 text-xs font-medium"
               >
                 {#if showAdvancedControls}
-                  <button
+                  <Button
                     type="button"
-                    class="text-muted hover:text-primary focus-visible:ring-accent-default/30 inline-flex h-11 w-full items-center gap-1 px-4 text-left text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset"
+                    variant="ghost"
+                    class="text-muted hover:text-primary h-11 w-full justify-start gap-1 rounded-none px-4 text-xs font-medium"
                     onclick={() => toggleSort("started")}
                   >
                     {m.flow_run_started()}
                     {#if sortState.key === "started"}
                       <IconChevronDown
-                        class="size-3 transition-transform {sortState.dir === 'asc'
+                        class="size-3 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {sortState.dir ===
+                        'asc'
                           ? 'rotate-180'
                           : ''}"
                         aria-hidden="true"
                       />
                     {/if}
-                  </button>
+                  </Button>
                 {:else}
                   <span class="block px-4">{m.flow_run_started()}</span>
                 {/if}
@@ -575,21 +583,23 @@
                 class="text-muted hidden h-11 px-0 text-xs font-medium lg:table-cell"
               >
                 {#if showAdvancedControls}
-                  <button
+                  <Button
                     type="button"
-                    class="text-muted hover:text-primary focus-visible:ring-accent-default/30 inline-flex h-11 w-full items-center gap-1 px-4 text-left text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset"
+                    variant="ghost"
+                    class="text-muted hover:text-primary h-11 w-full justify-start gap-1 rounded-none px-4 text-xs font-medium"
                     onclick={() => toggleSort("duration")}
                   >
                     {m.duration()}
                     {#if sortState.key === "duration"}
                       <IconChevronDown
-                        class="size-3 transition-transform {sortState.dir === 'asc'
+                        class="size-3 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {sortState.dir ===
+                        'asc'
                           ? 'rotate-180'
                           : ''}"
                         aria-hidden="true"
                       />
                     {/if}
-                  </button>
+                  </Button>
                 {:else}
                   <span class="block px-4">{m.duration()}</span>
                 {/if}
@@ -603,7 +613,7 @@
             {#each renderedRuns as run (run.id)}
               {@const isExpanded = selectedRunId === run.id}
               <Table.Row
-                class="border-default hover:bg-muted/40 cursor-pointer transition-colors {isExpanded
+                class="border-default hover:bg-muted/40 cursor-pointer motion-safe:transition-colors motion-safe:duration-(--duration-micro) {isExpanded
                   ? 'bg-muted/50'
                   : ''}"
                 tabindex={0}
@@ -631,12 +641,8 @@
                 >
                   {#if run.status === "completed" || run.status === "failed"}
                     {formatDuration(run.created_at, run.updated_at)}
-                  {:else if run.status === "running"}
-                    <span class="text-accent-stronger">{m.flow_run_running()}</span>
-                  {:else if isFlowRunAwaitingReview(run.status)}
-                    <span class="text-accent-stronger">{getRunStatusLabel(run.status)}</span>
                   {:else}
-                    —
+                    <span aria-hidden="true">—</span>
                   {/if}
                 </Table.Cell>
                 <!-- eslint-disable-next-line a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
@@ -658,7 +664,9 @@
                       {m.flow_run_evidence()}
                       <IconChevronDown
                         data-icon="inline-end"
-                        class="transition-transform duration-200 {isExpanded ? 'rotate-180' : ''}"
+                        class="motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {isExpanded
+                          ? 'rotate-180'
+                          : ''}"
                       />
                     </Button>
                     {#if canRedispatchFlowRun(run.status)}
@@ -677,6 +685,7 @@
                       <Button
                         variant="destructive"
                         size="sm"
+                        class="text-negative-stronger hover:text-negative-stronger"
                         disabled={cancellingRunId === run.id}
                         onclick={() => requestCancelRun(run.id)}
                       >
@@ -758,7 +767,7 @@
                 <Button
                   variant="destructive"
                   size="sm"
-                  class="flex-1"
+                  class="text-negative-stronger hover:text-negative-stronger flex-1"
                   disabled={cancellingRunId === run.id}
                   onclick={() => requestCancelRun(run.id)}
                 >
