@@ -86,3 +86,62 @@ async def test_scheduler_skips_websites_with_active_crawl_runs(
 
     due_ids = {site.id for site in due}
     assert website_id not in due_ids
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_scheduler_uses_settings_committed_after_due_query(
+    db_session, db_container, admin_user, space_factory, monkeypatch
+):
+    from unittest.mock import AsyncMock
+
+    from dependency_injector import providers
+
+    from eneo.websites.application import crawl_dispatch
+    from eneo.websites.domain.website import WebsiteSparse
+    from eneo.worker import crawl_tasks
+
+    async with db_session() as session:
+        space = await space_factory(session, "Updated scheduler settings")
+        embedding_id = await session.scalar(sa.select(EmbeddingModels.id).limit(1))
+        site = WebsitesTable(
+            name="Old name", url="https://example.com/old", download_files=False,
+            crawl_type=CrawlType.CRAWL, update_interval=UpdateInterval.DAILY,
+            size=0, tenant_id=admin_user.tenant_id, user_id=admin_user.id,
+            embedding_model_id=embedding_id, space_id=space.id,
+        )
+        session.add(site)
+        await session.flush()
+        stale = WebsiteSparse.to_domain(site)
+
+    async def due_query():
+        async with db_session() as session:
+            await session.execute(
+                sa.update(WebsitesTable).where(WebsitesTable.id == stale.id).values(
+                    name="Current name", url="https://example.com/new.xml",
+                    download_files=True, crawl_type=CrawlType.SITEMAP,
+                )
+            )
+        return [stale]
+
+    monkeypatch.setattr(crawl_dispatch, "reconcile_crawl_work", AsyncMock())
+    async with db_container(user=admin_user) as container:
+        scheduler = container.crawl_scheduler_service()
+        monkeypatch.setattr(scheduler, "get_websites_due_for_crawl", due_query)
+        container.crawl_scheduler_service.override(providers.Object(scheduler))
+        assert await crawl_tasks.queue_website_crawls(container)
+
+    async with db_session() as session:
+        run = await session.scalar(
+            sa.select(CrawlRunsTable).where(CrawlRunsTable.website_id == stale.id)
+        )
+        assert run is not None
+        attempt = await session.scalar(
+            sa.select(CrawlAttempts).where(CrawlAttempts.crawl_run_id == run.id)
+        )
+        data = attempt.dispatch_payload
+        assert data["url"] == "https://example.com/new.xml"
+        assert data["download_files"] is True
+        assert data["crawl_type"] == "sitemap"
+        job = await session.get(Jobs, run.job_id)
+        assert job.name == "Current name"
