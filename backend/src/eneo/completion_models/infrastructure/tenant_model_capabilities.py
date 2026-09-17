@@ -257,7 +257,8 @@ def normalize_reasoning_effort(
     reasoning_supported = (
         supported_params is not None and "reasoning_effort" in supported_params
     )
-    if normalized.get("reasoning_effort") not in (None, ""):
+    requested_effort = normalized.get("reasoning_effort")
+    if requested_effort not in (None, "none", ""):
         if not reasoning_supported:
             raise ProviderRejectedRequestException(
                 "The selected model route cannot honour the requested reasoning effort.",
@@ -271,7 +272,7 @@ def normalize_reasoning_effort(
         normalized["reasoning_effort"] = _resolve_openai_absent_effort(
             litellm_model=litellm_model,
             provider_type=provider_type,
-            requested=openai_absent_effort,
+            requested="none" if requested_effort == "none" else openai_absent_effort,
         )
     return normalized
 

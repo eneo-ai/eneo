@@ -161,14 +161,14 @@ class TestPrepareKwargsReasoningEffortTranslation:
     than handing the model no signal.
     """
 
-    def test_openai_preserves_explicit_none_reasoning_effort(self):
+    def test_openai_translates_none_without_value_support_to_low(self):
         adapter = _make_adapter("openai")
         with patch(
             "eneo.completion_models.infrastructure.tenant_model_capabilities.litellm"
         ) as mock_litellm:
             mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
             result = adapter._prepare_kwargs(model_kwargs={"reasoning_effort": "none"})
-        assert result["reasoning_effort"] == "none"
+        assert result["reasoning_effort"] == "low"
 
     def test_openai_translates_empty_reasoning_effort_to_low(self):
         adapter = _make_adapter("openai")
@@ -206,7 +206,7 @@ class TestPrepareKwargsReasoningEffortTranslation:
         ) as mock_litellm:
             mock_litellm.get_supported_openai_params.return_value = []
             with pytest.raises(ProviderRejectedRequestException):
-                adapter._prepare_kwargs(model_kwargs={"reasoning_effort": "none"})
+                adapter._prepare_kwargs(model_kwargs={"reasoning_effort": "high"})
 
     def test_capability_lookup_failure_stops_before_provider_preparation(self):
         adapter = _make_adapter("openai")
@@ -219,14 +219,14 @@ class TestPrepareKwargsReasoningEffortTranslation:
             with pytest.raises(RuntimeError, match="capability registry unavailable"):
                 adapter._prepare_kwargs(model_kwargs={"reasoning_effort": "high"})
 
-    def test_anthropic_preserves_explicit_none_reasoning_effort(self):
+    def test_anthropic_drops_none_reasoning_effort(self):
         adapter = _make_adapter("anthropic")
         with patch(
             "eneo.completion_models.infrastructure.tenant_model_capabilities.litellm"
         ) as mock_litellm:
             mock_litellm.get_supported_openai_params.return_value = ["reasoning_effort"]
             result = adapter._prepare_kwargs(model_kwargs={"reasoning_effort": "none"})
-        assert result["reasoning_effort"] == "none"
+        assert "reasoning_effort" not in result
 
     def test_openai_translates_pydantic_none_reasoning_effort_to_low(self):
         """Production callers pass a Pydantic ModelKwargs, not a dict.

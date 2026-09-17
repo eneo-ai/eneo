@@ -162,12 +162,19 @@ async def test_reasoning_dispatch_preserves_cap_and_effort_after_sdk_normalizati
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("provider", "model"), [("openai", "gpt-4o-mini"), ("mistral", "plain-model")]
+    ("provider", "model", "reasoning_supported", "off_effort"),
+    [
+        ("openai", "gpt-4o-mini", False, None),
+        ("mistral", "plain-model", False, None),
+        ("openai", "gpt-5", True, "low"),
+        ("openai", "gpt-5.1", True, "none"),
+        ("hosted_vllm", "reasoning-model", True, None),
+    ],
 )
 @pytest.mark.parametrize("effort", [None, "high", "none"])
 @pytest.mark.parametrize("method", ["get_response", "prepare_streaming"])
-async def test_unsupported_reasoning_is_refused_before_sdk_dispatch(
-    provider, model, effort, method, monkeypatch
+async def test_reasoning_dispatch_distinguishes_off_from_explicit_effort(
+    provider, model, reasoning_supported, off_effort, effort, method, monkeypatch
 ):
     adapter = object.__new__(TenantModelAdapter)
     adapter.litellm_model = f"{provider}/{model}"
@@ -225,7 +232,7 @@ async def test_unsupported_reasoning_is_refused_before_sdk_dispatch(
             **call_kwargs,
         )
 
-    if effort is not None:
+    if effort == "high" and not reasoning_supported:
         with pytest.raises(ProviderRejectedRequestException) as error:
             await dispatch()
         assert error.value.code == "provider_rejected_request"
@@ -236,8 +243,21 @@ async def test_unsupported_reasoning_is_refused_before_sdk_dispatch(
     else:
         await dispatch()
         assert len(requests) == 1
-        assert "reasoning_effort" not in requests[0]
-        assert requests[0]["max_tokens"] == 64
+        expected_effort = (
+            "high" if effort == "high" else off_effort if effort == "none" else None
+        )
+        if expected_effort is None:
+            assert "reasoning_effort" not in requests[0]
+        else:
+            assert requests[0]["reasoning_effort"] == expected_effort
+        assert (
+            requests[0].get("max_completion_tokens", requests[0].get("max_tokens"))
+            == 64
+        )
+        observer.rejected.assert_not_awaited()
+        if method == "get_response":
+            observer.started.assert_awaited_once()
+            observer.completed.assert_awaited_once()
 
 
 @pytest.mark.parametrize("effort", ["low", "high", "xhigh"])
@@ -277,7 +297,7 @@ def test_reasoning_effort_reaches_litellm_when_the_model_supports_it(
         RuntimeError("model metadata unavailable"),
     ],
 )
-def test_explicit_none_effort_is_preserved_without_value_metadata(
+def test_none_effort_uses_low_without_value_metadata(
     model_info: dict[str, object] | Exception,
 ) -> None:
     adapter = object.__new__(TenantModelAdapter)
@@ -308,7 +328,7 @@ def test_explicit_none_effort_is_preserved_without_value_metadata(
             model_kwargs=ModelKwargs(reasoning_effort="none")
         )
 
-    assert kwargs["reasoning_effort"] == "none"
+    assert kwargs["reasoning_effort"] == "low"
 
 
 def test_none_effort_reaches_litellm_with_explicit_route_support() -> None:
