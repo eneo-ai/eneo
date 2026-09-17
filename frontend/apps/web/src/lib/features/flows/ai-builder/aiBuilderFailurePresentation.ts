@@ -34,6 +34,11 @@ export interface FailureRecoveryCapabilities {
   canStartNewTurn: boolean;
   /** The latest turn is still open or processing on the server. */
   turnActive: boolean;
+  /** The model a same-turn replay runs when it is not the one the composer
+   *  shows: its listed name, "previous" when it is no longer listed, or null
+   *  when they are the same (or the retained request named none). A replay
+   *  keeps its retained request, so the button has to say which model runs. */
+  replayModel: string | "previous" | null;
 }
 
 export interface FailurePresentationContext {
@@ -273,14 +278,24 @@ const SHORTEN_KINDS: ReadonlySet<FailureKind> = new Set([
 ]);
 
 const action = {
-  retrySameTurn: (): FailureAction => ({
+  retrySameTurn: (model: FailureRecoveryCapabilities["replayModel"]): FailureAction => ({
     kind: "retry_same_turn",
-    label: m.ai_builder_turn_retry(),
+    label:
+      model === null
+        ? m.ai_builder_turn_retry()
+        : model === "previous"
+          ? m.ai_builder_turn_retry_previous_model()
+          : m.ai_builder_turn_retry_with_model({ model }),
     records: "retry_requested"
   }),
-  retryAcknowledged: (): FailureAction => ({
+  retryAcknowledged: (model: FailureRecoveryCapabilities["replayModel"]): FailureAction => ({
     kind: "retry_same_turn_acknowledged",
-    label: m.ai_builder_turn_retry_with_cost_acknowledgement(),
+    label:
+      model === null
+        ? m.ai_builder_turn_retry_with_cost_acknowledgement()
+        : model === "previous"
+          ? m.ai_builder_turn_retry_previous_model_and_cost_acknowledgement()
+          : m.ai_builder_turn_retry_with_model_and_cost_acknowledgement({ model }),
     records: "retry_with_acknowledgement_requested"
   }),
   retryNewTurn: (): FailureAction => ({
@@ -334,13 +349,13 @@ function actionsFor(
   if (special) return { primary: chat ? action.dismiss() : null, secondary: null };
   // Same-turn replays are the server's to offer; nothing else is a replay.
   if (capabilities.replay === "provider_outcome_unknown") {
-    return { primary: action.retryAcknowledged(), secondary: null };
+    return { primary: action.retryAcknowledged(capabilities.replayModel), secondary: null };
   }
   if (capabilities.replay === "failed_before_provider") {
     // Rewording is only offered where the composer will accept it; a
     // retained pre-provider turn usually fences new messages.
     return {
-      primary: action.retrySameTurn(),
+      primary: action.retrySameTurn(capabilities.replayModel),
       secondary: !chat && capabilities.canStartNewTurn ? action.clarify(kind) : null
     };
   }

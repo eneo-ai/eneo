@@ -774,6 +774,21 @@ describe("FlowAIBuilder planner controls", () => {
 
     await waitFor(() => expect(service().availableModels).toHaveLength(1));
     expect(screen.queryByRole("button", { name: /Test model/ })).toBeNull();
+    // No choice to make, but the model that runs is still named.
+    expect((await screen.findByTestId("ai-builder-shown-model")).textContent).toContain(
+      "Test model"
+    );
+  });
+
+  it("says the model list is loading instead of showing nothing", async () => {
+    const { fetch } = makeFetch();
+    const pending = vi.fn(async (path: string, init?: Record<string, unknown>) =>
+      path.endsWith("/models") ? new Promise(() => {}) : fetch(path as string, init as never)
+    );
+    const { service } = renderShell({ fetch: pending, stream: makeStream().stream });
+
+    expect(await screen.findByText(m.ai_builder_models_loading())).toBeTruthy();
+    expect(service().modelSendBlock).toBe("models_loading");
   });
 
   it("offers reasoning only for a model that advertises efforts", async () => {
@@ -1749,6 +1764,56 @@ describe("FlowAIBuilder confirm, build and review", () => {
       }
     });
     calls[1]!.finish();
+  });
+
+  it("puts the model reason and picker on the confirmation and refuses its turn actions while no model can run", async () => {
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          conversation: [
+            userMessage("u1", "Sammanfatta rapporter"),
+            assistantMessage("a1", "", { requirements_summary: SUMMARY })
+          ]
+        })
+      ]
+    });
+    const unready = vi.fn(async (path: string, init?: Record<string, unknown>) =>
+      path.endsWith("/models")
+        ? {
+            models: [
+              {
+                id: DEFAULT_MODEL_ID,
+                name: "Test model",
+                provider: "openai",
+                reasoning_effort_options: [],
+                availability: {
+                  state: "capacity_undeclared",
+                  missing_dimensions: ["context_window_tokens"]
+                }
+              }
+            ],
+            default_model_id: null
+          }
+        : fetch(path as string, init as never)
+    );
+    const { stream, calls } = makeStream(() => "hold");
+    renderShell({ fetch: unready, stream, resumeSessionId: "s-1" });
+
+    await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
+    const notice = await screen.findByTestId("ai-builder-model-notice");
+    expect(within(notice).getByText(m.ai_builder_no_ready_model())).toBeTruthy();
+    expect(
+      (
+        within(notice).getByRole("button", {
+          name: `${m.ai_builder_model_label()}: ${m.choose_a_completion_model()}`
+        }) as HTMLButtonElement
+      ).disabled
+    ).toBe(false);
+
+    const confirm = button(m.ai_builder_confirm_action());
+    expect(confirm.disabled).toBe(true);
+    await fireEvent.click(confirm);
+    expect(calls).toHaveLength(0);
   });
 
   it("keeps a long original request compact until the user expands it", async () => {

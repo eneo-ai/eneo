@@ -778,7 +778,7 @@ describe("FlowAIBuilderService", () => {
     it("gives every blocked state a reason, so a refused send never goes unexplained", () => {
       const { service } = makeReviewService();
       service.seedState({ modelLoadStatus: "loading" });
-      expect(service.modelSendBlockMessage).toBe(m.loading());
+      expect(service.modelSendBlockMessage).toBe(m.ai_builder_models_loading());
       service.seedState({ modelLoadStatus: "failed" });
       expect(service.modelSendBlockMessage).toBe(m.failed_to_load_models());
       seedReadyModel(service);

@@ -371,6 +371,18 @@ export class FlowAIBuilderDriver {
    *  still shows which model the user picked. */
   #lastListedSelection: AIBuilderModel | null = null;
 
+  /** The model a same-turn replay of the latest turn runs, when that is not
+   *  the model the composer shows: its listed name, or "previous" when no
+   *  listing names it. A replay keeps its retained request's model. */
+  get replayModel(): string | "previous" | null {
+    const retained = this.#state.session?.latest_turn?.retry_request?.model_id ?? null;
+    if (retained === null || retained === (this.effectiveModel?.id ?? null)) return null;
+    const listed =
+      this.#state.availableModels.find((model) => model.id === retained) ??
+      (this.#lastListedSelection?.id === retained ? this.#lastListedSelection : null);
+    return listed?.name ?? "previous";
+  }
+
   get modelSendBlock(): AIBuilderModelSendBlock | null {
     const { modelLoadStatus, selectedModelId, availableModels } = this.#state;
     if (modelLoadStatus === "loading") return "models_loading";

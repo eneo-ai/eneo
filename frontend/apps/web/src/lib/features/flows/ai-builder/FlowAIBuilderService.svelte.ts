@@ -128,6 +128,10 @@ export class FlowAIBuilderService {
     return this.#driver.canStartNewTurn;
   }
 
+  get #replayModel(): string | "previous" | null {
+    return this.#driver.replayModel;
+  }
+
   // Keep "updating plan" copy stable while a re-plan stream briefly clears currentPlan.
   #updatePlanSeenLatch(state: Readonly<FlowAIBuilderState>): void {
     if (state.session === null) {
@@ -323,7 +327,7 @@ export class FlowAIBuilderService {
   get modelSendBlockMessage(): string | null {
     switch (this.modelSendBlock) {
       case "models_loading":
-        return m.loading();
+        return m.ai_builder_models_loading();
       case "models_failed":
         return m.failed_to_load_models();
       case "model_not_listed":
@@ -331,7 +335,9 @@ export class FlowAIBuilderService {
       case "model_capacity_undeclared":
         return m.ai_builder_model_capacity_undeclared();
       case "no_ready_model":
-        return m.ai_builder_no_ready_model();
+        return this.#state.availableModels.length === 0
+          ? m.no_completion_model_description()
+          : m.ai_builder_no_ready_model();
       case null:
         return null;
     }
@@ -619,7 +625,8 @@ export class FlowAIBuilderService {
       this.#canStartNewTurn &&
       this.#state.streamState !== "streaming" &&
       this.#state.pendingOperation === null,
-    turnActive: this.latestTurnState === "open" || this.latestTurnState === "processing"
+    turnActive: this.latestTurnState === "open" || this.latestTurnState === "processing",
+    replayModel: this.#replayModel
   });
 
   /** The failure on screen (or the one given) was displayed here. */

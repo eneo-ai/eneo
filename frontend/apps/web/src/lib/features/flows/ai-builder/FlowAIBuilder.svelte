@@ -325,6 +325,19 @@
     })()
   );
 
+  // Screens that start turns without a composer of their own get the model
+  // controls here while the model on screen cannot run, so the reason and the
+  // way out are always on the screen whose actions are refused.
+  const showModelNotice = $derived(
+    service.hasSession &&
+      service.modelSendBlock !== null &&
+      ((screen === "findings" && service.failureRepair.status !== "closed") ||
+        (screen === "question" && Boolean(questionMessage)) ||
+        (screen === "confirm" && Boolean(latestSummary)) ||
+        screen === "build" ||
+        screen === "review")
+  );
+
   // One column per screen: the rail, the status row and the content sit in it,
   // so nothing floats beside the card it belongs to.
   const columnClass = $derived.by(() => {
@@ -947,6 +960,13 @@
 
     <div class="flex min-h-0 flex-1 flex-col overflow-y-auto" bind:this={screenScrollEl}>
       <BuilderTurnAlert {targetKind} suppressStreamError={planSurfaceClaimsError} />
+      {#if showModelNotice}
+        <div class="px-7 pt-3 max-sm:px-3" data-testid="ai-builder-model-notice">
+          <div class="mx-auto flex w-full flex-wrap items-center gap-2 {columnClass}">
+            <FlowAIBuilderModelSelect />
+          </div>
+        </div>
+      {/if}
 
       {#if screen === "conversation"}
         <BuilderConversationScreen
@@ -957,7 +977,7 @@
       {:else if screen === "findings" && service.failureRepair.status !== "closed"}
         <BuilderRepairScreen
           repair={service.failureRepair}
-          disabled={!service.canSendMessage}
+          disabled={!service.canSendMessage || service.modelSendBlock !== null}
           onprepare={prepareChangeFromFinding}
           onclose={() => service.closeFailureRepair()}
           onretry={(target) => void service.openFailureRepair(target)}
@@ -998,7 +1018,7 @@
           {editingQuestionId}
           {editingAnsweredOptionIds}
           {editingAnsweredCustomValue}
-          disabled={service.isCreating || service.isStreaming}
+          disabled={service.isCreating || service.isStreaming || service.modelSendBlock !== null}
           onanswer={handleQuestionAnswer}
           ondelegate={handleDelegateQuestion}
           onedit={handleEditAnswer}

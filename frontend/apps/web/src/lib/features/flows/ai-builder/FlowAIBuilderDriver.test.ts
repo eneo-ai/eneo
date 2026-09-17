@@ -829,6 +829,37 @@ describe("FlowAIBuilderDriver", () => {
       );
     });
 
+    it("names the retained model a replay runs and never rewrites the retained request", async () => {
+      const retained = makeRecoverableSession("failed_before_provider");
+      const retainedModelId = retained.latest_turn!.retry_request!.model_id!;
+      const fetch = vi.fn(async () => retained);
+      const { driver, stream } = makeDriver({
+        fetchImpl: fetch,
+        streamImpl: vi.fn(async (_path, _init, handlers) => {
+          completeStream(handlers);
+        })
+      });
+      driver.seedState({
+        session: retained,
+        availableModels: [
+          makeModel({ id: retainedModelId, name: "Retained model" }),
+          makeModel({ id: ALTERNATE_MODEL_ID, name: "Alternate model" })
+        ],
+        defaultModelId: retainedModelId
+      });
+      expect(driver.replayModel).toBeNull();
+
+      driver.selectModel(ALTERNATE_MODEL_ID);
+      expect(driver.replayModel).toBe("Retained model");
+
+      driver.seedState({ availableModels: [makeModel({ id: ALTERNATE_MODEL_ID })] });
+      expect(driver.replayModel).toBe("previous");
+
+      await driver.retryLatestTurn();
+      const body = stream.mock.calls[0]?.[1].requestBody["application/json"];
+      expect(body.model_id).toBe(retainedModelId);
+    });
+
     it("keeps the choice and its effort when a listing fails", async () => {
       const fetch = vi.fn(async () => {
         throw new Error("listing failed");

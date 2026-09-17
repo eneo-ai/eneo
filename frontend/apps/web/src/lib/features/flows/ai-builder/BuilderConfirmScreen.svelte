@@ -135,6 +135,9 @@
     onreopenassumption
   }: Props = $props();
 
+  // Actions that start a turn wait for a model that can run; typing does not.
+  const actionsDisabled = $derived(disabled || sendBlockedReason !== null);
+
   const namedContentFields = $derived(summary.named_content_fields ?? []);
   const decisionQuestionIds = $derived(
     new SvelteSet(
@@ -499,7 +502,7 @@
             answeredCustomValue={editingAnsweredCustomValue}
             {isEdit}
             why={editingQuestion.content.trim() || null}
-            {disabled}
+            disabled={actionsDisabled}
             onanswer={(payload) => onanswer?.(payload)}
           />
         {/key}
@@ -628,7 +631,7 @@
                       class="justify-self-start sm:justify-self-end"
                       aria-label={m.ai_builder_confirm_change_row_aria({ topic: decision.topic })}
                       data-edit-question={settledBy ?? undefined}
-                      {disabled}
+                      disabled={actionsDisabled}
                       onclick={(event) =>
                         settledBy
                           ? reopenQuestion(settledBy, event.currentTarget)
@@ -655,7 +658,7 @@
                       size="sm"
                       class="justify-self-start sm:justify-self-end"
                       aria-label={m.ai_builder_confirm_change_row_aria({ topic: row.label })}
-                      {disabled}
+                      disabled={actionsDisabled}
                       onclick={() => openChange(row.label)}
                     >
                       {m.ai_builder_question_change()}
@@ -833,7 +836,7 @@
                   size="sm"
                   class="ml-auto"
                   data-edit-question={runtimeFieldsQuestionId}
-                  {disabled}
+                  disabled={actionsDisabled}
                   onclick={(event) => reopenQuestion(runtimeFieldsQuestionId, event.currentTarget)}
                 >
                   {m.ai_builder_requirements_runtime_fields_change()}
@@ -951,7 +954,7 @@
                       class="hover:bg-hover-default text-secondary hover:text-primary inline-flex size-5 items-center justify-center rounded-full transition-colors"
                       aria-label={m.ai_builder_requirements_field_place({ field: field.label })}
                       title={m.ai_builder_requirements_field_place({ field: field.label })}
-                      {disabled}
+                      disabled={actionsDisabled}
                     >
                       <IconCornerDownRight class="size-3" aria-hidden="true" />
                     </DropdownMenu.Trigger>
@@ -983,7 +986,7 @@
                           count: String(cascade)
                         })
                       : undefined}
-                    {disabled}
+                    disabled={actionsDisabled}
                     onclick={() => removeContentField(field)}
                   >
                     <IconX class="size-3" aria-hidden="true" />
@@ -1067,7 +1070,7 @@
                             class="border-default text-secondary hover:text-primary inline-flex h-[1.625rem] max-w-40 items-center gap-1 truncate rounded-full border px-2.5 text-xs"
                             aria-label={m.ai_builder_requirements_place_label()}
                             title={m.ai_builder_requirements_place_label()}
-                            {disabled}
+                            disabled={actionsDisabled}
                           >
                             <IconCornerDownRight class="size-3 shrink-0" aria-hidden="true" />
                             <span class="truncate">{addTargetLabel}</span>
@@ -1089,7 +1092,7 @@
                       <Button
                         type="submit"
                         size="sm"
-                        disabled={disabled || !newContentField.trim()}
+                        disabled={actionsDisabled || !newContentField.trim()}
                       >
                         {m.ai_builder_requirements_field_add_confirm()}
                       </Button>
@@ -1099,7 +1102,7 @@
                         size="icon-xs"
                         aria-label={m.cancel()}
                         title={m.cancel()}
-                        {disabled}
+                        disabled={actionsDisabled}
                         onclick={() => void cancelAddingContentField()}
                       >
                         <IconX aria-hidden="true" />
@@ -1111,7 +1114,7 @@
                       size="sm"
                       class="h-[1.625rem] rounded-full border-dashed px-2.5 text-xs font-normal"
                       bind:ref={addContentFieldButton}
-                      {disabled}
+                      disabled={actionsDisabled}
                       onclick={() => (addingContentField = true)}
                     >
                       {m.ai_builder_requirements_field_add()}
@@ -1161,7 +1164,7 @@
                             topic: row.topic,
                             label: row.label
                           })}
-                          {disabled}
+                          disabled={actionsDisabled}
                           onclick={() => onreopenassumption(row.question_id)}
                         >
                           {m.ai_builder_question_change()}
@@ -1207,7 +1210,7 @@
                  below the card. A second button for it here read as two
                  different actions. -->
             <div class="ml-auto flex flex-wrap gap-2">
-              <Button variant="default" onclick={onconfirm} {disabled}>
+              <Button variant="default" onclick={onconfirm} disabled={actionsDisabled}>
                 {isEdit ? m.ai_builder_confirm_action_edit() : m.ai_builder_confirm_action()}
               </Button>
             </div>
