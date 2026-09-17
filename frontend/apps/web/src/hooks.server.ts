@@ -6,6 +6,7 @@ import { authenticateUser, clearFrontendCookies } from "$lib/features/auth/auth.
 import { ENEO_RESPONSE_HEADERS } from "@eneo/eneo-js";
 import { toAppError } from "$lib/core/errors";
 import { redirect, type Handle, type HandleFetch, type HandleServerError } from "@sveltejs/kit";
+import { EMBED_ROUTE_PREFIX, withFramePolicy } from "$lib/core/csp";
 import {
   getEnvironmentConfig,
   getBackendUrl,
@@ -88,7 +89,29 @@ export const headerFilterHandle: Handle = async ({ event, resolve }) => {
   return response;
 };
 
-export const handle = sequence(paraglideHandle, authHandle, headerFilterHandle);
+/**
+ * Deny framing everywhere except the widget embed page, which sets
+ * `locals.frameAncestors` from the widget's allowed origins in its load.
+ * SvelteKit's own CSP header (script-src nonces) is merged, not replaced.
+ */
+export const framePolicyHandle: Handle = async ({ event, resolve }) => {
+  const response = await resolve(event);
+  const isEmbed = event.route.id?.startsWith(EMBED_ROUTE_PREFIX) ?? false;
+  const frameAncestors = isEmbed ? event.locals.frameAncestors : undefined;
+  response.headers.set(
+    "content-security-policy",
+    withFramePolicy(response.headers.get("content-security-policy"), {
+      frameAncestors: frameAncestors ?? "'none'",
+      allowBlobWorkers: isEmbed
+    })
+  );
+  if (!frameAncestors) {
+    response.headers.set("x-frame-options", "DENY");
+  }
+  return response;
+};
+
+export const handle = sequence(paraglideHandle, authHandle, framePolicyHandle, headerFilterHandle);
 
 export const handleError: HandleServerError = async ({ error, event, status, message }) => {
   const appError = toAppError(error, { status, message });

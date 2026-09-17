@@ -169,6 +169,9 @@ class WidgetAskService:
             allow_tools=False,
             disabled_capabilities=list(CAPABILITY_PURPOSES),
         )
+        # Visitors never learn which model answers; the first chunk would
+        # otherwise carry the full model record.
+        response.completion_model = None  # type: ignore[assignment]
         answer = response.answer
         assert not isinstance(answer, str)
         response.answer = self._settled(

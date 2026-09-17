@@ -7,6 +7,7 @@
 /** @typedef {import('../types/resources').PromptSparse} PromptSparse */
 
 import { EneoError } from "../client/client.js";
+import { readConversationStream } from "./conversation-stream.js";
 
 /**
  * @param {import('../client/client').Client} client Provide a client with which to call the endpoints
@@ -186,11 +187,8 @@ export function initConversations(client) {
         );
       }
 
-      /** @type {import("../types/resources").ConversationMessage} */
-      // @ts-expect-error We rely on the fact that the first_chunk event will initialise the response
-      let response = {};
-
-      await client.stream(
+      const response = await readConversationStream(
+        client,
         "/api/v1/conversations/",
         {
           params: { query: { version: 2 } },
@@ -211,58 +209,7 @@ export function initConversations(client) {
             }
           }
         },
-        {
-          onOpen: async (response) => {
-            callbacks?.onOpen?.(response);
-          },
-          onMessage: (ev) => {
-            if (ev.data == "") return;
-            try {
-              const data = JSON.parse(ev.data);
-
-              switch (ev.event) {
-                case "first_chunk":
-                  response = data;
-                  callbacks?.onFirstChunk?.(data);
-                  break;
-
-                case "text":
-                  response.answer += data.answer;
-                  response.references = data.references;
-                  callbacks?.onText?.(data);
-                  break;
-
-                case "reasoning":
-                  callbacks?.onReasoning?.(data);
-                  break;
-
-                case "image":
-                  response.generated_files = data.generated_files;
-                  callbacks?.onImage?.(data);
-                  break;
-
-                case "eneo_event":
-                case "token_usage":
-                  callbacks?.onEneoEvent?.(data);
-                  break;
-
-                case "tool_call":
-                  callbacks?.onToolCall?.(data);
-                  break;
-
-                case "tool_approval_required":
-                  callbacks?.onToolApprovalRequired?.(data);
-                  break;
-
-                case "tool_approval_timeout":
-                  callbacks?.onToolApprovalTimeout?.(data);
-                  break;
-              }
-            } catch (e) {
-              return;
-            }
-          }
-        },
+        callbacks,
         abortController
       );
 

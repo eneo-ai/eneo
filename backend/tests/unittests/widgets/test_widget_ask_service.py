@@ -42,7 +42,12 @@ def _service(*, ask_result=None, session_questions=0, tokens=(120, 80)):
     session_obj = SimpleNamespace(id=uuid4(), questions=[object()] * session_questions)
     assistant_service.ask = AsyncMock(
         return_value=ask_result
-        or SimpleNamespace(session=session_obj, answer=_chunks(), question="q")
+        or SimpleNamespace(
+            session=session_obj,
+            answer=_chunks(),
+            question="q",
+            completion_model=object(),
+        )
     )
     session_service = MagicMock()
     session_service.get_session_by_uuid = AsyncMock(return_value=session_obj)
@@ -153,6 +158,7 @@ async def test_ask_streams_then_settles_budget_and_records_usage(fake_db):
     assert kwargs["allow_tools"] is False
     assert kwargs["stream"] is True
     assert kwargs["disabled_capabilities"]
+    assert response.completion_model is None
 
     deps.budget.reserve.assert_awaited_once_with(widget, 8_000)
     deps.budget.settle.assert_awaited_once()

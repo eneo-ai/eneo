@@ -78,6 +78,7 @@ async def test_public_config_only_for_active_widgets(
     assert body["public_id"] == public_id
     assert body["texts"]["ai_disclosure"]
     assert "allowed_origins" not in body
+    assert body["frame_ancestors"] == ["https://www.kommun.se"]
     assert resp.headers["cache-control"] == "public, max-age=60"
     etag = resp.headers["etag"]
 

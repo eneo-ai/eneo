@@ -61,6 +61,9 @@ export type InfoBlob = Omit<components["schemas"]["InfoBlobPublic"], "text"> & {
   text?: string | undefined;
 };
 export type CompletionModel = components["schemas"]["CompletionModelPublic"];
+export type WidgetPublicConfig = components["schemas"]["WidgetPublicConfig"];
+export type WidgetVisitorSession = components["schemas"]["VisitorSession"];
+export type WidgetChallenge = components["schemas"]["WidgetChallenge"];
 export type EmbeddingModel = components["schemas"]["EmbeddingModelPublic"];
 export type TranscriptionModel = components["schemas"]["TranscriptionModelPublic"];
 export type ImageModel = components["schemas"]["ImageModelPublic"];
