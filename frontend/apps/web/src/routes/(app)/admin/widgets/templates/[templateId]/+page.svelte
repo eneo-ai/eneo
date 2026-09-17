@@ -19,6 +19,7 @@
   import WidgetTextsFields from "$lib/features/widget/admin/WidgetTextsFields.svelte";
   import WidgetThemeFields from "$lib/features/widget/admin/WidgetThemeFields.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { FileText, Palette } from "lucide-svelte";
   import { untrack } from "svelte";
 
   let { data } = $props();
@@ -152,9 +153,18 @@
         </Card.Root>
 
         <Tabs.Root value="content" class="gap-6">
-          <Tabs.List variant="line" class="w-full justify-start">
-            <Tabs.Trigger value="content">{m.widget_admin_tab_content()}</Tabs.Trigger>
-            <Tabs.Trigger value="appearance">{m.widget_admin_tab_appearance()}</Tabs.Trigger>
+          <Tabs.List
+            class="h-auto w-full flex-wrap gap-1 p-1 sm:w-auto"
+            aria-label={m.widget_admin_template_details()}
+          >
+            <Tabs.Trigger value="content" class="h-9 px-3">
+              <FileText aria-hidden="true" />
+              {m.widget_admin_tab_content()}
+            </Tabs.Trigger>
+            <Tabs.Trigger value="appearance" class="h-9 px-3">
+              <Palette aria-hidden="true" />
+              {m.widget_admin_tab_appearance()}
+            </Tabs.Trigger>
           </Tabs.List>
           <Tabs.Content value="content">
             <Card.Root>

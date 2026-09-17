@@ -6,7 +6,7 @@
 <script lang="ts">
   import type { WidgetPolicy, WidgetPolicyUpdate, WidgetTemplate } from "@eneo/eneo-js";
   import { goto } from "$app/navigation";
-  import { Plus } from "lucide-svelte";
+  import { LayoutGrid, LayoutTemplate, Plus, ShieldCheck } from "lucide-svelte";
   import { Page } from "$lib/components/layout";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
@@ -19,6 +19,7 @@
   import { toastError } from "$lib/core/errors";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import WidgetOverviewList from "$lib/features/widget/admin/WidgetOverviewList.svelte";
+  import { urlTab } from "$lib/features/widget/admin/tabState.svelte";
   import { DEFAULT_PRIMARY_COLOR, isHexColor } from "$lib/features/widget/contrast";
   import { m } from "$lib/paraglide/messages";
   import { getLocale, localizeHref } from "$lib/paraglide/runtime";
@@ -133,6 +134,7 @@
   }
 
   const totals = $derived(data.overview.totals);
+  const tab = urlTab(["widgets", "policy", "templates"] as const, "widgets");
 </script>
 
 <svelte:head>
@@ -149,11 +151,25 @@
   </Page.Header>
   <Page.Main>
     <div class="mx-auto flex w-full max-w-[1400px] flex-col gap-6 p-4">
-      <Tabs.Root value="widgets" class="gap-6">
-        <Tabs.List variant="line" class="w-full justify-start">
-          <Tabs.Trigger value="widgets">{m.widget_admin_tab_widgets()}</Tabs.Trigger>
-          <Tabs.Trigger value="policy">{m.widget_admin_tab_policy()}</Tabs.Trigger>
-          <Tabs.Trigger value="templates">{m.widget_admin_templates()}</Tabs.Trigger>
+      <Tabs.Root bind:value={tab.value} class="gap-6">
+        <Tabs.List
+          class="h-auto w-full flex-wrap gap-1 p-1 sm:w-auto"
+          aria-label={m.widget_admin_nav()}
+        >
+          <Tabs.Trigger value="widgets" class="h-9 px-3">
+            <LayoutGrid aria-hidden="true" />
+            {m.widget_admin_tab_widgets()}
+            <Badge variant="secondary" class="ml-1">{number.format(totals.widgets)}</Badge>
+          </Tabs.Trigger>
+          <Tabs.Trigger value="policy" class="h-9 px-3">
+            <ShieldCheck aria-hidden="true" />
+            {m.widget_admin_tab_policy()}
+          </Tabs.Trigger>
+          <Tabs.Trigger value="templates" class="h-9 px-3">
+            <LayoutTemplate aria-hidden="true" />
+            {m.widget_admin_templates()}
+            <Badge variant="secondary" class="ml-1">{number.format(templates.length)}</Badge>
+          </Tabs.Trigger>
         </Tabs.List>
 
         <Tabs.Content value="widgets" class="flex flex-col gap-6">

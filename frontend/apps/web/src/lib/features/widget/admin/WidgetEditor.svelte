@@ -9,6 +9,7 @@
   import { beforeNavigate } from "$app/navigation";
   import { page } from "$app/state";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
+  import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Card from "$lib/components/ui/card/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
@@ -17,8 +18,10 @@
   import * as Tabs from "$lib/components/ui/tabs/index.js";
   import { toastError } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
+  import { FileText, Palette, Rocket, SlidersHorizontal } from "lucide-svelte";
   import { untrack } from "svelte";
   import { blockerLabel } from "./blockers";
+  import { urlTab } from "./tabState.svelte";
   import type { LoaderRelease } from "./snippet";
   import TemplatePicker from "./TemplatePicker.svelte";
   import { WidgetAutosave } from "./widgetAutosave.svelte";
@@ -60,7 +63,7 @@
   });
 
   const current = $derived(autosave.widget);
-  let tab = $state("content");
+  const tab = urlTab(["content", "appearance", "rules", "publish"] as const, "content");
 
   const lifecycle = (action: (params: { id: string }) => Promise<Widget>) => async () => {
     autosave.replace(await action({ id: widget.id }));
@@ -110,12 +113,30 @@
     onArchive={lifecycle(eneo.widgets.archive)}
   />
 
-  <Tabs.Root bind:value={tab} class="gap-6">
-    <Tabs.List variant="line" class="w-full justify-start overflow-x-auto">
-      <Tabs.Trigger value="content">{m.widget_admin_tab_content()}</Tabs.Trigger>
-      <Tabs.Trigger value="appearance">{m.widget_admin_tab_appearance()}</Tabs.Trigger>
-      <Tabs.Trigger value="rules">{m.widget_admin_tab_rules()}</Tabs.Trigger>
-      <Tabs.Trigger value="publish">{m.widget_admin_tab_publish()}</Tabs.Trigger>
+  <Tabs.Root bind:value={tab.value} class="gap-6">
+    <Tabs.List
+      class="h-auto w-full flex-wrap gap-1 p-1 sm:w-auto"
+      aria-label={m.widget_admin_title()}
+    >
+      <Tabs.Trigger value="content" class="h-9 px-3">
+        <FileText aria-hidden="true" />
+        {m.widget_admin_tab_content()}
+      </Tabs.Trigger>
+      <Tabs.Trigger value="appearance" class="h-9 px-3">
+        <Palette aria-hidden="true" />
+        {m.widget_admin_tab_appearance()}
+      </Tabs.Trigger>
+      <Tabs.Trigger value="rules" class="h-9 px-3">
+        <SlidersHorizontal aria-hidden="true" />
+        {m.widget_admin_tab_rules()}
+      </Tabs.Trigger>
+      <Tabs.Trigger value="publish" class="h-9 px-3">
+        <Rocket aria-hidden="true" />
+        {m.widget_admin_tab_publish()}
+        {#if blockers.length > 0 && current.status !== "active"}
+          <Badge variant="destructive" class="ml-1">{blockers.length}</Badge>
+        {/if}
+      </Tabs.Trigger>
     </Tabs.List>
 
     <div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(380px,460px)]">
@@ -263,7 +284,7 @@
         </Tabs.Content>
       </div>
 
-      {#if tab === "content" || tab === "appearance"}
+      {#if tab.value === "content" || tab.value === "appearance"}
         <aside class="min-w-0 self-start xl:sticky xl:top-4">
           <WidgetPreview widget={current} {eneo} />
         </aside>
