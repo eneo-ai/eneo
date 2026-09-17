@@ -7254,5 +7254,16 @@
   "flow_transcript_editor_skip_back": "Skip back 5 seconds",
   "flow_transcript_editor_skip_forward": "Skip forward 5 seconds",
   "flow_transcript_editor_skip_back_short": "−5s",
-  "flow_transcript_editor_skip_forward_short": "+5s"
+  "flow_transcript_editor_skip_forward_short": "+5s",
+  "flow_run_review_fields_help": "Check the information and correct it as needed. Approve also saves your unsaved changes.",
+  "flow_run_review_no_items": "No items.",
+  "flow_run_review_item": "Item {number}",
+  "flow_run_review_remove_item": "Remove item {number}",
+  "flow_run_review_add_item": "Add item",
+  "flow_run_review_choose_value": "Choose a value",
+  "flow_run_review_empty_value": "Empty value",
+  "flow_run_review_unsupported_field": "This field is shown unchanged. If needed, edit it in Advanced: JSON.",
+  "flow_run_review_show_fields": "Show fields",
+  "flow_run_review_show_json": "Advanced: JSON",
+  "flow_run_review_json_payload": "Result as JSON"
 }

@@ -146,6 +146,114 @@ function buildEneo({
 }
 
 describe("FlowRunReviewCheckpointPanel", () => {
+  it("edits a schema-labelled field and saves it before approving the visible result", async () => {
+    const checkpoint = buildCheckpoint("awaiting_review", 1);
+    checkpoint.output_contract = {
+      type: "object",
+      properties: {
+        answer: { type: "string", title: "Brukarens önskemål" }
+      }
+    };
+    checkpoint.current_payload_json = {
+      structured: { answer: "Nuvarande önskemål", retained: { ref: "F001" } }
+    };
+    const saved = {
+      ...checkpoint,
+      state: "edited" as const,
+      revision: 2,
+      current_payload_json: { structured: { answer: "Rättat önskemål", retained: { ref: "F001" } } }
+    };
+    const edit = vi.fn(async () => saved);
+    const approve = vi.fn(async () => ({ ...saved, state: "approved" as const, revision: 3 }));
+    const eneo = buildEneo({ activeCheckpoint: checkpoint, edit, approve });
+    render(FlowRunReviewCheckpointPanel, {
+      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
+    });
+    const field = await screen.findByLabelText("Brukarens önskemål");
+    await fireEvent.input(field, { target: { value: "Rättat önskemål" } });
+    await fireEvent.click(screen.getByRole("button", { name: m.approve() }));
+    await waitFor(() => expect(approve).toHaveBeenCalledTimes(1));
+    expect(edit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedCheckpointRevision: 1,
+        editedValue: { answer: "Rättat önskemål", retained: { ref: "F001" } }
+      })
+    );
+    expect(approve).toHaveBeenCalledWith(
+      expect.objectContaining({ expectedCheckpointRevision: 2 })
+    );
+    expect(edit.mock.invocationCallOrder[0]).toBeLessThan(approve.mock.invocationCallOrder[0]);
+  });
+
+  it("keeps the visible edit and does not approve when saving it fails", async () => {
+    const edit = vi.fn(async () => {
+      throw new Error("Save unavailable");
+    });
+    const approve = vi.fn();
+    const eneo = buildEneo({
+      activeCheckpoint: buildCheckpoint("awaiting_review", 1),
+      edit,
+      approve
+    });
+    render(FlowRunReviewCheckpointPanel, {
+      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
+    });
+    const field = await screen.findByLabelText("Answer");
+    await fireEvent.input(field, { target: { value: "Keep my correction" } });
+    await fireEvent.click(screen.getByRole("button", { name: m.approve() }));
+    await waitFor(() => expect(edit).toHaveBeenCalledTimes(1));
+    expect(approve).not.toHaveBeenCalled();
+    expect((field as HTMLTextAreaElement).value).toBe("Keep my correction");
+  });
+
+  it("shows the original result as read-only fields without replacing the draft", async () => {
+    const eneo = buildEneo({ activeCheckpoint: buildCheckpoint("awaiting_review", 1) });
+    render(FlowRunReviewCheckpointPanel, {
+      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
+    });
+    await fireEvent.input(await screen.findByLabelText("Answer"), { target: { value: "Unsaved" } });
+    const summary = screen.getByText(m.flow_run_review_original_payload());
+    const details = summary.closest("details");
+    if (!details) throw new Error("Missing original result disclosure");
+    details.open = true;
+    await fireEvent(details, new Event("toggle"));
+    const original = await screen.findByDisplayValue("Draft answer.");
+    expect(original.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByDisplayValue("Unsaved").hasAttribute("disabled")).toBe(false);
+    expect(screen.queryByLabelText(m.flow_run_review_json_payload())).toBeNull();
+  });
+
+  it("saves pending plain text before approval too", async () => {
+    const checkpoint = {
+      ...buildCheckpoint("awaiting_review", 1),
+      output_type: "text" as const,
+      output_contract: null,
+      current_payload_json: { text: "Original document" }
+    };
+    const edit = vi.fn(async () => ({
+      ...checkpoint,
+      state: "edited" as const,
+      revision: 2,
+      current_payload_json: { text: "Corrected document" }
+    }));
+    const approve = vi.fn(async () => ({ ...checkpoint, state: "approved" as const, revision: 3 }));
+    const eneo = buildEneo({ activeCheckpoint: checkpoint, edit, approve });
+    render(FlowRunReviewCheckpointPanel, {
+      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
+    });
+    await fireEvent.input(await screen.findByLabelText(m.flow_run_review_current_payload()), {
+      target: { value: "Corrected document" }
+    });
+    await fireEvent.click(screen.getByRole("button", { name: m.approve() }));
+    await waitFor(() => expect(approve).toHaveBeenCalledTimes(1));
+    expect(edit).toHaveBeenCalledWith(
+      expect.objectContaining({ editedValue: "Corrected document" })
+    );
+    expect(approve).toHaveBeenCalledWith(
+      expect.objectContaining({ expectedCheckpointRevision: 2 })
+    );
+  });
+
   it("shows the empty state when the run has no active review checkpoint", async () => {
     const eneo = buildEneo({ activeCheckpoint: null });
 
@@ -363,10 +471,8 @@ describe("FlowRunReviewCheckpointPanel", () => {
       props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
     });
 
-    const valueEditor = await screen.findByLabelText(m.flow_run_review_current_payload());
-    await fireEvent.input(valueEditor, {
-      target: { value: JSON.stringify({ answer: "Edited answer." }, null, 2) }
-    });
+    const valueEditor = await screen.findByLabelText("Answer");
+    await fireEvent.input(valueEditor, { target: { value: "Edited answer." } });
     await fireEvent.click(screen.getByRole("button", { name: m.flow_run_review_save_edit() }));
 
     await screen.findByText(m.flow_error_flow_review_stale_revision());
@@ -436,10 +542,8 @@ describe("FlowRunReviewCheckpointPanel", () => {
       props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
     });
 
-    const valueEditor = await screen.findByLabelText(m.flow_run_review_current_payload());
-    await fireEvent.input(valueEditor, {
-      target: { value: JSON.stringify({ answer: "Edited answer." }, null, 2) }
-    });
+    const valueEditor = await screen.findByLabelText("Answer");
+    await fireEvent.input(valueEditor, { target: { value: "Edited answer." } });
     await fireEvent.click(screen.getByRole("button", { name: m.flow_run_review_save_edit() }));
 
     await screen.findByText(m.flow_error_typed_io_contract_violation());
@@ -454,13 +558,16 @@ describe("FlowRunReviewCheckpointPanel", () => {
       props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
     });
 
-    const valueEditor = await screen.findByLabelText(m.flow_run_review_current_payload());
-    await fireEvent.input(valueEditor, {
-      target: { value: "{bad" }
-    });
+    await fireEvent.click(
+      await screen.findByRole("button", { name: m.flow_run_review_show_json() })
+    );
+    const valueEditor = screen.getByLabelText(m.flow_run_review_json_payload());
+    await fireEvent.input(valueEditor, { target: { value: "{bad" } });
     await fireEvent.click(screen.getByRole("button", { name: m.flow_run_review_save_edit() }));
 
-    await screen.findByText(m.flow_run_review_payload_invalid());
+    expect(screen.getAllByText(m.flow_run_review_payload_invalid()).length).toBeGreaterThan(0);
+    await fireEvent.click(screen.getByRole("button", { name: m.approve() }));
+    expect(eneo.flows.runs.reviewCheckpoints.approve).not.toHaveBeenCalled();
     expect(edit).not.toHaveBeenCalled();
 
     await fireEvent.input(valueEditor, {

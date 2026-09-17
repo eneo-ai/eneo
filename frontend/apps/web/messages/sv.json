@@ -7254,5 +7254,16 @@
   "flow_transcript_editor_skip_back": "Spola tillbaka 5 sekunder",
   "flow_transcript_editor_skip_forward": "Spola framåt 5 sekunder",
   "flow_transcript_editor_skip_back_short": "−5s",
-  "flow_transcript_editor_skip_forward_short": "+5s"
+  "flow_transcript_editor_skip_forward_short": "+5s",
+  "flow_run_review_fields_help": "Kontrollera uppgifterna och rätta det som behövs. Godkänn sparar även dina osparade ändringar.",
+  "flow_run_review_no_items": "Inga poster.",
+  "flow_run_review_item": "Post {number}",
+  "flow_run_review_remove_item": "Ta bort post {number}",
+  "flow_run_review_add_item": "Lägg till post",
+  "flow_run_review_choose_value": "Välj värde",
+  "flow_run_review_empty_value": "Tomt värde",
+  "flow_run_review_unsupported_field": "Fältet visas oförändrat. Vid behov kan det redigeras i Avancerat: JSON.",
+  "flow_run_review_show_fields": "Visa fält",
+  "flow_run_review_show_json": "Avancerat: JSON",
+  "flow_run_review_json_payload": "Resultat som JSON"
 }

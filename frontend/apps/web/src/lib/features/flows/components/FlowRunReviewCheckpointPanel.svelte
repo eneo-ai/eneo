@@ -20,6 +20,7 @@
   import { getLocale } from "$lib/paraglide/runtime";
   import { getFlowRuntimeErrorMessage } from "$lib/features/flows/flowRuntimeErrorMapping";
   import SpeakerMappingReviewEditor from "./SpeakerMappingReviewEditor.svelte";
+  import FlowStructuredReviewEditor from "./FlowStructuredReviewEditor.svelte";
   import TranscriptPlayer from "./TranscriptPlayer.svelte";
   import {
     buildEditedMapping,
@@ -65,6 +66,7 @@
   let loadError: string | null = $state(null);
   let actionError: string | null = $state(null);
   let draftValueText = $state("");
+  let originalExpanded = $state(false);
   let transcriptPlayer = $state<{ playSpeakerSample: (label: string) => void }>();
   let speakerReviews = $state<TranscriptFileReview[]>([]);
   let speakerRows = $state<SpeakerMappingRow[]>([]);
@@ -133,6 +135,12 @@
     isSpeakerMapping &&
       JSON.stringify(buildEditedMapping(speakerRows)) !==
         JSON.stringify(buildEditedMapping(buildSpeakerRows(checkpoint?.current_payload_json)))
+  );
+  const outputEditsPending = $derived(
+    checkpoint !== null &&
+      !isSpeakerMapping &&
+      draftValueText !==
+        renderEditableValue(checkpoint.current_payload_json, checkpoint.output_type)
   );
   let rejectReason = $state("");
   let activeAction: ReviewAction | null = $state(null);
@@ -446,21 +454,24 @@
     activeAction = "approve";
     actionError = null;
     try {
-      // Approving is meant to accept what the reviewer sees, so pending
-      // speaker edits are saved first rather than silently dropped.
+      // Approval accepts the visible draft, and uses the revision returned by its save.
       if (correctionsController && !(await correctionsController.flush())) {
         actionError =
           correctionsController.error ?? m.flow_run_transcript_corrections_save_failed();
         return;
       }
       let current = checkpoint;
-      if (speakerEditsPending && canEdit) {
+      if ((speakerEditsPending || outputEditsPending) && canEdit) {
+        const editedValue = isSpeakerMapping
+          ? buildEditedMapping(speakerRows)
+          : parseDraftValue(current.output_type);
+        if (editedValue === null) return;
         current = await eneo.flows.runs.reviewCheckpoints.edit({
           flowId,
           runId,
           checkpointId: current.id,
           expectedCheckpointRevision: current.revision,
-          editedValue: buildEditedMapping(speakerRows)
+          editedValue
         });
         applyCheckpoint(current);
       }
@@ -750,6 +761,33 @@
             />
           {/key}
         </Field.Field>
+      {:else if checkpoint.output_type === "json"}
+        <div class="flex min-w-0 flex-col gap-6 lg:col-span-2">
+          {#key checkpoint.id}
+            <FlowStructuredReviewEditor
+              text={draftValueText}
+              schema={checkpoint.output_contract}
+              disabled={!canEdit || activeAction !== null}
+              onChange={(text) => (draftValueText = text)}
+            />
+          {/key}
+          <details bind:open={originalExpanded} class="border-default border-t py-2">
+            <summary
+              class="text-primary focus-visible:ring-accent-default cursor-pointer py-2 text-sm font-medium focus-visible:ring-2"
+            >
+              {m.flow_run_review_original_payload()}
+            </summary>
+            {#if originalExpanded}
+              <FlowStructuredReviewEditor
+                text={renderEditableValue(checkpoint.original_payload_json, checkpoint.output_type)}
+                schema={checkpoint.output_contract}
+                disabled={true}
+                original
+                onChange={() => {}}
+              />
+            {/if}
+          </details>
+        </div>
       {:else}
         <Field.Field>
           <Field.Label class="text-primary text-xs font-medium" for="flow-review-current-payload">
