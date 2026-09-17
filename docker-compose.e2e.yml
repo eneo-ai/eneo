@@ -88,6 +88,10 @@ services:
       DEFAULT_TENANT_NAME: E2ETenant
       DEFAULT_USER_EMAIL: e2e@example.com
       DEFAULT_USER_PASSWORD: E2ePassword123!
+      # The widget spec solves a real ALTCHA proof of work in Chromium; the
+      # production cost (50k hashes) competes with the other Playwright worker
+      # for the runner's two vCPUs and can eat the whole answer timeout.
+      WIDGET_ALTCHA_COST: "1000"
     command:
       - bash
       - -lc
