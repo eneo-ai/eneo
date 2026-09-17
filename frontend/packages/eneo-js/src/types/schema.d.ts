@@ -3227,6 +3227,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/widgets/{id}/preview-token/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Create Widget Preview Token
+     * @description Mint a visitor token for the live preview on the admin page. Admits the embed page for draft and paused widgets; each call is a fresh pseudonymous visitor.
+     */
+    post: operations["create_widget_preview_token_api_v1_widgets__id__preview_token__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/widgets/{id}/activate/": {
     parameters: {
       query?: never;
@@ -22077,6 +22097,21 @@ export interface components {
      * @enum {string}
      */
     WidgetPosition: "bottom-right" | "bottom-left";
+    /**
+     * WidgetPreviewToken
+     * @description Visitor token for the admin page's live preview of the embed page.
+     */
+    WidgetPreviewToken: {
+      /** Token */
+      token: string;
+      /**
+       * Expires In
+       * @description Seconds until the token expires.
+       */
+      expires_in: number;
+      /** Public Id */
+      public_id: string;
+    };
     /** WidgetPrivacy */
     WidgetPrivacy: {
       /**
@@ -35017,6 +35052,64 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["WidgetUsagePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  create_widget_preview_token_api_v1_widgets__id__preview_token__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WidgetPreviewToken"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */

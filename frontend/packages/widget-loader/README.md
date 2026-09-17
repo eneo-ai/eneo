@@ -22,16 +22,17 @@ immutable, for hosts that require `integrity`).
 Optional `data-*` attributes (also usable as attributes on a hand-written
 `<eneo-widget>` element for single-page apps):
 
-| Attribute      | Values                          | Default                     |
-| -------------- | ------------------------------- | --------------------------- |
-| `lang`         | `sv`, `en`                      | the page's `<html lang>`    |
-| `position`     | `bottom-right`, `bottom-left`   | `bottom-right`              |
-| `color-scheme` | `auto`, `light`, `dark`         | `auto`                      |
-| `auto-open`    | `true`                          | closed                      |
-| `launcher`     | `none` (host renders its own)   | built-in button             |
-| `label`        | accessible name of the button   | "Öppna chatt" / "Open chat" |
-| `frame-title`  | accessible name of the iframe   | "Chatt" / "Chat"            |
-| `prefetch`     | `true` (load before first open) | lazy                        |
+| Attribute      | Values                                            | Default                     |
+| -------------- | ------------------------------------------------- | --------------------------- |
+| `lang`         | `sv`, `en`                                        | the page's `<html lang>`    |
+| `position`     | `bottom-right`, `bottom-left`                     | `bottom-right`              |
+| `color-scheme` | `auto`, `light`, `dark`                           | `auto`                      |
+| `auto-open`    | `true`                                            | closed                      |
+| `launcher`     | `none` (host renders its own)                     | built-in button             |
+| `label`        | accessible name of the button                     | "Öppna chatt" / "Open chat" |
+| `frame-title`  | accessible name of the iframe                     | "Chatt" / "Chat"            |
+| `prefetch`     | `true` (load before first open)                   | lazy                        |
+| `preview`      | preview token from the admin page (draft widgets) | none                        |
 
 CSS custom properties on the element or `:root`: `--eneo-widget-color`,
 `--eneo-widget-on-color`, `--eneo-widget-radius`, `--eneo-widget-z`,

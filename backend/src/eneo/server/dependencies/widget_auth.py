@@ -17,6 +17,7 @@ from eneo.widgets.application.visitor_user import build_visitor_user
 from eneo.widgets.domain.exceptions import (
     VisitorTokenInvalidError,
     WidgetNotActiveError,
+    WidgetPublicError,
 )
 from eneo.widgets.domain.visitor import WidgetPrincipal
 from eneo.widgets.domain.widget import Widget, WidgetStatus, is_public_id
@@ -26,29 +27,52 @@ from eneo.widgets.domain.widget import Widget, WidgetStatus, is_public_id
 PublicContainer = Annotated[Container, Depends(get_container())]
 
 
-async def get_active_widget(public_id: str, container: PublicContainer) -> Widget:
-    """Resolve an active widget by its public id; anything else is 404.
-
-    A malformed id, an unknown id and a paused/archived widget all answer the
-    same way so the public surface leaks nothing about what exists.
-    """
-    if not is_public_id(public_id):
-        raise WidgetNotActiveError()
-    widget = await container.widget_repo().get_by_public_id(public_id)
-    if widget is None or widget.status != WidgetStatus.ACTIVE:
-        raise WidgetNotActiveError()
-    return widget
-
-
-ActiveWidget = Annotated[Widget, Depends(get_active_widget)]
-
-
 def bearer_token(request: Request) -> Optional[str]:
     header = request.headers.get("authorization", "")
     scheme, _, credentials = header.partition(" ")
     if scheme.lower() != "bearer" or not credentials.strip():
         return None
     return credentials.strip()
+
+
+def _holds_preview_token(
+    request: Request, widget: Widget, container: Container
+) -> bool:
+    token = bearer_token(request)
+    if token is None:
+        return False
+    try:
+        claims = container.widget_visitor_token_service().verify(token, widget)
+    except WidgetPublicError:
+        return False
+    return claims.preview
+
+
+async def get_active_widget(
+    request: Request, public_id: str, container: PublicContainer
+) -> Widget:
+    """Resolve an active widget by its public id; anything else is 404.
+
+    A malformed id, an unknown id and a paused/archived widget all answer the
+    same way so the public surface leaks nothing about what exists. The one
+    exception is an editor's preview token, which admits a draft or paused
+    widget so the admin page can show the real embed page before activation.
+    """
+    if not is_public_id(public_id):
+        raise WidgetNotActiveError()
+    widget = await container.widget_repo().get_by_public_id(public_id)
+    if widget is None:
+        raise WidgetNotActiveError()
+    if widget.status == WidgetStatus.ACTIVE:
+        return widget
+    if widget.status != WidgetStatus.ARCHIVED and _holds_preview_token(
+        request, widget, container
+    ):
+        return widget
+    raise WidgetNotActiveError()
+
+
+ActiveWidget = Annotated[Widget, Depends(get_active_widget)]
 
 
 async def get_widget_principal(

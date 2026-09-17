@@ -75,6 +75,14 @@ class WidgetPublic(BaseModel):
     updated_at: datetime
 
 
+class WidgetPreviewToken(BaseModel):
+    """Visitor token for the admin page's live preview of the embed page."""
+
+    token: str
+    expires_in: int = Field(description="Seconds until the token expires.")
+    public_id: str
+
+
 class WidgetUsageDayPublic(BaseModel):
     day: date
     questions: int

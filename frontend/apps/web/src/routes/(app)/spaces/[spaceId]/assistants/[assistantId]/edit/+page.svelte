@@ -37,6 +37,7 @@
   import SkillBindingsEditor from "$lib/features/skills/SkillBindingsEditor.svelte";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { resolve } from "$app/paths";
+  import { localizeHref } from "$lib/paraglide/runtime";
   import {
     loadSkillBindingCatalogPage,
     loadSkillBindingPreview
@@ -776,6 +777,23 @@
                 resource={data.assistant}
                 hasUnsavedChanges={$currentChanges.hasUnsavedChanges}
               />
+            </Settings.Row>
+          {/if}
+
+          {#if hasPermission(data.user)("widgets") && data.assistant.permissions?.includes("edit")}
+            <Settings.Row
+              title={m.widget_admin_title()}
+              description={m.widget_admin_link_description()}
+            >
+              <div class="flex h-14 items-center">
+                <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- localized href built from typed route segments -->
+                <Button
+                  variant="outlined"
+                  href={localizeHref(
+                    `/spaces/${$currentSpace.routeId}/assistants/${data.assistant.id}/widget`
+                  )}>{m.widget_admin_open()}</Button
+                >
+              </div>
             </Settings.Row>
           {/if}
 

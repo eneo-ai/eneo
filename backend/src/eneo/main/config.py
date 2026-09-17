@@ -454,6 +454,7 @@ class Settings(BaseSettings):
     # visitor's identity for a re-mint without a new proof of work.
     widget_visitor_token_ttl_seconds: int = Field(default=900, gt=0)
     widget_visitor_token_grace_seconds: int = Field(default=3600, ge=0)
+    widget_preview_token_ttl_seconds: int = Field(default=3600, gt=0)
     # ALTCHA proof-of-work cost (expected hash count). ~0.5 s in Python at
     # 100k; browsers solve it several times faster.
     widget_altcha_cost: int = Field(default=50_000, ge=1_000)

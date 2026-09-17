@@ -27,9 +27,11 @@
     onSession: (session: VisitorSession) => void;
     /** The host page's colour scheme, forwarded by the loader. */
     onTheme?: (scheme: "light" | "dark" | "auto") => void;
+    /** Admin preview of a draft widget: used as the visitor token, nothing is remembered. */
+    previewToken?: string | null;
   };
 
-  let { config, client, hostOrigin, onSession, onTheme }: Props = $props();
+  let { config, client, hostOrigin, onSession, onTheme, previewToken = null }: Props = $props();
 
   const chat = getChatService();
 
@@ -46,11 +48,12 @@
   let pendingQuestion = $state<string | null>(null);
 
   // Props are fixed for the lifetime of the page; capture them once.
-  const initial = untrack(() => ({ client, config, hostOrigin, onSession, onTheme }));
+  const initial = untrack(() => ({ client, config, hostOrigin, onSession, onTheme, previewToken }));
 
   const session = new VisitorSession({
     client: initial.client,
     config: initial.config,
+    fixedToken: initial.previewToken,
     solve: () => {
       status = "verifying";
       return solveWithAltcha(altchaElement).finally(() => {

@@ -2,6 +2,7 @@ import { error } from "@sveltejs/kit";
 import { createWidgetClient, EneoError } from "@eneo/eneo-js";
 import { frameAncestorsFor } from "$lib/core/csp";
 import { getBackendUrl } from "$lib/core/environment.server";
+import { PREVIEW_QUERY } from "$lib/features/widget/preview";
 import type { PageServerLoad } from "./$types";
 
 /** Only a syntactically valid origin may become the postMessage peer. */
@@ -22,21 +23,27 @@ function parseScheme(raw: string | null): "light" | "dark" | "auto" | null {
 export const load: PageServerLoad = async ({ params, url, fetch, locals, setHeaders }) => {
   const baseUrl = getBackendUrl() ?? "";
   const client = createWidgetClient({ baseUrl, publicId: params.publicId, fetch });
+  const standalone = url.searchParams.get("mode") === "full";
+  // The admin page's live preview: the token is in the fragment, so the
+  // configuration is fetched in the browser and only Eneo itself may frame it.
+  const preview = url.searchParams.get(PREVIEW_QUERY) === "1";
 
-  let config;
-  try {
-    config = await client.config();
-  } catch (e) {
-    if (e instanceof EneoError && e.status === 404) {
-      error(404);
+  let config = null;
+  if (!preview) {
+    try {
+      config = await client.config();
+    } catch (e) {
+      if (e instanceof EneoError && e.status === 404) {
+        error(404);
+      }
+      throw e;
     }
-    throw e;
   }
 
-  const standalone = url.searchParams.get("mode") === "full";
   // The browser enforces where this page may render. The stand-alone page has
   // no reason to be framed at all.
-  locals.frameAncestors = standalone ? "'self'" : frameAncestorsFor(config.frame_ancestors);
+  locals.frameAncestors =
+    standalone || !config ? "'self'" : frameAncestorsFor(config.frame_ancestors);
 
   setHeaders({
     "cache-control": "no-store",
@@ -50,6 +57,7 @@ export const load: PageServerLoad = async ({ params, url, fetch, locals, setHead
     publicId: params.publicId,
     baseUrl,
     hostOrigin: standalone ? null : parseHostOrigin(url.searchParams.get("origin")),
+    preview,
     hostScheme: parseScheme(url.searchParams.get("scheme")),
     standalone
   };

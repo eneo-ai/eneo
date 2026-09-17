@@ -1211,6 +1211,7 @@ class Container(containers.DeclarativeContainer):
         space_service=space_service,
         actor_manager=actor_manager,
         tenant_service=tenant_service,
+        token_service=widget_visitor_token_service,
     )
     assistant_template_service = providers.Factory(
         AssistantTemplateService,

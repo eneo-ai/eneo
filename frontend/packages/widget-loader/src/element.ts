@@ -107,7 +107,11 @@ export class EneoWidgetElement extends HTMLElement {
     const prefix = this.lang === "en" ? "/en" : "";
     const origin = encodeURIComponent(location.origin);
     const scheme = this.colorScheme === "auto" ? "" : `&scheme=${this.colorScheme}`;
-    return `${this.baseUrl}${prefix}/embed/${encodeURIComponent(this.widgetId)}?origin=${origin}${scheme}`;
+    // Editors test draft widgets with a preview token; the fragment never
+    // reaches a server log and the embed page reads it client-side.
+    const preview = this.getAttribute("preview");
+    const suffix = preview ? `&preview=1#preview=${encodeURIComponent(preview)}` : "";
+    return `${this.baseUrl}${prefix}/embed/${encodeURIComponent(this.widgetId)}?origin=${origin}${scheme}${suffix}`;
   }
 
   private get labels(): Labels {

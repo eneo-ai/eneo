@@ -107,6 +107,12 @@ describe("opening", () => {
     expect(frameOf(element)!.src).toMatch(/\?origin=[^&]+&scheme=dark$/);
   });
 
+  it("hands a preview token to the embed page in the fragment", () => {
+    const element = mount({ preview: "tok/en" });
+    element.openPanel();
+    expect(frameOf(element)!.src).toMatch(/\?origin=[^&]+&preview=1#preview=tok%2Fen$/);
+  });
+
   it("uses the Swedish embed route by default", () => {
     const element = mount();
     element.openPanel();

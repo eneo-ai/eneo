@@ -25,6 +25,7 @@ def _settings(ttl: int = 900) -> SimpleNamespace:
         jwt_algorithm="HS256",
         widget_visitor_token_ttl_seconds=ttl,
         widget_visitor_token_grace_seconds=3600,
+        widget_preview_token_ttl_seconds=3600,
     )
 
 
@@ -65,6 +66,20 @@ def test_mint_and_verify_round_trip():
     assert claims.tenant_id == widget.tenant_id
     assert claims.generation == 0
     assert claims.expires_at > datetime.now(timezone.utc)
+
+
+def test_preview_tokens_are_flagged_and_live_longer():
+    widget = _widget()
+    service = VisitorTokenService(settings=_settings())
+
+    token, expires_in = service.mint(widget, uuid4(), preview=True)
+    assert expires_in == 3600
+    assert service.verify(token, widget).preview is True
+
+    ordinary, _ = service.mint(widget, uuid4())
+    assert service.verify(ordinary, widget).preview is False
+    # A forged flag with the wrong type never counts as a preview.
+    assert service.verify(_encode(widget, preview="yes"), widget).preview is False
 
 
 def test_token_is_bound_to_one_widget():

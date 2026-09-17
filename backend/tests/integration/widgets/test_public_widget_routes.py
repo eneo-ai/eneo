@@ -102,6 +102,80 @@ async def test_public_config_only_for_active_widgets(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_preview_token_admits_draft_widgets(client, admin_token):
+    resp = await client.post(
+        "/api/v1/spaces/",
+        json={"name": f"preview-widget-{uuid4().hex[:8]}"},
+        headers=_auth(admin_token),
+    )
+    space_id = resp.json()["id"]
+    resp = await client.post(
+        f"/api/v1/spaces/{space_id}/applications/assistants/",
+        json={"name": "Utkastassistenten"},
+        headers=_auth(admin_token),
+    )
+    assistant_id = resp.json()["id"]
+    resp = await client.post(
+        f"/api/v1/spaces/{space_id}/widgets/",
+        json={"target_id": assistant_id, "name": "Utkast"},
+        headers=_auth(admin_token),
+    )
+    widget = resp.json()
+    public_id = widget["public_id"]
+
+    # Still a draft: the public surface denies it outright.
+    resp = await client.get(f"/api/v1/widgets/{public_id}/config/")
+    assert resp.status_code == 404
+
+    resp = await client.post(
+        f"/api/v1/widgets/{widget['id']}/preview-token/", headers=_auth(admin_token)
+    )
+    assert resp.status_code == 200, resp.text
+    preview = resp.json()
+    assert preview["public_id"] == public_id
+    assert preview["expires_in"] > 900
+
+    resp = await client.get(
+        f"/api/v1/widgets/{public_id}/config/", headers=_auth(preview["token"])
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["public_id"] == public_id
+
+    # Rotation keeps the preview flag so the preview survives a token refresh.
+    resp = await client.post(
+        f"/api/v1/widgets/{public_id}/visitor-sessions/",
+        json={"previous_token": preview["token"]},
+        headers=_auth(preview["token"]),
+    )
+    assert resp.status_code == 200, resp.text
+    rotated = resp.json()["token"]
+    resp = await client.get(
+        f"/api/v1/widgets/{public_id}/config/", headers=_auth(rotated)
+    )
+    assert resp.status_code == 200
+
+    # An ordinary (non-preview) token never admits a draft.
+    resp = await client.get(
+        f"/api/v1/widgets/{public_id}/config/", headers=_auth("not-a-token")
+    )
+    assert resp.status_code == 404
+
+    resp = await client.post(
+        f"/api/v1/widgets/{widget['id']}/archive/", headers=_auth(admin_token)
+    )
+    assert resp.status_code == 200
+    resp = await client.get(
+        f"/api/v1/widgets/{public_id}/config/", headers=_auth(preview["token"])
+    )
+    assert resp.status_code == 404
+    resp = await client.post(
+        f"/api/v1/widgets/{widget['id']}/preview-token/", headers=_auth(admin_token)
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_visitor_session_lifecycle(client, admin_token, active_widget):
     public_id = active_widget["public_id"]
 

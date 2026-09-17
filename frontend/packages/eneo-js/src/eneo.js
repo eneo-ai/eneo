@@ -40,6 +40,7 @@ import { initSkills } from "./endpoints/skills.js";
 import { initObjectContentPolicy } from "./endpoints/object-content-policy.js";
 import { initObjectStoreConnection } from "./endpoints/object-store-connection.js";
 import { initModules } from "./endpoints/modules.js";
+import { initWidgets } from "./endpoints/widgets.js";
 
 /**
  * Create an Eneo.js object to interact with the eneo backend.
@@ -95,6 +96,7 @@ export function createEneo(args) {
     objectContentPolicy: initObjectContentPolicy(client),
     objectStoreConnection: initObjectStoreConnection(client),
     modules: initModules(client),
+    widgets: initWidgets(client),
     client
   };
 }

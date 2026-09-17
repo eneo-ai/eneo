@@ -112,6 +112,7 @@ async def create_visitor_session(
     tokens = container.widget_visitor_token_service()
     await limiter.check_mint(widget, client_ip(request))
 
+    preview = False
     if body.previous_token is not None:
         claims = tokens.verify(
             body.previous_token,
@@ -119,6 +120,7 @@ async def create_visitor_session(
             grace_seconds=settings.widget_visitor_token_grace_seconds,
         )
         visitor_id = claims.visitor_id
+        preview = claims.preview
     elif body.altcha is not None:
         await container.widget_altcha_service().verify(body.altcha)
         visitor_id = body.visitor_id or uuid4()
@@ -129,7 +131,7 @@ async def create_visitor_session(
             "A solved challenge is required.", code="challenge_required"
         )
 
-    token, expires_in = tokens.mint(widget, visitor_id)
+    token, expires_in = tokens.mint(widget, visitor_id, preview=preview)
     return VisitorSession(token=token, expires_in=expires_in, visitor_id=visitor_id)
 
 

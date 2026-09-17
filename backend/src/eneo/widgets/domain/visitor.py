@@ -37,6 +37,8 @@ class VisitorClaims:
     issued_at: datetime
     expires_at: datetime
     jti: str
+    # Minted for an editor's live preview: admits draft and paused widgets.
+    preview: bool = False
 
 
 @dataclass(frozen=True)

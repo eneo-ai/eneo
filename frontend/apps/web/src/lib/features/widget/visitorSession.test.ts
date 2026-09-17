@@ -151,4 +151,23 @@ describe("VisitorSession", () => {
     const { session } = setup({ storage });
     expect(session.token).toBeNull();
   });
+
+  it("uses a preview token as is and never stores or rotates it", async () => {
+    const storage = new MemoryStorage();
+    const createVisitorSession = vi.fn();
+    const session = new VisitorSession({
+      client: { createVisitorSession } as unknown as WidgetClient,
+      config: { public_id: "wgt_x", bot_protection: "altcha", token_generation: 0 },
+      solve: vi.fn(),
+      storage,
+      fixedToken: "preview-token"
+    });
+    expect(session.isPreview).toBe(true);
+    expect(session.token).toBe("preview-token");
+    expect(await session.ensureToken()).toBe("preview-token");
+    expect(session.hasIdentity).toBe(false);
+    session.rememberSession("s1");
+    expect(createVisitorSession).not.toHaveBeenCalled();
+    expect(storage.store.size).toBe(0);
+  });
 });

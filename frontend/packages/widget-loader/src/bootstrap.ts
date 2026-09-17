@@ -11,7 +11,8 @@ const SCRIPT_ATTRIBUTES = [
   "launcher",
   "label",
   "frame-title",
-  "prefetch"
+  "prefetch",
+  "preview"
 ] as const;
 
 /** The origin of the script tag is where the embed page and API live. */

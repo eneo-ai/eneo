@@ -4,8 +4,8 @@
 
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
-from uuid import UUID
+from typing import TYPE_CHECKING, Any, Optional
+from uuid import UUID, uuid4
 
 from pydantic import ValidationError
 
@@ -16,6 +16,7 @@ from eneo.main.exceptions import (
 )
 from eneo.roles.permissions import Permission, validate_permission
 from eneo.users.user import UserInDB
+from eneo.widgets.application.visitor_token_service import VisitorTokenService
 from eneo.widgets.domain.widget import (
     Widget,
     WidgetLanguage,
@@ -46,12 +47,14 @@ class WidgetService:
         space_service: "SpaceService",
         actor_manager: "ActorManager",
         tenant_service: "TenantService",
+        token_service: Optional[VisitorTokenService] = None,
     ) -> None:
         self.user = user
         self.repo = repo
         self.space_service = space_service
         self.actor_manager = actor_manager
         self.tenant_service = tenant_service
+        self.token_service = token_service or VisitorTokenService()
 
     # --- policy -----------------------------------------------------------
 
@@ -181,6 +184,20 @@ class WidgetService:
         widget.activate(by=self.user.id)
         widget = await self.repo.update(widget)
         return self._view(space, widget)
+
+    async def preview_token(self, widget_id: UUID) -> tuple[str, int]:
+        """A visitor token for the editor's live preview.
+
+        Works for draft and paused widgets, so editors can see the embed page
+        before an admin activates it. Each call is a fresh pseudonymous
+        visitor; nothing about the editor is put in the token.
+        """
+        validate_permission(self.user, Permission.WIDGETS)
+        widget = await self._owned_widget(widget_id)
+        await self._space_for_edit(widget.space_id)
+        if widget.status == WidgetStatus.ARCHIVED:
+            raise BadRequestException("Archived widgets cannot be previewed.")
+        return self.token_service.mint(widget, uuid4(), preview=True)
 
     async def pause_widget(self, widget_id: UUID) -> WidgetView:
         widget = await self._owned_widget(widget_id)

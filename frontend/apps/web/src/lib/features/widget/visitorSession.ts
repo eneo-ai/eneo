@@ -25,6 +25,8 @@ export type VisitorSessionOptions = {
   now?: () => number;
   /** Seconds an expired token may still rotate silently (server grace is 60 min). */
   graceSeconds?: number;
+  /** A preview token from the admin page: used as is, never stored or rotated. */
+  fixedToken?: string | null;
 };
 
 const EXPIRY_MARGIN_MS = 30_000;
@@ -50,20 +52,32 @@ export class VisitorSession {
   #grace: number;
   #state: StoredVisitor | null;
   #minting: Promise<string> | null = null;
+  #fixedToken: string | null;
 
   constructor(options: VisitorSessionOptions) {
     this.#client = options.client;
     this.#config = options.config;
     this.#solve = options.solve;
-    this.#storage = options.storage === undefined ? safeLocalStorage() : options.storage;
+    this.#fixedToken = options.fixedToken ?? null;
+    this.#storage =
+      this.#fixedToken !== null
+        ? null
+        : options.storage === undefined
+          ? safeLocalStorage()
+          : options.storage;
     this.#now = options.now ?? (() => Date.now());
     this.#grace = (options.graceSeconds ?? 3600) * 1000;
     this.#state = this.#load();
   }
 
+  /** True for the admin page's live preview; nothing is remembered. */
+  get isPreview(): boolean {
+    return this.#fixedToken !== null;
+  }
+
   /** The token to send right now, or null when nothing has been minted yet. */
   get token(): string | null {
-    return this.#state?.token ?? null;
+    return this.#fixedToken ?? this.#state?.token ?? null;
   }
 
   get visitorId(): string | null {
@@ -106,6 +120,7 @@ export class VisitorSession {
    * rotating as needed. Concurrent callers share one mint.
    */
   async ensureToken(): Promise<string> {
+    if (this.#fixedToken !== null) return this.#fixedToken;
     const state = this.#state;
     if (state?.token && state.expires_at - EXPIRY_MARGIN_MS > this.#now()) {
       return state.token;

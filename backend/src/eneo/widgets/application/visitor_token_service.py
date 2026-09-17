@@ -36,9 +36,15 @@ class VisitorTokenService:
     def __init__(self, settings: Optional[Settings] = None) -> None:
         self.settings = settings or get_settings()
 
-    def mint(self, widget: Widget, visitor_id: UUID) -> tuple[str, int]:
+    def mint(
+        self, widget: Widget, visitor_id: UUID, *, preview: bool = False
+    ) -> tuple[str, int]:
         assert widget.id is not None
-        ttl = self.settings.widget_visitor_token_ttl_seconds
+        ttl = (
+            self.settings.widget_preview_token_ttl_seconds
+            if preview
+            else self.settings.widget_visitor_token_ttl_seconds
+        )
         now = datetime.now(timezone.utc)
         payload: dict[str, Any] = {
             "token_use": TOKEN_USE,
@@ -52,6 +58,8 @@ class VisitorTokenService:
             "exp": int((now + timedelta(seconds=ttl)).timestamp()),
             "jti": uuid4().hex,
         }
+        if preview:
+            payload["preview"] = True
         token = jwt.encode(
             payload, self.settings.jwt_secret, algorithm=self.settings.jwt_algorithm
         )
@@ -105,4 +113,5 @@ class VisitorTokenService:
             issued_at=datetime.fromtimestamp(int(claims["iat"]), tz=timezone.utc),
             expires_at=expires_at,
             jti=str(claims.get("jti", "")),
+            preview=claims.get("preview") is True,
         )

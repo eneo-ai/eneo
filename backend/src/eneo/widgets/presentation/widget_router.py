@@ -21,6 +21,7 @@ from eneo.widgets.presentation.widget_models import (
     WidgetCreate,
     WidgetPolicyPublic,
     WidgetPolicyUpdate,
+    WidgetPreviewToken,
     WidgetPublic,
     WidgetUpdate,
     WidgetUsageDayPublic,
@@ -190,6 +191,25 @@ async def get_widget_usage(
         ],
         budget_used_today=used_today,
         daily_token_budget=view.widget.limits.daily_token_budget,
+    )
+
+
+@router.post(
+    "/{id}/preview-token/",
+    response_model=WidgetPreviewToken,
+    description=(
+        "Mint a visitor token for the live preview on the admin page. Admits"
+        " the embed page for draft and paused widgets; each call is a fresh"
+        " pseudonymous visitor."
+    ),
+    responses=responses.get_responses([400, 403, 404]),
+)
+async def create_widget_preview_token(id: UUID, container: _ContainerWithUser):
+    service = container.widget_service()
+    view = await service.get_widget(id)
+    token, expires_in = await service.preview_token(id)
+    return WidgetPreviewToken(
+        token=token, expires_in=expires_in, public_id=view.widget.public_id
     )
 
 
