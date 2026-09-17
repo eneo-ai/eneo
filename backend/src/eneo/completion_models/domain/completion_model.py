@@ -53,7 +53,6 @@ class CompletionModel(AIModel):
         reasoning: bool,
         supports_tool_calling: bool = False,
         supports_strict_tool_schema: bool = False,
-        context_window_tokens: int | None = None,
         token_limit: Optional[int] = None,
         base_url: Optional[str] = None,
         litellm_model_name: Optional[str] = None,
@@ -103,7 +102,6 @@ class CompletionModel(AIModel):
         self.supports_strict_tool_schema = supports_strict_tool_schema
         self.max_input_tokens = max_input_tokens
         self.max_output_tokens = max_output_tokens
-        self.context_window_tokens = context_window_tokens
         self.deployment_name = deployment_name
         self.nr_billion_parameters = nr_billion_parameters
         self.input_cost_per_token = input_cost_per_token
@@ -117,9 +115,7 @@ class CompletionModel(AIModel):
 
     @property
     def capacity(self) -> ModelCapacity:
-        return ModelCapacity(
-            self.max_input_tokens, self.max_output_tokens, self.context_window_tokens
-        )
+        return ModelCapacity(self.max_input_tokens, self.max_output_tokens)
 
     @property
     def can_access(self):
@@ -183,7 +179,6 @@ class CompletionModel(AIModel):
             name=completion_model_db.name,
             max_input_tokens=completion_model_db.max_input_tokens,
             max_output_tokens=completion_model_db.max_output_tokens,
-            context_window_tokens=completion_model_db.context_window_tokens,
             vision=completion_model_db.vision,
             family=completion_model_db.family,
             hosting=completion_model_db.hosting,

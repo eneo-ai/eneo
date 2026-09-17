@@ -165,7 +165,7 @@
           <td class="py-2.5">{model.name}</td>
         </tr>
 
-        <!-- Context window -->
+        <!-- Token limits -->
         {#if "max_input_tokens" in model}
           <tr>
             <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap"
@@ -176,16 +176,6 @@
                 input: formatTokens(model.max_input_tokens),
                 output: formatTokens(model.max_output_tokens)
               })}
-            </td>
-          </tr>
-          <tr>
-            <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap"
-              >{m.context_window_tokens()}</td
-            >
-            <td class="py-2.5 font-mono text-sm">
-              {model.context_window_tokens == null
-                ? m.context_window_unknown()
-                : formatTokens(model.context_window_tokens)}
             </td>
           </tr>
         {/if}

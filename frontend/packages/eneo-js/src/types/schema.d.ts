@@ -13676,11 +13676,6 @@ export interface components {
     CompletionModel: {
       /** Base Url */
       base_url?: string | null;
-      /**
-       * Context Window Tokens
-       * @description Shared context window of input and output in tokens; null when not declared for this model route.
-       */
-      context_window_tokens?: number | null;
       /** Created At */
       created_at?: string | null;
       /** Deployment Name */
@@ -13775,11 +13770,6 @@ export interface components {
     CompletionModelCreate: {
       /** Base Url */
       base_url?: string | null;
-      /**
-       * Context Window Tokens
-       * @description Shared context window of input and output in tokens; null when not declared for this model route.
-       */
-      context_window_tokens?: number | null;
       /** Deployment Name */
       deployment_name?: string | null;
       /** Description */
@@ -13846,11 +13836,6 @@ export interface components {
        * @default false
        */
       can_access?: boolean;
-      /**
-       * Context Window Tokens
-       * @description Shared context window of input and output in tokens; null when not declared for this model route.
-       */
-      context_window_tokens?: number | null;
       /** Created At */
       created_at?: string | null;
       /** Credential Provider */
@@ -13980,11 +13965,6 @@ export interface components {
        * @default false
        */
       can_access?: boolean;
-      /**
-       * Context Window Tokens
-       * @description Shared context window of input and output in tokens; null when not declared for this model route.
-       */
-      context_window_tokens?: number | null;
       /** Created At */
       created_at?: string | null;
       /** Credential Provider */
@@ -14095,11 +14075,6 @@ export interface components {
     CompletionModelSparse: {
       /** Base Url */
       base_url?: string | null;
-      /**
-       * Context Window Tokens
-       * @description Shared context window of input and output in tokens; null when not declared for this model route.
-       */
-      context_window_tokens?: number | null;
       /** Created At */
       created_at?: string | null;
       /** Deployment Name */
@@ -28187,11 +28162,6 @@ export interface components {
     PartialCompletionModelUpdate: {
       /** Base Url */
       base_url?: string | null;
-      /**
-       * Context Window Tokens
-       * @description Shared context window of input and output in tokens; null when not declared for this model route.
-       */
-      context_window_tokens?: number | null;
       /** Deployment Name */
       deployment_name?: string | null;
       /** Description */
@@ -32817,8 +32787,6 @@ export interface components {
     };
     /** TenantCompletionModelCreate */
     TenantCompletionModelCreate: {
-      /** Context Window Tokens */
-      context_window_tokens?: number | null;
       /** Description */
       description?: string | null;
       /** Display Name */
@@ -32883,8 +32851,6 @@ export interface components {
     };
     /** TenantCompletionModelUpdate */
     TenantCompletionModelUpdate: {
-      /** Context Window Tokens */
-      context_window_tokens?: number | null;
       /** Description */
       description?: string | null;
       /** Display Name */
@@ -45742,11 +45708,6 @@ export interface operations {
                  * @default false
                  */
                 can_access?: boolean;
-                /**
-                 * Context Window Tokens
-                 * @description Shared context window of input and output in tokens; null when not declared for this model route.
-                 */
-                context_window_tokens?: number | null;
                 /** Created At */
                 created_at?: string | null;
                 /** Credential Provider */
@@ -46185,11 +46146,6 @@ export interface operations {
                  * @default false
                  */
                 can_access?: boolean;
-                /**
-                 * Context Window Tokens
-                 * @description Shared context window of input and output in tokens; null when not declared for this model route.
-                 */
-                context_window_tokens?: number | null;
                 /** Created At */
                 created_at?: string | null;
                 /** Credential Provider */
@@ -48491,11 +48447,6 @@ export interface operations {
                      * @default false
                      */
                     can_access?: boolean;
-                    /**
-                     * Context Window Tokens
-                     * @description Shared context window of input and output in tokens; null when not declared for this model route.
-                     */
-                    context_window_tokens?: number | null;
                     /** Created At */
                     created_at?: string | null;
                     /** Credential Provider */

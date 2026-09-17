@@ -20,9 +20,7 @@ def skill_context_token_allowance(
     max_input_tokens: int | None,
     context_share_percent: int,
 ) -> int:
-    max_input_tokens = ModelCapacity(
-        max_input_tokens, None, None
-    ).require_input_tokens()
+    max_input_tokens = ModelCapacity(max_input_tokens, None).require_input_tokens()
     return max_input_tokens * context_share_percent // 100
 
 

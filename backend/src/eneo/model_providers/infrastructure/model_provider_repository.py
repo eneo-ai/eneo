@@ -136,14 +136,12 @@ class ModelProviderRepository:
                 CompletionModels.tenant_id == self.tenant_id,
                 sa.or_(
                     CompletionModels.supports_strict_tool_schema.is_(True),
-                    CompletionModels.context_window_tokens.is_not(None),
                     CompletionModels.max_input_tokens.is_not(None),
                     CompletionModels.max_output_tokens.is_not(None),
                 ),
             )
             .values(
                 supports_strict_tool_schema=False,
-                context_window_tokens=None,
                 max_input_tokens=None,
                 max_output_tokens=None,
             )

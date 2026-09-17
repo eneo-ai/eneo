@@ -39,7 +39,6 @@
   import {
     MAX_COST_INPUT,
     completionUpdateCapabilities,
-    completionUpdateCapacity,
     createEmptyDraft,
     findDraftCostOverflow,
     hasValidDeclaredCapacity,
@@ -135,7 +134,6 @@
       open_source: openSource,
       ...completionUpdateCeilings(draft),
       ...completionUpdateCapabilities(draft),
-      ...completionUpdateCapacity(draft),
       input_cost_per_token: tokenCostFromPerMillion(draft.inputCostPerTokenStr),
       output_cost_per_token: tokenCostFromPerMillion(draft.outputCostPerTokenStr),
       ...(hasDefaultToggle ? { is_default: isDefault } : {}),

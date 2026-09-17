@@ -65,6 +65,7 @@ async def test_create_tenant_completion_model_uses_split_token_fields(
     assert payload["max_input_tokens"] == 272000
     assert payload["max_output_tokens"] == 128000
     assert payload["token_limit"] == 272000
+    assert "context_window_tokens" not in payload
 
     async with db_container() as container:
         session = container.session()
@@ -290,3 +291,21 @@ async def test_update_tenant_completion_model_keeps_token_limit_as_api_alias(
         assert created_model is not None
         assert created_model.max_input_tokens == 300000
         assert created_model.max_output_tokens == 120000
+
+    for patch, expected in [
+        ({"max_input_tokens": None, "max_output_tokens": None}, (None, None)),
+        ({"description": "Unrelated edit"}, (None, None)),
+        ({"max_input_tokens": 100, "max_output_tokens": 120}, (100, 120)),
+        ({"name": "another-route"}, (None, None)),
+        ({"name": "gpt-5.4-mini"}, (None, None)),
+        ({"name": "gpt-5.4-mini"}, (None, None)),
+    ]:
+        response = await client.put(
+            f"/api/v1/admin/tenant-models/completion/{model_id}/",
+            headers={"Authorization": f"Bearer {admin_bearer_token}"},
+            json=patch,
+        )
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert (payload["max_input_tokens"], payload["max_output_tokens"]) == expected
+        assert "context_window_tokens" not in payload

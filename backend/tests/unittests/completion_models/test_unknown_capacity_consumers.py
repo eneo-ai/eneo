@@ -86,11 +86,11 @@ def test_known_dimension_does_not_require_other_dimensions():
 
 @pytest.mark.parametrize("dimension", ["input", "output"])
 def test_capacity_exposes_required_dimension(dimension):
-    capacity = ModelCapacity(None, None, None)
+    capacity = ModelCapacity(None, None)
     with pytest.raises(UnknownModelCapacityError) as error:
         getattr(capacity, f"require_{dimension}_tokens")()
     assert error.value.missing_dimensions == (f"max_{dimension}_tokens",)
-    assert getattr(ModelCapacity(100, 80, None), f"require_{dimension}_tokens")() == (
+    assert getattr(ModelCapacity(100, 80), f"require_{dimension}_tokens")() == (
         100 if dimension == "input" else 80
     )
 

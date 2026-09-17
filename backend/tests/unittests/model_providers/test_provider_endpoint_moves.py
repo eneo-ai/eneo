@@ -166,10 +166,8 @@ async def test_a_provider_without_any_endpoint_keeps_declarations():
 
 
 @pytest.mark.parametrize("move", [False, True])
-@pytest.mark.parametrize("window", [None, 120])
-async def test_provider_endpoint_change_withdraws_window_even_without_strict_schema(
+async def test_provider_endpoint_change_withdraws_capacity_even_without_strict_schema(
     move,
-    window,
 ):
     import sqlalchemy as sa
     from sqlalchemy.orm import Session
@@ -188,7 +186,6 @@ async def test_provider_endpoint_change_withdraws_window_even_without_strict_sch
         "tenant_id",
         "provider_id",
         "supports_strict_tool_schema",
-        "context_window_tokens",
         "max_input_tokens",
         "max_output_tokens",
         "updated_at",
@@ -210,7 +207,6 @@ async def test_provider_endpoint_change_withdraws_window_even_without_strict_sch
                 tenant_id=tenant_id,
                 provider_id=provider_id,
                 supports_strict_tool_schema=False,
-                context_window_tokens=window,
                 max_input_tokens=100,
                 max_output_tokens=80,
             ),
@@ -219,7 +215,6 @@ async def test_provider_endpoint_change_withdraws_window_even_without_strict_sch
                 tenant_id=uuid4(),
                 provider_id=provider_id,
                 supports_strict_tool_schema=True,
-                context_window_tokens=140,
                 max_input_tokens=110,
                 max_output_tokens=90,
             ),
@@ -228,7 +223,6 @@ async def test_provider_endpoint_change_withdraws_window_even_without_strict_sch
                 tenant_id=tenant_id,
                 provider_id=uuid4(),
                 supports_strict_tool_schema=True,
-                context_window_tokens=160,
                 max_input_tokens=130,
                 max_output_tokens=100,
             ),
@@ -264,17 +258,6 @@ async def test_provider_endpoint_change_withdraws_window_even_without_strict_sch
                 else "https://old.invalid/v1"
             },
         )
-        values = (
-            db.execute(
-                sa.select(metadata.tables[table.name].c.context_window_tokens).order_by(
-                    metadata.tables[table.name].c.context_window_tokens
-                )
-            )
-            .scalars()
-            .all()
-        )
-        assert values == ([None, 140, 160] if move else [window, 140, 160])
-
         limits = db.execute(
             sa.select(
                 metadata.tables[table.name].c.max_input_tokens,
@@ -282,3 +265,14 @@ async def test_provider_endpoint_change_withdraws_window_even_without_strict_sch
             ).where(metadata.tables[table.name].c.id == rows[0].id)
         ).one()
         assert limits == ((None, None) if move else (100, 80))
+
+        for row, expected in zip(rows[1:], [(110, 90), (130, 100)]):
+            assert (
+                db.execute(
+                    sa.select(
+                        metadata.tables[table.name].c.max_input_tokens,
+                        metadata.tables[table.name].c.max_output_tokens,
+                    ).where(metadata.tables[table.name].c.id == row.id)
+                ).one()
+                == expected
+            )

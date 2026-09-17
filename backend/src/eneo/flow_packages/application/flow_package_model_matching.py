@@ -157,7 +157,7 @@ def hard_model_candidate_rejection_reasons(
 
     if candidate.model_kind is FlowPackageModelKind.COMPLETION_MODEL:
         try:
-            ModelCapacity(candidate.max_input_tokens, None, None).require_input_tokens()
+            ModelCapacity(candidate.max_input_tokens, None).require_input_tokens()
         except UnknownModelCapacityError:
             return (FlowPackageModelMatchIssue.MODEL_CAPACITY_UNKNOWN,)
 
@@ -178,7 +178,7 @@ def _completion_constraint_rejections(
 ) -> list[FlowPackageModelMatchIssue]:
     reasons: list[FlowPackageModelMatchIssue] = []
     if constraints.minimum_context_tokens is not None and (
-        not ModelCapacity(candidate.max_input_tokens, None, None).admits_input(
+        not ModelCapacity(candidate.max_input_tokens, None).admits_input(
             constraints.minimum_context_tokens, safety_tokens=0
         )
     ):
@@ -286,7 +286,7 @@ def _evaluation_sort_key(
     return (
         evaluation.identity_rank,
         -(
-            ModelCapacity(candidate.max_input_tokens, None, None).require_input_tokens()
+            ModelCapacity(candidate.max_input_tokens, None).require_input_tokens()
             if candidate.model_kind is FlowPackageModelKind.COMPLETION_MODEL
             else 0
         ),

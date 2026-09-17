@@ -594,9 +594,7 @@ class Assistant(Entity):
 
         # Fill half the context
         num_chunks = (
-            ModelCapacity(
-                effective_model.max_input_tokens, None, None
-            ).require_input_tokens()
+            ModelCapacity(effective_model.max_input_tokens, None).require_input_tokens()
             // 200
             // 2
             if version == 2

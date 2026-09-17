@@ -3,8 +3,8 @@
 Usage:
     uv run python -m eneo.cli.model_capacity_readiness report [--tenant-id UUID] [--format json|text]
 
-Stored values are declarations, not verification. Exit codes: 0 for no missing
-required dimensions, 1 for missing dimensions, 2 for usage errors, 3 for an
+Stored values are declarations, not verification. Exit codes: 0 for all uses
+usable, 1 for unusable uses, 2 for usage errors, 3 for an
 incomplete report, including invalid settings. Only database reads are
 performed; no providers are contacted, and the LiteLLM model catalogue is always
 read from the installed package.
@@ -22,13 +22,16 @@ import os
 import shutil
 import sys
 import tempfile
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Literal, NotRequired, Protocol, TypedDict
 from uuid import UUID
 
 if TYPE_CHECKING:
     from eneo.completion_models.domain.completion_model import CompletionModel
-    from eneo.completion_models.domain.model_capacity import CapacityDimension
+    from eneo.completion_models.domain.model_capacity import (
+        CapacityAvailability,
+        CapacityDimension,
+    )
     from eneo.flows.domain.flow import FlowRunStatusSnapshot, FlowSparse, FlowVersion
     from eneo.spaces.space import Space
     from eneo.tenants.tenant import TenantInDB
@@ -65,7 +68,7 @@ class ModelReadiness(TypedDict):
     route: str
     stored: dict[CapacityDimension, int | None]
     uses: dict[str, Use]
-    required_dimensions: dict[str, list[CapacityDimension]]
+    availability: dict[str, CapacityAvailability]
     missing_dimensions: list[CapacityDimension]
     verification: str
 
@@ -76,8 +79,8 @@ class DisabledUse(TypedDict):
 
 
 class Summary(TypedDict):
-    models_without_missing_dimensions: int
-    models_with_missing_dimensions: int
+    usable_models: int
+    unusable_models: int
     disabled_uses: list[DisabledUse]
 
 
@@ -87,35 +90,14 @@ class TenantReadiness(TypedDict):
     summary: Summary
 
 
-def required_dimensions(
-    model: CompletionModel, *, builder: bool
-) -> list[CapacityDimension]:
-    from eneo.completion_models.domain.model_capacity import (
-        ModelCapacity,
-        UnknownModelCapacityError,
-    )
-
-    unknown = ModelCapacity(None, None, None)
-    rules: list[Callable[[], object]] = (
-        [lambda: unknown.admits_request(0, safety_tokens=0, output_reserve_tokens=0)]
-        if builder or model.context_window_tokens is not None
-        else [unknown.require_input_tokens, unknown.require_output_tokens]
-    )
-    dimensions: list[CapacityDimension] = []
-    for rule in rules:
-        try:
-            rule()
-        except UnknownModelCapacityError as error:
-            dimensions.extend(error.missing_dimensions)
-    return dimensions
-
-
 def add_use(
     records: dict[UUID, ModelReadiness],
     seen: set[tuple[UUID, UseKind, UUID]],
     model: CompletionModel,
     use: UseKind,
     identity: UUID,
+    *,
+    safety_tokens: int = 0,
 ) -> None:
     identity_key = (model.id, use, identity)
     if identity_key in seen:
@@ -131,29 +113,26 @@ def add_use(
             "stored": {
                 "max_input_tokens": model.max_input_tokens,
                 "max_output_tokens": model.max_output_tokens,
-                "context_window_tokens": model.context_window_tokens,
             },
             "uses": {},
-            "required_dimensions": {},
-            "missing_dimensions": [],
+            "availability": {},
+            "missing_dimensions": list(model.capacity.missing_dimensions()),
             "verification": "unverified",
         }
     record = records[model.id]
     usage = record["uses"].setdefault(use, {"count": 0, "ids": []})
     usage.setdefault("ids", []).append(str(identity))
     usage["count"] += 1
-    dimensions = required_dimensions(model, builder=use == "builder")
-    record["required_dimensions"][use] = dimensions
-    for dimension in dimensions:
-        if (
-            record["stored"][dimension] is None
-            and dimension not in record["missing_dimensions"]
-        ):
-            record["missing_dimensions"].append(dimension)
+    record["availability"][use] = model.capacity.availability(
+        safety_tokens=safety_tokens
+    )
 
 
 async def report_tenant(source: ReadinessSource, owner: TenantInDB) -> TenantReadiness:
     from eneo.flows.ai_builder.ai_builder_context import eligible_planner_models
+    from eneo.flows.ai_builder.ai_builder_settings import (
+        resolve_ai_builder_budget_policy,
+    )
     from eneo.flows.enums import (
         flow_output_mode_uses_completion_model,
         is_terminal_flow_run_status,
@@ -162,12 +141,15 @@ async def report_tenant(source: ReadinessSource, owner: TenantInDB) -> TenantRea
 
     records: dict[UUID, ModelReadiness] = {}
     seen: set[tuple[UUID, UseKind, UUID]] = set()
+    safety = resolve_ai_builder_budget_policy(
+        owner.flow_settings
+    ).conversation_safety_buffer_tokens
     active = await source.active_provider_ids(owner)
     async for space in source.builder_spaces(owner):
         if space.id is None or space.tenant_id != owner.id:
             raise ValueError("Invalid space ownership")
         for model in eligible_planner_models(space, active_provider_ids=active):
-            add_use(records, seen, model, "builder", space.id)
+            add_use(records, seen, model, "builder", space.id, safety_tokens=safety)
 
     async def add_version(
         flow_id: UUID, number: int, use: UseKind, identity: UUID
@@ -214,19 +196,19 @@ async def report_tenant(source: ReadinessSource, owner: TenantInDB) -> TenantRea
             usage.get("ids", []).sort()
         if "builder" in record["uses"]:
             del record["uses"]["builder"]["ids"]
-        missing_uses = [
+        unusable_uses = [
             use
-            for use, dimensions in record["required_dimensions"].items()
-            if any(record["stored"][dimension] is None for dimension in dimensions)
+            for use, availability in record["availability"].items()
+            if availability != "ready"
         ]
-        if missing_uses:
-            disabled.append({"model_id": record["model_id"], "uses": missing_uses})
+        if unusable_uses:
+            disabled.append({"model_id": record["model_id"], "uses": unusable_uses})
     return {
         "tenant_id": str(owner.id),
         "models": models,
         "summary": {
-            "models_without_missing_dimensions": len(models) - len(disabled),
-            "models_with_missing_dimensions": len(disabled),
+            "usable_models": len(models) - len(disabled),
+            "unusable_models": len(disabled),
             "disabled_uses": disabled,
         },
     }
@@ -261,7 +243,7 @@ async def run_report(
             output.write('{"tenants":[')
         async for owner in source.tenants(tenant_id):
             result = await report_tenant(source, owner)
-            missing |= bool(result["summary"]["models_with_missing_dimensions"])
+            missing |= bool(result["summary"]["unusable_models"])
             if output_format == "json":
                 if count:
                     output.write(",")
@@ -283,8 +265,8 @@ def format_text(report: TenantReadiness) -> str:
     summary = report["summary"]
     lines = [
         f"Tenant {report['tenant_id']}",
-        f"  Models without missing dimensions: {summary['models_without_missing_dimensions']}",
-        f"  Models with missing dimensions: {summary['models_with_missing_dimensions']}",
+        f"  Usable models: {summary['usable_models']}",
+        f"  Unusable models: {summary['unusable_models']}",
     ]
     for record in report["models"]:
         lines.append(f"  Model {record['model_id']} {json.dumps(record['name'])}")
@@ -302,9 +284,7 @@ def format_text(report: TenantReadiness) -> str:
                 f"    {use}: {usage['count']}"
                 + (f" ids={','.join(usage['ids'])}" if "ids" in usage else "")
             )
-            lines.append(
-                f"      Required: {', '.join(record['required_dimensions'][use])}"
-            )
+            lines.append(f"      Availability: {record['availability'][use]}")
     for disabled in summary["disabled_uses"]:
         lines.append(
             f"  Would disable {disabled['model_id']}: {', '.join(disabled['uses'])}"

@@ -1,6 +1,4 @@
 {
-  "context_window_tokens": "Kontextfönster (tokens)",
-  "context_window_tokens_help": "Lämna tomt om modellens delade fönster inte är känt.",
   "context_window_unknown": "okänt",
   "$schema": "https://inlang.com/schema/inlang-message-format",
   "flow_capsule_ai_speakers": "Föreslår talare",
@@ -2510,8 +2508,8 @@
   "token_limit_hint": "Maximalt kontextfönster i tokens",
   "token_limit_context": "{limit} kontext",
   "max_output_tokens": "Max utdatatokens",
-  "max_input_tokens_help": "Maximalt antal tokens modellen accepterar som indata (kontextfönster).",
-  "max_output_tokens_help": "Maximalt antal tokens modellen kan generera per svar.",
+  "max_input_tokens_help": "Maximalt antal indatatokens för modellen i den här driftsmiljön. Om leverantören bara anger ett gemensamt kontextfönster anger du det värdet. Eneo reserverar utrymme för svaret inom gränsen.",
+  "max_output_tokens_help": "Maximalt antal tokens i ett svar från modellen i den här driftsmiljön, inklusive resonemangstokens om leverantören räknar in dem. Eneo kan begära färre tokens för att hela anropet ska rymmas.",
   "token_reference_input": "Referens: t.ex. 128 000 (GPT-4o).",
   "token_reference_output": "Referens: t.ex. 16 384 (GPT-4o).",
   "vision_support": "Bildstöd",

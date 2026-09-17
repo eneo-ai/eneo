@@ -11,7 +11,6 @@ from eneo.tenants.tenant import TenantInDB
 
 def _load_model(
     output_tokens: int | None,
-    window: int | None = None,
     input_tokens: int | None = 1_000_000,
 ) -> CompletionModel:
     now = datetime.now(timezone.utc)
@@ -26,7 +25,6 @@ def _load_model(
         provider_id=uuid4(),
         max_input_tokens=input_tokens,
         max_output_tokens=output_tokens,
-        context_window_tokens=window,
         open_source=False,
         is_deprecated=False,
         is_enabled=True,
@@ -71,49 +69,25 @@ def test_model_limits_preserve_only_configured_values(
     assert model.max_output_tokens == expected_output
 
 
-@pytest.mark.parametrize("window", [None, 1_128_000])
-def test_shared_window_survives_hydration_and_public_projection(window) -> None:
+def test_two_limit_hydration_and_public_projection() -> None:
     from eneo.ai_models.completion_models.completion_model import CompletionModelPublic
-    from eneo.completion_models.domain.model_capacity import ModelCapacity
     from eneo.completion_models.presentation.completion_model_assembler import (
         CompletionModelAssembler,
     )
 
-    model = _load_model(128_000, window)
-    assert model.capacity == ModelCapacity(1_000_000, 128_000, window)
-    assert CompletionModelPublic.from_domain(model).context_window_tokens == window
-    assembler = CompletionModelAssembler()
-    assert (
-        assembler.from_completion_model_to_model(model).context_window_tokens == window
-    )
+    model = _load_model(128_000)
+    assert not hasattr(model, "context_window_tokens")
+    for public in (
+        CompletionModelPublic.from_domain(model),
+        CompletionModelAssembler().from_completion_model_to_model(model),
+    ):
+        assert "context_window_tokens" not in public.model_dump()
+        assert public.max_input_tokens == 1_000_000
+        assert public.max_output_tokens == 128_000
 
 
-@pytest.mark.parametrize("value", [0, -1])
-def test_admin_window_declarations_must_be_positive(value) -> None:
-    from pydantic import ValidationError
-
-    from eneo.completion_models.presentation.tenant_completion_models_router import (
-        TenantCompletionModelCreate,
-        TenantCompletionModelUpdate,
-    )
-
-    with pytest.raises(ValidationError):
-        TenantCompletionModelUpdate(context_window_tokens=value)
-    with pytest.raises(ValidationError):
-        TenantCompletionModelCreate(
-            provider_id=uuid4(),
-            name="custom",
-            display_name="Custom",
-            max_input_tokens=100,
-            max_output_tokens=80,
-            context_window_tokens=value,
-        )
-
-
-@pytest.mark.parametrize(
-    "dimension", ["max_input_tokens", "max_output_tokens", "context_window_tokens"]
-)
-async def test_admin_window_create_read_declare_keep_clear_and_route_move(
+@pytest.mark.parametrize("dimension", ["max_input_tokens", "max_output_tokens"])
+async def test_admin_capacity_create_read_declare_keep_clear_and_route_move(
     dimension,
 ) -> None:
     from unittest.mock import AsyncMock, MagicMock
@@ -171,13 +145,11 @@ async def test_admin_window_create_read_declare_keep_clear_and_route_move(
                 display_name="Custom",
                 max_input_tokens=100,
                 max_output_tokens=80,
-                context_window_tokens=120,
             )
         )
         initial = {
             "max_input_tokens": 100,
             "max_output_tokens": 80,
-            "context_window_tokens": 120,
         }
         assert getattr(model, dimension) == initial[dimension]
         for payload, expected in (
@@ -225,7 +197,6 @@ async def test_metadata_route_update_withdraws_only_omitted_declarations(
         supports_strict_tool_schema=True,
         **(
             {
-                "context_window_tokens": 120,
                 "max_input_tokens": 100,
                 "max_output_tokens": 80,
             }
@@ -235,7 +206,6 @@ async def test_metadata_route_update_withdraws_only_omitted_declarations(
     )
     await repo.update_model(payload)
     written = repo.delegate.update.call_args.args[0].model_dump(exclude_unset=True)
-    assert written["context_window_tokens"] == (120 if redeclare else None)
     assert written["max_input_tokens"] == (100 if redeclare else None)
     assert written["max_output_tokens"] == (80 if redeclare else None)
     assert written["supports_strict_tool_schema"] is True
@@ -243,7 +213,7 @@ async def test_metadata_route_update_withdraws_only_omitted_declarations(
 
 @pytest.mark.parametrize("request_type", ["create", "update"])
 @pytest.mark.parametrize("value", [0, -1])
-def test_sysadmin_window_declarations_must_be_positive(request_type, value) -> None:
+def test_sysadmin_capacity_declarations_must_be_positive(request_type, value) -> None:
     from pydantic import ValidationError
 
     from eneo.ai_models.completion_models.completion_model import (
@@ -260,23 +230,22 @@ def test_sysadmin_window_declarations_must_be_positive(request_type, value) -> N
                 "id": uuid4(),
                 "name": "custom",
                 "max_input_tokens": 100,
-                "max_output_tokens": 80,
                 "vision": False,
                 "reasoning": False,
                 "is_deprecated": False,
-                "context_window_tokens": value,
+                "max_output_tokens": value,
             }
         )
     assert [(item["loc"], item["type"]) for item in error.value.errors()] == [
-        (("context_window_tokens",), "greater_than")
+        (("max_output_tokens",), "greater_than")
     ]
 
 
 @pytest.mark.parametrize("request_type", ["create", "update"])
 @pytest.mark.parametrize(
-    "declaration", [{}, {"context_window_tokens": None}, {"context_window_tokens": 120}]
+    "declaration", [{}, {"max_output_tokens": None}, {"max_output_tokens": 120}]
 )
-def test_sysadmin_window_preserves_optional_declarations(
+def test_sysadmin_capacity_preserves_optional_declarations(
     request_type, declaration
 ) -> None:
     from eneo.ai_models.completion_models.completion_model import (
@@ -292,16 +261,16 @@ def test_sysadmin_window_preserves_optional_declarations(
             "id": uuid4(),
             "name": "custom",
             "max_input_tokens": 100,
-            "max_output_tokens": 80,
             "vision": False,
             "reasoning": False,
             "is_deprecated": False,
+            **({"max_output_tokens": None} if request_type == "create" else {}),
             **declaration,
         }
     )
-    assert payload.context_window_tokens == declaration.get("context_window_tokens")
-    assert ("context_window_tokens" in payload.model_fields_set) == (
-        "context_window_tokens" in declaration
+    assert payload.max_output_tokens == declaration.get("max_output_tokens")
+    assert ("max_output_tokens" in payload.model_fields_set) == (
+        request_type == "create" or "max_output_tokens" in declaration
     )
 
 
@@ -323,7 +292,6 @@ def test_stored_limits_survive_hydration_and_projections(input_tokens, output_to
     ):
         assert public.max_input_tokens == input_tokens
         assert public.max_output_tokens == output_tokens
-        assert public.context_window_tokens is None
 
 
 @pytest.mark.parametrize("dimension", ["max_input_tokens", "max_output_tokens"])

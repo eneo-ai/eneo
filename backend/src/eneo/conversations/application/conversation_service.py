@@ -459,7 +459,7 @@ class ConversationService:
             return min(
                 models,
                 key=lambda model: ModelCapacity(
-                    model.token_limit, None, None
+                    model.token_limit, None
                 ).require_input_tokens(),
             ), 0
 
@@ -472,7 +472,7 @@ class ConversationService:
         return min(
             models,
             key=lambda model: ModelCapacity(
-                model.token_limit, None, None
+                model.token_limit, None
             ).require_input_tokens(),
         ), selector_tokens
 

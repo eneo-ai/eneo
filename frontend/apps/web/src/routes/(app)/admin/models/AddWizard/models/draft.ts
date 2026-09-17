@@ -32,10 +32,8 @@ export interface ModelDraftState {
   displayName: string;
   maxInputTokensStr: string;
   maxOutputTokensStr: string;
-  contextWindowTokensStr: string;
   maxInputTokensTouched: boolean;
   maxOutputTokensTouched: boolean;
-  contextWindowTouched: boolean;
   vision: boolean;
   reasoning: boolean;
   supportsToolCalling: boolean;
@@ -74,10 +72,8 @@ export function createEmptyDraft(modelType: ModelType, providerType: string): Mo
     displayName: "",
     maxInputTokensStr: "",
     maxOutputTokensStr: "",
-    contextWindowTokensStr: "",
     maxInputTokensTouched: false,
     maxOutputTokensTouched: false,
-    contextWindowTouched: false,
     vision: false,
     reasoning: false,
     supportsToolCalling: false,
@@ -172,11 +168,7 @@ export function hasValidCompletionTokenBudgets(draft: ModelDraftState): boolean 
  *  blank field states nothing: the model's capacity in that dimension is
  *  simply not declared, which an edit may leave alone or withdraw. */
 export function hasValidDeclaredCapacity(draft: ModelDraftState): boolean {
-  const declared = [
-    draft.maxInputTokensStr,
-    draft.maxOutputTokensStr,
-    draft.contextWindowTokensStr
-  ];
+  const declared = [draft.maxInputTokensStr, draft.maxOutputTokensStr];
   return declared.every(
     (value) => !value || (Number.isInteger(Number(value)) && Number(value) > 0)
   );
@@ -227,9 +219,7 @@ export function setDraftModelName(draft: ModelDraftState, name: string): void {
     // The declaration belonged to the route being left, so the form clears it.
     // That cleared field is a pending change, not an untouched one: a save
     // submits the clear, including when the identifier is changed back, so the
-    // stored window can never differ from the blank field the admin sees.
-    draft.contextWindowTokensStr = "";
-    draft.contextWindowTouched = true;
+    // stored capacity can never differ from the blank field the admin sees.
     draft.maxInputTokensStr = "";
     draft.maxInputTokensTouched = true;
     draft.maxOutputTokensStr = "";
@@ -326,27 +316,12 @@ export function completionUpdateCeilings(
   } satisfies Pick<TenantCompletionModelUpdate, "max_input_tokens" | "max_output_tokens">;
 }
 
-export function completionUpdateCapacity(
-  draft: ModelDraftState
-): Pick<TenantCompletionModelUpdate, "context_window_tokens"> {
-  return {
-    ...(draft.contextWindowTouched
-      ? {
-          context_window_tokens: draft.contextWindowTokensStr
-            ? Number(draft.contextWindowTokensStr)
-            : null
-        }
-      : {})
-  } satisfies Pick<TenantCompletionModelUpdate, "context_window_tokens">;
-}
-
 export function draftToWizardModel(draft: ModelDraftState): WizardModelDraft {
   return {
     name: submittedModelName(draft),
     displayName: draft.displayName,
     maxInputTokens: draft.maxInputTokensStr ? parseInt(draft.maxInputTokensStr, 10) : undefined,
     maxOutputTokens: draft.maxOutputTokensStr ? parseInt(draft.maxOutputTokensStr, 10) : undefined,
-    contextWindowTokens: draft.contextWindowTokensStr ? Number(draft.contextWindowTokensStr) : null,
     vision: draft.vision,
     reasoning: draft.reasoning,
     supportsToolCalling: draft.supportsToolCalling,
@@ -403,10 +378,8 @@ export function modelToDraft(model: AnyCatalogModel, modelType: ModelType): Mode
     displayName: ("nickname" in model && model.nickname) || model.name,
     maxInputTokensStr: "",
     maxOutputTokensStr: "",
-    contextWindowTokensStr: "",
     maxInputTokensTouched: false,
     maxOutputTokensTouched: false,
-    contextWindowTouched: false,
     vision: false,
     reasoning: false,
     supportsToolCalling: false,
@@ -429,7 +402,6 @@ export function modelToDraft(model: AnyCatalogModel, modelType: ModelType): Mode
   if (modelType === "completion" && "max_input_tokens" in model) {
     base.maxInputTokensStr = String(model.max_input_tokens ?? "");
     base.maxOutputTokensStr = String(model.max_output_tokens ?? "");
-    base.contextWindowTokensStr = String(model.context_window_tokens ?? "");
     base.vision = model.vision ?? false;
     base.reasoning = model.reasoning ?? false;
     base.supportsToolCalling = model.supports_tool_calling ?? false;

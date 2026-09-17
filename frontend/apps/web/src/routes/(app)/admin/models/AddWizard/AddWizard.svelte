@@ -400,7 +400,6 @@
         family: model.family ?? "openai",
         max_input_tokens: model.maxInputTokens,
         max_output_tokens: model.maxOutputTokens,
-        context_window_tokens: model.contextWindowTokens ?? null,
         ...completionCreateCapabilities(model),
         hosting: model.hosting ?? "swe",
         is_active: true,

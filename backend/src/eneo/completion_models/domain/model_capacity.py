@@ -1,9 +1,13 @@
 from dataclasses import dataclass
 from typing import Literal
 
-CapacityDimension = Literal[
-    "max_input_tokens", "max_output_tokens", "context_window_tokens"
-]
+CapacityDimension = Literal["max_input_tokens", "max_output_tokens"]
+CapacityAvailability = Literal["ready", "capacity_undeclared", "capacity_too_small"]
+
+
+@dataclass(frozen=True, slots=True)
+class ModelCapacityNoFit:
+    """The complete input reserve leaves no positive output cap."""
 
 
 class UnknownModelCapacityError(ValueError):
@@ -16,13 +20,11 @@ class UnknownModelCapacityError(ValueError):
 class ModelCapacity:
     max_input_tokens: int | None
     max_output_tokens: int | None
-    context_window_tokens: int | None
 
     def __post_init__(self) -> None:
         for value in (
             self.max_input_tokens,
             self.max_output_tokens,
-            self.context_window_tokens,
         ):
             if value is not None and (type(value) is not int or value <= 0):
                 raise ValueError("Model capacity must be a positive integer or None")
@@ -31,7 +33,6 @@ class ModelCapacity:
         dimensions: tuple[CapacityDimension, ...] = (
             "max_input_tokens",
             "max_output_tokens",
-            "context_window_tokens",
         )
         return tuple(name for name in dimensions if getattr(self, name) is None)
 
@@ -62,28 +63,25 @@ class ModelCapacity:
         assert self.max_output_tokens is not None
         return reserve_tokens <= self.max_output_tokens
 
-    def admits_request(
-        self, input_tokens: int, *, safety_tokens: int, output_reserve_tokens: int
-    ) -> bool:
-        self._require("max_input_tokens", "max_output_tokens", "context_window_tokens")
-        assert self.context_window_tokens is not None
-        return (
-            self.admits_input(input_tokens, safety_tokens=safety_tokens)
-            and self.output_reserve_fits(output_reserve_tokens)
-            and input_tokens + safety_tokens + output_reserve_tokens
-            <= self.context_window_tokens
-        )
-
-    def builder_input_allowance(
-        self, *, output_reserve_tokens: int, safety_tokens: int
-    ) -> int:
-        self._require("max_input_tokens", "context_window_tokens")
+    def resolve_output_cap(
+        self, *, input_tokens: int, safety_tokens: int, caller_cap: int | None = None
+    ) -> int | ModelCapacityNoFit:
+        self._require("max_input_tokens", "max_output_tokens")
         assert self.max_input_tokens is not None
-        assert self.context_window_tokens is not None
-        return (
-            min(
-                self.max_input_tokens,
-                self.context_window_tokens - output_reserve_tokens,
-            )
-            - safety_tokens
+        assert self.max_output_tokens is not None
+        cap = min(
+            self.max_output_tokens, self.max_input_tokens - safety_tokens - input_tokens
         )
+        if caller_cap is not None:
+            cap = min(cap, caller_cap)
+        return cap if cap >= 1 else ModelCapacityNoFit()
+
+    def input_allowance(self, *, output_reserve_tokens: int, safety_tokens: int) -> int:
+        return self.require_input_tokens() - safety_tokens - output_reserve_tokens
+
+    def availability(self, *, safety_tokens: int) -> CapacityAvailability:
+        if self.missing_dimensions():
+            return "capacity_undeclared"
+        if self.require_input_tokens() < safety_tokens + 2:
+            return "capacity_too_small"
+        return "ready"

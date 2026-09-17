@@ -5,7 +5,7 @@
  * Lives outside the Svelte component so step children can type their props
  * against the same source of truth without triggering a Svelte recompile.
  */
-import type { SecurityClassification, TenantCompletionModelCreate } from "@eneo/eneo-js";
+import type { SecurityClassification } from "@eneo/eneo-js";
 import type { ImageQuality, ImageSize } from "$lib/features/ai-models/imageModelOptions";
 
 export type WizardStepId = "provider" | "credentials" | "models";
@@ -15,7 +15,6 @@ export interface WizardModelDraft {
   displayName: string;
   maxInputTokens?: number;
   maxOutputTokens?: number;
-  contextWindowTokens?: TenantCompletionModelCreate["context_window_tokens"];
   vision?: boolean;
   reasoning?: boolean;
   supportsToolCalling?: boolean;

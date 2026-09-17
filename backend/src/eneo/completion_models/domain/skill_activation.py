@@ -239,9 +239,7 @@ class SkillActivationRuntime:
         max_input_tokens: int | None,
         supports_tool_calling: bool,
     ) -> SkillActivationRuntime:
-        max_input_tokens = ModelCapacity(
-            max_input_tokens, None, None
-        ).require_input_tokens()
+        max_input_tokens = ModelCapacity(max_input_tokens, None).require_input_tokens()
         ordered = tuple(sorted(skills, key=lambda skill: skill.position))
         initially_active = tuple(skill for skill in ordered if skill.initially_active)
         on_demand = tuple(skill for skill in ordered if not skill.initially_active)

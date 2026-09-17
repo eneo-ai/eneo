@@ -1,6 +1,4 @@
 {
-  "context_window_tokens": "Context window (tokens)",
-  "context_window_tokens_help": "Leave empty when the model's shared window is not known.",
   "context_window_unknown": "unknown",
   "$schema": "https://inlang.com/schema/inlang-message-format",
   "flow_capsule_ai_speakers": "Suggests speakers",
@@ -2477,8 +2475,8 @@
   "token_limit_hint": "Maximum context window in tokens",
   "token_limit_context": "{limit} context",
   "max_output_tokens": "Max Output Tokens",
-  "max_input_tokens_help": "Maximum tokens the model accepts as input (context window).",
-  "max_output_tokens_help": "Maximum tokens the model can generate per response.",
+  "max_input_tokens_help": "Maximum input tokens accepted by this deployment. If the provider specifies only a shared context window, enter that value. Eneo reserves room for the response within this limit.",
+  "max_output_tokens_help": "Maximum tokens this deployment allows for one generated response, including reasoning tokens where the provider counts them toward this limit. Eneo may request fewer tokens to fit the request.",
   "token_reference_input": "Reference: e.g. 128,000 (GPT-4o).",
   "token_reference_output": "Reference: e.g. 16,384 (GPT-4o).",
   "vision_support": "Vision Support",

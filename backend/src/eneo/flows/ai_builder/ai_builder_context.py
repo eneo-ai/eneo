@@ -207,7 +207,7 @@ def build_planner_context(
         max_template_placeholders=budget_policy.max_template_placeholders,
     )
     mapped_execution_policy = resolve_flow_mapped_execution_policy(tenant_flow_settings)
-    capacity = ModelCapacity(model.max_input_tokens, model.max_output_tokens, None)
+    capacity = ModelCapacity(model.max_input_tokens, model.max_output_tokens)
     try:
         max_input_tokens = capacity.require_input_tokens()
         max_output_tokens = capacity.require_output_tokens()

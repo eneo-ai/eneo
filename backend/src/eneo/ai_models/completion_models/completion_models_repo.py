@@ -147,7 +147,6 @@ class CompletionModelsRepository:
             not provided
             or {
                 "supports_strict_tool_schema",
-                "context_window_tokens",
                 "max_input_tokens",
                 "max_output_tokens",
             }
@@ -183,8 +182,6 @@ class CompletionModelsRepository:
         withdrawn: dict[str, object] = {}
         if "supports_strict_tool_schema" not in written:
             withdrawn["supports_strict_tool_schema"] = False
-        if "context_window_tokens" not in written:
-            withdrawn["context_window_tokens"] = None
         for dimension in ("max_input_tokens", "max_output_tokens"):
             if dimension not in written:
                 withdrawn[dimension] = None

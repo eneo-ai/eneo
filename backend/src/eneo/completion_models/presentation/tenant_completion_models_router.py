@@ -32,7 +32,6 @@ class TenantCompletionModelCreate(BaseModel):
     display_name: str
     max_input_tokens: int = Field(gt=0)
     max_output_tokens: int = Field(gt=0)
-    context_window_tokens: int | None = Field(default=None, gt=0)
     vision: bool = False
     reasoning: bool = False
     supports_tool_calling: bool = False
@@ -56,7 +55,6 @@ class TenantCompletionModelUpdate(BaseModel):
     description: str | None = None
     max_input_tokens: int | None = Field(default=None, gt=0)
     max_output_tokens: int | None = Field(default=None, gt=0)
-    context_window_tokens: int | None = Field(default=None, gt=0)
     vision: bool | None = None
     reasoning: bool | None = None
     supports_tool_calling: bool | None = None

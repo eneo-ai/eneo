@@ -16,7 +16,7 @@ def tenant():
     )
 
 
-def model(owner, *, output=4096, window=None):
+def model(owner, *, output=4096):
     return CompletionModel(
         tenant=owner,
         tenant_id=owner.id,
@@ -27,7 +27,6 @@ def model(owner, *, output=4096, window=None):
         name="model",
         max_input_tokens=16384,
         max_output_tokens=output,
-        context_window_tokens=window,
         vision=False,
         family=None,
         hosting=None,
@@ -110,27 +109,17 @@ async def test_builder_reports_old_stored_values_without_claiming_verification()
         "stored": {
             "max_input_tokens": 16384,
             "max_output_tokens": 4096,
-            "context_window_tokens": None,
         },
         "uses": {"builder": {"count": 1}},
-        "required_dimensions": {
-            "builder": [
-                "max_input_tokens",
-                "max_output_tokens",
-                "context_window_tokens",
-            ]
-        },
-        "missing_dimensions": ["context_window_tokens"],
+        "availability": {"builder": "ready"},
+        "missing_dimensions": [],
         "verification": "unverified",
     }
     assert records[str(other.id)]["verification"] == "unverified"
     assert records[str(other.id)]["stored"]["max_output_tokens"] == 4097
-    assert result["summary"]["models_with_missing_dimensions"] == 2
-    assert result["summary"]["models_without_missing_dimensions"] == 0
-    assert {r["model_id"]: r["uses"] for r in result["summary"]["disabled_uses"]} == {
-        str(old.id): ["builder"],
-        str(other.id): ["builder"],
-    }
+    assert result["summary"]["unusable_models"] == 0
+    assert result["summary"]["usable_models"] == 2
+    assert result["summary"]["disabled_uses"] == []
 
 
 def version(owner, flow_id, assistant_ids, number=1, modes=None):
@@ -253,9 +242,7 @@ async def test_published_and_pinned_run_models_use_execution_dimensions_and_skip
         "published_flow": {"count": 1, "ids": [str(flow_id)]}
     }
     assert records[str(published.id)]["missing_dimensions"] == []
-    assert records[str(published.id)]["required_dimensions"] == {
-        "published_flow": ["max_input_tokens", "max_output_tokens"]
-    }
+    assert records[str(published.id)]["availability"] == {"published_flow": "ready"}
     assert records[str(pinned.id)]["missing_dimensions"] == [
         "max_input_tokens",
         "max_output_tokens",
@@ -267,8 +254,8 @@ async def test_published_and_pinned_run_models_use_execution_dimensions_and_skip
         "resumable_run": {"count": len(active_ids), "ids": active_ids}
     }
     assert result["summary"] == {
-        "models_without_missing_dimensions": 1,
-        "models_with_missing_dimensions": 1,
+        "usable_models": 1,
+        "unusable_models": 1,
         "disabled_uses": [{"model_id": str(pinned.id), "uses": ["resumable_run"]}],
     }
 
@@ -281,7 +268,7 @@ async def test_json_tenant_filter_exit_codes_and_content_allowlist(capsys):
     from eneo.flows.domain.flow import FlowRunStatusSnapshot, FlowSparse
 
     selected, foreign = tenant(), tenant()
-    good, bad = model(selected, window=20000), model(foreign)
+    good, bad = model(selected), model(foreign, output=None)
     repository = FlowRepository(
         [selected, foreign], [space(selected, [good]), space(foreign, [bad])]
     )
@@ -323,18 +310,17 @@ async def test_json_tenant_filter_exit_codes_and_content_allowlist(capsys):
     assert str(repository.flows[1].id) not in output
     assert str(repository.runs[1].id) not in output
     assert "private" not in output
-    assert payload["tenants"][0]["models"][0]["required_dimensions"][
-        "published_flow"
-    ] == [
-        "max_input_tokens",
-        "max_output_tokens",
-        "context_window_tokens",
-    ]
+    assert (
+        payload["tenants"][0]["models"][0]["availability"]["published_flow"] == "ready"
+    )
     assert await run_report(repository, tenant_id=None, output_format="json") == 1
     all_reports = json.loads(capsys.readouterr().out)["tenants"]
     assert len(all_reports) == 2
     assert all_reports[1]["summary"]["disabled_uses"] == [
-        {"model_id": str(bad.id), "uses": ["builder"]}
+        {
+            "model_id": str(bad.id),
+            "uses": ["builder", "published_flow", "resumable_run"],
+        }
     ]
     assert await run_report(repository, tenant_id=uuid4(), output_format="json") == 2
 
@@ -513,13 +499,11 @@ async def test_builder_eligibility_and_text_with_unknown_capacity(capsys):
     assert str(unknown.id) in output
     assert str(disabled.id) not in output
     assert str(inactive.id) not in output
-    assert (
-        'Stored: {"context_window_tokens": null, "max_input_tokens": null, "max_output_tokens": null}'
-        in output
-    )
-    assert (
-        "Missing: max_input_tokens, max_output_tokens, context_window_tokens" in output
-    )
+    assert 'Stored: {"max_input_tokens": null, "max_output_tokens": null}' in output
+    assert "Missing: max_input_tokens, max_output_tokens" in output
+    assert "Usable models: 0" in output
+    assert "Unusable models: 1" in output
+    assert "Availability: capacity_undeclared" in output
     assert "Verification: unverified" in output
     assert f"Would disable {unknown.id}: builder" in output
 
@@ -547,3 +531,35 @@ async def test_incomplete_scan_emits_no_partial_report(capsys):
     with pytest.raises(Exception):
         await run_report(repository, tenant_id=None, output_format="json")
     assert capsys.readouterr().out == ""
+
+
+@pytest.mark.asyncio
+async def test_structural_usability_uses_tenant_safety_and_runtime_zero():
+    from eneo.cli.model_capacity_readiness import report_tenant
+    from eneo.flows.domain.flow import FlowSparse
+
+    owner = tenant()
+    owner.flow_settings = {"ai_builder": {"conversation_safety_buffer_tokens": 10}}
+    small = model(owner)
+    small.max_input_tokens = 11
+    repository = FlowRepository([owner], [space(owner, [small])])
+    fid, aid = uuid4(), uuid4()
+    repository.flows.append(
+        FlowSparse(
+            id=fid, tenant_id=owner.id, space_id=uuid4(), name="", published_version=1
+        )
+    )
+    repository.versions[owner.id, fid, 1] = version(owner, fid, [aid])
+    repository.assistants[owner.id, aid] = small
+    report = await report_tenant(repository, owner)
+    assert report["models"][0]["availability"] == {
+        "builder": "capacity_too_small",
+        "published_flow": "ready",
+    }
+    assert report["summary"]["unusable_models"] == 1
+    assert report["summary"]["disabled_uses"] == [
+        {"model_id": str(small.id), "uses": ["builder"]}
+    ]
+    small.max_input_tokens = 12
+    report = await report_tenant(repository, owner)
+    assert report["summary"]["usable_models"] == 1

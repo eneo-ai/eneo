@@ -272,7 +272,6 @@ class TenantCompletionModelService:
         new_model.litellm_model_name = None
         new_model.max_input_tokens = payload.max_input_tokens
         new_model.max_output_tokens = payload.max_output_tokens
-        new_model.context_window_tokens = payload.context_window_tokens
         new_model.vision = payload.vision
         new_model.reasoning = payload.reasoning
         new_model.supports_tool_calling = payload.supports_tool_calling
@@ -348,7 +347,6 @@ class TenantCompletionModelService:
             model.name = payload.name
         if renames_route:
             model.supports_strict_tool_schema = False
-            model.context_window_tokens = None
             model.max_input_tokens = None
             model.max_output_tokens = None
         if payload.display_name is not None:
@@ -367,8 +365,6 @@ class TenantCompletionModelService:
             model.max_input_tokens = payload.max_input_tokens
         if "max_output_tokens" in provided:
             model.max_output_tokens = payload.max_output_tokens
-        if "context_window_tokens" in provided:
-            model.context_window_tokens = payload.context_window_tokens
         if payload.vision is not None:
             model.vision = payload.vision
         if payload.reasoning is not None:

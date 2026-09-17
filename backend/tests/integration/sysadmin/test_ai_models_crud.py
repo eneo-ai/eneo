@@ -105,6 +105,7 @@ async def test_create_completion_model_success(client, super_admin_token, db_con
     assert data["nickname"] == "GPT-4 Test"
     assert data["family"] == "openai"
     assert data["max_input_tokens"] == 8000
+    assert "context_window_tokens" not in data
     assert data["vision"] is True
     assert data["reasoning"] is False
     assert "id" in data
@@ -358,6 +359,7 @@ async def test_sysadmin_strict_tool_schema_declaration_survives_partial_updates(
     created = create_response.json()
     model_id = created["id"]
     assert created["supports_strict_tool_schema"] is True
+    assert "context_window_tokens" not in created
 
     async with db_container() as container:
         session = container.session()
@@ -413,6 +415,23 @@ async def test_sysadmin_strict_tool_schema_declaration_survives_partial_updates(
         )
         assert db_model is not None
         assert db_model.supports_strict_tool_schema is False
+
+    for patch, expected in [
+        ({"name": "strict-tool-schema-round-trip"}, (None, None)),
+        ({"name": "strict-tool-schema-round-trip"}, (None, None)),
+        ({"max_input_tokens": 100, "max_output_tokens": 120}, (100, 120)),
+        ({"description": "Unrelated edit"}, (100, 120)),
+        ({"max_input_tokens": None, "max_output_tokens": None}, (None, None)),
+    ]:
+        response = await client.put(
+            f"/api/v1/sysadmin/completion-models/{model_id}/metadata",
+            headers={"X-API-Key": super_admin_token},
+            json=patch,
+        )
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert (payload["max_input_tokens"], payload["max_output_tokens"]) == expected
+        assert "context_window_tokens" not in payload
 
 
 @pytest.mark.integration

@@ -1174,7 +1174,7 @@ class TenantModelAdapter(CompletionModelAdapter):
             kwargs.get(name) is not None
             for name in ("max_tokens", "max_completion_tokens")
         ):
-            ModelCapacity(None, None, None).require_output_tokens()
+            ModelCapacity(None, None).require_output_tokens()
 
         return kwargs
 
@@ -2751,7 +2751,7 @@ class TenantModelAdapter(CompletionModelAdapter):
         Returns:
             int: Maximum tokens available for input context
         """
-        return ModelCapacity(self.model.token_limit, None, None).require_input_tokens()
+        return ModelCapacity(self.model.token_limit, None).require_input_tokens()
 
     @override
     def get_logging_details(
