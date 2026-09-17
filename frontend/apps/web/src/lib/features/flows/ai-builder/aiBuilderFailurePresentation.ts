@@ -102,14 +102,20 @@ const INVALID_PROPOSAL_CODES: ReadonlySet<string> = new Set([
 interface ActionableProblem {
   cause: string;
   actionLabel: string;
-  /** Where the fix is made: attaching a template, or describing it in words. */
-  fix: "attach_template" | "clarify";
+  /** The control needed to resolve the problem in the conversation. */
+  fix: "attach_template" | "clarify" | "change_model";
 }
 
 function actionableProblem(error: AIBuilderError): ActionableProblem | null {
   const detailReason = error.details.failure_code;
   const reason = typeof detailReason === "string" ? detailReason : error.code;
   switch (reason) {
+    case "planner_model_incompatible_token_limits":
+      return {
+        cause: m.ai_builder_model_capacity_too_small(),
+        actionLabel: m.choose_a_completion_model(),
+        fix: "change_model"
+      };
     case "template_attachment_selection_invalid":
       return {
         cause: m.ai_builder_failure_problem_template_attachment_selection_invalid(),
@@ -314,7 +320,7 @@ const action = {
   // control the user lands on there, and the label says which fix it is.
   // Both open the conversation, so both record that it was opened.
   fixProblem: (problem: ActionableProblem): FailureAction => ({
-    kind: problem.fix,
+    kind: problem.fix === "change_model" ? "clarify" : problem.fix,
     label: problem.actionLabel,
     records: "conversation_opened"
   }),
@@ -367,6 +373,9 @@ function actionsFor(
   // The chat surface shows failures of any operation; it offers no resend and
   // no reword of the plan there, only the way to acknowledge the message.
   if (chat) return { primary: action.dismiss(), secondary: null };
+  if (problem?.fix === "change_model") {
+    return { primary: action.fixProblem(problem), secondary: null };
+  }
   if (!capabilities.canResend) return { primary: action.clarify(kind), secondary: null };
   // A named problem has one fix; sending the same request again cannot be it.
   if (problem) return { primary: action.fixProblem(problem), secondary: null };

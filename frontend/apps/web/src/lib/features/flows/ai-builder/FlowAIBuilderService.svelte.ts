@@ -334,6 +334,8 @@ export class FlowAIBuilderService {
         return m.ai_builder_model_not_listed();
       case "model_capacity_undeclared":
         return m.ai_builder_model_capacity_undeclared();
+      case "model_capacity_too_small":
+        return m.ai_builder_model_capacity_too_small();
       case "no_ready_model":
         return this.#state.availableModels.length === 0
           ? m.no_completion_model_description()

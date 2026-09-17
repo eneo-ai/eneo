@@ -7,9 +7,20 @@
   import { groupModelsByVendor } from "$lib/features/ai-models/groupModels";
   import { m } from "$lib/paraglide/messages";
 
+  import type { AIBuilderModel } from "./protocol";
+
   import { getAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
 
   const service = getAIBuilderService();
+
+  function availabilityReason(availability: AIBuilderModel["availability"]): string | null {
+    const reasons = {
+      ready: null,
+      capacity_undeclared: m.ai_builder_model_capacity_undeclared_short(),
+      capacity_too_small: m.ai_builder_model_capacity_too_small_short()
+    } satisfies Record<AIBuilderModel["availability"]["state"], string | null>;
+    return reasons[availability.state];
+  }
 
   const activeModel = $derived(service.effectiveModel);
   const groups = $derived(
@@ -77,18 +88,18 @@
         {#each groups as group (group.label)}
           <ModelSelector.Group heading={group.label}>
             {#each group.models as model (model.id)}
-              {@const ready = model.availability.state === "ready"}
+              {@const reason = availabilityReason(model.availability)}
               <ModelSelector.Item
                 value={`${model.id} ${model.name} ${group.label}`}
                 selected={model.id === activeModel?.id}
-                disabled={!ready}
+                disabled={reason !== null}
                 onSelect={() => service.selectModel(model.id)}
               >
                 <ModelSelector.Logo provider={model.provider} />
                 <ModelSelector.Name>{model.name}</ModelSelector.Name>
-                {#if !ready}
+                {#if reason}
                   <span class="text-secondary ml-auto shrink-0 text-xs">
-                    {m.ai_builder_model_capacity_undeclared_short()}
+                    {reason}
                   </span>
                 {/if}
               </ModelSelector.Item>

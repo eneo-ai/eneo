@@ -125,7 +125,7 @@ export type AIBuilderModelSendBlock =
   | "models_failed"
   | "no_ready_model"
   | "model_not_listed"
-  | "model_capacity_undeclared";
+  | `model_${Exclude<AIBuilderModel["availability"]["state"], "ready">}`;
 
 export interface FlowAIBuilderState {
   session: AIBuilderSession | null;
@@ -395,7 +395,17 @@ export class FlowAIBuilderDriver {
     }
     const shown = this.effectiveModel;
     if (shown === null) return "no_ready_model";
-    return shown.availability.state === "ready" ? null : "model_capacity_undeclared";
+    const availability = shown.availability;
+    switch (availability.state) {
+      case "ready":
+        return null;
+      case "capacity_undeclared":
+        return "model_capacity_undeclared";
+      case "capacity_too_small":
+        return "model_capacity_too_small";
+      default:
+        return assertNever(availability);
+    }
   }
 
   selectModel(modelId: string): void {

@@ -23,7 +23,7 @@ vi.mock("$lib/core/Eneo", () => ({
 import FlowAIBuilderHarness from "./test-harnesses/FlowAIBuilderHarness.svelte";
 import type { AIBuilderClientTransport } from "./FlowAIBuilderDriver";
 import type { FlowAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
-import type { AIBuilderSavedFlowStepScope, RequirementsSummary } from "./protocol";
+import type { AIBuilderModel, AIBuilderSavedFlowStepScope, RequirementsSummary } from "./protocol";
 import type { StructuredQuestion } from "./structuredQuestionAnswer";
 
 // ---- Routes and fixtures ----------------------------------------------------
@@ -919,15 +919,18 @@ describe("FlowAIBuilder planner controls", () => {
   });
 
   /** A space whose listing carries models without declared capacity. */
-  function withUnreadyModels(defaultReady: boolean) {
+  function withUnreadyModels(
+    defaultReady: boolean,
+    availability: AIBuilderModel["availability"] = {
+      state: "capacity_undeclared",
+      missing_dimensions: ["max_input_tokens"]
+    }
+  ) {
     const { fetch } = makeFetch();
     const unready = {
       provider: "openai",
       reasoning_effort_options: [],
-      availability: {
-        state: "capacity_undeclared",
-        missing_dimensions: ["context_window_tokens"]
-      }
+      availability
     };
     return vi.fn(async (path: string, init?: Record<string, unknown>) =>
       path.endsWith("/models")
@@ -967,6 +970,23 @@ describe("FlowAIBuilder planner controls", () => {
 
     expect(service().effectiveModel?.id).toBe(DEFAULT_MODEL_ID);
     expect(service().modelSendBlock).toBeNull();
+  });
+
+  it("lists a too-small model disabled with its reason and keeps the picker enabled", async () => {
+    const { service } = renderShell({
+      fetch: withUnreadyModels(true, { state: "capacity_too_small" }),
+      stream: makeStream().stream
+    });
+    const trigger = (await screen.findByRole("button", {
+      name: `${m.ai_builder_model_label()}: Test model`
+    })) as HTMLButtonElement;
+    expect(trigger.disabled).toBe(false);
+    await fireEvent.click(trigger);
+    const option = await screen.findByRole("option", { name: /Second model/ });
+    expect(option.getAttribute("aria-disabled")).toBe("true");
+    expect(within(option).getByText(m.ai_builder_model_capacity_too_small_short())).toBeTruthy();
+    await fireEvent.click(option);
+    expect(service().effectiveModel?.id).toBe(DEFAULT_MODEL_ID);
   });
 
   it("says why and starts no turn while no listed model is ready, with the picker and typing still open", async () => {
@@ -1812,7 +1832,7 @@ describe("FlowAIBuilder confirm, build and review", () => {
                 reasoning_effort_options: [],
                 availability: {
                   state: "capacity_undeclared",
-                  missing_dimensions: ["context_window_tokens"]
+                  missing_dimensions: ["max_input_tokens"]
                 }
               },
               {
@@ -1873,7 +1893,7 @@ describe("FlowAIBuilder confirm, build and review", () => {
                 reasoning_effort_options: [],
                 availability: {
                   state: "capacity_undeclared",
-                  missing_dimensions: ["context_window_tokens"]
+                  missing_dimensions: ["max_input_tokens"]
                 }
               }
             ],
@@ -1899,6 +1919,58 @@ describe("FlowAIBuilder confirm, build and review", () => {
     expect(confirm.disabled).toBe(true);
     await fireEvent.click(confirm);
     expect(calls).toHaveLength(0);
+  });
+
+  it("keeps an explicit too-small choice on the confirmation and preserves refused change-request text", async () => {
+    const secondModelId = "11111111-1111-4111-8111-111111111198";
+    const { fetch } = makeFetch({
+      sessions: [
+        makeSession({
+          conversation: [
+            userMessage("u1", "Sammanfatta rapporter"),
+            assistantMessage("a1", "", { requirements_summary: SUMMARY })
+          ]
+        })
+      ]
+    });
+    const { stream, calls } = makeStream(() => "hold");
+    const { service } = renderShell({ fetch, stream, resumeSessionId: "s-1" });
+    await screen.findByRole("heading", { name: m.ai_builder_requirements_title() });
+    await waitFor(() => expect(service().effectiveModel?.id).toBe(DEFAULT_MODEL_ID));
+    service().selectModel(DEFAULT_MODEL_ID);
+    const model = service().effectiveModel!;
+    service().seedState({
+      availableModels: [
+        { ...model, availability: { state: "capacity_too_small" } },
+        { ...model, id: secondModelId, name: "Second model" }
+      ],
+      defaultModelId: secondModelId
+    });
+    const notice = await screen.findByTestId("ai-builder-model-notice");
+    expect(await within(notice).findByText(m.ai_builder_model_capacity_too_small())).toBeTruthy();
+    const trigger = within(notice).getByRole("button", {
+      name: `${m.ai_builder_model_label()}: Test model`
+    }) as HTMLButtonElement;
+    expect(trigger.disabled).toBe(false);
+    expect(button(m.ai_builder_confirm_action()).disabled).toBe(true);
+    await fireEvent.click(screen.getByText(m.ai_builder_change_request_write()).closest("button")!);
+    const box = (await screen.findByRole("textbox", {
+      name: m.ai_builder_change_request_textarea_label()
+    })) as HTMLTextAreaElement;
+    expect(box.disabled).toBe(false);
+    await fireEvent.input(box, { target: { value: "en PDF i stället" } });
+    expect(button(m.ai_builder_send()).disabled).toBe(true);
+    await fireEvent.click(button(m.ai_builder_send()));
+    expect(box.value).toBe("en PDF i stället");
+    expect(service().effectiveModel?.id).toBe(DEFAULT_MODEL_ID);
+    expect(calls).toHaveLength(0);
+    await fireEvent.click(trigger);
+    await fireEvent.click(await screen.findByRole("option", { name: /Second model/ }));
+    await fireEvent.click(button(m.ai_builder_send()));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]!.body).toMatchObject({ model_id: secondModelId });
+    expect(calls[0]!.body.message).toContain("en PDF i stället");
+    calls[0]!.finish();
   });
 
   it("keeps a long original request compact until the user expands it", async () => {

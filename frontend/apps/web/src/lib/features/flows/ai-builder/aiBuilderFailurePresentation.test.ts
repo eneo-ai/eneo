@@ -93,6 +93,34 @@ describe("describeFailure", () => {
     );
   });
 
+  it.each([chat, generation])(
+    "explains a capacity refusal on $surface and offers model selection instead of resend",
+    (context) => {
+      const presentation = present({
+        error: error({
+          code: "planner_model_incompatible_token_limits",
+          message: "Raw server detail"
+        }),
+        latestTurn: null,
+        capabilities: { ...committed, canResend: false },
+        context
+      });
+      expect(presentation.consequence).toContain(m.ai_builder_model_capacity_too_small());
+      expect(presentation.consequence).not.toContain("Raw server detail");
+      expect(presentation.primary).toMatchObject(
+        context.surface === "chat"
+          ? { kind: "dismiss" }
+          : {
+              kind: "clarify",
+              label: m.choose_a_completion_model(),
+              records: "conversation_opened"
+            }
+      );
+      expect(presentation.secondary).toBeNull();
+      expect(presentation.technical?.code).toBe("planner_model_incompatible_token_limits");
+    }
+  );
+
   it("presents nothing without an error or a retained replay, and a replay on its own", () => {
     expect(
       describeFailure({ error: null, latestTurn: null, capabilities: committed, context: chat })

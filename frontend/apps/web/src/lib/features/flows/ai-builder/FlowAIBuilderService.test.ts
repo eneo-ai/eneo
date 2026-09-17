@@ -758,7 +758,7 @@ describe("FlowAIBuilderService", () => {
             provider: "openai",
             availability: {
               state: "capacity_undeclared",
-              missing_dimensions: ["context_window_tokens"]
+              missing_dimensions: ["max_input_tokens"]
             }
           }
         ],
@@ -773,6 +773,29 @@ describe("FlowAIBuilderService", () => {
       expect(fetch).toHaveBeenCalledTimes(1);
       expect(service.modelSendBlock).toBe("no_ready_model");
       expect(service.modelSendBlockMessage).toBe(m.ai_builder_no_ready_model());
+    });
+
+    it("keeps an explicit too-small model and explains the blocked send", async () => {
+      const { service } = makeReviewService();
+      seedReadyModel(service);
+      const ready = service.availableModels[0]!;
+      service.seedState({
+        selectedModelId: "too-small",
+        availableModels: [
+          ready,
+          {
+            ...ready,
+            id: "too-small",
+            name: "Small",
+            availability: { state: "capacity_too_small" }
+          }
+        ]
+      });
+      expect(service.effectiveModel?.id).toBe("too-small");
+      expect(service.modelSendBlock).toBe("model_capacity_too_small");
+      expect(service.modelSendBlockMessage).toBe(m.ai_builder_model_capacity_too_small());
+      expect(await service.sendMessage("Behåll min text")).toBe("not_started");
+      expect(service.effectiveModel?.id).toBe("too-small");
     });
 
     it("gives every blocked state a reason, so a refused send never goes unexplained", () => {

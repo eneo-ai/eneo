@@ -229,7 +229,7 @@ describe("FlowAIBuilderDriver", () => {
         makeModel({
           availability: {
             state: "capacity_undeclared",
-            missing_dimensions: ["context_window_tokens"]
+            missing_dimensions: ["max_input_tokens"]
           }
         })
       ]
@@ -743,7 +743,7 @@ describe("FlowAIBuilderDriver", () => {
           makeModel({
             availability: {
               state: "capacity_undeclared",
-              missing_dimensions: ["context_window_tokens"]
+              missing_dimensions: ["max_input_tokens"]
             }
           })
         ],
@@ -777,14 +777,14 @@ describe("FlowAIBuilderDriver", () => {
       expect(driver.effectiveModel?.id).toBe(DEFAULT_MODEL_ID);
     });
 
-    it("keeps a choice a later listing omits, names it and blocks turns until the user picks again", async () => {
+    it.each<AIBuilderModel["availability"]>([
+      { state: "capacity_undeclared", missing_dimensions: ["max_input_tokens"] },
+      { state: "capacity_too_small" }
+    ])("keeps a choice when re-listed as $state", async (availability) => {
       const unready = makeModel({
         id: ALTERNATE_MODEL_ID,
         name: "Alternate model",
-        availability: {
-          state: "capacity_undeclared",
-          missing_dimensions: ["context_window_tokens"]
-        }
+        availability
       });
       const listings = [
         { models: [makeModel()], default_model_id: DEFAULT_MODEL_ID },
@@ -813,10 +813,10 @@ describe("FlowAIBuilderDriver", () => {
       expect(driver.modelSendBlock).toBe("model_not_listed");
       expect(await driver.sendMessage("Hej")).toBe("not_started");
 
-      // Listed again without declared capacity: still chosen, still blocked.
+      // Listed again but unready: still chosen, still blocked.
       await driver.closeReviewListing();
       expect(driver.state.selectedModelId).toBe(ALTERNATE_MODEL_ID);
-      expect(driver.modelSendBlock).toBe("model_capacity_undeclared");
+      expect(driver.modelSendBlock).toBe(`model_${availability.state}`);
       expect(await driver.sendMessage("Hej")).toBe("not_started");
       expect(stream).not.toHaveBeenCalled();
 
