@@ -756,13 +756,14 @@ async def test_update_flow_merges_http_secrets_by_step_id_after_reorder(user):
     flow_id = uuid4()
     first_step = _step(step_order=1).model_copy(
         update={
+            "input_source": "http_get",
             "input_config": _http_authored_config("enc:first-secret"),
         },
         deep=True,
     )
     second_step = _step(step_order=2).model_copy(
         update={
-            "input_source": "previous_step",
+            "input_source": "http_get",
             "input_config": _http_authored_config("enc:second-secret"),
         },
         deep=True,
@@ -788,7 +789,7 @@ async def test_update_flow_merges_http_secrets_by_step_id_after_reorder(user):
     first_incoming = first_step.model_copy(
         update={
             "step_order": 2,
-            "input_source": "previous_step",
+            "input_source": "http_get",
             "input_config": _http_authored_config(SECRET_SENTINEL),
         },
         deep=True,
@@ -796,7 +797,7 @@ async def test_update_flow_merges_http_secrets_by_step_id_after_reorder(user):
     second_incoming = second_step.model_copy(
         update={
             "step_order": 1,
-            "input_source": "flow_input",
+            "input_source": "http_get",
             "input_config": _http_authored_config(SECRET_SENTINEL),
         },
         deep=True,
@@ -876,7 +877,7 @@ async def test_update_flow_rejects_idless_step_secret_sentinel(user):
     new_step = _step(step_order=2).model_copy(
         update={
             "id": None,
-            "input_source": "previous_step",
+            "input_source": "http_get",
             "input_config": _http_authored_config(SECRET_SENTINEL),
         },
         deep=True,
@@ -3113,3 +3114,48 @@ async def test_publish_flow_allows_encrypted_stored_http_secret(user):
     await service.publish_flow(flow_id=stored.id)
 
     version_repo.create.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_create_flow_drops_inactive_config_before_secret_validation(user):
+    repo = AsyncMock()
+    repo.create.side_effect = lambda flow, tenant_id: flow
+    service = _service(user=user, flow_repo=repo, version_repo=AsyncMock())
+    step = _step().model_copy(
+        update={
+            "input_config": {"url": "obsolete", "auth": "malformed"},
+            "output_config": {
+                "template_file_id": "obsolete",
+                "custom_headers": [{"value": SECRET_SENTINEL}],
+                "extension": "preserved",
+            },
+        }
+    )
+    created = await service.create_flow(space_id=uuid4(), name="Flow", steps=[step])
+    assert created.steps[0].input_config is None
+    assert created.steps[0].output_config == {"extension": "preserved"}
+    assert step.input_config == {"url": "obsolete", "auth": "malformed"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("supply_steps", [True, False])
+async def test_update_flow_drops_inactive_stored_credentials(user, supply_steps):
+    repo = AsyncMock()
+    stored_step = _step().model_copy(
+        update={"input_config": _http_authored_config("enc:stored-credential")}
+    )
+    existing = _published_flow_for_update(user, [stored_step])
+    repo.get.return_value = existing
+    repo.update.side_effect = lambda flow, tenant_id, expected_revision=None: flow
+    service = _service(user=user, flow_repo=repo, version_repo=AsyncMock())
+    incoming = stored_step.model_copy(
+        update={"input_config": _http_authored_config(SECRET_SENTINEL)}
+    )
+    new_step = _step(2).model_copy(
+        update={"id": None, "input_config": _http_authored_config(SECRET_SENTINEL)}
+    )
+    updated = await service.update_flow(
+        flow_id=existing.id,
+        steps=[incoming, new_step] if supply_steps else None,
+    )
+    assert all(step.input_config is None for step in updated.steps)

@@ -27,6 +27,7 @@ from eneo.flows.domain.flow_invariant_exceptions import (
     FlowPublishedDefinitionInvalidError,
 )
 from eneo.flows.domain.flow_step_validation import FlowStepValidationError
+from eneo.flows.domain.step_config import clean_inactive_step_config
 from eneo.flows.enums import flow_output_mode_uses_completion_model
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_metadata import (
@@ -115,6 +116,7 @@ class FlowService:
         metadata_json: FlowPersistedJsonObject | None = None,
         owner_user_id: UUID | None = None,
     ) -> Flow:
+        steps = [clean_inactive_step_config(step) for step in steps]
         normalized_metadata = normalize_flow_metadata_for_write(metadata_json)
         self._validate_steps(steps, metadata_json=normalized_metadata)
         self._validate_variable_alias_collisions(
@@ -218,11 +220,16 @@ class FlowService:
             )
 
         if steps is not None:
+            steps = [clean_inactive_step_config(step) for step in steps]
             self._validate_update_step_identity(
                 incoming_steps=steps,
                 stored_steps=existing.steps,
             )
-        next_steps = steps if steps is not None else existing.steps
+        next_steps = (
+            steps
+            if steps is not None
+            else [clean_inactive_step_config(step) for step in existing.steps]
+        )
         await self._validate_assistant_scope_for_steps(
             space_id=existing.space_id,
             steps=next_steps,

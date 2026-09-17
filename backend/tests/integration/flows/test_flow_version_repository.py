@@ -581,3 +581,95 @@ async def test_snapshot_file_references_reject_cross_tenant_file(
             await repo.file_ids_referenced_by_versions(flow.id, admin_user.tenant_id)
             == set()
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_current_step_config_repair_preserves_published_runtime_snapshot(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    import sqlalchemy as sa
+
+    from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+    from eneo.database.tables.flow_tables import Flows
+    from eneo.flows.application.flow_step_config_repair import repair_flow_step_config
+    from eneo.flows.published_runtime import load_published_definition
+    from eneo.main.exceptions import BadRequestException
+
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(session, "Published cleanup", [model.id])
+        assistant = await assistant_factory(
+            session, "Published cleanup", model.id, space_id=space.id
+        )
+        repo = FlowRepository(session)
+        versions = FlowVersionRepository(session)
+        original = _flow(
+            tenant_id=admin_user.tenant_id,
+            space_id=space.id,
+            user_id=admin_user.id,
+            assistant_id=assistant.id,
+        )
+        original.steps[0].output_config = {
+            "url": "https://example.test/obsolete",
+            "auth": {"mode": "bearer_token", "token": "historical-ciphertext"},
+        }
+        flow = await repo.create(flow=original, tenant_id=admin_user.tenant_id)
+        flow_id = flow.require_persisted_id()
+        version = await versions.create(
+            flow_id=flow_id,
+            version=1,
+            tenant_id=admin_user.tenant_id,
+            definition_json=_definition_json(
+                flow=flow, step=flow.steps[0], output_config=flow.steps[0].output_config
+            ),
+            source_draft_revision=flow.draft_revision,
+        )
+        await session.execute(
+            sa.update(Flows).where(Flows.id == flow_id).values(published_version=1)
+        )
+        assert await repo.next_step_config_repair_flow(
+            tenant_id=admin_user.tenant_id, after=None
+        ) == (admin_user.tenant_id, flow_id)
+        runtime_before = await load_published_definition(
+            flow_version_repo=versions,
+            flow_id=flow_id,
+            version=1,
+            tenant_id=admin_user.tenant_id,
+        )
+        assert (
+            await repair_flow_step_config(
+                flow_repo=repo,
+                audit_log_repo=AuditLogRepositoryImpl(session),
+                flow_id=flow_id,
+                tenant_id=admin_user.tenant_id,
+                apply=True,
+                operator_identity="test-operator",
+            )
+            == "repaired"
+        )
+        reloaded = await repo.get(flow_id, admin_user.tenant_id)
+        assert reloaded.published_version == 1
+        assert reloaded.draft_revision == flow.draft_revision + 1
+        assert reloaded.steps[0].output_config is None
+        assert (
+            await versions.get(
+                flow_id=flow_id, version=1, tenant_id=admin_user.tenant_id
+            )
+            == version
+        )
+        runtime_after = await load_published_definition(
+            flow_version_repo=versions,
+            flow_id=flow_id,
+            version=1,
+            tenant_id=admin_user.tenant_id,
+        )
+        assert runtime_after == runtime_before
+        assert "historical-ciphertext" in str(runtime_after)
+        with pytest.raises(BadRequestException, match="Cannot mutate a published flow"):
+            await container.flow_service().update_flow(flow_id=flow_id, name="Refused")

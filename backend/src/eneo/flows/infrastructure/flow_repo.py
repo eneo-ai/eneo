@@ -155,6 +155,18 @@ def _resource_binding_from_row(row: FlowResourceBindings) -> LocalResourceBindin
     )
 
 
+def _stale_revision_error(
+    *, flow_id: UUID, expected_revision: int
+) -> BadRequestException:
+    return BadRequestException(
+        "Flödet har ändrats sedan det lästes in, till exempel i en "
+        "annan flik eller av en kollega. Ladda om sidan och gör om "
+        "din senaste ändring.",
+        code="stale_revision",
+        context={"flow_id": str(flow_id), "expected_revision": expected_revision},
+    )
+
+
 class FlowRepository:
     """Tenant-scoped repository for flow aggregate operations."""
 
@@ -767,6 +779,96 @@ class FlowRepository:
         )
         return flow_id_in_db is not None
 
+    async def next_step_config_repair_flow(
+        self, *, tenant_id: UUID | None, after: UUID | None
+    ) -> tuple[UUID, UUID] | None:
+        stmt = sa.select(Flows.tenant_id, Flows.id).where(Flows.deleted_at.is_(None))
+        if tenant_id is not None:
+            stmt = stmt.where(Flows.tenant_id == tenant_id)
+        if after is not None:
+            stmt = stmt.where(Flows.id > after)
+        row = (
+            await self.session.execute(stmt.order_by(Flows.id).limit(1))
+        ).one_or_none()
+        return (row.tenant_id, row.id) if row is not None else None
+
+    async def get_step_config_repair_flow(
+        self, *, flow_id: UUID, tenant_id: UUID
+    ) -> Flow:
+        # One statement keeps configs and the revision in the same read snapshot.
+        rows = (
+            await self.session.execute(
+                sa.select(Flows, FlowSteps)
+                .outerjoin(
+                    FlowSteps,
+                    sa.and_(
+                        FlowSteps.flow_id == Flows.id,
+                        FlowSteps.tenant_id == Flows.tenant_id,
+                    ),
+                )
+                .where(
+                    Flows.id == flow_id,
+                    Flows.tenant_id == tenant_id,
+                    Flows.deleted_at.is_(None),
+                )
+                .order_by(FlowSteps.step_order)
+                .execution_options(populate_existing=True)
+            )
+        ).all()
+        if not rows:
+            raise NotFoundException("Flow not found.")
+        return Flow(
+            **FlowSparse.model_validate(rows[0][0]).model_dump(),
+            steps=[
+                FlowStep.model_validate(row[1]) for row in rows if row[1] is not None
+            ],
+        )
+
+    async def repair_step_configs(self, *, flow: Flow, steps: list[FlowStep]) -> None:
+        flow_id = flow.require_persisted_id()
+        stored_by_id = {step.id: step for step in flow.steps}
+        changes: list[tuple[UUID, dict[str, Any]]] = []
+        for step in steps:
+            if step.id is None or step.id not in stored_by_id:
+                raise ValueError("Repair requires existing step ids.")
+            stored = stored_by_id[step.id]
+            values = {
+                field: getattr(step, field)
+                for field in ("input_config", "output_config")
+                if getattr(step, field) != getattr(stored, field)
+            }
+            if values:
+                changes.append((step.id, values))
+        if not changes:
+            return
+        updated_id = await self.session.scalar(
+            sa.update(Flows)
+            .where(
+                Flows.id == flow_id,
+                Flows.tenant_id == flow.tenant_id,
+                Flows.deleted_at.is_(None),
+                Flows.draft_revision == flow.draft_revision,
+            )
+            .values(
+                draft_revision=Flows.draft_revision + 1, updated_at=Flows.updated_at
+            )
+            .returning(Flows.id)
+        )
+        if updated_id is None:
+            raise _stale_revision_error(
+                flow_id=flow_id, expected_revision=flow.draft_revision
+            )
+        for step_id, values in changes:
+            await self.session.execute(
+                sa.update(FlowSteps)
+                .where(
+                    FlowSteps.id == step_id,
+                    FlowSteps.flow_id == flow_id,
+                    FlowSteps.tenant_id == flow.tenant_id,
+                )
+                .values(**values, updated_at=FlowSteps.updated_at)
+            )
+
     async def update(
         self,
         flow: Flow,
@@ -808,15 +910,8 @@ class FlowRepository:
                 .where(Flows.deleted_at.is_(None))
             )
             if existing_id is not None:
-                raise BadRequestException(
-                    "Flödet har ändrats sedan det lästes in, till exempel i en "
-                    "annan flik eller av en kollega. Ladda om sidan och gör om "
-                    "din senaste ändring.",
-                    code="stale_revision",
-                    context={
-                        "flow_id": str(flow_id),
-                        "expected_revision": fenced_revision,
-                    },
+                raise _stale_revision_error(
+                    flow_id=flow_id, expected_revision=fenced_revision
                 )
             raise NotFoundException("Flow not found.")
 

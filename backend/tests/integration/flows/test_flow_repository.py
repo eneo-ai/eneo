@@ -1369,3 +1369,461 @@ async def test_flow_repository_sparse_list_derives_step_projection_in_one_batche
         assert paged_by_id[single_json_step_flow.id].step_count == 1
         assert paged_by_id[single_json_step_flow.id].input_type is None
         assert paged_by_id[single_json_step_flow.id].output_type == FlowOutputType.JSON
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize("operation", ["create", "update", "metadata", "switch"])
+async def test_flow_save_removes_inactive_step_config(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    operation,
+):
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(
+            session, "Config cleanup", [model.id], user_id=admin_user.id
+        )
+        assistant = await assistant_factory(
+            session, "Config cleanup", model.id, space_id=space.id
+        )
+        service = container.flow_service()
+        repo = FlowRepository(session=session)
+        step = _build_step(
+            tenant_id=admin_user.tenant_id,
+            assistant_id=assistant.id,
+            step_order=1,
+        ).model_copy(
+            update={
+                "timeout_seconds": 90,
+                "input_config": {
+                    "url": "https://example.test/private",
+                    "auth": {"mode": "bearer_token", "token": {"$secret": "stored"}},
+                    "timeout_seconds": 12,
+                    "body": {"mode": "none"},
+                    "custom_headers": [],
+                    "response_format": "json",
+                    "extension": {"keep": True},
+                },
+                "output_config": {
+                    "auth": "malformed obsolete auth",
+                    "template_asset_id": str(uuid4()),
+                    "template_file_id": str(uuid4()),
+                    "template_name": "old.docx",
+                    "template_checksum": "old",
+                    "placeholders": ["old"],
+                    "bindings": {"old": "unused"},
+                    "citation_mode": "off",
+                },
+            }
+        )
+        if operation == "create":
+            saved = await service.create_flow(
+                space_id=space.id, name="Cleanup", steps=[step]
+            )
+        else:
+            from cryptography.fernet import Fernet
+
+            from eneo.settings.encryption_service import EncryptionService
+
+            encryption = EncryptionService(Fernet.generate_key().decode())
+            stored_step = step.model_copy(deep=True)
+            stored_step.input_config = {
+                "url": "https://example.test/private",
+                "auth": {
+                    "mode": "bearer_token",
+                    "token": encryption.encrypt("stored-credential"),
+                },
+            }
+            if operation == "switch":
+                stored_step.input_source = "http_get"
+            flow = _build_flow(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                user_id=admin_user.id,
+                assistant_id=assistant.id,
+            ).model_copy(
+                update={
+                    "steps": [stored_step]
+                    if operation in {"metadata", "switch"}
+                    else []
+                }
+            )
+            existing = await repo.create(flow=flow, tenant_id=admin_user.tenant_id)
+            await session.execute(
+                sa.update(Assistants)
+                .where(Assistants.id == assistant.id)
+                .values(
+                    origin="flow_managed", managing_flow_id=existing.id, hidden=True
+                )
+            )
+            if operation == "switch":
+                step.id = existing.steps[0].id
+            saved = await service.update_flow(
+                flow_id=existing.require_persisted_id(),
+                name="Cleanup",
+                steps=[step] if operation in {"update", "switch"} else None,
+            )
+        reloaded = await repo.get(saved.require_persisted_id(), admin_user.tenant_id)
+        assert reloaded.steps[0].input_config == (
+            None if operation == "metadata" else {"extension": {"keep": True}}
+        )
+        assert reloaded.steps[0].output_config == {"citation_mode": "off"}
+        assert reloaded.steps[0].timeout_seconds == 90
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_step_config_repair_is_atomic_narrow_and_idempotent(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+    from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
+    from eneo.flows.application.flow_step_config_repair import repair_flow_step_config
+
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(session, "Repair configs", [model.id])
+        assistant = await assistant_factory(
+            session, "Repair configs", model.id, space_id=space.id
+        )
+        repo = FlowRepository(session=session)
+        original = _build_flow(
+            tenant_id=admin_user.tenant_id,
+            space_id=space.id,
+            user_id=admin_user.id,
+            assistant_id=assistant.id,
+        )
+        original.steps[0].input_config = {
+            "url": "https://example.test/private",
+            "auth": {"mode": "bearer_token", "token": "stored-ciphertext"},
+        }
+        original.steps[0].output_config = {"template_name": "old.docx"}
+        flow = await repo.create(flow=original, tenant_id=admin_user.tenant_id)
+        flow_id = flow.require_persisted_id()
+        deleted = await repo.create(
+            flow=original.model_copy(update={"steps": [], "name": "Deleted flow"}),
+            tenant_id=admin_user.tenant_id,
+        )
+        await session.execute(
+            sa.update(Flows)
+            .where(Flows.id == deleted.id)
+            .values(deleted_at=sa.func.now())
+        )
+        assert await repo.next_step_config_repair_flow(tenant_id=None, after=None) == (
+            admin_user.tenant_id,
+            flow_id,
+        )
+        assert await repo.next_step_config_repair_flow(
+            tenant_id=admin_user.tenant_id, after=None
+        ) == (admin_user.tenant_id, flow_id)
+        assert (
+            await repo.next_step_config_repair_flow(tenant_id=uuid4(), after=None)
+            is None
+        )
+        assert (
+            await repo.next_step_config_repair_flow(tenant_id=None, after=flow_id)
+            is None
+        )
+        audit_repo = AuditLogRepositoryImpl(session)
+
+        async def repair(apply):
+            return await repair_flow_step_config(
+                flow_repo=repo,
+                audit_log_repo=audit_repo,
+                flow_id=flow_id,
+                tenant_id=admin_user.tenant_id,
+                apply=apply,
+                operator_identity="test-operator",
+            )
+
+        async def rows():
+            flow_row = (
+                (
+                    await session.execute(
+                        sa.select(Flows.__table__).where(Flows.id == flow_id)
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            step_rows = (
+                (
+                    await session.execute(
+                        sa.select(FlowSteps.__table__).where(
+                            FlowSteps.flow_id == flow_id
+                        )
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            audits = (
+                (
+                    await session.execute(
+                        sa.select(AuditLogTable).where(
+                            AuditLogTable.entity_id == flow_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            return dict(flow_row), [dict(row) for row in step_rows], audits
+
+        before_flow, before_steps, before_audits = await rows()
+        assert await repair(False) == "would_change"
+        assert await rows() == (before_flow, before_steps, before_audits)
+        assert await repair(True) == "repaired"
+        after_flow, after_steps, audits = await rows()
+        assert after_flow == {
+            **before_flow,
+            "draft_revision": before_flow["draft_revision"] + 1,
+        }
+        assert after_steps == [
+            {**before_steps[0], "input_config": None, "output_config": None}
+        ]
+        assert len(audits) == len(before_audits) + 1
+        assert audits[-1].actor_type == "system"
+        assert audits[-1].actor_id is None
+        assert "stored-ciphertext" not in str(audits[-1].log_metadata)
+        assert await repair(True) == "unchanged"
+        assert await rows() == (after_flow, after_steps, audits)
+
+        from eneo.flow_packages.application.flow_package_export_service import (
+            FlowPackageExportService,
+        )
+        from eneo.flow_packages.domain.flow_package_manifest import (
+            EneoPackageKind,
+            FlowPackageManifestMetadata,
+        )
+        from eneo.flow_packages.infrastructure.flow_package_zip_writer import (
+            write_flow_package,
+        )
+
+        repaired = await repo.get(flow_id, admin_user.tenant_id)
+        exported = await FlowPackageExportService(
+            flow_service=container.flow_service(),
+            package_writer=write_flow_package,
+        ).export_to_bytes(
+            flow_id=flow_id,
+            flow=repaired,
+            manifest_metadata=FlowPackageManifestMetadata(
+                schema_version=1,
+                kind=EneoPackageKind.FLOW,
+                package_id="se.test.cleanup",
+                package_version="1.0.0",
+                name="Cleanup",
+                description="Portable flow",
+            ),
+        )
+        assert exported.package_bytes.startswith(b"PK")
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize("failure", ["audit", "invalid", "conflict"])
+async def test_step_config_repair_failure_leaves_rows_unchanged(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    failure,
+    monkeypatch,
+):
+    from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+    from eneo.database.database import sessionmanager
+    from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
+    from eneo.flows.application.flow_step_config_repair import repair_flow_step_config
+
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(session, "Repair failure", [model.id])
+        assistant = await assistant_factory(
+            session, "Repair failure", model.id, space_id=space.id
+        )
+        repo = FlowRepository(session)
+        original = _build_flow(
+            tenant_id=admin_user.tenant_id,
+            space_id=space.id,
+            user_id=admin_user.id,
+            assistant_id=assistant.id,
+        )
+        original.steps[0].input_config = {"url": "https://secret.example.test/private"}
+        if failure == "invalid":
+            original.steps[0].input_bindings = {"question": "{{step_999.output}}"}
+        flow = await repo.create(flow=original, tenant_id=admin_user.tenant_id)
+        flow_id = flow.require_persisted_id()
+
+    async with db_container() as container:
+        session = container.session()
+        repo = FlowRepository(session)
+        audit_repo = AuditLogRepositoryImpl(session)
+        before = await repo.get(flow_id, admin_user.tenant_id)
+        original_write = repo.repair_step_configs
+        original_audit = audit_repo.create
+
+        async def fail_audit(_audit):
+            await original_audit(_audit)
+            raise RuntimeError("secret-url-or-config-must-not-be-reported")
+
+        async def concurrent_write(*, flow, steps):
+            async with sessionmanager.session() as other, other.begin():
+                await other.execute(
+                    sa.update(Flows)
+                    .where(Flows.id == flow_id)
+                    .values(draft_revision=Flows.draft_revision + 1)
+                )
+            await original_write(flow=flow, steps=steps)
+
+        if failure == "audit":
+            monkeypatch.setattr(audit_repo, "create", fail_audit)
+        elif failure == "conflict":
+            monkeypatch.setattr(repo, "repair_step_configs", concurrent_write)
+        outcome = await repair_flow_step_config(
+            flow_repo=repo,
+            audit_log_repo=audit_repo,
+            flow_id=flow_id,
+            tenant_id=admin_user.tenant_id,
+            apply=True,
+            operator_identity="test-operator",
+        )
+        assert (
+            outcome
+            == {"audit": "failed", "invalid": "invalid", "conflict": "conflict"}[
+                failure
+            ]
+        )
+        session.expire_all()
+        after = await repo.get(flow_id, admin_user.tenant_id)
+        assert after.steps == before.steps
+        assert after.draft_revision == before.draft_revision + (failure == "conflict")
+        assert (
+            not (
+                await session.execute(
+                    sa.select(AuditLogTable).where(AuditLogTable.entity_id == flow_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_step_config_repair_preserves_active_ciphertext_and_templates(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    from cryptography.fernet import Fernet
+
+    from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+    from eneo.flows.application.flow_step_config_repair import repair_flow_step_config
+    from eneo.flows.http_transport import HttpAuthoredConfig
+    from eneo.flows.http_transport.secret_codec import decrypt_authored_config
+    from eneo.settings.encryption_service import EncryptionService
+
+    encryption = EncryptionService(Fernet.generate_key().decode())
+    ciphertext = encryption.encrypt("retained-secret")
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(session, "Mixed config", [model.id])
+        assistant = await assistant_factory(
+            session, "Mixed config", model.id, space_id=space.id
+        )
+        original = _build_flow(
+            tenant_id=admin_user.tenant_id,
+            space_id=space.id,
+            user_id=admin_user.id,
+            assistant_id=assistant.id,
+        )
+        http_step = original.steps[0].model_copy(
+            update={
+                "input_source": "http_get",
+                "step_order": 2,
+                "user_description": "HTTP step",
+                "input_bindings": None,
+                "input_config": {
+                    "url": "https://example.test/input",
+                    "auth": {"mode": "bearer_token", "token": ciphertext},
+                },
+                "output_config": {
+                    "template_name": "obsolete",
+                    "retrieval_policy": {"version": 1, "mode": "best_effort"},
+                    "extension": {"keep": True},
+                },
+            }
+        )
+        upload_step = _build_step(
+            tenant_id=admin_user.tenant_id, assistant_id=assistant.id, step_order=1
+        ).model_copy(
+            update={
+                "input_source": "flow_input",
+                "input_type": "document",
+                "input_config": {
+                    "runtime_input": {"enabled": True, "input_format": "document"}
+                },
+                "input_bindings": {"question": "{{step_input.text}}"},
+            }
+        )
+        template_step = _build_step(
+            tenant_id=admin_user.tenant_id, assistant_id=assistant.id, step_order=3
+        ).model_copy(
+            update={
+                "input_bindings": None,
+                "output_contract": None,
+                "output_mode": "template_fill",
+                "output_type": "docx",
+                "output_config": {
+                    "template_asset_id": str(uuid4()),
+                    "template_name": "active.docx",
+                    "template_checksum": "checksum",
+                    "placeholders": [],
+                    "bindings": {},
+                },
+                "input_config": {"auth": "obsolete"},
+            }
+        )
+        original.steps = [upload_step, http_step, template_step]
+        repo = FlowRepository(session)
+        before = await repo.create(flow=original, tenant_id=admin_user.tenant_id)
+        assert (
+            await repair_flow_step_config(
+                flow_repo=repo,
+                audit_log_repo=AuditLogRepositoryImpl(session),
+                flow_id=before.require_persisted_id(),
+                tenant_id=admin_user.tenant_id,
+                apply=True,
+                operator_identity="test-operator",
+            )
+            == "repaired"
+        )
+        after = await repo.get(before.require_persisted_id(), admin_user.tenant_id)
+        assert after.steps[1].input_config == before.steps[1].input_config
+        assert after.steps[1].input_config["auth"]["token"] == ciphertext
+        decrypted = decrypt_authored_config(
+            HttpAuthoredConfig.model_validate(after.steps[1].input_config), encryption
+        )
+        assert decrypted.auth.model_dump()["token"] == "retained-secret"
+        assert after.steps[1].output_config == {
+            "retrieval_policy": {"version": 1, "mode": "best_effort"},
+            "extension": {"keep": True},
+        }
+        assert after.steps[0] == before.steps[0]
+        assert after.steps[2].output_config == before.steps[2].output_config
+        assert after.steps[2].input_config is None
