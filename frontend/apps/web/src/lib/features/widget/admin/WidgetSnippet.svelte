@@ -9,6 +9,8 @@
   import { ExternalLink } from "lucide-svelte";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
+  import { getLocale } from "$lib/paraglide/runtime";
+  import { docsUrl } from "$lib/core/docs";
   import { floatingSnippet, pinnedSnippet, standaloneUrl, type LoaderRelease } from "./snippet";
 
   type Props = {
@@ -49,7 +51,7 @@
   <h2 id="widget-snippet-title" class="text-base font-semibold">{m.widget_admin_snippet()}</h2>
   <p class="text-secondary text-sm">{m.widget_admin_snippet_description()}</p>
   <LinkButton
-    href="https://docs.eneo.ai/guides/embed-widget#for-the-website-team"
+    href={docsUrl("guides/embed-widget", getLocale(), "for-the-website-team")}
     target="_blank"
     rel="noreferrer"
     variant="link"

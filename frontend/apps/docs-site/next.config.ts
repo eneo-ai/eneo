@@ -1,9 +1,11 @@
 import type { NextConfig } from "next";
 import nextra from "nextra";
+import localizeMdxLinks from "./scripts/localize-mdx-links.mjs";
 
 const withNextra = nextra({
   // Disable staticImage so mdx-components.js handles images with basePath
   staticImage: false,
+  mdxOptions: { remarkPlugins: [localizeMdxLinks] },
 });
 
 const nextConfig: NextConfig = withNextra({

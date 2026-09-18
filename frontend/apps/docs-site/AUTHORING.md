@@ -76,3 +76,25 @@ An hourly scheduled reconciliation catches refs whose old workflows did not
 run; GitHub may delay scheduled jobs. Unchanged inputs skip installation and
 builds. A manual run can force a rebuild. See [README.md](README.md) for the
 implementation and recovery procedure.
+
+## Translate an existing page
+
+Keep the English source at its existing path. Add the Swedish version at the
+same relative path under `src/content/sv/`, on the same target branch as the
+English content. For example, `guides/deployment.mdx` is translated in
+`sv/guides/deployment.mdx`. Do not create language/version combinations by hand.
+The version builder selects translations from the same git ref as the original.
+
+English owns page inventory and `_meta.ts` ordering. Translate navigation titles
+in `src/lib/navigation.ts`; do not duplicate the navigation tree under `sv/`.
+Use normal root-relative docs links (for example `/guides/deployment`) in both
+languages. The shared MDX link adapters retain the current language and version.
+Keep existing fragment IDs for sections linked from the app; translated headings
+can use explicit IDs such as `## För webbansvariga [#for-the-website-team]`.
+
+Missing translations fall back to English with a visible notice. They are
+excluded from Swedish search. Never copy an untranslated English page into
+`sv/`: that would falsely label and index it as Swedish. A translated overview
+may link to still-untranslated detail pages; make its scope clear to readers.
+When changing English behaviour, update its existing translation in the same PR
+or remove that translation until it is current, allowing the marked fallback.

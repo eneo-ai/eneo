@@ -1,3 +1,4 @@
+import "./globals.css";
 import { NotFoundPage } from "nextra-theme-docs";
 
 import { getDocsVersions, versionTitle } from "@/lib/versions";
