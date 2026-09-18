@@ -166,7 +166,11 @@
     rememberDismissedFinding(packet.flow_id, fact.finding_id);
     pickedFindings.delete(fact.finding_id);
     dismissed = new Set([...dismissed, fact.finding_id]);
-    hiddenNotice = m.ai_builder_review_hidden_notice();
+    const hiddenAfter = hiddenCount + 1;
+    hiddenNotice =
+      hiddenAfter === 1
+        ? m.ai_builder_review_hidden_notice()
+        : m.ai_builder_review_hidden_notice_count({ count: String(hiddenAfter) });
 
     await tick();
     const next = nextId
@@ -284,6 +288,7 @@
                 variant="link"
                 class="text-accent-stronger -my-1 h-auto px-0 py-1 text-[0.8125rem] font-semibold"
                 data-testid="findings-select-all"
+                {disabled}
                 onclick={() => {
                   if (pickedFindings.size > 0) pickedFindings.clear();
                   else
@@ -324,7 +329,6 @@
                  heavy enough to carry it alone would rule this like a table. -->
             <ul
               class="flex flex-col"
-              role="group"
               aria-labelledby="review-facts-title"
               data-testid="findings-list"
             >
@@ -358,6 +362,7 @@
                     variant="ghost"
                     size="sm"
                     class="text-secondary h-7 shrink-0 px-2 text-xs"
+                    {disabled}
                     onclick={() => dismiss(fact)}
                   >
                     {m.ai_builder_review_hide()}
@@ -424,6 +429,7 @@
                   variant="link"
                   class="text-accent-stronger -my-1 h-auto px-0 py-1 text-[0.8125rem] font-semibold"
                   data-testid="suggestions-select-all"
+                  {disabled}
                   onclick={() => {
                     if (pickedSuggestions.size === total) pickedSuggestions.clear();
                     else for (let i = 0; i < total; i += 1) pickedSuggestions.add(i);
@@ -573,13 +579,19 @@
               {:else}
                 <ul
                   class="mt-3 flex flex-col"
-                  role="group"
                   aria-labelledby="review-suggestions-title"
                   data-testid="suggestions-list"
                 >
                   {#each judged.suggestions as suggestion, index (index)}
+                    <!-- A suggestion row is deliberately not a finding row.
+                         Both halves carried the identical class, so anyone
+                         scanning rather than reading saw one uniform list of
+                         tickable items, with the only cue that half of them
+                         are a model's opinion sitting in a section heading
+                         far above the row being decided. The gutter travels
+                         with the row. -->
                     <li
-                      class="border-stronger flex items-start gap-3 border-t py-3.5 first:border-t-0 first:pt-0"
+                      class="border-stronger border-l-accent-default/45 flex items-start gap-3 border-t border-l-2 py-3.5 pl-3 first:border-t-0 first:pt-0"
                     >
                       <Checkbox
                         class="mt-1 shrink-0"
@@ -652,8 +664,29 @@
                      asking someone to investigate all of them before they have
                      read one is asking for a decision they cannot make yet. -->
                 {@const picked = judged.suggestions.filter((_, i) => pickedSuggestions.has(i))}
+                <!-- Above the action, not below it: this is the half that
+                     sends run excerpts to a model, so the question has to be
+                     answerable before the click rather than after it. Four
+                     facts left open are a grey wall under the list; behind
+                     their own question they are one line that says a
+                     disclosure exists and where it is. -->
+                <Collapsible.Root bind:open={sendsOpen}>
+                  <Collapsible.Trigger
+                    class="text-secondary hover:text-primary focus-visible:ring-accent-stronger mt-3 inline-flex min-h-[24px] items-center rounded-sm text-[0.8125rem] font-semibold underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                    data-testid="suggestions-sends"
+                  >
+                    {m.ai_builder_review_sends_question()}
+                  </Collapsible.Trigger>
+                  <Collapsible.Content>
+                    <p class="text-secondary mt-1 text-[0.8125rem] text-pretty">
+                      {picked.length === 1
+                        ? m.ai_builder_review_suggestion_investigate_hint()
+                        : m.ai_builder_review_suggestion_investigate_all_hint()}
+                    </p>
+                  </Collapsible.Content>
+                </Collapsible.Root>
                 {#if picked.length > 0}
-                  <div class="selection-bar mt-3.5">
+                  <div class="selection-bar mt-2.5">
                     <Button
                       variant="outline"
                       size="sm"
@@ -670,29 +703,10 @@
                     </Button>
                   </div>
                 {:else}
-                  <p class="text-secondary mt-3.5 text-[0.8125rem] text-pretty">
+                  <p class="text-secondary mt-2.5 text-[0.8125rem] text-pretty">
                     {m.ai_builder_review_select_hint_suggestions()}
                   </p>
                 {/if}
-                <!-- Investigating sends run content to a model, so there are
-                     four things to disclose. Left open they are a grey wall
-                     under the list; behind their own question they are one
-                     line that says a disclosure exists and where it is. -->
-                <Collapsible.Root bind:open={sendsOpen}>
-                  <Collapsible.Trigger
-                    class="text-secondary hover:text-primary focus-visible:ring-accent-stronger mt-1.5 inline-flex min-h-[24px] items-center rounded-sm text-[0.8125rem] font-semibold underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
-                    data-testid="suggestions-sends"
-                  >
-                    {m.ai_builder_review_sends_question()}
-                  </Collapsible.Trigger>
-                  <Collapsible.Content>
-                    <p class="text-secondary mt-1 text-[0.8125rem] text-pretty">
-                      {picked.length === 1
-                        ? m.ai_builder_review_suggestion_investigate_hint()
-                        : m.ai_builder_review_suggestion_investigate_all_hint()}
-                    </p>
-                  </Collapsible.Content>
-                </Collapsible.Root>
               {/if}
             {/if}
           </section>
@@ -728,9 +742,12 @@
                 <Button
                   variant="link"
                   class="text-accent-stronger mt-1 -mb-1 h-auto px-0 py-1 text-xs font-semibold"
+                  {disabled}
                   onclick={showHidden}
                 >
-                  {m.ai_builder_review_show_hidden({ count: String(hiddenCount) })}
+                  {hiddenCount === 1
+                    ? m.ai_builder_review_show_hidden_one()
+                    : m.ai_builder_review_show_hidden({ count: String(hiddenCount) })}
                 </Button>
               {/if}
             </footer>

@@ -225,7 +225,7 @@ describe("BuilderFindingsScreen", () => {
     await fireEvent.click(hide);
     expect(screen.getAllByRole("listitem")).toHaveLength(1);
     expect(
-      screen.getByRole("button", { name: m.ai_builder_review_show_hidden({ count: "1" }) })
+      screen.getByRole("button", { name: m.ai_builder_review_show_hidden_one() })
     ).toBeTruthy();
     unmount();
     // A hidden finding stays hidden on the next open of the same version.
@@ -237,7 +237,7 @@ describe("BuilderFindingsScreen", () => {
     });
     expect(screen.getAllByRole("listitem")).toHaveLength(1);
     await fireEvent.click(
-      screen.getByRole("button", { name: m.ai_builder_review_show_hidden({ count: "1" }) })
+      screen.getByRole("button", { name: m.ai_builder_review_show_hidden_one() })
     );
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
   });
@@ -396,7 +396,11 @@ describe("BuilderFindingsScreen suggestions", () => {
         // The investigation rereads the named runs and takes bounded excerpts
         // of them to the planner, so the note has to say so: it is the only
         // place the user is told what leaves this screen.
-        expect(note).toMatch(/läser om|rereads/i);
+        // The concept, not the sentence: the runs are read a second time.
+        // "läser om" was replaced because in Swedish it reads as "reads
+        // about" as readily as "re-reads", in the one sentence that governs
+        // whether case content leaves the tenancy.
+        expect(note).toMatch(/en gång till|once more/i);
         expect(note).toMatch(/utdrag|excerpts/i);
         await tick("suggestions-list", 0);
         expect(screen.getByText(m.ai_builder_review_suggestion_investigate_hint())).toBeTruthy();
