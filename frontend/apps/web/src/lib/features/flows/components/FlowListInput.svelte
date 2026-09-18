@@ -78,7 +78,7 @@
             <span class="max-w-[16rem] truncate">{value}</span>
             <button
               type="button"
-              class="hover:bg-hover-dimmer inline-flex size-4 items-center justify-center rounded-full"
+              class="hover:bg-hover-dimmer relative inline-flex size-4 items-center justify-center rounded-full before:absolute before:-inset-[4.5px] before:content-['']"
               aria-label={m.flow_list_input_remove({ value })}
               onclick={() => removeAt(index)}
             >
