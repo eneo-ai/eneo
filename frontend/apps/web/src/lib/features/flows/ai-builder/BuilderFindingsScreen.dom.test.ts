@@ -5,6 +5,7 @@ import { m } from "$lib/paraglide/messages";
 import { withLocale } from "../testLocale";
 import type { AIBuilderFlowReviewPacket } from "./protocol";
 import BuilderFindingsScreen from "./BuilderFindingsScreen.svelte";
+import { MAX_FINDINGS_PER_CHANGE } from "./flowReviewFindings";
 
 /** Reading and deciding are separate now: tick the rows, then press the one
  *  action the section shows. */
@@ -146,6 +147,49 @@ describe("BuilderFindingsScreen", () => {
     await fireEvent.click(screen.getByTestId("prepare-selected"));
     expect(onprepare.mock.calls[1][0].reviewContext.finding_ids).toEqual(["bbbbbbbbbbbbbbbb"]);
   });
+
+  it.each([MAX_FINDINGS_PER_CHANGE, MAX_FINDINGS_PER_CHANGE + 1])(
+    "never sends more findings than the server accepts, with %i on screen",
+    async (total) => {
+      // `finding_ids` is declared max_length=MAX_REVIEW_FINDINGS_PER_TURN on
+      // the server, and the fact generator can exceed it on a long flow, so
+      // a selection that ignored the bound would build a rejected request.
+      const onprepare = vi.fn();
+      const packet = makePacket();
+      render(BuilderFindingsScreen, {
+        review: {
+          status: "ready",
+          packet: {
+            ...packet,
+            facts: Array.from({ length: total }, (_, i) => ({
+              kind: "output_not_observed_consumed" as const,
+              finding_id: `finding-${String(i).padStart(10, "0")}`,
+              step_id: STEP_1,
+              step_order: 1,
+              run_count: 3
+            }))
+          }
+        },
+        onprepare,
+        onclose: vi.fn(),
+        onretry: vi.fn()
+      });
+
+      await fireEvent.click(screen.getByTestId("findings-select-all"));
+      await fireEvent.click(screen.getByTestId("prepare-selected"));
+      const sent = onprepare.mock.calls[0][0].reviewContext.finding_ids;
+      expect(sent).toHaveLength(MAX_FINDINGS_PER_CHANGE);
+
+      // Over the bound, the remaining rows stop being tickable and the screen
+      // says why rather than letting someone build a request that fails.
+      const boxes = screen
+        .getByTestId("findings-list")
+        .querySelectorAll<HTMLButtonElement>('[role="checkbox"]');
+      const unticked = [...boxes].filter((b) => b.getAttribute("aria-checked") !== "true");
+      expect(unticked.every((b) => b.disabled)).toBe(true);
+      expect(unticked).toHaveLength(total - MAX_FINDINGS_PER_CHANGE);
+    }
+  );
 
   it("explains withheld token measurements in the completeness footer", () => {
     const packet = makePacket();

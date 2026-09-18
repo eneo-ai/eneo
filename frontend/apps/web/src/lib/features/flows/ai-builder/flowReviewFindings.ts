@@ -2,6 +2,18 @@ import { m } from "$lib/paraglide/messages";
 import type { AIBuilderFlowReviewFact, AIBuilderFlowReviewStep } from "./protocol";
 import { getFlowRuntimeErrorMessageByCode } from "$lib/features/flows/flowRuntimeErrorMapping";
 
+/**
+ * How many findings one change request may carry.
+ *
+ * The server enforces this: `FlowReviewReference.finding_ids` is declared
+ * `max_length=MAX_REVIEW_FINDINGS_PER_TURN` in
+ * `backend/src/eneo/flows/ai_builder/ai_builder_flow_review.py`, where the
+ * constant is 10. The fact generator can produce more than that on a long
+ * flow, so a "select all" that ignored the bound would build a request the
+ * server rejects. Keep this in step with the backend constant.
+ */
+export const MAX_FINDINGS_PER_CHANGE = 10;
+
 /** The user-facing reading of one fact: a short title and the evidence line. */
 export function describeReviewFact(
   fact: AIBuilderFlowReviewFact,

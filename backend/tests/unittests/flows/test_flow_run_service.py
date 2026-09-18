@@ -1047,6 +1047,11 @@ def test_create_run_idempotency_fingerprint_shape_is_stable(user):
         ],
     )
 
+    # This digest changed when run_label joined the fingerprint, so a request
+    # accepted before that upgrade and retried after it conflicts instead of
+    # replaying its own run. Pre-release with zero users, that is the agreed
+    # trade; pin the digest so a later change to it is a decision, not a
+    # side effect.
     assert fingerprint == (
         "70966a42e154972866cacdf7aa3aa34203ef2b9f9dd960188dbb9c933f416db8"
     )
@@ -4908,9 +4913,13 @@ def test_create_run_idempotency_fingerprint_separates_purposes(user):
     assert production != test
     assert service._build_idempotency_fingerprint(**inputs) == production
 
-    # The unchanged pre-purpose digest is pinned by
-    # test_create_run_idempotency_fingerprint_shape_is_stable: production
-    # identity did not move, so a cross-upgrade retry still replays its run.
+    # Purposes stay distinct, and the default is production. Note that
+    # production identity did move when run_label joined the fingerprint:
+    # test_create_run_idempotency_fingerprint_shape_is_stable pins the new
+    # digest. A request accepted before that upgrade and retried after it
+    # conflicts rather than replaying. That is acceptable only under the
+    # pre-release, zero-users assumption this slice was specified with; it
+    # would need a compatibility branch to deploy over live consumers.
 
 
 @pytest.fixture

@@ -19,6 +19,7 @@
     AIBuilderReviewReference
   } from "./protocol";
   import {
+    MAX_FINDINGS_PER_CHANGE,
     describeReviewFact,
     dismissedFindingIds,
     rememberDismissedFinding
@@ -102,6 +103,10 @@
   const pickedSuggestions = new SvelteSet<number>();
 
   const selectedFindings = $derived(findings.filter((f) => pickedFindings.has(f.finding_id)));
+  /* One change request carries at most MAX_FINDINGS_PER_CHANGE findings; the
+     server rejects more. Stop the selection at the bound rather than letting
+     someone tick fifteen and meet a validation error they cannot act on. */
+  const findingsAtLimit = $derived(selectedFindings.length >= MAX_FINDINGS_PER_CHANGE);
 
   function toggle<T>(set: SvelteSet<T>, key: T, on: boolean) {
     if (on) set.add(key);
@@ -280,13 +285,20 @@
                 class="text-accent-stronger -my-1 h-auto px-0 py-1 text-[0.8125rem] font-semibold"
                 data-testid="findings-select-all"
                 onclick={() => {
-                  if (pickedFindings.size === findings.length) pickedFindings.clear();
-                  else for (const fact of findings) pickedFindings.add(fact.finding_id);
+                  if (pickedFindings.size > 0) pickedFindings.clear();
+                  else
+                    for (const fact of findings.slice(0, MAX_FINDINGS_PER_CHANGE))
+                      pickedFindings.add(fact.finding_id);
                 }}
               >
-                {pickedFindings.size === findings.length
+                {pickedFindings.size > 0
                   ? m.ai_builder_review_select_none()
-                  : m.ai_builder_review_select_all({ count: String(findings.length) })}
+                  : findings.length > MAX_FINDINGS_PER_CHANGE
+                    ? m.ai_builder_review_select_max({
+                        max: String(MAX_FINDINGS_PER_CHANGE),
+                        total: String(findings.length)
+                      })
+                    : m.ai_builder_review_select_all({ count: String(findings.length) })}
               </Button>
             {/if}
           </div>
@@ -326,8 +338,9 @@
                   <Checkbox
                     class="mt-1 shrink-0"
                     checked={picked}
-                    {disabled}
+                    disabled={disabled || (findingsAtLimit && !picked)}
                     aria-label={described.title}
+                    aria-describedby={findingsAtLimit && !picked ? "review-facts-limit" : undefined}
                     onCheckedChange={(on) => toggle(pickedFindings, fact.finding_id, on === true)}
                   />
                   <div class="min-w-0 flex-1">
@@ -352,10 +365,12 @@
                 </li>
               {/each}
             </ul>
-            <!-- Preparing a change from a counted fact sends nothing to a
-                 model, so there is nothing to disclose up front: the line
-                 beside the button is reassurance, and it belongs where the
-                 button is. One grey line in either state. -->
+            <!-- This does open a turn with the planner: the callback sends
+                 the message and the finding ids straight to `sendMessage`.
+                 What travels is the findings you ticked, named by step and
+                 count, and not the run excerpts the suggestions path sends,
+                 which is why this line is shorter than that one rather than
+                 absent. One grey line in either state. -->
             {#if selectedFindings.length > 0}
               <div class="selection-bar mt-3.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
                 <Button
@@ -375,6 +390,17 @@
                 <span class="text-secondary text-[0.8125rem]">
                   {m.ai_builder_review_prepare_hint()}
                 </span>
+                {#if findingsAtLimit && findings.length > MAX_FINDINGS_PER_CHANGE}
+                  <p
+                    id="review-facts-limit"
+                    class="text-secondary basis-full text-[0.8125rem] text-pretty"
+                    role="status"
+                  >
+                    {m.ai_builder_review_select_limit_reached({
+                      max: String(MAX_FINDINGS_PER_CHANGE)
+                    })}
+                  </p>
+                {/if}
               </div>
             {:else}
               <p class="text-secondary mt-3.5 text-[0.8125rem] text-pretty">
@@ -583,7 +609,7 @@
                           onOpenChange={(open) => (openSources[index] = open)}
                         >
                           <Collapsible.Trigger
-                            class="text-secondary hover:text-primary focus-visible:ring-accent-stronger mt-1.5 rounded-sm text-[0.8125rem] font-semibold underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                            class="text-secondary hover:text-primary focus-visible:ring-accent-stronger mt-1.5 -mb-1 inline-flex min-h-[24px] items-center rounded-sm text-[0.8125rem] font-semibold underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
                           >
                             {openSources[index]
                               ? m.ai_builder_review_suggestion_sources_hide()
@@ -701,7 +727,7 @@
               {#if hiddenCount > 0}
                 <Button
                   variant="link"
-                  class="text-accent-stronger mt-1 h-auto p-0 text-xs font-semibold"
+                  class="text-accent-stronger mt-1 -mb-1 h-auto px-0 py-1 text-xs font-semibold"
                   onclick={showHidden}
                 >
                   {m.ai_builder_review_show_hidden({ count: String(hiddenCount) })}
