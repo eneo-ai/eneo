@@ -226,6 +226,8 @@ class SessionRepository:
         assistant_id: UUID | None = None,
         user_id: UUID | None = None,
         api_key_id: UUID | None = None,
+        widget_id: UUID | None = None,
+        visitor_id: UUID | None = None,
         group_chat_id: UUID | None = None,
         name_filter: str | None = None,
         start_date: datetime | None = None,
@@ -249,6 +251,10 @@ class SessionRepository:
             query = query.where(Sessions.user_id == user_id)
         if api_key_id is not None:
             query = query.where(Sessions.api_key_id == api_key_id)
+        if widget_id is not None:
+            query = query.where(
+                Sessions.widget_id == widget_id, Sessions.visitor_id == visitor_id
+            )
 
         if name_filter is not None:
             query = query.where(Sessions.name.ilike(f"%{name_filter}%"))
@@ -267,6 +273,8 @@ class SessionRepository:
         assistant_id: UUID,
         user_id: UUID | None = None,
         api_key_id: UUID | None = None,
+        widget_id: UUID | None = None,
+        visitor_id: UUID | None = None,
         limit: int | None = None,
         cursor: datetime | None = None,
         previous: bool = False,
@@ -286,6 +294,10 @@ class SessionRepository:
             query = query.where(Sessions.user_id == user_id)
         if api_key_id is not None:
             query = query.where(Sessions.api_key_id == api_key_id)
+        if widget_id is not None:
+            query = query.where(
+                Sessions.widget_id == widget_id, Sessions.visitor_id == visitor_id
+            )
 
         if normalized_name_filter is not None:
             query = query.where(Sessions.name.ilike(f"%{normalized_name_filter}%"))
@@ -300,6 +312,8 @@ class SessionRepository:
             assistant_id=assistant_id,
             user_id=user_id,
             api_key_id=api_key_id,
+            widget_id=widget_id,
+            visitor_id=visitor_id,
             name_filter=normalized_name_filter,
             start_date=start_date,
             end_date=end_date,
@@ -354,6 +368,8 @@ class SessionRepository:
         assistant_id: UUID,
         user_id: UUID | None = None,
         api_key_id: UUID | None = None,
+        widget_id: UUID | None = None,
+        visitor_id: UUID | None = None,
         limit: int | None = None,
         cursor: datetime | None = None,
         previous: bool = False,
@@ -375,6 +391,10 @@ class SessionRepository:
             query = query.where(Sessions.user_id == user_id)
         if api_key_id is not None:
             query = query.where(Sessions.api_key_id == api_key_id)
+        if widget_id is not None:
+            query = query.where(
+                Sessions.widget_id == widget_id, Sessions.visitor_id == visitor_id
+            )
 
         if normalized_name_filter is not None:
             query = query.where(Sessions.name.ilike(f"%{normalized_name_filter}%"))
@@ -389,6 +409,8 @@ class SessionRepository:
             assistant_id=assistant_id,
             user_id=user_id,
             api_key_id=api_key_id,
+            widget_id=widget_id,
+            visitor_id=visitor_id,
             name_filter=normalized_name_filter,
             start_date=start_date,
             end_date=end_date,
@@ -427,6 +449,8 @@ class SessionRepository:
         group_chat_id: UUID,
         user_id: UUID | None = None,
         api_key_id: UUID | None = None,
+        widget_id: UUID | None = None,
+        visitor_id: UUID | None = None,
         limit: int | None = None,
         cursor: datetime | None = None,
         previous: bool = False,
@@ -446,6 +470,10 @@ class SessionRepository:
             query = query.where(Sessions.user_id == user_id)
         if api_key_id is not None:
             query = query.where(Sessions.api_key_id == api_key_id)
+        if widget_id is not None:
+            query = query.where(
+                Sessions.widget_id == widget_id, Sessions.visitor_id == visitor_id
+            )
 
         if normalized_name_filter is not None:
             query = query.where(Sessions.name.ilike(f"%{normalized_name_filter}%"))
@@ -460,6 +488,8 @@ class SessionRepository:
             group_chat_id=group_chat_id,
             user_id=user_id,
             api_key_id=api_key_id,
+            widget_id=widget_id,
+            visitor_id=visitor_id,
             name_filter=normalized_name_filter,
             start_date=start_date,
             end_date=end_date,
@@ -500,6 +530,8 @@ class SessionRepository:
         group_chat_id: UUID,
         user_id: UUID | None = None,
         api_key_id: UUID | None = None,
+        widget_id: UUID | None = None,
+        visitor_id: UUID | None = None,
         limit: int | None = None,
         cursor: datetime | None = None,
         previous: bool = False,
@@ -521,6 +553,10 @@ class SessionRepository:
             query = query.where(Sessions.user_id == user_id)
         if api_key_id is not None:
             query = query.where(Sessions.api_key_id == api_key_id)
+        if widget_id is not None:
+            query = query.where(
+                Sessions.widget_id == widget_id, Sessions.visitor_id == visitor_id
+            )
 
         if normalized_name_filter is not None:
             query = query.where(Sessions.name.ilike(f"%{normalized_name_filter}%"))
@@ -535,6 +571,8 @@ class SessionRepository:
             group_chat_id=group_chat_id,
             user_id=user_id,
             api_key_id=api_key_id,
+            widget_id=widget_id,
+            visitor_id=visitor_id,
             name_filter=normalized_name_filter,
             start_date=start_date,
             end_date=end_date,

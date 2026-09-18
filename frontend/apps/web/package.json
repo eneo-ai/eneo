@@ -20,7 +20,7 @@
     "test:vite": "node --test plugins/*.test.js",
     "pretest:unit:watch": "bun run test:browsers",
     "test:unit:watch": "vitest",
-    "pretest:e2e": "bun run test:browsers",
+    "pretest:e2e": "bun run test:browsers && bun run --cwd ../../packages/widget-loader build",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:report": "playwright show-report",
@@ -31,10 +31,11 @@
     "i18n:compile": "paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.10.2",
+    "@eneo/eneo-js": "workspace:*",
+    "@eneo/eslint-plugin": "workspace:*",
     "@eslint/js": "^9.39.4",
     "@internationalized/date": "^3.12.0",
-    "@eneo/eslint-plugin": "workspace:*",
-    "@eneo/eneo-js": "workspace:*",
     "@lucide/svelte": "^1.22.0",
     "@melt-ui/svelte": "^0.86.5",
     "@playwright/test": "1.61.1",
@@ -76,6 +77,7 @@
   "dependencies": {
     "@eneo/ui": "workspace:*",
     "@inlang/paraglide-js": "^2.20.2",
+    "altcha": "^3.2.2",
     "dompurify": "^3.4.11",
     "lucide-svelte": "^0.544.0",
     "marked": "^15.0.8",

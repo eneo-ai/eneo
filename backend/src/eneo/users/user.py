@@ -22,6 +22,7 @@ from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleInDB, RolePublic
 from eneo.tenants.tenant import TenantInDB
 from eneo.users.password import LOCAL_PASSWORD_POLICY, LocalPasswordPolicy
+from eneo.widgets.domain.visitor import WidgetVisitorContext
 
 
 class UserState(str, Enum):
@@ -291,6 +292,9 @@ class UserInDB(UserInDBBase):
     user_groups: list[UserGroupInDBRead] = []
     tenant: TenantInDB
     active_api_key: Optional[ApiKeyV2InDB] = None
+    # Set only on the synthetic visitor user built for the anonymous widget
+    # surface; never persisted and never present on a real user.
+    active_widget: Optional[WidgetVisitorContext] = None
     roles: list[RoleInDB] = []
     quota_used: int = 0
     deleted_at: Optional[datetime] = Field(

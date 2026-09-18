@@ -1,0 +1,169 @@
+# Embed an Assistant on Your Website
+
+import { Callout } from "nextra/components";
+
+A web widget puts a published assistant on an external website, for example a municipality's public site, as a chat bubble in the corner of every page. Visitors are anonymous: no Eneo account, no cookies, and nothing is stored until they send their first message.
+
+This guide covers the editor's side (creating and publishing a widget), the operator's side (policy, templates, security and data protection) and what to publish in your accessibility statement.
+
+## How it works
+
+- Your site includes one small script (the _loader_, about 4 kB) from your Eneo installation. It renders a launcher button and, when opened, an `iframe` with Eneo's chat page.
+- The chat runs entirely on the Eneo origin. The host site never sees the conversation, and the browser only allows the widget on the sites you have listed (`Content-Security-Policy: frame-ancestors`).
+- Before the first message the visitor's browser solves an invisible proof of work (ALTCHA, self-hosted, no third party) and receives a short-lived visitor token. Rate limits per visitor and per IP address, a maximum question length and a daily token budget per widget limit usage.
+- Tools, MCP servers and file uploads are always off for visitors. The assistant answers from its instructions and knowledge only.
+
+## For editors: publish a widget
+
+You need the **widgets** permission and edit rights on the assistant.
+
+1. Publish the assistant in its space (Assistant → **Publishing**).
+2. On the same page, open **Web widget**. Create the widget, optionally from one of the organisation's templates.
+3. Configure it. Every change is saved automatically. The page is organised in the order you work:
+   - **Content**: name and language, then the texts visitors read: title, welcome message, suggested questions (added one by one, at most five), the required description under the title (by default an AI disclosure) and a footer note with an optional link (a data-handling reminder, a "powered by" line, whatever fits).
+   - **Appearance**: start from one of the organisation's templates if you like, then the primary colour (a contrast check tells you when it is too light), an optional header colour and logo (Eneo's logo marks the spot until you set your own), colour scheme, position and corner radius. Text on your colours is chosen automatically for contrast. Colours chosen for a light page rarely work on a dark one, so **Dark mode** can have its own primary and header colour (checked against the dark panel); leave them empty and dark mode keeps the light-mode colours. The chat button on your site takes the widget's colour too. The live preview follows the theme you are using in Eneo unless the widget pins light or dark.
+   - **Rules**: the websites that may show the widget (one origin per line, for example `https://www.kommun.se` or `https://*.kommun.se`; at least one is required), limits, privacy (retention in days; `0` stores nothing after the answer, so the chat answers one question at a time without follow-ups or feedback) and protection.
+   - **Publish**: the activation checklist, the install snippet, "Test in Eneo" and usage.
+4. Check the **Preview** (the real chat page) and, if you like, **Test in Eneo**, which mounts the real widget on the admin page so you can try the button, keyboard navigation and the chat before anything is installed on your site.
+5. When the status bar shows no blockers, a tenant admin activates the widget. Until then the widget is a draft and shows nothing on your site.
+6. Copy the **install snippet** and place it once on the website, preferably just before `</body>`:
+
+```html
+<script
+  async
+  src="https://eneo.example.se/widget/v1/eneo.js"
+  data-widget-id="wgt_…"
+></script>
+```
+
+The floating `v1` address follows Eneo releases. Sites that require Subresource Integrity can copy the pinned variant instead; it must be replaced after each Eneo release.
+
+If another editor changes the widget while you edit, autosave stops and keeps your unsaved values visible. Copy anything you want to keep, then choose **Reload and discard unsaved changes** before editing the latest version. A stale save cannot undo a pause or archive.
+
+**Pause** stops the widget immediately for every visitor; any editor can pause. **Archive** (admins) is permanent.
+
+### Optional attributes and API
+
+| Attribute                              | Effect                                                                              |
+| -------------------------------------- | ----------------------------------------------------------------------------------- |
+| `data-lang="sv"` / `"en"`              | Fixed interface language (default: the page's)                                      |
+| `data-position="bottom-left"`          | Launcher on the left (the copied snippet carries the position chosen in the editor) |
+| `data-color-scheme="light"` / `"dark"` | Fixed colour scheme (default: follows the site)                                     |
+| `data-launcher="none"`                 | No button; the site opens the chat itself                                           |
+| `data-auto-open="true"`                | Open the panel on page load                                                         |
+
+The loader also exposes `window.Eneo`, which queues calls made before the script has loaded:
+
+```html
+<script>
+  window.Eneo =
+    window.Eneo ||
+    function () {
+      (window.Eneo.q = window.Eneo.q || []).push(arguments);
+    };
+  Eneo("on", "conversation_started", function () {
+    /* analytics */
+  });
+</script>
+<button onclick="Eneo('open')">Ask us</button>
+```
+
+Commands: `open`, `close`, `toggle`, `on(event, listener)`, `off(event, listener)`. The loader also accepts `setContext({ page_url, page_title })`, but the chat does not use page context yet, so nothing about the page is sent.
+
+A stand-alone version of the chat is available at `/embed/<widget id>?mode=full` for sites that cannot run scripts.
+
+## For the website team
+
+The editor in Eneo hands you the install snippet; this is what you need to know to put it on the site.
+
+1. **Where to paste it.** Once per page template, ideally just before `</body>`. In SiteVision and Optimizely (Episerver) that is the site template's script slot; in WordPress a footer script block or a theme's `footer.php`; through Google Tag Manager a Custom HTML tag fired on all pages. The script is `async`, so it never blocks rendering.
+2. **The address must match exactly.** The editor lists the sites that may show the widget under _Rules → Allowed websites_. Each entry is a full origin: scheme and host, for example `https://www.kommun.se`. `https://kommun.se` and `https://www.kommun.se` are two different origins, and `http` is not `https`. A wildcard covers subdomains: `https://*.kommun.se`. If the origin is missing, the button appears but the panel stays empty, because the browser refuses to frame the chat.
+3. **Content Security Policy.** If the site sends a CSP, allow the Eneo origin in `script-src` (the loader) and `frame-src` (the chat panel), for example `script-src 'self' https://eneo.kommun.se; frame-src https://eneo.kommun.se`. Nothing else is needed: the chat itself runs inside the frame on Eneo's origin.
+4. **Cookies and consent.** The widget sets no cookies on your site. The chat panel keeps a pseudonymous visitor id and the current conversation in its own frame storage, which browsers keep separate per site. It does not need to be gated behind a cookie banner, but mention it in the site's privacy information; the _Personal data and cookies_ section below has the wording.
+5. **Locked version (SRI).** If your policy requires Subresource Integrity, copy the pinned snippet with the `integrity` attribute instead of the floating one. It stops loading after the next Eneo release until you paste the new snippet, so prefer the floating `v1` address unless SRI is mandatory.
+6. **Test before go-live.** Open a page with the snippet on a staging host that is on the allowed list, click the launcher, send a question, close with Escape and check that focus returns to the button. The editor can also use _Test in Eneo_ to try the real widget before your site has it.
+7. **No JavaScript on the page?** Link to the stand-alone chat instead: `https://<eneo>/embed/<widget id>?mode=full`. It is the same chat as a full page and works from intranets and content that cannot run scripts.
+
+## For operators: policy, templates and security
+
+### Tenant policy
+
+Under **Admin → Web widgets** a tenant admin sees every widget in the organisation (where it lives, whether it is active, questions and tokens over the last 7 and 30 days, blocked requests, today's budget) and sets the ceilings every widget must stay within: the highest daily token budget, the allowed retention range and whether widgets may run without bot protection (off by default). Editors see policy violations as activation blockers. There is no cap on the number of widgets; each activation is still an admin decision and the overview keeps the public surface visible.
+
+### Templates
+
+Templates hold the organisation's house style: texts, colours, logo, shape and language. Admins create them under **Admin → Web widgets → Templates** and preview them in light and dark mode; at most one template is the default that editors get preselected (switch it off and nothing is preselected). Applying a template copies its values onto the widget, so later template edits never change a live widget. Suggested questions are not part of a template: they depend on the assistant and are set per widget.
+
+### Security properties
+
+- **Who may frame the chat** is enforced by the visitor's browser from the widget's allowed origins. A site that is not listed gets a blank frame.
+- **Visitor tokens** are JWTs bound to one widget and one pseudonymous visitor id, valid for 15 minutes and rotated silently. Pausing the widget or changing its origins, limits or privacy settings invalidates every outstanding token.
+- **ALTCHA** is a self-hosted proof of work; no CAPTCHA provider, no cookies, no fingerprinting. Widgets without it require the tenant policy to allow it.
+- **Limits fail closed by default.** Redis protects request rates and challenge replays. The daily token budget and in-flight reservations are stored in PostgreSQL, so losing Redis data does not reset that budget.
+- **Budget accounting** reserves tokens before a turn and replaces the reservation with that answer’s measured usage exactly once. A failure before streaming releases the reservation. If a stream or process stops with uncertain usage, its reservation remains charged for that day. The reservation size is an admission estimate, not a hard maximum for a model response; actual usage can exceed it.
+- **The loader** is served from your Eneo origin with `nosniff`, open CORS (required for `integrity`) and an ETag; the pinned variant is immutable.
+- The embed page sends `Referrer-Policy: strict-origin-when-cross-origin`, a restrictive `Permissions-Policy` and a CSP without `unsafe-inline` scripts.
+
+### Personal data and cookies
+
+The widget sets **no cookies**. The visitor's browser keeps a small record in the iframe's own storage (a random visitor id issued by Eneo together with a key that proves it, the current token and the id of the last conversation) so the conversation survives a page reload on the same site. Nothing is written before the first message, and the storage is partitioned per site by the browser.
+
+Suggested sentence for your cookie or privacy page: _"The chat assistant uses no cookies. Your browser stores a random identifier and the current conversation locally so you can continue it while browsing our site. Conversations are stored by [organisation] for [N] days."_
+
+### Conversation retention
+
+The worker removes expired conversations daily at 03:30 UTC, including their questions, source references and question-owned model logs. Knowledge sources and audit records have their own lifecycles. With retention set to `0`, nothing is committed while the answer is produced and the conversation is deleted at the end of the turn, including when budget settlement fails; the visitor is offered a new question instead of a follow-up or feedback. Changing an existing widget to `0` also makes its earlier conversations eligible for the next scheduled purge.
+
+Daily usage totals and budget receipts contain no conversation text or visitor identifier. Receipts expire after seven days; daily totals remain available for statistics.
+
+### DPIA checklist
+
+Before activating a widget on a public site, confirm that:
+
+- the description under the title says that visitors are talking to an AI assistant, and the footer links to your privacy policy;
+- the retention period matches your records schedule (`0` if conversations must not be kept);
+- free-text feedback is only stored if you have a purpose for it (off by default);
+- the assistant's instructions tell visitors not to enter personal data and how to reach a human;
+- the assistant's knowledge contains no personal data or internal material;
+- the daily token budget reflects the cost you accept, and the usage view is reviewed regularly;
+- audit logging is enabled: widget creation, changes, activation, pausing, archiving and budget exhaustion are logged.
+
+## Accessibility
+
+The widget is built for WCAG 2.1 AA: the launcher is a real button with an accessible name and a visible focus ring, the panel is a labelled `iframe`, opening moves focus into the chat, `Escape` closes it and returns focus, answers are announced to screen readers, everything works with the keyboard, colours meet contrast requirements and the panel becomes full-screen on small screens. Editors get a contrast check on the colour they choose.
+
+### Accessibility statement template
+
+Add a section like this to the website's accessibility statement (the template is available in Swedish and English; adapt the bracketed parts):
+
+<details>
+<summary>Svenska</summary>
+
+**Chattassistent**
+
+Webbplatsen innehåller en chattassistent som drivs av [organisationens namn]s AI-plattform. Chatten öppnas med en knapp som går att nå med tangentbord och skärmläsare. Den kan stängas med Escape-tangenten, och fokus återvänder då till knappen. Svaren läses upp av skärmläsare när de är klara. Chatten följer webbläsarens inställningar för ljust och mörkt läge och för minskad rörelse, och den fyller hela skärmen på små skärmar.
+
+Kända begränsningar: svaren skapas av en AI-modell och kan vara felaktiga. Svar kan innehålla länkar till källor som öppnas i en ny flik.
+
+Om du inte kan använda chatten kan du kontakta oss på [alternativ kontaktväg]. Rapportera brister i tillgängligheten till [kontaktuppgift].
+
+</details>
+
+<details>
+<summary>English</summary>
+
+**Chat assistant**
+
+This website includes a chat assistant powered by [organisation]'s AI platform. The chat opens from a button that can be reached with a keyboard and screen readers. It can be closed with the Escape key, after which focus returns to the button. Answers are announced by screen readers when complete. The chat follows the browser's settings for light and dark mode and for reduced motion, and it fills the whole screen on small displays.
+
+Known limitations: answers are generated by an AI model and may be incorrect. Answers may contain links to sources that open in a new tab.
+
+If you cannot use the chat, contact us at [alternative contact]. Report accessibility problems to [contact details].
+
+</details>
+
+<Callout type="info">
+  Design record: `docs/adr/embeddable-widgets/` in the repository documents the
+  architecture, the security and privacy decisions and the deviations made
+  during implementation.
+</Callout>

@@ -2827,6 +2827,7 @@ class AssistantService:
         require_tool_approval: bool = False,
         disabled_mcp_server_ids: list["UUID"] | None = None,
         disabled_capabilities: list[CapabilityPurpose] | None = None,
+        allow_tools: bool = True,
     ):
         # PRD §6 "Critical tests #2": defense-in-depth — never run a Help
         # Assistant via the normal ask path. Both ``POST /assistants/{id}/sessions/``
@@ -2838,6 +2839,8 @@ class AssistantService:
             role_repo=self.org_space_assistant_role_repo,
             history_repo=self.help_assistant_assignment_history_repo,
         )
+        if not allow_tools and tool_assistant_id is not None:
+            raise BadRequestException("Tool assistants are not available here.")
         if tool_assistant_id is not None:
             await assert_not_helper_assistant(
                 assistant_id=tool_assistant_id,
@@ -3058,6 +3061,13 @@ class AssistantService:
                 for server in resolution.capability_servers
             ]
 
+        if not allow_tools:
+            # Anonymous widget visitors: no MCP servers or capabilities, whatever
+            # the assistant or a policy grants. Knowledge retrieval is not a tool
+            # and stays on.
+            mcp_servers_override = []
+            capability_mcp_servers = []
+
         # This message's own uploads have no save-time fit gate and are inlined
         # whole, so reject an upload that can't fit before any session/question
         # row is created — same "fail before persisting" carve-out as governance.
@@ -3185,7 +3195,9 @@ class AssistantService:
         # calling never get a server and fall back to legacy
         # retrieve-and-inject inside Assistant.ask.
         knowledge_mcp_server = None
-        if internal_mcp.knowledge:
+        # No tools means no loopback server either: a widget visitor has no
+        # users row behind the scoped token, so its knowledge is injected.
+        if internal_mcp.knowledge and allow_tools:
             knowledge_mcp_server = await build_knowledge_mcp_server(
                 token=mint_scoped_token(),
                 tenant_id=self.user.tenant_id,

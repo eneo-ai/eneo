@@ -572,6 +572,46 @@ const ACTION_MESSAGES = {
   help_assistant_uninstalled: {
     name: m.audit_action_help_assistant_uninstalled,
     description: m.audit_action_help_assistant_uninstalled_description
+  },
+  widget_created: {
+    name: m.audit_action_widget_created,
+    description: m.audit_action_widget_created_description
+  },
+  widget_updated: {
+    name: m.audit_action_widget_updated,
+    description: m.audit_action_widget_updated_description
+  },
+  widget_activated: {
+    name: m.audit_action_widget_activated,
+    description: m.audit_action_widget_activated_description
+  },
+  widget_paused: {
+    name: m.audit_action_widget_paused,
+    description: m.audit_action_widget_paused_description
+  },
+  widget_archived: {
+    name: m.audit_action_widget_archived,
+    description: m.audit_action_widget_archived_description
+  },
+  widget_policy_updated: {
+    name: m.audit_action_widget_policy_updated,
+    description: m.audit_action_widget_policy_updated_description
+  },
+  widget_budget_exhausted: {
+    name: m.audit_action_widget_budget_exhausted,
+    description: m.audit_action_widget_budget_exhausted_description
+  },
+  widget_template_created: {
+    name: m.audit_action_widget_template_created,
+    description: m.audit_action_widget_template_created_description
+  },
+  widget_template_updated: {
+    name: m.audit_action_widget_template_updated,
+    description: m.audit_action_widget_template_updated_description
+  },
+  widget_template_deleted: {
+    name: m.audit_action_widget_template_deleted,
+    description: m.audit_action_widget_template_deleted_description
   }
 } satisfies Record<ActionType, { name: MessageFn; description: MessageFn }>;
 

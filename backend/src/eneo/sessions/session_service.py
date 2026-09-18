@@ -199,30 +199,58 @@ class SessionService:
         async with session.begin():
             yield
 
-    def _principal_columns(self) -> tuple[UUID | None, UUID | None]:
-        """Return (user_id, api_key_id) for the current authenticated principal.
+    def _never_persist(self) -> bool:
+        widget = getattr(self.user, "active_widget", None)
+        return widget is not None and widget.never_persist
+
+    @asynccontextmanager
+    async def _placeholder_transaction(self) -> AsyncGenerator[AsyncSession]:
+        """Where a new conversation or question placeholder is written.
+
+        Normally its own committed transaction, so the user's message survives
+        a completion failure. A zero-retention widget visitor must leave no
+        content behind on any exit, so its placeholders stay in the request
+        transaction: rolled back with a failure, deleted after the answer.
+        """
+        if self._never_persist():
+            async with self._write_transaction():
+                yield self.session_repo.session
+            return
+        async with sessionmanager.session() as session, session.begin():
+            yield session
+
+    def _principal_columns(
+        self,
+    ) -> tuple[UUID | None, UUID | None, UUID | None, UUID | None]:
+        """Return (user_id, api_key_id, widget_id, visitor_id) for the current
+        authenticated principal.
 
         Service keys resolve to a synthetic UserInDB whose id is not in the
-        users table, so we cannot persist self.user.id as sessions.user_id.
-        Instead we record the API key id; the resolver-supplied UserInDB
-        carries it on .active_api_key.
+        users table, so we cannot persist self.user.id as sessions.user_id;
+        we record the API key id instead. Widget visitors are likewise
+        synthetic and are recorded as widget + visitor id.
 
-        Exactly one of the returned values is non-None.
+        Exactly one principal (user, key, or widget+visitor) is non-None.
         """
+        widget = getattr(self.user, "active_widget", None)
+        if widget is not None:
+            return None, None, widget.widget_id, widget.visitor_id
         if is_service_api_key(self.user):
             key = self.user.active_api_key
             assert key is not None  # guaranteed by is_service_api_key
-            return None, key.id
-        return self.user.id, None
+            return None, key.id, None, None
+        return self.user.id, None, None, None
 
     def _is_owner(self, session: SessionInDB) -> bool:
         """Match the session's principal against the current request's principal.
 
-        Both branches require a non-None match; we never treat NULL == NULL
+        Every branch requires a non-None match; we never treat NULL == NULL
         as a match (defends against the synthetic-user/no-user trap where two
         unrelated NULL fields would otherwise compare equal).
         """
-        user_id, api_key_id = self._principal_columns()
+        user_id, api_key_id, widget_id, visitor_id = self._principal_columns()
+        if widget_id is not None:
+            return session.widget_id == widget_id and session.visitor_id == visitor_id
         if user_id is not None:
             return session.user_id == user_id
         if api_key_id is not None:
@@ -292,11 +320,13 @@ class SessionService:
         previous: bool = False,
         name_filter: str | None = None,
     ) -> tuple[list[SessionInDB], int]:
-        user_id, api_key_id = self._principal_columns()
+        user_id, api_key_id, widget_id, visitor_id = self._principal_columns()
         return await self.session_repo.get_by_assistant(
             assistant_id=assistant_id,
             user_id=user_id,
             api_key_id=api_key_id,
+            widget_id=widget_id,
+            visitor_id=visitor_id,
             limit=limit,
             cursor=cursor,
             previous=previous,
@@ -337,7 +367,7 @@ class SessionService:
             assistant_id=assistant_id,
             group_chat_id=group_chat_id,
         )
-        async with sessionmanager.session() as session, session.begin():
+        async with self._placeholder_transaction() as session:
             return await self._session_repository(session).add(session_add)
 
     def _build_session_add(
@@ -347,11 +377,13 @@ class SessionService:
         assistant_id: UUID | None,
         group_chat_id: UUID | None,
     ) -> SessionAdd:
-        user_id, api_key_id = self._principal_columns()
+        user_id, api_key_id, widget_id, visitor_id = self._principal_columns()
         return SessionAdd(
             name=name,
             user_id=user_id,
             api_key_id=api_key_id,
+            widget_id=widget_id,
+            visitor_id=visitor_id,
             assistant_id=assistant_id,
             group_chat_id=group_chat_id,
         )
@@ -419,7 +451,7 @@ class SessionService:
             assistant_id=session_assistant_id,
             group_chat_id=group_chat_id,
         )
-        async with sessionmanager.session() as db_session, db_session.begin():
+        async with self._placeholder_transaction() as db_session:
             session_record = await self._session_repository(db_session).add(session_add)
             question_add = self._build_question_placeholder(
                 question=question,
@@ -470,7 +502,7 @@ class SessionService:
             skill_activation=skill_activation,
         )
 
-        async with sessionmanager.session() as db_session, db_session.begin():
+        async with self._placeholder_transaction() as db_session:
             return await self._insert_question_placeholder(
                 self._question_repository(db_session), question_add, files
             )
@@ -541,11 +573,13 @@ class SessionService:
         previous: bool = False,
         name_filter: str | None = None,
     ) -> tuple[list[SessionInDB], int]:
-        user_id, api_key_id = self._principal_columns()
+        user_id, api_key_id, widget_id, visitor_id = self._principal_columns()
         return await self.session_repo.get_by_group_chat(
             group_chat_id=group_chat_id,
             user_id=user_id,
             api_key_id=api_key_id,
+            widget_id=widget_id,
+            visitor_id=visitor_id,
             limit=limit,
             cursor=cursor,
             previous=previous,

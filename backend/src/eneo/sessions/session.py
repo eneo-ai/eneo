@@ -35,6 +35,9 @@ class SessionAdd(SessionBase):
     # is set per session. The session_service write paths enforce this invariant.
     user_id: Optional[UUID] = None
     api_key_id: Optional[UUID] = None
+    # Widget visitors own sessions by widget + pseudonymous visitor id.
+    widget_id: Optional[UUID] = None
+    visitor_id: Optional[UUID] = None
     assistant_id: Optional[UUID] = None
     group_chat_id: Optional[UUID] = None
 
@@ -46,6 +49,8 @@ class SessionUpdate(SessionBase):
 class SessionInDB(SessionBase, InDB):
     user_id: Optional[UUID] = None
     api_key_id: Optional[UUID] = None
+    widget_id: Optional[UUID] = None
+    visitor_id: Optional[UUID] = None
     feedback_value: Optional[Literal[-1, 1]] = None
     feedback_text: Optional[str] = None
 

@@ -237,7 +237,15 @@ jobs:
       - name: Run integration tests
         # -n 4: public-repo ubuntu-latest runners have 4 vCPUs, and each xdist
         # worker gets its own session-scoped Postgres testcontainer.
-        run: uv run pytest -v -n 4 -m integration tests/integration/
+        # The object-content lock-observation tests get their own invocation:
+        # test_concurrent_reference_failure_precedes_campaign_capacity_snapshot
+        # only passes when its xdist worker has already run
+        # test_backend_failure.py, which the shared scheduling stopped
+        # guaranteeing once other suites grew.
+        run: |
+          uv run pytest -v -n 4 -m integration tests/integration/ \
+            --ignore=tests/integration/object_content
+          uv run pytest -v -n 4 -m integration tests/integration/object_content
         env:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
@@ -359,6 +367,11 @@ jobs:
       - name: Run web unit & component tests
         run: FORCE_COLOR=1 bun run --filter '@eneo/web' test
 
+      # Builds the loader first (its size budget is enforced by the build) and
+      # runs its element tests in the same Chromium.
+      - name: Run widget loader tests
+        run: FORCE_COLOR=1 bun run --filter '@eneo/widget-loader' test
+
       - name: Build frontend
         run: bun run build
         env:
@@ -390,7 +403,9 @@ jobs:
 
       - name: Build workspace dependencies
         working-directory: frontend
-        run: bun run --filter @eneo/ui build
+        run: |
+          bun run --filter @eneo/ui build
+          bun run --filter @eneo/widget-loader build
 
       # Pin to match apps/web's @playwright/test dependency; a bare
       # `bun x playwright` fetches the latest and installs a browser build the

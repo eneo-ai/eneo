@@ -73,6 +73,7 @@ from eneo.users.password import (
     PasswordPolicyViolationError,
     PasswordReuseError,
 )
+from eneo.widgets.domain.exceptions import WidgetPublicError
 
 # Partial unique indexes that guard active model display names, per
 # 20260602_unique_model_display_names. Their names all end in this suffix.
@@ -397,3 +398,15 @@ def add_exception_handlers(app: FastAPI):
         )
 
     app.add_exception_handler(IntegrityError, integrity_error_handler)
+
+    async def widget_public_error_handler(
+        request: Request, exc: Exception
+    ) -> JSONResponse:
+        error = cast(WidgetPublicError, exc)
+        return JSONResponse(
+            status_code=error.status_code,
+            content={"detail": {"code": error.code, "message": error.message}},
+            headers=error.headers,
+        )
+
+    app.add_exception_handler(WidgetPublicError, widget_public_error_handler)

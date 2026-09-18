@@ -177,7 +177,7 @@
   <Page.Header>
     <Page.Title
       title={m.edit_app_template()}
-      parent={{ href: "/admin/templates", title: m.templates() }}
+      parent={{ href: "/admin/templates", title: m.assistant_and_app_templates() }}
     />
 
     <Page.Flex>

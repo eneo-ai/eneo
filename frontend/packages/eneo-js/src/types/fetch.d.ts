@@ -78,6 +78,7 @@ type EneoStreamingEndpoints =
   | "/api/v1/assistants/{id}/sessions/"
   | "/api/v1/analysis/assistants/{assistant_id}/"
   | "/api/v1/conversations/"
+  | "/api/v1/widgets/{public_id}/ask/"
   | "/api/v1/analysis/conversation-insights/";
 
 type EneoStreamFunction = <Endpoint extends EneoStreamingEndpoints>(

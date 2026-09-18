@@ -14,6 +14,7 @@ const meta: MetaRecord = {
   "object-content-storage": "Choose Content Storage",
   "document-processing": "Document Processing",
   "sharepoint-integration": "SharePoint Integration",
+  "embed-widget": "Embed an Assistant (Web Widget)",
   "upgrade-1-7-0": "Upgrading to 1.7.0",
 };
 
