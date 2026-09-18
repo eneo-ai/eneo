@@ -56,15 +56,20 @@
   });
 
   function scopeLabel(): string {
-    if (settings.scope === "organization") return m.flow_run_retention_scope_organization();
-    if (settings.scope === "space") return m.flow_run_retention_scope_space();
-    return m.flow_run_retention_scope_flow();
+    return definiteScopeLabel(settings.scope);
+  }
+
+  // Every template these feed puts the noun after a preposition ("för …",
+  // "från …"), which Swedish renders in the definite form; the bare nouns are
+  // for headings and column titles.
+  function definiteScopeLabel(scope: "organization" | "space" | "flow"): string {
+    if (scope === "organization") return m.flow_run_retention_scope_organization_definite();
+    if (scope === "space") return m.flow_run_retention_scope_space_definite();
+    return m.flow_run_retention_scope_flow_definite();
   }
 
   function sourceLabel(source: "organization" | "space" | "flow"): string {
-    if (source === "organization") return m.flow_run_retention_scope_organization();
-    if (source === "space") return m.flow_run_retention_scope_space();
-    return m.flow_run_retention_scope_flow();
+    return definiteScopeLabel(source);
   }
 
   function choiceLabel(value: PolicyChoice): string {
@@ -120,7 +125,7 @@
   }
 </script>
 
-<Card.Root size="sm" class="mx-4 gap-4 lg:mx-0.5">
+<Card.Root size="sm" class="mx-4 w-auto gap-4 lg:mx-0.5">
   <Card.Header class="gap-1.5">
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div class="min-w-0">

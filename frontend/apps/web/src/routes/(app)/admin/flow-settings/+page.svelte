@@ -29,6 +29,8 @@
   // commit() re-baselines them from server responses after each save.
   const initial = untrack(() => data);
 
+  // Binary multiples: every byte figure on this page is labelled MiB / KiB,
+  // matching what the deployment ceilings are actually expressed in.
   const MB = 1024 * 1024;
   const KB = 1024;
   // A size in MiB means nothing to an administrator choosing a limit for
@@ -217,8 +219,8 @@
 
   function formatStorage(value: number | null | undefined): string {
     if (value == null) return m.flow_knowledge_evidence_default_hint();
-    if (value >= MB) return `${Number((value / MB).toFixed(1))} MB`;
-    return `${Number((value / KB).toFixed(1))} KB`;
+    if (value >= MB) return `${Number((value / MB).toFixed(1))} MiB`;
+    return `${Number((value / KB).toFixed(1))} KiB`;
   }
 
   /** Say what an audio size limit buys, in running time an admin recognises. */
@@ -251,6 +253,16 @@
       total: formatStorage(evidenceStepSize.value)
     })
   );
+
+  // One call is held back for a retry, so the budget buys one file fewer. Saying
+  // that as "N calls cover N-1 files" left the arithmetic to the reader; with a
+  // value entered, state the file count outright.
+  const mappedCallsHint = $derived.by(() => {
+    const base = m.flow_mapped_execution_calls_description();
+    const calls = mappedCalls.value;
+    if (calls == null || calls < 2) return base;
+    return `${base} ${m.flow_mapped_execution_calls_files_hint({ calls, files: calls - 1 })}`;
+  });
 
   const builderMessagePages = $derived(
     Math.max(1, Math.round((builderMaxMessageChars.value ?? 0) / 2500))
@@ -418,7 +430,7 @@
 
 <Page.Root>
   <Page.Header>
-    <Page.Title title={m.flow_settings_title()} description={m.flow_settings_page_description()} />
+    <Page.Title title={m.flow_settings_title()} />
     <Page.Tabbar>
       <Page.TabTrigger tab="retention">{m.flow_settings_tab_retention()}</Page.TabTrigger>
       <Page.TabTrigger tab="uploads">{m.flow_settings_tab_uploads()}</Page.TabTrigger>
@@ -427,6 +439,14 @@
     </Page.Tabbar>
   </Page.Header>
   <Page.Main>
+    <!--
+      The header subtitle is hidden below the wide container breakpoint and, above it,
+      runs under the centred tab strip, so this standing context never reads reliably
+      there. It belongs with the tab panels: it holds for all four of them.
+    -->
+    <p class="text-secondary mx-auto w-full max-w-[1180px] px-6 pt-4 text-sm lg:px-4">
+      {m.flow_settings_page_description()}
+    </p>
     <Page.Tab id="retention">
       <FlowRunRetentionPolicyPanel
         initialPolicy={initial.flowRunRetentionPolicy}
@@ -535,9 +555,9 @@
                 </span>
               </span>
               <ChevronDown
-                class={runtimeLimitsOpen
-                  ? "size-4 shrink-0 rotate-180 transition-transform duration-150 motion-reduce:transition-none"
-                  : "size-4 shrink-0 transition-transform duration-150 motion-reduce:transition-none"}
+                class="text-secondary size-4 shrink-0 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {runtimeLimitsOpen
+                  ? 'rotate-180'
+                  : ''}"
                 aria-hidden="true"
               />
             </Collapsible.Trigger>
@@ -633,7 +653,7 @@
             unit={m.flow_settings_unit_calls_per_step()}
             offStatus={m.flow_mapped_execution_off_status()}
             info={m.flow_mapped_execution_info()}
-            hint={m.flow_mapped_execution_calls_description()}
+            hint={mappedCallsHint}
             field={mappedCalls}
           />
           <div class="flex flex-col gap-2 px-4 xl:ml-[40%] xl:px-1">
@@ -699,9 +719,9 @@
             title={m.flow_knowledge_evidence_passage_bytes_title()}
             description={m.flow_knowledge_evidence_passage_bytes_description()}
             placeholder={m.flow_knowledge_evidence_default_hint()}
-            unit="KB"
+            unit="KiB"
             hint={m.flow_knowledge_evidence_ceiling_bytes_hint({
-              ceiling: `${EVIDENCE_MAX_PASSAGE_BYTES / KB} KB`
+              ceiling: `${EVIDENCE_MAX_PASSAGE_BYTES / KB} KiB`
             })}
             field={evidencePassageSize}
           />
@@ -709,13 +729,13 @@
             title={m.flow_knowledge_evidence_step_bytes_title()}
             description={m.flow_knowledge_evidence_step_bytes_description()}
             placeholder={m.flow_knowledge_evidence_default_hint()}
-            unit="KB"
+            unit="KiB"
             hint={m.flow_knowledge_evidence_ceiling_bytes_hint({
-              ceiling: `${EVIDENCE_MAX_STEP_BYTES / MB} MB`
+              ceiling: `${EVIDENCE_MAX_STEP_BYTES / MB} MiB`
             })}
             field={evidenceStepSize}
           />
-          <Card.Root size="sm" class="mx-4 lg:mx-0.5">
+          <Card.Root size="sm" class="mx-4 w-auto lg:mx-0.5">
             <Card.Header>
               <Card.Title>{m.flow_knowledge_evidence_summary_title()}</Card.Title>
               <Card.Description class="leading-relaxed">{evidenceSummary}</Card.Description>

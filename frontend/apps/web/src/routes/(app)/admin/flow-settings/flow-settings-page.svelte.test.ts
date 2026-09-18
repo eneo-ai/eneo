@@ -302,8 +302,8 @@ describe("flow settings page — mapped restore lifecycle", () => {
 
     await page.getByLabelText("Gallringsbeteende för Organisation").click();
     await page.getByRole("option", { name: "Granska före gallring" }).click();
-    await page.getByLabelText("Aktuell efter").fill("30");
-    await page.getByRole("button", { name: "Spara policy för Organisation" }).click();
+    await page.getByLabelText("Kan gallras efter").fill("30");
+    await page.getByRole("button", { name: "Spara policy för organisationen" }).click();
 
     expect(replaceOrganizationFlowRunRetentionPolicy).toHaveBeenCalledExactlyOnceWith({
       policy: { mode: "review_required", days: 30 }
@@ -498,7 +498,7 @@ describe("flow settings page — mapped restore lifecycle", () => {
       .element(page.getByText("Policy för körningshistorik", { exact: true }))
       .toBeVisible();
     await expect
-      .element(page.getByRole("button", { name: "Spara policy för Organisation" }))
+      .element(page.getByRole("button", { name: "Spara policy för organisationen" }))
       .toBeVisible();
   });
 
@@ -677,7 +677,7 @@ describe("flow settings page — mapped restore lifecycle", () => {
     await expect
       .element(
         page.getByText(
-          "Högst 25 källor och 5 textavsnitt per källa sparas, sammanlagt högst 128 KB per steg."
+          "Högst 25 källor och 5 textavsnitt per källa sparas, sammanlagt högst 128 KiB per steg."
         )
       )
       .toBeVisible();

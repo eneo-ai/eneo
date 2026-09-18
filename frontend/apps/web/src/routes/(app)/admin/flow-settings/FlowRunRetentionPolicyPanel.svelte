@@ -107,9 +107,9 @@
   }
 
   function sourceLabel(source: "organization" | "space" | "flow"): string {
-    if (source === "organization") return m.flow_run_retention_scope_organization();
-    if (source === "space") return m.flow_run_retention_scope_space();
-    return m.flow_run_retention_scope_flow();
+    if (source === "organization") return m.flow_run_retention_scope_organization_definite();
+    if (source === "space") return m.flow_run_retention_scope_space_definite();
+    return m.flow_run_retention_scope_flow_definite();
   }
 
   async function saveOrganizationPolicy(
@@ -317,7 +317,7 @@
     description={m.flow_run_retention_policy_group_description()}
     density="compact"
   >
-    <Alert.Root class="mx-4 max-w-3xl lg:mx-0.5">
+    <Alert.Root class="mx-4 w-auto max-w-3xl lg:mx-0.5">
       <ShieldCheck aria-hidden="true" />
       <Alert.Title>{m.flow_run_retention_safe_title()}</Alert.Title>
       <Alert.Description>{m.flow_run_retention_safe_description()}</Alert.Description>
