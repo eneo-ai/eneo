@@ -154,7 +154,7 @@
               >
                 {#if copiedKey === `progress-step-${step.stepOrder}-output`}
                   <span in:fade={{ duration: prefersReducedMotion ? 0 : 150 }}
-                    ><IconCheck class="text-positive-default size-3.5" /></span
+                    ><IconCheck class="text-positive-stronger size-3.5" /></span
                   >
                 {:else}
                   <IconCopy class="size-3.5" />
@@ -242,7 +242,7 @@
               >
                 {#if copiedKey === `progress-step-${step.stepOrder}-input`}
                   <span in:fade={{ duration: prefersReducedMotion ? 0 : 150 }}
-                    ><IconCheck class="text-positive-default size-3.5" /></span
+                    ><IconCheck class="text-positive-stronger size-3.5" /></span
                   >
                 {:else}
                   <IconCopy class="size-3.5" />

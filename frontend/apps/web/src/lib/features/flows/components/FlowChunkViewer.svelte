@@ -375,7 +375,7 @@
               </div>
             </div>
           {:else if loadError}
-            <p class="text-negative-default p-4 text-sm">
+            <p class="text-negative-stronger p-4 text-sm">
               {m.flow_run_knowledge_document_load_failed()}
             </p>
           {:else if !documentText}

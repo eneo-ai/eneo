@@ -725,7 +725,7 @@
                             {/if}
                           {/if}
                           {#if weakRoleIds.has(row.file_id)}
-                            <span class="text-warning-default text-[0.8rem] font-medium">
+                            <span class="text-warning-stronger text-[0.8rem] font-medium">
                               {m.ai_builder_attachment_role_unsure()}
                             </span>
                           {/if}

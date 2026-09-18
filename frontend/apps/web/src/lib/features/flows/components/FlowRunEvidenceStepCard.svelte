@@ -239,7 +239,7 @@
                   )}
               >
                 {#if copiedKey === `step-${result.step_order}-prompt`}
-                  <IconCheck class="text-positive-default size-3.5" />
+                  <IconCheck class="text-positive-stronger size-3.5" />
                 {:else}
                   <IconCopy class="size-3.5" />
                 {/if}
@@ -283,7 +283,7 @@
                   )}
               >
                 {#if copiedKey === `step-${result.step_order}-output`}
-                  <IconCheck class="text-positive-default size-3.5" />
+                  <IconCheck class="text-positive-stronger size-3.5" />
                 {:else}
                   <IconCopy class="size-3.5" />
                 {/if}
@@ -413,7 +413,7 @@
                   )}
               >
                 {#if copiedKey === `step-${result.step_order}-input`}
-                  <IconCheck class="text-positive-default size-3.5" />
+                  <IconCheck class="text-positive-stronger size-3.5" />
                 {:else}
                   <IconCopy class="size-3.5" />
                 {/if}
@@ -577,7 +577,7 @@
                   )}
               >
                 {#if copiedKey === `step-${result.step_order}-attempts`}
-                  <IconCheck class="text-positive-default size-3.5" />
+                  <IconCheck class="text-positive-stronger size-3.5" />
                 {:else}
                   <IconCopy class="size-3.5" />
                 {/if}

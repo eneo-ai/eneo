@@ -268,7 +268,7 @@
           <div
             class="bg-positive-default/10 flex size-8 shrink-0 items-center justify-center rounded-full"
           >
-            <IconCheck class="text-positive-default size-4" />
+            <IconCheck class="text-positive-stronger size-4" />
           </div>
           <span class="text-sm font-medium">{labels.selectedFiles(fileCount)}</span>
         </div>
@@ -485,7 +485,7 @@
                 <IconDownload class="size-4" />
               </button>
               <button
-                class="text-muted/60 hover:text-negative-default group-hover:text-muted flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md transition-colors duration-(--duration-quick)"
+                class="text-muted/60 hover:text-negative-stronger group-hover:text-muted flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md transition-colors duration-(--duration-quick)"
                 onclick={() => onRemoveFile(file.id)}
                 aria-label="{m.delete()} {file.name ?? file.id}"
               >

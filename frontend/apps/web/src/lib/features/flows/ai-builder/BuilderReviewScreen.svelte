@@ -1278,7 +1278,7 @@
                       {advisory.severity === 'warning'
                       ? 'bg-warning-dimmer text-warning-stronger'
                       : advisory.severity === 'error'
-                        ? 'bg-negative-dimmer text-negative-default'
+                        ? 'bg-negative-dimmer text-negative-stronger'
                         : 'bg-secondary text-secondary'}"
                   >
                     {advisoryText(advisory)}

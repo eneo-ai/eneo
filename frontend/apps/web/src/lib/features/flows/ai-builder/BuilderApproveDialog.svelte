@@ -62,7 +62,7 @@
     >
       {#if phase === "created"}
         <span
-          class="text-positive-default motion-safe:animate-in motion-safe:fade-in-0 flex items-center gap-2 motion-safe:duration-(--duration-fast)"
+          class="text-positive-stronger motion-safe:animate-in motion-safe:fade-in-0 flex items-center gap-2 motion-safe:duration-(--duration-fast)"
         >
           <IconCheck class="size-4 shrink-0" aria-hidden="true" />
           {m.ai_builder_approve_dialog_created()}

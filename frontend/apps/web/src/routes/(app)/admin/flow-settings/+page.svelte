@@ -773,7 +773,7 @@
               : m.flow_settings_unsaved_many({ count: form.dirtyCount })}
           </p>
           {#if timeoutOrderError}
-            <p class="text-negative-default mt-0.5 text-xs">{timeoutOrderError}</p>
+            <p class="text-negative-stronger mt-0.5 text-xs">{timeoutOrderError}</p>
           {/if}
         </div>
         <div class="flex items-center gap-2">

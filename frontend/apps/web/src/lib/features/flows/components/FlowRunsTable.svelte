@@ -535,7 +535,7 @@
             >
           {/if}
           {#if history.loadMoreError}
-            <span class="text-negative-default text-xs" role="alert">
+            <span class="text-negative-stronger text-xs" role="alert">
               {m.flow_history_load_more_failed()}
             </span>
           {/if}
@@ -830,7 +830,7 @@
         </span>
         <span class="flex items-center gap-2">
           {#if history.loadMoreError}
-            <span class="text-negative-default" role="alert">
+            <span class="text-negative-stronger" role="alert">
               {m.flow_history_load_more_failed()}
             </span>
           {/if}
