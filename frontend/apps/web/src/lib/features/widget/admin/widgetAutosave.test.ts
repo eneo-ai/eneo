@@ -1,7 +1,7 @@
 /* eslint-disable eneo/no-raw-color -- fixtures use literal widget colours */
-import { EneoError, type Widget } from "@eneo/eneo-js";
+import { EneoError, type Widget, type WidgetPolicy, type WidgetPolicyUpdate } from "@eneo/eneo-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { WidgetAutosave } from "./widgetAutosave.svelte";
+import { Autosave, WidgetAutosave } from "./widgetAutosave.svelte";
 
 function widget(overrides: Partial<Widget> = {}): Widget {
   return {
@@ -146,5 +146,49 @@ describe("WidgetAutosave", () => {
     autosave.replace(widget({ status: "active" }));
     expect(autosave.widget.status).toBe("active");
     expect(autosave.widget.name).toBe("Utkast");
+  });
+});
+
+describe("policy autosave", () => {
+  const policy: WidgetPolicy = {
+    max_daily_token_budget: 1000,
+    min_retention_days: 0,
+    max_retention_days: 365,
+    allow_bot_protection_none: false
+  };
+
+  it("serialises saves and keeps an edit made while the first save is in flight", async () => {
+    let resolveFirst!: (value: WidgetPolicy) => void;
+    const save = vi
+      .fn<(update: WidgetPolicyUpdate) => Promise<WidgetPolicy>>()
+      .mockImplementationOnce(() => new Promise((resolve) => (resolveFirst = resolve)))
+      .mockImplementationOnce(async () => ({
+        ...policy,
+        max_daily_token_budget: 2000,
+        min_retention_days: 5
+      }));
+    const autosave = new Autosave<WidgetPolicy, WidgetPolicyUpdate>(policy, save, { delay: 10 });
+
+    autosave.patch({ max_daily_token_budget: 2000 });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(autosave.status).toBe("saving");
+
+    // Edited while the first response is outstanding: shown at once, sent later.
+    autosave.patch({ min_retention_days: 5 });
+    expect(autosave.widget.min_retention_days).toBe(5);
+    expect(save).toHaveBeenCalledTimes(1);
+
+    // The server echoes the whole policy as of the first patch only.
+    resolveFirst({ ...policy, max_daily_token_budget: 2000 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(autosave.widget.min_retention_days).toBe(5);
+
+    await vi.runAllTimersAsync();
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(save).toHaveBeenLastCalledWith({ min_retention_days: 5 }, expect.anything());
+    expect(autosave.widget).toMatchObject({ max_daily_token_budget: 2000, min_retention_days: 5 });
+    expect(autosave.status).toBe("saved");
+    expect(autosave.hasPending).toBe(false);
   });
 });

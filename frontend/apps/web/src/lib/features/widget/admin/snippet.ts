@@ -16,6 +16,8 @@ export type SnippetOptions = {
   publicId: string;
   /** Widget language when it is fixed; `auto` follows the host page. */
   language?: "sv" | "en" | "auto";
+  /** Launcher placement as saved in the editor; the loader defaults to bottom-right. */
+  position?: "bottom-right" | "bottom-left";
   release: LoaderRelease | null;
 };
 
@@ -30,6 +32,10 @@ function languageAttribute(language: SnippetOptions["language"]): Array<[string,
   return language && language !== "auto" ? [["data-lang", language]] : [];
 }
 
+function positionAttribute(position: SnippetOptions["position"]): Array<[string, string]> {
+  return position ? [["data-position", position]] : [];
+}
+
 export function loaderUrl(origin: string, version: string): string {
   return `${origin.replace(/\/+$/, "")}/widget/${version}/eneo.js`;
 }
@@ -40,7 +46,8 @@ export function floatingSnippet(options: SnippetOptions): string {
   return scriptTag([
     ["src", loaderUrl(options.origin, channel)],
     ["data-widget-id", options.publicId],
-    ...languageAttribute(options.language)
+    ...languageAttribute(options.language),
+    ...positionAttribute(options.position)
   ]);
 }
 
@@ -52,7 +59,8 @@ export function pinnedSnippet(options: SnippetOptions): string | null {
     ["integrity", options.release.integrity],
     ["crossorigin", "anonymous"],
     ["data-widget-id", options.publicId],
-    ...languageAttribute(options.language)
+    ...languageAttribute(options.language),
+    ...positionAttribute(options.position)
   ]);
 }
 

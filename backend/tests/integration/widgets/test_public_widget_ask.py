@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
@@ -16,6 +17,8 @@ from eneo.assistants.assistant_service import AssistantService
 from eneo.database.database import sessionmanager
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
+from eneo.database.tables.tenant_table import Tenants
+from eneo.main.exceptions import BadRequestException
 from eneo.questions.question import UseTools
 from eneo.widgets.application.widget_retention import purge_expired_widget_sessions
 
@@ -302,3 +305,242 @@ async def test_retention_purge_deletes_old_widget_sessions(
         f"/api/v1/widgets/{public_id}/sessions/{session_id}/", headers=_auth(token)
     )
     assert resp.status_code == 404
+
+
+async def _patch_widget(client, admin_token: str, widget_id: str, **fields) -> dict:
+    current = await client.get(
+        f"/api/v1/widgets/{widget_id}/", headers=_auth(admin_token)
+    )
+    resp = await client.patch(
+        f"/api/v1/widgets/{widget_id}/",
+        json={"revision": current.json()["revision"], **fields},
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+async def _stored_conversations(widget_id: str) -> tuple[int, int]:
+    """(sessions, questions) committed for the widget, seen from a new session."""
+    async with sessionmanager.session() as db, db.begin():
+        sessions = await db.scalar(
+            sa.select(sa.func.count())
+            .select_from(Sessions)
+            .where(Sessions.widget_id == UUID(widget_id))
+        )
+        questions = await db.scalar(
+            sa.select(sa.func.count())
+            .select_from(Questions)
+            .join(Sessions, Questions.session_id == Sessions.id)
+            .where(Sessions.widget_id == UUID(widget_id))
+        )
+    return int(sessions or 0), int(questions or 0)
+
+
+async def _set_tenant_state(tenant_id: UUID, state: str) -> None:
+    async with sessionmanager.session() as db, db.begin():
+        await db.execute(
+            sa.update(Tenants).where(Tenants.id == tenant_id).values(state=state)
+        )
+
+
+@pytest.fixture
+def failing_assistant_ask(monkeypatch):
+    """The real placeholder write, then a failed model preparation."""
+
+    async def fake_ask(self, *, question, assistant_id, session_id=None, **kwargs):
+        await self.session_service.create_session_with_question_placeholder(
+            name=question,
+            question=question,
+            session_assistant_id=assistant_id,
+            question_assistant_id=assistant_id,
+        )
+        raise BadRequestException("Model preparation failed")
+
+    monkeypatch.setattr(AssistantService, "ask", fake_ask)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_suspended_tenant_revokes_visitor_access(
+    client, admin_token, active_widget, fake_assistant_ask, db_container
+):
+    public_id = active_widget["public_id"]
+    token = await _mint(client, public_id)
+    resp = await client.post(
+        f"/api/v1/widgets/{public_id}/ask/",
+        json={"question": "Hej"},
+        headers=_auth(token),
+    )
+    assert resp.status_code == 200, resp.text
+    session_id = _sse_events(resp.text)[0][1]["session_id"]
+    async with db_container() as container:
+        user = await container.user_repo().get_user_by_email("test@example.com")
+        tenant_id = user.tenant_id
+
+    await _set_tenant_state(tenant_id, "suspended")
+    try:
+        resp = await client.get(
+            f"/api/v1/widgets/{public_id}/sessions/{session_id}/",
+            headers=_auth(token),
+        )
+        assert resp.status_code == 404, resp.text
+        assert resp.json()["detail"]["code"] == "widget_not_active"
+        resp = await client.post(
+            f"/api/v1/widgets/{public_id}/ask/",
+            json={"question": "Och?", "session_id": session_id},
+            headers=_auth(token),
+        )
+        assert resp.status_code == 404, resp.text
+        assert resp.json()["detail"]["code"] == "widget_not_active"
+        resp = await client.post(
+            f"/api/v1/widgets/{public_id}/sessions/{session_id}/feedback/",
+            json={"value": 1},
+            headers=_auth(token),
+        )
+        assert resp.status_code == 404, resp.text
+    finally:
+        await _set_tenant_state(tenant_id, "active")
+
+    # Reactivation restores the visitor's access without a new token.
+    resp = await client.get(
+        f"/api/v1/widgets/{public_id}/sessions/{session_id}/", headers=_auth(token)
+    )
+    assert resp.status_code == 200, resp.text
+    resp = await client.post(
+        f"/api/v1/widgets/{public_id}/ask/",
+        json={"question": "Och?", "session_id": session_id},
+        headers=_auth(token),
+    )
+    assert resp.status_code == 200, resp.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_overlapping_identical_votes_count_once(
+    client, admin_token, active_widget, fake_assistant_ask
+):
+    public_id = active_widget["public_id"]
+    token = await _mint(client, public_id)
+    resp = await client.post(
+        f"/api/v1/widgets/{public_id}/ask/",
+        json={"question": "Hej"},
+        headers=_auth(token),
+    )
+    session_id = _sse_events(resp.text)[0][1]["session_id"]
+    feedback_url = f"/api/v1/widgets/{public_id}/sessions/{session_id}/feedback/"
+
+    # A double click before the first response arrives.
+    first, second = await asyncio.gather(
+        client.post(feedback_url, json={"value": 1}, headers=_auth(token)),
+        client.post(feedback_url, json={"value": 1}, headers=_auth(token)),
+    )
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+
+    async def counters() -> tuple[int, int]:
+        resp = await client.get(
+            f"/api/v1/widgets/{active_widget['id']}/usage/",
+            headers=_auth(admin_token),
+        )
+        day = resp.json()["days"][0]
+        return day["helpful"], day["unhelpful"]
+
+    assert await counters() == (1, 0)
+
+    resp = await client.post(feedback_url, json={"value": -1}, headers=_auth(token))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["feedback"]["value"] == -1
+    assert await counters() == (0, 1)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_zero_retention_commits_nothing_when_model_preparation_fails(
+    client, admin_token, active_widget, failing_assistant_ask
+):
+    widget_id = active_widget["id"]
+    public_id = active_widget["public_id"]
+    await _patch_widget(
+        client,
+        admin_token,
+        widget_id,
+        privacy={"retention_days": 0, "store_feedback_text": False},
+    )
+    token = await _mint(client, public_id)
+
+    resp = await client.post(
+        f"/api/v1/widgets/{public_id}/ask/",
+        json={"question": "Mitt personnummer är 19XX..."},
+        headers=_auth(token),
+    )
+    assert resp.status_code == 400, resp.text
+    assert await _stored_conversations(widget_id) == (0, 0)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_retained_widget_keeps_the_question_when_model_preparation_fails(
+    client, active_widget, failing_assistant_ask
+):
+    """Ordinary retention keeps the durable placeholder, like every other chat."""
+    public_id = active_widget["public_id"]
+    token = await _mint(client, public_id)
+
+    resp = await client.post(
+        f"/api/v1/widgets/{public_id}/ask/",
+        json={"question": "Hej"},
+        headers=_auth(token),
+    )
+    assert resp.status_code == 400, resp.text
+    assert await _stored_conversations(active_widget["id"]) == (1, 1)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_zero_retention_answer_leaves_no_session_behind(
+    client, admin_token, active_widget, fake_assistant_ask
+):
+    widget_id = active_widget["id"]
+    public_id = active_widget["public_id"]
+    await _patch_widget(
+        client,
+        admin_token,
+        widget_id,
+        privacy={"retention_days": 0, "store_feedback_text": False},
+    )
+    resp = await client.get(f"/api/v1/widgets/{public_id}/config/")
+    assert resp.json()["single_turn"] is True
+    token = await _mint(client, public_id)
+
+    resp = await client.post(
+        f"/api/v1/widgets/{public_id}/ask/",
+        json={"question": "Vad har biblioteket för öppettider?"},
+        headers=_auth(token),
+    )
+    assert resp.status_code == 200, resp.text
+    events = _sse_events(resp.text)
+    assert "".join(d["answer"] for e, d in events if e == "text") == "Hej där!"
+    session_id = events[0][1]["session_id"]
+    assert await _stored_conversations(widget_id) == (0, 0)
+
+    # Nothing to continue, restore or rate afterwards.
+    for method, url, body in (
+        (
+            "post",
+            f"/api/v1/widgets/{public_id}/ask/",
+            {"question": "Och?", "session_id": session_id},
+        ),
+        ("get", f"/api/v1/widgets/{public_id}/sessions/{session_id}/", None),
+        (
+            "post",
+            f"/api/v1/widgets/{public_id}/sessions/{session_id}/feedback/",
+            {"value": 1},
+        ),
+    ):
+        if method == "get":
+            resp = await client.get(url, headers=_auth(token))
+        else:
+            resp = await client.post(url, json=body, headers=_auth(token))
+        assert resp.status_code == 404, resp.text
+        assert resp.json()["detail"]["code"] == "session_not_owned"

@@ -42,6 +42,7 @@ def build_visitor_user(
             tenant_id=widget.tenant_id,
             space_id=widget.space_id,
             target_id=widget.target_id,
+            never_persist=widget.privacy.never_persists,
         ),
         roles=[role],
         used_tokens=0,

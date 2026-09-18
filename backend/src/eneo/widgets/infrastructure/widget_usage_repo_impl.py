@@ -206,6 +206,15 @@ class WidgetUsageRepoImpl:
             )
         )
 
+    async def lock_feedback(self, session_id: UUID) -> int | None:
+        """Lock a widget session row until the transaction ends and return
+        its vote as it stands once any concurrent writer has committed."""
+        return await self.session.scalar(
+            sa.select(Sessions.feedback_value)
+            .where(Sessions.id == session_id, Sessions.widget_id.is_not(None))
+            .with_for_update()
+        )
+
     async def retention_targets(self) -> list[tuple[UUID, int]]:
         """(widget_id, retention_days) for every widget that keeps sessions
         for a bounded time; archived widgets are included so their history

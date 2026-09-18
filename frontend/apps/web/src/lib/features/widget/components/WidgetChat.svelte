@@ -41,6 +41,7 @@
   let altchaElement = $state<AltchaWidgetElement | null>(null);
   let composer = $state<WidgetComposer | null>(null);
   let log = $state<HTMLDivElement | null>(null);
+  let newQuestionButton = $state<HTMLButtonElement | null>(null);
 
   let status = $state<"idle" | "verifying" | "sending">("idle");
   let announcement = $state("");
@@ -58,9 +59,11 @@
     config: initial.config,
     fixedToken: initial.previewToken,
     solve: () => {
+      // Restore what was in progress (a send stays "sending" until it ends).
+      const before = status;
       status = "verifying";
       return solveWithAltcha(altchaElement).finally(() => {
-        if (status === "verifying") status = "idle";
+        if (status === "verifying") status = before;
       });
     }
   });
@@ -82,14 +85,26 @@
   );
   const busy = $derived(status !== "idle" || chat.askQuestion.isLoading);
   const subtitle = $derived(config.texts.subtitle);
+  // Retention 0: the backend deletes the session when the answer ends, so
+  // there is nothing to continue, rate or restore. Each question stands alone.
+  const singleTurn = $derived(config.single_turn);
+  const answered = $derived(singleTurn && messages.length > 0 && !busy);
 
   onMount(() => {
     bridge.ready(launcherColors(initial.config.theme));
-    // Restore the visitor's last conversation on this site, if any.
-    if (session.sessionId && session.hasIdentity) {
+    if (initial.config.single_turn) {
+      session.rememberSession(null);
+    } else if (session.sessionId && session.hasIdentity) {
+      // Restore the visitor's last conversation on this site, if any.
       void restore(session.sessionId);
     }
     return () => bridge.destroy();
+  });
+
+  $effect(() => {
+    // The composer closes once a single-turn answer is in; keep the keyboard
+    // on the one action that remains instead of dropping focus on the body.
+    if (answered) void tick().then(() => newQuestionButton?.focus());
   });
 
   async function restore(sessionId: string) {
@@ -140,29 +155,15 @@
     }
   }
 
-  async function send(question: string, retried = false): Promise<void> {
+  async function send(question: string): Promise<void> {
+    // One request at a time. The guard is synchronous, so a second click while
+    // the token is minted or before the first chunk never starts another ask.
+    if (status !== "idle" || chat.askQuestion.isLoading) return;
+    status = "sending";
     errorMessage = null;
-    const wasNew = !chat.currentConversation.id;
     pendingQuestion = question;
     try {
-      await session.ensureToken();
-      status = "sending";
-      await chat.askQuestion(question);
-      const sessionId = chat.currentConversation.id;
-      if (sessionId) {
-        session.rememberSession(sessionId);
-        if (wasNew) bridge.conversationStarted(sessionId);
-      }
-      announcement = m.widget_answer_complete();
-    } catch (error) {
-      if (isTokenRejected(error) && !retried) {
-        // Stale after a pause/config change or simply expired: re-mint once.
-        session.invalidate();
-        return send(question, true);
-      }
-      if (errorCode(error) === "widget_not_active") unavailable = true;
-      errorMessage = describe(error);
-      announcement = errorMessage;
+      await ask(question, false);
     } finally {
       status = "idle";
       pendingQuestion = null;
@@ -171,14 +172,38 @@
     }
   }
 
+  async function ask(question: string, retried: boolean): Promise<void> {
+    const wasNew = !chat.currentConversation.id;
+    try {
+      await session.ensureToken();
+      await chat.askQuestion(question);
+      const sessionId = chat.currentConversation.id;
+      if (sessionId) {
+        if (!singleTurn) session.rememberSession(sessionId);
+        if (wasNew) bridge.conversationStarted(sessionId);
+      }
+      announcement = m.widget_answer_complete();
+    } catch (error) {
+      if (isTokenRejected(error) && !retried) {
+        // Stale after a pause/config change or simply expired: re-mint once.
+        session.invalidate();
+        return ask(question, true);
+      }
+      if (errorCode(error) === "widget_not_active") unavailable = true;
+      errorMessage = describe(error);
+      announcement = errorMessage;
+    }
+  }
+
   // Starting over throws the visible conversation away, so it asks first.
   let confirmStartOver = $state(false);
 
-  function startOver() {
+  async function startOver() {
     confirmStartOver = false;
     chat.newConversation();
     session.rememberSession(null);
     errorMessage = null;
+    await tick();
     composer?.focus();
   }
 
@@ -283,7 +308,7 @@
           {/if}
         </ol>
       </div>
-      {#if chat.currentConversation.id && !chat.askQuestion.isLoading}
+      {#if !singleTurn && chat.currentConversation.id && !chat.askQuestion.isLoading}
         {@const given = feedbackGiven[chat.currentConversation.id]}
         <div
           class="mt-3 flex items-center gap-2"
@@ -337,11 +362,25 @@
     {#if status === "verifying"}
       <p class="text-secondary text-xs">{m.widget_verifying()}</p>
     {/if}
+    {#if answered}
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <p class="text-secondary text-xs">{m.widget_single_turn_hint()}</p>
+        <button
+          type="button"
+          bind:this={newQuestionButton}
+          class="widget-new-question bg-primary text-primary hover:bg-secondary focus-visible:ring-default flex items-center gap-1.5 border px-3 py-1.5 text-sm focus-visible:ring-2 focus-visible:outline-none"
+          onclick={startOver}
+        >
+          <MessageSquarePlus class="size-4" aria-hidden="true" />
+          {m.widget_new_question()}
+        </button>
+      </div>
+    {/if}
     <WidgetComposer
       bind:this={composer}
       placeholder={config.texts.placeholder || m.widget_input_placeholder()}
       maxLength={config.max_question_chars}
-      disabled={unavailable}
+      disabled={unavailable || answered}
       {busy}
       suggestions={config.texts.suggested_questions ?? []}
       showSuggestions={messages.length === 0}
@@ -428,6 +467,10 @@
   }
   .widget-header-muted {
     color: var(--text-secondary);
+  }
+  .widget-new-question {
+    border-color: var(--widget-accent);
+    border-radius: var(--widget-radius);
   }
   .widget-bubble {
     background: var(--widget-accent);

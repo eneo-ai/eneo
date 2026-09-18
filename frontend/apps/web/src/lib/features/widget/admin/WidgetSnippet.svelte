@@ -26,6 +26,7 @@
     origin,
     publicId: widget.public_id,
     language: widget.language,
+    position: widget.theme.position ?? undefined,
     release
   });
   const snippet = $derived(pinned ? pinnedSnippet(options) : floatingSnippet(options));

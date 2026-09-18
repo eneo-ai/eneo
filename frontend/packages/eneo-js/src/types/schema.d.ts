@@ -22469,6 +22469,11 @@ export interface components {
       /** Token Generation */
       token_generation: number;
       /**
+       * Single Turn
+       * @description True when the widget stores nothing after the answer: no follow-up questions, feedback or restore; every question starts a new conversation.
+       */
+      single_turn: boolean;
+      /**
        * Frame Ancestors
        * @description CSP host sources the embed page may be framed by. Mirrors the frame-ancestors response header, which is public anyway.
        */
@@ -22691,6 +22696,11 @@ export interface components {
        * Format: uuid
        */
       target_id: string;
+      /**
+       * Never Persist
+       * @default false
+       */
+      never_persist?: boolean;
     };
     /**
      * WizardType

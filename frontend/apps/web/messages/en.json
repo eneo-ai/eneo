@@ -4825,6 +4825,8 @@
   "widget_not_available_body": "The chat has been paused or does not exist. Please try again later.",
   "widget_open_source": "Open source (opens in a new tab)",
   "widget_feedback_prompt": "Was this answer helpful?",
+  "widget_single_turn_hint": "This chat does not keep conversations, so each question is answered on its own.",
+  "widget_new_question": "Ask a new question",
   "widget_preview_title": "Widget preview",
   "widget_preview_loading": "Loading the preview…",
   "widget_preview_unavailable": "The preview could not be loaded. Reload the admin page to get a new preview link.",

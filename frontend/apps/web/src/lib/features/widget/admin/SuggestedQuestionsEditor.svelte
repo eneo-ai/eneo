@@ -5,7 +5,7 @@
 -->
 <script lang="ts">
   import { Plus, X } from "lucide-svelte";
-  import { tick } from "svelte";
+  import { tick, untrack } from "svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
@@ -31,11 +31,15 @@
 
   $effect(() => {
     // Adopt external values (template applied, page load) only when they differ
-    // from what the rows already represent, so typing is never interrupted.
-    const current = rows.map((row) => row.text.trim()).filter(Boolean);
-    if (current.join("\n") !== questions.join("\n")) {
-      rows = questions.map((text) => ({ key: nextKey++, text }));
-    }
+    // from what the rows already represent. Only `questions` is a dependency:
+    // typing edits the rows and must never rerun this, or the draft is lost.
+    const incoming = questions.join("\n");
+    untrack(() => {
+      const current = rows.map((row) => row.text.trim()).filter(Boolean);
+      if (current.join("\n") !== incoming) {
+        rows = questions.map((text) => ({ key: nextKey++, text }));
+      }
+    });
   });
 
   function emit() {

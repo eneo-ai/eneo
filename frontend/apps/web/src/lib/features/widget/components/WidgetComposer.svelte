@@ -67,7 +67,7 @@
           <button
             type="button"
             class="widget-chip bg-primary text-primary hover:bg-secondary focus-visible:ring-default border px-3 py-1.5 text-sm focus-visible:ring-2 focus-visible:outline-none"
-            {disabled}
+            disabled={disabled || busy}
             onclick={() => onSend(suggestion)}
           >
             {suggestion}
