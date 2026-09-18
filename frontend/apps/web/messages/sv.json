@@ -7018,6 +7018,7 @@
   "ai_builder_review_all_hidden": "Alla punkter är dolda.",
   "ai_builder_review_show_hidden": "Visa {count} dolda",
   "ai_builder_review_hide": "Dölj",
+  "ai_builder_review_hidden_notice": "Punkten är dold. Du kan visa den igen längst ned.",
   "ai_builder_review_prepare": "Förbered ändring",
   "ai_builder_review_prepare_message": "Förbered en ändring som åtgärdar: {finding}",
   "ai_builder_review_completeness": "{incomplete} körningar saknade resultat för något steg.",

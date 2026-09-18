@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Snippet } from "svelte";
+  import { tick, type Snippet } from "svelte";
   import { m } from "$lib/paraglide/messages";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
@@ -121,10 +121,22 @@
     });
   }
 
-  function dismiss(fact: AIBuilderFlowReviewFact) {
+  let hiddenNotice = $state("");
+
+  async function dismiss(fact: AIBuilderFlowReviewFact) {
     if (!packet) return;
+    const remaining = findings.filter((f) => f.finding_id !== fact.finding_id);
+    const nextId = remaining[findings.indexOf(fact)]?.finding_id ?? remaining.at(-1)?.finding_id;
+
     rememberDismissedFinding(packet.flow_id, fact.finding_id);
     dismissed = new Set([...dismissed, fact.finding_id]);
+    hiddenNotice = m.ai_builder_review_hidden_notice();
+
+    await tick();
+    const next = nextId
+      ? document.querySelector<HTMLElement>(`[data-finding-id="${nextId}"] h4`)
+      : document.querySelector<HTMLElement>('[data-testid="builder-findings"] h3');
+    next?.focus();
   }
 
   function showHidden() {
@@ -222,7 +234,8 @@
             </p>
           {/if}
         {:else if packet}
-          <h3 class="text-primary mb-2.5 text-[0.9375rem] font-bold">
+          <p class="sr-only" role="status" aria-live="polite">{hiddenNotice}</p>
+          <h3 tabindex="-1" class="text-primary mb-2.5 text-[0.9375rem] font-bold outline-none">
             {m.ai_builder_review_facts_title()}
           </h3>
           {#if findings.length === 0}
@@ -247,7 +260,10 @@
                 >
                   <div class="flex items-start justify-between gap-3">
                     <div class="min-w-0">
-                      <h4 class="text-primary text-[0.9rem] font-semibold first-letter:uppercase">
+                      <h4
+                        tabindex="-1"
+                        class="text-primary text-[0.9rem] font-semibold outline-none first-letter:uppercase"
+                      >
                         {described.title}
                       </h4>
                       <p class="text-secondary mt-0.5 text-[0.8125rem] text-pretty">

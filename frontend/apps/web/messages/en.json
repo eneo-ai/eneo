@@ -7018,6 +7018,7 @@
   "ai_builder_review_all_hidden": "All findings are hidden.",
   "ai_builder_review_show_hidden": "Show {count} hidden",
   "ai_builder_review_hide": "Hide",
+  "ai_builder_review_hidden_notice": "The item is hidden. You can show it again at the bottom.",
   "ai_builder_review_prepare": "Prepare change",
   "ai_builder_review_prepare_message": "Prepare a change that addresses: {finding}",
   "ai_builder_review_completeness": "{incomplete} runs were missing results for some step.",
