@@ -44,6 +44,7 @@ def test_reserved_input_payload_keys_are_sorted_for_sdk_output() -> None:
         "expected_flow_version",
         "file_ids",
         "step_inputs",
+        "transcript_regeneration",
         "transkribering",
     )
     assert generator._reserved_input_payload_keys_from_source() == tuple(

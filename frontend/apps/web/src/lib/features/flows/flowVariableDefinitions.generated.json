@@ -29,6 +29,7 @@
     "text",
     "transcribed_text",
     "transcript",
+    "transcript_regeneration",
     "transcription",
     "transkribering"
   ]
