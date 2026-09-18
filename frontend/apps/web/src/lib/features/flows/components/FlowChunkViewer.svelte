@@ -298,7 +298,7 @@
                       <span class="flex items-center gap-1">
                         {#if bestScore !== null && Number(passage.score ?? 0) === bestScore && chunkItems.length > 1}
                           <span
-                            class="bg-accent-dimmer text-accent-stronger rounded-full px-1.5 py-0.5 text-[11px] font-medium"
+                            class="bg-accent-dimmer text-accent-stronger rounded-full px-1.5 py-0.5 text-xs font-medium"
                           >
                             {m.flow_run_knowledge_best_match()}
                           </span>
@@ -328,7 +328,7 @@
                       {passage.text}
                     </p>
                     {#if passage.recording === "tail_truncated"}
-                      <p class="text-muted mt-1 text-[11px] italic">
+                      <p class="text-muted mt-1 text-xs italic">
                         {m.flow_run_knowledge_passage_truncated()}
                       </p>
                     {/if}

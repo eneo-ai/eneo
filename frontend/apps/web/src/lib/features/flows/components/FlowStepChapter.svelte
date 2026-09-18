@@ -58,7 +58,7 @@
       {/if}
     </span>
     <ChevronDown
-      class="text-secondary size-4 shrink-0 transition-transform duration-200 group-data-[state=open]:rotate-180 motion-reduce:transition-none"
+      class="text-secondary size-4 shrink-0 group-data-[state=open]:rotate-180 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) motion-reduce:transition-none"
     />
   </Collapsible.Trigger>
   <Collapsible.Content class="collapsible-animate px-2 pt-1 pb-5">

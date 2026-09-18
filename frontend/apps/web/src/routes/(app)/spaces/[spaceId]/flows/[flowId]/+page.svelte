@@ -730,7 +730,7 @@
 
               {#if i > 0}
                 <div
-                  class="mx-1 h-0.5 w-4 shrink-0 transition-colors duration-200 sm:mx-1.5 sm:w-6 xl:mx-3 xl:w-auto xl:flex-1
+                  class="mx-1 h-0.5 w-4 shrink-0 motion-safe:transition-colors motion-safe:duration-(--duration-quick) sm:mx-1.5 sm:w-6 xl:mx-3 xl:w-auto xl:flex-1
                     {isPreviousCompleted ? 'bg-accent-default' : 'bg-border-default'}"
                 ></div>
               {/if}
@@ -738,14 +738,14 @@
               <li class="min-w-0">
                 <button
                   type="button"
-                  class="hover:bg-hover-dimmer flex min-w-0 items-center gap-1.5 rounded-lg px-1.5 py-1.5 text-sm transition-all duration-200 sm:gap-2 sm:px-2 lg:gap-2.5 lg:px-2.5
+                  class="hover:bg-hover-dimmer flex min-w-0 items-center gap-1.5 rounded-lg px-1.5 py-1.5 text-sm motion-safe:transition-colors motion-safe:duration-(--duration-quick) sm:gap-2 sm:px-2 lg:gap-2.5 lg:px-2.5
                     {isActive ? 'text-primary font-semibold' : ''}"
                   aria-current={isActive ? "step" : undefined}
                   onclick={() => void navigateToStage(stage.id)}
                 >
                   {#if isCompleted}
                     <span
-                      class="bg-accent-default/15 text-accent-default inline-flex size-7 items-center justify-center rounded-full text-sm font-semibold transition-colors duration-200 sm:size-8"
+                      class="bg-accent-default/15 text-accent-default inline-flex size-7 items-center justify-center rounded-full text-sm font-semibold motion-safe:transition-colors motion-safe:duration-(--duration-quick) sm:size-8"
                     >
                       <svg class="size-3.5 sm:size-4" viewBox="0 0 16 16" fill="none">
                         <path
@@ -759,19 +759,19 @@
                     </span>
                   {:else if isActive}
                     <span
-                      class="bg-accent-default text-on-fill ring-accent-default/20 inline-flex size-7 items-center justify-center rounded-full text-sm font-semibold ring-2 transition-all duration-200 sm:size-8"
+                      class="bg-accent-default text-on-fill ring-accent-default/20 inline-flex size-7 items-center justify-center rounded-full text-sm font-semibold ring-2 motion-safe:transition-colors motion-safe:duration-(--duration-quick) sm:size-8"
                     >
                       {stage.id}
                     </span>
                   {:else if isSkipped}
                     <span
-                      class="border-default text-muted inline-flex size-7 items-center justify-center rounded-full border-2 border-dashed text-sm font-medium opacity-60 transition-colors duration-200 sm:size-8"
+                      class="border-default text-muted inline-flex size-7 items-center justify-center rounded-full border-2 border-dashed text-sm font-medium opacity-60 motion-safe:transition-colors motion-safe:duration-(--duration-quick) sm:size-8"
                     >
                       {stage.id}
                     </span>
                   {:else}
                     <span
-                      class="border-default text-muted inline-flex size-7 items-center justify-center rounded-full border-2 text-sm font-medium transition-colors duration-200 sm:size-8"
+                      class="border-default text-muted inline-flex size-7 items-center justify-center rounded-full border-2 text-sm font-medium motion-safe:transition-colors motion-safe:duration-(--duration-quick) sm:size-8"
                     >
                       {stage.id}
                     </span>
@@ -963,7 +963,7 @@
                         {#each checklistEntries as item (item.key)}
                           <li class="flex items-center gap-2.5 text-sm">
                             <span
-                              class="flex size-5 shrink-0 items-center justify-center rounded-full transition-colors {item.done
+                              class="flex size-5 shrink-0 items-center justify-center rounded-full motion-safe:transition-colors motion-safe:duration-(--duration-quick) {item.done
                                 ? 'bg-positive-dimmer text-positive-stronger'
                                 : 'border-default bg-hover-dimmer text-muted border'}"
                               aria-hidden="true"
@@ -1017,7 +1017,7 @@
               <!-- Main transcription card — single unified card for all states -->
               <Card.Root
                 class={[
-                  "gap-0 py-0 transition-colors duration-200 ease-out",
+                  "gap-0 py-0 motion-safe:transition-colors motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out)",
                   transcriptionEnabled && "ring-accent-default/25"
                 ]}
               >
@@ -1125,7 +1125,7 @@
                       </div>
                       {#if transcriptionServiceConfigured}
                         <div
-                          class="bg-primary flex items-start justify-between gap-4 rounded-lg border px-3 py-3 transition-colors {transcriptionDiarization
+                          class="bg-primary flex items-start justify-between gap-4 rounded-lg border px-3 py-3 motion-safe:transition-colors motion-safe:duration-(--duration-quick) {transcriptionDiarization
                             ? 'border-accent-default/40'
                             : 'border-default'}"
                         >
@@ -1324,7 +1324,7 @@
                             .completion_model
                         : null}
                     <div
-                      class="border-default/80 bg-secondary/20 hover:bg-secondary/35 flex min-w-0 items-center gap-2 rounded-xl border px-3 py-2 transition-colors"
+                      class="border-default/80 bg-secondary/20 hover:bg-secondary/35 flex min-w-0 items-center gap-2 rounded-xl border px-3 py-2 motion-safe:transition-colors motion-safe:duration-(--duration-micro)"
                     >
                       <span
                         class="bg-hover-dimmer text-secondary flex size-5 shrink-0 items-center justify-center rounded-md text-xs font-semibold tabular-nums"

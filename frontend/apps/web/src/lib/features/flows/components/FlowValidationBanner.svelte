@@ -199,7 +199,7 @@
             {isExpanded ? m.flow_validation_hide_details() : m.flow_validation_show_details()}
           </span>
           <svg
-            class="text-negative-stronger/60 size-4 shrink-0 transition-transform duration-200 ease-out {isExpanded
+            class="text-negative-stronger/60 size-4 shrink-0 ease-out motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {isExpanded
               ? 'rotate-180'
               : ''}"
             aria-hidden="true"
@@ -288,7 +288,7 @@
                 {#if issue.stepId && onNavigateToStep}
                   <button
                     type="button"
-                    class="border-accent-default/20 bg-accent-default/5 text-accent-default hover:border-accent-default/40 hover:bg-accent-default/10 shrink-0 rounded-lg border px-3 py-1.5 text-xs font-medium transition-all duration-200 hover:shadow-sm active:scale-[0.98]"
+                    class="border-accent-default/20 bg-accent-default/5 text-accent-default hover:border-accent-default/40 hover:bg-accent-default/10 shrink-0 rounded-lg border px-3 py-1.5 text-xs font-medium hover:shadow-sm active:scale-[0.98] motion-safe:transition-[background-color,border-color,box-shadow,transform] motion-safe:duration-(--duration-quick)"
                     onclick={(e) => {
                       e.stopPropagation();
                       handleNavigate(issue.stepId);

@@ -128,11 +128,15 @@
     color: var(--text-primary);
   }
   .pending-question-hint {
-    @apply ml-1 text-xs;
+    @apply ml-1;
+    font-size: var(--text-xs);
+    line-height: var(--text-xs--line-height);
     color: var(--text-secondary);
   }
   .edit-answer {
-    @apply mt-1.5 text-xs font-semibold underline-offset-[3px] hover:underline disabled:opacity-50;
+    @apply mt-1.5 font-semibold underline-offset-[3px] hover:underline disabled:opacity-50;
+    font-size: var(--text-xs);
+    line-height: var(--text-xs--line-height);
     color: var(--accent-default);
   }
 

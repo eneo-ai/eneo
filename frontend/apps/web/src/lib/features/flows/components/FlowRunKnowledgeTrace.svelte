@@ -173,8 +173,8 @@
         </div>
         <IconChevronRight
           class={expanded
-            ? "text-muted size-4 shrink-0 rotate-90 transition-transform duration-200"
-            : "text-muted size-4 shrink-0 transition-transform duration-200"}
+            ? "text-muted size-4 shrink-0 rotate-90 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out)"
+            : "text-muted size-4 shrink-0 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out)"}
         />
       </Collapsible.Trigger>
 

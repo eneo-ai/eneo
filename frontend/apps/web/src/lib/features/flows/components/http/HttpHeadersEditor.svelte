@@ -78,7 +78,9 @@
         class="hover:bg-secondary/20 flex w-full items-center gap-2 px-3 py-3 text-left text-sm font-medium transition-colors"
       >
         <IconChevronRight
-          class="size-3.5 shrink-0 transition-transform duration-200 {expanded ? 'rotate-90' : ''}"
+          class="size-3.5 shrink-0 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {expanded
+            ? 'rotate-90'
+            : ''}"
         />
         {m.http_headers_title()}
         {#if headers.length > 0}

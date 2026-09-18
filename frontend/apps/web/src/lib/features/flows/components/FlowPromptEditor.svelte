@@ -496,7 +496,7 @@
           type="button"
           class="{getChipClasses(
             v.category
-          )} cursor-pointer transition-all hover:scale-105 hover:shadow-sm active:scale-95"
+          )} cursor-pointer hover:scale-105 hover:shadow-sm active:scale-95 motion-safe:transition-[transform,box-shadow] motion-safe:duration-(--duration-micro)"
           onclick={() => void insertAtCursor(v.token)}
         >
           {`{{${v.displayToken ? v.token : v.label}}}`}

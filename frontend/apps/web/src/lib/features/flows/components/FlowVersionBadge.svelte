@@ -29,7 +29,7 @@
 {#if publishedVersion != null}
   <Badge
     variant="outline"
-    class="border-positive-default/25 bg-positive-dimmer/60 text-positive-stronger gap-1.5 transition-all duration-300
+    class="border-positive-default/25 bg-positive-dimmer/60 text-positive-stronger gap-1.5 motion-safe:transition-[transform,box-shadow] motion-safe:duration-(--duration-medium)
       {justChanged ? 'ring-positive-default/40 scale-105 ring-2' : ''}"
   >
     <CheckCircle2 class="size-3" />

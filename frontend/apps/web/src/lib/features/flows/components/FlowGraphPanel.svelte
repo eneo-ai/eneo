@@ -64,7 +64,7 @@
         {/if}
       </span>
       <span
-        class="text-muted flex size-5 shrink-0 items-center justify-center transition-transform duration-200 ease-out"
+        class="text-muted flex size-5 shrink-0 items-center justify-center ease-out motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out)"
         class:rotate-180={isOpen}
         aria-hidden="true"
       >

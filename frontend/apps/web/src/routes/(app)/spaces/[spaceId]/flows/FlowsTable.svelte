@@ -11,6 +11,7 @@
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { IconEllipsis } from "@eneo/icons/ellipsis";
+  import ChevronDown from "lucide-svelte/icons/chevron-down";
   import { IconTrash } from "@eneo/icons/trash";
   import FlowActions from "./FlowActions.svelte";
   import { m } from "$lib/paraglide/messages";
@@ -254,7 +255,7 @@
             >
               <span class="inline-flex items-center gap-1">
                 {m.flow_list_updated()}
-                <span aria-hidden="true" class="text-[0.5625rem]">▼</span>
+                <ChevronDown class="size-3 shrink-0" aria-hidden="true" />
               </span>
             </Table.Head>
             <Table.Head

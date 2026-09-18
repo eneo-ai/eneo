@@ -124,7 +124,7 @@
     <div class="flex shrink-0 items-center gap-2">
       {#if canExpand}
         <span
-          class="text-muted transition-transform duration-200"
+          class="text-muted motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out)"
           class:rotate-180={expanded}
           aria-hidden="true"
         >
@@ -227,7 +227,7 @@
                 class="text-muted hover:text-secondary focus-visible:ring-accent-default -ml-1 flex items-center gap-1.5 rounded-md px-1 py-0.5 text-xs font-semibold transition-colors focus-visible:ring-2 focus-visible:outline-none"
               >
                 <IconChevronDown
-                  class="size-3 transition-transform duration-200 {inputExpanded
+                  class="size-3 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {inputExpanded
                     ? ''
                     : '-rotate-90'}"
                 />

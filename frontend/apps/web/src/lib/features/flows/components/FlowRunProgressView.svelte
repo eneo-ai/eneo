@@ -171,7 +171,7 @@
         <div
           class="{progressPercent >= 100
             ? 'bg-positive-default'
-            : 'bg-accent-default'} h-full w-full origin-left rounded-full transition-transform duration-500 ease-out"
+            : 'bg-accent-default'} h-full w-full origin-left rounded-full motion-safe:transition-transform motion-safe:duration-(--duration-very-slow) motion-safe:ease-(--ease-out)"
           style:transform="scaleX({Math.max(0, Math.min(1, progressPercent / 100))})"
         ></div>
       </div>

@@ -301,7 +301,7 @@
                 </Badge>
                 <div class="bg-hover-dimmer h-2 w-full max-w-48 overflow-hidden rounded-full">
                   <div
-                    class={`h-full transition-all ${templateReadiness.incomplete ? "bg-warning-default" : "bg-positive-default"}`}
+                    class={`h-full motion-safe:transition-[width,background-color] motion-safe:duration-(--duration-quick) ${templateReadiness.incomplete ? "bg-warning-default" : "bg-positive-default"}`}
                     style={`width: ${(templateReadiness.matched / templateReadiness.total) * 100}%`}
                   ></div>
                 </div>

@@ -194,7 +194,7 @@
         <span class="text-secondary text-xs">{ioLabel}</span>
       </span>
       <IconChevronDown
-        class="text-secondary size-4 shrink-0 transition-transform duration-200 ease-out {open
+        class="text-secondary size-4 shrink-0 ease-out motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {open
           ? 'rotate-180'
           : ''}"
         aria-hidden="true"

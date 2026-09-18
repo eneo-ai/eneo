@@ -188,7 +188,7 @@
     {#if hasHumanReview}
       <Badge
         variant="secondary"
-        class="bg-accent-dimmer text-accent-stronger shrink-0 px-1.5 text-[10px]"
+        class="bg-accent-dimmer text-accent-stronger shrink-0 px-1.5 text-xs"
         title={m.flow_graph_review_badge()}
       >
         {m.flow_graph_review_badge_short()}

@@ -882,7 +882,7 @@
     >
       <span class="text-primary">{title}</span>
       <IconChevronDown
-        class="text-secondary ml-auto size-3.5 shrink-0 transition-transform duration-200 ease-out {isOpen
+        class="text-secondary ml-auto size-3.5 shrink-0 ease-out motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {isOpen
           ? 'rotate-180'
           : ''}"
         aria-hidden="true"

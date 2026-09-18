@@ -588,7 +588,7 @@
                   ? m.ai_builder_requirements_hide_full_request()
                   : m.ai_builder_requirements_show_full_request()}
                 <IconChevronDown
-                  class="size-3.5 transition-transform duration-200 ease-out motion-reduce:duration-0 {userRequestExpanded
+                  class="size-3.5 ease-out motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) motion-reduce:duration-0 {userRequestExpanded
                     ? 'rotate-180'
                     : ''}"
                   aria-hidden="true"

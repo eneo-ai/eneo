@@ -236,7 +236,7 @@
               </div>
               <div class="bg-hover-dimmer h-1.5 w-full overflow-hidden rounded-full">
                 <div
-                  class="bg-accent-default h-full transition-all"
+                  class="bg-accent-default h-full motion-safe:transition-[width] motion-safe:duration-(--duration-quick)"
                   style={`width: ${upload.progress}%`}
                 ></div>
               </div>

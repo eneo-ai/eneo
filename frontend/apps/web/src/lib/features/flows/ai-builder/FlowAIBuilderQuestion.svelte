@@ -998,7 +998,9 @@
   }
 
   .question-kicker {
-    @apply text-xs font-semibold;
+    @apply font-semibold;
+    font-size: var(--text-xs);
+    line-height: var(--text-xs--line-height);
     color: var(--text-secondary);
   }
 
@@ -1028,7 +1030,9 @@
   }
 
   .option-filter {
-    @apply mx-4 mb-1 flex flex-col gap-1 text-xs font-medium;
+    @apply mx-4 mb-1 flex flex-col gap-1 font-medium;
+    font-size: var(--text-xs);
+    line-height: var(--text-xs--line-height);
     color: var(--text-secondary);
   }
 
@@ -1040,7 +1044,9 @@
   }
 
   .option-filter-summary {
-    @apply mx-4 mb-2 text-xs;
+    @apply mx-4 mb-2;
+    font-size: var(--text-xs);
+    line-height: var(--text-xs--line-height);
     color: var(--text-secondary);
   }
 
@@ -1081,26 +1087,33 @@
   }
 
   .option-example {
-    @apply text-xs;
+    font-size: var(--text-xs);
+    line-height: var(--text-xs--line-height);
     color: var(--text-secondary);
     opacity: 0.85;
   }
 
   .option-evidence {
-    @apply mt-1.5 self-start border-l-2 pl-2.5 text-xs italic;
+    @apply mt-1.5 self-start border-l-2 pl-2.5 italic;
+    font-size: var(--text-xs);
+    line-height: var(--text-xs--line-height);
     border-color: oklch(from var(--accent-default) l c h / 0.35);
     color: var(--text-secondary);
   }
 
   .option-current {
-    @apply inline-flex h-5 shrink-0 items-center rounded-full px-2 text-xs font-bold;
+    @apply inline-flex h-5 shrink-0 items-center rounded-full px-2 font-bold;
+    font-size: var(--text-xs);
+    line-height: var(--text-xs--line-height);
     letter-spacing: 0.03em;
     color: var(--positive-stronger);
     background: var(--positive-dimmer);
   }
 
   .option-recommendation {
-    @apply inline-flex h-5 shrink-0 items-center rounded-full px-2 text-xs font-bold;
+    @apply inline-flex h-5 shrink-0 items-center rounded-full px-2 font-bold;
+    font-size: var(--text-xs);
+    line-height: var(--text-xs--line-height);
     letter-spacing: 0.03em;
     color: var(--accent-stronger);
     background: var(--accent-dimmer);
@@ -1111,7 +1124,8 @@
   }
 
   .delegate-note {
-    @apply text-xs;
+    font-size: var(--text-xs);
+    line-height: var(--text-xs--line-height);
     color: var(--text-secondary);
   }
 
@@ -1207,18 +1221,23 @@
   }
 
   .field-list-count {
-    @apply text-xs;
+    font-size: var(--text-xs);
+    line-height: var(--text-xs--line-height);
     color: var(--text-secondary);
   }
 
   .field-search {
-    @apply ml-auto h-8 w-[11.875rem] rounded-md border px-2 text-xs;
+    @apply ml-auto h-8 w-[11.875rem] rounded-md border px-2;
+    font-size: var(--text-xs);
+    line-height: var(--text-xs--line-height);
     border-color: var(--border-default);
     background: var(--background-primary);
   }
 
   .field-summary-row {
-    @apply flex min-h-11 w-full flex-wrap items-center gap-x-3 gap-y-0.5 rounded-lg px-3 py-2 text-left text-xs;
+    @apply flex min-h-11 w-full flex-wrap items-center gap-x-3 gap-y-0.5 rounded-lg px-3 py-2 text-left;
+    font-size: var(--text-xs);
+    line-height: var(--text-xs--line-height);
     background: var(--background-secondary);
     color: var(--text-secondary);
   }
@@ -1233,12 +1252,16 @@
   }
 
   .field-summary-name {
-    @apply truncate text-xs;
+    @apply truncate;
+    font-size: var(--text-xs);
+    line-height: var(--text-xs--line-height);
     font-family: var(--font-mono, ui-monospace, monospace);
   }
 
   .field-summary-required {
-    @apply rounded px-1.5 py-0.5 text-xs font-semibold;
+    @apply rounded px-1.5 py-0.5 font-semibold;
+    font-size: var(--text-xs);
+    line-height: var(--text-xs--line-height);
     background: var(--accent-dimmer);
     color: var(--accent-stronger);
   }
@@ -1253,7 +1276,8 @@
   }
 
   .field-paste-label {
-    @apply text-xs;
+    font-size: var(--text-xs);
+    line-height: var(--text-xs--line-height);
     color: var(--text-secondary);
   }
 
@@ -1263,7 +1287,9 @@
   }
 
   .field-name {
-    @apply flex flex-col gap-1 text-xs font-medium;
+    @apply flex flex-col gap-1 font-medium;
+    font-size: var(--text-xs);
+    line-height: var(--text-xs--line-height);
   }
 
   .field-name-label {
@@ -1271,7 +1297,9 @@
   }
 
   .field-name-token {
-    @apply inline-flex h-[1.375rem] w-fit items-center rounded-md border px-2 text-xs;
+    @apply inline-flex h-[1.375rem] w-fit items-center rounded-md border px-2;
+    font-size: var(--text-xs);
+    line-height: var(--text-xs--line-height);
     font-family: var(--font-mono, ui-monospace, monospace);
     border-color: var(--border-default);
     background: var(--background-primary);
@@ -1283,23 +1311,36 @@
   }
 
   .field-name-auto {
-    @apply text-xs font-normal;
+    @apply font-normal;
+    font-size: var(--text-xs);
+    line-height: var(--text-xs--line-height);
     color: var(--text-secondary);
   }
 
   .field-technical-toggle {
-    @apply inline-flex items-center gap-2 text-xs;
+    @apply inline-flex min-h-[24px] items-center gap-2;
+    font-size: var(--text-xs);
+    line-height: var(--text-xs--line-height);
     color: var(--text-secondary);
   }
 
   .field-name-issue {
-    @apply text-xs font-semibold;
+    @apply font-semibold;
+    font-size: var(--text-xs);
+    line-height: var(--text-xs--line-height);
     color: var(--text-warning-stronger, var(--text-secondary));
   }
 
   .field-row label:not(.field-required) {
-    @apply flex flex-col gap-1 text-xs font-medium;
+    @apply flex flex-col gap-1 font-medium;
+    font-size: var(--text-xs);
+    line-height: var(--text-xs--line-height);
     color: var(--text-secondary);
+  }
+
+  .field-row input[type="checkbox"],
+  .field-technical-toggle input[type="checkbox"] {
+    @apply size-4 shrink-0;
   }
 
   .field-row input:not([type="checkbox"]),
@@ -1311,7 +1352,9 @@
   }
 
   .field-options {
-    @apply col-span-2 flex flex-col gap-1.5 text-xs font-medium;
+    @apply col-span-2 flex flex-col gap-1.5 font-medium;
+    font-size: var(--text-xs);
+    line-height: var(--text-xs--line-height);
   }
 
   .field-options-label {
@@ -1337,7 +1380,9 @@
   }
 
   .field-option-add {
-    @apply w-fit text-xs font-semibold;
+    @apply inline-flex min-h-[24px] w-fit items-center font-semibold;
+    font-size: var(--text-xs);
+    line-height: var(--text-xs--line-height);
     color: var(--accent-stronger);
   }
 
@@ -1346,13 +1391,17 @@
   }
 
   .field-required {
-    @apply flex items-center gap-2 text-xs;
+    @apply flex min-h-[24px] items-center gap-2;
+    font-size: var(--text-xs);
+    line-height: var(--text-xs--line-height);
     color: var(--text-primary);
   }
 
   .field-add,
   .field-remove {
-    @apply w-fit text-xs font-medium underline-offset-2 hover:underline disabled:opacity-50;
+    @apply inline-flex min-h-[24px] w-fit items-center font-medium underline-offset-2 hover:underline disabled:opacity-50;
+    font-size: var(--text-xs);
+    line-height: var(--text-xs--line-height);
     color: var(--accent-stronger);
   }
 
@@ -1401,7 +1450,8 @@
     }
 
     .delegate-note {
-      @apply text-xs;
+      font-size: var(--text-xs);
+      line-height: var(--text-xs--line-height);
       color: var(--text-secondary);
     }
 
@@ -1424,18 +1474,23 @@
     }
 
     .field-list-count {
-      @apply text-xs;
+      font-size: var(--text-xs);
+      line-height: var(--text-xs--line-height);
       color: var(--text-secondary);
     }
 
     .field-search {
-      @apply ml-auto h-8 w-[11.875rem] rounded-md border px-2 text-xs;
+      @apply ml-auto h-8 w-[11.875rem] rounded-md border px-2;
+      font-size: var(--text-xs);
+      line-height: var(--text-xs--line-height);
       border-color: var(--border-default);
       background: var(--background-primary);
     }
 
     .field-summary-row {
-      @apply flex min-h-11 w-full flex-wrap items-center gap-x-3 gap-y-0.5 rounded-lg px-3 py-2 text-left text-xs;
+      @apply flex min-h-11 w-full flex-wrap items-center gap-x-3 gap-y-0.5 rounded-lg px-3 py-2 text-left;
+      font-size: var(--text-xs);
+      line-height: var(--text-xs--line-height);
       background: var(--background-secondary);
       color: var(--text-secondary);
     }
@@ -1450,12 +1505,16 @@
     }
 
     .field-summary-name {
-      @apply truncate text-xs;
+      @apply truncate;
+      font-size: var(--text-xs);
+      line-height: var(--text-xs--line-height);
       font-family: var(--font-mono, ui-monospace, monospace);
     }
 
     .field-summary-required {
-      @apply rounded px-1.5 py-0.5 text-xs font-semibold;
+      @apply rounded px-1.5 py-0.5 font-semibold;
+      font-size: var(--text-xs);
+      line-height: var(--text-xs--line-height);
       background: var(--accent-dimmer);
       color: var(--accent-stronger);
     }
@@ -1470,7 +1529,8 @@
     }
 
     .field-paste-label {
-      @apply text-xs;
+      font-size: var(--text-xs);
+      line-height: var(--text-xs--line-height);
       color: var(--text-secondary);
     }
 
