@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRawSnippet } from "svelte";
 import { m } from "$lib/paraglide/messages";
-import { getLocale, setLocale } from "$lib/paraglide/runtime";
+import { withLocale } from "../testLocale";
 import type { AIBuilderFlowReviewPacket } from "./protocol";
 import BuilderFindingsScreen from "./BuilderFindingsScreen.svelte";
 
@@ -315,9 +315,8 @@ describe("BuilderFindingsScreen suggestions", () => {
       // What is sent to the model before the call: the recorded fields and
       // the recipient. What travels on investigate: reference metadata, never
       // the reasoning or the quotes. Concepts, not sentences, in both locales.
-      const previous = getLocale();
+      const restoreLocale = withLocale(locale);
       try {
-        setLocale(locale, { reload: false });
         const closed = render(BuilderFindingsScreen, {
           review: { status: "ready", packet: makePacket() },
           suggestions: { status: "closed" },
@@ -358,7 +357,7 @@ describe("BuilderFindingsScreen suggestions", () => {
         await tick("suggestions-list", 0);
         expect(screen.getByText(m.ai_builder_review_suggestion_investigate_hint())).toBeTruthy();
       } finally {
-        setLocale(previous, { reload: false });
+        restoreLocale();
       }
     }
   );
@@ -442,9 +441,8 @@ describe("BuilderFindingsScreen suggestions", () => {
   ])(
     "investigates every suggestion in one canonical turn, or just one, in $locale",
     async ({ locale, all, one }) => {
-      const previous = getLocale();
+      const restoreLocale = withLocale(locale);
       try {
-        setLocale(locale, { reload: false });
         const onprepare = vi.fn();
         const judged = makeSuggestions();
         const second = {
@@ -519,7 +517,7 @@ describe("BuilderFindingsScreen suggestions", () => {
         ]);
         expect(single.message).toBe(one);
       } finally {
-        setLocale(previous, { reload: false });
+        restoreLocale();
       }
     }
   );

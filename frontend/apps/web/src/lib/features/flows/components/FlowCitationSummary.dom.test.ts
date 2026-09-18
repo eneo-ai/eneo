@@ -2,7 +2,7 @@ import { cleanup, render, screen } from "@testing-library/svelte";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { m } from "$lib/paraglide/messages";
-import { getLocale, setLocale } from "$lib/paraglide/runtime";
+import { withLocale } from "../testLocale";
 
 import FlowCitationSummary from "./FlowCitationSummary.svelte";
 import type { FlowCitationSummary as Summary } from "./flowCitationSummary";
@@ -46,10 +46,9 @@ describe("FlowCitationSummary", () => {
   });
 
   it("falls back to the localized unidentified label for unresolved sources in both locales", () => {
-    const previousLocale = getLocale();
-    try {
-      for (const locale of ["sv", "en"] as const) {
-        setLocale(locale, { reload: false });
+    for (const locale of ["sv", "en"] as const) {
+      const restoreLocale = withLocale(locale);
+      try {
         const { unmount } = render(FlowCitationSummary, {
           summary: makeSummary({
             sources: [{ identity_resolved: false, display_name: null, container_label: null }]
@@ -57,9 +56,9 @@ describe("FlowCitationSummary", () => {
         });
         expect(screen.getByText(m.flow_citation_source_unidentified())).toBeTruthy();
         unmount();
+      } finally {
+        restoreLocale();
       }
-    } finally {
-      setLocale(previousLocale, { reload: false });
     }
   });
 
