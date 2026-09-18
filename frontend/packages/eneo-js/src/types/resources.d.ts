@@ -24,6 +24,8 @@ export type SkillRuntimePolicy = components["schemas"]["SkillRuntimePolicyPublic
 export type SkillRuntimePolicyUpdate = components["schemas"]["SkillRuntimePolicyUpdate"];
 export type SkillRuntimeModelProjections = components["schemas"]["SkillRuntimeModelProjections"];
 export type OrganizationSkillPublic = components["schemas"]["OrganizationSkillPublic"];
+export type SkillUsageCounts = components["schemas"]["SkillUsageCountsPublic"];
+export type SkillRemovalResult = components["schemas"]["SkillRemovalPublic"];
 export type OrganizationSkillSummaryPublic =
   components["schemas"]["OrganizationSkillSummaryPublic"];
 export type OrganizationSkillSummaryPagePublic =

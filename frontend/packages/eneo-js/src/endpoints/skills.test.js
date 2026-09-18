@@ -567,3 +567,51 @@ test("Assistant binding list and configuration preserve their independent contra
     }
   ]);
 });
+
+test("organization removal sends one bounded batch and returns removed IDs", async () => {
+  const calls = [];
+  const result = { removed_ids: ["skill-1", "skill-2"] };
+  const skills = initSkills({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return result;
+    }
+  });
+  assert.equal(await skills.organization.removeMany({ skill_ids: result.removed_ids }), result);
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/skills/organization/remove/",
+      request: {
+        method: "post",
+        requestBody: { "application/json": { skill_ids: result.removed_ids } }
+      }
+    }
+  ]);
+});
+
+test("organization catalogue can request retained removed skills", async () => {
+  const calls = [];
+  const skills = initSkills({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return { items: [] };
+    }
+  });
+  await skills.organization.list({
+    removed: true,
+    search: "payroll",
+    cursor: "payroll:skill-1",
+    limit: 25
+  });
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/skills/organization/",
+      request: {
+        method: "get",
+        params: {
+          query: { removed: true, search: "payroll", cursor: "payroll:skill-1", limit: 25 }
+        }
+      }
+    }
+  ]);
+});

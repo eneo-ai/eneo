@@ -1,0 +1,177 @@
+<script lang="ts">
+  import {
+    EneoError,
+    type OrganizationSkillSummaryPublic,
+    type SkillRemovalResult
+  } from "@eneo/eneo-js";
+  import { resolve } from "$app/paths";
+  import * as Alert from "$lib/components/ui/alert/index.js";
+  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import { getErrorMessage, SKILL_STILL_ATTACHED } from "$lib/core/errors";
+  import { m } from "$lib/paraglide/messages";
+  import { onDestroy, tick } from "svelte";
+
+  type Target = Pick<OrganizationSkillSummaryPublic, "id" | "display_name" | "usage">;
+  let {
+    skills,
+    onRemove,
+    onRemoved,
+    onClose,
+    onExclude
+  }: {
+    skills: Target[];
+    onRemove: (ids: string[]) => Promise<SkillRemovalResult>;
+    onRemoved: (ids: string[]) => Promise<void>;
+    onClose: () => void;
+    onExclude: (ids: string[]) => void;
+  } = $props();
+
+  let saving = $state(false);
+  let error = $state<string | null>(null);
+  let serverBlockers = $state<string[]>([]);
+  let restoreFocus = true;
+  const previousFocus = typeof document === "undefined" ? null : document.activeElement;
+  const focusFallback =
+    typeof document === "undefined"
+      ? null
+      : document.querySelector<HTMLElement>("[data-skill-removal-focus]");
+  onDestroy(() => {
+    void tick().then(() => {
+      if (!restoreFocus || typeof HTMLElement === "undefined") return;
+      if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus();
+      else if (focusFallback?.isConnected) focusFallback.focus();
+    });
+  });
+  const blockers = $derived(
+    skills.filter(
+      (skill) =>
+        skill.usage.assistant_count > 0 ||
+        skill.usage.app_count > 0 ||
+        skill.usage.personal_chat_pinned ||
+        serverBlockers.includes(skill.id)
+    )
+  );
+
+  async function remove(event: MouseEvent) {
+    event.preventDefault();
+    if (saving || blockers.length > 0 || skills.length === 0) return;
+    saving = true;
+    error = null;
+    let result: SkillRemovalResult;
+    try {
+      result = await onRemove(skills.map((skill) => skill.id));
+    } catch (cause) {
+      error = getErrorMessage(cause, m.organization_skills_remove_error());
+      // App-run conflicts remain retryable after the job finishes; only bindings
+      // require changing the selection or detaching resources first.
+      if (cause instanceof EneoError && cause.code === SKILL_STILL_ATTACHED) {
+        const ids: unknown = cause.response?.details?.skill_ids;
+        if (Array.isArray(ids)) {
+          serverBlockers = ids.filter((id): id is string => typeof id === "string");
+        }
+      }
+      saving = false;
+      return;
+    }
+    saving = false;
+    onClose();
+    await onRemoved(result.removed_ids);
+  }
+
+  function excludeBlockers() {
+    onExclude(blockers.map((skill) => skill.id));
+    error = null;
+    serverBlockers = [];
+  }
+</script>
+
+<AlertDialog.Root
+  open
+  onOpenChange={(open) => {
+    if (!open && !saving) onClose();
+  }}
+>
+  <AlertDialog.Content
+    class="max-h-[calc(100dvh-2rem)] overflow-y-auto data-[size=default]:sm:max-w-lg"
+  >
+    <AlertDialog.Header>
+      <AlertDialog.Title
+        >{skills.length === 1
+          ? m.organization_skills_remove_single_title()
+          : m.organization_skills_remove_title({ count: String(skills.length) })}</AlertDialog.Title
+      >
+      <AlertDialog.Description>{m.organization_skills_remove_description()}</AlertDialog.Description
+      >
+    </AlertDialog.Header>
+    <ul class="max-h-64 overflow-y-auto divide-y divide-border">
+      {#each skills as skill (skill.id)}
+        <li class="flex flex-col gap-1 py-3 first:pt-0">
+          <a
+            href={resolve(
+              `/spaces/organization/skills/${skill.id}#organization-skill-adoption-heading`
+            )}
+            onclick={(event) => {
+              if (saving) {
+                event.preventDefault();
+                return;
+              }
+              restoreFocus = false;
+              onClose();
+            }}
+            class="text-foreground break-words text-sm font-medium underline underline-offset-4"
+          >
+            {skill.display_name}
+          </a>
+          <p class="text-muted-foreground text-sm tabular-nums">
+            {m.organization_skills_usage_counts({
+              assistants: String(skill.usage.assistant_count),
+              apps: String(skill.usage.app_count),
+              spaces: String(skill.usage.distinct_space_count)
+            })}
+            {#if skill.usage.personal_chat_pinned}
+              · {m.organization_skills_usage_personal_chat()}{/if}
+          </p>
+          {#if serverBlockers.includes(skill.id)}
+            <p class="text-destructive text-sm">{m.organization_skills_remove_new_binding()}</p>
+          {/if}
+        </li>
+      {/each}
+    </ul>
+    {#if blockers.length > 0}
+      <Alert.Root>
+        <Alert.Title>{m.organization_skills_remove_blocked_title()}</Alert.Title>
+        <Alert.Description>
+          {m.organization_skills_remove_blocked_description()}
+          {#if blockers.length < skills.length}
+            <div class="mt-2">
+              <Button variant="outline" size="sm" onclick={excludeBlockers}>
+                {m.organization_skills_remove_exclude_blocked({ count: String(blockers.length) })}
+              </Button>
+            </div>
+          {/if}
+        </Alert.Description>
+      </Alert.Root>
+    {/if}
+    {#if error}
+      <Alert.Root variant="destructive" role="alert">
+        <Alert.Title>{m.organization_skills_remove_error()}</Alert.Title>
+        <Alert.Description>{error}</Alert.Description>
+      </Alert.Root>
+    {/if}
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel disabled={saving}>{m.cancel()}</AlertDialog.Cancel>
+      <AlertDialog.Action
+        variant="destructive"
+        disabled={saving || blockers.length > 0}
+        onclick={remove}
+      >
+        {saving
+          ? m.organization_skills_removing()
+          : skills.length === 1
+            ? m.organization_skills_remove_action()
+            : m.organization_skills_remove_confirm({ count: String(skills.length) })}
+      </AlertDialog.Action>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>

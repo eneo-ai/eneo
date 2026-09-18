@@ -4,11 +4,12 @@
   import { resolve } from "$app/paths";
   import { Page } from "$lib/components/layout";
   import * as Alert from "$lib/components/ui/alert/index.js";
-  import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
+  import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import * as InputGroup from "$lib/components/ui/input-group/index.js";
   import * as Table from "$lib/components/ui/table/index.js";
+  import SkillRemovalDialog from "$lib/features/skills/SkillRemovalDialog.svelte";
   import { getErrorMessage } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
@@ -23,6 +24,7 @@
     BookOpenCheck
   } from "lucide-svelte";
   import { untrack } from "svelte";
+  import { SvelteURLSearchParams } from "svelte/reactivity";
 
   let { data } = $props();
 
@@ -31,10 +33,19 @@
   let nextCursor = $state(untrack(() => serverPage.next_cursor ?? null));
   let loadingMore = $state(false);
   let loadError = $state<string | null>(null);
-  let deleteTarget = $state<OrganizationSkillSummaryPublic | null>(null);
-  let deleteError = $state<string | null>(null);
-  let deleting = $state(false);
+  const selectionLimit = 100;
+  let selectedIds = $state<string[]>([]);
+  let removalTargets = $state<OrganizationSkillSummaryPublic[]>([]);
+  let announcement = $state("");
   let refreshWarning = $state(false);
+  const selectedSkills = $derived(items.filter((skill) => selectedIds.includes(skill.id)));
+  const selectableItems = $derived(items.slice(0, selectionLimit));
+
+  function select(skillId: string, checked: boolean) {
+    selectedIds = checked
+      ? [...selectedIds, skillId].slice(0, selectionLimit)
+      : selectedIds.filter((id) => id !== skillId);
+  }
 
   $effect(() => {
     const refreshedPage = data.page;
@@ -43,11 +54,10 @@
     items = [...refreshedPage.items];
     nextCursor = refreshedPage.next_cursor ?? null;
     loadError = null;
+    loadingMore = false;
+    selectedIds = [];
+    removalTargets = [];
   });
-
-  function canDelete(skill: OrganizationSkillSummaryPublic): boolean {
-    return skill.publication_state === "draft";
-  }
 
   function formatDate(value: string): string {
     return new Date(value).toLocaleString(getLocale() === "sv" ? "sv-SE" : "en-US", {
@@ -57,6 +67,7 @@
   }
 
   function statusLabel(skill: OrganizationSkillSummaryPublic): string {
+    if (skill.removed_at) return m.organization_skills_removed_status();
     if (skill.execution_blocked) return m.organization_skills_status_blocked();
     switch (skill.publication_state) {
       case "draft":
@@ -73,6 +84,7 @@
   function statusVariant(
     skill: OrganizationSkillSummaryPublic
   ): "default" | "destructive" | "secondary" | "outline" {
+    if (skill.removed_at) return "outline";
     if (skill.execution_blocked) return "destructive";
     if (skill.publication_state === "published") return "secondary";
     if (skill.publication_state === "update_pending") return "default";
@@ -92,37 +104,37 @@
     if (nextCursor === null || loadingMore) return;
     loadingMore = true;
     loadError = null;
+    const requestPage = data.page;
     try {
       const page = await data.eneo.skills.organization.list({
         cursor: nextCursor,
-        search: data.search || undefined
+        search: data.search || undefined,
+        removed: data.removed
       });
+      if (data.page !== requestPage) return;
       items = [...items, ...page.items];
       nextCursor = page.next_cursor ?? null;
     } catch (error) {
-      loadError = getErrorMessage(error, m.organization_skills_load_more_error());
+      if (data.page === requestPage) {
+        loadError = getErrorMessage(error, m.organization_skills_load_more_error());
+      }
     } finally {
-      loadingMore = false;
+      if (data.page === requestPage) loadingMore = false;
     }
   }
 
-  async function deleteSkill(event: MouseEvent) {
-    event.preventDefault();
-    if (!deleteTarget || deleting) return;
-    deleting = true;
-    deleteError = null;
-    const deletedSkillId = deleteTarget.id;
-    try {
-      await data.eneo.skills.organization.delete({ skillId: deletedSkillId });
-    } catch (error) {
-      deleteError = getErrorMessage(error, m.organization_skills_delete_error());
-      deleting = false;
-      return;
-    }
-    items = items.filter((skill) => skill.id !== deletedSkillId);
-    deleteTarget = null;
-    deleting = false;
+  async function removedSkills(ids: string[]) {
+    if (!data.removed) items = items.filter((skill) => !ids.includes(skill.id));
+    selectedIds = [];
+    announcement = m.organization_skills_removed_success({ count: String(ids.length) });
     await refreshOrganizationSkills();
+  }
+
+  function filterLink(removed: boolean): string {
+    const query = new SvelteURLSearchParams();
+    if (data.search) query.set("search", data.search);
+    if (removed) query.set("removed", "true");
+    return resolve("/spaces/organization/skills") + (query.size ? `?${query}` : "");
   }
 </script>
 
@@ -166,6 +178,28 @@
         {m.organization_skills_manage_intro()}
       </p>
 
+      <nav class="flex flex-wrap gap-2" aria-label={m.organization_skills_filter_label()}>
+        <Button
+          data-skill-removal-focus
+          href={filterLink(false)}
+          variant={data.removed ? "ghost" : "secondary"}
+          aria-current={!data.removed ? "page" : undefined}
+          >{m.organization_skills_current_filter()}</Button
+        >
+        <Button
+          href={filterLink(true)}
+          variant={data.removed ? "secondary" : "ghost"}
+          aria-current={data.removed ? "page" : undefined}
+          >{m.organization_skills_removed_filter()}</Button
+        >
+      </nav>
+      {#if data.removed}
+        <p class="text-muted-foreground max-w-[65ch] text-sm">
+          {m.organization_skills_removed_description()}
+        </p>
+      {/if}
+      <p class={announcement ? "text-sm" : "sr-only"} role="status">{announcement}</p>
+
       {#if items.length > 0 || data.search}
         <form
           method="GET"
@@ -173,6 +207,7 @@
           class="grid max-w-xl grid-cols-[minmax(0,1fr)_auto] gap-2"
           role="search"
         >
+          {#if data.removed}<input type="hidden" name="removed" value="true" />{/if}
           <InputGroup.Root class="min-w-0">
             <InputGroup.Addon>
               <Search aria-hidden="true" />
@@ -190,7 +225,8 @@
             <Button type="submit" variant="outline">{m.search()}</Button>
             {#if data.search}
               <Button
-                href={resolve("/spaces/organization/skills")}
+                href={resolve("/spaces/organization/skills") +
+                  (data.removed ? "?removed=true" : "")}
                 variant="ghost"
                 aria-label={m.organization_skills_clear_search()}
               >
@@ -217,17 +253,19 @@
           {/if}
           <div class="max-w-md">
             <h2 class="text-foreground text-base font-medium">
-              {data.search
-                ? m.skills_library_no_results()
-                : m.organization_skills_empty_manage_title()}
+              {data.removed && !data.search
+                ? m.organization_skills_removed_empty()
+                : data.search
+                  ? m.skills_library_no_results()
+                  : m.organization_skills_empty_manage_title()}
             </h2>
-            {#if !data.search}
+            {#if !data.search && !data.removed}
               <p class="text-muted-foreground mt-1.5 text-sm leading-6">
                 {m.organization_skills_empty_manage_description()}
               </p>
             {/if}
           </div>
-          {#if !data.search}
+          {#if !data.search && !data.removed}
             <Button href={resolve("/spaces/organization/skills/new")}>
               <Plus data-icon="inline-start" aria-hidden="true" />
               {m.skills_library_create_first()}
@@ -235,10 +273,47 @@
           {/if}
         </div>
       {:else}
+        {#if !data.removed}
+          <div class="flex flex-wrap items-center gap-3">
+            <p class="text-muted-foreground text-sm" aria-live="polite">
+              {m.organization_skills_selection_count({
+                count: String(selectedIds.length),
+                limit: String(selectionLimit)
+              })}
+            </p>
+            {#if selectedIds.length > 0}
+              <Button
+                variant="outline"
+                size="sm"
+                onclick={() => (removalTargets = [...selectedSkills])}
+              >
+                <Trash2 aria-hidden="true" />{m.organization_skills_remove_selected()}
+              </Button>
+              <Button variant="ghost" size="sm" onclick={() => (selectedIds = [])}
+                >{m.clear()}</Button
+              >
+            {/if}
+          </div>
+        {/if}
         <div class="border-border @container border-y">
           <Table.Root class="w-full table-fixed">
             <Table.Header>
               <Table.Row>
+                {#if !data.removed}
+                  <Table.Head class="w-12">
+                    <Checkbox
+                      aria-label={m.organization_skills_select_shown({
+                        count: String(selectableItems.length)
+                      })}
+                      checked={selectableItems.length > 0 &&
+                        selectableItems.every((skill) => selectedIds.includes(skill.id))}
+                      indeterminate={selectedIds.length > 0 &&
+                        !selectableItems.every((skill) => selectedIds.includes(skill.id))}
+                      onCheckedChange={(checked) =>
+                        (selectedIds = checked ? selectableItems.map((skill) => skill.id) : [])}
+                    />
+                  </Table.Head>
+                {/if}
                 <Table.Head class="w-auto @4xl:w-[22%]">{m.name()}</Table.Head>
                 <Table.Head class="hidden w-[30%] @4xl:table-cell">{m.description()}</Table.Head>
                 <Table.Head class="hidden w-32 @md:table-cell">{m.status()}</Table.Head>
@@ -256,6 +331,19 @@
             <Table.Body>
               {#each items as skill (skill.id)}
                 <Table.Row class="[&>td]:align-top">
+                  {#if !data.removed}
+                    <Table.Cell>
+                      <Checkbox
+                        aria-label={m.organization_skills_select_skill({
+                          name: skill.display_name
+                        })}
+                        checked={selectedIds.includes(skill.id)}
+                        disabled={selectedIds.length >= selectionLimit &&
+                          !selectedIds.includes(skill.id)}
+                        onCheckedChange={(checked) => select(skill.id, checked)}
+                      />
+                    </Table.Cell>
+                  {/if}
                   <Table.Cell class="min-w-0 font-medium @4xl:w-[22%]">
                     <a
                       href={resolve(`/spaces/organization/skills/${skill.id}`)}
@@ -266,8 +354,33 @@
                     <p class="text-muted-foreground mt-0.5 break-all whitespace-normal text-xs">
                       {skill.slug}
                     </p>
+                    {#if !data.removed}
+                      <a
+                        href={resolve(
+                          `/spaces/organization/skills/${skill.id}#organization-skill-adoption-heading`
+                        )}
+                        class="text-muted-foreground hover:text-foreground mt-2 block whitespace-normal text-xs font-normal leading-5 underline underline-offset-4"
+                      >
+                        {m.organization_skills_usage_counts({
+                          assistants: String(skill.usage.assistant_count),
+                          apps: String(skill.usage.app_count),
+                          spaces: String(skill.usage.distinct_space_count)
+                        })}
+                        {#if skill.usage.personal_chat_pinned}<span class="block"
+                            >{m.organization_skills_usage_personal_chat()}</span
+                          >{/if}
+                      </a>
+                    {:else if skill.removed_at}
+                      <p class="text-muted-foreground mt-2 whitespace-normal text-xs font-normal">
+                        {m.organization_skills_removed_at({ time: formatDate(skill.removed_at) })}
+                      </p>
+                    {/if}
                     <div class="mt-2 @md:hidden">
-                      <Badge variant={statusVariant(skill)}>{statusLabel(skill)}</Badge>
+                      <Badge
+                        variant={statusVariant(skill)}
+                        class="h-auto min-h-5 max-w-full whitespace-normal text-left"
+                        >{statusLabel(skill)}</Badge
+                      >
                     </div>
                     <p
                       class="text-muted-foreground mt-2 line-clamp-2 min-w-0 break-words whitespace-normal pr-2 text-sm leading-6 @4xl:hidden"
@@ -297,7 +410,11 @@
                     <p class="line-clamp-2">{skill.description}</p>
                   </Table.Cell>
                   <Table.Cell class="hidden @md:table-cell">
-                    <Badge variant={statusVariant(skill)}>{statusLabel(skill)}</Badge>
+                    <Badge
+                      variant={statusVariant(skill)}
+                      class="h-auto min-h-5 max-w-full whitespace-normal text-left"
+                      >{statusLabel(skill)}</Badge
+                    >
                   </Table.Cell>
                   <Table.Cell class="text-muted-foreground hidden text-sm @4xl:table-cell">
                     {m.organization_skills_version({
@@ -310,16 +427,16 @@
                     {formatDate(skill.updated_at)}
                   </Table.Cell>
                   <Table.Cell class="text-right">
-                    {#if canDelete(skill)}
+                    {#if !data.removed}
                       <Button
                         variant="ghost"
                         size="icon-sm"
                         class="size-11 md:size-7"
-                        title={m.delete()}
-                        aria-label={m.skills_library_delete_aria({
+                        title={m.remove()}
+                        aria-label={m.organization_skills_remove_aria({
                           name: skill.display_name
                         })}
-                        onclick={() => (deleteTarget = skill)}
+                        onclick={() => (removalTargets = [skill])}
                       >
                         <Trash2 aria-hidden="true" />
                       </Button>
@@ -352,32 +469,15 @@
   </Page.Main>
 </Page.Root>
 
-<AlertDialog.Root
-  open={deleteTarget !== null}
-  onOpenChange={(open) => {
-    if (!open && !deleting) {
-      deleteTarget = null;
-      deleteError = null;
-    }
-  }}
->
-  <AlertDialog.Content>
-    <AlertDialog.Header>
-      <AlertDialog.Title>{m.skills_library_delete_title()}</AlertDialog.Title>
-      <AlertDialog.Description>
-        {m.organization_skills_delete_description({
-          name: deleteTarget?.display_name ?? ""
-        })}
-      </AlertDialog.Description>
-    </AlertDialog.Header>
-    {#if deleteError}
-      <p class="text-destructive text-sm" role="alert">{deleteError}</p>
-    {/if}
-    <AlertDialog.Footer>
-      <AlertDialog.Cancel disabled={deleting}>{m.cancel()}</AlertDialog.Cancel>
-      <AlertDialog.Action variant="destructive" disabled={deleting} onclick={deleteSkill}>
-        {deleting ? m.skills_library_deleting() : m.delete()}
-      </AlertDialog.Action>
-    </AlertDialog.Footer>
-  </AlertDialog.Content>
-</AlertDialog.Root>
+{#if removalTargets.length > 0}
+  <SkillRemovalDialog
+    skills={removalTargets}
+    onRemove={(skill_ids) => data.eneo.skills.organization.removeMany({ skill_ids })}
+    onRemoved={removedSkills}
+    onClose={() => (removalTargets = [])}
+    onExclude={(ids) => {
+      removalTargets = removalTargets.filter((skill) => !ids.includes(skill.id));
+      selectedIds = selectedIds.filter((id) => !ids.includes(id));
+    }}
+  />
+{/if}

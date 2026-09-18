@@ -1078,6 +1078,7 @@ async def test_concurrent_reference_failure_precedes_campaign_capacity_snapshot(
 
     failure_paused = asyncio.Event()
     release_failure = asyncio.Event()
+    initial_snapshot_taken = asyncio.Event()
     failure_backend_pid: int | None = None
 
     async def fail_reference() -> None:
@@ -1106,39 +1107,45 @@ async def test_concurrent_reference_failure_precedes_campaign_capacity_snapshot(
                 observed_storage_kind=StorageKind.POSTGRES_INLINE,
             )
 
+    async def start_campaign_after_initial_snapshot() -> FileIconBackfillResult:
+        await initial_snapshot_taken.wait()
+        return await _backfill(
+            object_content_database,
+            auto_inline_max_bytes=1024,
+            inline_capacity_ack=1200,
+        ).run_once()
+
     failure_task = asyncio.create_task(fail_reference())
     startup_task: asyncio.Task[FileIconBackfillResult] | None = None
     capacity_lock_observed = False
     try:
         await asyncio.wait_for(failure_paused.wait(), timeout=LOCK_WAIT_SECONDS)
-        startup_task = asyncio.create_task(
-            _backfill(
-                object_content_database,
-                auto_inline_max_bytes=1024,
-                inline_capacity_ack=1200,
-            ).run_once()
-        )
+        startup_task = asyncio.create_task(start_campaign_after_initial_snapshot())
         assert failure_backend_pid is not None
 
         async def wait_for_blocked_campaign_start() -> bool:
-            async with object_content_database.session() as session, session.begin():
+            async with object_content_database.session() as session:
                 while not startup_task.done():
-                    waiting = await session.scalar(
-                        sa.text(
-                            """
-                            SELECT EXISTS (
-                                SELECT 1
-                                FROM pg_stat_activity
-                                WHERE datname = current_database()
-                                  AND pid <> pg_backend_pid()
-                                  AND :blocking_pid = ANY(pg_blocking_pids(pid))
-                            )
-                            """
-                        ),
-                        {"blocking_pid": failure_backend_pid},
-                    )
+                    # Activity snapshots last for a transaction; refresh each
+                    # probe to see connections opened after the first snapshot.
+                    async with session.begin():
+                        waiting = await session.scalar(
+                            sa.text(
+                                """
+                                SELECT EXISTS (
+                                    SELECT 1
+                                    FROM pg_stat_activity
+                                    WHERE datname = current_database()
+                                      AND pid <> pg_backend_pid()
+                                      AND :blocking_pid = ANY(pg_blocking_pids(pid))
+                                )
+                                """
+                            ),
+                            {"blocking_pid": failure_backend_pid},
+                        )
                     if waiting:
                         return True
+                    initial_snapshot_taken.set()
                     await asyncio.sleep(0.01)
             return False
 
@@ -1149,9 +1156,12 @@ async def test_concurrent_reference_failure_precedes_campaign_capacity_snapshot(
     finally:
         release_failure.set()
         await asyncio.wait_for(failure_task, timeout=LOCK_WAIT_SECONDS)
+        if startup_task is not None:
+            initial_snapshot_taken.set()
+            await asyncio.wait_for(startup_task, timeout=LOCK_WAIT_SECONDS)
 
     assert startup_task is not None
-    startup = await asyncio.wait_for(startup_task, timeout=LOCK_WAIT_SECONDS)
+    startup = startup_task.result()
     assert capacity_lock_observed
     assert startup.state is FileIconBackfillState.WAITING_FOR_CAPACITY
     assert startup.detail is not None

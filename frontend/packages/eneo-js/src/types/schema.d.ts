@@ -6629,7 +6629,7 @@ export interface paths {
     post?: never;
     /**
      * Delete Organization Skill
-     * @description Delete an eligible organisation Skill draft.
+     * @description Remove an unused organisation Skill while retaining its history.
      */
     delete: operations["delete_organization_skill_api_v1_skills_organization__skill_id___delete"];
     options?: never;
@@ -6815,6 +6815,26 @@ export interface paths {
      * @description Remove an organisation Skill from new catalogue use.
      */
     post: operations["unpublish_organization_skill_api_v1_skills_organization__skill_id__unpublish__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/skills/organization/remove/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Remove Organization Skills
+     * @description Remove up to 100 unused organisation Skills atomically, retaining history.
+     */
+    post: operations["remove_organization_skills_api_v1_skills_organization_remove__post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -12599,7 +12619,8 @@ export interface components {
       | 9058
       | 9059
       | 9060
-      | 9061;
+      | 9061
+      | 9062;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -15539,6 +15560,9 @@ export interface components {
       publication_state: components["schemas"]["SkillPublicationState"];
       /** Execution Blocked */
       execution_blocked: boolean;
+      /** Removed At */
+      removed_at: string | null;
+      usage: components["schemas"]["SkillUsageCountsPublic"];
       current_revision: components["schemas"]["SkillRevisionPublic"];
     };
     /** OrganizationSkillSummaryPagePublic */
@@ -15609,6 +15633,9 @@ export interface components {
       publication_state: components["schemas"]["SkillPublicationState"];
       /** Execution Blocked */
       execution_blocked: boolean;
+      /** Removed At */
+      removed_at: string | null;
+      usage: components["schemas"]["SkillUsageCountsPublic"];
     };
     /** OriginalSignedURLRequest */
     OriginalSignedURLRequest: {
@@ -18623,6 +18650,19 @@ export interface components {
        */
       expected_revision_id: string;
     };
+    /** SkillRemovalPublic */
+    SkillRemovalPublic: {
+      /**
+       * Removed Ids
+       * @description Selected Skills confirmed removed, including previously removed Skills.
+       */
+      removed_ids: string[];
+    };
+    /** SkillRemovalRequest */
+    SkillRemovalRequest: {
+      /** Skill Ids */
+      skill_ids: string[];
+    };
     /** SkillRevisionCreateRequest */
     SkillRevisionCreateRequest: {
       /** Display Name */
@@ -18827,6 +18867,17 @@ export interface components {
      * @enum {string}
      */
     SkillTurnEffectiveMode: "eager" | "always_only" | "selective";
+    /** SkillUsageCountsPublic */
+    SkillUsageCountsPublic: {
+      /** Assistant Count */
+      assistant_count: number;
+      /** App Count */
+      app_count: number;
+      /** Distinct Space Count */
+      distinct_space_count: number;
+      /** Personal Chat Pinned */
+      personal_chat_pinned: boolean;
+    };
     /** SkillsPolicyInput */
     SkillsPolicyInput: {
       /** Bindings */
@@ -44415,6 +44466,7 @@ export interface operations {
         limit?: number;
         cursor?: string | null;
         search?: string | null;
+        removed?: boolean;
       };
       header?: never;
       path?: never;
@@ -45219,6 +45271,75 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  remove_organization_skills_api_v1_skills_organization_remove__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SkillRemovalRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SkillRemovalPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };

@@ -32,7 +32,8 @@
 export {
   getErrorMessage,
   getErrorCodeMessage,
-  SKILL_EXECUTION_BLOCK_CONFLICT
+  SKILL_EXECUTION_BLOCK_CONFLICT,
+  SKILL_STILL_ATTACHED
 } from "./getErrorMessage";
 export { toastError } from "./toastError";
 export { toAppError } from "./toAppError";

@@ -32,6 +32,7 @@ MAX_SKILL_ADOPTION_PAGE_LIMIT = 100
 DEFAULT_SKILL_ADOPTION_PAGE_LIMIT = 25
 MAX_SKILL_EXECUTION_BLOCK_REASON_LENGTH = 1000
 MAX_RETAINED_SKILL_ACTIVATION_REJECTIONS = 50
+MAX_SKILL_REMOVAL_BATCH_SIZE = 100
 
 _SKILL_SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _SKILL_BOUNDARY = (
@@ -383,6 +384,7 @@ class Skill:
     current_revision: SkillRevision
     published_revision_number: int | None = None
     first_published_at: datetime | None = None
+    removed_at: datetime | None = None
 
     @property
     def publication_state(self) -> "SkillPublicationState":
@@ -394,9 +396,18 @@ class Skill:
 
 
 @dataclass(frozen=True)
+class SkillUsageCounts:
+    assistant_count: int = 0
+    app_count: int = 0
+    distinct_space_count: int = 0
+    personal_chat_pinned: bool = False
+
+
+@dataclass(frozen=True)
 class OrganizationSkillProjection:
     skill: Skill
     execution_blocked: bool
+    usage: SkillUsageCounts = SkillUsageCounts()
 
 
 class SkillPublicationState(str, Enum):
@@ -452,6 +463,7 @@ class SkillSummary:
     updated_at: datetime
     published_revision_number: int | None = None
     first_published_at: datetime | None = None
+    removed_at: datetime | None = None
 
     @property
     def publication_state(self) -> SkillPublicationState:
@@ -466,6 +478,7 @@ class SkillSummary:
 class OrganizationSkillSummaryProjection:
     skill: SkillSummary
     execution_blocked: bool
+    usage: SkillUsageCounts = SkillUsageCounts()
 
 
 @dataclass(frozen=True)
@@ -674,11 +687,19 @@ class PersonalChatPinConfirmOutcome(str, Enum):
 
 
 class SkillHasBindingsError(Exception):
-    pass
+    def __init__(self, *, skill_ids: list[UUID] | None = None) -> None:
+        self.details = {"skill_ids": [str(skill_id) for skill_id in skill_ids or []]}
+        super().__init__()
 
 
 class SkillHasActiveAppRunsError(Exception):
-    pass
+    def __init__(self, *, skill_ids: list[UUID] | None = None) -> None:
+        self.details = {"skill_ids": [str(skill_id) for skill_id in skill_ids or []]}
+        super().__init__()
+
+
+class SkillRemovalBusyError(Exception):
+    """A concurrent Skill operation must finish before removal can be retried."""
 
 
 class SkillRevisionConflictError(Exception):

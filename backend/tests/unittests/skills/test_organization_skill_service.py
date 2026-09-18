@@ -22,7 +22,6 @@ from eneo.skills.domain.skill import (
     PersonalChatPinConfirmOutcome,
     PersonalChatPinOverride,
     PersonalDefaultsSnapshot,
-    PublishedSkillDeletionError,
     SkillAdoptionCursor,
     SkillAdoptionDrift,
     SkillAdoptionPersonalChat,
@@ -32,6 +31,7 @@ from eneo.skills.domain.skill import (
     SkillAdoptionRevisionCount,
     SkillAdoptionSummary,
     SkillBlockedForBindingError,
+    SkillHasBindingsError,
     SkillNotPublishedForBindingError,
     SkillPublicationChange,
     SkillRevision,
@@ -75,6 +75,8 @@ def _service(*, organization, permissions, repo=None):
     repo = repo or AsyncMock()
     if not isinstance(repo.list_active_execution_blocks.return_value, dict):
         repo.list_active_execution_blocks.return_value = {}
+    if not isinstance(repo.get_usage_counts.return_value, dict):
+        repo.get_usage_counts.return_value = {}
     return OrganizationSkillService(
         user=user,
         repo=repo,
@@ -562,17 +564,17 @@ async def test_admin_can_unpublish_without_changing_revision_history():
     )
 
 
-async def test_previously_published_skill_cannot_be_deleted():
+async def test_bound_skill_cannot_be_removed():
     organization = _organization()
     repo = AsyncMock()
-    repo.delete_organization.side_effect = PublishedSkillDeletionError
+    repo.remove_organization_many.side_effect = SkillHasBindingsError
     service = _service(
         organization=organization,
         permissions={Permission.ADMIN},
         repo=repo,
     )
 
-    with pytest.raises(PublishedSkillDeletionError):
+    with pytest.raises(SkillHasBindingsError):
         await service.delete(skill_id=uuid4())
 
 
@@ -1027,3 +1029,14 @@ async def test_pin_advance_rejection_from_the_fit_owner_propagates():
             expected_pinned_revision_id=uuid4(),
             expected_published_revision_id=uuid4(),
         )
+
+
+async def test_skill_management_permission_does_not_grant_bulk_removal():
+    organization = _organization()
+    service = _service(
+        organization=organization,
+        permissions={Permission.SKILLS, Permission.SKILLS_MANAGEMENT},
+    )
+    with pytest.raises(UnauthorizedException):
+        await service.remove_many(skill_ids=[uuid4()])
+    service.repo.remove_organization_many.assert_not_awaited()

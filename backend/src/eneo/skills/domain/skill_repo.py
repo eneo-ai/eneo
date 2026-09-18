@@ -29,6 +29,7 @@ from eneo.skills.domain.skill import (
     SkillRuntimePolicySnapshot,
     SkillStatusChange,
     SkillSummary,
+    SkillUsageCounts,
 )
 
 
@@ -71,7 +72,17 @@ class SkillRepo(Protocol):
         limit: int,
         after_slug: str | None,
         search: str | None = None,
+        removed: bool = False,
+        after_id: UUID | None = None,
     ) -> list[SkillSummary]: ...
+
+    async def get_usage_counts(
+        self, *, tenant_id: UUID, skill_ids: Sequence[UUID]
+    ) -> dict[UUID, SkillUsageCounts]: ...
+
+    async def remove_organization_many(
+        self, *, tenant_id: UUID, skill_ids: Sequence[UUID]
+    ) -> list[SkillSummary] | None: ...
 
     async def get_organization_for_tenant(
         self,
@@ -198,13 +209,6 @@ class SkillRepo(Protocol):
     ) -> SkillPublicationChange | None: ...
 
     async def delete(self, *, skill_id: UUID) -> Skill | None: ...
-
-    async def delete_organization(
-        self,
-        *,
-        tenant_id: UUID,
-        skill_id: UUID,
-    ) -> Skill | None: ...
 
     async def get_active_execution_block(
         self,

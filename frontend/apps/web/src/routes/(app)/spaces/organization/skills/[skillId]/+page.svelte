@@ -20,6 +20,7 @@
   import SkillForm from "$lib/features/skills/SkillForm.svelte";
   import SkillRevisionHistory from "$lib/features/skills/SkillRevisionHistory.svelte";
   import SkillPreview from "$lib/features/skills/SkillPreview.svelte";
+  import SkillRemovalDialog from "$lib/features/skills/SkillRemovalDialog.svelte";
   import { publishedSkillPreview } from "$lib/features/skills/skillBindingCatalog";
   import type { SkillRevisionFormValue } from "$lib/features/skills/skillBindings";
   import { getErrorMessage, SKILL_EXECUTION_BLOCK_CONFLICT } from "$lib/core/errors";
@@ -29,7 +30,7 @@
     type SkillAdoptionRun,
     type SkillBindingUpdateScope
   } from "$lib/features/skills/SkillAdoptionProjection.svelte";
-  import { Info, RefreshCw, ShieldAlert, ShieldCheck } from "lucide-svelte";
+  import { Info, RefreshCw, ShieldAlert, ShieldCheck, Trash2 } from "lucide-svelte";
   import { onDestroy, tick, untrack } from "svelte";
 
   type PublicationAction = "publish" | "unpublish";
@@ -48,6 +49,9 @@
   let { data } = $props();
 
   let formDirty = $state(false);
+  let removalOpen = $state(false);
+  let removedAtOverride = $state<string | null>(null);
+  const removedAt = $derived(data.skill.removed_at ?? removedAtOverride);
   let publicationAction = $state<PublicationAction | null>(null);
   let publicationSaving = $state(false);
   let publicationError = $state<string | null>(null);
@@ -516,6 +520,12 @@
     executionReason = "";
   }
 
+  async function removedSkill(ids: string[]) {
+    if (!ids.includes(data.skill.id) || !componentActive) return;
+    removedAtOverride = new Date().toISOString();
+    await refreshOrganizationSkills(data.skill.id);
+  }
+
   function formatExecutionDate(value: string): string {
     return new Date(value).toLocaleString(getLocale() === "sv" ? "sv-SE" : "en-US", {
       dateStyle: "medium",
@@ -661,6 +671,8 @@
     const nextSkillId = data.skill.id;
     if (nextSkillId !== advanceObservedSkillId) {
       advanceObservedSkillId = nextSkillId;
+      removalOpen = false;
+      removedAtOverride = null;
       rolloutGeneration += 1;
       rollout = null;
       publicationAction = null;
@@ -745,6 +757,21 @@
       }}
       title={pageTitle}
     ></Page.Title>
+    {#if !removedAt}
+      <Button
+        variant="outline"
+        class="text-destructive"
+        disabled={formDirty ||
+          rolloutMutationInFlight ||
+          publicationSaving ||
+          executionSaving ||
+          advanceSaving}
+        onclick={() => (removalOpen = true)}
+      >
+        <Trash2 aria-hidden="true" />
+        {m.organization_skills_remove_action()}
+      </Button>
+    {/if}
   </Page.Header>
   <Page.Main>
     <div class="mx-auto flex w-full max-w-6xl flex-col gap-8 px-4 py-6 sm:px-6 sm:py-8">
@@ -768,267 +795,312 @@
           </Alert.Action>
         </Alert.Root>
       {/if}
-      <div class="grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_20rem]">
-        <div class="flex min-w-0 flex-col gap-10">
-          <section class="flex flex-col gap-5" aria-labelledby="organization-skill-content-heading">
-            <div class="flex flex-col gap-1">
-              <h2
-                id="organization-skill-content-heading"
-                class="text-foreground text-lg font-semibold"
-              >
-                {m.skills_library_content_heading()}
-              </h2>
-              <p class="text-muted-foreground max-w-[65ch] text-sm leading-6">
-                {m.organization_skills_content_description()}
+      {#if removedAt}
+        <Alert.Root>
+          <Alert.Title
+            >{m.organization_skills_removed_at({
+              time: formatExecutionDate(removedAt)
+            })}</Alert.Title
+          >
+          <Alert.Description>{m.organization_skills_removed_description()}</Alert.Description>
+        </Alert.Root>
+        <SkillPreview
+          preview={{
+            id: data.skill.id,
+            source: "organization",
+            slug: data.skill.slug,
+            revisionId: data.skill.current_revision_id,
+            revisionNumber: data.skill.current_revision_number,
+            displayName: data.skill.display_name,
+            description: data.skill.description,
+            instructions: data.skill.current_revision.instructions
+          }}
+        />
+        {#if executionBlock.block}
+          <Alert.Root variant="destructive">
+            <ShieldAlert aria-hidden="true" />
+            <Alert.Title>{m.organization_skills_execution_blocked_status()}</Alert.Title>
+            <Alert.Description>
+              <p>{executionBlock.block.reason}</p>
+              <p class="mt-1 tabular-nums">
+                {m.organization_skills_execution_blocked_at({
+                  time: formatExecutionDate(executionBlock.block.blocked_at)
+                })}
               </p>
-            </div>
-            <Alert.Root role="note">
-              <Info aria-hidden="true" />
-              <Alert.Title>{m.skills_library_revision_notice_title()}</Alert.Title>
-              <Alert.Description>
-                {m.skills_library_revision_notice_description()}
-              </Alert.Description>
-            </Alert.Root>
-            {#key data.skill.current_revision_id}
-              <SkillForm
-                mode="revision"
-                initialValue={{
-                  display_name: data.skill.current_revision.display_name,
-                  description: data.skill.current_revision.description,
-                  instructions: data.skill.current_revision.instructions
-                }}
-                submitLabel={m.save()}
-                submittingLabel={m.saving()}
-                onSubmit={createRevision}
-                showDiscardAction
-                onDirtyChange={(dirty) => (formDirty = dirty)}
-              />
-            {/key}
-          </section>
-
-          {#if approvedPreview && data.skill.published_revision_number !== data.skill.current_revision_number}
-            <section aria-labelledby="organization-skill-approved-heading">
+              <Button class="mt-3" variant="outline" onclick={() => (executionAction = "unblock")}>
+                {m.organization_skills_execution_unblock_action()}
+              </Button>
+            </Alert.Description>
+          </Alert.Root>
+        {/if}
+      {:else}
+        <div class="grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_20rem]">
+          <div class="flex min-w-0 flex-col gap-10">
+            <section
+              class="flex flex-col gap-5"
+              aria-labelledby="organization-skill-content-heading"
+            >
               <div class="flex flex-col gap-1">
                 <h2
-                  id="organization-skill-approved-heading"
+                  id="organization-skill-content-heading"
                   class="text-foreground text-lg font-semibold"
                 >
-                  {m.organization_skills_approved_snapshot_heading()}
+                  {m.skills_library_content_heading()}
                 </h2>
                 <p class="text-muted-foreground max-w-[65ch] text-sm leading-6">
-                  {m.organization_skills_approved_snapshot_description()}
+                  {m.organization_skills_content_description()}
                 </p>
               </div>
-              <div class="mt-4">
-                <SkillPreview preview={approvedPreview} />
-              </div>
+              <Alert.Root role="note">
+                <Info aria-hidden="true" />
+                <Alert.Title>{m.skills_library_revision_notice_title()}</Alert.Title>
+                <Alert.Description>
+                  {m.skills_library_revision_notice_description()}
+                </Alert.Description>
+              </Alert.Root>
+              {#key data.skill.current_revision_id}
+                <SkillForm
+                  mode="revision"
+                  initialValue={{
+                    display_name: data.skill.current_revision.display_name,
+                    description: data.skill.current_revision.description,
+                    instructions: data.skill.current_revision.instructions
+                  }}
+                  submitLabel={m.save()}
+                  submittingLabel={m.saving()}
+                  onSubmit={createRevision}
+                  showDiscardAction
+                  onDirtyChange={(dirty) => (formDirty = dirty)}
+                />
+              {/key}
             </section>
-          {/if}
-        </div>
 
-        <aside
-          class="border-border border-t pt-6 lg:sticky lg:top-6 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0"
-          aria-labelledby="organization-skill-publication-heading"
-        >
-          <div class="flex flex-col gap-5">
-            <div class="flex flex-col items-start gap-2">
-              <div>
-                <h2
-                  id="organization-skill-publication-heading"
-                  class="text-foreground font-semibold"
-                >
-                  {m.organization_skills_publication_heading()}
-                </h2>
-                <p class="text-muted-foreground mt-1 max-w-[32ch] text-sm leading-6">
-                  {m.organization_skills_publication_description()}
-                </p>
-              </div>
-              <Badge
-                variant={publicationVariant(data.skill)}
-                class="max-w-full whitespace-normal text-left"
-              >
-                {publicationLabel(data.skill)}
-              </Badge>
-            </div>
-
-            <dl class="grid grid-cols-2 gap-x-4 gap-y-4 text-sm lg:grid-cols-1">
-              <div class="flex flex-col gap-0.5">
-                <dt class="text-muted-foreground">
-                  {m.organization_skills_current_revision_label()}
-                </dt>
-                <dd class="font-medium tabular-nums">
-                  {m.organization_skills_version({
-                    version: String(data.skill.current_revision_number)
-                  })}
-                </dd>
-              </div>
-              <div class="flex flex-col gap-0.5">
-                <dt class="text-muted-foreground">
-                  {m.organization_skills_approved_revision_label()}
-                </dt>
-                <dd class="font-medium tabular-nums">
-                  {data.skill.published_revision_number === null
-                    ? m.organization_skills_not_published()
-                    : m.organization_skills_version({
-                        version: String(data.skill.published_revision_number)
-                      })}
-                </dd>
-              </div>
-            </dl>
-
-            {#if data.skill.publication_state === "update_pending"}
-              <div class="flex gap-2" role="note">
-                <Info class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-                <div class="min-w-0">
-                  <p class="text-sm font-medium">
-                    {m.organization_skills_update_pending_title()}
-                  </p>
-                  <p class="text-muted-foreground mt-1 text-sm leading-6">
-                    {m.organization_skills_update_pending_description()}
-                  </p>
-                </div>
-              </div>
-            {/if}
-
-            <div class="flex flex-wrap items-center gap-2">
-              {#if data.skill.publication_state !== "published"}
-                <Button
-                  disabled={formDirty || rolloutMutationInFlight}
-                  onclick={() => openPublicationDialog("publish")}
-                >
-                  <ShieldCheck aria-hidden="true" />
-                  {data.skill.publication_state === "update_pending"
-                    ? m.organization_skills_publish_update_action()
-                    : m.organization_skills_publish_action()}
-                </Button>
-              {/if}
-              {#if data.skill.publication_state === "published" || data.skill.publication_state === "update_pending"}
-                <Button
-                  variant="outline"
-                  disabled={formDirty || rolloutMutationInFlight}
-                  onclick={() => openPublicationDialog("unpublish")}
-                >
-                  {m.organization_skills_unpublish_action()}
-                </Button>
-              {/if}
-              {#if formDirty}
-                <p class="text-muted-foreground basis-full text-xs">
-                  {m.organization_skills_save_before_publication()}
-                </p>
-              {/if}
-            </div>
-
-            {#if data.skill.first_published_at !== null}
-              <section
-                class="border-border mt-1 flex flex-col gap-4 border-t pt-6"
-                aria-labelledby="organization-skill-execution-heading"
-              >
-                <div class="flex flex-col items-start gap-2">
-                  <div>
-                    <h2
-                      id="organization-skill-execution-heading"
-                      class="text-destructive flex items-center gap-1.5 font-semibold"
-                    >
-                      <ShieldAlert class="size-4" aria-hidden="true" />
-                      {m.organization_skills_execution_heading()}
-                    </h2>
-                    <p class="text-muted-foreground mt-1 max-w-[32ch] text-sm leading-6">
-                      {m.organization_skills_execution_description()}
-                    </p>
-                  </div>
-                  <Badge variant={executionBlock.block === null ? "outline" : "destructive"}>
-                    {executionBlock.block === null
-                      ? m.organization_skills_execution_available_status()
-                      : m.organization_skills_execution_blocked_status()}
-                  </Badge>
-                </div>
-
-                {#if executionBlock.block}
-                  <Alert.Root variant="destructive">
-                    <ShieldAlert aria-hidden="true" />
-                    <Alert.Title>{m.organization_skills_execution_blocked_status()}</Alert.Title>
-                    <Alert.Description>
-                      <span class="block">
-                        {m.organization_skills_execution_blocked_description()}
-                      </span>
-                      <span class="mt-2 block font-medium text-current">
-                        {executionBlock.block.reason}
-                      </span>
-                      <span class="mt-1 block text-xs text-current/80 tabular-nums">
-                        {m.organization_skills_execution_blocked_at({
-                          time: formatExecutionDate(executionBlock.block.blocked_at)
-                        })}
-                      </span>
-                    </Alert.Description>
-                  </Alert.Root>
-                {/if}
-
-                <div>
-                  <Button
-                    variant={executionBlock.block === null ? "destructive" : "outline"}
-                    onclick={() =>
-                      (executionAction = executionBlock.block === null ? "block" : "unblock")}
+            {#if approvedPreview && data.skill.published_revision_number !== data.skill.current_revision_number}
+              <section aria-labelledby="organization-skill-approved-heading">
+                <div class="flex flex-col gap-1">
+                  <h2
+                    id="organization-skill-approved-heading"
+                    class="text-foreground text-lg font-semibold"
                   >
-                    {#if executionBlock.block === null}
-                      <ShieldAlert aria-hidden="true" />
-                      {m.organization_skills_execution_block_action()}
-                    {:else}
-                      <ShieldCheck aria-hidden="true" />
-                      {m.organization_skills_execution_unblock_action()}
-                    {/if}
-                  </Button>
+                    {m.organization_skills_approved_snapshot_heading()}
+                  </h2>
+                  <p class="text-muted-foreground max-w-[65ch] text-sm leading-6">
+                    {m.organization_skills_approved_snapshot_description()}
+                  </p>
+                </div>
+                <div class="mt-4">
+                  <SkillPreview preview={approvedPreview} />
                 </div>
               </section>
             {/if}
           </div>
-        </aside>
-      </div>
 
-      {#await data.adoptionPage}
-        <SkillAdoptionProjection
-          skillId={data.skill.id}
-          initialPage={null}
-          initialLoading
-          {getOrganizationSkillAdoption}
-          {onAdvancePersonalChat}
-          publishedRevisionId={data.published?.revision_id ?? null}
-          {onStartOutdatedBindingsUpdate}
-          run={rollout}
-          onStop={stopPublishedBindingUpdate}
-          onRestart={restartPublishedBindingUpdate}
-        />
-      {:then adoptionPage}
-        <SkillAdoptionProjection
-          skillId={data.skill.id}
-          initialPage={adoptionPage}
-          {getOrganizationSkillAdoption}
-          {onAdvancePersonalChat}
-          publishedRevisionId={data.published?.revision_id ?? null}
-          {onStartOutdatedBindingsUpdate}
-          run={rollout}
-          onStop={stopPublishedBindingUpdate}
-          onRestart={restartPublishedBindingUpdate}
-        />
-        <p class="sr-only" aria-live="polite">{advanceAnnouncement}</p>
-      {:catch}
-        <SkillAdoptionProjection
-          skillId={data.skill.id}
-          initialPage={null}
-          initialError
-          {getOrganizationSkillAdoption}
-          {onAdvancePersonalChat}
-          publishedRevisionId={data.published?.revision_id ?? null}
-          {onStartOutdatedBindingsUpdate}
-          run={rollout}
-          onStop={stopPublishedBindingUpdate}
-          onRestart={restartPublishedBindingUpdate}
-        />
-        <p class="sr-only" aria-live="polite">{advanceAnnouncement}</p>
-      {/await}
+          <aside
+            class="border-border border-t pt-6 lg:sticky lg:top-6 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0"
+            aria-labelledby="organization-skill-publication-heading"
+          >
+            <div class="flex flex-col gap-5">
+              <div class="flex flex-col items-start gap-2">
+                <div>
+                  <h2
+                    id="organization-skill-publication-heading"
+                    class="text-foreground font-semibold"
+                  >
+                    {m.organization_skills_publication_heading()}
+                  </h2>
+                  <p class="text-muted-foreground mt-1 max-w-[32ch] text-sm leading-6">
+                    {m.organization_skills_publication_description()}
+                  </p>
+                </div>
+                <Badge
+                  variant={publicationVariant(data.skill)}
+                  class="max-w-full whitespace-normal text-left"
+                >
+                  {publicationLabel(data.skill)}
+                </Badge>
+              </div>
+
+              <dl class="grid grid-cols-2 gap-x-4 gap-y-4 text-sm lg:grid-cols-1">
+                <div class="flex flex-col gap-0.5">
+                  <dt class="text-muted-foreground">
+                    {m.organization_skills_current_revision_label()}
+                  </dt>
+                  <dd class="font-medium tabular-nums">
+                    {m.organization_skills_version({
+                      version: String(data.skill.current_revision_number)
+                    })}
+                  </dd>
+                </div>
+                <div class="flex flex-col gap-0.5">
+                  <dt class="text-muted-foreground">
+                    {m.organization_skills_approved_revision_label()}
+                  </dt>
+                  <dd class="font-medium tabular-nums">
+                    {data.skill.published_revision_number === null
+                      ? m.organization_skills_not_published()
+                      : m.organization_skills_version({
+                          version: String(data.skill.published_revision_number)
+                        })}
+                  </dd>
+                </div>
+              </dl>
+
+              {#if data.skill.publication_state === "update_pending"}
+                <div class="flex gap-2" role="note">
+                  <Info class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                  <div class="min-w-0">
+                    <p class="text-sm font-medium">
+                      {m.organization_skills_update_pending_title()}
+                    </p>
+                    <p class="text-muted-foreground mt-1 text-sm leading-6">
+                      {m.organization_skills_update_pending_description()}
+                    </p>
+                  </div>
+                </div>
+              {/if}
+
+              <div class="flex flex-wrap items-center gap-2">
+                {#if data.skill.publication_state !== "published"}
+                  <Button
+                    disabled={formDirty || rolloutMutationInFlight}
+                    onclick={() => openPublicationDialog("publish")}
+                  >
+                    <ShieldCheck aria-hidden="true" />
+                    {data.skill.publication_state === "update_pending"
+                      ? m.organization_skills_publish_update_action()
+                      : m.organization_skills_publish_action()}
+                  </Button>
+                {/if}
+                {#if data.skill.publication_state === "published" || data.skill.publication_state === "update_pending"}
+                  <Button
+                    variant="outline"
+                    disabled={formDirty || rolloutMutationInFlight}
+                    onclick={() => openPublicationDialog("unpublish")}
+                  >
+                    {m.organization_skills_unpublish_action()}
+                  </Button>
+                {/if}
+                {#if formDirty}
+                  <p class="text-muted-foreground basis-full text-xs">
+                    {m.organization_skills_save_before_publication()}
+                  </p>
+                {/if}
+              </div>
+
+              {#if data.skill.first_published_at !== null}
+                <section
+                  class="border-border mt-1 flex flex-col gap-4 border-t pt-6"
+                  aria-labelledby="organization-skill-execution-heading"
+                >
+                  <div class="flex flex-col items-start gap-2">
+                    <div>
+                      <h2
+                        id="organization-skill-execution-heading"
+                        class="text-destructive flex items-center gap-1.5 font-semibold"
+                      >
+                        <ShieldAlert class="size-4" aria-hidden="true" />
+                        {m.organization_skills_execution_heading()}
+                      </h2>
+                      <p class="text-muted-foreground mt-1 max-w-[32ch] text-sm leading-6">
+                        {m.organization_skills_execution_description()}
+                      </p>
+                    </div>
+                    <Badge variant={executionBlock.block === null ? "outline" : "destructive"}>
+                      {executionBlock.block === null
+                        ? m.organization_skills_execution_available_status()
+                        : m.organization_skills_execution_blocked_status()}
+                    </Badge>
+                  </div>
+
+                  {#if executionBlock.block}
+                    <Alert.Root variant="destructive">
+                      <ShieldAlert aria-hidden="true" />
+                      <Alert.Title>{m.organization_skills_execution_blocked_status()}</Alert.Title>
+                      <Alert.Description>
+                        <span class="block">
+                          {m.organization_skills_execution_blocked_description()}
+                        </span>
+                        <span class="mt-2 block font-medium text-current">
+                          {executionBlock.block.reason}
+                        </span>
+                        <span class="mt-1 block text-xs text-current/80 tabular-nums">
+                          {m.organization_skills_execution_blocked_at({
+                            time: formatExecutionDate(executionBlock.block.blocked_at)
+                          })}
+                        </span>
+                      </Alert.Description>
+                    </Alert.Root>
+                  {/if}
+
+                  <div>
+                    <Button
+                      variant={executionBlock.block === null ? "destructive" : "outline"}
+                      onclick={() =>
+                        (executionAction = executionBlock.block === null ? "block" : "unblock")}
+                    >
+                      {#if executionBlock.block === null}
+                        <ShieldAlert aria-hidden="true" />
+                        {m.organization_skills_execution_block_action()}
+                      {:else}
+                        <ShieldCheck aria-hidden="true" />
+                        {m.organization_skills_execution_unblock_action()}
+                      {/if}
+                    </Button>
+                  </div>
+                </section>
+              {/if}
+            </div>
+          </aside>
+        </div>
+
+        {#await data.adoptionPage}
+          <SkillAdoptionProjection
+            skillId={data.skill.id}
+            initialPage={null}
+            initialLoading
+            {getOrganizationSkillAdoption}
+            {onAdvancePersonalChat}
+            publishedRevisionId={data.published?.revision_id ?? null}
+            {onStartOutdatedBindingsUpdate}
+            run={rollout}
+            onStop={stopPublishedBindingUpdate}
+            onRestart={restartPublishedBindingUpdate}
+          />
+        {:then adoptionPage}
+          <SkillAdoptionProjection
+            skillId={data.skill.id}
+            initialPage={adoptionPage}
+            {getOrganizationSkillAdoption}
+            {onAdvancePersonalChat}
+            publishedRevisionId={data.published?.revision_id ?? null}
+            {onStartOutdatedBindingsUpdate}
+            run={rollout}
+            onStop={stopPublishedBindingUpdate}
+            onRestart={restartPublishedBindingUpdate}
+          />
+          <p class="sr-only" aria-live="polite">{advanceAnnouncement}</p>
+        {:catch}
+          <SkillAdoptionProjection
+            skillId={data.skill.id}
+            initialPage={null}
+            initialError
+            {getOrganizationSkillAdoption}
+            {onAdvancePersonalChat}
+            publishedRevisionId={data.published?.revision_id ?? null}
+            {onStartOutdatedBindingsUpdate}
+            run={rollout}
+            onStop={stopPublishedBindingUpdate}
+            onRestart={restartPublishedBindingUpdate}
+          />
+          <p class="sr-only" aria-live="polite">{advanceAnnouncement}</p>
+        {/await}
+      {/if}
 
       <section aria-labelledby="organization-skill-history-heading">
         <h2
           id="organization-skill-history-heading"
+          data-skill-removal-focus
+          tabindex="-1"
           class="text-foreground mb-1 text-lg font-semibold"
         >
           {m.skills_library_history_heading()}
@@ -1041,7 +1113,7 @@
           <SkillRevisionHistory
             currentRevision={data.skill.current_revision}
             initialPage={data.revisionPage}
-            canRestore
+            canRestore={!removedAt}
             hasUnsavedChanges={formDirty}
             onLoadMore={loadMoreRevisions}
             onView={getRevision}
@@ -1055,6 +1127,16 @@
     </div>
   </Page.Main>
 </Page.Root>
+
+{#if removalOpen}
+  <SkillRemovalDialog
+    skills={[data.skill]}
+    onRemove={(ids) => data.eneo.skills.organization.removeMany({ skill_ids: ids })}
+    onRemoved={removedSkill}
+    onClose={() => (removalOpen = false)}
+    onExclude={() => (removalOpen = false)}
+  />
+{/if}
 
 <AlertDialog.Root open={publicationAction !== null} onOpenChange={setPublicationDialogOpen}>
   <AlertDialog.Content class={publicationAction === "publish" ? "sm:max-w-md" : undefined}>

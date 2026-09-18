@@ -332,6 +332,15 @@ async def test_adoption_projection_counts_exact_revisions_and_distinct_spaces(
         summary = projection.summary
         resources = projection.items
 
+        counts = await repo.get_usage_counts(
+            tenant_id=admin_user.tenant_id, skill_ids=[skill.id, uuid4()]
+        )
+        assert set(counts) == {skill.id}
+        assert counts[skill.id].assistant_count == summary.assistant_count
+        assert counts[skill.id].app_count == summary.app_count
+        assert counts[skill.id].distinct_space_count == summary.distinct_space_count
+        assert counts[skill.id].personal_chat_pinned is True
+
         assert summary.assistant_count == 2
         assert summary.app_count == 1
         assert summary.distinct_space_count == 2

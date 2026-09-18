@@ -75,6 +75,13 @@ function updatePendingSkill(): OrganizationSkillPublic {
     first_published_at: "2026-07-19T09:00:00Z",
     publication_state: "update_pending",
     execution_blocked: false,
+    removed_at: null,
+    usage: {
+      assistant_count: 0,
+      app_count: 0,
+      distinct_space_count: 0,
+      personal_chat_pinned: false
+    },
     current_revision: currentRevision
   };
 }
@@ -206,6 +213,90 @@ describe("organisation Skill detail page", () => {
   beforeEach(() => {
     invalidate.mockReset();
     invalidate.mockResolvedValue(undefined);
+  });
+
+  test("removal keeps the current instructions and history read-only even when refreshing fails", async () => {
+    const data = publicationLifecycleData();
+    const removeMany = vi.fn(async () => ({ removed_ids: [data.skill.id] }));
+    const renderedData = {
+      ...data,
+      eneo: {
+        ...data.eneo,
+        skills: {
+          organization: { ...data.eneo.skills.organization, removeMany }
+        }
+      }
+    };
+    invalidate.mockRejectedValueOnce(new Error("Refresh failed"));
+    render(OrganizationSkillDetailPage, { data: renderedData as never });
+    await page
+      .getByRole("button", { name: m.organization_skills_remove_action(), exact: true })
+      .click();
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: m.organization_skills_remove_action(), exact: true })
+      .click();
+    await vi.waitFor(() => expect(removeMany).toHaveBeenCalledWith({ skill_ids: [data.skill.id] }));
+    await expect.element(page.getByText(m.organization_skills_removed_description())).toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: m.save(), exact: true }))
+      .not.toBeInTheDocument();
+    await expect
+      .element(
+        page.getByRole("button", {
+          name: m.organization_skills_publish_update_action(),
+          exact: true
+        })
+      )
+      .not.toBeInTheDocument();
+    await expect
+      .element(
+        page.getByRole("button", { name: m.organization_skills_remove_action(), exact: true })
+      )
+      .not.toBeInTheDocument();
+    await expect
+      .element(page.getByText(m.organization_skills_refresh_after_mutation_warning()))
+      .toBeVisible();
+    await expect
+      .element(page.getByRole("heading", { name: m.skills_library_history_heading() }))
+      .toHaveFocus();
+  });
+
+  test("a removed skill can close its existing execution block without becoming editable", async () => {
+    const data = publicationLifecycleData();
+    data.skill = {
+      ...data.skill,
+      removed_at: "2026-09-18T08:00:00Z",
+      is_active: false,
+      published_revision_number: null
+    };
+    const block: SkillExecutionBlockState = {
+      skill_id: data.skill.id,
+      block: {
+        id: "block-removed",
+        skill_id: data.skill.id,
+        blocked_at: "2026-09-17T08:00:00Z",
+        blocked_by_user_id: "user-1",
+        reason: "Incident investigation"
+      }
+    };
+    render(OrganizationSkillDetailPage, {
+      data: { ...data, published: null, executionBlock: block } as never
+    });
+    await expect
+      .element(page.getByRole("button", { name: m.organization_skills_execution_unblock_action() }))
+      .toBeVisible();
+    await expect
+      .element(
+        page.getByRole("button", {
+          name: m.organization_skills_execution_block_action(),
+          exact: true
+        })
+      )
+      .not.toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: m.save(), exact: true }))
+      .not.toBeInTheDocument();
   });
 
   test("keeps a created revision saved when refreshing the page data fails", async () => {
