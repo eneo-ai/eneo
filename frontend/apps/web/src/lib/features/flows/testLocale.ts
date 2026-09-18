@@ -9,9 +9,14 @@ import { getLocale, overwriteGetLocale, type Locale } from "$lib/paraglide/runti
  * real URL. The cookie `setLocale()` writes never gets a vote, which is why a
  * locale-switching test passes alone and fails the moment a sibling file runs
  * beside it. Overwriting the resolver removes the strategy from the question.
+ *
+ * Restore puts back the *resolver*, not the locale it happened to return.
+ * Capturing `getLocale()` and restoring `() => previous` would leave every
+ * later test pinned to a constant, with URL and cookie resolution silently
+ * dead for the rest of the file.
  */
 export function withLocale(locale: Locale): () => void {
-  const previous = getLocale();
+  const previousResolver = getLocale;
   overwriteGetLocale(() => locale);
-  return () => overwriteGetLocale(() => previous);
+  return () => overwriteGetLocale(previousResolver);
 }
