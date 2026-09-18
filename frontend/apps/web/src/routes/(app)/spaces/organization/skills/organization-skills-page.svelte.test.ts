@@ -48,6 +48,13 @@ function skill(
     published_revision_number: publicationState === "draft" ? null : 1,
     first_published_at: publicationState === "draft" ? null : "2026-07-19T08:00:00Z",
     publication_state: publicationState,
+    removed_at: null,
+    usage: {
+      assistant_count: 0,
+      app_count: 0,
+      distinct_space_count: 0,
+      personal_chat_pinned: false
+    },
     execution_blocked: executionBlocked
   };
 }
@@ -58,89 +65,48 @@ describe("organisation Skill catalogue page", () => {
     invalidate.mockResolvedValue(undefined);
   });
 
-  test("deletes only never-published drafts, then removes the deleted row", async () => {
-    const draft = skill("draft", "draft");
-    const unpublished = skill("unpublished", "unpublished");
+  test("removes an unused published skill after confirming retained history", async () => {
     const published = skill("published", "published");
-    const updatePending = skill("update-pending", "update_pending");
-    const deleteSkill = vi.fn(async () => {});
-
+    const unpublished = skill("unpublished", "unpublished");
+    const removeMany = vi.fn(async () => ({ removed_ids: [published.id] }));
     render(OrganizationSkillsPage, {
       data: {
         search: "",
-        page: {
-          items: [draft, unpublished, published, updatePending],
-          count: 4,
-          limit: 25,
-          next_cursor: null
-        },
-        eneo: {
-          skills: {
-            organization: {
-              delete: deleteSkill,
-              list: vi.fn()
-            },
-            catalogue: {
-              list: vi.fn()
-            }
-          }
-        }
+        removed: false,
+        page: { items: [published, unpublished], count: 2, limit: 25, next_cursor: null },
+        eneo: { skills: { organization: { removeMany, list: vi.fn() } } }
       } as never
     });
 
-    await expect
-      .element(
-        page.getByRole("button", {
-          name: m.skills_library_delete_aria({ name: draft.display_name })
-        })
-      )
-      .toBeVisible();
-    await expect
-      .element(
-        page.getByRole("button", {
-          name: m.skills_library_delete_aria({ name: unpublished.display_name })
-        })
-      )
-      .not.toBeInTheDocument();
-    await expect
-      .element(
-        page.getByRole("button", {
-          name: m.skills_library_delete_aria({ name: published.display_name })
-        })
-      )
-      .not.toBeInTheDocument();
-    await expect
-      .element(
-        page.getByRole("button", {
-          name: m.skills_library_delete_aria({ name: updatePending.display_name })
-        })
-      )
-      .not.toBeInTheDocument();
-
-    await page
-      .getByRole("button", {
-        name: m.skills_library_delete_aria({ name: draft.display_name })
-      })
-      .click();
-    await expect
-      .element(
-        page.getByText(
-          m.organization_skills_delete_description({
-            name: draft.display_name
+    for (const item of [published, unpublished]) {
+      await expect
+        .element(
+          page.getByRole("button", {
+            name: m.organization_skills_remove_aria({ name: item.display_name })
           })
         )
-      )
-      .toBeVisible();
-    await page.getByRole("button", { name: m.delete(), exact: true }).click();
-
-    await vi.waitFor(() =>
-      expect(deleteSkill).toHaveBeenCalledWith({
-        skillId: draft.id
+        .toBeVisible();
+    }
+    await page
+      .getByRole("button", {
+        name: m.organization_skills_remove_aria({ name: published.display_name })
       })
-    );
-    await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith("organization:skills"));
-    await expect.element(page.getByText(draft.display_name)).not.toBeInTheDocument();
+      .click();
+    await expect.element(page.getByText(m.organization_skills_remove_description())).toBeVisible();
+    await page
+      .getByRole("button", { name: m.organization_skills_remove_action(), exact: true })
+      .click();
+    await vi.waitFor(() => expect(removeMany).toHaveBeenCalledWith({ skill_ids: [published.id] }));
+    await expect
+      .element(page.getByText(published.display_name, { exact: true }))
+      .not.toBeInTheDocument();
     await expect.element(page.getByText(unpublished.display_name)).toBeVisible();
+    await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith("organization:skills"));
+    await expect
+      .element(
+        page.getByRole("link", { name: m.organization_skills_current_filter(), exact: true })
+      )
+      .toHaveFocus();
   });
 
   test("names the attachment that blocks a delete instead of a model name clash", async () => {
@@ -153,7 +119,7 @@ describe("organisation Skill catalogue page", () => {
           "RESPONSE",
           409,
           SKILL_STILL_ATTACHED,
-          {},
+          { details: { skill_ids: [draft.id] } },
           { endpoint: "DELETE@/api/v1/skills/organization/" }
         )
       );
@@ -164,7 +130,7 @@ describe("organisation Skill catalogue page", () => {
         page: { items: [draft], count: 1, limit: 25, next_cursor: null },
         eneo: {
           skills: {
-            organization: { delete: deleteSkill, list: vi.fn() },
+            organization: { removeMany: deleteSkill, list: vi.fn() },
             catalogue: { list: vi.fn() }
           }
         }
@@ -173,16 +139,109 @@ describe("organisation Skill catalogue page", () => {
 
     await page
       .getByRole("button", {
-        name: m.skills_library_delete_aria({ name: draft.display_name })
+        name: m.organization_skills_remove_aria({ name: draft.display_name })
       })
       .click();
-    await page.getByRole("button", { name: m.delete(), exact: true }).click();
+    await page
+      .getByRole("button", { name: m.organization_skills_remove_action(), exact: true })
+      .click();
 
     await expect.element(page.getByText(m.eneo_error_9051())).toBeVisible();
+    await expect.element(page.getByText(m.organization_skills_remove_new_binding())).toBeVisible();
+    await expect
+      .element(
+        page.getByRole("button", { name: m.organization_skills_remove_action(), exact: true })
+      )
+      .toBeDisabled();
     // The shared collision code this conflict used to travel under is generic,
     // but its localized copy is about AI model display names.
     await expect.element(page.getByText(m.eneo_error_9017())).not.toBeInTheDocument();
-    await expect.element(page.getByRole("link", { name: draft.display_name })).toBeVisible();
+    await expect
+      .element(page.getByRole("link", { name: draft.display_name }).first())
+      .toBeVisible();
+  });
+
+  test("bulk removal requires excluding skills in use and preserves the reviewed selection", async () => {
+    const free = skill("free", "published");
+    const used = {
+      ...skill("used", "published"),
+      usage: {
+        assistant_count: 2,
+        app_count: 1,
+        distinct_space_count: 2,
+        personal_chat_pinned: true
+      }
+    };
+    const removeMany = vi.fn(async () => ({ removed_ids: [free.id] }));
+    render(OrganizationSkillsPage, {
+      data: {
+        search: "",
+        removed: false,
+        page: { items: [free, used], count: 2, limit: 25, next_cursor: null },
+        eneo: { skills: { organization: { removeMany, list: vi.fn() } } }
+      } as never
+    });
+    await expect
+      .element(
+        page.getByRole("link", {
+          name: new RegExp(
+            m.organization_skills_usage_counts({ assistants: "2", apps: "1", spaces: "2" })
+          )
+        })
+      )
+      .toBeVisible();
+    await page
+      .getByRole("checkbox", { name: m.organization_skills_select_shown({ count: "2" }) })
+      .click();
+    await page.getByRole("button", { name: m.organization_skills_remove_selected() }).click();
+    await expect
+      .element(page.getByText(m.organization_skills_remove_blocked_title()))
+      .toBeVisible();
+    await expect
+      .element(
+        page.getByRole("button", {
+          name: m.organization_skills_remove_confirm({ count: "2" }),
+          exact: true
+        })
+      )
+      .toBeDisabled();
+    expect(removeMany).not.toHaveBeenCalled();
+    await page
+      .getByRole("button", { name: m.organization_skills_remove_exclude_blocked({ count: "1" }) })
+      .click();
+    await page
+      .getByRole("button", { name: m.organization_skills_remove_action(), exact: true })
+      .click();
+    await vi.waitFor(() => expect(removeMany).toHaveBeenCalledWith({ skill_ids: [free.id] }));
+    await expect.element(page.getByText(used.display_name)).toBeVisible();
+    await expect.element(page.getByText(free.display_name)).not.toBeInTheDocument();
+  });
+
+  test("removed view retains history links and search scope without selection or removal actions", async () => {
+    const removed = { ...skill("removed", "unpublished"), removed_at: "2026-09-18T08:00:00Z" };
+    render(OrganizationSkillsPage, {
+      data: {
+        search: "Payroll",
+        removed: true,
+        page: { items: [removed], count: 1, limit: 25, next_cursor: null },
+        eneo: { skills: { organization: { removeMany: vi.fn(), list: vi.fn() } } }
+      } as never
+    });
+    await expect.element(page.getByRole("link", { name: removed.display_name })).toBeVisible();
+    await expect.element(page.getByRole("checkbox")).not.toBeInTheDocument();
+    await expect
+      .element(
+        page.getByRole("button", {
+          name: m.organization_skills_remove_aria({ name: removed.display_name })
+        })
+      )
+      .not.toBeInTheDocument();
+    expect(document.querySelector<HTMLInputElement>('input[name="removed"]')?.value).toBe("true");
+    await expect
+      .element(
+        page.getByRole("link", { name: m.organization_skills_removed_filter(), exact: true })
+      )
+      .toHaveAttribute("aria-current", "page");
   });
 
   test("shows execution blocking as the dominant operational status", async () => {
@@ -272,7 +331,7 @@ describe("organisation Skill catalogue page", () => {
 
     expect(
       document.querySelectorAll(
-        `[aria-label="${m.skills_library_delete_aria({ name: draft.display_name })}"]`
+        `[aria-label="${m.organization_skills_remove_aria({ name: draft.display_name })}"]`
       )
     ).toHaveLength(1);
   });
@@ -314,7 +373,7 @@ describe("organisation Skill catalogue page", () => {
 
   test("keeps a deleted Skill removed when refreshing the page data fails", async () => {
     const draft = skill("draft", "draft");
-    const deleteSkill = vi.fn(async () => {});
+    const deleteSkill = vi.fn(async () => ({ removed_ids: [draft.id] }));
     invalidate.mockRejectedValueOnce(new Error("Refresh failed"));
 
     render(OrganizationSkillsPage, {
@@ -329,7 +388,7 @@ describe("organisation Skill catalogue page", () => {
         eneo: {
           skills: {
             organization: {
-              delete: deleteSkill,
+              removeMany: deleteSkill,
               list: vi.fn()
             },
             catalogue: {
@@ -342,10 +401,12 @@ describe("organisation Skill catalogue page", () => {
 
     await page
       .getByRole("button", {
-        name: m.skills_library_delete_aria({ name: draft.display_name })
+        name: m.organization_skills_remove_aria({ name: draft.display_name })
       })
       .click();
-    await page.getByRole("button", { name: m.delete(), exact: true }).click();
+    await page
+      .getByRole("button", { name: m.organization_skills_remove_action(), exact: true })
+      .click();
 
     await vi.waitFor(() => expect(deleteSkill).toHaveBeenCalledTimes(1));
     await expect.element(page.getByText(draft.display_name)).not.toBeInTheDocument();
@@ -353,7 +414,7 @@ describe("organisation Skill catalogue page", () => {
       .element(page.getByText(m.organization_skills_refresh_after_mutation_warning()))
       .toBeVisible();
     await expect
-      .element(page.getByText(m.organization_skills_delete_error()))
+      .element(page.getByText(m.organization_skills_remove_error()))
       .not.toBeInTheDocument();
   });
 

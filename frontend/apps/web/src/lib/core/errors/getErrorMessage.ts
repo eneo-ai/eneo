@@ -25,6 +25,7 @@ import { m } from "$lib/paraglide/messages";
  * state — is a decision, not just a message.
  */
 export const SKILL_EXECUTION_BLOCK_CONFLICT: EneoErrorCode = 9052;
+export const SKILL_STILL_ATTACHED: EneoErrorCode = 9051;
 
 // Keyed on the generated code union, so a code the backend does not define
 // fails to compile instead of mapping a message nothing can ever reach.
@@ -79,7 +80,8 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   9050: () => m.eneo_error_9050(), // SKILL_IN_USE_BY_APP_RUN
   9051: () => m.eneo_error_9051(), // SKILL_STILL_ATTACHED
   9053: () => m.eneo_error_9053(), // SKILL_NOT_PUBLISHED_FOR_BINDING
-  9054: () => m.eneo_error_9054() // SKILL_BLOCKED_FOR_BINDING
+  9054: () => m.eneo_error_9054(), // SKILL_BLOCKED_FOR_BINDING
+  9062: () => m.eneo_error_9062() // SKILL_REMOVAL_BUSY
 };
 
 /**

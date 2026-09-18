@@ -196,15 +196,28 @@ export function initSkills(client) {
 
     organization: {
       /**
-       * List organisation Skill drafts and publication status.
-       * @param {{limit?: number, cursor?: string | null, search?: string | null}} [params]
+       * List current or removed organisation Skills with configured usage counts.
+       * @param {{limit?: number, cursor?: string | null, search?: string | null, removed?: boolean}} [params]
        * @returns {Promise<OrganizationSkillSummaryPagePublic>}
        * @throws {EneoError}
        */
-      list: async ({ limit, cursor, search } = {}) => {
+      list: async ({ limit, cursor, search, removed } = {}) => {
         return await client.fetch("/api/v1/skills/organization/", {
           method: "get",
-          params: { query: { limit, cursor, search } }
+          params: { query: { limit, cursor, search, removed } }
+        });
+      },
+
+      /**
+       * Remove a bounded selection atomically while retaining version history.
+       * @param {import('../types/fetch').JSONRequestBody<"post", "/api/v1/skills/organization/remove/">} params
+       * @returns {Promise<import('../types/resources').SkillRemovalResult>}
+       * @throws {EneoError}
+       */
+      removeMany: async ({ skill_ids }) => {
+        return await client.fetch("/api/v1/skills/organization/remove/", {
+          method: "post",
+          requestBody: { "application/json": { skill_ids } }
         });
       },
 
@@ -395,7 +408,7 @@ export function initSkills(client) {
       },
 
       /**
-       * Delete an eligible organisation Skill draft.
+       * Remove an unused organisation Skill while retaining its history.
        * @param {{skillId: string}} params
        * @returns {Promise<void>}
        * @throws {EneoError}

@@ -25,6 +25,58 @@ from eneo.skills.domain.skill import (
 )
 
 
+async def test_removing_an_unused_published_skill_preserves_its_history(
+    db_container, admin_user
+):
+    async with db_container() as container:
+        organization = await _organization_space(
+            container.session(), tenant_id=admin_user.tenant_id
+        )
+        repo = container.skill_repo()
+        skill = await repo.create(
+            space_id=organization.id,
+            slug="retained-skill",
+            display_name="Retained Skill",
+            description="Guidance retained for audit history",
+            instructions="Use approved guidance.",
+            content_digest="a" * 64,
+            created_by_user_id=admin_user.id,
+        )
+        await repo.publish_organization(
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            expected_revision_id=skill.current_revision.id,
+        )
+
+        await repo.remove_organization_many(
+            tenant_id=admin_user.tenant_id, skill_ids=[skill.id]
+        )
+
+        with pytest.raises(PublishedSkillDeletionError):
+            await repo.delete(skill_id=skill.id)
+
+        retained = await repo.get_organization_for_tenant(
+            tenant_id=admin_user.tenant_id, skill_id=skill.id
+        )
+        assert retained is not None
+        assert retained.removed_at is not None
+        assert retained.is_active is False
+        assert retained.published_revision_number is None
+        assert retained.current_revision == skill.current_revision
+        assert (
+            await repo.get_revision(
+                skill_id=skill.id, revision_id=skill.current_revision.id
+            )
+            == skill.current_revision
+        )
+        assert (
+            await repo.list_organization_for_tenant(
+                tenant_id=admin_user.tenant_id, limit=25, after_slug=None
+            )
+            == []
+        )
+
+
 async def _organization_space(session, *, tenant_id):
     return await session.scalar(
         sa.select(Spaces).where(
@@ -131,6 +183,15 @@ async def test_catalogue_reads_only_the_tenants_exact_published_revision(
             tenant_id=admin_user.tenant_id,
             skill_id=local.id,
         )
+
+        assert (
+            await repo.remove_organization_many(
+                tenant_id=admin_user.tenant_id, skill_ids=[local.id, foreign.id]
+            )
+            is None
+        )
+        assert await repo.get(skill_id=local.id) is not None
+        assert await repo.get(skill_id=foreign.id) is not None
 
         assert [entry.id for entry in catalogue] == [local.id]
         assert catalogue[0].display_name == "Payroll"
@@ -431,8 +492,7 @@ async def test_published_catalogue_skill_binds_and_executes_across_tenant_spaces
             app_id=app.id,
             references=[],
         )
-        with pytest.raises(PublishedSkillDeletionError):
-            await container.organization_skill_service().delete(skill_id=published.id)
+        await container.organization_skill_service().delete(skill_id=published.id)
         retained_revision = await repo.get_revision(
             skill_id=published.id,
             revision_id=app_composition.provenance[0].skill_revision_id,
@@ -570,12 +630,6 @@ async def test_publication_mutations_are_stale_safe_and_idempotent(
         assert pending is not None
         assert pending.skill.publication_state is SkillPublicationState.UPDATE_PENDING
 
-        with pytest.raises(PublishedSkillDeletionError):
-            await repo.delete_organization(
-                tenant_id=admin_user.tenant_id,
-                skill_id=skill.id,
-            )
-
         unpublished = await repo.unpublish_organization(
             tenant_id=admin_user.tenant_id,
             skill_id=skill.id,
@@ -591,11 +645,6 @@ async def test_publication_mutations_are_stale_safe_and_idempotent(
             )
             is None
         )
-        with pytest.raises(PublishedSkillDeletionError):
-            await repo.delete_organization(
-                tenant_id=admin_user.tenant_id,
-                skill_id=skill.id,
-            )
         retained = await repo.get_organization_for_tenant(
             tenant_id=admin_user.tenant_id,
             skill_id=skill.id,

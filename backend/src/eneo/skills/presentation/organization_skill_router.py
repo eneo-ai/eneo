@@ -38,6 +38,8 @@ from eneo.skills.presentation.skill_models import (
     SkillAdoptionProjectionPagePublic,
     SkillCreateRequest,
     SkillPublishRequest,
+    SkillRemovalPublic,
+    SkillRemovalRequest,
     SkillRevisionCreateRequest,
     SkillRevisionPublic,
     SkillRevisionRestorePublic,
@@ -108,11 +110,13 @@ async def list_organization_skills(
     limit: Annotated[int, Query(ge=1, le=_MAX_PAGE_LIMIT)] = _DEFAULT_PAGE_LIMIT,
     cursor: str | None = None,
     search: Annotated[str | None, Query(max_length=200)] = None,
+    removed: bool = False,
 ) -> OrganizationSkillSummaryPagePublic:
     page = await container.organization_skill_service().list_organization_skills(
         limit=limit,
         cursor=cursor,
         search=search,
+        removed=removed,
     )
     assembler = container.skill_assembler()
     return OrganizationSkillSummaryPagePublic(
@@ -605,25 +609,27 @@ async def unpublish_organization_skill(
 @router.delete(
     "/organization/{skill_id}/",
     status_code=204,
-    description="Delete an eligible organisation Skill draft.",
+    description="Remove an unused organisation Skill while retaining its history.",
     responses=responses.get_responses([403, 404, 409]),
 )
 async def delete_organization_skill(
     skill_id: UUID,
     container: _ContainerWithUser,
 ) -> None:
-    skill = await container.organization_skill_service().delete(skill_id=skill_id)
-    user = container.user()
-    await container.audit_service().log_async(
-        tenant_id=user.tenant_id,
-        user=user,
-        action=ActionType.SKILL_DELETED,
-        entity_type=EntityType.SKILL,
-        entity_id=skill.id,
-        description=f"Deleted Skill '{skill.current_revision.display_name}'",
-        metadata=AuditMetadata.standard(
-            actor=user,
-            target=skill,
-            extra=skill_audit_extra(skill),
-        ),
+    await container.organization_skill_service().delete(skill_id=skill_id)
+
+
+@router.post(
+    "/organization/remove/",
+    response_model=SkillRemovalPublic,
+    description="Remove up to 100 unused organisation Skills atomically, retaining history.",
+    responses=responses.get_responses([400, 403, 404, 409]),
+)
+async def remove_organization_skills(
+    payload: SkillRemovalRequest,
+    container: _ContainerWithUser,
+) -> SkillRemovalPublic:
+    skills = await container.organization_skill_service().remove_many(
+        skill_ids=payload.skill_ids
     )
+    return SkillRemovalPublic(removed_ids=[skill.id for skill in skills])

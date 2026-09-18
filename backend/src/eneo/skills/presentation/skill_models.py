@@ -2,12 +2,13 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from eneo.main.models import NotProvided, PaginatedResponse
 from eneo.skills.domain.skill import (
     MAX_SKILL_DESCRIPTION_LENGTH,
     MAX_SKILL_DISPLAY_NAME_LENGTH,
+    MAX_SKILL_REMOVAL_BATCH_SIZE,
     MAX_SKILL_SLUG_LENGTH,
     AppPinAdvanceIncompatibleReason,
     AppPinAdvanceOutcome,
@@ -124,6 +125,32 @@ class SkillActiveUpdateRequest(BaseModel):
     is_active: bool
 
 
+class SkillRemovalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    skill_ids: list[UUID] = Field(min_length=1, max_length=MAX_SKILL_REMOVAL_BATCH_SIZE)
+
+    @field_validator("skill_ids")
+    @classmethod
+    def unique_skills(cls, value: list[UUID]) -> list[UUID]:
+        if len(value) != len(set(value)):
+            raise ValueError("Select distinct Skills")
+        return value
+
+
+class SkillRemovalPublic(BaseModel):
+    removed_ids: list[UUID] = Field(
+        description="Selected Skills confirmed removed, including previously removed Skills."
+    )
+
+
+class SkillUsageCountsPublic(BaseModel):
+    assistant_count: int
+    app_count: int
+    distinct_space_count: int
+    personal_chat_pinned: bool
+
+
 class SkillRevisionPublic(BaseModel):
     id: UUID
     skill_id: UUID
@@ -175,6 +202,8 @@ class OrganizationSkillSummaryPublic(SkillSparse):
     first_published_at: datetime | None
     publication_state: SkillPublicationState
     execution_blocked: bool
+    removed_at: datetime | None
+    usage: SkillUsageCountsPublic
 
 
 class OrganizationSkillPublic(OrganizationSkillSummaryPublic):

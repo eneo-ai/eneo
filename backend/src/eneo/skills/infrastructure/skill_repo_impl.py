@@ -66,6 +66,7 @@ from eneo.skills.domain.skill import (
     SkillHasBindingsError,
     SkillNotPublishedForBindingError,
     SkillPublicationChange,
+    SkillRemovalBusyError,
     SkillRevision,
     SkillRevisionChange,
     SkillRevisionConflictError,
@@ -77,6 +78,7 @@ from eneo.skills.domain.skill import (
     SkillSlugConflictError,
     SkillStatusChange,
     SkillSummary,
+    SkillUsageCounts,
 )
 
 _BindingRow = TypeVar(
@@ -192,6 +194,7 @@ class SkillRepoImpl:
             current_revision=cls._to_revision(revision),
             published_revision_number=row.published_revision_number,
             first_published_at=row.first_published_at,
+            removed_at=row.removed_at,
         )
 
     @staticmethod
@@ -218,6 +221,7 @@ class SkillRepoImpl:
             updated_at=skill.updated_at,
             published_revision_number=skill.published_revision_number,
             first_published_at=skill.first_published_at,
+            removed_at=skill.removed_at,
         )
 
     @staticmethod
@@ -236,7 +240,10 @@ class SkillRepoImpl:
         space_id: UUID,
         query: str | None,
     ) -> list[ColumnElement[bool]]:
-        predicates: list[ColumnElement[bool]] = [Skills.space_id == space_id]
+        predicates: list[ColumnElement[bool]] = [
+            Skills.space_id == space_id,
+            Skills.removed_at.is_(None),
+        ]
         if query is not None:
             predicates.append(
                 sa.or_(
@@ -259,27 +266,30 @@ class SkillRepoImpl:
     def _organization_adoption_facts(
         *,
         tenant_id: UUID,
-        skill_id: UUID,
+        skill_ids: Sequence[UUID],
     ):
         empty_space_id = sa.cast(sa.null(), AssistantSkillBindings.space_id.type)
         return sa.union_all(
             sa.select(
+                AssistantSkillBindings.skill_id.label("skill_id"),
                 sa.literal(SkillAdoptionResourceKind.ASSISTANT.value).label("kind"),
                 AssistantSkillBindings.skill_revision_id.label("revision_id"),
                 AssistantSkillBindings.space_id.label("space_id"),
             ).where(
                 AssistantSkillBindings.tenant_id == tenant_id,
-                AssistantSkillBindings.skill_id == skill_id,
+                AssistantSkillBindings.skill_id.in_(skill_ids),
             ),
             sa.select(
+                AppSkillBindings.skill_id.label("skill_id"),
                 sa.literal(SkillAdoptionResourceKind.APP.value).label("kind"),
                 AppSkillBindings.skill_revision_id.label("revision_id"),
                 AppSkillBindings.space_id.label("space_id"),
             ).where(
                 AppSkillBindings.tenant_id == tenant_id,
-                AppSkillBindings.skill_id == skill_id,
+                AppSkillBindings.skill_id.in_(skill_ids),
             ),
             sa.select(
+                GovernancePolicySkillBindings.skill_id.label("skill_id"),
                 sa.literal("personal_chat").label("kind"),
                 GovernancePolicySkillBindings.skill_revision_id.label("revision_id"),
                 empty_space_id.label("space_id"),
@@ -290,12 +300,34 @@ class SkillRepoImpl:
             )
             .where(
                 GovernancePolicySkillBindings.tenant_id == tenant_id,
-                GovernancePolicySkillBindings.skill_id == skill_id,
+                GovernancePolicySkillBindings.skill_id.in_(skill_ids),
                 GovernancePolicies.tenant_id == tenant_id,
                 GovernancePolicies.scope
                 == PolicyScope.PERSONAL_DEFAULT_ASSISTANT.value,
             ),
         ).cte("organization_skill_adoption_facts")
+
+    async def get_usage_counts(
+        self, *, tenant_id: UUID, skill_ids: Sequence[UUID]
+    ) -> dict[UUID, SkillUsageCounts]:
+        if not skill_ids:
+            return {}
+        facts = self._organization_adoption_facts(
+            tenant_id=tenant_id, skill_ids=skill_ids
+        )
+        rows = await self.session.execute(
+            sa.select(
+                facts.c.skill_id,
+                sa.func.count().filter(facts.c.kind == "assistant"),
+                sa.func.count().filter(facts.c.kind == "app"),
+                sa.func.count(sa.distinct(facts.c.space_id)),
+                sa.func.bool_or(facts.c.kind == "personal_chat"),
+            ).group_by(facts.c.skill_id)
+        )
+        return {
+            skill_id: SkillUsageCounts(assistants, apps, spaces, personal_chat)
+            for skill_id, assistants, apps, spaces, personal_chat in rows.tuples()
+        }
 
     @staticmethod
     def _adoption_drift(
@@ -384,7 +416,9 @@ class SkillRepoImpl:
 
     async def get(self, *, skill_id: UUID) -> Skill | None:
         result = await self.session.execute(
-            self._skill_query().where(Skills.id == skill_id)
+            self._skill_query().where(
+                Skills.id == skill_id, Skills.removed_at.is_(None)
+            )
         )
         row = result.one_or_none()
         if row is None:
@@ -486,11 +520,18 @@ class SkillRepoImpl:
         limit: int,
         after_slug: str | None,
         search: str | None = None,
+        removed: bool = False,
+        after_id: UUID | None = None,
     ) -> list[SkillSummary]:
         statement = (
             self._summary_query(published=False)
             .where(*self._organization_scope(tenant_id))
-            .order_by(Skills.slug)
+            .where(
+                Skills.removed_at.is_not(None)
+                if removed
+                else Skills.removed_at.is_(None)
+            )
+            .order_by(Skills.slug, Skills.id)
             .limit(limit)
         )
         if search:
@@ -503,7 +544,11 @@ class SkillRepoImpl:
                 )
             )
         if after_slug is not None:
-            statement = statement.where(Skills.slug > after_slug)
+            statement = statement.where(
+                sa.tuple_(Skills.slug, Skills.id) > (after_slug, after_id)
+                if after_id is not None
+                else Skills.slug > after_slug
+            )
         rows = await self.session.execute(statement)
         return [
             self._to_summary(
@@ -673,7 +718,7 @@ class SkillRepoImpl:
         if after is None:
             facts = self._organization_adoption_facts(
                 tenant_id=tenant_id,
-                skill_id=skill_id,
+                skill_ids=[skill_id],
             )
             facts_with_revision = (
                 sa.select(
@@ -1554,7 +1599,9 @@ class SkillRepoImpl:
         expected_current_revision_id: UUID | None = None,
     ) -> SkillRevisionChange | None:
         skill_row = await self.session.scalar(
-            sa.select(Skills).where(Skills.id == skill_id).with_for_update()
+            sa.select(Skills)
+            .where(Skills.id == skill_id, Skills.removed_at.is_(None))
+            .with_for_update()
         )
         if skill_row is None:
             return None
@@ -1966,7 +2013,7 @@ class SkillRepoImpl:
             tenant_id=tenant_id,
             skill_id=skill_id,
         )
-        if skill_row is None:
+        if skill_row is None or skill_row.removed_at is not None:
             return None
         current_revision_id = await self.session.scalar(
             sa.select(SkillRevisions.id).where(
@@ -2014,7 +2061,7 @@ class SkillRepoImpl:
             tenant_id=tenant_id,
             skill_id=skill_id,
         )
-        if skill_row is None:
+        if skill_row is None or skill_row.removed_at is not None:
             return None
         previous = skill_row.published_revision_number
         previous_is_active = skill_row.is_active
@@ -2049,29 +2096,91 @@ class SkillRepoImpl:
         skill = self._to_skill(row[0], row[1])
         return await self._delete_locked_skill(skill=skill)
 
-    async def delete_organization(
-        self,
-        *,
-        tenant_id: UUID,
-        skill_id: UUID,
-    ) -> Skill | None:
-        skill_row = await self._lock_organization_skill(
-            tenant_id=tenant_id,
-            skill_id=skill_id,
-        )
-        if skill_row is None:
+    async def remove_organization_many(
+        self, *, tenant_id: UUID, skill_ids: Sequence[UUID]
+    ) -> list[SkillSummary] | None:
+        """Remove the entire reviewed batch, retaining revisions and audit history.
+
+        NOWAIT avoids lock cycles with binding saves, which resolve retained and
+        new references in separate steps. The request transaction rolls back on
+        any refusal; callers may retry after the concurrent operation finishes.
+        """
+        try:
+            rows = await self.session.execute(
+                self._summary_query(published=False)
+                .where(*self._organization_scope(tenant_id), Skills.id.in_(skill_ids))
+                .order_by(Skills.id)
+                .with_for_update(of=Skills, nowait=True)
+            )
+        except DBAPIError as error:
+            if _is_lock_not_available(error):
+                raise SkillRemovalBusyError from error
+            raise
+        summaries = [
+            self._to_summary(
+                skill=skill,
+                revision_id=revision_id,
+                display_name=name,
+                description=description,
+                content_digest=digest,
+            )
+            for skill, revision_id, name, description, digest in rows.tuples()
+        ]
+        if len(summaries) != len(set(skill_ids)):
             return None
-        revision_row = await self.session.scalar(
-            sa.select(SkillRevisions).where(
-                SkillRevisions.skill_id == skill_id,
-                SkillRevisions.revision_number == skill_row.current_revision_number,
+        current_ids = [skill.id for skill in summaries if skill.removed_at is None]
+        if not current_ids:
+            return summaries
+
+        bound = await self.session.scalars(
+            sa.union(
+                *[
+                    sa.select(binding.skill_id).where(binding.skill_id.in_(current_ids))
+                    for binding in (
+                        AssistantSkillBindings,
+                        AppSkillBindings,
+                        GovernancePolicySkillBindings,
+                    )
+                ]
             )
         )
-        if revision_row is None:
-            raise RuntimeError("Skill current revision is missing")
-        return await self._delete_locked_skill(
-            skill=self._to_skill(skill_row, revision_row)
+        bound_ids = list(bound)
+        if bound_ids:
+            raise SkillHasBindingsError(skill_ids=bound_ids)
+
+        active_runs = await self.session.scalars(
+            sa.select(Skills.id).where(
+                Skills.id.in_(current_ids),
+                sa.exists()
+                .where(
+                    AppRuns.job_id == Jobs.id,
+                    Jobs.status.in_((Status.QUEUED.value, Status.IN_PROGRESS.value)),
+                    AppRuns.skill_provenance.contains(
+                        sa.func.jsonb_build_array(
+                            sa.func.jsonb_build_object(
+                                "skill_id", sa.cast(Skills.id, sa.Text)
+                            )
+                        )
+                    ),
+                )
+                .correlate(Skills),
+            )
         )
+        active_run_ids = list(active_runs)
+        if active_run_ids:
+            raise SkillHasActiveAppRunsError(skill_ids=active_run_ids)
+
+        await self.session.execute(
+            sa.update(Skills)
+            .where(Skills.id.in_(current_ids))
+            .values(
+                removed_at=sa.func.now(),
+                is_active=False,
+                published_revision_number=None,
+                updated_at=sa.func.now(),
+            )
+        )
+        return summaries
 
     async def get_active_execution_block(
         self,
@@ -2120,7 +2229,11 @@ class SkillRepoImpl:
             tenant_id=tenant_id,
             skill_id=skill_id,
         )
-        if skill is None or skill.first_published_at is None:
+        if (
+            skill is None
+            or skill.first_published_at is None
+            or skill.removed_at is not None
+        ):
             return None
         existing = await self.session.scalar(
             sa.select(SkillExecutionBlocks).where(
@@ -2202,6 +2315,8 @@ class SkillRepoImpl:
         )
 
     async def _delete_locked_skill(self, *, skill: Skill) -> Skill:
+        # Protect published history even if a direct repository caller bypasses
+        # the service's restriction of hard deletion to local Space Skills.
         if skill.first_published_at is not None:
             raise PublishedSkillDeletionError
         if await self._is_bound(skill_id=skill.id):
@@ -2383,7 +2498,9 @@ class SkillRepoImpl:
             )
         )
         if lock_active_state:
-            statement = statement.with_for_update(read=True, of=Skills)
+            statement = statement.where(Skills.removed_at.is_(None)).with_for_update(
+                read=True, of=Skills
+            )
         rows = await self.session.execute(statement)
         by_reference = {
             SkillBindingReference(
