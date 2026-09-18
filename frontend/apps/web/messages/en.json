@@ -4946,6 +4946,7 @@
   "widget_admin_preview_failed": "The preview could not be loaded",
   "widget_admin_snippet": "Install snippet",
   "widget_admin_snippet_description": "Paste this once on the website, preferably just before </body>. The floating version updates automatically with Eneo.",
+  "widget_admin_snippet_guide": "Guide for whoever manages the website",
   "widget_admin_snippet_inactive": "The widget is not active yet. The snippet can be installed now but shows nothing until a tenant admin activates the widget.",
   "widget_admin_snippet_not_built": "The loader script is not available in this installation.",
   "widget_admin_snippet_pinned": "Pinned version with integrity hash",

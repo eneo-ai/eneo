@@ -5,6 +5,7 @@
 <script lang="ts">
   import type { Widget } from "@eneo/eneo-js";
   import { Button, Input } from "@eneo/ui";
+  import { ExternalLink } from "lucide-svelte";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
   import { floatingSnippet, pinnedSnippet, standaloneUrl, type LoaderRelease } from "./snippet";
@@ -46,6 +47,17 @@
 >
   <h2 id="widget-snippet-title" class="text-base font-semibold">{m.widget_admin_snippet()}</h2>
   <p class="text-secondary text-sm">{m.widget_admin_snippet_description()}</p>
+  <Button
+    href="https://docs.eneo.ai/guides/embed-widget#for-the-website-team"
+    target="_blank"
+    rel="noreferrer"
+    variant="link"
+    size="sm"
+    class="h-auto w-fit px-0"
+  >
+    {m.widget_admin_snippet_guide()}
+    <ExternalLink data-icon="inline-end" aria-hidden="true" />
+  </Button>
 
   {#if widget.status !== "active"}
     <p class="bg-warning-dimmer text-warning-stronger rounded-lg px-3 py-2 text-sm">

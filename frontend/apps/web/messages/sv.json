@@ -4946,6 +4946,7 @@
   "widget_admin_preview_failed": "Förhandsgranskningen kunde inte laddas",
   "widget_admin_snippet": "Installationskod",
   "widget_admin_snippet_description": "Klistra in detta en gång på webbplatsen, helst strax före </body>. Den flytande versionen uppdateras automatiskt med Eneo.",
+  "widget_admin_snippet_guide": "Guide för den som förvaltar webbplatsen",
   "widget_admin_snippet_inactive": "Widgeten är inte aktiv än. Koden kan installeras redan nu men visar inget förrän en organisationsadministratör aktiverar widgeten.",
   "widget_admin_snippet_not_built": "Laddarskriptet är inte tillgängligt i den här installationen.",
   "widget_admin_snippet_pinned": "Låst version med integritetshash",
