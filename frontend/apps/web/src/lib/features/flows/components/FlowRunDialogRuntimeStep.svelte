@@ -238,7 +238,7 @@
     <div
       class="{fileCount > 0
         ? 'mt-4 py-3.5'
-        : 'mt-6 min-h-[132px] py-6 sm:min-h-[100px]'} flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 text-center transition-[background-color,border-color,scale,min-height,padding,margin] duration-150 ease-[var(--ease-smooth-out)] {dragging
+        : 'mt-6 min-h-[132px] py-6 sm:min-h-[100px]'} flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 text-center transition-[background-color,border-color,scale,min-height,padding,margin] duration-(--duration-quick) ease-[var(--ease-smooth-out)] {dragging
         ? 'border-accent-default bg-accent-dimmer scale-[1.02]'
         : fileCount > 0
           ? 'border-positive-default/30 bg-positive-dimmer/10'
@@ -468,7 +468,7 @@
       <div class="mt-3 mb-2 flex flex-col gap-1.5">
         {#each files as file (file.id)}
           <div
-            class="group bg-hover-dimmer hover:bg-hover-default flex min-h-[44px] items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors duration-150"
+            class="group bg-hover-dimmer hover:bg-hover-default flex min-h-[44px] items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors duration-(--duration-quick)"
           >
             <div class="flex min-w-0 flex-col">
               <span class="min-w-0 truncate">{file.name ?? file.id}</span>
@@ -478,14 +478,14 @@
             </div>
             <div class="flex shrink-0 items-center gap-1">
               <button
-                class="text-muted/70 hover:text-accent-stronger group-hover:text-muted flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md transition-colors duration-150"
+                class="text-muted/70 hover:text-accent-stronger group-hover:text-muted flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md transition-colors duration-(--duration-quick)"
                 onclick={() => onDownloadUploadedFile(file)}
                 aria-label="{m.download_file()} {file.name ?? file.id}"
               >
                 <IconDownload class="size-4" />
               </button>
               <button
-                class="text-muted/60 hover:text-negative-default group-hover:text-muted flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md transition-colors duration-150"
+                class="text-muted/60 hover:text-negative-default group-hover:text-muted flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md transition-colors duration-(--duration-quick)"
                 onclick={() => onRemoveFile(file.id)}
                 aria-label="{m.delete()} {file.name ?? file.id}"
               >

@@ -192,7 +192,7 @@
 <div
   bind:this={rowEl}
   role="listitem"
-  class="step-card-row group flex w-full items-start gap-2.5 border-b px-3.5 py-3 text-left transition-colors duration-150
+  class="step-card-row group flex w-full items-start gap-2.5 border-b px-3.5 py-3 text-left transition-colors duration-(--duration-quick)
     {isActive ? 'border-b-default bg-accent-dimmer/40' : 'border-default hover:bg-hover-dimmer/40'}
     active:bg-hover-default"
   style:animation-delay="{Math.min(index, 10) * 50}ms"
@@ -207,7 +207,7 @@
   >
     <!-- Step order tile — rounded square (matches AI Builder rhythm) -->
     <div
-      class="relative flex size-7 shrink-0 items-center justify-center rounded-lg text-[13px] font-semibold tabular-nums transition-colors duration-150"
+      class="relative flex size-7 shrink-0 items-center justify-center rounded-lg text-[13px] font-semibold tabular-nums transition-colors duration-(--duration-quick)"
       class:bg-accent-default={isActive}
       class:text-on-fill={isActive}
       class:bg-hover-default={!isActive}
@@ -290,7 +290,7 @@
 
   {#if !isPublished}
     <div
-      class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-150 group-focus-within:opacity-100 group-hover:opacity-100"
+      class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-(--duration-quick) group-focus-within:opacity-100 group-hover:opacity-100"
       class:opacity-100={isActive || menuOpen}
     >
       <button

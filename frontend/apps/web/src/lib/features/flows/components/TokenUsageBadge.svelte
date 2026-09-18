@@ -36,7 +36,7 @@
 {#snippet badge()}
   <Badge
     variant="outline"
-    class="bg-secondary/60 text-muted hover:bg-secondary hover:text-primary cursor-help px-2 py-0.5 text-xs font-medium tabular-nums motion-safe:transition-colors motion-safe:duration-150"
+    class="bg-secondary/60 text-muted hover:bg-secondary hover:text-primary cursor-help px-2 py-0.5 text-xs font-medium tabular-nums motion-safe:transition-colors motion-safe:duration-(--duration-quick)"
   >
     {estimated ? "≈ " : ""}{badgeLabel}
     {#if incomplete}
