@@ -14,6 +14,7 @@
   import type { FlowRunLaunchInputState } from "./FlowRunLaunchInputState.svelte";
   import type { FlowRunDialogLabels } from "./flowRunDialogLabels";
   import FlowListInput from "./FlowListInput.svelte";
+  import { SvelteSet } from "svelte/reactivity";
 
   let {
     formFields,
@@ -31,8 +32,18 @@
 
   const currentFormValues = $derived(launchInputState.formValuesSnapshot);
 
+  // A form that greets a first-time user by marking three fields wrong before
+  // they have typed anything reads as an accusation. The asterisk and
+  // `aria-required` already say a field is needed; the error presentation
+  // waits until the reader has been in the field. The footer lists whatever is
+  // still missing throughout, so nothing is hidden.
+  const touched = new SvelteSet<string>();
+  function markTouched(field: NormalizedFlowFormField) {
+    touched.add(field.name);
+  }
+
   function isFieldMissing(field: NormalizedFlowFormField): boolean {
-    return missingRequiredFields.includes(field);
+    return missingRequiredFields.includes(field) && touched.has(field.name);
   }
 
   function getRequiredErrorMessage(field: NormalizedFlowFormField): string {
@@ -74,10 +85,14 @@
         <Select.Root
           type="multiple"
           value={selectedValues}
-          onValueChange={(value) => launchInputState.setFieldValue(field, value)}
+          onValueChange={(value) => {
+            markTouched(field);
+            launchInputState.setFieldValue(field, value);
+          }}
         >
           <Select.Trigger
             id={inputId}
+            onblur={() => markTouched(field)}
             aria-required={field.required}
             aria-invalid={invalid}
             aria-describedby={describedBy}
@@ -100,16 +115,23 @@
           required={field.required}
           {invalid}
           {describedBy}
-          onchange={(values) => launchInputState.setFieldValue(field, values)}
+          onchange={(values) => {
+            markTouched(field);
+            launchInputState.setFieldValue(field, values);
+          }}
         />
       {:else if field.type === "select"}
         <Select.Root
           type="single"
           value={readFlowRunFieldValue(currentFormValues, field)}
-          onValueChange={(value) => launchInputState.setFieldValue(field, value ?? "")}
+          onValueChange={(value) => {
+            markTouched(field);
+            launchInputState.setFieldValue(field, value ?? "");
+          }}
         >
           <Select.Trigger
             id={inputId}
+            onblur={() => markTouched(field)}
             aria-required={field.required}
             aria-invalid={invalid}
             aria-describedby={describedBy}
@@ -133,6 +155,7 @@
           aria-required={field.required}
           aria-invalid={invalid}
           aria-describedby={describedBy}
+          onblur={() => markTouched(field)}
           oninput={(event) => launchInputState.setFieldValue(field, event.currentTarget.value)}
         />
       {/if}

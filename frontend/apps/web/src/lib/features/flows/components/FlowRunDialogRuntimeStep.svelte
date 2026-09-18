@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { FlowRunContractStepInput, UploadedFile } from "@eneo/eneo-js";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
+  import ChevronRight from "lucide-svelte/icons/chevron-right";
   import { IconUploadCloud } from "@eneo/icons/upload-cloud";
   import { IconXMark } from "@eneo/icons/x-mark";
   import { IconCheck } from "@eneo/icons/check";
@@ -153,6 +154,10 @@
     onRecorderRef?.(activeStepId, recorderRef);
     return () => onRecorderRef?.(activeStepId, null);
   });
+
+  // Drive the disclosure chevrons.
+  let allowedTypesOpen = $state(false);
+  let technicalMimeOpen = $state(false);
 </script>
 
 <div class="flex flex-col gap-5">
@@ -279,15 +284,34 @@
     </div>
 
     {#if acceptedMimetypes.length > 0}
-      <details class="border-default bg-secondary/5 mt-3 rounded-lg border px-3 py-2.5">
-        <summary class="cursor-pointer text-sm font-medium">
+      <details
+        bind:open={allowedTypesOpen}
+        class="border-default bg-secondary/5 mt-3 rounded-lg border px-3 py-2.5"
+      >
+        <summary
+          class="focus-visible:ring-accent-default flex min-h-[24px] cursor-pointer list-none items-center gap-1.5 text-sm font-medium focus-visible:ring-2 [&::-webkit-details-marker]:hidden"
+        >
+          <ChevronRight
+            class="text-secondary size-3.5 shrink-0 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {allowedTypesOpen
+              ? 'rotate-90'
+              : ''}"
+            aria-hidden="true"
+          />
           {labels.allowedTypesToggle}
         </summary>
         <p class="text-secondary mt-2 max-w-prose text-sm leading-relaxed">
           {friendlyMimeNames(acceptedMimetypes).join(", ")}
         </p>
-        <details class="mt-2">
-          <summary class="text-muted cursor-pointer text-sm hover:underline">
+        <details bind:open={technicalMimeOpen} class="mt-2">
+          <summary
+            class="text-muted focus-visible:ring-accent-default flex min-h-[24px] cursor-pointer list-none items-center gap-1.5 text-sm hover:underline focus-visible:ring-2 [&::-webkit-details-marker]:hidden"
+          >
+            <ChevronRight
+              class="size-3.5 shrink-0 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {technicalMimeOpen
+                ? 'rotate-90'
+                : ''}"
+              aria-hidden="true"
+            />
             {labels.technicalMimeToggle}
           </summary>
           <p

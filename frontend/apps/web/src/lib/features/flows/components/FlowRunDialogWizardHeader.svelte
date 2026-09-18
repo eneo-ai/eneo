@@ -34,8 +34,11 @@
           {progressLabel}
         {/if}
       </p>
+      <!-- Focused on every page change so a screen reader lands on the new
+           heading. It is not in the tab order, so the browser's ring would
+           only ever appear for that programmatic move and read as a defect. -->
       <h3
-        class="text-primary text-base font-semibold tracking-tight sm:text-lg"
+        class="text-primary text-base font-semibold tracking-tight outline-none sm:text-lg"
         data-wizard-heading
         tabindex="-1"
       >

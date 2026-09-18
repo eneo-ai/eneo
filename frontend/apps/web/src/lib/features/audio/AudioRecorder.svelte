@@ -1117,7 +1117,11 @@
 </div>
 
 <style lang="postcss">
-  @reference "@eneo/ui/styles";
+  /* The app's own sheet, not the package's: `app.css` imports the package and
+     then raises `--text-xs` to the 12px floor and repoints `text-muted` at the
+     AA-compliant shade. Referencing the package alone resolves `@apply` against
+     the base theme and silently opts this component out of both. */
+  @reference "../../../app.css";
 
   @keyframes breathe-ring {
     0%,

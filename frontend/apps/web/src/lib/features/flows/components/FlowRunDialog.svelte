@@ -41,7 +41,10 @@
   } from "$lib/features/audio/flowRunRecordingSession";
   import { diffContractSnapshot } from "$lib/features/audio/recordingSession";
   import type { FlowCareDataPolicy } from "$lib/features/flows/flowCareDataPolicy";
-  import { normalizeFlowFormFields } from "$lib/features/flows/flowFormSchema";
+  import {
+    getFlowFormFieldLabel,
+    normalizeFlowFormFields
+  } from "$lib/features/flows/flowFormSchema";
   import {
     buildFlowRunInputPayload,
     buildFlowRunIntent,
@@ -131,7 +134,11 @@
     getMissingFlowRunRequiredFields(launchInputState.formValuesSnapshot, formFields)
   );
   const missingRequiredFieldNames = $derived(
-    missingRequiredFields.map((field) => field.name.trim()).filter((name) => name.length > 0)
+    // The footer speaks to the reader, so it uses the label they see, not the
+    // runtime key the flow author chose.
+    missingRequiredFields
+      .map((field) => getFlowFormFieldLabel(field).trim() || field.name.trim())
+      .filter((name) => name.length > 0)
   );
 
   const stepCount = $derived(flow.steps?.length ?? 0);
