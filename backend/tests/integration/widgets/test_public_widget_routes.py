@@ -300,10 +300,30 @@ async def test_bot_protection_none_requires_policy(client, admin_token, active_w
     )
     assert resp.status_code == 200, resp.text
 
-    known_visitor = str(uuid4())
+    issued = (
+        await client.post(f"/api/v1/widgets/{public_id}/visitor-sessions/", json={})
+    ).json()
+    known_visitor, visitor_key = issued["visitor_id"], issued["visitor_key"]
+
+    # The pseudonym survives a fresh mint only together with its key.
     resp = await client.post(
         f"/api/v1/widgets/{public_id}/visitor-sessions/",
-        json={"visitor_id": known_visitor},
+        json={"visitor_id": known_visitor, "visitor_key": visitor_key},
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["visitor_id"] == known_visitor
+    assert resp.json()["visitor_key"] == visitor_key
+
+    # A claimed id without the right key starts a new pseudonym instead.
+    resp = await client.post(
+        f"/api/v1/widgets/{public_id}/visitor-sessions/",
+        json={"visitor_id": known_visitor, "visitor_key": "00" * 32},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["visitor_id"] != known_visitor
+    resp = await client.post(
+        f"/api/v1/widgets/{public_id}/visitor-sessions/",
+        json={"visitor_id": str(uuid4())},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["visitor_id"] != known_visitor

@@ -56,10 +56,10 @@ export function createWidgetClient({ baseUrl, publicId, getToken, fetch }) {
     /**
      * Mint a visitor token from a solved challenge, a previous token, or
      * nothing when the widget has bot protection switched off.
-     * @param {{ altcha?: string; previousToken?: string; visitorId?: string }} params
+     * @param {{ altcha?: string; previousToken?: string; visitorId?: string; visitorKey?: string }} params
      * @returns {Promise<WidgetVisitorSession>}
      */
-    createVisitorSession: async ({ altcha, previousToken, visitorId } = {}) => {
+    createVisitorSession: async ({ altcha, previousToken, visitorId, visitorKey } = {}) => {
       return await client().fetch("/api/v1/widgets/{public_id}/visitor-sessions/", {
         method: "post",
         params: { path },
@@ -67,7 +67,8 @@ export function createWidgetClient({ baseUrl, publicId, getToken, fetch }) {
           "application/json": {
             altcha: altcha ?? null,
             previous_token: previousToken ?? null,
-            visitor_id: visitorId ?? null
+            visitor_id: visitorId ?? null,
+            visitor_key: visitorKey ?? null
           }
         }
       });

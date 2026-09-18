@@ -24,7 +24,8 @@ function setup(options: { botProtection?: "altcha" | "none"; storage?: MemorySto
   const createVisitorSession = vi.fn(async ({ previousToken, visitorId, altcha }) => ({
     token: `tok-${createVisitorSession.mock.calls.length}${previousToken ? "-rot" : ""}${altcha ? "-pow" : ""}`,
     expires_in: 900,
-    visitor_id: visitorId ?? "visitor-1"
+    visitor_id: visitorId ?? "visitor-1",
+    visitor_key: "key-1"
   }));
   const client = { createVisitorSession } as unknown as WidgetClient;
   const solve = vi.fn(async () => "payload");
@@ -56,9 +57,10 @@ describe("VisitorSession", () => {
     const token = await session.ensureToken();
     expect(token).toBe("tok-1-pow");
     expect(solve).toHaveBeenCalledTimes(1);
-    expect(createVisitorSession).toHaveBeenCalledWith({ altcha: "payload", visitorId: undefined });
+    expect(createVisitorSession).toHaveBeenCalledWith({ altcha: "payload" });
     expect(JSON.parse(storage.getItem(storageKey("wgt_x"))!)).toMatchObject({
       visitor_id: "visitor-1",
+      visitor_key: "key-1",
       token: "tok-1-pow"
     });
     expect(session.hasIdentity).toBe(true);
@@ -96,7 +98,8 @@ describe("VisitorSession", () => {
     // The visitor id is carried over so continuity survives the re-challenge.
     expect(createVisitorSession).toHaveBeenLastCalledWith({
       altcha: "payload",
-      visitorId: "visitor-1"
+      visitorId: "visitor-1",
+      visitorKey: "key-1"
     });
   });
 
@@ -108,7 +111,8 @@ describe("VisitorSession", () => {
     await session.ensureToken();
     expect(createVisitorSession).toHaveBeenLastCalledWith({
       altcha: "payload",
-      visitorId: "visitor-1"
+      visitorId: "visitor-1",
+      visitorKey: "key-1"
     });
     expect(solve).toHaveBeenCalledTimes(2);
   });
@@ -138,7 +142,8 @@ describe("VisitorSession", () => {
     await second.session.ensureToken();
     expect(second.createVisitorSession).toHaveBeenCalledWith({
       altcha: "payload",
-      visitorId: "visitor-1"
+      visitorId: "visitor-1",
+      visitorKey: "key-1"
     });
 
     second.session.clear();

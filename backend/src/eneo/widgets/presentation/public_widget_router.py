@@ -3,7 +3,7 @@
 # Licensed under the MIT License.
 
 
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import APIRouter, Request, Response
 
@@ -110,6 +110,7 @@ async def create_visitor_session(
     settings = get_settings()
     limiter = container.widget_limiter()
     tokens = container.widget_visitor_token_service()
+    identity = container.widget_visitor_identity()
     await limiter.check_mint(widget, client_ip(request))
 
     preview = False
@@ -123,16 +124,21 @@ async def create_visitor_session(
         preview = claims.preview
     elif body.altcha is not None:
         await container.widget_altcha_service().verify(body.altcha)
-        visitor_id = body.visitor_id or uuid4()
+        visitor_id = identity.resolve(widget, body.visitor_id, body.visitor_key)
     elif widget.bot_protection == BotProtection.NONE:
-        visitor_id = body.visitor_id or uuid4()
+        visitor_id = identity.resolve(widget, body.visitor_id, body.visitor_key)
     else:
         raise ChallengeInvalidError(
             "A solved challenge is required.", code="challenge_required"
         )
 
     token, expires_in = tokens.mint(widget, visitor_id, preview=preview)
-    return VisitorSession(token=token, expires_in=expires_in, visitor_id=visitor_id)
+    return VisitorSession(
+        token=token,
+        expires_in=expires_in,
+        visitor_id=visitor_id,
+        visitor_key=identity.key_for(widget, visitor_id),
+    )
 
 
 def _principal(request: Request) -> WidgetPrincipal:

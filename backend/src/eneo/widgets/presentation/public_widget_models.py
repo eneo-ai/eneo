@@ -50,7 +50,15 @@ class VisitorSessionRequest(BaseModel):
 
     visitor_id: Optional[UUID] = Field(
         default=None,
-        description="Pseudonymous visitor id from a previous session on this site.",
+        description=(
+            "Pseudonymous visitor id issued earlier for this widget. Honoured"
+            " only together with its visitor_key; otherwise a new id is issued."
+        ),
+    )
+    visitor_key: Optional[str] = Field(
+        default=None,
+        max_length=64,
+        description="The key that came with visitor_id when it was issued.",
     )
     altcha: Optional[str] = Field(
         default=None,
@@ -77,3 +85,10 @@ class VisitorSession(BaseModel):
     token: str
     expires_in: int = Field(description="Seconds until the token expires.")
     visitor_id: UUID
+    visitor_key: str = Field(
+        description=(
+            "Proof that the server issued visitor_id for this widget. Send both"
+            " when minting again after the token's grace window to keep the"
+            " pseudonym and its conversations."
+        )
+    )

@@ -9,6 +9,8 @@ import { EneoError } from "@eneo/eneo-js";
  */
 type StoredVisitor = {
   visitor_id: string;
+  /** Server-issued proof for visitor_id; without it the id is not sent. */
+  visitor_key: string | null;
   token: string;
   expires_at: number;
   session_id: string | null;
@@ -147,17 +149,27 @@ export class VisitorSession {
       }
     }
 
-    const visitorId = previous?.visitor_id ?? undefined;
+    // The pseudonym is only worth sending with the key the server issued for it.
+    const identity =
+      previous?.visitor_id && previous.visitor_key
+        ? { visitorId: previous.visitor_id, visitorKey: previous.visitor_key }
+        : {};
     if (this.#config.bot_protection === "none") {
-      return this.#store(await this.#client.createVisitorSession({ visitorId }));
+      return this.#store(await this.#client.createVisitorSession(identity));
     }
     const altcha = await this.#solve();
-    return this.#store(await this.#client.createVisitorSession({ altcha, visitorId }));
+    return this.#store(await this.#client.createVisitorSession({ altcha, ...identity }));
   }
 
-  #store(session: { token: string; expires_in: number; visitor_id: string }): string {
+  #store(session: {
+    token: string;
+    expires_in: number;
+    visitor_id: string;
+    visitor_key: string;
+  }): string {
     this.#state = {
       visitor_id: session.visitor_id,
+      visitor_key: session.visitor_key,
       token: session.token,
       expires_at: this.#now() + session.expires_in * 1000,
       session_id: this.#state?.session_id ?? null
@@ -174,6 +186,7 @@ export class VisitorSession {
       if (typeof parsed.visitor_id !== "string" || typeof parsed.token !== "string") return null;
       return {
         visitor_id: parsed.visitor_id,
+        visitor_key: typeof parsed.visitor_key === "string" ? parsed.visitor_key : null,
         token: parsed.token,
         expires_at: typeof parsed.expires_at === "number" ? parsed.expires_at : 0,
         session_id: typeof parsed.session_id === "string" ? parsed.session_id : null

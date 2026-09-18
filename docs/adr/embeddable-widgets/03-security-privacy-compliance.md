@@ -39,7 +39,7 @@ Cache-Control: no-store
 
 ## Storage and cookies
 
-- The embed page sets **no cookies**. State is `localStorage` in the iframe: `visitor_id`, last `session_id`, dismissed hints. Chrome 115+, Firefox and Safari partition this per top-level site, so it works across pages of `kommun.se` and cannot track a visitor across sites.
+- The embed page sets **no cookies**. State is `localStorage` in the iframe: `visitor_id` with its server-issued `visitor_key`, the current token, last `session_id`, dismissed hints. The key is what makes the pseudonym unforgeable: without it the server issues a new id, so nobody can claim another visitor's conversations. Chrome 115+, Firefox and Safari partition this per top-level site, so it works across pages of `kommun.se` and cannot track a visitor across sites.
 - Nothing is written before the visitor sends a message (Lagen om elektronisk kommunikation: storage strictly necessary for a service the user requested). The admin page ships a ready-made sentence for the host site's cookie/storage notice.
 - The host page never receives visitor identifiers.
 

@@ -21897,14 +21897,24 @@ export interface components {
        * Format: uuid
        */
       visitor_id: string;
+      /**
+       * Visitor Key
+       * @description Proof that the server issued visitor_id for this widget. Send both when minting again after the token's grace window to keep the pseudonym and its conversations.
+       */
+      visitor_key: string;
     };
     /** VisitorSessionRequest */
     VisitorSessionRequest: {
       /**
        * Visitor Id
-       * @description Pseudonymous visitor id from a previous session on this site.
+       * @description Pseudonymous visitor id issued earlier for this widget. Honoured only together with its visitor_key; otherwise a new id is issued.
        */
       visitor_id?: string | null;
+      /**
+       * Visitor Key
+       * @description The key that came with visitor_id when it was issued.
+       */
+      visitor_key?: string | null;
       /**
        * Altcha
        * @description Base64 ALTCHA payload for a new or expired visitor.

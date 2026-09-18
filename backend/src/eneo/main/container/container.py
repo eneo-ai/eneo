@@ -397,6 +397,7 @@ from eneo.websites.infrastructure.update_website_size_service import (
 )
 from eneo.websites.infrastructure.website_cleaner_service import WebsiteCleanerService
 from eneo.widgets.application.altcha_service import AltchaService
+from eneo.widgets.application.visitor_identity import VisitorIdentity
 from eneo.widgets.application.visitor_token_service import VisitorTokenService
 from eneo.widgets.application.widget_ask_service import WidgetAskService
 from eneo.widgets.application.widget_limits import WidgetBudget, WidgetLimiter
@@ -681,6 +682,7 @@ class Container(containers.DeclarativeContainer):
     widget_assembler = providers.Factory(WidgetAssembler)
     widget_usage_repo = providers.Factory(WidgetUsageRepoImpl, session=session)
     widget_visitor_token_service = providers.Factory(VisitorTokenService)
+    widget_visitor_identity = providers.Factory(VisitorIdentity)
     widget_altcha_service = providers.Factory(AltchaService, redis_client=redis_client)
     widget_limiter = providers.Factory(WidgetLimiter, redis_client=redis_client)
     widget_budget = providers.Factory(WidgetBudget)
