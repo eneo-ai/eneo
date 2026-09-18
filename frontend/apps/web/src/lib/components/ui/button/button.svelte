@@ -15,7 +15,12 @@
         default:
           "bg-accent-default text-on-fill hover:bg-accent-stronger aria-expanded:bg-accent-stronger",
         outline:
-          "border-border bg-background hover:bg-muted hover:text-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50 aria-expanded:bg-muted aria-expanded:text-foreground",
+          // `border-border` is `--border-default`, the 15% separator step: 1.37:1
+          // in light, where this variant's fill is the same white as the page,
+          // so nothing identified the control at all. Dark already escaped it
+          // via `bg-input/30`. `border-strongest` is the step meant for a
+          // boundary you have to see.
+          "border-strongest bg-background hover:bg-muted hover:text-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50 aria-expanded:bg-muted aria-expanded:text-foreground",
         secondary:
           "bg-secondary text-secondary-foreground hover:bg-secondary/80 aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
         ghost:

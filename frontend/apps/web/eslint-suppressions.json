@@ -34,11 +34,6 @@
       "count": 2
     }
   },
-  "src/lib/components/ui/checkbox/checkbox.svelte": {
-    "eneo/no-raw-color": {
-      "count": 4
-    }
-  },
   "src/lib/components/ui/dropdown-menu/dropdown-menu-item.svelte": {
     "eneo/no-raw-color": {
       "count": 1

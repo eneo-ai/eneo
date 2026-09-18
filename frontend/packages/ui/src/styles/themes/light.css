@@ -43,11 +43,22 @@
   --text-placeholder: oklch(56% 0.005 78.28);
   --text-on-fill: var(--color-white); /* Text on a coloured background */
 
-  --border-strongest: oklch(from var(--color-ui-grey-900) l c h / 45%);
+  /* 48%, not 45%: this is the step a control boundary uses, and 45%
+     measures 2.96:1 on white, just under the 3:1 that WCAG 1.4.11
+     asks of anything required to identify a component. */
+  --border-strongest: oklch(from var(--color-ui-grey-900) l c h / 48%);
   --border-stronger: oklch(from var(--color-ui-grey-900) l c h / 25%);
   --border-default: oklch(from var(--color-ui-grey-900) l c h / 15%);
   --border-dimmer: oklch(from var(--color-ui-grey-900) l c h / 5%);
   --border-on-fill: var(--color-white);
+
+  /* Checkbox control tokens. The eslint rule is right that a `dark:`
+     variant bypasses this system, so each theme states its own value:
+     the resting fill, the checked boundary, and the invalid boundary. */
+  --control-checkbox-fill: transparent;
+  --control-checkbox-checked-border: var(--accent-default);
+  --control-checkbox-invalid-border: var(--negative-default);
+  --control-checkbox-invalid-ring: oklch(from var(--negative-default) l c h / 20%);
 
   /* Colors */
   --brand-eneo: var(--text-primary);

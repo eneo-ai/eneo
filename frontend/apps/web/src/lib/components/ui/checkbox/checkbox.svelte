@@ -20,7 +20,7 @@
     // NOTE: checked state uses `bg-accent-default` / `text-on-fill` / `border-accent-default`
     // instead of upstream's `bg-primary` / `text-primary-foreground` / `border-primary` —
     // see app.css `--color-primary` namespace conflict comment for the full rationale.
-    "border-input dark:bg-input/30 data-[state=checked]:bg-accent-default data-[state=checked]:text-on-fill dark:data-[state=checked]:bg-accent-default data-[state=checked]:border-accent-default aria-invalid:aria-checked:border-accent-default aria-invalid:border-destructive dark:aria-invalid:border-destructive/50 focus-visible:border-ring focus-visible:ring-ring aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 peer relative flex size-4 shrink-0 items-center justify-center rounded-[4px] border transition-colors outline-none group-has-disabled/field:opacity-50 after:absolute after:-inset-x-3 after:-inset-y-2 focus-visible:ring-3 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:ring-3",
+    "border-input data-[state=checked]:bg-accent-default data-[state=checked]:text-on-fill aria-invalid:aria-checked:border-accent-default focus-visible:border-ring focus-visible:ring-ring peer relative flex size-4 shrink-0 items-center justify-center rounded-[4px] border bg-(--control-checkbox-fill) transition-colors outline-none group-has-disabled/field:opacity-50 after:absolute after:-inset-x-3 after:-inset-y-2 focus-visible:ring-3 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-(--control-checkbox-invalid-border) aria-invalid:ring-3 aria-invalid:ring-(--control-checkbox-invalid-ring) data-[state=checked]:border-(--control-checkbox-checked-border)",
     className
   )}
   bind:checked
