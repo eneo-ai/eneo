@@ -220,7 +220,11 @@
           </p>
           {#if omittedCount > 0}
             <p class="text-secondary mt-1.5 text-[0.8125rem]">
-              {m.ai_builder_review_omitted({ count: String(omittedCount) })}
+              {#if omittedCount === 1}
+                {m.ai_builder_review_omitted_one()}
+              {:else}
+                {m.ai_builder_review_omitted({ count: String(omittedCount) })}
+              {/if}
             </p>
           {/if}
         {:else if packet}
@@ -536,7 +540,9 @@
                 {:else if usageWithheldCount > 1}
                   {m.ai_builder_review_usage_withheld({ count: String(usageWithheldCount) })}
                 {/if}
-                {#if omittedCount > 0}
+                {#if omittedCount === 1}
+                  {m.ai_builder_review_omitted_one()}
+                {:else if omittedCount > 1}
                   {m.ai_builder_review_omitted({ count: String(omittedCount) })}
                 {/if}
               </p>

@@ -7026,6 +7026,7 @@
   "ai_builder_review_usage_withheld_one": "I 1 körning gick tokenförbrukningen inte att verifiera fullt ut mot leverantörens kvitton; andelar av tokens beräknades inte för den.",
   "ai_builder_review_usage_withheld": "I {count} körningar gick tokenförbrukningen inte att verifiera fullt ut mot leverantörens kvitton; andelar av tokens beräknades inte för dem.",
   "ai_builder_review_omitted": "{count} körningar lästes inte (utanför urvalet, äldre än spårningen eller utan behörighet).",
+  "ai_builder_review_omitted_one": "1 körning lästes inte (utanför urvalet, äldre än spårningen eller utan behörighet).",
   "ai_builder_review_step": "steg {number}",
   "ai_builder_review_step_labelled": "steg {number} ({label})",
   "ai_builder_review_unknown_step": "ett borttaget steg",

@@ -7026,6 +7026,7 @@
   "ai_builder_review_usage_withheld_one": "In 1 run, token usage could not be fully verified from provider receipts; token shares were not computed for it.",
   "ai_builder_review_usage_withheld": "In {count} runs, token usage could not be fully verified from provider receipts; token shares were not computed for them.",
   "ai_builder_review_omitted": "{count} runs were not read (outside the selection, older than tracking, or not permitted).",
+  "ai_builder_review_omitted_one": "1 run was not read (outside the sample, older than the trace, or not permitted).",
   "ai_builder_review_step": "step {number}",
   "ai_builder_review_step_labelled": "step {number} ({label})",
   "ai_builder_review_unknown_step": "a removed step",

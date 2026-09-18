@@ -91,9 +91,11 @@ describe("BuilderFindingsScreen", () => {
         })
       )
     ).toBeTruthy();
-    // The completeness fact is a footnote, never a card, and omitted runs are counted.
+    // The completeness fact is a footnote, never a card, and omitted runs are
+    // counted — in the singular when there is one, as the two counters beside
+    // it already were.
     expect(screen.getByTestId("builder-findings").textContent).toContain(
-      m.ai_builder_review_omitted({ count: "1" })
+      m.ai_builder_review_omitted_one()
     );
 
     const [prepare] = screen.getAllByRole("button", { name: m.ai_builder_review_prepare() });
