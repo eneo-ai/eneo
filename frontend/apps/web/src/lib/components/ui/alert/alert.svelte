@@ -7,7 +7,13 @@
       variant: {
         default: "bg-card text-card-foreground",
         destructive:
-          "text-destructive bg-card *:data-[slot=alert-description]:text-destructive/90 *:[svg]:text-current"
+          // `--color-destructive` is `--negative-default`, the fill step. As a
+          // foreground on the card it measures 3.50:1 in dark, and the
+          // description's /90 took it to 3.05:1, against a 4.5:1 bar. The
+          // `-stronger` step is 7.37 light / 5.05 dark. The alpha is gone
+          // because at /90 dark is still 4.31:1, and the title's font-semibold
+          // already separates it from the description without costing contrast.
+          "text-negative-stronger bg-card *:data-[slot=alert-description]:text-negative-stronger *:[svg]:text-current"
       }
     },
     defaultVariants: {

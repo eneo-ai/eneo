@@ -79,10 +79,15 @@
     {/if}
 
     {#if onrepair}
+      <!-- The border keeps the destructive association; the label does not.
+           `text-current` inherited the alert's red onto this variant's own
+           fill, which is 3.31:1 in dark against a 4.5:1 bar, while the same
+           red on the card behind it is 5.05:1. The boundary can carry the
+           colour because it only owes 3:1. -->
       <Button
         variant="outline"
         size="sm"
-        class="w-fit gap-1.5 border-current text-current hover:text-current"
+        class="text-foreground w-fit gap-1.5 border-current"
         onclick={onrepair}
       >
         <IconSparkles class="size-3.5" aria-hidden="true" />
@@ -91,8 +96,12 @@
     {/if}
 
     <details class="group">
+      <!-- 15px tall with the repair button 7.5px above it, so the 2.5.8
+           spacing exception could not rescue it. `w-fit` keeps the target on
+           the words rather than spanning the whole card, where a stray click
+           would have toggled it. -->
       <summary
-        class="cursor-pointer text-xs font-medium underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:ring-current focus-visible:outline-none"
+        class="flex min-h-[24px] w-fit cursor-pointer items-center text-xs font-medium underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:ring-current focus-visible:outline-none"
       >
         {m.flow_run_error_show_technical_detail()}
       </summary>

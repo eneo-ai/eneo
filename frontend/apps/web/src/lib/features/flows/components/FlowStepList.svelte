@@ -123,7 +123,7 @@
       <Separator class="mb-3" />
       <button
         type="button"
-        class="border-default text-secondary hover:border-accent-default hover:bg-accent-dimmer/60 hover:text-accent-default focus-visible:ring-accent-default/30 flex min-h-[40px] w-full items-center justify-center gap-2 rounded-xl border border-dashed py-2.5 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none"
+        class="border-default text-secondary hover:border-accent-default hover:bg-accent-dimmer/60 hover:text-accent-default focus-visible:ring-ring/30 flex min-h-[40px] w-full items-center justify-center gap-2 rounded-xl border border-dashed py-2.5 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none"
         onclick={() => (showAddStep = true)}
       >
         <IconPlus class="size-4" aria-hidden="true" />

@@ -52,7 +52,7 @@
         <button
           {...props}
           type="button"
-          class="ring-offset-background focus-visible:ring-accent-default/40 focus-visible:ring-offset-background rounded-full focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
+          class="ring-offset-background focus-visible:ring-ring/40 focus-visible:ring-offset-background rounded-full focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
         >
           {@render badge()}
         </button>

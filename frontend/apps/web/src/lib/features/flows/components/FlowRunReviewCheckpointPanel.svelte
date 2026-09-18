@@ -818,7 +818,7 @@
     >
       <summary
         id="flow-review-history-title"
-        class="text-primary focus-visible:ring-accent-default flex min-h-10 cursor-pointer list-none items-center py-2 text-sm font-medium focus-visible:ring-2 [&::-webkit-details-marker]:hidden"
+        class="text-primary focus-visible:ring-ring flex min-h-10 cursor-pointer list-none items-center py-2 text-sm font-medium focus-visible:ring-2 [&::-webkit-details-marker]:hidden"
       >
         <ChevronRight
           class="text-secondary mr-2 size-4 shrink-0 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {historyExpanded
@@ -934,7 +934,7 @@
 
     <details bind:open={rejectExpanded} class="text-secondary border-default border-t text-sm">
       <summary
-        class="focus-visible:ring-accent-default flex min-h-10 cursor-pointer list-none items-center py-3 focus-visible:ring-2 [&::-webkit-details-marker]:hidden"
+        class="focus-visible:ring-ring flex min-h-10 cursor-pointer list-none items-center py-3 focus-visible:ring-2 [&::-webkit-details-marker]:hidden"
       >
         <ChevronRight
           class="mr-2 size-4 shrink-0 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {rejectExpanded

@@ -64,7 +64,7 @@
     <IconMessageSquare class="size-3.5" />
     <span class="max-sm:sr-only">{m.ai_builder_conversation_button()}</span>
     <span
-      class="bg-tertiary text-secondary inline-flex h-[1.125rem] min-w-[1.125rem] items-center justify-center rounded-full px-1.5 text-xs font-bold"
+      class="bg-tertiary text-primary inline-flex h-[1.125rem] min-w-[1.125rem] items-center justify-center rounded-full px-1.5 text-xs font-bold"
     >
       {service.visibleMessageCount}
     </span>

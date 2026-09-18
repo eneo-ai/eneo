@@ -191,7 +191,7 @@
 
 <Card.Root class="overflow-hidden">
   <button
-    class="hover:bg-hover-dimmer flex w-full items-center justify-between px-5 py-3.5 text-left"
+    class="hover:bg-hover-dimmer focus-visible:inset-ring-ring flex w-full items-center justify-between px-5 py-3.5 text-left focus-visible:inset-ring-2 focus-visible:outline-none"
     aria-expanded={expanded}
     aria-controls={panelId}
     onclick={() => onToggle(result.step_order)}
@@ -388,7 +388,7 @@
           <Collapsible.Root bind:open={inputOpen}>
             <div class="flex items-center justify-between">
               <Collapsible.Trigger
-                class="text-muted hover:text-secondary focus-visible:ring-accent-default -ml-1 flex items-center gap-1.5 rounded-md px-1 py-0.5 text-xs font-semibold transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                class="text-muted hover:text-secondary focus-visible:ring-ring -ml-1 flex items-center gap-1.5 rounded-md px-1 py-0.5 text-xs font-semibold transition-colors focus-visible:ring-2 focus-visible:outline-none"
                 aria-expanded={inputOpen}
                 aria-controls="step-{result.step_order}-input-panel"
               >

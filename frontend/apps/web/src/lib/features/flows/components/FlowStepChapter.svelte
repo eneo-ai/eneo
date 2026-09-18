@@ -47,7 +47,7 @@
 
 <Collapsible.Root bind:open class={cn("border-default border-b", className)}>
   <Collapsible.Trigger
-    class="group hover:bg-hover-dimmer/20 focus-visible:ring-accent-default/40 flex min-h-[52px] w-full items-center gap-3 rounded-lg px-2 py-3.5 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none"
+    class="group hover:bg-hover-dimmer/20 focus-visible:ring-ring/40 flex min-h-[52px] w-full items-center gap-3 rounded-lg px-2 py-3.5 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none"
   >
     <span class="min-w-0 flex-1">
       <span class="flex items-center gap-2">

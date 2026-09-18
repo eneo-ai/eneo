@@ -169,7 +169,7 @@
   {#if changed && kind !== "object"}
     <details bind:open={previousOpen} class="min-w-0">
       <summary
-        class="text-secondary hover:text-primary focus-visible:ring-accent-default flex min-h-8 w-fit cursor-pointer list-none items-center gap-1.5 rounded-sm text-xs focus-visible:ring-2 [&::-webkit-details-marker]:hidden"
+        class="text-secondary hover:text-primary focus-visible:ring-ring flex min-h-8 w-fit cursor-pointer list-none items-center gap-1.5 rounded-sm text-xs focus-visible:ring-2 [&::-webkit-details-marker]:hidden"
       >
         <ChevronRight
           class="size-3.5 shrink-0 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {previousOpen
@@ -275,7 +275,7 @@
   {:else}
     <details bind:open class="border-default min-w-0 border-t">
       <summary
-        class="text-primary hover:bg-hover-dimmer focus-visible:ring-accent-default flex min-h-11 cursor-pointer list-none items-start gap-2 rounded-sm py-2.5 text-sm focus-visible:ring-2 motion-safe:transition-colors motion-safe:duration-(--duration-micro) [&::-webkit-details-marker]:hidden"
+        class="text-primary hover:bg-hover-dimmer focus-visible:ring-ring flex min-h-11 cursor-pointer list-none items-start gap-2 rounded-sm py-2.5 text-sm focus-visible:ring-2 motion-safe:transition-colors motion-safe:duration-(--duration-micro) [&::-webkit-details-marker]:hidden"
       >
         <ChevronRight
           class="text-secondary mt-0.5 size-4 shrink-0 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {open

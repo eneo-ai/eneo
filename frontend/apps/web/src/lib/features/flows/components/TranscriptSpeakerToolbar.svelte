@@ -52,7 +52,7 @@
   <button
     type="button"
     {disabled}
-    class="focus-visible:ring-accent-default rounded px-1.5 py-px text-xs focus-visible:ring-2"
+    class="focus-visible:ring-ring rounded px-1.5 py-px text-xs focus-visible:ring-2"
     onclick={() => onChoose(null)}
   >
     {m.flow_transcript_review_unresolved()}
@@ -61,7 +61,7 @@
     <button
       type="button"
       {disabled}
-      class="rounded px-1.5 py-px text-xs font-semibold {option.colorClass} focus-visible:ring-accent-default cursor-pointer transition-shadow hover:ring-1 hover:ring-current/40 focus-visible:ring-2 focus-visible:outline-none disabled:cursor-default disabled:opacity-50"
+      class="rounded px-1.5 py-px text-xs font-semibold {option.colorClass} focus-visible:ring-ring cursor-pointer transition-shadow hover:ring-1 hover:ring-current/40 focus-visible:ring-2 focus-visible:outline-none disabled:cursor-default disabled:opacity-50"
       onclick={() => onChoose(option.label)}
     >
       {option.display}
@@ -70,7 +70,7 @@
   <button
     type="button"
     {disabled}
-    class="border-default text-secondary hover:bg-hover-dimmer focus-visible:ring-accent-default rounded border px-1.5 py-px text-xs focus-visible:ring-2 focus-visible:outline-none disabled:opacity-50"
+    class="border-default text-secondary hover:bg-hover-dimmer focus-visible:ring-ring rounded border px-1.5 py-px text-xs focus-visible:ring-2 focus-visible:outline-none disabled:opacity-50"
     onclick={() => onChoose(newSpeakerLabel)}
   >
     {m.flow_run_transcript_new_speaker()}

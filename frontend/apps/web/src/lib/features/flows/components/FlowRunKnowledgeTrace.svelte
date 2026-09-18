@@ -143,7 +143,7 @@
   <Collapsible.Root bind:open={expanded}>
     <section class="bg-primary overflow-hidden">
       <Collapsible.Trigger
-        class="hover:bg-hover-dimmer focus-visible:ring-accent-default/30 flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset"
+        class="hover:bg-hover-dimmer focus-visible:ring-ring/30 flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset"
         aria-controls={`flow-knowledge-trace-${stepOrder}`}
       >
         <div class="flex min-w-0 flex-col gap-1">

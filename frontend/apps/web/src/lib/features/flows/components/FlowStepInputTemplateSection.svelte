@@ -424,7 +424,7 @@
                             <li>
                               <button
                                 type="button"
-                                class="hover:bg-hover-dimmer focus-visible:ring-accent-default/30 flex w-full min-w-0 items-start rounded-md px-2 py-2 text-left focus-visible:ring-2 focus-visible:outline-none"
+                                class="hover:bg-hover-dimmer focus-visible:ring-ring/30 flex w-full min-w-0 items-start rounded-md px-2 py-2 text-left focus-visible:ring-2 focus-visible:outline-none"
                                 onclick={() => selectMaterial(option)}
                               >
                                 <span class="min-w-0 flex-1">

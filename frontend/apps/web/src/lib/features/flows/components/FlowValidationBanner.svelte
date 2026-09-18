@@ -251,7 +251,7 @@
                       class="text-muted mt-0.5 text-xs"
                     >
                       <summary
-                        class="focus-visible:ring-accent-default flex min-h-[24px] cursor-pointer list-none items-center gap-1.5 select-none focus-visible:ring-2 [&::-webkit-details-marker]:hidden"
+                        class="focus-visible:ring-ring flex min-h-[24px] cursor-pointer list-none items-center gap-1.5 select-none focus-visible:ring-2 [&::-webkit-details-marker]:hidden"
                         ><ChevronRight
                           class="size-3.5 shrink-0 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {techDetailsOpen
                             ? 'rotate-90'

@@ -147,7 +147,7 @@
               <h4 class="text-muted text-xs font-semibold">{m.flow_run_output()}</h4>
               <button
                 type="button"
-                class="text-muted hover:bg-hover-default hover:text-secondary focus-visible:ring-accent-default rounded-md p-1.5 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                class="text-muted hover:bg-hover-default hover:text-secondary focus-visible:ring-ring rounded-md p-1.5 transition-colors focus-visible:ring-2 focus-visible:outline-none"
                 aria-label={m.copy()}
                 onclick={() =>
                   void onCopyPayload(`progress-step-${step.stepOrder}-output`, step.outputPayload)}
@@ -224,7 +224,7 @@
           <Collapsible.Root open={inputExpanded} onOpenChange={() => onToggleInput(step.stepOrder)}>
             <div class="flex items-center justify-between">
               <Collapsible.Trigger
-                class="text-muted hover:text-secondary focus-visible:ring-accent-default -ml-1 flex items-center gap-1.5 rounded-md px-1 py-0.5 text-xs font-semibold transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                class="text-muted hover:text-secondary focus-visible:ring-ring -ml-1 flex items-center gap-1.5 rounded-md px-1 py-0.5 text-xs font-semibold transition-colors focus-visible:ring-2 focus-visible:outline-none"
               >
                 <IconChevronDown
                   class="size-3 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {inputExpanded
@@ -235,7 +235,7 @@
               </Collapsible.Trigger>
               <button
                 type="button"
-                class="text-muted hover:bg-hover-default hover:text-secondary focus-visible:ring-accent-default rounded-md p-1.5 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                class="text-muted hover:bg-hover-default hover:text-secondary focus-visible:ring-ring rounded-md p-1.5 transition-colors focus-visible:ring-2 focus-visible:outline-none"
                 aria-label={m.copy()}
                 onclick={() =>
                   void onCopyPayload(`progress-step-${step.stepOrder}-input`, step.inputPayload)}

@@ -468,8 +468,7 @@
         type="button"
         variant="outline"
         size="sm"
-        class="focus-visible:ring-accent-default h-8 rounded-full px-3.5 text-[0.8rem] {statusFilter ===
-        null
+        class="focus-visible:ring-ring h-8 rounded-full px-3.5 text-[0.8rem] {statusFilter === null
           ? 'border-accent-default/40 bg-accent-default/10 text-accent-stronger hover:bg-accent-default/15 hover:text-accent-stronger'
           : 'text-secondary'}"
         aria-pressed={statusFilter === null}
@@ -485,7 +484,7 @@
             type="button"
             variant="outline"
             size="sm"
-            class="focus-visible:ring-accent-default h-8 rounded-full px-3.5 text-[0.8rem] {statusFilter ===
+            class="focus-visible:ring-ring h-8 rounded-full px-3.5 text-[0.8rem] {statusFilter ===
             status
               ? 'border-accent-default/40 bg-accent-default/10 text-accent-stronger hover:bg-accent-default/15 hover:text-accent-stronger'
               : 'text-secondary'}"
@@ -557,7 +556,7 @@
                   <Button
                     type="button"
                     variant="ghost"
-                    class="text-muted hover:text-primary focus-visible:ring-accent-default h-11 w-full justify-start gap-1 rounded-none px-4 text-xs font-medium focus-visible:ring-inset"
+                    class="text-muted hover:text-primary focus-visible:ring-ring h-11 w-full justify-start gap-1 rounded-none px-4 text-xs font-medium focus-visible:ring-inset"
                     onclick={() => toggleSort("status")}
                   >
                     {m.status()}
@@ -586,7 +585,7 @@
                   <Button
                     type="button"
                     variant="ghost"
-                    class="text-muted hover:text-primary focus-visible:ring-accent-default h-11 w-full justify-start gap-1 rounded-none px-4 text-xs font-medium focus-visible:ring-inset"
+                    class="text-muted hover:text-primary focus-visible:ring-ring h-11 w-full justify-start gap-1 rounded-none px-4 text-xs font-medium focus-visible:ring-inset"
                     onclick={() => toggleSort("started")}
                   >
                     {m.flow_run_started()}
@@ -612,7 +611,7 @@
                   <Button
                     type="button"
                     variant="ghost"
-                    class="text-muted hover:text-primary focus-visible:ring-accent-default h-11 w-full justify-start gap-1 rounded-none px-4 text-xs font-medium focus-visible:ring-inset"
+                    class="text-muted hover:text-primary focus-visible:ring-ring h-11 w-full justify-start gap-1 rounded-none px-4 text-xs font-medium focus-visible:ring-inset"
                     onclick={() => toggleSort("duration")}
                   >
                     {m.duration()}
@@ -639,7 +638,7 @@
             {#each renderedRuns as run (run.id)}
               {@const isExpanded = selectedRunId === run.id}
               <Table.Row
-                class="border-default hover:bg-muted/40 cursor-pointer motion-safe:transition-colors motion-safe:duration-(--duration-micro) {isExpanded
+                class="border-default hover:bg-muted/40 focus-visible:inset-ring-ring cursor-pointer focus-visible:inset-ring-2 focus-visible:outline-none motion-safe:transition-colors motion-safe:duration-(--duration-micro) {isExpanded
                   ? 'bg-muted/50'
                   : ''}"
                 tabindex={0}

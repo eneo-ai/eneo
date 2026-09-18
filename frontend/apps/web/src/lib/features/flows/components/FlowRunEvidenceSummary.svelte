@@ -70,7 +70,7 @@
             <Tooltip.Trigger
               onclick={copyTraceId}
               aria-label={m.flow_run_evidence_trace_id_copy()}
-              class="focus-visible:ring-accent-default/40 rounded-full focus-visible:ring-2 focus-visible:outline-none"
+              class="focus-visible:ring-ring/40 rounded-full focus-visible:ring-2 focus-visible:outline-none"
             >
               <Badge variant="outline" class="font-mono text-xs">
                 {traceCopied

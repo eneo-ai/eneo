@@ -104,7 +104,7 @@
     "positive-stronger"
   ];
   const action =
-    "min-h-9 rounded-md px-2.5 py-1.5 text-xs font-medium hover:bg-hover-default focus-visible:ring-2 focus-visible:ring-accent-default focus-visible:outline-none disabled:opacity-40";
+    "min-h-9 rounded-md px-2.5 py-1.5 text-xs font-medium hover:bg-hover-default focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-40";
   const name = (speaker: string | null) => {
     if (!speaker) return m.flow_transcript_editor_unknown();
     const display = displayName(speaker);
@@ -663,9 +663,13 @@
       editingHint: editable ? m.flow_transcript_editor_typing_hint() : ""
     })}
   </p>
+  <!-- A contenteditable role="textbox" is a tab stop, and killing the UA
+       outline left only the caret to say where focus went, in a region tall
+       enough for the caret to be off screen. Same ring the app's Textarea
+       uses, inset so it does not clip against the panel. -->
   <div
     bind:this={body}
-    class="px-5 py-5 outline-none focus:outline-none sm:px-7"
+    class="focus-visible:inset-ring-ring px-5 py-5 outline-none focus:outline-none focus-visible:inset-ring-2 sm:px-7"
     contenteditable="true"
     role="textbox"
     aria-label={m.flow_transcript_editor_textbox()}
@@ -703,7 +707,7 @@
           class="text-muted flex min-w-0 items-start gap-2 text-xs sm:block sm:pt-1"
         >
           <button
-            class="focus-visible:ring-accent-default min-h-[24px] shrink-0 tabular-nums focus-visible:ring-2"
+            class="focus-visible:ring-ring min-h-[24px] shrink-0 tabular-nums focus-visible:ring-2"
             disabled={!audioAvailable}
             onclick={() => {
               onSeek(first.source.fileIndex, first.source.start, playing);
@@ -711,7 +715,7 @@
             }}>{formatClock(first.source.start)}</button
           >
           <button
-            class="focus-visible:ring-accent-default mt-1 block min-h-[24px] max-w-full text-left text-xs [overflow-wrap:anywhere] whitespace-normal focus-visible:ring-2"
+            class="focus-visible:ring-ring mt-1 block min-h-[24px] max-w-full text-left text-xs [overflow-wrap:anywhere] whitespace-normal focus-visible:ring-2"
             style:color={color(first.pending ? null : first.speaker)}
             onclick={() => choose(paragraph.flatMap(wholePassage))}>{label(first)}</button
           >
@@ -737,7 +741,7 @@
                 : m.flow_transcript_editor_seek_passage({ text: f.text.trim(), speaker: label(f) })}
               onclick={(e) => clickPassage(e, f)}
               onkeydown={(e) => keyPassage(e, f)}
-              class="focus-visible:outline-accent-default py-1 underline decoration-[1.5px] underline-offset-[6px] focus-visible:rounded focus-visible:outline-2 {f.pending
+              class="focus-visible:outline-ring py-1 underline decoration-[1.5px] underline-offset-[6px] focus-visible:rounded focus-visible:outline-2 {f.pending
                 ? 'cursor-pointer decoration-dotted'
                 : 'decoration-solid'}"
               style:text-decoration-color={color(

@@ -200,7 +200,7 @@
 >
   <button
     type="button"
-    class="focus-visible:ring-accent-default flex min-w-0 flex-1 items-start gap-2.5 rounded text-left focus-visible:ring-2 focus-visible:outline-none"
+    class="focus-visible:ring-ring flex min-w-0 flex-1 items-start gap-2.5 rounded text-left focus-visible:ring-2 focus-visible:outline-none"
     aria-current={isActive ? "true" : undefined}
     onclick={() => onClick?.()}
     onkeydown={handleKeydown}
@@ -295,7 +295,7 @@
     >
       <button
         type="button"
-        class="text-secondary hover:bg-hover-dimmer focus-visible:ring-accent-default inline-flex size-7 items-center justify-center rounded-md transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40"
+        class="text-secondary hover:bg-hover-dimmer focus-visible:ring-ring inline-flex size-7 items-center justify-center rounded-md transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40"
         onclick={(e) => {
           e.stopPropagation();
           onMoveUp?.();
@@ -319,7 +319,7 @@
       </button>
       <button
         type="button"
-        class="text-secondary hover:bg-hover-dimmer focus-visible:ring-accent-default inline-flex size-7 items-center justify-center rounded-md transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40"
+        class="text-secondary hover:bg-hover-dimmer focus-visible:ring-ring inline-flex size-7 items-center justify-center rounded-md transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40"
         onclick={(e) => {
           e.stopPropagation();
           onMoveDown?.();
@@ -347,7 +347,7 @@
             <button
               {...props}
               type="button"
-              class="text-secondary hover:bg-hover-dimmer focus-visible:ring-accent-default inline-flex size-7 items-center justify-center rounded-md transition-colors focus-visible:ring-2 focus-visible:outline-none"
+              class="text-secondary hover:bg-hover-dimmer focus-visible:ring-ring inline-flex size-7 items-center justify-center rounded-md transition-colors focus-visible:ring-2 focus-visible:outline-none"
               title={m.flow_step_more_actions()}
               aria-label={m.flow_step_more_actions()}
             >

@@ -741,7 +741,7 @@
       </div>
       {#if reviewEditor}
         <button
-          class="focus-visible:ring-accent-default w-fit text-xs underline focus-visible:ring-2"
+          class="focus-visible:ring-ring w-fit text-xs underline focus-visible:ring-2"
           disabled={busy}
           onclick={downloadTranscript}
         >

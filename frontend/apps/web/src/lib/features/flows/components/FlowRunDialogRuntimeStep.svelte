@@ -289,7 +289,7 @@
         class="border-default bg-secondary/5 mt-3 rounded-lg border px-3 py-2.5"
       >
         <summary
-          class="focus-visible:ring-accent-default flex min-h-[24px] cursor-pointer list-none items-center gap-1.5 text-sm font-medium focus-visible:ring-2 [&::-webkit-details-marker]:hidden"
+          class="focus-visible:ring-ring flex min-h-[24px] cursor-pointer list-none items-center gap-1.5 text-sm font-medium focus-visible:ring-2 [&::-webkit-details-marker]:hidden"
         >
           <ChevronRight
             class="text-secondary size-3.5 shrink-0 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {allowedTypesOpen
@@ -304,7 +304,7 @@
         </p>
         <details bind:open={technicalMimeOpen} class="mt-2">
           <summary
-            class="text-muted focus-visible:ring-accent-default flex min-h-[24px] cursor-pointer list-none items-center gap-1.5 text-sm hover:underline focus-visible:ring-2 [&::-webkit-details-marker]:hidden"
+            class="text-muted focus-visible:ring-ring flex min-h-[24px] cursor-pointer list-none items-center gap-1.5 text-sm hover:underline focus-visible:ring-2 [&::-webkit-details-marker]:hidden"
           >
             <ChevronRight
               class="size-3.5 shrink-0 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {technicalMimeOpen

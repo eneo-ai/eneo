@@ -271,7 +271,7 @@
     {#if turn.reviewDetails}
       <details bind:open={detailsOpen} class="text-muted inline-block text-xs">
         <summary
-          class="focus-visible:ring-accent-default flex min-h-[24px] cursor-pointer list-none items-center gap-1.5 rounded px-1 focus-visible:ring-2 [&::-webkit-details-marker]:hidden"
+          class="focus-visible:ring-ring flex min-h-[24px] cursor-pointer list-none items-center gap-1.5 rounded px-1 focus-visible:ring-2 [&::-webkit-details-marker]:hidden"
           ><ChevronRight
             class="size-3.5 shrink-0 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {detailsOpen
               ? 'rotate-90'
@@ -284,7 +284,7 @@
     {/if}
     <button
       type="button"
-      class="hover:text-secondary focus-visible:ring-accent-default rounded px-0.5 text-xs tabular-nums transition-colors focus-visible:ring-2 focus-visible:outline-none {active
+      class="hover:text-secondary focus-visible:ring-ring rounded px-0.5 text-xs tabular-nums transition-colors focus-visible:ring-2 focus-visible:outline-none {active
         ? 'text-accent-stronger font-semibold'
         : 'text-muted'}"
       aria-label={m.flow_run_transcript_seek_to({ time })}
@@ -300,7 +300,7 @@
         {#if hasCorrections}
           <button
             type="button"
-            class="text-muted hover:bg-hover-default hover:text-secondary focus-visible:ring-accent-default rounded-md p-1 transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:opacity-50"
+            class="text-muted hover:bg-hover-default hover:text-secondary focus-visible:ring-ring rounded-md p-1 transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:opacity-50"
             aria-label={m.flow_run_transcript_revert_turn({ time })}
             disabled={busy}
             onclick={onRevertTurn}
@@ -310,7 +310,7 @@
         {/if}
         <button
           type="button"
-          class="text-muted hover:bg-hover-default hover:text-secondary focus-visible:ring-accent-default rounded-md p-1 transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:opacity-50"
+          class="text-muted hover:bg-hover-default hover:text-secondary focus-visible:ring-ring rounded-md p-1 transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:opacity-50"
           aria-label={m.flow_run_transcript_edit_turn({ time })}
           disabled={busy}
           onclick={onStartEdit}
@@ -329,7 +329,7 @@
         aria-label={m.flow_run_transcript_edit_turn({ time })}
         tabindex="0"
         spellcheck="false"
-        class="border-default bg-primary focus-visible:ring-accent-default block w-full rounded-md border px-2 py-1.5 text-sm leading-relaxed whitespace-pre-wrap focus-visible:ring-2 focus-visible:outline-none"
+        class="border-default bg-primary focus-visible:ring-ring block w-full rounded-md border px-2 py-1.5 text-sm leading-relaxed whitespace-pre-wrap focus-visible:ring-2 focus-visible:outline-none"
         {@attach editor}
         onkeydown={onEditorKeydown}
         onblur={onEditorBlur}
