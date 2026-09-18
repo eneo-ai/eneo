@@ -1,5 +1,6 @@
 import { m } from "$lib/paraglide/messages";
 import type { AIBuilderFlowReviewFact, AIBuilderFlowReviewStep } from "./protocol";
+import { getFlowRuntimeErrorMessageByCode } from "$lib/features/flows/flowRuntimeErrorMapping";
 
 /** The user-facing reading of one fact: a short title and the evidence line. */
 export function describeReviewFact(
@@ -30,7 +31,7 @@ function describe(
       return {
         title: m.ai_builder_review_repeated_error_title({ step: stepLabel(fact.step_id) }),
         evidence: m.ai_builder_review_repeated_error_evidence({
-          code: fact.error_code,
+          code: getFlowRuntimeErrorMessageByCode(fact.error_code) ?? fact.error_code,
           runs: String(fact.run_count)
         })
       };
