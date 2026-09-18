@@ -1,6 +1,10 @@
 import adapter_node from "@sveltejs/adapter-node";
 import { vitePreprocess } from "@sveltejs/vite-plugin-svelte";
 
+// Impeccable's live picker loads from its local helper on :8400. Dev only: the
+// array is empty in every other mode, so the built CSP is unchanged.
+const DEV_LIVE = process.env.NODE_ENV === "development" ? ["http://localhost:8400"] : [];
+
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
   // Consult https://kit.svelte.dev/docs/integrations#preprocessors
@@ -25,9 +29,12 @@ const config = {
     },
     csp: {
       directives: {
-        "script-src": ["self"],
-        "script-src-elem": ["self"],
-        "script-src-attr": ["self"]
+        "script-src": ["self", ...DEV_LIVE],
+        "script-src-elem": ["self", ...DEV_LIVE],
+        "script-src-attr": ["self"],
+        // Only in dev: the app had no connect-src directive, so adding one
+        // outside dev would newly restrict where the client may call.
+        ...(DEV_LIVE.length ? { "connect-src": ["self", ...DEV_LIVE] } : {})
       }
     },
     files: {
