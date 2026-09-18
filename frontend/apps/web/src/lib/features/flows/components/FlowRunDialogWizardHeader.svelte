@@ -63,7 +63,7 @@
         <button
           type="button"
           title={page.title}
-          class="focus-visible:ring-ring/50 relative h-1.5 flex-1 rounded-full transition-colors duration-(--duration-quick) before:absolute before:-inset-x-0 before:-inset-y-5 before:content-[''] focus-visible:ring-2 focus-visible:ring-offset-2 {isCompleted
+          class="focus-visible:ring-ring relative h-1.5 flex-1 rounded-full transition-colors duration-(--duration-quick) before:absolute before:-inset-x-0 before:-inset-y-5 before:content-[''] focus-visible:ring-2 focus-visible:ring-offset-2 {isCompleted
             ? 'bg-accent-default'
             : isCurrent
               ? 'bg-accent-default/55'

@@ -109,7 +109,7 @@
     type="button"
     aria-pressed={selectedId === template.id}
     class={cn(
-      "border-default hover:bg-hover-dimmer/40 focus-visible:ring-ring/40 flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none",
+      "border-default hover:bg-hover-dimmer/40 focus-visible:ring-ring flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none",
       selectedId === template.id && "border-accent-default/50 bg-accent-dimmer/40"
     )}
     onclick={() => (selectedId = template.id)}
@@ -148,7 +148,7 @@
       <Input
         bind:value={query}
         placeholder={m.flow_add_step_search()}
-        class="focus-visible:ring-ring/40 pl-9 focus-visible:ring-2"
+        class="focus-visible:ring-ring pl-9 focus-visible:ring-2"
         aria-label={m.flow_add_step_search()}
         name="flow-template-search"
         autocomplete="off"

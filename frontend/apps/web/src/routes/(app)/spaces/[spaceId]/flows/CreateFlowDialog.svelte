@@ -91,7 +91,7 @@
       <div class="flex flex-col gap-2.5 px-6 pt-4">
         <button
           type="button"
-          class="border-accent-default bg-accent-default/5 hover:bg-accent-default/10 focus-visible:ring-ring/50 w-full rounded-[10px] border px-4 py-3.5 text-left outline-none focus-visible:ring-[3px]"
+          class="border-accent-default bg-accent-default/5 hover:bg-accent-default/10 focus-visible:ring-ring w-full rounded-[10px] border px-4 py-3.5 text-left outline-none focus-visible:ring-[3px]"
           onclick={startWithAI}
         >
           <span class="flex flex-wrap items-center gap-2">
@@ -110,7 +110,7 @@
         </button>
         <button
           type="button"
-          class="border-default bg-primary hover:bg-secondary focus-visible:ring-ring/50 w-full rounded-[10px] border px-4 py-3.5 text-left outline-none focus-visible:ring-[3px]"
+          class="border-default bg-primary hover:bg-secondary focus-visible:ring-ring w-full rounded-[10px] border px-4 py-3.5 text-left outline-none focus-visible:ring-[3px]"
           onclick={() => (path = "manual")}
         >
           <span class="text-primary text-[0.9375rem] font-semibold tracking-tight">

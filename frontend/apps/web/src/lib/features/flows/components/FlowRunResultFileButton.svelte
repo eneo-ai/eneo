@@ -32,8 +32,8 @@
   );
   const buttonClass = $derived(
     compact
-      ? "border-default bg-primary hover:border-stronger hover:bg-hover-dimmer focus-visible:ring-ring/30 inline-flex h-7 items-center gap-1.5 rounded-[min(var(--radius-md),12px)] px-2.5 text-[0.8rem] font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
-      : "group border-default bg-primary hover:border-stronger hover:bg-hover-dimmer focus-visible:ring-ring/30 inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+      ? "border-default bg-primary hover:border-stronger hover:bg-hover-dimmer focus-visible:ring-ring inline-flex h-7 items-center gap-1.5 rounded-[min(var(--radius-md),12px)] px-2.5 text-[0.8rem] font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+      : "group border-default bg-primary hover:border-stronger hover:bg-hover-dimmer focus-visible:ring-ring inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
   );
 </script>
 

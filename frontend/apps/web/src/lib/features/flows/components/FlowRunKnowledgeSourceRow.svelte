@@ -57,7 +57,7 @@
     <li>
       <button
         type="button"
-        class="group hover:bg-hover-dimmer focus-visible:ring-ring/30 flex min-h-16 w-full items-center justify-between gap-3 px-3 py-3 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset sm:px-4"
+        class="group hover:bg-hover-dimmer focus-visible:ring-ring flex min-h-16 w-full items-center justify-between gap-3 px-3 py-3 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset sm:px-4"
         aria-label={`${m.flow_run_knowledge_open_viewer()}: ${displayTitle}`}
         onclick={showViewer}
       >

@@ -39,7 +39,7 @@
 {#if collapsible && title}
   <Collapsible.Root bind:open class={cn("flex flex-col", className)}>
     <Collapsible.Trigger
-      class="group hover:bg-hover-dimmer/20 focus-visible:ring-ring/40 border-default flex w-full items-center gap-3 border-b px-1.5 pt-1 pb-2.5 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none"
+      class="group hover:bg-hover-dimmer/20 focus-visible:ring-ring border-default flex w-full items-center gap-3 border-b px-1.5 pt-1 pb-2.5 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none"
     >
       <span class="min-w-0 flex-1">
         <h2 class="text-primary text-sm font-semibold tracking-[-0.005em]">

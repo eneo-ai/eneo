@@ -50,7 +50,7 @@
 <div class="border-default bg-secondary/15 border-t">
   <Collapsible.Root bind:open={isOpen}>
     <Collapsible.Trigger
-      class="hover:bg-hover-dimmer/60 group focus-visible:ring-ring/30 flex min-h-[44px] w-full items-center justify-between gap-3 px-4 py-2.5 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset sm:px-5"
+      class="hover:bg-hover-dimmer/60 group focus-visible:ring-ring flex min-h-[44px] w-full items-center justify-between gap-3 px-4 py-2.5 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset sm:px-5"
     >
       <span class="flex min-w-0 items-center gap-2">
         <span class="bg-hover-dimmer/80 size-1.5 shrink-0 rounded-full" aria-hidden="true"></span>

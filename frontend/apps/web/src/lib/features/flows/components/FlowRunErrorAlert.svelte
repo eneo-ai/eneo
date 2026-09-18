@@ -79,15 +79,16 @@
     {/if}
 
     {#if onrepair}
-      <!-- The border keeps the destructive association; the label does not.
-           `text-current` inherited the alert's red onto this variant's own
-           fill, which is 3.31:1 in dark against a 4.5:1 bar, while the same
-           red on the card behind it is 5.05:1. The boundary can carry the
-           colour because it only owes 3:1. -->
+      <!-- The border carries the destructive association, the label does not.
+           `text-current` put the alert's red on the label, 3.31:1 in dark
+           against this variant's own fill; the label now has its own
+           foreground. That moved currentColor too, so the border names the
+           colour rather than inheriting it: a boundary only owes 3:1 and
+           negative-stronger is 5.05:1 there. -->
       <Button
         variant="outline"
         size="sm"
-        class="text-foreground w-fit gap-1.5 border-current"
+        class="text-foreground border-negative-stronger w-fit gap-1.5"
         onclick={onrepair}
       >
         <IconSparkles class="size-3.5" aria-hidden="true" />
@@ -106,7 +107,7 @@
         {m.flow_run_error_show_technical_detail()}
       </summary>
       <pre
-        class="bg-primary/50 mt-2 max-h-60 overflow-auto rounded-md p-2 font-mono text-xs leading-relaxed break-words whitespace-pre-wrap opacity-80">{message}</pre>
+        class="bg-primary/50 text-foreground mt-2 max-h-60 overflow-auto rounded-md p-2 font-mono text-xs leading-relaxed break-words whitespace-pre-wrap">{message}</pre>
     </details>
   </Alert.Description>
 </Alert.Root>

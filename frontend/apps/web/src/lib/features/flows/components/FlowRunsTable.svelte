@@ -748,7 +748,7 @@
             <button
               type="button"
               data-testid={`flow-run-evidence-toggle-mobile-${run.id}`}
-              class="focus-visible:ring-ring/40 flex w-full flex-col gap-2 rounded-xl px-4 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset"
+              class="focus-visible:ring-ring flex w-full flex-col gap-2 rounded-xl px-4 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset"
               aria-expanded={isExpanded}
               aria-controls={isExpanded ? getEvidenceRowId(run.id) : undefined}
               onclick={() => toggleRunDetails(run.id)}
