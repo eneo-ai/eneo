@@ -18839,6 +18839,11 @@ export interface components {
         [key: string]: unknown;
       } | null;
       /**
+       * Run Label
+       * @description Caller-supplied run label. Normalized to Unicode NFC and trimmed on creation; must contain 1–120 characters and no line breaks or control characters. Omitted or null labels are stored as null.
+       */
+      run_label?: string | null;
+      /**
        * Step Inputs
        * @description Per-step runtime inputs keyed by step id. This is the supported way to route uploads to step 3, 5, 8, or any other step that declares runtime input in the run contract.
        */
@@ -19386,6 +19391,7 @@ export interface components {
      *       "purpose": "production",
      *       "result_files": [],
      *       "revision": 1,
+     *       "run_label": "Case 123",
      *       "status": "queued",
      *       "tenant_id": "00000000-0000-0000-0000-000000000010",
      *       "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -19516,6 +19522,11 @@ export interface components {
        * @description Monotonic run lifecycle compare token.
        */
       revision: number;
+      /**
+       * Run Label
+       * @description Caller-supplied run label, available only through audited reads.
+       */
+      run_label?: string | null;
       /**
        * Started At
        * @description When a worker began executing the first step. Null while queued.
@@ -19942,6 +19953,7 @@ export interface components {
      *           "purpose": "production",
      *           "result_files": [],
      *           "revision": 1,
+     *           "run_label": "Case 123",
      *           "status": "queued",
      *           "tenant_id": "00000000-0000-0000-0000-000000000010",
      *           "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -20652,6 +20664,7 @@ export interface components {
      *         "purpose": "production",
      *         "result_files": [],
      *         "revision": 1,
+     *         "run_label": "Case 123",
      *         "status": "queued",
      *         "tenant_id": "00000000-0000-0000-0000-000000000010",
      *         "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -20823,6 +20836,7 @@ export interface components {
      *       "purpose": "production",
      *       "result_files": [],
      *       "revision": 1,
+     *       "run_label": "Case 123",
      *       "status": "queued",
      *       "tenant_id": "00000000-0000-0000-0000-000000000010",
      *       "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -20941,6 +20955,11 @@ export interface components {
        */
       revision: number;
       /**
+       * Run Label
+       * @description Caller-supplied run label, available only through audited reads.
+       */
+      run_label?: string | null;
+      /**
        * Started At
        * @description When a worker began executing the first step. Null while queued.
        */
@@ -21004,6 +21023,7 @@ export interface components {
      *         "purpose": "production",
      *         "result_files": [],
      *         "revision": 1,
+     *         "run_label": "Case 123",
      *         "status": "queued",
      *         "tenant_id": "00000000-0000-0000-0000-000000000010",
      *         "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -21895,6 +21915,7 @@ export interface components {
      *         "purpose": "production",
      *         "result_files": [],
      *         "revision": 2,
+     *         "run_label": "Case 123",
      *         "status": "queued",
      *         "tenant_id": "00000000-0000-0000-0000-000000000010",
      *         "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -54850,6 +54871,7 @@ export interface operations {
            *         "purpose": "production",
            *         "result_files": [],
            *         "revision": 2,
+           *         "run_label": "Case 123",
            *         "status": "queued",
            *         "tenant_id": "00000000-0000-0000-0000-000000000010",
            *         "trace_id": "00000000-0000-0000-0000-000000000302",
