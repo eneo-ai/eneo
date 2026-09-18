@@ -5037,7 +5037,7 @@
   "flow_graph_preview": "Flow view",
   "flow_graph_retry": "Try again",
   "flow_history": "History",
-  "flow_history_search_placeholder": "Search by run id, date, status or version…",
+  "flow_history_search_placeholder": "Search by date or status…",
   "flow_history_search_scope_hint": "Searching the {count} loaded run summaries: run id, date, status and version. Inputs and results are loaded only when you open audited run details.",
   "flow_history_showing_count": "Showing {count} runs",
   "flow_history_showing_count_one": "Showing 1 run",

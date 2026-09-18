@@ -5037,7 +5037,7 @@
   "flow_graph_preview": "Flödesvy",
   "flow_graph_retry": "Försök igen",
   "flow_history": "Historik",
-  "flow_history_search_placeholder": "Sök på körnings-id, datum, status eller version…",
+  "flow_history_search_placeholder": "Sök på datum eller status…",
   "flow_history_search_scope_hint": "Söker i de {count} inlästa körningsöversikterna: körnings-id, datum, status och version. Indata och resultat läses endast in när du öppnar den granskningsloggade körningsdetaljen.",
   "flow_history_showing_count": "Visar {count} körningar",
   "flow_history_showing_count_one": "Visar 1 körning",
