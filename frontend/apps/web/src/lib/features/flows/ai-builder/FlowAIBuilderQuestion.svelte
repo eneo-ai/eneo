@@ -765,7 +765,7 @@
             <label class="field-paste-label" for={pasteId}>
               {m.ai_builder_question_field_paste_hint()}
             </label>
-            <textarea id={pasteId} bind:value={pasteText} rows="3" {disabled}></textarea>
+            <Textarea id={pasteId} bind:value={pasteText} rows={3} {disabled} />
             <button
               type="button"
               class="field-add"

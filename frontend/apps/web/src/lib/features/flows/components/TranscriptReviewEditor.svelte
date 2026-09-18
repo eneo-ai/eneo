@@ -2,6 +2,8 @@
   import * as m from "$lib/paraglide/messages";
   const SPACE = " ";
   import { tick } from "svelte";
+  import { Textarea } from "$lib/components/ui/textarea/index.js";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import type { TranscriptSegment, TranscriptFileReview } from "../transcriptSegments";
   import { formatClock, speakerColorIndex } from "../transcriptSegments";
   import {
@@ -514,26 +516,21 @@
             })}</button
           >
         {/if}
-        <label class="text-xs"
-          ><span class="sr-only">{m.flow_transcript_editor_assign()}</span>
-          <select
-            class="border-default bg-primary min-h-9 max-w-56 rounded-md border px-2"
-            disabled={!editable}
-            value=""
-            onchange={(e) => {
-              if (e.currentTarget.value)
-                assign(e.currentTarget.value === "__unresolved__" ? null : e.currentTarget.value);
-              e.currentTarget.value = "";
-            }}
-          >
-            <option value="" disabled>{m.flow_transcript_editor_assign()}</option>
-            {#each speakerOptions as speaker (speaker)}<option
-                value={speaker}
-                disabled={!audioAvailable}>{name(speaker)}</option
-              >{/each}
-            <option value="__unresolved__">{m.flow_transcript_editor_cannot_determine()}</option>
-          </select>
-        </label>
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger class={action} disabled={!editable}>
+            {m.flow_transcript_editor_assign()}
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Content align="start" class="max-w-56">
+            {#each speakerOptions as speaker (speaker)}
+              <DropdownMenu.Item disabled={!audioAvailable} onclick={() => assign(speaker)}>
+                {name(speaker)}
+              </DropdownMenu.Item>
+            {/each}
+            <DropdownMenu.Item onclick={() => assign(null)}>
+              {m.flow_transcript_editor_cannot_determine()}
+            </DropdownMenu.Item>
+          </DropdownMenu.Content>
+        </DropdownMenu.Root>
         <button
           class={action}
           disabled={!editable}
@@ -558,9 +555,10 @@
     {/if}
     {#if editing}
       <label class="mt-2 block text-xs"
-        >{m.flow_transcript_editor_correct_selection()}<textarea
-          class="border-default bg-primary mt-1 block min-h-20 w-full rounded-md border p-2 text-sm"
-          bind:value={textDraft}></textarea></label
+        >{m.flow_transcript_editor_correct_selection()}<Textarea
+          class="mt-1 min-h-20"
+          bind:value={textDraft}
+        /></label
       >
       <button class={action} disabled={!editable} onclick={saveText}
         >{m.flow_transcript_editor_save_correction()}</button

@@ -4,6 +4,7 @@
   import { untrack } from "svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
+  import * as Select from "$lib/components/ui/select/index.js";
   import { m } from "$lib/paraglide/messages";
   import { renderReviewedTranscript } from "../speakerReview";
   import {
@@ -709,18 +710,24 @@
         <span class="text-secondary min-w-[4.5rem] text-right text-xs tabular-nums">
           {Number.isFinite(duration) && duration > 0 ? formatClock(duration, withHours) : "--:--"}
         </span>
-        <label class="text-secondary flex items-center gap-1 text-xs">
-          <span class="sr-only">{m.flow_run_transcript_rate()}</span>
-          <select
-            bind:value={playbackRate}
-            class="border-default bg-primary rounded-md border px-1.5 py-1 text-xs"
-            disabled={audioUnavailable}
+        <Select.Root
+          type="single"
+          value={String(playbackRate)}
+          onValueChange={(next) => (playbackRate = Number(next))}
+          disabled={audioUnavailable}
+        >
+          <Select.Trigger
+            class="h-7 w-auto gap-1 px-2 text-xs"
+            aria-label={m.flow_run_transcript_rate()}
           >
+            {playbackRate}×
+          </Select.Trigger>
+          <Select.Content>
             {#each RATES as rate (rate)}
-              <option value={rate}>{rate}×</option>
+              <Select.Item value={String(rate)} label={`${rate}×`}>{rate}×</Select.Item>
             {/each}
-          </select>
-        </label>
+          </Select.Content>
+        </Select.Root>
         <Button
           variant={follow ? "secondary" : "outline"}
           size="sm"

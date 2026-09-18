@@ -4,6 +4,35 @@ import Fixture from "./TranscriptReviewEditor.fixture.svelte";
 import Editor from "./TranscriptReviewEditor.svelte";
 import { assignSelection } from "../transcriptReviewEditor";
 import type { TranscriptSegment } from "../transcriptSegments";
+
+// The menu primitive needs pointer capture, animation and scrolling, which jsdom omits.
+Element.prototype.animate ??= (() => ({
+  cancel() {},
+  finished: Promise.resolve(),
+  onfinish: null
+})) as never;
+Element.prototype.hasPointerCapture ??= () => false;
+Element.prototype.setPointerCapture ??= () => undefined;
+Element.prototype.releasePointerCapture ??= () => undefined;
+Object.defineProperty(Element.prototype, "scrollIntoView", { configurable: true, value: () => {} });
+
+const press = async (element: HTMLElement) => {
+  await fireEvent.pointerDown(element, { pointerType: "mouse", button: 0 });
+  await fireEvent.pointerUp(element, { pointerType: "mouse", button: 0 });
+  await fireEvent.click(element);
+};
+
+/**
+ * Assigning is a menu action, not a value: open the menu, then pick the speaker.
+ * Opened from the keyboard, which is both what the menu primitive responds to in
+ * jsdom and the path this control exists to make work.
+ */
+const assignTo = async (speaker: string) => {
+  await fireEvent.keyDown(screen.getByRole("button", { name: "Tilldela talare" }), {
+    key: "Enter"
+  });
+  await press(await screen.findByRole("menuitem", { name: speaker }));
+};
 const raw: TranscriptSegment[] = [
   {
     index: 0,
@@ -67,9 +96,7 @@ it("preserves native cross-source selection and saves both sources in one action
   range.setEnd(last, 2);
   window.getSelection()?.addRange(range);
   await fireEvent(document, new Event("selectionchange"));
-  await fireEvent.change(screen.getByLabelText("Tilldela talare"), {
-    target: { value: "SPEAKER_01" }
-  });
+  await assignTo("Bo");
   expect(onSave).toHaveBeenCalledTimes(1);
   expect(
     onSave.mock.calls[0][0].speakerEdits.map((e: { segment_index: number }) => e.segment_index)
@@ -94,9 +121,7 @@ it("allows unresolved without audio while affirmative confirmation stays disable
   expect(
     (screen.getByRole("button", { name: "Bekräfta Anna" }) as HTMLButtonElement).disabled
   ).toBe(true);
-  await fireEvent.change(screen.getByLabelText("Tilldela talare"), {
-    target: { value: "__unresolved__" }
-  });
+  await assignTo("Går inte att avgöra");
   expect(onSave.mock.calls[0][0].speakerEdits[0].decision).toBe("unresolved");
 });
 it("typing at a caret preserves punctuation and restores the caret after each update", async () => {
@@ -206,9 +231,7 @@ it("preserves exact sentence spacing across review fragments and joins sources w
   expect(paragraph.textContent).toBe(expected);
   rangeIn(container.querySelector("[data-text-span]")!, 5, 8);
   await fireEvent(document, new Event("selectionchange"));
-  await fireEvent.change(screen.getByLabelText("Tilldela talare"), {
-    target: { value: "SPEAKER_00" }
-  });
+  await assignTo("Anna");
   expect(paragraph.querySelectorAll("[data-text-span]")).toHaveLength(4);
   expect(paragraph.textContent).toBe(expected);
 });

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { SvelteSet } from "svelte/reactivity";
   import ChevronRight from "lucide-svelte/icons/chevron-right";
+  import { Input } from "$lib/components/ui/input/index.js";
   import * as m from "$lib/paraglide/messages";
   import type { SpeakerMappingRow } from "../speakerMappingReview";
   import { speakerColorIndex } from "../transcriptSegments";
@@ -72,10 +73,9 @@
         >● {m.flow_transcript_editor_speaker({ number: index + 1 })}</label
       >
       <div class="min-w-0">
-        <input
+        <Input
           id={id + "-" + index}
           list={id}
-          class="border-default bg-primary min-h-9 w-full rounded-md border px-3 text-sm"
           value={row.name ?? ""}
           {disabled}
           placeholder={m.flow_transcript_editor_name_placeholder()}
