@@ -175,7 +175,7 @@
       <Select.Root type="single" bind:value={choice} disabled={saving}>
         <Select.Trigger
           id={`flow-retention-mode-${settings.scope}`}
-          class="w-full"
+          class="focus-visible:ring-accent-default w-full focus-visible:ring-2"
           aria-label={m.flow_run_retention_behavior_for_scope({ scope: scopeLabel() })}
         >
           <span class="truncate">{choiceLabel(choice)}</span>
@@ -200,7 +200,7 @@
       <div class="flex items-center gap-2">
         <Input
           id={`flow-retention-days-${settings.scope}`}
-          class="tabular-nums"
+          class="focus-visible:ring-accent-default tabular-nums focus-visible:ring-2"
           type="number"
           min={FLOW_RETENTION_MIN_DAYS}
           max={FLOW_RETENTION_MAX_DAYS}

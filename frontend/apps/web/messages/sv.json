@@ -6630,6 +6630,7 @@
   "flow_knowledge_evidence_group": "Hur mycket källtext som sparas",
   "flow_knowledge_evidence_summary_title": "Med de här värdena",
   "flow_knowledge_evidence_summary": "Högst {sources} källor och {passages} textavsnitt per källa sparas, sammanlagt högst {total} per steg.",
+  "flow_knowledge_evidence_summary_pending": "Rätta värdet ovan för att se vad som sparas.",
   "storage_connection_title": "Objektlagring",
   "storage_connection_description": "Anslut en S3-kompatibel lagringstjänst. Den börjar användas först när du väljer objektlagring för nya filer.",
   "storage_connection_summary_loading": "Läser in",

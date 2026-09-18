@@ -60,7 +60,7 @@
   const fileMaxSize = new NumberField({
     initial: initial.flowInputLimits.file_max_size_bytes,
     scale: MB,
-    min: 1,
+    min: MB,
     max: initial.flowInputLimits.file_max_size_ceiling_bytes
   });
   // Bounds mirror backend admission caps in flow_input_limits.py.
@@ -72,7 +72,7 @@
   const audioMaxSize = new NumberField({
     initial: initial.flowInputLimits.audio_max_size_bytes,
     scale: MB,
-    min: 1,
+    min: MB,
     max: initial.flowInputLimits.audio_max_size_ceiling_bytes
   });
   const audioMaxFiles = new NumberField({
@@ -246,13 +246,21 @@
     return `${audioRunningTime(audioMaxSize.value)} ${ceiling}`;
   });
 
-  const evidenceSummary = $derived(
-    m.flow_knowledge_evidence_summary({
-      sources: evidenceSources.value ?? 0,
-      passages: evidencePassages.value ?? 0,
-      total: formatStorage(evidenceStepSize.value)
-    })
-  );
+  // `value` is undefined while an entry is invalid, and `?? 0` turned that into
+  // a confident "Högst 0 källor" — a policy nobody set, stated mid-keystroke.
+  const evidenceSummary = $derived.by(() => {
+    const sources = evidenceSources.value;
+    const passages = evidencePassages.value;
+    const total = evidenceStepSize.value;
+    if (sources === undefined || passages === undefined || total === undefined) {
+      return m.flow_knowledge_evidence_summary_pending();
+    }
+    return m.flow_knowledge_evidence_summary({
+      sources: sources ?? 0,
+      passages: passages ?? 0,
+      total: formatStorage(total)
+    });
+  });
 
   // One call is held back for a retry, so the budget buys one file fewer. Saying
   // that as "N calls cover N-1 files" left the arithmetic to the reader; with a
@@ -448,7 +456,7 @@
       <Button
         variant="link"
         href="/admin/audit-logs?actions=tenant_settings_updated,flow_run_retention_policy_changed"
-        class="text-secondary hover:text-primary h-auto p-0 text-sm underline underline-offset-2"
+        class="text-secondary hover:text-primary focus-visible:outline-accent-default h-auto p-0 text-sm underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-solid"
       >
         {m.flow_settings_changes_are_logged()}
       </Button>
@@ -470,7 +478,7 @@
             <span class="text-secondary text-xs font-medium">
               {m.flow_retention_status_uploads()}
             </span>
-            <Badge variant={uploadStatus.active ? "default" : "secondary"}>
+            <Badge variant="secondary">
               {uploadStatus.label}
             </Badge>
             {#if retentionDirty}

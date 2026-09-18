@@ -6630,6 +6630,7 @@
   "flow_knowledge_evidence_group": "How much source text is retained",
   "flow_knowledge_evidence_summary_title": "With these values",
   "flow_knowledge_evidence_summary": "Up to {sources} sources and {passages} passages per source are retained, with a total of no more than {total} per step.",
+  "flow_knowledge_evidence_summary_pending": "Correct the value above to see what is retained.",
   "storage_connection_title": "Object storage",
   "storage_connection_description": "Connect an S3-compatible storage service. It is used only after you select object storage for new files.",
   "storage_connection_summary_loading": "Loading",
