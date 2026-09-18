@@ -1,8 +1,10 @@
 <script lang="ts">
   import { tick, type Snippet } from "svelte";
+  import { SvelteSet } from "svelte/reactivity";
   import { m } from "$lib/paraglide/messages";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
+  import { Checkbox } from "$lib/components/ui/checkbox/index.js";
   import IconArrowLeft from "@lucide/svelte/icons/arrow-left";
   import IconSparkles from "@lucide/svelte/icons/sparkles";
   import IconCheck from "@lucide/svelte/icons/check";
@@ -58,6 +60,7 @@
   /** Which suggestion cards show their quotes; folded by default so the
    *  finding, not its evidence, is what the reviewer reads first. */
   let openSources = $state<Record<number, boolean>>({});
+  let sendsOpen = $state(false);
   $effect(() => {
     if (review.status === "ready") {
       dismissed = dismissedFindingIds(review.packet.flow_id);
@@ -89,16 +92,46 @@
       : 0
   );
 
-  function prepare(fact: AIBuilderFlowReviewFact) {
-    if (!packet) return;
-    const described = describeReviewFact(fact, packet.steps);
+  /* Both halves are read first and acted on once: you tick what is worth
+     changing, then send the whole tick list as one turn. Both server
+     contracts already take a set (`finding_ids`, `suggestions`), so a
+     selection costs no extra round trip. The two halves stay separate
+     selections because they are separate requests: one is grounded in what
+     was counted, the other in what a model read. */
+  const pickedFindings = new SvelteSet<string>();
+  const pickedSuggestions = new SvelteSet<number>();
+
+  const selectedFindings = $derived(findings.filter((f) => pickedFindings.has(f.finding_id)));
+
+  function toggle<T>(set: SvelteSet<T>, key: T, on: boolean) {
+    if (on) set.add(key);
+    else set.delete(key);
+  }
+
+  /* A finding hidden while ticked would otherwise keep voting from off
+     screen. Same for a suggestion list replaced by a new judgement. */
+  $effect(() => {
+    const live = new Set(findings.map((f) => f.finding_id));
+    for (const id of pickedFindings) if (!live.has(id)) pickedFindings.delete(id);
+  });
+  $effect(() => {
+    const count = suggestions.status === "ready" ? suggestions.suggestions.suggestions.length : 0;
+    for (const index of pickedSuggestions) if (index >= count) pickedSuggestions.delete(index);
+  });
+
+  function prepare(facts: AIBuilderFlowReviewFact[]) {
+    if (!packet || facts.length === 0) return;
+    const described = facts.map((fact) => describeReviewFact(fact, packet.steps).title);
     onprepare({
-      message: m.ai_builder_review_prepare_message({ finding: described.title }),
+      message:
+        described.length === 1
+          ? m.ai_builder_review_prepare_message({ finding: described[0] })
+          : m.ai_builder_review_prepare_message_many({ findings: described.join("; ") }),
       reviewContext: {
         kind: "flow_review",
         flow_version: packet.flow_version,
         definition_checksum: packet.definition_checksum,
-        finding_ids: [fact.finding_id]
+        finding_ids: facts.map((fact) => fact.finding_id)
       }
     });
   }
@@ -129,6 +162,7 @@
     const nextId = remaining[findings.indexOf(fact)]?.finding_id ?? remaining.at(-1)?.finding_id;
 
     rememberDismissedFinding(packet.flow_id, fact.finding_id);
+    pickedFindings.delete(fact.finding_id);
     dismissed = new Set([...dismissed, fact.finding_id]);
     hiddenNotice = m.ai_builder_review_hidden_notice();
 
@@ -235,9 +269,30 @@
           {/if}
         {:else if packet}
           <p class="sr-only" role="status" aria-live="polite">{hiddenNotice}</p>
-          <h3 tabindex="-1" class="text-primary mb-2.5 text-[0.9375rem] font-bold outline-none">
-            {m.ai_builder_review_facts_title()}
-          </h3>
+          <div class="mb-2.5 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+            <h3
+              id="review-facts-title"
+              tabindex="-1"
+              class="text-primary text-[0.9375rem] font-bold outline-none"
+            >
+              {m.ai_builder_review_facts_title()}
+            </h3>
+            {#if findings.length > 1}
+              <Button
+                variant="link"
+                class="text-accent-stronger -my-1 h-auto px-0 py-1 text-[0.8125rem] font-semibold"
+                data-testid="findings-select-all"
+                onclick={() => {
+                  if (pickedFindings.size === findings.length) pickedFindings.clear();
+                  else for (const fact of findings) pickedFindings.add(fact.finding_id);
+                }}
+              >
+                {pickedFindings.size === findings.length
+                  ? m.ai_builder_review_select_none()
+                  : m.ai_builder_review_select_all({ count: String(findings.length) })}
+              </Button>
+            {/if}
+          </div>
           {#if findings.length === 0}
             <p
               class="text-secondary flex items-center gap-1.5 text-[0.875rem] text-pretty"
@@ -251,52 +306,109 @@
                 : m.ai_builder_review_nothing_found()}
             </p>
           {:else}
-            <ul class="flex flex-col gap-2.5" data-testid="findings-list">
+            <!-- Rows, not cards: a card inside the panel painted a 1.07:1 fill
+                 behind a 1.35:1 hairline, so the boundaries that say which
+                 evidence belongs to which finding were the least visible
+                 thing on the screen. A rule and real space say it better. -->
+            <ul
+              class="flex flex-col"
+              role="group"
+              aria-labelledby="review-facts-title"
+              data-testid="findings-list"
+            >
               {#each findings as fact (fact.finding_id)}
                 {@const described = describeReviewFact(fact, packet.steps)}
+                {@const picked = pickedFindings.has(fact.finding_id)}
                 <li
-                  class="border-default bg-secondary rounded-lg border px-3.5 py-3"
+                  class="border-stronger flex items-start gap-3 border-t py-3.5 first:border-t-0 first:pt-0"
                   data-finding-id={fact.finding_id}
                 >
-                  <div class="flex items-start justify-between gap-3">
-                    <div class="min-w-0">
-                      <h4
-                        tabindex="-1"
-                        class="text-primary text-[0.9rem] font-semibold outline-none first-letter:uppercase"
-                      >
-                        {described.title}
-                      </h4>
-                      <p class="text-secondary mt-0.5 text-[0.8125rem] text-pretty">
-                        {described.evidence}
-                      </p>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      class="text-secondary h-7 shrink-0 px-2 text-xs"
-                      onclick={() => dismiss(fact)}
+                  <Checkbox
+                    class="mt-1 shrink-0"
+                    checked={picked}
+                    {disabled}
+                    aria-label={described.title}
+                    onCheckedChange={(on) => toggle(pickedFindings, fact.finding_id, on === true)}
+                  />
+                  <div class="min-w-0 flex-1">
+                    <h4
+                      tabindex="-1"
+                      class="text-primary text-[0.9rem] font-semibold outline-none first-letter:uppercase"
                     >
-                      {m.ai_builder_review_hide()}
-                    </Button>
+                      {described.title}
+                    </h4>
+                    <p class="text-secondary mt-0.5 text-[0.8125rem] text-pretty">
+                      {described.evidence}
+                    </p>
                   </div>
-                  <div class="mt-2.5">
-                    <Button size="sm" class="h-8" {disabled} onclick={() => prepare(fact)}>
-                      {m.ai_builder_review_prepare()}
-                    </Button>
-                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    class="text-secondary h-7 shrink-0 px-2 text-xs"
+                    onclick={() => dismiss(fact)}
+                  >
+                    {m.ai_builder_review_hide()}
+                  </Button>
                 </li>
               {/each}
             </ul>
+            <!-- Preparing a change from a counted fact sends nothing to a
+                 model, so there is nothing to disclose up front: the line
+                 beside the button is reassurance, and it belongs where the
+                 button is. One grey line in either state. -->
+            {#if selectedFindings.length > 0}
+              <div class="selection-bar mt-3.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  class="h-8"
+                  {disabled}
+                  data-testid="prepare-selected"
+                  onclick={() => prepare(selectedFindings)}
+                >
+                  {selectedFindings.length === 1
+                    ? m.ai_builder_review_prepare()
+                    : m.ai_builder_review_prepare_count({
+                        count: String(selectedFindings.length)
+                      })}
+                </Button>
+                <span class="text-secondary text-[0.8125rem]">
+                  {m.ai_builder_review_prepare_hint()}
+                </span>
+              </div>
+            {:else}
+              <p class="text-secondary mt-3.5 text-[0.8125rem] text-pretty">
+                {m.ai_builder_review_select_hint()}
+              </p>
+            {/if}
           {/if}
 
           <section
-            class="border-default mt-5 border-t pt-4"
+            class="border-stronger mt-7 border-t pt-5"
             aria-label={m.ai_builder_review_suggestions_title()}
             data-testid="review-suggestions"
           >
-            <h3 class="text-primary text-[0.9375rem] font-bold">
-              {m.ai_builder_review_suggestions_title()}
-            </h3>
+            <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+              <h3 id="review-suggestions-title" class="text-primary text-[0.9375rem] font-bold">
+                {m.ai_builder_review_suggestions_title()}
+              </h3>
+              {#if suggestions.status === "ready" && suggestions.suggestions.suggestions.length > 1}
+                {@const total = suggestions.suggestions.suggestions.length}
+                <Button
+                  variant="link"
+                  class="text-accent-stronger -my-1 h-auto px-0 py-1 text-[0.8125rem] font-semibold"
+                  data-testid="suggestions-select-all"
+                  onclick={() => {
+                    if (pickedSuggestions.size === total) pickedSuggestions.clear();
+                    else for (let i = 0; i < total; i += 1) pickedSuggestions.add(i);
+                  }}
+                >
+                  {pickedSuggestions.size === total
+                    ? m.ai_builder_review_select_none()
+                    : m.ai_builder_review_select_all({ count: String(total) })}
+                </Button>
+              {/if}
+            </div>
             {#if suggestions.status === "closed"}
               <div class="mt-2 flex flex-col gap-2">
                 <p class="text-secondary text-[0.8125rem] text-pretty">
@@ -377,7 +489,13 @@
                 class="text-secondary mt-0.5 flex items-center gap-1 text-[0.8125rem]"
                 data-testid="suggestions-lead"
               >
+                <!-- "Suggestions, not confirmed faults" used to appear only on
+                     the button that asks for them, so it vanished exactly when
+                     the guesses arrived. It belongs next to the results. -->
                 <span>
+                  <span class="text-primary font-semibold"
+                    >{m.ai_builder_review_suggestions_advisory()}</span
+                  >
                   {judged.sample.run_ids.length === 1
                     ? m.ai_builder_review_suggestions_lead_one()
                     : m.ai_builder_review_suggestions_lead({
@@ -427,88 +545,67 @@
                   {m.ai_builder_review_suggestions_none()}
                 </p>
               {:else}
-                {#if judged.suggestions.length > 1}
-                  <div class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
-                    <Button
-                      {disabled}
-                      data-testid="investigate-all"
-                      onclick={() => investigate(judged.suggestions)}
-                    >
-                      {m.ai_builder_review_suggestion_investigate_all({
-                        count: String(judged.suggestions.length)
-                      })}
-                    </Button>
-                    <span class="text-secondary text-[0.8125rem]">
-                      {m.ai_builder_review_suggestion_investigate_all_hint()}
-                    </span>
-                  </div>
-                {/if}
-                <ul class="mt-3 flex flex-col gap-2.5" data-testid="suggestions-list">
+                <ul
+                  class="mt-3 flex flex-col"
+                  role="group"
+                  aria-labelledby="review-suggestions-title"
+                  data-testid="suggestions-list"
+                >
                   {#each judged.suggestions as suggestion, index (index)}
-                    <li class="border-default bg-secondary rounded-lg border px-3.5 py-3">
-                      <div class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                        <h4 class="text-primary text-[0.9rem] font-semibold">
-                          {suggestionKindLabel(suggestion.kind)}
-                        </h4>
-                        <span class="text-secondary text-[0.8125rem]">
-                          {suggestionStepsLabel(suggestion.step_orders)}
-                        </span>
-                      </div>
-                      <p class="text-secondary mt-1 text-[0.8125rem] text-pretty">
-                        {suggestion.rationale}
-                      </p>
-                      <Collapsible.Root
-                        open={openSources[index] ?? false}
-                        onOpenChange={(open) => (openSources[index] = open)}
-                      >
-                        <Collapsible.Trigger
-                          class="text-secondary hover:text-primary focus-visible:ring-accent-stronger mt-1.5 rounded-sm text-[0.8125rem] font-semibold underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
-                        >
-                          {openSources[index]
-                            ? m.ai_builder_review_suggestion_sources_hide()
-                            : suggestion.sources.length === 1
-                              ? m.ai_builder_review_suggestion_sources_show_one()
-                              : m.ai_builder_review_suggestion_sources_show({
-                                  count: String(suggestion.sources.length)
-                                })}
-                        </Collapsible.Trigger>
-                        <Collapsible.Content>
-                          <ul class="mt-2 flex flex-col gap-1.5">
-                            {#each suggestion.sources as source, sourceIndex (sourceIndex)}
-                              <li class="text-[0.8125rem]">
-                                <span class="text-secondary">
-                                  {suggestionSourceLabel(source, judged.sample.run_ids)}:
-                                </span>
-                                <q class="text-primary">{source.quote}</q>
-                              </li>
-                            {/each}
-                          </ul>
-                        </Collapsible.Content>
-                      </Collapsible.Root>
-                      <div class="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1">
-                        {#if judged.suggestions.length > 1}
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            class="h-8"
-                            {disabled}
-                            aria-label={m.ai_builder_review_suggestion_investigate_this_label({
-                              index: String(index + 1),
-                              kind: suggestionKindLabel(suggestion.kind),
-                              steps: suggestionStepsLabel(suggestion.step_orders)
-                            })}
-                            onclick={() => investigate([suggestion])}
-                          >
-                            {m.ai_builder_review_suggestion_investigate_this()}
-                          </Button>
-                        {:else}
-                          <Button {disabled} onclick={() => investigate([suggestion])}>
-                            {m.ai_builder_review_suggestion_investigate()}
-                          </Button>
+                    <li
+                      class="border-stronger flex items-start gap-3 border-t py-3.5 first:border-t-0 first:pt-0"
+                    >
+                      <Checkbox
+                        class="mt-1 shrink-0"
+                        checked={pickedSuggestions.has(index)}
+                        {disabled}
+                        aria-label={m.ai_builder_review_suggestion_investigate_this_label({
+                          index: String(index + 1),
+                          kind: suggestionKindLabel(suggestion.kind),
+                          steps: suggestionStepsLabel(suggestion.step_orders)
+                        })}
+                        onCheckedChange={(on) => toggle(pickedSuggestions, index, on === true)}
+                      />
+                      <div class="min-w-0 flex-1">
+                        <div class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                          <h4 class="text-primary text-[0.9rem] font-semibold">
+                            {suggestionKindLabel(suggestion.kind)}
+                          </h4>
                           <span class="text-secondary text-[0.8125rem]">
-                            {m.ai_builder_review_suggestion_investigate_hint()}
+                            {suggestionStepsLabel(suggestion.step_orders)}
                           </span>
-                        {/if}
+                        </div>
+                        <p class="text-secondary mt-1 text-[0.8125rem] text-pretty">
+                          {suggestion.rationale}
+                        </p>
+                        <Collapsible.Root
+                          open={openSources[index] ?? false}
+                          onOpenChange={(open) => (openSources[index] = open)}
+                        >
+                          <Collapsible.Trigger
+                            class="text-secondary hover:text-primary focus-visible:ring-accent-stronger mt-1.5 rounded-sm text-[0.8125rem] font-semibold underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                          >
+                            {openSources[index]
+                              ? m.ai_builder_review_suggestion_sources_hide()
+                              : suggestion.sources.length === 1
+                                ? m.ai_builder_review_suggestion_sources_show_one()
+                                : m.ai_builder_review_suggestion_sources_show({
+                                    count: String(suggestion.sources.length)
+                                  })}
+                          </Collapsible.Trigger>
+                          <Collapsible.Content>
+                            <ul class="mt-2 flex flex-col gap-1.5">
+                              {#each suggestion.sources as source, sourceIndex (sourceIndex)}
+                                <li class="text-[0.8125rem]">
+                                  <span class="text-secondary">
+                                    {suggestionSourceLabel(source, judged.sample.run_ids)}:
+                                  </span>
+                                  <q class="text-primary">{source.quote}</q>
+                                </li>
+                              {/each}
+                            </ul>
+                          </Collapsible.Content>
+                        </Collapsible.Root>
                       </div>
                     </li>
                   {/each}
@@ -525,6 +622,51 @@
                         })}
                   </p>
                 {/if}
+                <!-- The action sits after the list and counts what is ticked:
+                     asking someone to investigate all of them before they have
+                     read one is asking for a decision they cannot make yet. -->
+                {@const picked = judged.suggestions.filter((_, i) => pickedSuggestions.has(i))}
+                {#if picked.length > 0}
+                  <div class="selection-bar mt-3.5">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      class="h-8"
+                      {disabled}
+                      data-testid="investigate-selected"
+                      onclick={() => investigate(picked)}
+                    >
+                      {picked.length === 1
+                        ? m.ai_builder_review_suggestion_investigate()
+                        : m.ai_builder_review_suggestion_investigate_count({
+                            count: String(picked.length)
+                          })}
+                    </Button>
+                  </div>
+                {:else}
+                  <p class="text-secondary mt-3.5 text-[0.8125rem] text-pretty">
+                    {m.ai_builder_review_select_hint_suggestions()}
+                  </p>
+                {/if}
+                <!-- Investigating sends run content to a model, so there are
+                     four things to disclose. Left open they are a grey wall
+                     under the list; behind their own question they are one
+                     line that says a disclosure exists and where it is. -->
+                <Collapsible.Root bind:open={sendsOpen}>
+                  <Collapsible.Trigger
+                    class="text-secondary hover:text-primary focus-visible:ring-accent-stronger mt-1.5 inline-flex min-h-[24px] items-center rounded-sm text-[0.8125rem] font-semibold underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                    data-testid="suggestions-sends"
+                  >
+                    {m.ai_builder_review_sends_question()}
+                  </Collapsible.Trigger>
+                  <Collapsible.Content>
+                    <p class="text-secondary mt-1 text-[0.8125rem] text-pretty">
+                      {picked.length === 1
+                        ? m.ai_builder_review_suggestion_investigate_hint()
+                        : m.ai_builder_review_suggestion_investigate_all_hint()}
+                    </p>
+                  </Collapsible.Content>
+                </Collapsible.Root>
               {/if}
             {/if}
           </section>
@@ -587,8 +729,24 @@
       transform: none;
     }
   }
+  /* The bar appears the moment the first row is ticked; it should arrive,
+     not blink. Quick, because it answers a click the reader just made. */
+  .selection-bar {
+    animation: selection-bar-in var(--duration-quick) var(--ease-smooth-out);
+  }
+  @keyframes selection-bar-in {
+    from {
+      opacity: 0;
+      transform: translateY(var(--distance-micro, 4px));
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
   @media (prefers-reduced-motion: reduce) {
-    .findings-screen {
+    .findings-screen,
+    .selection-bar {
       animation: none;
     }
   }

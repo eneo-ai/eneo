@@ -6,6 +6,13 @@ import { getLocale, setLocale } from "$lib/paraglide/runtime";
 import type { AIBuilderFlowReviewPacket } from "./protocol";
 import BuilderFindingsScreen from "./BuilderFindingsScreen.svelte";
 
+/** Reading and deciding are separate now: tick the rows, then press the one
+ *  action the section shows. */
+async function tick(list: "findings-list" | "suggestions-list", ...indexes: number[]) {
+  const boxes = screen.getByTestId(list).querySelectorAll<HTMLElement>('[role="checkbox"]');
+  for (const index of indexes) await fireEvent.click(boxes[index]);
+}
+
 const STEP_1 = "11111111-1111-4111-8111-111111111111";
 const STEP_2 = "22222222-2222-4222-8222-222222222222";
 
@@ -98,8 +105,11 @@ describe("BuilderFindingsScreen", () => {
       m.ai_builder_review_omitted_one()
     );
 
-    const [prepare] = screen.getAllByRole("button", { name: m.ai_builder_review_prepare() });
-    await fireEvent.click(prepare);
+    // No action until something is ticked: the list is for reading first.
+    expect(screen.queryByTestId("prepare-selected")).toBeNull();
+
+    await tick("findings-list", 0);
+    await fireEvent.click(screen.getByTestId("prepare-selected"));
     expect(onprepare).toHaveBeenCalledWith({
       message: m.ai_builder_review_prepare_message({
         finding: m.ai_builder_review_unconsumed_title({
@@ -113,6 +123,28 @@ describe("BuilderFindingsScreen", () => {
         finding_ids: ["aaaaaaaaaaaaaaaa"]
       }
     });
+  });
+
+  it("takes several findings into one change, and drops a hidden one from the selection", async () => {
+    const onprepare = vi.fn();
+    render(BuilderFindingsScreen, {
+      review: { status: "ready", packet: makePacket() },
+      onprepare,
+      onclose: vi.fn(),
+      onretry: vi.fn()
+    });
+    await fireEvent.click(screen.getByTestId("findings-select-all"));
+    await fireEvent.click(screen.getByTestId("prepare-selected"));
+    expect(onprepare.mock.calls[0][0].reviewContext.finding_ids).toEqual([
+      "aaaaaaaaaaaaaaaa",
+      "bbbbbbbbbbbbbbbb"
+    ]);
+
+    // Hiding a ticked finding must not leave it voting from off screen.
+    const [hide] = screen.getAllByRole("button", { name: m.ai_builder_review_hide() });
+    await fireEvent.click(hide);
+    await fireEvent.click(screen.getByTestId("prepare-selected"));
+    expect(onprepare.mock.calls[1][0].reviewContext.finding_ids).toEqual(["bbbbbbbbbbbbbbbb"]);
   });
 
   it("explains withheld token measurements in the completeness footer", () => {
@@ -309,8 +341,13 @@ describe("BuilderFindingsScreen suggestions", () => {
           onclose: vi.fn(),
           onretry: vi.fn()
         });
+        // The disclosure is one click behind a question that names it, so
+        // the reader always sees that there is one. Open it and read it: it
+        // describes the section, so with nothing ticked it is the plural
+        // wording. Concepts are what matters here, not the sentence.
+        await fireEvent.click(screen.getByTestId("suggestions-sends"));
         const note =
-          screen.getByText(m.ai_builder_review_suggestion_investigate_hint()).textContent ?? "";
+          screen.getByText(m.ai_builder_review_suggestion_investigate_all_hint()).textContent ?? "";
         expect(note).toMatch(/motivering|reasoning/i);
         expect(note).toMatch(/citat|quotes/i);
         // The investigation rereads the named runs and takes bounded excerpts
@@ -318,6 +355,8 @@ describe("BuilderFindingsScreen suggestions", () => {
         // place the user is told what leaves this screen.
         expect(note).toMatch(/läser om|rereads/i);
         expect(note).toMatch(/utdrag|excerpts/i);
+        await tick("suggestions-list", 0);
+        expect(screen.getByText(m.ai_builder_review_suggestion_investigate_hint())).toBeTruthy();
       } finally {
         setLocale(previous, { reload: false });
       }
@@ -372,9 +411,8 @@ describe("BuilderFindingsScreen suggestions", () => {
       .find((label) => label.includes(coverage));
     expect(readingNote).toContain("Model A");
 
-    await fireEvent.click(
-      screen.getByRole("button", { name: m.ai_builder_review_suggestion_investigate() })
-    );
+    await tick("suggestions-list", 0);
+    await fireEvent.click(screen.getByTestId("investigate-selected"));
     expect(onprepare).toHaveBeenCalledTimes(1);
     const detail = onprepare.mock.calls[0][0];
     expect(detail.reviewContext).toEqual({
@@ -438,7 +476,8 @@ describe("BuilderFindingsScreen suggestions", () => {
         const note = screen.getByTestId("review-suggestions").textContent ?? "";
         expect(note).toMatch(/förslagens typer|suggestions' kinds/i);
 
-        await fireEvent.click(screen.getByTestId("investigate-all"));
+        await fireEvent.click(screen.getByTestId("suggestions-select-all"));
+        await fireEvent.click(screen.getByTestId("investigate-selected"));
         expect(onprepare).toHaveBeenCalledTimes(1);
         const batch = onprepare.mock.calls[0][0];
         expect(batch.reviewContext.suggestions).toEqual([
@@ -450,20 +489,20 @@ describe("BuilderFindingsScreen suggestions", () => {
         expect(batch.message).not.toContain("tre punkter");
         expect(batch.message).not.toContain("tomma svar");
 
-        // Each per-card action carries its own accessible name, including
-        // its ordinal, so two findings on one scope are two choices.
+        // Each row's checkbox carries its own accessible name, including its
+        // ordinal, so two findings on one scope stay two distinct choices.
         const stepsOneTwo = m.ai_builder_review_suggestion_steps({
           steps: `1 ${m.ai_builder_review_suggestion_steps_join()} 2`
         });
         const kindDuplicated = m.ai_builder_review_suggestion_kind_duplicated_work();
-        const secondCard = screen.getByRole("button", {
+        const secondCard = screen.getByRole("checkbox", {
           name: m.ai_builder_review_suggestion_investigate_this_label({
             index: "2",
             kind: kindDuplicated,
             steps: stepsOneTwo
           })
         });
-        const thirdCard = screen.getByRole("button", {
+        const thirdCard = screen.getByRole("checkbox", {
           name: m.ai_builder_review_suggestion_investigate_this_label({
             index: "3",
             kind: kindDuplicated,
@@ -471,7 +510,9 @@ describe("BuilderFindingsScreen suggestions", () => {
           })
         });
         expect(secondCard).not.toBe(thirdCard);
+        await fireEvent.click(screen.getByTestId("suggestions-select-all")); // clear
         await fireEvent.click(thirdCard);
+        await fireEvent.click(screen.getByTestId("investigate-selected"));
         const single = onprepare.mock.calls[1][0];
         expect(single.reviewContext.suggestions).toEqual([
           { suggestion_kind: "duplicated_work", step_orders: [1, 2] }
