@@ -303,10 +303,13 @@
                 : m.ai_builder_review_nothing_found()}
             </p>
           {:else}
-            <!-- Rows, not cards: a card inside the panel painted a 1.07:1 fill
-                 behind a 1.35:1 hairline, so the boundaries that say which
-                 evidence belongs to which finding were the least visible
-                 thing on the screen. A rule and real space say it better. -->
+            <!-- Rows, not cards: a card inside the panel painted a 1.07:1
+                 fill behind a 1.35:1 hairline, a box drawn in colours nobody
+                 can see. Space groups these instead: 26px between rows
+                 against 2px between a finding and its own evidence line, so
+                 proximity says what belongs together. The rule is a second
+                 cue at 1.8:1, not the thing carrying the grouping; a stroke
+                 heavy enough to carry it alone would rule this like a table. -->
             <ul
               class="flex flex-col"
               role="group"
