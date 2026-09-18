@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ChevronRight from "lucide-svelte/icons/chevron-right";
   import PencilLine from "lucide-svelte/icons/pencil-line";
   import Undo2 from "lucide-svelte/icons/undo-2";
   import { untrack } from "svelte";
@@ -243,6 +244,8 @@
       event.preventDefault();
     }
   }
+
+  let detailsOpen = $state(false);
 </script>
 
 <div
@@ -266,10 +269,15 @@
       />
     {/if}
     {#if turn.reviewDetails}
-      <details class="text-muted inline-block text-xs">
+      <details bind:open={detailsOpen} class="text-muted inline-block text-xs">
         <summary
-          class="focus-visible:ring-accent-default cursor-pointer rounded px-1 focus-visible:ring-2"
-          >{m.flow_transcript_review_details()}</summary
+          class="focus-visible:ring-accent-default flex min-h-[24px] cursor-pointer list-none items-center gap-1.5 rounded px-1 focus-visible:ring-2 [&::-webkit-details-marker]:hidden"
+          ><ChevronRight
+            class="size-3.5 shrink-0 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {detailsOpen
+              ? 'rotate-90'
+              : ''}"
+            aria-hidden="true"
+          />{m.flow_transcript_review_details()}</summary
         >
         <p class="bg-primary border-default my-1 rounded border p-2">{turn.reviewDetails}</p>
       </details>

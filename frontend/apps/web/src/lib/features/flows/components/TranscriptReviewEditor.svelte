@@ -705,7 +705,7 @@
           class="text-muted flex min-w-0 items-start gap-2 text-xs sm:block sm:pt-1"
         >
           <button
-            class="focus-visible:ring-accent-default min-h-6 shrink-0 tabular-nums focus-visible:ring-2"
+            class="focus-visible:ring-accent-default min-h-[24px] shrink-0 tabular-nums focus-visible:ring-2"
             disabled={!audioAvailable}
             onclick={() => {
               onSeek(first.source.fileIndex, first.source.start, playing);
@@ -713,7 +713,7 @@
             }}>{formatClock(first.source.start)}</button
           >
           <button
-            class="focus-visible:ring-accent-default mt-1 block min-h-6 max-w-full text-left text-xs [overflow-wrap:anywhere] whitespace-normal focus-visible:ring-2"
+            class="focus-visible:ring-accent-default mt-1 block min-h-[24px] max-w-full text-left text-xs [overflow-wrap:anywhere] whitespace-normal focus-visible:ring-2"
             style:color={color(first.pending ? null : first.speaker)}
             onclick={() => choose(paragraph.flatMap(wholePassage))}>{label(first)}</button
           >

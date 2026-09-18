@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { SvelteSet } from "svelte/reactivity";
+  import ChevronRight from "lucide-svelte/icons/chevron-right";
   import { prefersReducedMotion } from "$lib/core/prefersReducedMotion";
   import type { FlowStep } from "@eneo/eneo-js";
   import { IconInfo } from "@eneo/icons/info";
@@ -176,6 +178,9 @@
       onNavigateToStep(stepId);
     }
   }
+
+  // One disclosure per issue; a shared flag would expand them all together.
+  const techDetailsOpen = new SvelteSet<string>();
 </script>
 
 {#if hasErrors}
@@ -237,8 +242,22 @@
                   {/if}
                   <span class="text-secondary text-[13px] leading-relaxed">{issue.message}</span>
                   {#if issue.detail}
-                    <details class="text-muted mt-0.5 text-xs">
-                      <summary class="cursor-pointer select-none">
+                    <details
+                      open={techDetailsOpen.has(issue.key)}
+                      ontoggle={(event) =>
+                        event.currentTarget.open
+                          ? techDetailsOpen.add(issue.key)
+                          : techDetailsOpen.delete(issue.key)}
+                      class="text-muted mt-0.5 text-xs"
+                    >
+                      <summary
+                        class="focus-visible:ring-accent-default flex min-h-[24px] cursor-pointer list-none items-center gap-1.5 select-none focus-visible:ring-2 [&::-webkit-details-marker]:hidden"
+                        ><ChevronRight
+                          class="size-3.5 shrink-0 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {techDetailsOpen
+                            ? 'rotate-90'
+                            : ''}"
+                          aria-hidden="true"
+                        />
                         {m.flow_validation_technical_details()}
                       </summary>
                       <span class="mt-1 block leading-relaxed break-words">{issue.detail}</span>

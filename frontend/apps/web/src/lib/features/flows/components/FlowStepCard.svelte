@@ -241,7 +241,7 @@
           {#if step.output_mode === "template_fill"}
             <Badge
               variant="secondary"
-              class="bg-accent-dimmer text-accent-stronger h-5 px-1.5 text-xs font-semibold tracking-wide uppercase"
+              class="bg-accent-dimmer text-accent-stronger h-5 px-1.5 text-xs font-semibold"
             >
               {m.flow_template_fill_card_badge()}
             </Badge>
@@ -258,7 +258,7 @@
           {:else}
             <Badge
               variant="secondary"
-              class="bg-accent-dimmer text-accent-stronger h-5 px-1.5 text-xs font-semibold tracking-wide uppercase"
+              class="bg-accent-dimmer text-accent-stronger h-5 px-1.5 text-xs font-semibold"
             >
               {m.flow_transcribe_only_title()}
             </Badge>

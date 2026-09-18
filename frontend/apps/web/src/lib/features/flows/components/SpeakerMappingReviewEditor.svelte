@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { SvelteSet } from "svelte/reactivity";
+  import ChevronRight from "lucide-svelte/icons/chevron-right";
   import * as m from "$lib/paraglide/messages";
   import type { SpeakerMappingRow } from "../speakerMappingReview";
   import { speakerColorIndex } from "../transcriptSegments";
@@ -41,6 +43,9 @@
     "accent-stronger",
     "positive-stronger"
   ];
+
+  // One disclosure per row: a single flag would open every row at once.
+  const whyOpen = new SvelteSet<string>();
 </script>
 
 <details class="border-default bg-primary min-w-0 rounded-xl border p-4" open>
@@ -97,9 +102,20 @@
             ? m.flow_transcript_editor_inferred_name()
             : ""}
         </p>
-        <details class="text-muted mt-1 text-xs">
-          <summary class="focus-visible:ring-accent-default cursor-pointer focus-visible:ring-2"
-            >{m.flow_transcript_editor_why()}</summary
+        <details
+          open={whyOpen.has(row.label)}
+          ontoggle={(event) =>
+            event.currentTarget.open ? whyOpen.add(row.label) : whyOpen.delete(row.label)}
+          class="text-muted mt-1 text-xs"
+        >
+          <summary
+            class="focus-visible:ring-accent-default flex min-h-[24px] cursor-pointer list-none items-center gap-1.5 focus-visible:ring-2 [&::-webkit-details-marker]:hidden"
+            ><ChevronRight
+              class="size-3.5 shrink-0 motion-safe:transition-transform motion-safe:duration-(--duration-quick) motion-safe:ease-(--ease-smooth-out) {whyOpen
+                ? 'rotate-90'
+                : ''}"
+              aria-hidden="true"
+            />{m.flow_transcript_editor_why()}</summary
           >
           <p class="mt-2 leading-relaxed">
             {row.evidence || m.flow_transcript_editor_no_evidence()}
