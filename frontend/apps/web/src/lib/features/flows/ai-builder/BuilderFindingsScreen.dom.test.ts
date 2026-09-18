@@ -221,12 +221,29 @@ describe("BuilderFindingsScreen", () => {
       onclose: vi.fn(),
       onretry: vi.fn()
     });
+    const status = () =>
+      screen.getByTestId("builder-findings").querySelector('[role="status"]')?.textContent ?? "";
+
     const [hide] = screen.getAllByRole("button", { name: m.ai_builder_review_hide() });
     await fireEvent.click(hide);
     expect(screen.getAllByRole("listitem")).toHaveLength(1);
     expect(
       screen.getByRole("button", { name: m.ai_builder_review_show_hidden_one() })
     ).toBeTruthy();
+    // The announcement has to agree with the restore button. `hiddenCount` is
+    // derived from `dismissed`, so reading it after the assignment already
+    // counts the finding just hidden; adding one announced two.
+    expect(status()).toBe(m.ai_builder_review_hidden_notice());
+
+    // And it has to change on the second hide, or a polite live region with
+    // unchanged content is never re-announced.
+    const [hideSecond] = screen.getAllByRole("button", { name: m.ai_builder_review_hide() });
+    await fireEvent.click(hideSecond);
+    expect(status()).toBe(m.ai_builder_review_hidden_notice_count({ count: "2" }));
+    await fireEvent.click(
+      screen.getByRole("button", { name: m.ai_builder_review_show_hidden({ count: "2" }) })
+    );
+    await fireEvent.click(screen.getAllByRole("button", { name: m.ai_builder_review_hide() })[0]);
     unmount();
     // A hidden finding stays hidden on the next open of the same version.
     render(BuilderFindingsScreen, {

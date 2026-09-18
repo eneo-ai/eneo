@@ -79,18 +79,13 @@
     {/if}
 
     {#if onrepair}
-      <!-- The border carries the destructive association, the label does not.
-           `text-current` put the alert's red on the label, 3.31:1 in dark
-           against this variant's own fill; the label now has its own
-           foreground. That moved currentColor too, so the border names the
-           colour rather than inheriting it: a boundary only owes 3:1 and
-           negative-stronger is 5.05:1 there. -->
-      <Button
-        variant="outline"
-        size="sm"
-        class="text-foreground border-negative-stronger w-fit gap-1.5"
-        onclick={onrepair}
-      >
+      <!-- `text-current` put the alert's red on this label, 3.31:1 in dark
+           against the variant's own fill, so the label has its own
+           foreground now. The button carries no destructive colour of its
+           own: the variant sets `dark:border-input`, which outranks a base
+           border, and a `dark:` override is the thing the token lint exists
+           to prevent. The red text it sits inside carries the association. -->
+      <Button variant="outline" size="sm" class="text-foreground w-fit gap-1.5" onclick={onrepair}>
         <IconSparkles class="size-3.5" aria-hidden="true" />
         {m.flow_run_error_repair_action()}
       </Button>

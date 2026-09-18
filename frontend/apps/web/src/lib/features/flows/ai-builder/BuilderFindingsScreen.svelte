@@ -166,11 +166,13 @@
     rememberDismissedFinding(packet.flow_id, fact.finding_id);
     pickedFindings.delete(fact.finding_id);
     dismissed = new Set([...dismissed, fact.finding_id]);
-    const hiddenAfter = hiddenCount + 1;
+    // `hiddenCount` is derived from `dismissed`, which was just assigned, so
+    // it already counts this one. Adding another announced one more hidden
+    // item than the restore button offered.
     hiddenNotice =
-      hiddenAfter === 1
+      hiddenCount === 1
         ? m.ai_builder_review_hidden_notice()
-        : m.ai_builder_review_hidden_notice_count({ count: String(hiddenAfter) });
+        : m.ai_builder_review_hidden_notice_count({ count: String(hiddenCount) });
 
     await tick();
     const next = nextId
