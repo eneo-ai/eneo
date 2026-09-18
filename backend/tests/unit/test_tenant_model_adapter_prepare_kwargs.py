@@ -162,6 +162,64 @@ def test_input_packing_leaves_room_for_a_positive_answer():
     assert _make_adapter(token_limit=100).get_token_limit_of_model() == 99
 
 
+@pytest.mark.asyncio
+async def test_vllm_dispatch_preserves_schema_and_counts_it_in_input_budget():
+    from eneo.completion_models.infrastructure.adapters.base_adapter import (
+        ProviderInput,
+    )
+    from eneo.completion_models.infrastructure.tenant_model_capabilities import (
+        schema_response_format,
+    )
+
+    adapter = _make_adapter("hosted_vllm", token_limit=100, max_output_tokens=80)
+    adapter.prepare_provider_input = Mock(
+        return_value=ProviderInput(
+            messages=[{"role": "user", "content": "Extract facts"}],
+            tools=[],
+            built_in_tools=[],
+        )
+    )
+    response_format = schema_response_format(
+        litellm_model=adapter.litellm_model,
+        provider_type=adapter.provider_type,
+        schema={
+            "type": "object",
+            "properties": {"facts": {"type": "array", "items": {"type": "string"}}},
+            "required": ["facts"],
+            "additionalProperties": False,
+        },
+        name="flow_step_output",
+    )
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content='{"facts": []}', tool_calls=None),
+                finish_reason="stop",
+            )
+        ],
+        usage=None,
+    )
+    with (
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+            AsyncMock(return_value=response),
+        ) as transport,
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter.measure_provider_input_reserve",
+            return_value=SimpleNamespace(tokens=60),
+        ) as reserve,
+    ):
+        await adapter.get_response(
+            context=SimpleNamespace(),
+            model_kwargs={"response_format": response_format},
+        )
+
+    assert reserve.call_args.kwargs["response_format"] == response_format
+    sent = transport.await_args.kwargs
+    assert sent["response_format"] == response_format
+    assert sent.get("max_completion_tokens", sent.get("max_tokens")) == 40
+
+
 class TestPrepareKwargsReasoningEffortTranslation:
     """Preserve or refuse explicit choices; apply defaults only to absent effort."""
 

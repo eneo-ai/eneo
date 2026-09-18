@@ -18,6 +18,7 @@ from eneo.completion_models.infrastructure.context_builder import (
 )
 from eneo.completion_models.infrastructure.tenant_model_capabilities import (
     get_supported_openai_params,
+    schema_response_format,
 )
 from eneo.files.file_models import File
 from eneo.flows.citation_sidecar import (
@@ -50,13 +51,17 @@ from eneo.flows.flow_run_provenance import (
     MappedProviderCallProvenance,
     merge_resolved_input_edges,
 )
+from eneo.flows.output_processing import schema_yields_top_level_object
 from eneo.flows.runtime.inherited_citations import (
     build_inherited_citation_prompt_appendix,
     collect_inherited_citation_context,
     inherited_cited_sources,
 )
 from eneo.flows.runtime.output_formats import resolve_format_spec
-from eneo.flows.runtime.output_formats.base import append_output_format_instructions
+from eneo.flows.runtime.output_formats.base import (
+    append_output_format_instructions,
+    output_contract_instructions,
+)
 from eneo.flows.runtime.output_runtime import TypedOutputProcessingResult
 from eneo.flows.runtime.protocols import RuntimeAssistantProtocol
 from eneo.flows.runtime.rag_retrieval import RAG_RETRIEVAL_FAIL_CLOSED_STATUSES
@@ -309,7 +314,8 @@ class PreparedCompletionCall:
     capability_fallback_model_kwargs: ModelKwargs | None
     capability_fallback_model_parameters: dict[str, Any] | None
     assistant_context_version: int
-    preferred_native_json_object: bool
+    preferred_native_json_format: bool
+    capability_fallback_prompt: str | None = None
 
 
 @dataclass(frozen=True)
@@ -390,7 +396,7 @@ def json_mode_cache_key(assistant: RuntimeAssistantProtocol) -> str:
 
 @dataclass(frozen=True, slots=True)
 class JsonResponseFormatPlan:
-    native_json_object_attempted: bool
+    response_format: dict[str, object] | None
     fallback_call_possible: bool
     strip_stored_response_format: bool
 
@@ -401,14 +407,14 @@ def resolve_json_response_format_plan(
     assistant: RuntimeAssistantProtocol,
     state: RunExecutionState,
 ) -> JsonResponseFormatPlan:
-    requested = resolve_format_spec(
-        step.output_type
-    ).should_request_native_json_object_mode(step.output_contract)
+    requested = resolve_format_spec(step.output_type).requests_structured_output(
+        step.output_contract
+    )
     if not requested:
         # Other output modes preserve authored response-format kwargs and the
         # existing no-fallback behavior.
         return JsonResponseFormatPlan(
-            native_json_object_attempted=False,
+            response_format=None,
             fallback_call_possible=False,
             strip_stored_response_format=False,
         )
@@ -420,13 +426,33 @@ def resolve_json_response_format_plan(
         if detected_support is not None:
             state.json_mode_supported[cache_key] = detected_support
             cached_support = detected_support
-    native_json_object_attempted = cached_support is not False
+    response_format: dict[str, object] | None = None
+    if cached_support is not False:
+        model_route = _resolve_litellm_model_name(assistant)
+        completion_model = assistant.completion_model
+        if (
+            step.output_contract is not None
+            and model_route
+            and completion_model
+            and cache_key not in state.json_schema_rejected_models
+        ):
+            response_format = schema_response_format(
+                litellm_model=model_route,
+                provider_type=completion_model.provider_type or "",
+                schema=step.output_contract,
+                name="flow_step_output",
+            )
+        if response_format is None and (
+            step.output_contract is None
+            or schema_yields_top_level_object(step.output_contract)
+        ):
+            response_format = {"type": "json_object"}
     stored_response_format_present = (
         assistant.completion_model_kwargs.response_format is not None
     )
     return JsonResponseFormatPlan(
-        native_json_object_attempted=native_json_object_attempted,
-        fallback_call_possible=native_json_object_attempted,
+        response_format=response_format,
+        fallback_call_possible=response_format is not None,
         strip_stored_response_format=(
             cached_support is False and stored_response_format_present
         ),
@@ -1311,13 +1337,13 @@ def build_prepared_completion_call(
         assistant=prepared.assistant,
         state=state,
     )
-    native_json_object_attempted = response_format_plan.native_json_object_attempted
+    native_json_format_attempted = response_format_plan.response_format is not None
     fallback_call_possible = response_format_plan.fallback_call_possible
     cache_key = json_mode_cache_key(prepared.assistant)
-    if native_json_object_attempted:
+    if native_json_format_attempted:
         try:
             preferred_kwargs = original_kwargs.model_copy(
-                update={"response_format": {"type": "json_object"}}
+                update={"response_format": response_format_plan.response_format}
             )
         except Exception:
             logger.warning(
@@ -1326,7 +1352,7 @@ def build_prepared_completion_call(
                 exc_info=True,
             )
             state.json_mode_supported[cache_key] = False
-            native_json_object_attempted = False
+            native_json_format_attempted = False
             fallback_call_possible = False
     elif response_format_plan.strip_stored_response_format:
         preferred_kwargs = original_kwargs.model_copy(update={"response_format": None})
@@ -1335,14 +1361,23 @@ def build_prepared_completion_call(
     if fallback_call_possible and preferred_kwargs.response_format is not None:
         fallback_kwargs = original_kwargs.model_copy(update={"response_format": None})
 
+    full_prompt = effective_completion_prompt(step=step, state=state, prepared=prepared)
+    prompt = full_prompt
+    if (
+        step.output_contract is not None
+        and preferred_kwargs.response_format is not None
+        and preferred_kwargs.response_format.get("type") == "json_schema"
+    ):
+        schema_suffix = "\n" + "\n".join(
+            output_contract_instructions(step.output_contract)
+        )
+        prompt = full_prompt.removesuffix(schema_suffix)
+
     citation_mode = citation_mode_for_step(step)
     return PreparedCompletionCall(
         question=prepared.step_input.text,
-        effective_prompt=effective_completion_prompt(
-            step=step,
-            state=state,
-            prepared=prepared,
-        ),
+        effective_prompt=prompt,
+        capability_fallback_prompt=full_prompt if fallback_kwargs is not None else None,
         preferred_model_kwargs=preferred_kwargs,
         preferred_model_parameters=effective_model_parameters(
             prepared.assistant,
@@ -1360,7 +1395,7 @@ def build_prepared_completion_call(
         assistant_context_version=(
             2 if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR else 1
         ),
-        preferred_native_json_object=native_json_object_attempted,
+        preferred_native_json_format=native_json_format_attempted,
     )
 
 
@@ -1563,7 +1598,15 @@ async def _complete_step_execution(
     cache_key = json_mode_cache_key(prepared.assistant)
     use_capability_fallback = (
         completion_call.capability_fallback_model_kwargs is not None
-        and state.json_mode_supported.get(cache_key) is False
+        and (
+            state.json_mode_supported.get(cache_key) is False
+            or (
+                cache_key in state.json_schema_rejected_models
+                and completion_call.preferred_model_kwargs.response_format is not None
+                and completion_call.preferred_model_kwargs.response_format.get("type")
+                == "json_schema"
+            )
+        )
     )
     if use_capability_fallback:
         selected_model_kwargs = completion_call.capability_fallback_model_kwargs
@@ -1573,17 +1616,22 @@ async def _complete_step_execution(
     else:
         selected_model_kwargs = completion_call.preferred_model_kwargs
         selected_model_parameters = completion_call.preferred_model_parameters
-    native_json_object_attempted = (
-        completion_call.preferred_native_json_object and not use_capability_fallback
+    actual_prompt = (
+        completion_call.capability_fallback_prompt or completion_call.effective_prompt
+        if use_capability_fallback
+        else completion_call.effective_prompt
+    )
+    native_json_format_attempted = (
+        completion_call.preferred_native_json_format and not use_capability_fallback
     )
     if deps.logger is not None:
         deps.logger.info(
             "flow_executor.llm_call run_id=%s step_order=%d timeout=%s "
-            "native_json_object_attempted=%s",
+            "native_json_format_attempted=%s",
             run.id,
             step.step_order,
             deps.llm_request_timeout_seconds,
-            native_json_object_attempted,
+            native_json_format_attempted,
         )
     actual_model_parameters = selected_model_parameters
     step_deadline_monotonic = (
@@ -1599,7 +1647,7 @@ async def _complete_step_execution(
             question=completion_call.question,
             model_kwargs=selected_model_kwargs,
             info_blob_chunks=info_blob_chunks,
-            prompt_override=completion_call.effective_prompt,
+            prompt_override=actual_prompt,
             version=completion_call.assistant_context_version,
             provider_call_reason=(
                 "capability_fallback" if use_capability_fallback else "initial"
@@ -1613,7 +1661,13 @@ async def _complete_step_execution(
             and model_exc.capability == "response_format"
             and model_exc.retry_without_capability_safe
         ):
-            state.json_mode_supported[cache_key] = False
+            if (
+                selected_model_kwargs.response_format is not None
+                and selected_model_kwargs.response_format.get("type") == "json_schema"
+            ):
+                state.json_schema_rejected_models.add(cache_key)
+            else:
+                state.json_mode_supported[cache_key] = False
             fallback_kwargs = completion_call.capability_fallback_model_kwargs
             assert fallback_kwargs is not None
             fallback_model_parameters = (
@@ -1621,6 +1675,10 @@ async def _complete_step_execution(
             )
             assert fallback_model_parameters is not None
             actual_model_parameters = fallback_model_parameters
+            actual_prompt = (
+                completion_call.capability_fallback_prompt
+                or completion_call.effective_prompt
+            )
             response = await call_assistant_with_timeout(
                 step=step,
                 run=run,
@@ -1630,7 +1688,7 @@ async def _complete_step_execution(
                 question=completion_call.question,
                 model_kwargs=fallback_kwargs,
                 info_blob_chunks=info_blob_chunks,
-                prompt_override=completion_call.effective_prompt,
+                prompt_override=actual_prompt,
                 version=completion_call.assistant_context_version,
                 provider_call_reason="capability_fallback",
                 step_deadline_monotonic=step_deadline_monotonic,
@@ -1655,7 +1713,7 @@ async def _complete_step_execution(
                 context={"finish_reason": completion.finish_reason},
             ),
             input_payload_for_result=prepared.input_payload_for_result,
-            effective_prompt=completion_call.effective_prompt,
+            effective_prompt=actual_prompt,
         )
     if isinstance(completion, str):
         raw_full_text = completion
@@ -1725,7 +1783,7 @@ async def _complete_step_execution(
         raise attach_typed_failure_context(
             exc,
             input_payload_for_result=prepared.input_payload_for_result,
-            effective_prompt=completion_call.effective_prompt,
+            effective_prompt=actual_prompt,
             rejected_output=full_text,
         ) from exc
 
@@ -1761,7 +1819,7 @@ async def _complete_step_execution(
         tool_calls_metadata=tool_calls,
         num_tokens_input=num_tokens_input,
         num_tokens_output=num_tokens_output,
-        effective_prompt=completion_call.effective_prompt,
+        effective_prompt=actual_prompt,
         model_parameters_json=actual_model_parameters,
         requested_model=requested_model_name(prepared.assistant),
         response_model=getattr(response_model_info, "name", None),

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
 from typing import Literal, cast
@@ -15,6 +16,7 @@ from eneo.completion_models.domain.model_kwargs_capabilities import (
 )
 from eneo.main.exceptions import ProviderRejectedRequestException
 from eneo.main.logging import get_logger
+from eneo.tenants.provider_field_config import get_canonical_provider_type
 
 logger = get_logger(__name__)
 
@@ -105,6 +107,86 @@ def unsupported_structured_output_decision(
         source=StructuredOutputDecisionSource.NO_PROVIDER_SUPPORT,
         supports_response_schema=supports_response_schema,
         supports_response_format=supports_response_format,
+    )
+
+
+def schema_response_format(
+    *,
+    litellm_model: str,
+    provider_type: str,
+    schema: Mapping[str, object],
+    name: str,
+) -> dict[str, object] | None:
+    """Build a native schema request without rewriting the validation contract.
+
+    Unsupported grammar features must not turn previously usable JSON requests
+    into 400s. vLLM also constrains models absent from LiteLLM's catalog.
+    """
+    provider_type = get_canonical_provider_type(provider_type)
+    if not _common_schema_subset(schema):
+        return None
+    if provider_type != "hosted_vllm":
+        if schema.get("type") != "object":
+            return None
+        if (
+            _safe_supports_response_schema(
+                litellm_model=litellm_model, provider_type=provider_type
+            )
+            is not True
+        ):
+            return None
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": name,
+            # Authored schemas need not satisfy OpenAI's stricter schema subset.
+            # The caller must still validate against the complete contract.
+            "strict": False,
+            "schema": deepcopy(dict(schema)),
+        },
+    }
+
+
+_COMMON_SCHEMA_KEYWORDS = frozenset(
+    {
+        "type",
+        "properties",
+        "required",
+        "additionalProperties",
+        "items",
+        "enum",
+        "const",
+        "minLength",
+        "maxLength",
+        "minimum",
+        "maximum",
+        "exclusiveMinimum",
+        "exclusiveMaximum",
+        "minItems",
+        "maxItems",
+        "title",
+        "description",
+        "$schema",
+        "$id",
+    }
+)
+
+
+def _common_schema_subset(schema: Mapping[str, object]) -> bool:
+    if schema.keys() - _COMMON_SCHEMA_KEYWORDS:
+        return False
+    properties = schema.get("properties", {})
+    if not isinstance(properties, Mapping):
+        return False
+    children = list(cast(Mapping[str, object], properties).values())
+    for keyword in ("items", "additionalProperties"):
+        child = schema.get(keyword)
+        if child is not None and not isinstance(child, bool):
+            children.append(child)
+    return all(
+        isinstance(child, Mapping)
+        and _common_schema_subset(cast(Mapping[str, object], child))
+        for child in children
     )
 
 
@@ -381,6 +463,7 @@ __all__ = [
     "normalize_reasoning_effort",
     "resolve_reasoning_effort_options",
     "resolve_structured_output_capability",
+    "schema_response_format",
     "selectable_reasoning_effort_options",
     "supports_response_schema",
     "unsupported_structured_output_decision",

@@ -172,32 +172,28 @@ def test_document_output_prompt_with_schema_matches_current_instructions(
     [
         (None, True, False),
         ({"type": "object"}, True, True),
-        ({"type": "array"}, False, False),
+        ({"type": "array"}, True, True),
         ({"type": ["object", "null"]}, True, True),
-        ({"type": ["object", "array"]}, False, False),
+        ({"type": ["object", "array"]}, True, True),
         ({"properties": {"name": {"type": "string"}}}, True, True),
-        ({"items": {"type": "string"}}, False, False),
-        ({}, False, False),
+        ({"items": {"type": "string"}}, True, True),
+        ({}, True, True),
     ],
 )
-def test_native_json_object_mode_matches_current_schema_matrix(
+def test_structured_output_request_matches_format(
     schema: dict[str, object] | None,
     json_expected: bool,
     document_expected: bool,
 ) -> None:
     assert (
-        resolve_format_spec("json").should_request_native_json_object_mode(schema)
-        is json_expected
+        resolve_format_spec("json").requests_structured_output(schema) is json_expected
     )
     assert (
-        resolve_format_spec("pdf").should_request_native_json_object_mode(schema)
+        resolve_format_spec("pdf").requests_structured_output(schema)
         is document_expected
     )
     assert (
-        resolve_format_spec("docx").should_request_native_json_object_mode(schema)
+        resolve_format_spec("docx").requests_structured_output(schema)
         is document_expected
     )
-    assert (
-        resolve_format_spec("text").should_request_native_json_object_mode(schema)
-        is False
-    )
+    assert resolve_format_spec("text").requests_structured_output(schema) is False

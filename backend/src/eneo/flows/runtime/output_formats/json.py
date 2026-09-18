@@ -6,7 +6,6 @@ from eneo.flows.runtime.output_formats.base import (
     OutputFormatProcessingResult,
     json_schema_instructions,
     prune_model_output_extras,
-    schema_yields_top_level_object,
 )
 
 
@@ -16,12 +15,10 @@ class JsonOutputFormatSpec:
     ) -> tuple[str, ...]:
         return json_schema_instructions(output_contract)
 
-    def should_request_native_json_object_mode(
+    def requests_structured_output(
         self, output_contract: FlowPersistedJsonObject | None
     ) -> bool:
-        if output_contract is None:
-            return True
-        return schema_yields_top_level_object(output_contract)
+        return True
 
     def process_model_output(
         self,

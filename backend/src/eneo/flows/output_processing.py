@@ -38,17 +38,17 @@ def _parse_json_candidate(raw_text: str) -> StructuredOutputValue:
 
 
 def _extract_embedded_json(raw_text: str) -> StructuredOutputValue | None:
-    decoder = json.JSONDecoder()
-    for start_index, char in enumerate(raw_text):
-        if char not in "{[":
-            continue
-        try:
-            parsed, _end_index = decoder.raw_decode(raw_text[start_index:])
-        except json.JSONDecodeError:
-            continue
-        if isinstance(parsed, (dict, list)):
-            return cast(StructuredOutputValue, parsed)
-    return None
+    start = re.search(r"[\[{]", raw_text)
+    if start is None:
+        return None
+    try:
+        parsed, end = json.JSONDecoder().raw_decode(raw_text, start.start())
+    except json.JSONDecodeError:
+        # Trying later braces can turn a truncated document into a valid fragment.
+        return None
+    if re.search(r"[\[\]{}]", raw_text[end:]):
+        return None
+    return cast(StructuredOutputValue, parsed)
 
 
 def parse_json_output(raw_text: str) -> StructuredOutputValue:
@@ -81,9 +81,23 @@ def validate_against_contract(data: Any, schema: dict[str, Any], *, label: str) 
     try:
         jsonschema.validate(instance=data, schema=schema)
     except jsonschema.ValidationError as exc:
+        path = "/" + "/".join(
+            _json_pointer_token(str(part)) for part in exc.absolute_path
+        )
+        path = path[:400]
+        rule = str(exc.validator)[:80]
+        if rule == "type":
+            detail = f"Value is not of type {exc.validator_value!r}."
+        elif rule == "required":
+            detail = exc.message
+        elif rule == "additionalProperties":
+            detail = "Additional properties are not allowed."
+        else:
+            detail = f"Value does not satisfy schema rule '{rule}'."
         raise TypedIOValidationException(
-            f"{label}: {exc.message}",
+            f"{label} at {path}: {detail[:400]}",
             code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+            context={"json_pointer": path, "schema_rule": rule},
         ) from exc
 
 

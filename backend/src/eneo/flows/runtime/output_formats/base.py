@@ -10,7 +10,6 @@ from eneo.flows.domain.runtime import StepDiagnostic
 from eneo.flows.output_processing import (
     StructuredOutputValue,
     prune_extras_to_strict_schema,
-    schema_yields_top_level_object,
 )
 from eneo.flows.runtime.document_rendering.guidance import (
     document_markdown_guidance,
@@ -90,7 +89,7 @@ class OutputFormatSpec(Protocol):
         self, output_contract: FlowPersistedJsonObject | None
     ) -> tuple[str, ...]: ...
 
-    def should_request_native_json_object_mode(
+    def requests_structured_output(
         self, output_contract: FlowPersistedJsonObject | None
     ) -> bool: ...
 
@@ -121,11 +120,18 @@ def json_schema_instructions(
     )
     if output_contract is None:
         return instructions
-    schema_json = json.dumps(output_contract, ensure_ascii=False, sort_keys=True)
     return (
         *instructions,
+        *output_contract_instructions(output_contract),
+    )
+
+
+def output_contract_instructions(
+    output_contract: FlowPersistedJsonObject,
+) -> tuple[str, str]:
+    return (
         "Follow this JSON Schema exactly:",
-        schema_json,
+        json.dumps(output_contract, ensure_ascii=False, sort_keys=True),
     )
 
 
@@ -137,24 +143,20 @@ def document_prompt_instructions(
             *document_markdown_guidance(artifact_name=artifact_name),
             "For PDF output specifically, do not start the response with %PDF-.",
         )
-    schema_json = json.dumps(output_contract, ensure_ascii=False, sort_keys=True)
     return (
         f"The system will validate your JSON and render it into a {artifact_name} file after you respond.",
         "Return ONLY valid JSON.",
         "Do not include markdown code fences, commentary, or any surrounding text.",
         "The top-level JSON value must be an object or array.",
         "Use plain text for JSON string values; do not include Markdown formatting markers inside strings.",
-        "Follow this JSON Schema exactly:",
-        schema_json,
+        *output_contract_instructions(output_contract),
     )
 
 
-def document_prefers_native_json_object_mode(
+def document_requests_structured_output(
     output_contract: FlowPersistedJsonObject | None,
 ) -> bool:
-    if output_contract is None:
-        return False
-    return schema_yields_top_level_object(output_contract)
+    return output_contract is not None
 
 
 def prune_model_output_extras(

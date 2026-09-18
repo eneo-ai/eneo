@@ -8,6 +8,7 @@ from eneo.completion_models.infrastructure.tenant_model_capabilities import (
     StructuredOutputMode,
     resolve_reasoning_effort_options,
     resolve_structured_output_capability,
+    schema_response_format,
     unsupported_structured_output_decision,
 )
 
@@ -232,4 +233,77 @@ def test_decision_rejects_inconsistent_fields() -> None:
             source=StructuredOutputDecisionSource.LITELLM_RESPONSE_SCHEMA,
             supports_response_schema=True,
             supports_response_format=True,
+        )
+
+
+@pytest.mark.parametrize(
+    "keyword", ["uniqueItems", "contains", "$ref", "patternProperties"]
+)
+@pytest.mark.parametrize("provider", ["hosted_vllm", "lm_studio", "openai"])
+def test_unsupported_grammar_uses_existing_json_mode(keyword, provider):
+    schema = {
+        "type": "object",
+        "properties": {"facts": {"type": "array", keyword: True}},
+    }
+    with patch(
+        "eneo.completion_models.infrastructure.tenant_model_capabilities.supports_response_schema",
+        return_value=True,
+    ):
+        assert (
+            schema_response_format(
+                litellm_model=f"{provider}/local-model",
+                provider_type=provider,
+                schema=schema,
+                name="test_output",
+            )
+            is None
+        )
+    assert keyword in schema["properties"]["facts"]
+
+
+@pytest.mark.parametrize("provider", ["hosted_vllm", "vllm"])
+def test_vllm_schema_is_passed_through_litellm_without_mutating_contract(provider):
+    from copy import deepcopy
+
+    from litellm.llms.hosted_vllm.chat.transformation import HostedVLLMChatConfig
+
+    # Property names are data, not schema keywords.
+    schema = {
+        "type": "object",
+        "properties": {"uniqueItems": {"type": "string"}},
+        "required": ["uniqueItems"],
+        "additionalProperties": False,
+    }
+    original = deepcopy(schema)
+    response_format = schema_response_format(
+        litellm_model="hosted_vllm/local-model",
+        provider_type=provider,
+        schema=schema,
+        name="test_output",
+    )
+    sent = HostedVLLMChatConfig().map_openai_params(
+        non_default_params={"response_format": response_format},
+        optional_params={},
+        model="local-model",
+        drop_params=True,
+    )
+    assert sent["response_format"]["type"] == "json_schema"
+    assert sent["response_format"]["json_schema"]["schema"] == original
+    sent["response_format"]["json_schema"]["schema"]["properties"].clear()
+    assert schema == original
+
+
+def test_native_schema_request_requires_support_for_other_providers():
+    with patch(
+        "eneo.completion_models.infrastructure.tenant_model_capabilities.supports_response_schema",
+        return_value=False,
+    ):
+        assert (
+            schema_response_format(
+                litellm_model="custom/model",
+                provider_type="openai",
+                schema={"type": "object"},
+                name="test_output",
+            )
+            is None
         )

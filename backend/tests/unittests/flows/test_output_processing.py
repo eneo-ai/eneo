@@ -36,6 +36,29 @@ def test_parse_json_output_accepts_wrapped_json_object():
     assert result == {"key": "val"}
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        '{"sections": [{"text": "first"}, {"text": "unfinished',
+        'Result:\n{"sections": [{"text": "first"}, {"text": "unfinished',
+        '{"first": true}\n{"second": true}',
+        '{"first": true}\n{"second":',
+        '```json\n{"first": true}\n```\n```json\n{"second": true}\n```',
+    ],
+)
+def test_parse_json_output_does_not_salvage_a_partial_result(text):
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        parse_json_output(text)
+    assert exc_info.value.code == "typed_io_output_parse_failed"
+
+
+def test_parse_json_output_preserves_all_items_in_large_result():
+    import json
+
+    data = {"sections": [{"text": f"Uppgift {index}"} for index in range(3000)]}
+    assert parse_json_output(json.dumps(data, ensure_ascii=False)) == data
+
+
 def test_parse_json_output_empty_response_has_clearer_message():
     with pytest.raises(TypedIOValidationException, match="response was empty"):
         parse_json_output("   \n\t  ")
@@ -86,6 +109,40 @@ def test_validate_against_contract_error_code():
     with pytest.raises(TypedIOValidationException) as exc_info:
         validate_against_contract({}, schema, label="output")
     assert exc_info.value.code == "typed_io_contract_violation"
+
+
+def test_contract_error_locates_nested_wrong_type_without_echoing_records():
+    schema = {
+        "type": "object",
+        "properties": {
+            "areas": {
+                "type": "object",
+                "properties": {"family": {"type": "object"}},
+            }
+        },
+    }
+    data = {"areas": {"family": [{"text": "Private source content"}]}}
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        validate_against_contract(data, schema, label="Step 3 output")
+
+    assert exc_info.value.code == "typed_io_contract_violation"
+    assert "/areas/family" in str(exc_info.value)
+    assert "object" in str(exc_info.value)
+    assert "Private source content" not in str(exc_info.value)
+
+
+def test_contract_error_bounds_record_content_and_escapes_json_pointer():
+    schema = {
+        "type": "object",
+        "properties": {"a/b~c": {"type": "string", "maxLength": 10}},
+    }
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        validate_against_contract({"a/b~c": "Private" * 10000}, schema, label="Output")
+
+    assert "/a~1b~0c" in str(exc_info.value)
+    assert "maxLength" in str(exc_info.value)
+    assert len(str(exc_info.value)) < 500
 
 
 def test_prune_extras_to_strict_schema_drops_extra_item_property():

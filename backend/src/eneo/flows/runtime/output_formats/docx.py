@@ -5,8 +5,8 @@ from eneo.flows.enums import FlowOutputType
 from eneo.flows.runtime.output_formats.base import (
     OutputFormatProcessingContext,
     OutputFormatProcessingResult,
-    document_prefers_native_json_object_mode,
     document_prompt_instructions,
+    document_requests_structured_output,
     process_structured_document_output,
     render_document_output,
 )
@@ -20,10 +20,10 @@ class DocxOutputFormatSpec:
             artifact_name="DOCX", output_contract=output_contract
         )
 
-    def should_request_native_json_object_mode(
+    def requests_structured_output(
         self, output_contract: FlowPersistedJsonObject | None
     ) -> bool:
-        return document_prefers_native_json_object_mode(output_contract)
+        return document_requests_structured_output(output_contract)
 
     def process_model_output(
         self,

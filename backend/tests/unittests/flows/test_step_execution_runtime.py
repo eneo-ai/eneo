@@ -554,6 +554,89 @@ def test_detect_native_json_output_support_uses_litellm_model_name(
     assert captured == ["azure/gpt-4.1-mini"]
 
 
+@pytest.mark.parametrize(
+    ("provider", "model"),
+    [
+        ("hosted_vllm", "locally-hosted-model"),
+        ("vllm", "locally-hosted-model"),
+        ("openai", "gpt-4.1"),
+    ],
+)
+@pytest.mark.parametrize("array_root", [False, True])
+def test_prepared_json_call_includes_nested_output_schema(
+    provider, model, array_root, monkeypatch
+):
+    monkeypatch.setattr(
+        "eneo.completion_models.infrastructure.tenant_model_capabilities.supports_response_schema",
+        lambda **kwargs: True,
+    )
+    monkeypatch.setattr(
+        "eneo.flows.runtime.step_execution_runtime.detect_native_json_output_support",
+        lambda assistant: True,
+    )
+    schema = {
+        "type": "object",
+        "required": ["section"],
+        "additionalProperties": False,
+        "properties": {
+            "section": {
+                "type": "object",
+                "required": ["heading", "facts"],
+                "additionalProperties": False,
+                "properties": {
+                    "heading": {"type": "string"},
+                    "facts": {"type": "array", "items": {"type": "string"}},
+                },
+            }
+        },
+    }
+    if array_root:
+        schema = {"type": "array", "items": schema}
+    original_schema = json.dumps(schema, sort_keys=True)
+    assistant = MagicMock()
+    assistant.completion_model = SimpleNamespace(
+        id=None,
+        name=model,
+        provider_type=provider,
+        litellm_model_name=f"{provider}/{model}",
+        supported_model_kwargs=SupportedModelKwargs(),
+    )
+    assistant.completion_model_kwargs = ModelKwargs()
+    prepared = PreparedStepExecution(
+        assistant=assistant,
+        step_input=StepInputValue(
+            text="Source", source_text="Source", input_source="flow_input"
+        ),
+        effective_prompt=_prompt_for_output_format(
+            output_type="json", output_contract=schema, prompt="Extract the facts"
+        ),
+        input_payload_for_result={"text": "Source"},
+        contract_validation=None,
+        diagnostics=[],
+        llm_files=[],
+    )
+
+    call = build_prepared_completion_call(
+        step=_step(output_type="json", output_contract=schema),
+        state=_state(),
+        prepared=prepared,
+    )
+
+    response_format = call.preferred_model_kwargs.response_format
+    if array_root and provider == "openai":
+        assert response_format is None
+        assert call.effective_prompt == prepared.effective_prompt
+        return
+    assert response_format["type"] == "json_schema"
+    assert response_format["json_schema"]["schema"] == schema
+    assert json.dumps(schema, sort_keys=True) == original_schema
+    assert call.preferred_model_parameters["response_format"] == response_format
+    assert original_schema not in call.effective_prompt
+    assert call.effective_prompt.startswith("Extract the facts")
+    assert "Return ONLY valid JSON" in call.effective_prompt
+    assert call.capability_fallback_prompt == prepared.effective_prompt
+
+
 def test_detect_native_json_output_support_falls_back_to_provider_prefixed_name(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -686,8 +769,10 @@ def test_apply_prompt_context_trace_marks_inserted_sources() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("with_schema", [False, True])
 async def test_complete_step_execution_falls_back_when_json_mode_rejected(
     monkeypatch: pytest.MonkeyPatch,
+    with_schema: bool,
 ):
     monkeypatch.setattr(
         "eneo.flows.runtime.step_execution_runtime.detect_native_json_output_support",
@@ -695,7 +780,12 @@ async def test_complete_step_execution_falls_back_when_json_mode_rejected(
     )
     run = _run()
     state = _state()
-    step = _step(output_type="json")
+    schema = (
+        {"type": "object", "properties": {"ok": {"type": "boolean"}}}
+        if with_schema
+        else None
+    )
+    step = _step(output_type="json", output_contract=schema)
     original_kwargs = ModelKwargs(
         temperature=0.2,
         top_p=0.8,
@@ -705,8 +795,8 @@ async def test_complete_step_execution_falls_back_when_json_mode_rejected(
     assistant.get_prompt_text.return_value = ""
     assistant.completion_model = SimpleNamespace(
         id=None,
-        litellm_model_name="openai/gpt-test",
-        name="gpt-test",
+        litellm_model_name="openai/gpt-4.1",
+        name="gpt-4.1",
         provider_type="openai",
         supported_model_kwargs=SupportedModelKwargs(
             temperature=ModelKwargCapability(supported=True)
@@ -731,7 +821,9 @@ async def test_complete_step_execution_falls_back_when_json_mode_rejected(
             source_text="hello",
             input_source="flow_input",
         ),
-        effective_prompt="Prompt",
+        effective_prompt=_prompt_for_output_format(
+            output_type="json", output_contract=schema, prompt="Prompt"
+        ),
         input_payload_for_result={
             "text": "hello",
             "source_text": "hello",
@@ -759,9 +851,17 @@ async def test_complete_step_execution_falls_back_when_json_mode_rejected(
         state=state,
         prepared=prepared,
     )
-    assert prepared.completion_call.preferred_model_parameters["response_format"] == {
-        "type": "json_object"
-    }
+    assert prepared.completion_call.preferred_model_parameters["response_format"][
+        "type"
+    ] == ("json_schema" if with_schema else "json_object")
+    if with_schema:
+        assert (
+            "Follow this JSON Schema" not in prepared.completion_call.effective_prompt
+        )
+        assert (
+            "Follow this JSON Schema"
+            in prepared.completion_call.capability_fallback_prompt
+        )
     assert prepared.completion_call.preferred_model_parameters["temperature"] == 0.2
     assert prepared.completion_call.preferred_model_parameters["top_p"] is None
     assert prepared.completion_call.capability_fallback_model_parameters is not None
@@ -781,18 +881,48 @@ async def test_complete_step_execution_falls_back_when_json_mode_rejected(
     assert assistant.get_response.await_count == 2
     first_kwargs = assistant.get_response.await_args_list[0].kwargs
     second_kwargs = assistant.get_response.await_args_list[1].kwargs
-    assert first_kwargs["model_kwargs"].response_format == {"type": "json_object"}
+    assert first_kwargs["model_kwargs"].response_format["type"] == (
+        "json_schema" if with_schema else "json_object"
+    )
+    assert first_kwargs["prompt_override"] == prepared.completion_call.effective_prompt
+    assert second_kwargs["prompt_override"] == prepared.effective_prompt
+    assert output.effective_prompt == prepared.effective_prompt
     assert first_kwargs["model_kwargs"].top_p is None
     assert second_kwargs["model_kwargs"].response_format is None
     assert second_kwargs["model_kwargs"].temperature == 0.2
     assert second_kwargs["model_kwargs"].top_p is None
-    assert state.json_mode_supported["openai:gpt-test:none"] is False
+    if with_schema:
+        assert state.json_mode_supported.get("openai:gpt-4.1:none") is not False
+        assert "openai:gpt-4.1:none" in state.json_schema_rejected_models
+    else:
+        assert state.json_mode_supported["openai:gpt-4.1:none"] is False
     assert output.structured_output == {"ok": True}
     assert output.full_text == '{"ok": true}'
     assert (
         output.model_parameters_json
         == prepared.completion_call.capability_fallback_model_parameters
     )
+
+    if with_schema:
+        next_step = _step(step_order=2, output_type="json", output_contract=schema)
+        prepared.completion_call = build_prepared_completion_call(
+            step=next_step, state=state, prepared=prepared
+        )
+        assistant.get_response.side_effect = None
+        assistant.get_response.return_value = SimpleNamespace(
+            total_token_count=4, completion='{"ok": true}'
+        )
+        await complete_step_execution(
+            step=next_step, run=run, state=state, prepared=prepared, deps=deps
+        )
+        assert assistant.get_response.await_count == 3
+        assert assistant.get_response.await_args.kwargs[
+            "model_kwargs"
+        ].response_format == {"type": "json_object"}
+        assert (
+            assistant.get_response.await_args.kwargs["prompt_override"]
+            == prepared.effective_prompt
+        )
 
 
 @pytest.mark.asyncio
@@ -1962,12 +2092,13 @@ async def test_complete_step_execution_skips_native_json_mode_when_capability_is
 async def test_complete_step_execution_does_not_force_json_object_for_array_document_contract(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def _unexpected_json_mode_detection(assistant_obj: object) -> bool | None:
-        raise AssertionError("array schemas must not request json_object mode")
-
     monkeypatch.setattr(
         "eneo.flows.runtime.step_execution_runtime.detect_native_json_output_support",
-        _unexpected_json_mode_detection,
+        lambda assistant: None,
+    )
+    monkeypatch.setattr(
+        "eneo.flows.runtime.step_execution_runtime.schema_response_format",
+        lambda **kwargs: None,
     )
     run = _run()
     state = _state()

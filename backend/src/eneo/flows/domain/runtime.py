@@ -171,6 +171,7 @@ class RunExecutionState:
     assistant_cache: dict[UUID | tuple[UUID, str], Any]
     json_mode_supported: dict[str, bool]
     file_cache: dict[frozenset[UUID], list[File]]
+    json_schema_rejected_models: set[str] = field(default_factory=set[str])
     flow_id: UUID | None = None
     flow_space: Space | None = None
     collection_cache: dict[UUID, Collection] = field(

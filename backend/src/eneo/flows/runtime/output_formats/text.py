@@ -13,7 +13,7 @@ class TextOutputFormatSpec:
     ) -> tuple[str, ...]:
         return ()
 
-    def should_request_native_json_object_mode(
+    def requests_structured_output(
         self, output_contract: FlowPersistedJsonObject | None
     ) -> bool:
         return False

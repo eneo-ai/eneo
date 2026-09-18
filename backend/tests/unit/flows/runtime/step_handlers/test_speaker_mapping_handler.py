@@ -111,7 +111,7 @@ def harness(monkeypatch):
             capability_fallback_model_kwargs=None,
             capability_fallback_model_parameters=None,
             assistant_context_version=1,
-            preferred_native_json_object=False,
+            preferred_native_json_format=False,
         )
 
     monkeypatch.setattr(handler_module, "build_prepared_completion_call", fake_call)
