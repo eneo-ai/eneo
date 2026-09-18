@@ -111,7 +111,11 @@
       >
         {#if otherDraftCount > 0}
           <span class="text-secondary">{m.ai_builder_task_drafts_question()}</span>
-          <Button variant="link" class="h-auto p-0 text-xs font-semibold" href={flowsHref}>
+          <Button
+            variant="link"
+            class="text-accent-stronger h-auto p-0 text-xs font-semibold"
+            href={flowsHref}
+          >
             {otherDraftCount === 1
               ? m.ai_builder_task_drafts_link_one()
               : m.ai_builder_task_drafts_link({ count: String(otherDraftCount) })}
@@ -119,7 +123,11 @@
         {/if}
         <span class="text-secondary ml-auto max-sm:ml-0">
           {m.ai_builder_task_manual_question()}
-          <Button variant="link" class="h-auto p-0 text-xs font-semibold" href={flowsHref}>
+          <Button
+            variant="link"
+            class="text-accent-stronger h-auto p-0 text-xs font-semibold"
+            href={flowsHref}
+          >
             {m.ai_builder_task_manual_link()}
           </Button>
         </span>
