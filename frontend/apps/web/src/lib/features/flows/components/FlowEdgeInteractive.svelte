@@ -190,7 +190,7 @@
      focusable; focus-within then reveals them. */
   :global(.edge-label-actions) {
     opacity: 0;
-    transition: opacity 150ms ease;
+    transition: opacity var(--duration-quick) var(--ease-out);
     pointer-events: none;
   }
 
@@ -210,7 +210,7 @@
   :global(.flow-dot) {
     fill: var(--border-stronger);
     opacity: 0;
-    transition: opacity 150ms ease;
+    transition: opacity var(--duration-quick) var(--ease-out);
   }
 
   :global(.svelte-flow__edge:hover) :global(.flow-dot),

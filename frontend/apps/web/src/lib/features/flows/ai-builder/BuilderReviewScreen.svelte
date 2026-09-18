@@ -1949,12 +1949,12 @@
   .success-tick {
     stroke-dasharray: 64;
     stroke-dashoffset: 64;
-    animation: success-draw 0.42s var(--ease-smooth-out) forwards;
+    animation: success-draw var(--duration-very-slow) var(--ease-smooth-out) forwards;
   }
   .success-tick {
     stroke-dasharray: 16;
     stroke-dashoffset: 16;
-    animation-delay: 0.22s;
+    animation-delay: calc(var(--duration-very-slow) * 0.52);
   }
   @keyframes success-draw {
     to {
@@ -1973,7 +1973,7 @@
   .progress-ring {
     border-color: var(--border-default);
     border-top-color: var(--accent-default);
-    animation: builder-spin 1s linear infinite;
+    animation: builder-spin 1s var(--ease-linear) infinite;
   }
 
   @keyframes builder-spin {

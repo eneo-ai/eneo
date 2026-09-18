@@ -62,14 +62,14 @@
     >
       {#if phase === "created"}
         <span
-          class="text-positive-default motion-safe:animate-in motion-safe:fade-in-0 flex items-center gap-2 motion-safe:duration-200"
+          class="text-positive-default motion-safe:animate-in motion-safe:fade-in-0 flex items-center gap-2 motion-safe:duration-(--duration-fast)"
         >
           <IconCheck class="size-4 shrink-0" aria-hidden="true" />
           {m.ai_builder_approve_dialog_created()}
         </span>
       {:else if phase === "pending"}
         <span
-          class="motion-safe:animate-in motion-safe:fade-in-0 flex items-center gap-2 motion-safe:duration-200"
+          class="motion-safe:animate-in motion-safe:fade-in-0 flex items-center gap-2 motion-safe:duration-(--duration-fast)"
         >
           <IconLoaderCircle
             class="text-accent-stronger size-4 shrink-0 animate-spin motion-reduce:animate-none"
