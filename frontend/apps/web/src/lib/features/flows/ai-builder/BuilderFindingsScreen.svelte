@@ -377,7 +377,7 @@
                 <Tooltip.Provider delayDuration={150}>
                   <Tooltip.Root>
                     <Tooltip.Trigger
-                      class="text-secondary hover:text-primary focus-visible:ring-accent-stronger inline-flex size-5 items-center justify-center rounded-full focus-visible:ring-2 focus-visible:outline-none"
+                      class="text-secondary hover:text-primary focus-visible:ring-ring -my-0.5 inline-flex size-[24px] items-center justify-center rounded-full focus-visible:ring-2 focus-visible:outline-none"
                       aria-label={readingNote}
                     >
                       <IconInfo class="size-3.5" aria-hidden="true" />
