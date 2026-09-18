@@ -15,7 +15,7 @@
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
-  import * as Select from "$lib/components/ui/select/index.js";
+  import RetentionTargetCombobox from "./RetentionTargetCombobox.svelte";
   import * as Table from "$lib/components/ui/table/index.js";
   import { toastError } from "$lib/core/errors";
   import { getEneo } from "$lib/core/Eneo";
@@ -342,82 +342,44 @@
         <Field.Label for="flow-retention-space-select">
           {m.flow_run_retention_select_space()}
         </Field.Label>
-        <Select.Root
-          type="single"
-          bind:value={() => selectedSpaceId, chooseSpace}
+        <RetentionTargetCombobox
+          id="flow-retention-space-select"
+          label={m.flow_run_retention_select_space()}
+          placeholder={m.flow_run_retention_select_space_placeholder()}
+          items={sortedSpaces}
+          value={selectedSpaceId}
           disabled={scopeLoading}
-        >
-          <Select.Trigger
-            id="flow-retention-space-select"
-            class="w-full"
-            aria-label={m.flow_run_retention_select_space()}
-          >
-            <span class="truncate">
-              {selectedSpaceId
-                ? selectedSpaceName()
-                : m.flow_run_retention_select_space_placeholder()}
-            </span>
-          </Select.Trigger>
-          <Select.Content>
-            {#each sortedSpaces as space (space.id)}
-              <Select.Item value={space.id} label={space.name}>{space.name}</Select.Item>
-            {/each}
-          </Select.Content>
-        </Select.Root>
+          loading={spaceTargetsLoading}
+          hasMore={spacesHaveMore}
+          loadMoreLabel={m.flow_run_retention_load_more_spaces()}
+          onSelect={chooseSpace}
+          onLoadMore={loadMoreSpaces}
+        />
         <Field.Description>{m.flow_run_retention_select_space_description()}</Field.Description>
-        {#if spacesHaveMore}
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            disabled={spaceTargetsLoading}
-            onclick={loadMoreSpaces}
-          >
-            {m.flow_run_retention_load_more_spaces()}
-          </Button>
-        {/if}
       </Field.Field>
 
       <Field.Field>
         <Field.Label for="flow-retention-flow-select">
           {m.flow_run_retention_select_flow()}
         </Field.Label>
-        <Select.Root
-          type="single"
-          bind:value={() => selectedFlowId, chooseFlow}
+        <RetentionTargetCombobox
+          id="flow-retention-flow-select"
+          label={m.flow_run_retention_select_flow()}
+          placeholder={m.flow_run_retention_select_flow_placeholder()}
+          items={sortedFlows}
+          value={selectedFlowId}
           disabled={!selectedSpaceId || scopeLoading || sortedFlows.length === 0}
-        >
-          <Select.Trigger
-            id="flow-retention-flow-select"
-            class="w-full"
-            aria-label={m.flow_run_retention_select_flow()}
-          >
-            <span class="truncate">
-              {selectedFlowId ? selectedFlowName() : m.flow_run_retention_select_flow_placeholder()}
-            </span>
-          </Select.Trigger>
-          <Select.Content>
-            {#each sortedFlows as flow (flow.id)}
-              <Select.Item value={flow.id} label={flow.name}>{flow.name}</Select.Item>
-            {/each}
-          </Select.Content>
-        </Select.Root>
+          loading={flowTargetsLoading}
+          hasMore={Boolean(selectedSpaceId) && flowsHaveMore}
+          loadMoreLabel={m.flow_run_retention_load_more_flows()}
+          onSelect={chooseFlow}
+          onLoadMore={loadMoreFlows}
+        />
         <Field.Description>
           {selectedSpaceId && sortedFlows.length === 0 && !scopeLoading
             ? m.flow_run_retention_space_has_no_flows()
             : m.flow_run_retention_select_flow_description()}
         </Field.Description>
-        {#if selectedSpaceId && flowsHaveMore}
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            disabled={flowTargetsLoading}
-            onclick={loadMoreFlows}
-          >
-            {m.flow_run_retention_load_more_flows()}
-          </Button>
-        {/if}
       </Field.Field>
     </div>
 

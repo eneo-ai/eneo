@@ -335,14 +335,14 @@ describe("flow settings page — mapped restore lifecycle", () => {
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
     render(FlowSettingsPage, pageProps());
 
-    await page.getByRole("button", { name: "Yta", exact: true }).click();
+    await page.getByRole("combobox", { name: "Yta" }).click();
     await page.getByRole("option", { name: "Inköp" }).click();
     await expect.element(page.getByText("Policy för ytan: Inköp")).toBeVisible();
 
-    await page.getByLabelText("Gallringsbeteende för Yta").click();
+    await page.getByLabelText("Gallringsbeteende för ytan").click();
     await page.getByRole("option", { name: "Granska före gallring" }).click();
 
-    await page.getByRole("button", { name: "Yta", exact: true }).click();
+    await page.getByRole("combobox", { name: "Yta" }).click();
     await page.getByRole("option", { name: "Juridik" }).click();
 
     expect(confirmSpy).toHaveBeenCalledOnce();
@@ -392,17 +392,20 @@ describe("flow settings page — mapped restore lifecycle", () => {
       } as never
     });
 
-    await page.getByRole("button", { name: "Ladda fler ytor" }).click();
+    // Loading the next page happens inside the open list, so the admin never
+    // loses their place to fetch more.
+    await page.getByRole("combobox", { name: "Yta" }).click();
+    await page.getByRole("option", { name: "Ladda fler ytor" }).click();
     expect(listFlowRunRetentionSpaceTargets).toHaveBeenCalledExactlyOnceWith({
       limit: 200,
       offset: 2
     });
 
-    await page.getByRole("button", { name: "Yta", exact: true }).click();
     await expect.element(page.getByRole("option", { name: "Ekonomi" })).toBeVisible();
     await page.getByRole("option", { name: "Inköp" }).click();
-    await expect.element(page.getByRole("button", { name: "Ladda fler flöden" })).toBeVisible();
-    await page.getByRole("button", { name: "Ladda fler flöden" }).click();
+
+    await page.getByRole("combobox", { name: "Flöde" }).click();
+    await page.getByRole("option", { name: "Ladda fler flöden" }).click();
 
     expect(listFlowRunRetentionFlowTargets).toHaveBeenNthCalledWith(1, {
       spaceId: "space-1",

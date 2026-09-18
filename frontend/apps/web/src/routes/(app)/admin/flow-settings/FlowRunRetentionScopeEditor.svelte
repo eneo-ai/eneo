@@ -94,6 +94,33 @@
       : m.flow_run_retention_mode_review_description();
   }
 
+  const LEVELS = ["organization", "space", "flow"] as const;
+
+  /**
+   * The card already resolves inheritance into one badge; this says how it got
+   * there. `contributors` is computed server-side and was not shown anywhere,
+   * so the three levels were only ever described in prose — four times over on
+   * this tab. Levels below the card's own scope are not its business.
+   */
+  const chain = $derived.by(() => {
+    const upto = LEVELS.indexOf(settings.scope) + 1;
+    return LEVELS.slice(0, upto).map((level) => {
+      const own = settings.effective.contributors?.[level] ?? null;
+      return {
+        level,
+        name: bareScopeLabel(level),
+        value: own ? `${own.days} ${m.flow_retention_days_suffix()}` : null,
+        wins: settings.effective.state !== "off" && settings.effective.source === level
+      };
+    });
+  });
+
+  function bareScopeLabel(scope: "organization" | "space" | "flow"): string {
+    if (scope === "organization") return m.flow_run_retention_scope_organization();
+    if (scope === "space") return m.flow_run_retention_scope_space();
+    return m.flow_run_retention_scope_flow();
+  }
+
   function effectiveSummary(): string {
     if (settings.effective.state === "off") {
       return m.flow_run_retention_effective_off();
@@ -194,6 +221,27 @@
             })}
       </Field.Description>
     </Field.Field>
+    {#if chain.length > 1}
+      <div class="col-span-full">
+        <p class="text-secondary text-xs font-medium">{m.flow_run_retention_chain_title()}</p>
+        <ol class="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs">
+          {#each chain as step, i (step.level)}
+            {#if i > 0}
+              <li aria-hidden="true" class="text-muted">›</li>
+            {/if}
+            <li class={step.wins ? "text-primary font-medium" : "text-secondary"}>
+              {step.name}
+              <span class="text-muted">
+                {step.value ?? m.flow_run_retention_level_inherits()}
+              </span>
+              {#if step.wins}
+                <span class="text-muted">· {m.flow_run_retention_level_applies()}</span>
+              {/if}
+            </li>
+          {/each}
+        </ol>
+      </div>
+    {/if}
   </Card.Content>
   <!--
     Committing a retention policy is the card's one action, and its label carries
