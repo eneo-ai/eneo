@@ -135,7 +135,12 @@
       <Badge variant="secondary">{effectiveSummary()}</Badge>
     </div>
   </Card.Header>
-  <Card.Content class="grid gap-4 md:grid-cols-[minmax(0,1fr)_12rem_auto] md:items-end">
+  <!--
+    The two fields start on the same line so their labels and controls align;
+    bottom-aligning them instead staggered the labels, because the help text
+    under each one is a different number of lines.
+  -->
+  <Card.Content class="grid gap-x-6 gap-y-4 md:grid-cols-[minmax(0,1fr)_12rem] md:items-start">
     <Field.Field>
       <Field.Label for={`flow-retention-mode-${settings.scope}`}>
         {m.flow_run_retention_behavior_label()}
@@ -189,11 +194,17 @@
             })}
       </Field.Description>
     </Field.Field>
-
+  </Card.Content>
+  <!--
+    Committing a retention policy is the card's one action, and its label carries
+    the scope, so it needs a full row rather than a grid cell sized to whatever
+    the scope noun happens to be in this locale.
+  -->
+  <Card.Footer class="border-default justify-end">
     <Button type="button" disabled={!dirty || !valid || saving} onclick={save}>
       {saving
         ? m.flow_run_retention_saving()
         : m.flow_run_retention_save_scope({ scope: scopeLabel() })}
     </Button>
-  </Card.Content>
+  </Card.Footer>
 </Card.Root>
