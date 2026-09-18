@@ -254,7 +254,7 @@
               <Button
                 variant="link"
                 size="sm"
-                class="mt-1 h-auto min-h-[24px] px-0 py-1"
+                class="text-accent-stronger mt-1 h-auto min-h-[24px] px-0 py-1"
                 aria-expanded={promptExpanded}
                 onclick={() => (promptExpanded = !promptExpanded)}
               >

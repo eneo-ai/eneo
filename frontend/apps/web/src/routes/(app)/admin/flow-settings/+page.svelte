@@ -258,10 +258,9 @@
   // that as "N calls cover N-1 files" left the arithmetic to the reader; with a
   // value entered, state the file count outright.
   const mappedCallsHint = $derived.by(() => {
-    const base = m.flow_mapped_execution_calls_description();
     const calls = mappedCalls.value;
-    if (calls == null || calls < 2) return base;
-    return `${base} ${m.flow_mapped_execution_calls_files_hint({ calls, files: calls - 1 })}`;
+    if (calls == null || calls < 2) return m.flow_mapped_execution_calls_description();
+    return m.flow_mapped_execution_calls_files_hint({ calls, files: calls - 1 });
   });
 
   const builderMessagePages = $derived(
@@ -446,6 +445,13 @@
     -->
     <p class="text-secondary mx-auto w-full max-w-[1180px] px-6 pt-4 text-sm lg:px-4">
       {m.flow_settings_page_description()}
+      <Button
+        variant="link"
+        href="/admin/audit-logs?actions=tenant_settings_updated,flow_run_retention_policy_changed"
+        class="text-secondary hover:text-primary h-auto p-0 text-sm underline underline-offset-2"
+      >
+        {m.flow_settings_changes_are_logged()}
+      </Button>
     </p>
     <Page.Tab id="retention">
       <FlowRunRetentionPolicyPanel
@@ -499,6 +505,7 @@
             description={m.flow_input_limits_file_description()}
             placeholder={m.flow_input_limits_deployment_default_hint()}
             unit="MiB"
+            info={m.flow_input_limits_file_info()}
             hint={m.flow_input_limits_ceiling_hint({
               ceiling: `${Math.floor(initial.flowInputLimits.file_max_size_ceiling_bytes / MB)} MiB`
             })}
@@ -522,6 +529,7 @@
             description={m.flow_input_limits_audio_description()}
             placeholder={m.flow_input_limits_deployment_default_hint()}
             unit="MiB"
+            info={m.flow_input_limits_audio_info()}
             hint={audioCeilingHint}
             field={audioMaxSize}
           />
@@ -529,6 +537,7 @@
             title={m.flow_input_limits_audio_max_files_title()}
             description={m.flow_input_limits_audio_max_files_description()}
             placeholder={m.flow_input_limits_deployment_default_hint()}
+            info={m.flow_input_limits_audio_max_files_info()}
             field={audioMaxFiles}
           />
         </Settings.Group>
@@ -674,7 +683,7 @@
             {:else}
               <Button
                 variant="link"
-                class="w-fit px-0"
+                class="text-accent-stronger w-fit px-0"
                 onclick={restoreMappedDefault}
                 disabled={saving}
               >

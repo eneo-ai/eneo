@@ -200,7 +200,10 @@
     the scope, so it needs a full row rather than a grid cell sized to whatever
     the scope noun happens to be in this locale.
   -->
-  <Card.Footer class="border-default justify-end">
+  <Card.Footer class="border-default justify-between gap-3">
+    <p class="text-secondary text-xs">
+      {#if !dirty}{m.flow_run_retention_no_changes()}{/if}
+    </p>
     <Button type="button" disabled={!dirty || !valid || saving} onclick={save}>
       {saving
         ? m.flow_run_retention_saving()

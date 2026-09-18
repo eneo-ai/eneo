@@ -1341,7 +1341,12 @@
                 ? m.flow_technical_settings_count_one()
                 : m.flow_technical_settings_count_many({ count: technicalSettingsCount })}
             </p>
-            <Button variant="link" size="sm" class="h-auto px-0" onclick={showTechnicalSettings}>
+            <Button
+              variant="link"
+              size="sm"
+              class="text-accent-stronger h-auto px-0"
+              onclick={showTechnicalSettings}
+            >
               {m.flow_show_in_advanced()}
             </Button>
           </div>

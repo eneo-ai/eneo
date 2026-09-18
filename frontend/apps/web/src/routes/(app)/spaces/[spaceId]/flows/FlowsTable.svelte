@@ -272,7 +272,11 @@
               <Table.Cell colspan={5} class="px-6 py-9 text-center whitespace-normal">
                 {#if query.trim()}
                   <p class="text-primary text-sm font-semibold">{m.flow_list_no_match_title()}</p>
-                  <Button variant="link" class="mt-1 h-auto p-0" onclick={() => (query = "")}>
+                  <Button
+                    variant="link"
+                    class="text-accent-stronger mt-1 h-auto p-0"
+                    onclick={() => (query = "")}
+                  >
                     {m.flow_list_clear_search()}
                   </Button>
                 {:else}
@@ -281,7 +285,11 @@
                       ? m.flow_list_no_published_title()
                       : m.flow_list_no_drafts_title()}
                   </p>
-                  <Button variant="link" class="mt-1 h-auto p-0" onclick={() => (filter = "all")}>
+                  <Button
+                    variant="link"
+                    class="text-accent-stronger mt-1 h-auto p-0"
+                    onclick={() => (filter = "all")}
+                  >
                     {m.flow_list_show_all()}
                   </Button>
                 {/if}

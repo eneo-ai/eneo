@@ -664,7 +664,7 @@
                       <Button
                         variant="link"
                         size="xs"
-                        class="mt-0.5 h-auto self-start px-0 font-medium"
+                        class="text-accent-stronger mt-0.5 h-auto self-start px-0 font-medium"
                         onclick={() => addOption(index)}
                       >
                         <IconPlus class="size-3" aria-hidden="true" />

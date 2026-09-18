@@ -108,7 +108,7 @@
                   <Button
                     variant="link"
                     size="sm"
-                    class="h-auto p-0 text-xs"
+                    class="text-accent-stronger h-auto p-0 text-xs"
                     disabled={isPublished}
                     onclick={() => replaceHeaderSecret(i)}
                   >
@@ -154,7 +154,7 @@
             <Button
               variant="link"
               size="sm"
-              class="h-auto p-0 text-xs font-medium"
+              class="text-accent-stronger h-auto p-0 text-xs font-medium"
               disabled={isPublished}
               onclick={addHeader}
             >

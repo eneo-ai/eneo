@@ -543,7 +543,7 @@
               {#if hiddenCount > 0}
                 <Button
                   variant="link"
-                  class="mt-1 h-auto p-0 text-xs font-semibold"
+                  class="text-accent-stronger mt-1 h-auto p-0 text-xs font-semibold"
                   onclick={showHidden}
                 >
                   {m.ai_builder_review_show_hidden({ count: String(hiddenCount) })}
