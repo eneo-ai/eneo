@@ -197,8 +197,9 @@
           <Button
             variant="outline"
             size="sm"
-            class="rounded-full font-medium max-sm:h-[44px] max-sm:px-4 {filter === option.value
-              ? 'border-stronger bg-tertiary text-primary'
+            class="focus-visible:ring-accent-default h-8 rounded-full px-3.5 font-medium max-sm:h-[44px] max-sm:px-4 {filter ===
+            option.value
+              ? 'border-accent-default/40 bg-accent-default/10 text-accent-stronger hover:bg-accent-default/15 hover:text-accent-stronger'
               : 'text-secondary'}"
             aria-pressed={filter === option.value}
             onclick={() => (filter = option.value)}
@@ -294,7 +295,7 @@
                   <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing for dynamic paths -->
                   <a
                     href={rowHref(row)}
-                    class="text-primary focus-visible:ring-ring/40 truncate rounded-sm text-[0.875rem] font-semibold outline-none focus-visible:ring-2"
+                    class="text-primary focus-visible:ring-accent-default relative truncate rounded-sm text-[0.875rem] font-semibold outline-none before:absolute before:-inset-y-[2.5px] before:content-[''] focus-visible:ring-2"
                   >
                     {rowName(row)}
                   </a>
