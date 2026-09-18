@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -1059,6 +1060,7 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
         "expected_flow_version": flow["published_version"],
         "input_payload_json": {"text": "hello"},
         "step_inputs": {},
+        "run_label": "  A\u030arende a\u0308 o\u0308  ",
     }
     idempotency_key = f"flow-run:{uuid4().hex}"
     first_run_response = await client.post(
@@ -1072,6 +1074,7 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
     assert first_run_response.status_code == 201, first_run_response.text
     first_run = first_run_response.json()
     assert first_run["input_payload_json"] == {"text": "hello"}
+    assert first_run["run_label"] == "Årende ä ö"
     assert [request[0] for request in dispatch_requests] == [UUID(first_run["id"])]
 
     immediate_poll_response = await client.get(
@@ -1086,6 +1089,7 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
     assert "input_payload_json" not in immediate_poll
     assert "result" not in immediate_poll
     assert "result_files" not in immediate_poll
+    assert "run_label" not in immediate_poll
     assert "error" not in immediate_poll
 
     immediate_detail_response = await client.get(
@@ -1098,6 +1102,7 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
     immediate_detail = immediate_detail_response.json()
     assert immediate_detail["input_payload_json"] == {"text": "hello"}
     assert immediate_detail["result"] is None
+    assert immediate_detail["run_label"] == "Årende ä ö"
 
     replay_response = await client.post(
         f"/api/v1/flows/{flow_id}/runs/",
@@ -1125,16 +1130,30 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
     assert conflict_response.status_code == 400, conflict_response.text
     assert conflict_response.json()["code"] == "flow_run_idempotency_conflict"
 
+    label_conflict = await client.post(
+        f"/api/v1/flows/{flow_id}/runs/",
+        json={**run_payload, "run_label": "Another case"},
+        headers={
+            "Authorization": f"Bearer {admin_token}",
+            "Idempotency-Key": idempotency_key,
+        },
+    )
+    assert label_conflict.status_code == 400, label_conflict.text
+    assert label_conflict.json()["code"] == "flow_run_idempotency_conflict"
+
     second_run_response = await client.post(
         f"/api/v1/flows/{flow_id}/runs/",
         json={
             "expected_flow_version": flow["published_version"],
             "input_payload_json": {"text": "second"},
+            "run_label": "Årende ä ö",
         },
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert second_run_response.status_code == 201, second_run_response.text
     second_run = second_run_response.json()
+    assert second_run["run_label"] == first_run["run_label"]
+    assert second_run["id"] != first_run["id"]
     assert [request[0] for request in dispatch_requests] == [
         UUID(first_run["id"]),
         UUID(second_run["id"]),
@@ -1152,6 +1171,7 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
     assert "input_payload_json" not in list_payload["items"][0]
     assert "result" not in list_payload["items"][0]
     assert "result_files" not in list_payload["items"][0]
+    assert "run_label" not in list_payload["items"][0]
     assert "error" not in list_payload["items"][0]
 
     detail_response = await client.get(
@@ -2884,3 +2904,40 @@ async def test_flow_service_key_can_drive_human_review_runtime_paths(
     assert resumed_payload["checkpoint"]["id"] == checkpoint_id
     assert resumed_payload["checkpoint"]["decided_by_principal_type"] == "service_key"
     assert resumed_payload["run"]["id"] == run["id"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_run_label_validation_uses_existing_error_response(
+    client, admin_token, monkeypatch
+):
+    dispatch = AsyncMock()
+    monkeypatch.setattr(
+        flow_run_lifecycle_router,
+        "dispatch_flow_run_recoverably_after_commit",
+        dispatch,
+    )
+    space_id = await _create_space(client, token=admin_token)
+    flow = await _create_published_flow(client, token=admin_token, space_id=space_id)
+    for label in ["", "  ", "a\nb", "a\x00b", "x" * 121]:
+        response = await client.post(
+            f"/api/v1/flows/{flow['id']}/runs/",
+            json={"run_label": label, "input_payload_json": {"text": "hello"}},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert response.status_code == 422, response.text
+        assert response.json()["eneo_error_code"] == 9012
+        assert response.json()["code"] == "validation_error"
+    dispatch.assert_not_awaited()
+    assert (
+        await _flow_run_first_page_count(client, flow_id=flow["id"], token=admin_token)
+        == 0
+    )
+    for label_fields in [{}, {"run_label": None}]:
+        response = await client.post(
+            f"/api/v1/flows/{flow['id']}/runs/",
+            json={"input_payload_json": {"text": "hello"}, **label_fields},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["run_label"] is None

@@ -256,6 +256,8 @@ def test_flow_run_public_examples_exactly_match_their_typed_contracts() -> None:
         FlowRunSummaryPublic.model_fields
     )
     assert set(FLOW_RUN_PUBLIC_EXAMPLE) == set(FlowRunPublic.model_fields)
+    assert "run_label" not in FlowRunSummaryPublic.model_fields
+    assert "run_label" in FlowRunPublic.model_fields
     assert "error" not in FlowRunSummaryPublic.model_fields
     assert "error" in FlowRunPublic.model_fields
     assert summary.id == detail.id

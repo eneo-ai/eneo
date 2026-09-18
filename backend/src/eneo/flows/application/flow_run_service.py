@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import unicodedata
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Sequence
@@ -98,7 +99,7 @@ from eneo.flows.published_definition import (
 )
 from eneo.flows.published_runtime import load_published_definition
 from eneo.main.config import get_settings
-from eneo.main.exceptions import NotFoundException
+from eneo.main.exceptions import NotFoundException, ValidationException
 from eneo.settings.setting_service import SettingService
 from eneo.users.user import UserInDB
 
@@ -177,6 +178,7 @@ class _PublishedRunDefinition:
 @dataclass(frozen=True)
 class _PreparedRunCreation:
     input_payload_json: FlowPersistedJsonObject | None
+    run_label: str | None
     preseed_steps: list[PreseedStep]
     step_input_files: list[FlowRunStepInputFileProjection]
     request_fingerprint: str
@@ -292,6 +294,7 @@ class FlowRunService:
         *,
         flow_id: UUID,
         input_payload_json: FlowPersistedJsonObject | None,
+        run_label: str | None = None,
         expected_flow_version: int | None = None,
         step_inputs: FlowRunStepInputs | None = None,
         idempotency_key: str | None = None,
@@ -299,6 +302,20 @@ class FlowRunService:
         purpose: FlowRunPurpose = FlowRunPurpose.PRODUCTION,
     ) -> CreateRunResult:
         idempotency_key = self._validate_idempotency_key(idempotency_key)
+        if run_label is not None:
+            run_label = unicodedata.normalize("NFC", run_label)
+            if any(
+                unicodedata.category(char) in {"Cc", "Cf", "Cs", "Zl", "Zp"}
+                for char in run_label
+            ):
+                raise ValidationException(
+                    "run_label must be a single line without control characters."
+                )
+            run_label = run_label.strip()
+            if not 1 <= len(run_label) <= 120:
+                raise ValidationException(
+                    "run_label must contain between 1 and 120 characters."
+                )
         principal = self._principal()
         published = await self._load_published_run_definition(
             flow_id=flow_id,
@@ -311,6 +328,7 @@ class FlowRunService:
             definition=published.definition,
             principal=principal,
             input_payload_json=input_payload_json,
+            run_label=run_label,
             step_inputs=step_inputs,
             purpose=purpose,
         )
@@ -332,6 +350,7 @@ class FlowRunService:
                     flow_id=flow_id,
                     flow_version=published.flow_version,
                     input_payload_json=payload,
+                    run_label=run_label,
                     step_input_files=prepared.step_input_files,
                     purpose=purpose,
                 ),
@@ -409,6 +428,7 @@ class FlowRunService:
         definition: PublishedFlowDefinition,
         principal: FlowPrincipal,
         input_payload_json: FlowPersistedJsonObject | None,
+        run_label: str | None,
         step_inputs: FlowRunStepInputs | None,
         purpose: FlowRunPurpose,
     ) -> _PreparedRunCreation:
@@ -471,6 +491,7 @@ class FlowRunService:
             flow_id=flow_id,
             flow_version=flow_version,
             input_payload_json=prepared_payload,
+            run_label=run_label,
             step_input_files=step_input_file_projections,
             purpose=purpose,
         )
@@ -481,6 +502,7 @@ class FlowRunService:
         )
         return _PreparedRunCreation(
             input_payload_json=prepared_payload,
+            run_label=run_label,
             preseed_steps=preseed_steps,
             step_input_files=step_input_file_projections,
             request_fingerprint=request_fingerprint,
@@ -564,6 +586,7 @@ class FlowRunService:
                 runtime_service_permission=self._runtime_service_permission(principal),
                 tenant_id=self.user.tenant_id,
                 input_payload_json=prepared.input_payload_json,
+                run_label=prepared.run_label,
                 preseed_steps=prepared.preseed_steps,
                 step_input_files=prepared.step_input_files,
                 idempotency_key=idempotency_key,
@@ -587,17 +610,12 @@ class FlowRunService:
         flow_id: UUID,
         flow_version: int,
         input_payload_json: FlowPersistedJsonObject | None,
+        run_label: str | None = None,
         step_input_files: Sequence[FlowRunStepInputFileProjection] | None = None,
         purpose: FlowRunPurpose = FlowRunPurpose.PRODUCTION,
     ) -> str:
-        # A production request fingerprints exactly as it did before purpose
-        # existed, so an accepted request retried across this upgrade still
-        # replays its run instead of conflicting and being run a second time.
-        # A test request carries its purpose and therefore never matches a
-        # production request's fingerprint: reusing one key for both is the
-        # conflict it has always been, never a silent replay of the other.
         normalized = {
-            "request_fingerprint_algo_version": 3,
+            "request_fingerprint_algo_version": 4,
             **(
                 {"purpose": purpose.value}
                 if purpose is not FlowRunPurpose.PRODUCTION
@@ -618,6 +636,7 @@ class FlowRunService:
             "flow_id": str(flow_id),
             "flow_version": flow_version,
             "input_payload_json": input_payload_json,
+            "run_label": run_label,
             "step_input_files": _normalize_step_input_files_for_fingerprint(
                 step_input_files
             ),

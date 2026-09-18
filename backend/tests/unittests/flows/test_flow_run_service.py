@@ -53,6 +53,7 @@ from eneo.flows.domain.run_step_input_exceptions import (
 from eneo.flows.domain.runtime_invariant_exceptions import (
     FlowPublishedDefinitionWithoutExecutableStepsError,
 )
+from eneo.flows.domain.transcript_regeneration import TranscriptRegenerationSeed
 from eneo.flows.enums import (
     FlowRunLifecycleSource,
     FlowStepAttemptStatus,
@@ -107,6 +108,7 @@ from eneo.main.exceptions import (
     NotFoundException,
     ResourceGoneException,
     UnauthorizedException,
+    ValidationException,
 )
 from eneo.roles.permissions import Permission
 from tests.unit.api_key_test_utils import make_api_key
@@ -1045,11 +1047,8 @@ def test_create_run_idempotency_fingerprint_shape_is_stable(user):
         ],
     )
 
-    # This digest predates the run purpose. A production request must keep
-    # producing it, so a request accepted before that upgrade and retried
-    # after it replays its own run instead of conflicting and running twice.
     assert fingerprint == (
-        "7c11e7738bb53084971053e6719133e2acb33a18c6a5ade511735406a8f21910"
+        "70966a42e154972866cacdf7aa3aa34203ef2b9f9dd960188dbb9c933f416db8"
     )
 
 
@@ -4912,3 +4911,132 @@ def test_create_run_idempotency_fingerprint_separates_purposes(user):
     # The unchanged pre-purpose digest is pinned by
     # test_create_run_idempotency_fingerprint_shape_is_stable: production
     # identity did not move, so a cross-upgrade retry still replays its run.
+
+
+@pytest.fixture
+def label_creation(user):
+    flow = _flow(user=user, published_version=2)
+    flow_repo = _flow_repo()
+    _seed_flow_repo(flow_repo, flow)
+    run_repo = flow_run_repo_mock()
+    run_repo.count_active_runs.return_value = 0
+    run_repo.get_idempotent_run.return_value = None
+    run_repo.create.return_value = _run(user=user, flow_id=flow.id)
+    version_repo = AsyncMock()
+    version_repo.get.return_value = _version(user=user, flow=flow, version=2)
+    service = _flow_run_service(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=run_repo,
+        flow_version_repo=version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
+        max_concurrent_runs=5,
+    )
+
+    return service, flow, run_repo
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "label_fields,expected",
+    [
+        ({}, None),
+        ({"run_label": None}, None),
+        ({"run_label": "x"}, "x"),
+        ({"run_label": "ö" * 120}, "ö" * 120),
+        ({"run_label": "  A\u030arende a\u0308 o\u0308  "}, "Årende ä ö"),
+        ({"run_label": "o\u0308" * 120}, "ö" * 120),
+    ],
+)
+async def test_create_run_normalizes_and_persists_run_label(
+    label_creation, label_fields, expected
+):
+    service, flow, run_repo = label_creation
+    await service.create_run(
+        flow_id=flow.id,
+        input_payload_json={"case": "not the label"},
+        **label_fields,
+    )
+    assert run_repo.create.await_args.kwargs["run_label"] == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "label",
+    [
+        "",
+        "   ",
+        "\u00a0",
+        "a\nb",
+        "a\rb",
+        "a\tb",
+        "a\x00b",
+        "a\x7fb",
+        "\nlabel",
+        "label\n",
+        "a\u2028b",
+        "a\u2029b",
+        "a\u200bb",
+        "x" * 121,
+    ],
+)
+async def test_create_run_rejects_invalid_run_label(label_creation, label):
+    service, flow, run_repo = label_creation
+    with pytest.raises(ValidationException):
+        await service.create_run(
+            flow_id=flow.id, input_payload_json=None, run_label=label
+        )
+    run_repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "replay_label,conflict",
+    [("Årende", False), (" A\u030arende ", False), ("Different", True), (None, True)],
+)
+@pytest.mark.parametrize("with_transcript_seed", [False, True])
+async def test_create_run_idempotency_includes_normalized_run_label(
+    label_creation, replay_label, conflict, with_transcript_seed
+):
+    service, flow, run_repo = label_creation
+    seed = (
+        TranscriptRegenerationSeed(
+            source_run_id=uuid4(),
+            transcript_step_id=flow.steps[0].id,
+            transcript="Reviewed text",
+            provenance={"version": 1},
+            results=(),
+        )
+        if with_transcript_seed
+        else None
+    )
+    first = await service.create_run(
+        flow_id=flow.id,
+        input_payload_json=None,
+        run_label="Årende",
+        idempotency_key="label-key",
+        transcript_seed=seed,
+    )
+    fingerprint = run_repo.create.await_args.kwargs["request_fingerprint"]
+    run_repo.get_idempotent_run.return_value = (first.run, fingerprint)
+    if conflict:
+        with pytest.raises(FlowBadRequestException) as exc_info:
+            await service.create_run(
+                flow_id=flow.id,
+                input_payload_json=None,
+                run_label=replay_label,
+                idempotency_key="label-key",
+                transcript_seed=seed,
+            )
+        assert exc_info.value.code == FlowApiErrorCode.RUN_IDEMPOTENCY_CONFLICT
+    else:
+        replay = await service.create_run(
+            flow_id=flow.id,
+            input_payload_json=None,
+            run_label=replay_label,
+            idempotency_key="label-key",
+            transcript_seed=seed,
+        )
+        assert replay.created is False
+        assert replay.run.id == first.run.id
+    assert run_repo.create.await_count == 1

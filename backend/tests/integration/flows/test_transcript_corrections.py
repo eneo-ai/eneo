@@ -1314,6 +1314,7 @@ async def test_regeneration_snapshots_saved_review_and_keeps_original_output(
                 status="completed",
                 finished_at=datetime.now(timezone.utc),
                 output_payload_json={"text": "Original summary"},
+                run_label="Ärende 42",
             )
         )
         await session.execute(
@@ -1391,6 +1392,7 @@ async def test_regeneration_snapshots_saved_review_and_keeps_original_output(
         )
         child = await repo.get(run_id=child_id, tenant_id=admin_user.tenant_id)
         assert source.output_payload_json == {"text": "Original summary"}
+        assert child.run_label == source.run_label == "Ärende 42"
         assert (
             child.input_payload_json["transcript_regeneration"]["correction_revision"]
             == 1

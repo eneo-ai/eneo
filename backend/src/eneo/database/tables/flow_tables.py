@@ -820,6 +820,7 @@ class FlowRuns(BasePublic):
     finished_at: Mapped[Optional[datetime]] = mapped_column(
         sa.DateTime(timezone=True), nullable=True
     )
+    run_label: Mapped[Optional[str]] = mapped_column(sa.Text(), nullable=True)
     input_payload_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
         JSONB, nullable=True
     )
@@ -833,6 +834,10 @@ class FlowRuns(BasePublic):
     )
 
     __table_args__ = (
+        CheckConstraint(
+            "char_length(run_label) BETWEEN 1 AND 120",
+            name="ck_flow_runs_run_label_length",
+        ),
         CheckConstraint(
             f"purpose IN ({_check_values(FLOW_RUN_PURPOSE_VALUES)})",
             name="ck_flow_runs_purpose",

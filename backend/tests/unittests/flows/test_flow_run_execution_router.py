@@ -395,7 +395,10 @@ async def test_create_flow_run_allows_service_key_principals():
 
 
 @pytest.mark.asyncio
-async def test_create_flow_run_schedules_background_dispatch():
+@pytest.mark.parametrize(
+    "label_fields", [{}, {"run_label": None}, {"run_label": "Ärende 42"}]
+)
+async def test_create_flow_run_schedules_background_dispatch(label_fields):
     container = MagicMock()
     flow_run_service = AsyncMock()
     audit_service = AsyncMock()
@@ -415,7 +418,7 @@ async def test_create_flow_run_schedules_background_dispatch():
     _enable_explicit_transaction(container, events)
 
     background_tasks = _RecordingBackgroundTasks(events)
-    run_in = FlowRunCreateRequest(input_payload_json={"case_id": "123"})
+    run_in = FlowRunCreateRequest(input_payload_json={"case_id": "123"}, **label_fields)
 
     response = await create_flow_run(
         id=flow_id,
@@ -442,6 +445,7 @@ async def test_create_flow_run_schedules_background_dispatch():
     flow_run_service.create_run.assert_awaited_once_with(
         flow_id=flow_id,
         input_payload_json={"case_id": "123"},
+        **label_fields,
         expected_flow_version=None,
         step_inputs=None,
         idempotency_key=None,

@@ -336,6 +336,7 @@ FLOW_RUN_SUMMARY_PUBLIC_EXAMPLE: dict[str, Any] = {
 
 FLOW_RUN_PUBLIC_EXAMPLE: dict[str, Any] = {
     **FLOW_RUN_SUMMARY_PUBLIC_EXAMPLE,
+    "run_label": "Case 123",
     "error": None,
     "input_payload_json": {"employee_name": "Alex Example"},
     "result": None,
@@ -799,6 +800,14 @@ class FlowRunCreateRequest(BaseModel):
         json_schema_extra={"example": FLOW_RUN_CREATE_REQUEST_EXAMPLE},
     )
 
+    run_label: str | None = Field(
+        default=None,
+        description=(
+            "Caller-supplied run label. Normalized to Unicode NFC and trimmed on "
+            "creation; must contain 1–120 characters and no line breaks or control "
+            "characters. Omitted or null labels are stored as null."
+        ),
+    )
     expected_flow_version: int | None = Field(
         default=None,
         description=(
@@ -1098,6 +1107,12 @@ class FlowRunPublic(FlowRunSummaryPublic):
         json_schema_extra={"example": FLOW_RUN_PUBLIC_EXAMPLE},
     )
 
+    run_label: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=120,
+        description="Caller-supplied run label, available only through audited reads.",
+    )
     error: FlowRunError | None = Field(
         default=None,
         description=(

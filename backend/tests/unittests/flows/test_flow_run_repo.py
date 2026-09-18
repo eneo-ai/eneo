@@ -98,6 +98,7 @@ async def test_get_status_selects_only_lifecycle_and_authorization_columns() -> 
     assert "flow_runs.input_payload_json" not in sql
     assert "flow_runs.output_payload_json" not in sql
     assert "flow_runs.error_json" not in sql
+    assert "flow_runs.run_label" not in sql
 
 
 @pytest.mark.asyncio
@@ -118,6 +119,7 @@ async def test_list_statuses_never_selects_run_content_columns() -> None:
     assert "flow_runs.input_payload_json" not in sql
     assert "flow_runs.output_payload_json" not in sql
     assert "flow_runs.error_json" not in sql
+    assert "flow_runs.run_label" not in sql
     assert "ORDER BY flow_runs.created_at DESC, flow_runs.id DESC" in sql
 
 

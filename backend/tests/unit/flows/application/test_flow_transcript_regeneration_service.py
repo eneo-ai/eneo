@@ -40,6 +40,7 @@ def context():
         revision=1,
         flow_version=1,
         input_payload_json={"question": "Meeting"},
+        run_label=None,
     )
     user = SimpleNamespace(
         id=user_id,
@@ -264,3 +265,12 @@ async def test_null_revision_can_regenerate_an_unedited_transcript(context):
     assert seed.provenance["correction_revision"] is None
     assert seed.transcript.count("[Överlappande tal – osäker talare]") == 3
     context.service.corrections_repo.copy_snapshot.assert_not_awaited()
+
+
+@pytest.mark.parametrize("label", [None, "Ärende 42"])
+async def test_regeneration_copies_source_run_label(context, label):
+    context.source.run_label = label
+    await context.service.regenerate(**context.request)
+    args = context.service.run_service.create_run.await_args.kwargs
+    assert "run_label" in args
+    assert args["run_label"] == label

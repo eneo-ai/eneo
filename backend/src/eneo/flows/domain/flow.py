@@ -282,6 +282,7 @@ class FlowRun(FlowRunStatusSnapshot):
         default=None,
         validation_alias=AliasChoices("error", "error_json"),
     )
+    run_label: str | None = None
     created_by_api_key_id: Optional[UUID] = None
     runtime_service_permission: ApiKeyPermission | None = None
     input_payload_json: FlowPersistedJsonObject | None = None

@@ -459,6 +459,7 @@ class FlowRunRepository:
         step_input_files: Sequence[FlowRunStepInputFileProjection] | None = None,
         idempotency_key: str | None = None,
         request_fingerprint: str | None = None,
+        run_label: str | None = None,
         purpose: FlowRunPurpose = FlowRunPurpose.PRODUCTION,
     ) -> FlowRun:
         now_utc = datetime.now(timezone.utc)
@@ -486,6 +487,7 @@ class FlowRunRepository:
                 trace_id=uuid4(),
                 idempotency_key=idempotency_key,
                 request_fingerprint=request_fingerprint,
+                run_label=run_label,
                 purpose=purpose.value,
                 status=FlowRunStatus.QUEUED.value,
                 **start_flow_dispatch_epoch(now_utc),

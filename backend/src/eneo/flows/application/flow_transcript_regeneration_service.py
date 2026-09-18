@@ -318,6 +318,7 @@ class FlowTranscriptRegenerationService:
         }
         created = await self.run_service.create_run(
             flow_id=flow_id,
+            run_label=source.run_label,
             input_payload_json=read_semantic_flow_input_payload(
                 source.input_payload_json
             ),

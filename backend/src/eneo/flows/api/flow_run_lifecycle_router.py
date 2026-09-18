@@ -445,6 +445,7 @@ async def create_flow_run(
                     else None
                 ),
                 idempotency_key=idempotency_key,
+                **run_in.model_dump(include={"run_label"}, exclude_unset=True),
             )
             run = create_result.run
             if create_result.created:

@@ -3778,6 +3778,7 @@ async def test_dispatch_lifecycle_uses_one_durable_epoch_and_exact_cas(
                 principal_user_id=admin_user.id,
                 tenant_id=admin_user.tenant_id,
                 input_payload_json={"case": case},
+                run_label=case,
                 preseed_steps=[
                     {
                         "step_id": flow.steps[0].id,
@@ -4087,6 +4088,9 @@ async def test_dispatch_lifecycle_uses_one_durable_epoch_and_exact_cas(
         )
         assert rearmed is not None
         assert rearmed.status == FlowRunStatus.QUEUED
+        assert rearmed.run_label == "not-due"
+        persisted = await run_repo.get(run_id=rearmed.id, tenant_id=rearmed.tenant_id)
+        assert persisted.run_label == "not-due"
         assert rearmed.dispatch_pending_since == redrive_at
         assert rearmed.dispatch_attempt_count == 0
         assert rearmed.dispatch_last_attempt_at is None
@@ -4602,3 +4606,29 @@ async def test_provenance_measurement_and_bounded_attempt_read(
         assert all(rows <= candidate_limit for _, rows in bounded_inputs), (
             bounded_inputs
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_run_label_database_length_constraint(attempt_provenance_context):
+    context = attempt_provenance_context
+    async with sessionmanager.session() as session, session.begin():
+        repo = FlowRunRepository(session=session)
+        for label in [None, "x", "ö" * 120]:
+            await session.execute(
+                sa.update(FlowRuns)
+                .where(FlowRuns.id == context.run_id)
+                .values(run_label=label)
+            )
+            persisted = await repo.get(
+                run_id=context.run_id, tenant_id=context.tenant_id
+            )
+            assert persisted.run_label == label
+        for label in ["", "ö" * 121]:
+            with pytest.raises(IntegrityError, match="ck_flow_runs_run_label_length"):
+                async with session.begin_nested():
+                    await session.execute(
+                        sa.update(FlowRuns)
+                        .where(FlowRuns.id == context.run_id)
+                        .values(run_label=label)
+                    )
