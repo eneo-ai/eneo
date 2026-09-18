@@ -8,6 +8,8 @@ from uuid import uuid4
 import pytest
 
 from eneo.flows.domain.runtime import StepExecutionOutput, StepInputValue
+from eneo.flows.domain.speaker_labels import SPEAKER_MAPPING_OUTPUT_CONTRACT
+from eneo.flows.output_processing import validate_against_contract
 from eneo.flows.runtime.step_execution_runtime import (
     PreparedCompletionCall,
     PreparedStepExecution,
@@ -116,7 +118,11 @@ def harness(monkeypatch):
 
     async def fake_complete(*, step, run, state, prepared, deps):
         calls["deps"] = deps
-        return _output(calls.get("structured", PROPOSAL))
+        structured = calls.get("structured", PROPOSAL)
+        validate_against_contract(
+            structured, SPEAKER_MAPPING_OUTPUT_CONTRACT, label="Step 2 output"
+        )
+        return _output(structured)
 
     monkeypatch.setattr(handler_module, "complete_step_execution", fake_complete)
 
@@ -206,6 +212,80 @@ async def test_run_transcript_is_left_alone_when_it_differs(harness) -> None:
     persist.assert_not_awaited()
 
 
+@pytest.mark.parametrize("evidence_fields", [{}, {"evidence": None}, {"evidence": ""}])
+async def test_absent_evidence_preserves_known_and_unknown_speakers(
+    harness, evidence_fields
+) -> None:
+    calls, activate = harness
+    calls["structured"] = {
+        "speakers": [
+            {**speaker, **evidence_fields}
+            for speaker in (
+                {"label": "SPEAKER_00", "name": "Anna", "confidence": "high"},
+                {"label": "SPEAKER_01", "name": None, "confidence": "low"},
+            )
+        ]
+    }
+    handler, persist = _handler(activate)
+    state, _ = _state()
+    run = SimpleNamespace(
+        id=uuid4(), input_payload_json={"deltagare": "Anna", "transkribering": SOURCE}
+    )
+
+    result = await handler.execute(
+        step=_step(output_config={"speaker_mapping": {"infer_names": True}}),
+        run=run,
+        state=state,
+        version_metadata=None,
+        attempt_no=1,
+    )
+
+    expected = SOURCE.replace("SPEAKER_00:", "Anna:")
+    assert result.output.full_text == expected
+    assert result.output.structured_output == {
+        "speakers": [{**speaker, "evidence": ""} for speaker in PROPOSAL["speakers"]]
+    }
+    assert any(
+        diagnostic.code == "speaker_mapping_unmapped_labels"
+        for diagnostic in result.output.diagnostics
+    )
+    persist.assert_awaited_once_with(run, expected)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("label", None),
+        ("name", 42),
+        ("confidence", None),
+        ("evidence", {"text": "intro"}),
+    ],
+)
+async def test_invalid_speaker_fields_fail_before_transcript_is_persisted(
+    harness, field, value
+) -> None:
+    calls, activate = harness
+    calls["structured"] = {
+        "speakers": [{**PROPOSAL["speakers"][0], field: value}, PROPOSAL["speakers"][1]]
+    }
+    handler, persist = _handler(activate)
+    state, _ = _state()
+
+    with pytest.raises(TypedIOValidationException) as excinfo:
+        await handler.execute(
+            step=_step(),
+            run=SimpleNamespace(
+                id=uuid4(), input_payload_json={"transkribering": SOURCE}
+            ),
+            state=state,
+            version_metadata=None,
+            attempt_no=1,
+        )
+
+    assert excinfo.value.code == "typed_io_contract_violation"
+    persist.assert_not_awaited()
+
+
 async def test_skipped_upstream_diarization_passes_transcript_through(harness) -> None:
     _, activate = harness
     handler, persist = _handler(activate, prepared_text="Bara text utan talare.")
@@ -248,13 +328,28 @@ async def test_input_without_speaker_labels_fails_typed(harness) -> None:
         )
 
 
-async def test_invalid_proposal_fails_typed(harness) -> None:
+@pytest.mark.parametrize(
+    "labels",
+    [
+        ["SPEAKER_00"],
+        ["SPEAKER_00", "SPEAKER_00"],
+        ["SPEAKER_00", "SPEAKER_01", "SPEAKER_09"],
+    ],
+)
+async def test_mapping_must_cover_exactly_the_transcript_inventory(
+    harness, labels
+) -> None:
     calls, activate = harness
-    calls["structured"] = {"speakers": [{"label": "SPEAKER_00", "name": "Nobody"}]}
-    handler, _ = _handler(activate)
+    calls["structured"] = {
+        "speakers": [
+            {"label": label, "name": None, "confidence": "low", "evidence": None}
+            for label in labels
+        ]
+    }
+    handler, persist = _handler(activate)
     state, _ = _state()
 
-    with pytest.raises(TypedIOValidationException):
+    with pytest.raises(TypedIOValidationException) as excinfo:
         await handler.execute(
             step=_step(),
             run=SimpleNamespace(id=uuid4(), input_payload_json={"deltagare": "Anna"}),
@@ -262,6 +357,9 @@ async def test_invalid_proposal_fails_typed(harness) -> None:
             version_metadata=None,
             attempt_no=1,
         )
+
+    assert excinfo.value.code == "typed_io_validation_failed"
+    persist.assert_not_awaited()
 
 
 async def test_oversized_renamed_transcript_fails_instead_of_overflowing(

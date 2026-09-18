@@ -14,6 +14,16 @@ from eneo.flows.domain.speaker_mapping_config import (
 )
 from eneo.flows.flow_run_input_envelope import read_semantic_flow_input_payload
 
+_SPEAKER_MAPPING_RESPONSE_FORMAT = (
+    "Respond with JSON only. Include every supplied label exactly once, copied "
+    "unchanged. A name is text when supported, otherwise JSON null, not the "
+    'string "null". Evidence may be empty or null when no supporting words are '
+    "available; do not invent a reason.\n"
+    "Example with an unknown identity (use the actual labels from the input):\n"
+    '{"speakers": [{"label": "SPEAKER_00", "name": null, '
+    '"confidence": "low", "evidence": ""}]}'
+)
+
 SPEAKER_MAPPING_INSTRUCTIONS = (
     "You map diarized speaker labels in a transcript to the people who took part.\n"
     "You receive each speaker label with sample lines it spoke, and the list of "
@@ -27,10 +37,7 @@ SPEAKER_MAPPING_INSTRUCTIONS = (
     "- Use introductions, being addressed by name, roles and context as evidence.\n"
     "- For every label give a confidence (low, medium, high) and one short "
     "sentence of evidence in the language of the transcript.\n"
-    "Respond with JSON only, exactly in this shape:\n"
-    '{"speakers": [{"label": "SPEAKER_00", "name": "<participant or null>", '
-    '"confidence": "low|medium|high", "evidence": "<short reason>"}]}'
-)
+) + _SPEAKER_MAPPING_RESPONSE_FORMAT
 
 # With name inference on, the participant list is a hint rather than a
 # closed set: the conversation itself may name or describe the speakers.
@@ -67,10 +74,7 @@ SPEAKER_MAPPING_INFER_INSTRUCTIONS = (
     "- For every label give one short sentence of evidence in the language of "
     "the transcript, quoting the supplied words that support the identity and "
     "its link to the speaker. Do not invent a quote.\n"
-    "Respond with JSON only, exactly in this shape:\n"
-    '{"speakers": [{"label": "SPEAKER_00", "name": "<name, role or null>", '
-    '"confidence": "low|medium|high", "evidence": "<short reason>"}]}'
-)
+) + _SPEAKER_MAPPING_RESPONSE_FORMAT
 
 
 def speaker_mapping_instructions(*, infer_names: bool) -> str:

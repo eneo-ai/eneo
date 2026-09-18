@@ -51,7 +51,8 @@ SPEAKER_MAPPING_OUTPUT_CONTRACT: dict[str, Any] = {
                     "label": {"type": "string", "pattern": "^SPEAKER_\\d{2,}$"},
                     "name": {"type": ["string", "null"]},
                     "confidence": {"enum": ["low", "medium", "high"]},
-                    "evidence": {"type": "string"},
+                    # Optional evidence may be absent or null; mapping normalizes it to text.
+                    "evidence": {"type": ["string", "null"]},
                 },
             },
         }
