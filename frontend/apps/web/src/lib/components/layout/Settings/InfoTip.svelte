@@ -8,7 +8,7 @@
 
 <Tooltip.Root delayDuration={150}>
   <Tooltip.Trigger
-    class="text-secondary hover:text-primary focus-visible:ring-accent-default ml-2 inline-flex size-[24px] items-center justify-center rounded-md transition-colors focus-visible:ring-2 focus-visible:outline-none"
+    class="text-secondary hover:text-primary focus-visible:ring-ring ml-2 inline-flex size-[24px] items-center justify-center rounded-md transition-colors focus-visible:ring-2 focus-visible:outline-none"
     aria-label={`${m.flow_settings_more_info({ title })}. ${text}`}
     type="button"
   >

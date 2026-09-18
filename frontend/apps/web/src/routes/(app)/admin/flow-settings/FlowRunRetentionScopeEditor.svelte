@@ -60,7 +60,7 @@
   }
 
   // Every template these feed puts the noun after a preposition ("för …",
-  // "från …"), which Swedish renders in the definite form; the bare nouns are
+  //"från …"), which Swedish renders in the definite form; the bare nouns are
   // for headings and column titles.
   function definiteScopeLabel(scope: "organization" | "space" | "flow"): string {
     if (scope === "organization") return m.flow_run_retention_scope_organization_definite();
@@ -175,7 +175,7 @@
       <Select.Root type="single" bind:value={choice} disabled={saving}>
         <Select.Trigger
           id={`flow-retention-mode-${settings.scope}`}
-          class="focus-visible:ring-accent-default w-full focus-visible:ring-2"
+          class="w-full"
           aria-label={m.flow_run_retention_behavior_for_scope({ scope: scopeLabel() })}
         >
           <span class="truncate">{choiceLabel(choice)}</span>
@@ -200,7 +200,7 @@
       <div class="flex items-center gap-2">
         <Input
           id={`flow-retention-days-${settings.scope}`}
-          class="focus-visible:ring-accent-default tabular-nums focus-visible:ring-2"
+          class="tabular-nums"
           type="number"
           min={FLOW_RETENTION_MIN_DAYS}
           max={FLOW_RETENTION_MAX_DAYS}

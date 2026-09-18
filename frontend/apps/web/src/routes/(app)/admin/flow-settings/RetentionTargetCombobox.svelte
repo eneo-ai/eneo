@@ -57,7 +57,7 @@
         variant="outline"
         role="combobox"
         aria-expanded={open}
-        class="focus-visible:outline-accent-default w-full justify-between font-normal focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-solid"
+        class="w-full justify-between font-normal"
       >
         <span class="truncate" class:text-muted={!selectedName}>
           {selectedName ?? placeholder}

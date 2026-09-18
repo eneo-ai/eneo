@@ -247,7 +247,7 @@
   });
 
   // `value` is undefined while an entry is invalid, and `?? 0` turned that into
-  // a confident "Högst 0 källor" — a policy nobody set, stated mid-keystroke.
+  // a confident"Högst 0 källor" — a policy nobody set, stated mid-keystroke.
   const evidenceSummary = $derived.by(() => {
     const sources = evidenceSources.value;
     const passages = evidencePassages.value;
@@ -263,7 +263,7 @@
   });
 
   // One call is held back for a retry, so the budget buys one file fewer. Saying
-  // that as "N calls cover N-1 files" left the arithmetic to the reader; with a
+  // that as"N calls cover N-1 files" left the arithmetic to the reader; with a
   // value entered, state the file count outright.
   const mappedCallsHint = $derived.by(() => {
     const calls = mappedCalls.value;
@@ -456,7 +456,7 @@
       <Button
         variant="link"
         href="/admin/audit-logs?actions=tenant_settings_updated,flow_run_retention_policy_changed"
-        class="text-secondary hover:text-primary focus-visible:outline-accent-default h-auto p-0 text-sm underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-solid"
+        class="text-secondary hover:text-primary h-auto p-0 text-sm underline underline-offset-2"
       >
         {m.flow_settings_changes_are_logged()}
       </Button>

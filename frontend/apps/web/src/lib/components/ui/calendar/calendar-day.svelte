@@ -24,7 +24,7 @@
     // Unavailable
     "data-[unavailable]:text-muted-foreground data-[unavailable]:line-through",
     // focus
-    "focus:border-ring focus:ring-ring/50 focus:relative",
+    "focus:border-ring focus:ring-ring focus:relative",
     // inner spans
     "[&>span]:text-xs [&>span]:opacity-70",
     className
