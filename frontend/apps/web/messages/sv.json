@@ -7008,7 +7008,6 @@
   "ai_builder_review_lead_one": "Version {version} · 1 körning av samma flödesdefinition gav fakta",
   "ai_builder_review_lead_failed": ", varav {failed} misslyckades",
   "ai_builder_review_lead_loading": "Läser flödets senaste körningar …",
-  "ai_builder_review_close": "Stäng granskningen",
   "ai_builder_review_back": "Tillbaka",
   "ai_builder_review_retry": "Försök igen",
   "ai_builder_review_load_failed": "Körningarna kunde inte läsas just nu.",

@@ -7008,7 +7008,6 @@
   "ai_builder_review_lead_one": "Version {version} · 1 run of the same flow definition gave facts",
   "ai_builder_review_lead_failed": ", {failed} of them failed",
   "ai_builder_review_lead_loading": "Reading the flow's latest runs …",
-  "ai_builder_review_close": "Close the review",
   "ai_builder_review_back": "Back",
   "ai_builder_review_retry": "Try again",
   "ai_builder_review_load_failed": "The runs could not be read right now.",

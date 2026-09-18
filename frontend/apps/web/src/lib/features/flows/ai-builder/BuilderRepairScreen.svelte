@@ -2,7 +2,6 @@
   import { m } from "$lib/paraglide/messages";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
-  import IconX from "@lucide/svelte/icons/x";
   import IconArrowLeft from "@lucide/svelte/icons/arrow-left";
   import IconSparkles from "@lucide/svelte/icons/sparkles";
   import { getFlowRuntimeErrorMessageByCode } from "$lib/features/flows/flowRuntimeErrorMapping";
@@ -68,14 +67,9 @@
             {/if}
           </p>
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          class="size-8 shrink-0"
-          aria-label={m.ai_builder_review_close()}
-          onclick={onclose}
-        >
-          <IconX class="size-4" />
+        <Button variant="outline" size="sm" class="ml-auto shrink-0 gap-1.5" onclick={onclose}>
+          <IconArrowLeft class="size-3.5" aria-hidden="true" />
+          {m.ai_builder_review_back()}
         </Button>
       </header>
 
@@ -123,13 +117,6 @@
         {/if}
       </div>
     </section>
-
-    <div class="mt-3">
-      <Button variant="ghost" size="sm" class="text-secondary -ml-2 h-8 gap-1.5" onclick={onclose}>
-        <IconArrowLeft class="size-3.5" />
-        {m.ai_builder_review_back()}
-      </Button>
-    </div>
   </div>
 </div>
 
