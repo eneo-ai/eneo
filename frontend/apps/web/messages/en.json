@@ -7026,7 +7026,6 @@
   "ai_builder_review_select_hint_suggestions": "Tick the suggestions you want Eneo to investigate. You can pick several.",
   "ai_builder_review_prepare_count": "Prepare change ({count} selected)",
   "ai_builder_review_prepare_hint": "Opens a change proposal for you to approve. Nothing changes before that.",
-  "ai_builder_review_prepare_message_many": "Address the following, as the runs show: {findings}.",
   "ai_builder_review_suggestion_investigate_count": "Investigate {count} suggestions with Eneo",
   "ai_builder_review_prepare_message": "Prepare a change that addresses: {finding}",
   "ai_builder_review_completeness": "{incomplete} runs were missing results for some step.",

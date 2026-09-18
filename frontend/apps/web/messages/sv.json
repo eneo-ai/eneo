@@ -7026,7 +7026,6 @@
   "ai_builder_review_select_hint_suggestions": "Markera de förslag du vill att Eneo undersöker. Du kan välja flera.",
   "ai_builder_review_prepare_count": "Förbered ändring ({count} valda)",
   "ai_builder_review_prepare_hint": "Öppnar ett ändringsförslag som du godkänner. Inget ändras innan dess.",
-  "ai_builder_review_prepare_message_many": "Åtgärda följande som körningarna visar: {findings}.",
   "ai_builder_review_suggestion_investigate_count": "Undersök {count} förslag med Eneo",
   "ai_builder_review_prepare_message": "Förbered en ändring som åtgärdar: {finding}",
   "ai_builder_review_completeness": "{incomplete} körningar saknade resultat för något steg.",

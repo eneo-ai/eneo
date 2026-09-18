@@ -123,10 +123,7 @@
     if (!packet || facts.length === 0) return;
     const described = facts.map((fact) => describeReviewFact(fact, packet.steps).title);
     onprepare({
-      message:
-        described.length === 1
-          ? m.ai_builder_review_prepare_message({ finding: described[0] })
-          : m.ai_builder_review_prepare_message_many({ findings: described.join("; ") }),
+      message: m.ai_builder_review_prepare_message({ finding: described.join("; ") }),
       reviewContext: {
         kind: "flow_review",
         flow_version: packet.flow_version,
