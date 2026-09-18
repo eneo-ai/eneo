@@ -30,9 +30,11 @@
     days.reduce(
       (sum, row) => ({
         questions: sum.questions + row.questions,
-        blocked: sum.blocked + row.blocked_budget + row.blocked_rate
+        blocked: sum.blocked + row.blocked_budget + row.blocked_rate,
+        helpful: sum.helpful + row.helpful,
+        unhelpful: sum.unhelpful + row.unhelpful
       }),
-      { questions: 0, blocked: 0 }
+      { questions: 0, blocked: 0, helpful: 0, unhelpful: 0 }
     )
   );
 
@@ -97,6 +99,8 @@
             <Table.Head class="text-right">{m.widget_admin_usage_tokens_in()}</Table.Head>
             <Table.Head class="text-right">{m.widget_admin_usage_tokens_out()}</Table.Head>
             <Table.Head class="text-right">{m.widget_admin_usage_blocked()}</Table.Head>
+            <Table.Head class="text-right">{m.widget_admin_usage_helpful()}</Table.Head>
+            <Table.Head class="text-right">{m.widget_admin_usage_unhelpful()}</Table.Head>
           </Table.Row>
         </Table.Header>
         <Table.Body>
@@ -109,6 +113,8 @@
               <Table.Cell class="text-right"
                 >{number.format(row.blocked_budget + row.blocked_rate)}</Table.Cell
               >
+              <Table.Cell class="text-right">{number.format(row.helpful)}</Table.Cell>
+              <Table.Cell class="text-right">{number.format(row.unhelpful)}</Table.Cell>
             </Table.Row>
           {/each}
         </Table.Body>
@@ -117,6 +123,10 @@
         {m.widget_admin_usage_totals({
           questions: number.format(totals.questions),
           blocked: number.format(totals.blocked)
+        })}
+        {m.widget_admin_usage_feedback_totals({
+          helpful: number.format(totals.helpful),
+          unhelpful: number.format(totals.unhelpful)
         })}
       </p>
     {/if}

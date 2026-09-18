@@ -40,7 +40,9 @@ async def _chunks():
 
 def _service(*, ask_result=None, session_questions=0, tokens=(120, 80)):
     assistant_service = MagicMock()
-    session_obj = SimpleNamespace(id=uuid4(), questions=[object()] * session_questions)
+    session_obj = SimpleNamespace(
+        id=uuid4(), questions=[object()] * session_questions, feedback_value=None
+    )
     assistant_service.ask = AsyncMock(
         return_value=ask_result
         or SimpleNamespace(
@@ -341,3 +343,24 @@ async def test_feedback_text_is_dropped_unless_stored():
         deps.session_service.leave_feedback.await_args.kwargs["feedback"].text == "fel"
     )
     del feedback
+
+
+async def test_feedback_moves_the_daily_counters_with_the_vote():
+    from eneo.sessions.session import SessionFeedback
+
+    service, deps = _service()
+    widget = _widget()
+    principal = _principal(widget)
+    session = deps.session_service.get_session_by_uuid.return_value
+
+    await service.leave_feedback(principal, uuid4(), SessionFeedback(value=1))
+    kwargs = deps.usage.record.await_args.kwargs
+    assert (kwargs["helpful"], kwargs["unhelpful"]) == (1, 0)
+
+    session.feedback_value = 1
+    await service.leave_feedback(principal, uuid4(), SessionFeedback(value=1))
+    assert deps.usage.record.await_count == 1
+
+    await service.leave_feedback(principal, uuid4(), SessionFeedback(value=-1))
+    kwargs = deps.usage.record.await_args.kwargs
+    assert (kwargs["helpful"], kwargs["unhelpful"]) == (-1, 1)

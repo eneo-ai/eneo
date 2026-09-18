@@ -183,6 +183,14 @@ async def test_visitor_ask_streams_and_owns_its_session(
     assert resp.json()["feedback"]["value"] == 1
     assert resp.json()["feedback"]["text"] is None  # not stored by default
 
+    # Changing the vote moves it between the day's counters instead of adding.
+    resp = await client.post(
+        f"/api/v1/widgets/{public_id}/sessions/{session_id}/feedback/",
+        json={"value": -1},
+        headers=_auth(token),
+    )
+    assert resp.status_code == 200, resp.text
+
     # Another visitor of the same widget sees nothing.
     other = await _mint(client, public_id)
     resp = await client.get(
@@ -220,6 +228,7 @@ async def test_visitor_ask_streams_and_owns_its_session(
     usage = resp.json()
     assert usage["daily_token_budget"] == 500_000
     assert usage["days"] and usage["days"][0]["questions"] == 2
+    assert (usage["days"][0]["helpful"], usage["days"][0]["unhelpful"]) == (0, 1)
     assert (
         usage["budget_used_today"] == 0
     )  # reservations settled to the real (zero) usage

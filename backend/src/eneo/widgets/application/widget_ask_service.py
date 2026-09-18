@@ -110,12 +110,24 @@ class WidgetAskService:
         self, principal: WidgetPrincipal, session_id: UUID, feedback: SessionFeedback
     ) -> SessionInDB:
         widget = principal.widget
-        await self._owned_session(widget, session_id)
+        assert widget.id is not None
+        session = await self._owned_session(widget, session_id)
+        previous = session.feedback_value
         if not widget.privacy.store_feedback_text:
             feedback = SessionFeedback(value=feedback.value, text=None)
-        return await self.session_service.leave_feedback(
+        updated = await self.session_service.leave_feedback(
             session_id=session_id, assistant_id=widget.target_id, feedback=feedback
         )
+        # Daily counters follow the vote: a changed vote moves between the
+        # columns on the day it changes, in the same transaction as the vote.
+        if previous != feedback.value:
+            await self.usage_repo.record(
+                widget.id,
+                self._today(),
+                helpful=(feedback.value == 1) - (previous == 1),
+                unhelpful=(feedback.value == -1) - (previous == -1),
+            )
+        return updated
 
     # --- ask --------------------------------------------------------------
 

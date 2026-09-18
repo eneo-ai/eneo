@@ -14,9 +14,8 @@
   import { IconEneo } from "@eneo/icons/eneo";
   import { launcherColors } from "../contrast";
   import { linkHost } from "../urls";
-  import { IconThumb } from "@eneo/icons/thumb";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
-  import { MessageSquarePlus, X } from "lucide-svelte";
+  import { MessageSquarePlus, ThumbsDown, ThumbsUp, X } from "lucide-svelte";
   import { solveWithAltcha } from "../altcha";
   import { createEmbedBridge } from "../embedBridge";
   import { VisitorSession, isTokenRejected, isWidgetUnavailable } from "../visitorSession";
@@ -185,7 +184,7 @@
 
   async function feedback(value: 1 | -1) {
     const sessionId = chat.currentConversation.id;
-    if (!sessionId || feedbackGiven[sessionId]) return;
+    if (!sessionId || feedbackGiven[sessionId] === value) return;
     try {
       await client.conversations.leaveFeedback({
         conversation: { id: sessionId },
@@ -287,10 +286,13 @@
       {#if chat.currentConversation.id && !chat.askQuestion.isLoading}
         {@const given = feedbackGiven[chat.currentConversation.id]}
         <div
-          class="mt-3 flex items-center gap-1"
+          class="mt-3 flex items-center gap-2"
           role="group"
-          aria-label={m.widget_feedback_prompt()}
+          aria-labelledby="widget-feedback-prompt"
         >
+          <span id="widget-feedback-prompt" class="text-secondary text-xs">
+            {m.widget_feedback_prompt()}
+          </span>
           <button
             type="button"
             class={[
@@ -301,10 +303,9 @@
             ]}
             aria-label={m.widget_feedback_helpful()}
             aria-pressed={given === 1}
-            disabled={given !== undefined}
             onclick={() => feedback(1)}
           >
-            <IconThumb size="sm" />
+            <ThumbsUp class="size-4" aria-hidden="true" />
           </button>
           <button
             type="button"
@@ -316,10 +317,9 @@
             ]}
             aria-label={m.widget_feedback_unhelpful()}
             aria-pressed={given === -1}
-            disabled={given !== undefined}
             onclick={() => feedback(-1)}
           >
-            <IconThumb size="sm" class="rotate-180" />
+            <ThumbsDown class="size-4" aria-hidden="true" />
           </button>
         </div>
       {/if}

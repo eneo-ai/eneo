@@ -129,7 +129,7 @@
               </Card.Action>
             </Card.Header>
             <Card.Content class="flex flex-col gap-4">
-              <dl class="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
+              <dl class="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-5">
                 <div>
                   <dt class="text-secondary text-xs">{m.widget_admin_overview_questions_7d()}</dt>
                   <dd class="text-lg font-semibold tabular-nums">
@@ -157,6 +157,15 @@
                     ]}
                   >
                     {number.format(item.blocked_30d)}
+                  </dd>
+                </div>
+                <div>
+                  <dt class="text-secondary text-xs">{m.widget_admin_overview_feedback_30d()}</dt>
+                  <dd class="text-lg font-semibold tabular-nums">
+                    {m.widget_admin_overview_feedback_value({
+                      helpful: number.format(item.helpful_30d),
+                      unhelpful: number.format(item.unhelpful_30d)
+                    })}
                   </dd>
                 </div>
               </dl>

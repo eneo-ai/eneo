@@ -242,6 +242,8 @@ async def get_widget_usage(
                 output_tokens=row.output_tokens,
                 blocked_budget=row.blocked_budget,
                 blocked_rate=row.blocked_rate,
+                helpful=row.helpful,
+                unhelpful=row.unhelpful,
             )
             for row in rows
         ],
@@ -419,6 +421,8 @@ async def get_widget_overview(container: _ContainerWithUser):
                 input_tokens_30d=row.input_tokens_30d,
                 output_tokens_30d=row.output_tokens_30d,
                 blocked_30d=row.blocked_30d,
+                helpful_30d=row.helpful_30d,
+                unhelpful_30d=row.unhelpful_30d,
                 last_activity=row.last_activity,
                 daily_token_budget=row.daily_token_budget,
                 budget_used_today=row.budget_used_today,
@@ -431,6 +435,8 @@ async def get_widget_overview(container: _ContainerWithUser):
         questions_30d=sum(i.questions_30d for i in items),
         tokens_30d=sum(i.input_tokens_30d + i.output_tokens_30d for i in items),
         blocked_30d=sum(i.blocked_30d for i in items),
+        helpful_30d=sum(i.helpful_30d for i in items),
+        unhelpful_30d=sum(i.unhelpful_30d for i in items),
     )
     return WidgetOverviewPublic(items=items, totals=totals)
 

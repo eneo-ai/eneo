@@ -39,6 +39,8 @@ class WidgetOverviewRow:
     input_tokens_30d: int
     output_tokens_30d: int
     blocked_30d: int
+    helpful_30d: int
+    unhelpful_30d: int
     last_activity: Optional[date]
 
 
@@ -68,6 +70,8 @@ class WidgetOverviewRepoImpl:
                 window_sum(usage.blocked_budget + usage.blocked_rate, since_30).label(
                     "blocked_30d"
                 ),
+                window_sum(usage.helpful, since_30).label("helpful_30d"),
+                window_sum(usage.unhelpful, since_30).label("unhelpful_30d"),
                 sa.func.max(usage.day)
                 .filter(usage.questions + usage.blocked_budget + usage.blocked_rate > 0)
                 .label("last_activity"),
@@ -94,6 +98,8 @@ class WidgetOverviewRepoImpl:
                 aggregates.c.input_tokens_30d,
                 aggregates.c.output_tokens_30d,
                 aggregates.c.blocked_30d,
+                aggregates.c.helpful_30d,
+                aggregates.c.unhelpful_30d,
                 aggregates.c.last_activity,
                 aggregates.c.budget_used_today,
             )
@@ -132,6 +138,8 @@ class WidgetOverviewRepoImpl:
                     input_tokens_30d=int(row.input_tokens_30d or 0),
                     output_tokens_30d=int(row.output_tokens_30d or 0),
                     blocked_30d=int(row.blocked_30d or 0),
+                    helpful_30d=int(row.helpful_30d or 0),
+                    unhelpful_30d=int(row.unhelpful_30d or 0),
                     last_activity=row.last_activity,
                 )
             )

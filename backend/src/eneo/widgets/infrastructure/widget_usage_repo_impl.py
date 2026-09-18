@@ -29,6 +29,8 @@ class WidgetUsageDay:
     output_tokens: int
     blocked_budget: int
     blocked_rate: int
+    helpful: int
+    unhelpful: int
 
 
 class WidgetUsageRepoImpl:
@@ -133,6 +135,8 @@ class WidgetUsageRepoImpl:
         output_tokens: int = 0,
         blocked_budget: int = 0,
         blocked_rate: int = 0,
+        helpful: int = 0,
+        unhelpful: int = 0,
     ) -> None:
         stmt = insert(WidgetDailyUsage).values(
             widget_id=widget_id,
@@ -142,6 +146,8 @@ class WidgetUsageRepoImpl:
             output_tokens=output_tokens,
             blocked_budget=blocked_budget,
             blocked_rate=blocked_rate,
+            helpful=helpful,
+            unhelpful=unhelpful,
         )
         stmt = stmt.on_conflict_do_update(
             constraint="uq_widget_daily_usage_widget_day",
@@ -151,6 +157,8 @@ class WidgetUsageRepoImpl:
                 "output_tokens": WidgetDailyUsage.output_tokens + output_tokens,
                 "blocked_budget": WidgetDailyUsage.blocked_budget + blocked_budget,
                 "blocked_rate": WidgetDailyUsage.blocked_rate + blocked_rate,
+                "helpful": WidgetDailyUsage.helpful + helpful,
+                "unhelpful": WidgetDailyUsage.unhelpful + unhelpful,
                 "updated_at": sa.func.now(),
             },
         )
@@ -175,6 +183,8 @@ class WidgetUsageRepoImpl:
                 output_tokens=row.output_tokens,
                 blocked_budget=row.blocked_budget,
                 blocked_rate=row.blocked_rate,
+                helpful=row.helpful,
+                unhelpful=row.unhelpful,
             )
             for row in rows.scalars()
         ]

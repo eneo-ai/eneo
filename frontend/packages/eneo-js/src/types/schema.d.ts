@@ -22291,6 +22291,16 @@ export interface components {
       output_tokens_30d: number;
       /** Blocked 30D */
       blocked_30d: number;
+      /**
+       * Helpful 30D
+       * @description Net thumbs up registered in the last 30 days.
+       */
+      helpful_30d: number;
+      /**
+       * Unhelpful 30D
+       * @description Net thumbs down registered in the last 30 days.
+       */
+      unhelpful_30d: number;
       /** Last Activity */
       last_activity?: string | null;
       /** Daily Token Budget */
@@ -22321,6 +22331,10 @@ export interface components {
       tokens_30d: number;
       /** Blocked 30D */
       blocked_30d: number;
+      /** Helpful 30D */
+      helpful_30d: number;
+      /** Unhelpful 30D */
+      unhelpful_30d: number;
     };
     /** WidgetPolicyPublic */
     WidgetPolicyPublic: {
@@ -22621,6 +22635,16 @@ export interface components {
       blocked_budget: number;
       /** Blocked Rate */
       blocked_rate: number;
+      /**
+       * Helpful
+       * @description Net thumbs up registered on the day.
+       */
+      helpful: number;
+      /**
+       * Unhelpful
+       * @description Net thumbs down registered on the day.
+       */
+      unhelpful: number;
     };
     /** WidgetUsagePublic */
     WidgetUsagePublic: {
