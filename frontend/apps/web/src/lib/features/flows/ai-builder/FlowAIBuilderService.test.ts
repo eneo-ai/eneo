@@ -199,14 +199,12 @@ describe("FlowAIBuilderService", () => {
     const fetch = vi.fn(async () =>
       makeSession({
         session_id: "s-1",
-        conversation: [
-          {
-            message_id: "u1",
-            role: "user",
-            content: "tydligare",
-            timestamp: "2026-07-11T09:00:00Z"
-          }
-        ],
+        latest_turn: {
+          client_turn_id: "turn-1",
+          state: "committed",
+          user_message_id: "u1",
+          requires_duplicate_provider_spend_acknowledgement: false
+        } as never,
         edit_scope: projected
       })
     );
@@ -255,14 +253,12 @@ describe("FlowAIBuilderService", () => {
         ? makeSession({
             session_id: "s-1",
             latest_plan_id: "plan-1",
-            conversation: [
-              {
-                message_id: "u1",
-                role: "user",
-                content: "tydligare",
-                timestamp: "2026-07-11T09:00:00Z"
-              }
-            ],
+            latest_turn: {
+              client_turn_id: "turn-1",
+              state: "committed",
+              user_message_id: "u1",
+              requires_duplicate_provider_spend_acknowledgement: false
+            } as never,
             edit_scope: {
               context: {
                 kind: "proposed_plan",
@@ -428,17 +424,22 @@ describe("FlowAIBuilderService", () => {
     });
     expect(service.activeStepScope).toBeNull();
 
-    // An accepted turn supersedes the dismissal: the server's word again.
+    // An accepted turn supersedes the dismissal even when compaction leaves
+    // the conversation the same length and the plan unchanged: its durable
+    // id is what changed. The server's word again, for the same step.
     service.seedState({
       session: makeSession({
         session_id: "s-1",
-        conversation: [
-          { message_id: "u1", role: "user", content: "x", timestamp: "2026-07-11T09:00:00Z" }
-        ],
-        edit_scope: scopeOf("existing_step_3", "Tre")
+        latest_turn: {
+          client_turn_id: "turn-2",
+          state: "committed",
+          user_message_id: "u9",
+          requires_duplicate_provider_spend_acknowledgement: false
+        } as never,
+        edit_scope: scopeOf("existing_step_2", "Två")
       })
     });
-    expect(service.activeStepScope).toEqual({ stepName: "Tre", stepNumber: 2 });
+    expect(service.activeStepScope).toEqual({ stepName: "Två", stepNumber: 2 });
   });
 
   it("passes Driver-owned field getters through the reactive facade", () => {

@@ -3789,6 +3789,12 @@ describe("FlowAIBuilder edit host contract", () => {
     );
     const accepted = {
       ...editSession(),
+      latest_turn: {
+        client_turn_id: "turn-1",
+        state: "committed",
+        user_message_id: "u1",
+        requires_duplicate_provider_spend_acknowledgement: false
+      },
       conversation: [
         {
           message_id: "u1",

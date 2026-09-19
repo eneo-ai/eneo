@@ -81,14 +81,14 @@ export class FlowAIBuilderService {
     key: string;
   } | null>(null);
 
-  /** What the server has accepted so far: the user turns of the conversation
-   *  and the plan they produced. Browser-only intent is bound to this, never
-   *  to how many times the session was read. */
+  /** What the server has accepted so far: the latest accepted turn's durable
+   *  id and the plan it left current. Browser-only intent is bound to this,
+   *  never to how many times the session was read, and never to the length
+   *  of the conversation, which compaction rewrites. */
   get #acceptedTurns(): string {
     const session = this.#state.session;
     if (!session) return "";
-    const userTurns = (session.conversation ?? []).filter((message) => message.role === "user");
-    return `${userTurns.length}:${session.latest_plan_id ?? ""}`;
+    return `${session.latest_turn?.client_turn_id ?? ""}:${session.latest_plan_id ?? ""}`;
   }
 
   hasSession = $derived(this.#state.session !== null);
