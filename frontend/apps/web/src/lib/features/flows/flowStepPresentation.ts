@@ -572,6 +572,86 @@ function walkFlowGraph(
   }
 }
 
+/**
+ * Decides what fits in an exported image's caption, from widths the caller has
+ * measured.
+ *
+ * A caption that loses its own words is worse than none, and it is drawn on a
+ * canvas that has no wrapping, clipping or overflow of its own -- so every
+ * decision is made here first. A heavily reduced graph can produce an image
+ * only a few dozen pixels wide, where the dashed key cannot fit beside its own
+ * label; it is dropped rather than drawn past the edge.
+ */
+export function planFlowExportCaption(params: {
+  availableWidth: number;
+  titleWidth: number;
+  captionWidth: number;
+  legendLabelWidth: number | null;
+  keyWidth: number;
+  gap: number;
+  minimumTextWidth: number;
+}): {
+  showTitle: boolean;
+  showCaption: boolean;
+  showLegend: boolean;
+  legendSharesCaptionRow: boolean;
+  captionWidth: number;
+  legendLabelWidth: number;
+  rows: number;
+} {
+  const {
+    availableWidth,
+    titleWidth,
+    captionWidth,
+    legendLabelWidth,
+    keyWidth,
+    gap,
+    minimumTextWidth
+  } = params;
+
+  /**
+   * A readable minimum is about what survives truncation, not about how much
+   * the text had to say. A flow called "HR" needs no room to spare and must
+   * not be dropped for being short, so the minimum applies only when the text
+   * would have to be cut to fit.
+   */
+  const fits = (width: number, budget: number) =>
+    width > 0 && (width <= budget || budget >= minimumTextWidth);
+
+  const showTitle = fits(titleWidth, availableWidth);
+
+  // The key needs its own line plus a gap before anything is left for a label.
+  const legendBudget = availableWidth - keyWidth - gap;
+  const showLegend = legendLabelWidth !== null && fits(legendLabelWidth, legendBudget);
+  const legendWidth = showLegend
+    ? Math.min(legendLabelWidth ?? 0, legendBudget) + gap + keyWidth
+    : 0;
+
+  // Sharing a row is for when everything genuinely fits. Allowing it whenever
+  // some readable minimum survives would hand the sentence four characters and
+  // call that a caption, so if anything would have to be cut, each gets a row.
+  const captionBudgetBeside = availableWidth - legendWidth - gap * 2;
+  const legendSharesCaptionRow =
+    showLegend && captionWidth + gap * 2 + legendWidth <= availableWidth;
+  const captionBudget = legendSharesCaptionRow ? captionBudgetBeside : availableWidth;
+  const showCaption = fits(captionWidth, captionBudget);
+
+  const rows =
+    (showTitle ? 1 : 0) +
+    (showCaption ? 1 : 0) +
+    (showLegend && !(legendSharesCaptionRow && showCaption) ? 1 : 0);
+
+  return {
+    showTitle,
+    showCaption,
+    showLegend,
+    legendSharesCaptionRow: legendSharesCaptionRow && showCaption,
+    captionWidth: captionBudget,
+    legendLabelWidth: showLegend ? legendBudget : 0,
+    rows
+  };
+}
+
 /** Longest side a browser will reliably allocate for a canvas, with margin. */
 const FLOW_EXPORT_MAX_EDGE = 8192;
 /**

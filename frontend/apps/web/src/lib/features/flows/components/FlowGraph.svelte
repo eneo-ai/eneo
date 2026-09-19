@@ -27,6 +27,7 @@
     buildFlowGraphTopology,
     computeFlowExportSize,
     computeFlowGraphEmphasis,
+    planFlowExportCaption,
     emptyFlowGraphPreviewState,
     reduceFlowGraphPreview,
     resolveFlowGraphPreviewId,
@@ -503,46 +504,44 @@
     const gap = Math.round(font * 0.6);
     const margin = gap * 2;
     const available = spec.width - margin * 2;
-    if (available <= font) return dataUrl;
 
     const measure = document.createElement("canvas").getContext("2d");
     if (!measure) return dataUrl;
     const bodyFont = `${font}px ${style.fontFamily}`;
     const titleFont = `600 ${font}px ${style.fontFamily}`;
 
-    const ellipsise = (text: string, maxWidth: number): string => {
-      measure.font = bodyFont;
+    /** Shortens to fit, or gives up when not even an ellipsis would. */
+    const fitText = (text: string, maxWidth: number, withFont: string): string | null => {
+      measure.font = withFont;
       if (measure.measureText(text).width <= maxWidth) return text;
       let clipped = text;
-      while (clipped.length > 1 && measure.measureText(`${clipped}…`).width > maxWidth) {
+      while (clipped.length > 0 && measure.measureText(`${clipped}…`).width > maxWidth) {
         clipped = clipped.slice(0, -1);
       }
-      return `${clipped}…`;
+      return clipped.length === 0 ? null : `${clipped}…`;
     };
 
-    measure.font = titleFont;
     const rawTitle = flow.name ?? "";
-    let title = rawTitle;
-    if (measure.measureText(title).width > available) {
-      measure.font = titleFont;
-      while (title.length > 1 && measure.measureText(`${title}…`).width > available) {
-        title = title.slice(0, -1);
-      }
-      title = `${title}…`;
-    }
-
     const legendLabel = spec.hasBulkEdges ? m.flow_graph_legend_all_previous() : null;
-    const keyWidth = font * 1.6;
-    measure.font = bodyFont;
-    const legendWidth =
-      legendLabel === null ? 0 : measure.measureText(legendLabel).width + gap + keyWidth;
     const caption = m.flow_graph_export_caption();
-    const captionWidth = measure.measureText(caption).width;
-    // The key shares the sentence's row only when both fit on it.
-    const shareRow = legendLabel !== null && captionWidth + gap * 2 + legendWidth <= available;
-    const rows = 2 + (legendLabel !== null && !shareRow ? 1 : 0);
-    const band = font * rows + gap * (rows + 1);
+    const keyWidth = font * 1.6;
+    measure.font = titleFont;
+    const titleWidth = measure.measureText(rawTitle).width;
+    measure.font = bodyFont;
+    const plan = planFlowExportCaption({
+      availableWidth: available,
+      titleWidth,
+      captionWidth: measure.measureText(caption).width,
+      legendLabelWidth: legendLabel === null ? null : measure.measureText(legendLabel).width,
+      keyWidth,
+      gap,
+      // Below roughly two characters nothing legible survives, so the row is
+      // dropped instead of drawn as a lone ellipsis over the edge.
+      minimumTextWidth: font * 2
+    });
+    if (plan.rows === 0) return dataUrl;
 
+    const band = font * plan.rows + gap * (plan.rows + 1);
     const canvas = document.createElement("canvas");
     canvas.width = spec.width;
     canvas.height = spec.height + band;
@@ -559,32 +558,40 @@
     ctx.textBaseline = "top";
     ctx.fillStyle = style.color;
     let row = spec.height + gap;
-    ctx.font = titleFont;
-    ctx.fillText(title, margin, row);
 
-    row += font + gap;
+    if (plan.showTitle) {
+      const title = fitText(rawTitle, available, titleFont);
+      if (title !== null) {
+        ctx.font = titleFont;
+        ctx.fillText(title, margin, row);
+        row += font + gap;
+      }
+    }
+
     ctx.font = bodyFont;
     ctx.globalAlpha = 0.75;
-    ctx.fillText(
-      ellipsise(caption, shareRow ? available - legendWidth - gap * 2 : available),
-      margin,
-      row
-    );
+    let legendRow = row;
+    if (plan.showCaption) {
+      const text = fitText(caption, plan.captionWidth, bodyFont);
+      if (text !== null) ctx.fillText(text, margin, row);
+      if (!plan.legendSharesCaptionRow) legendRow = row + font + gap;
+    }
 
-    if (legendLabel !== null) {
-      const legendRow = shareRow ? row : row + font + gap;
-      const label = ellipsise(legendLabel, available - keyWidth - gap);
-      const labelWidth = measure.measureText(label).width;
-      const right = canvas.width - margin;
-      ctx.fillText(label, right - labelWidth, legendRow);
-      ctx.strokeStyle = style.color;
-      ctx.lineWidth = Math.max(1, Math.round(spec.scale));
-      ctx.setLineDash([font / 3, font / 3]);
-      ctx.beginPath();
-      ctx.moveTo(right - labelWidth - gap - keyWidth, legendRow + font / 2);
-      ctx.lineTo(right - labelWidth - gap, legendRow + font / 2);
-      ctx.stroke();
-      ctx.setLineDash([]);
+    if (plan.showLegend && legendLabel !== null) {
+      const label = fitText(legendLabel, plan.legendLabelWidth, bodyFont);
+      if (label !== null) {
+        const labelWidth = measure.measureText(label).width;
+        const right = canvas.width - margin;
+        ctx.fillText(label, right - labelWidth, legendRow);
+        ctx.strokeStyle = style.color;
+        ctx.lineWidth = Math.max(1, Math.round(spec.scale));
+        ctx.setLineDash([font / 3, font / 3]);
+        ctx.beginPath();
+        ctx.moveTo(right - labelWidth - gap - keyWidth, legendRow + font / 2);
+        ctx.lineTo(right - labelWidth - gap, legendRow + font / 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
     }
     ctx.globalAlpha = 1;
 

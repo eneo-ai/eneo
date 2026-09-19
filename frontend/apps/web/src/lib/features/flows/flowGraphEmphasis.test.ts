@@ -3,6 +3,7 @@ import {
   computeFlowExportSize,
   computeFlowGraphEmphasis,
   emptyFlowGraphPreviewState,
+  planFlowExportCaption,
   reduceFlowGraphPreview,
   resolveFlowGraphPreviewId,
   type FlowGraphEmphasisEdge,
@@ -271,5 +272,127 @@ describe("computeFlowGraphEmphasis traversal cost", () => {
     // Indexing reads each edge's two ends once; the walks then read one end
     // per edge at most once in each direction.
     expect(reads).toBeLessThanOrEqual(dense.length * 4);
+  });
+});
+
+describe("planFlowExportCaption", () => {
+  const base = { keyWidth: 32, gap: 12, minimumTextWidth: 40 };
+
+  it("puts the key beside the sentence when both keep a readable share", () => {
+    const plan = planFlowExportCaption({
+      ...base,
+      availableWidth: 900,
+      titleWidth: 300,
+      captionWidth: 420,
+      legendLabelWidth: 160
+    });
+
+    expect(plan.showTitle).toBe(true);
+    expect(plan.showCaption).toBe(true);
+    expect(plan.showLegend).toBe(true);
+    expect(plan.legendSharesCaptionRow).toBe(true);
+    expect(plan.rows).toBe(2);
+  });
+
+  it("drops the key onto its own row when the sentence would be squeezed", () => {
+    const plan = planFlowExportCaption({
+      ...base,
+      availableWidth: 300,
+      titleWidth: 200,
+      captionWidth: 420,
+      legendLabelWidth: 160
+    });
+
+    expect(plan.legendSharesCaptionRow).toBe(false);
+    expect(plan.showLegend).toBe(true);
+    expect(plan.rows).toBe(3);
+  });
+
+  /**
+   * The case that reached the edge: a graph scaled hard enough to the pixel
+   * ceiling leaves an image only a few dozen pixels wide, where the dashed key
+   * cannot fit beside its own label. It is dropped, not drawn past the border.
+   */
+  it("omits the key entirely when it cannot fit beside its label", () => {
+    const plan = planFlowExportCaption({
+      ...base,
+      availableWidth: 78,
+      titleWidth: 300,
+      captionWidth: 420,
+      legendLabelWidth: 160
+    });
+
+    expect(plan.showLegend).toBe(false);
+    expect(plan.legendSharesCaptionRow).toBe(false);
+  });
+
+  it("asks for no band at all when nothing legible fits", () => {
+    const plan = planFlowExportCaption({
+      ...base,
+      availableWidth: 20,
+      titleWidth: 300,
+      captionWidth: 420,
+      legendLabelWidth: 160
+    });
+
+    expect(plan.rows).toBe(0);
+    expect(plan.showTitle).toBe(false);
+    expect(plan.showCaption).toBe(false);
+    expect(plan.showLegend).toBe(false);
+  });
+
+  it("keeps a band for a flow with no bulk edges and so no key", () => {
+    const plan = planFlowExportCaption({
+      ...base,
+      availableWidth: 900,
+      titleWidth: 300,
+      captionWidth: 420,
+      legendLabelWidth: null
+    });
+
+    expect(plan.showLegend).toBe(false);
+    expect(plan.rows).toBe(2);
+  });
+
+  /**
+   * A readable minimum is about surviving truncation, not about having enough
+   * to say. "HR" needs no room to spare.
+   */
+  it("keeps a short flow name that fits without truncation", () => {
+    const plan = planFlowExportCaption({
+      ...base,
+      availableWidth: 900,
+      titleWidth: 24,
+      captionWidth: 420,
+      legendLabelWidth: null
+    });
+
+    expect(plan.showTitle).toBe(true);
+    expect(plan.rows).toBe(2);
+  });
+
+  it("keeps a short legend label that fits beside its key", () => {
+    const plan = planFlowExportCaption({
+      ...base,
+      availableWidth: 900,
+      titleWidth: 300,
+      captionWidth: 420,
+      legendLabelWidth: 20
+    });
+
+    expect(plan.showLegend).toBe(true);
+  });
+
+  it("omits an empty flow name rather than reserving a blank row", () => {
+    const plan = planFlowExportCaption({
+      ...base,
+      availableWidth: 900,
+      titleWidth: 0,
+      captionWidth: 420,
+      legendLabelWidth: null
+    });
+
+    expect(plan.showTitle).toBe(false);
+    expect(plan.rows).toBe(1);
   });
 });
