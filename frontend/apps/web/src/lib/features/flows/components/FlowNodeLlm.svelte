@@ -104,7 +104,7 @@
         >
           {data.step.step_order}
         </span>
-        <span class="truncate text-sm font-semibold">{data.label}</span>
+        <span class="truncate text-sm font-semibold" title={data.label}>{data.label}</span>
         {#if isAssembly}
           <Badge
             variant="secondary"
@@ -184,7 +184,7 @@
     >
       {data.step.step_order}
     </span>
-    <span class="truncate text-xs font-medium">{data.label}</span>
+    <span class="truncate text-xs font-medium" title={data.label}>{data.label}</span>
     {#if hasHumanReview}
       <Badge
         variant="secondary"

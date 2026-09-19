@@ -31,10 +31,11 @@ const config = {
       directives: {
         "script-src": ["self", ...DEV_LIVE],
         "script-src-elem": ["self", ...DEV_LIVE],
-        "script-src-attr": ["self"],
-        // Only in dev: the app had no connect-src directive, so adding one
-        // outside dev would newly restrict where the client may call.
-        ...(DEV_LIVE.length ? { "connect-src": ["self", ...DEV_LIVE] } : {})
+        "script-src-attr": ["self"]
+        // No connect-src: the app declares no default-src, so leaving the
+        // directive out keeps connections unrestricted. Naming it would only
+        // narrow them -- in dev that cut the client off from every backend
+        // that is not the live helper, including each lane stack on 127.0.0.1.
       }
     },
     files: {

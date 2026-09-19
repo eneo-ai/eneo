@@ -207,21 +207,24 @@
 
   /* The travelling dot is feedback, not decoration: it appears only while
      the pointer or keyboard focus is on the edge, so the graph stays calm. */
+  /* display, not opacity: an invisible animateMotion still runs, and a long
+     flow has one per edge. Hidden this way the browser stops them all. */
   :global(.flow-dot) {
-    fill: var(--border-stronger);
-    opacity: 0;
-    transition: opacity var(--duration-quick) var(--ease-out);
+    display: none;
+    fill: var(--border-strongest);
   }
 
-  :global(.svelte-flow__edge:hover) :global(.flow-dot),
-  :global(.svelte-flow__edge:focus-within) :global(.flow-dot) {
-    opacity: 0.8;
+  /* The reveal lives inside the preference rather than being undone by a
+     later rule: a media query carries no specificity, so a reduce-motion
+     `display: none` loses to this hover selector every time. */
+  @media (prefers-reduced-motion: no-preference) {
+    :global(.svelte-flow__edge:hover) :global(.flow-dot),
+    :global(.svelte-flow__edge:focus-within) :global(.flow-dot) {
+      display: block;
+    }
   }
 
   @media (prefers-reduced-motion: reduce) {
-    :global(.flow-dot) {
-      display: none;
-    }
     :global(.edge-actions *) {
       animation: none !important;
       transition: none !important;

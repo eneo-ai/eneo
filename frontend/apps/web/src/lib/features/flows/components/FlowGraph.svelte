@@ -18,6 +18,7 @@
   import FlowNodeLlm from "./FlowNodeLlm.svelte";
   import FlowNodeIO from "./FlowNodeIO.svelte";
   import FlowEdgeInteractive from "./FlowEdgeInteractive.svelte";
+  import FlowGraphAutoFit from "./FlowGraphAutoFit.svelte";
   import { getFlowUserMode } from "$lib/features/flows/FlowUserMode";
   import { getFlowEditor } from "$lib/features/flows/FlowEditor";
   import {
@@ -26,7 +27,7 @@
     getEdgePayloadKind
   } from "$lib/features/flows/flowStepPresentation";
   import { IconDownload } from "@eneo/icons/download";
-  import { onMount, tick } from "svelte";
+  import { tick } from "svelte";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import { m } from "$lib/paraglide/messages";
 
@@ -34,14 +35,18 @@
     flow: Flow;
     activeStepId: string | null;
     onnodeclick?: (id: string) => void;
+    /** Laid-out size of the graph, so a host can give it a shape that fits. */
+    oncontentsize?: (size: { width: number; height: number }) => void;
   }
-  let { flow, activeStepId, onnodeclick }: Props = $props();
+  let { flow, activeStepId, onnodeclick, oncontentsize }: Props = $props();
 
   const mode = getFlowUserMode();
   const flowEditor = getFlowEditor();
   const assistantRevision = flowEditor.assistantRevision;
 
-  let doFitView = $state(false);
+  let containerEl: HTMLDivElement | undefined = $state();
+  let layoutRevision = $state(0);
+  let fitGraph: (() => void) | undefined = $state();
 
   type AssistantFlowMeta = {
     modelName: string | null;
@@ -113,6 +118,10 @@
       cachedLayout = buildLayout(flow?.steps ?? [], activeStepId, currentMode);
       nodes = cachedLayout.nodes;
       edges = cachedLayout.edges;
+      // A counter, not a signature: rewiring one step's underlag changes the
+      // laid-out width without changing the mode, the JSON length, or the node
+      // and edge counts, and a collision leaves the old frame in place.
+      layoutRevision += 1;
     } else {
       // Only activeStepId changed — update isActive in-place
       nodes = cachedLayout.nodes.map((n) => ({
@@ -120,13 +129,6 @@
         data: { ...n.data, isActive: n.id === activeStepId }
       }));
     }
-  });
-
-  onMount(async () => {
-    await tick();
-    requestAnimationFrame(() => {
-      doFitView = true;
-    });
   });
 
   function parseAssistantMeta(assistant: unknown): AssistantFlowMeta {
@@ -296,6 +298,11 @@
       resultNodes.push({
         id: node.id,
         type: node.kind,
+        // These anchors say where data enters and leaves; there is nothing to
+        // open on them. Leaving them focusable put tab stops in the graph
+        // that answer Enter with nothing, under a description promising they
+        // would open a step.
+        focusable: false,
         ...(node.kind === "input" || node.kind === "http_source"
           ? { sourcePosition: Position.Right }
           : { targetPosition: Position.Left }),
@@ -310,6 +317,13 @@
     }
 
     dagre.layout(g);
+
+    // dagre knows the exact extent of what it just laid out, which is what a
+    // host needs to decide how much room the graph deserves.
+    const laidOut = g.graph();
+    if (typeof laidOut.width === "number" && typeof laidOut.height === "number") {
+      oncontentsize?.({ width: laidOut.width, height: laidOut.height });
+    }
 
     for (const node of resultNodes) {
       const pos = g.node(node.id);
@@ -414,9 +428,11 @@
     isExporting = true;
     try {
       const { toPng } = await import("html-to-image");
-      const el = document.querySelector("#flow-graph-container .svelte-flow") as HTMLElement | null;
+      const el = containerEl?.querySelector(".svelte-flow") as HTMLElement | null;
       if (!el) return;
-      doFitView = true;
+      // The image is of the whole flow, not of wherever the reader
+      // happens to have panned to.
+      fitGraph?.();
       await tick();
       await new Promise((r) => requestAnimationFrame(r));
       const dataUrl = await toPng(el, {
@@ -448,24 +464,79 @@
     return "var(--background-color-secondary)";
   }
 
+  // Show the whole flow, whatever its size. A floor under the zoom would
+  // keep labels larger but crop the graph, and a cropped graph hides that
+  // there is more of it -- the worse failure of the two. Complete and small
+  // is honest: the shape reads at a glance, the numbered badges survive the
+  // scale, and zoom, pan and the minimap recover any detail. maxZoom 1 keeps
+  // a short flow at its designed size instead of inflating it to fill.
+  // Zero, because any positive floor is a promise to crop some flow and
+  // nothing caps how many steps a flow may have -- 0.002 still clips a
+  // 400-step Avancerad chain. The fit itself can never be degenerate: a graph
+  // with nodes has positive bounds, so min(width, height) ratio is positive,
+  // and xyflow returns early when there are none. The interactive floor is
+  // the same value so a gesture after a deep fit is not snapped back by d3's
+  // scale extent; "Visa hela flödet" is the way back from a deep zoom-out.
+  const MIN_ZOOM = 0;
+  const fitViewOptions = { padding: 0.12, maxZoom: 1, minZoom: MIN_ZOOM };
+  // The whole graph is framed on arrival, so a minimap earns its place only
+  // once someone zooms in past that -- which is Avancerad's kind of reading,
+  // and only worth the clutter when there is enough graph to get lost in.
+  const showMiniMap = $derived($mode === "power_user" && nodes.length > 6);
+
   const handleNodeClick: NodeEventWithPointer<MouseEvent | TouchEvent, Node> = ({ node }) => {
     if ((node?.type === "llm" || node?.type === "assembly") && node.data?.step) {
       onnodeclick?.(node.id);
     }
   };
+
+  // xyflow makes every node focusable and treats Enter and Space as "select",
+  // which is not what a step node is for here -- clicking one opens it in the
+  // editor. Without this, the graph is reachable by keyboard but nothing in
+  // it can be opened that way.
+  function handleNodeKeydown(event: KeyboardEvent): void {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const nodeEl = target.closest<HTMLElement>(".svelte-flow__node");
+    const id = nodeEl?.dataset.id;
+    if (!id) return;
+    const node = nodes.find((candidate) => candidate.id === id);
+    if (node?.type !== "llm" && node?.type !== "assembly") return;
+    event.preventDefault();
+    onnodeclick?.(id);
+  }
+
+  // xyflow ships these in English, and its stock node description offers a
+  // delete this graph does not do.
+  const ariaLabelConfig = $derived({
+    "controls.ariaLabel": m.flow_graph_controls_label(),
+    "controls.zoomIn.ariaLabel": m.flow_graph_zoom_in(),
+    "controls.zoomOut.ariaLabel": m.flow_graph_zoom_out(),
+    "controls.fitView.ariaLabel": m.flow_graph_fit_view(),
+    "minimap.ariaLabel": m.flow_graph_minimap_label(),
+    "node.a11yDescription.default": m.flow_graph_node_keyboard_hint(),
+    "node.a11yDescription.keyboardDisabled": m.flow_graph_node_keyboard_hint(),
+    "edge.a11yDescription.default": m.flow_graph_edge_keyboard_hint()
+  });
 </script>
 
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<!-- The keys are handled for the focusable nodes inside, which xyflow owns
+     and renders itself; this element only carries the listener to them. -->
 <div
+  bind:this={containerEl}
   class="flow-graph h-full w-full {$mode === 'power_user' ? '' : 'user-mode'}"
-  id="flow-graph-container"
+  onkeydown={handleNodeKeydown}
 >
   <SvelteFlow
     {nodes}
     {edges}
     {nodeTypes}
     {edgeTypes}
-    fitView={doFitView}
-    fitViewOptions={{ padding: 0.3 }}
+    {fitViewOptions}
+    {ariaLabelConfig}
+    minZoom={MIN_ZOOM}
     proOptions={{ hideAttribution: true }}
     nodesDraggable={false}
     nodesConnectable={false}
@@ -474,16 +545,23 @@
     zoomOnScroll={true}
     onnodeclick={handleNodeClick}
   >
+    <FlowGraphAutoFit
+      container={containerEl}
+      options={fitViewOptions}
+      revision={layoutRevision}
+      bind:fit={fitGraph}
+    />
     <Controls position="top-left" showLock={false} />
+    {#if showMiniMap}
+      <MiniMap width={168} height={104} nodeColor={minimapNodeColor} pannable zoomable />
+    {/if}
     {#if $mode === "power_user"}
       <Background variant={BackgroundVariant.Dots} />
-      <MiniMap width={140} height={90} nodeColor={minimapNodeColor} />
       <Panel position="top-right">
         <button
-          class="bg-primary/90 text-secondary hover:bg-hover-dimmer flex items-center gap-1.5 rounded px-2 py-1 text-xs backdrop-blur-sm transition-colors"
+          class="bg-primary text-secondary hover:bg-hover-dimmer border-default flex items-center gap-1.5 rounded border px-2.5 py-1.5 text-xs shadow-sm transition-colors"
           onclick={exportPng}
           disabled={isExporting}
-          aria-label={m.flow_graph_download_png()}
         >
           <IconDownload class="size-3" />
           {m.flow_graph_download_png()}
@@ -491,7 +569,7 @@
       </Panel>
       <Panel position="bottom-left">
         <div
-          class="bg-primary/90 text-secondary flex items-center gap-3 rounded px-2.5 py-1.5 text-xs backdrop-blur-sm"
+          class="bg-primary text-secondary border-default flex items-center gap-3 rounded border px-2.5 py-1.5 text-xs shadow-sm"
         >
           <span class="flex items-center gap-1.5">
             <svg width="20" height="2"
@@ -561,16 +639,26 @@
     --xy-node-boxshadow-hover-default: 0 2px 8px var(--shadow-stronger);
     --xy-node-boxshadow-selected-default: 0 0 0 2px var(--color-accent-default);
     --xy-edge-label-background-color-default: transparent;
-    --xy-edge-stroke-default: var(--border-stronger);
+    --xy-edge-stroke-default: var(--border-strongest);
     --xy-edge-stroke-width-default: 2;
     --xy-edge-stroke-selected-default: var(--color-accent-default);
     --xy-background-pattern-dot-color-default: var(--border-color-dimmer);
     --xy-handle-background-color-default: var(--background-color-primary);
-    --xy-handle-border-color-default: var(--border-stronger);
-    --xy-minimap-background-color-default: var(--background-color-secondary);
+    --xy-handle-border-color-default: var(--border-strongest);
+    --xy-minimap-background-color-default: var(--background-color-primary);
+    --xy-minimap-mask-background-color-default: transparent;
+    --xy-minimap-mask-stroke-color-default: var(--color-accent-default);
+    --xy-minimap-mask-stroke-width-default: 3;
+    --xy-minimap-node-background-color-default: var(--border-strongest);
     --xy-controls-button-background-color-default: var(--background-color-primary);
     --xy-controls-button-background-color-hover-default: var(--background-color-secondary);
     --xy-controls-button-border-color-default: var(--border-color-default);
+  }
+
+  .flow-graph :global(.svelte-flow__minimap) {
+    border: 1px solid var(--border-strongest);
+    border-radius: 6px;
+    overflow: hidden;
   }
 
   .flow-graph :global(.svelte-flow__handle) {
