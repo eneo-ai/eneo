@@ -488,7 +488,13 @@
           expectedCheckpointRevision: current.revision
         })
       );
-      if (isTranscriptReview && checkpoint?.state === "approved") {
+      // Approving is the decision; continuing the run is its consequence, not
+      // a second one. `canResume` carries no permission of its own, only
+      // `state === "approved"`, and transcript reviews already continued
+      // straight through. Every review type now does. If the resume itself
+      // fails the approval still stands, so the checkpoint stays approved and
+      // the Fortsätt button returns as a retry.
+      if (checkpoint?.state === "approved") {
         activeAction = "resume";
         const result = await eneo.flows.runs.reviewCheckpoints.resume({
           flowId,
@@ -591,9 +597,7 @@
 {:else}
   <!-- The panel renders inside a table cell that keeps its own text on one
        line; review prose must wrap. -->
-  <div
-    class="bg-primary flex max-w-[53.75rem] min-w-0 flex-col gap-5 rounded-lg p-3 whitespace-normal sm:p-5 2xl:max-w-[62.5rem]"
-  >
+  <div class="bg-primary flex min-w-0 flex-col gap-5 rounded-lg p-3 whitespace-normal sm:p-5">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div class="min-w-0">
         <h3 class="text-primary text-sm font-semibold">
@@ -1017,9 +1021,7 @@
           >
             {activeAction === "approve" || activeAction === "resume"
               ? m.flow_run_review_approving()
-              : isTranscriptReview
-                ? m.flow_transcript_editor_approve_continue()
-                : m.approve()}
+              : m.flow_transcript_editor_approve_continue()}
           </Button>
         {/if}
       </div>

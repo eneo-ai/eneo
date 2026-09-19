@@ -7306,7 +7306,7 @@
   "flow_run_review_show_original": "Show original",
   "flow_run_review_back_to_edit": "Back to review",
   "flow_run_review_unsaved": "Unsaved changes",
-  "flow_run_review_approve_help": "Approve saves your changes. You can then continue the run.",
+  "flow_run_review_approve_help": "Approve saves your changes and continues the run.",
   "flow_run_review_resume_help": "The review is approved. Continue to run the next step.",
   "flow_run_review_reject_open": "Reject the result…",
   "flow_run_review_reject_help": "Rejection stops the run. Describe what needs correcting."
