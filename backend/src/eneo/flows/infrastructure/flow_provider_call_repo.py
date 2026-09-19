@@ -128,11 +128,97 @@ class FlowStepUsageReceipt:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class FlowAttemptCompletionReceipt:
+    response_model: str | None
+    provider_response_id: str | None
+    num_tokens_input: int | None
+    num_tokens_output: int | None
+
+
 class FlowProviderCallRepository:
     """Owns ordered provider-call lifecycle rows under a Flow step attempt."""
 
     def __init__(self, session: AsyncSession):
         self.session = session
+
+    async def get_attempt_completion_receipt(
+        self, *, attempt_id: UUID, provider_response_id: str | None
+    ) -> FlowAttemptCompletionReceipt:
+        """Read a rejected response's identity and the attempt's reported spend.
+
+        The caller has already locked and authorized the attempt. Counts cover
+        all its completion calls, including earlier tool rounds or mapped items;
+        missing or estimated usage never becomes an exact total here.
+        """
+        completed = FlowProviderCalls.status == ProviderCallStatus.COMPLETED.value
+        matching = (
+            sa.and_(
+                completed,
+                FlowProviderCalls.provider_response_id == provider_response_id,
+            )
+            if provider_response_id is not None
+            else completed
+        )
+        row = (
+            await self.session.execute(
+                sa.select(
+                    sa.func.count().filter(completed).label("completed_count"),
+                    sa.func.count()
+                    .filter(
+                        FlowProviderCalls.status.in_(("started", "outcome_unknown"))
+                    )
+                    .label("unresolved_count"),
+                    sa.func.count().filter(matching).label("matching_count"),
+                    sa.func.max(FlowProviderCalls.response_model)
+                    .filter(matching)
+                    .label("response_model"),
+                    sa.func.max(FlowProviderCalls.provider_response_id)
+                    .filter(matching)
+                    .label("provider_response_id"),
+                    sa.func.count(FlowProviderCalls.num_tokens_input)
+                    .filter(
+                        sa.and_(completed, FlowProviderCalls.input_source == "provider")
+                    )
+                    .label("reported_inputs"),
+                    sa.func.count(FlowProviderCalls.num_tokens_output)
+                    .filter(
+                        sa.and_(
+                            completed, FlowProviderCalls.output_source == "provider"
+                        )
+                    )
+                    .label("reported_outputs"),
+                    sa.func.sum(FlowProviderCalls.num_tokens_input)
+                    .filter(completed)
+                    .label("input_tokens"),
+                    sa.func.sum(FlowProviderCalls.num_tokens_output)
+                    .filter(completed)
+                    .label("output_tokens"),
+                ).where(
+                    FlowProviderCalls.flow_step_attempt_id == attempt_id,
+                    FlowProviderCalls.call_kind == ProviderCallKind.COMPLETION.value,
+                )
+            )
+        ).one()
+        usage_complete = row.completed_count > 0 and row.unresolved_count == 0
+        sole_match = row.matching_count == 1
+        response_id = provider_response_id
+        if response_id is None and sole_match:
+            response_id = row.provider_response_id
+        return FlowAttemptCompletionReceipt(
+            response_model=row.response_model if sole_match else None,
+            provider_response_id=response_id,
+            num_tokens_input=(
+                int(row.input_tokens)
+                if usage_complete and row.reported_inputs == row.completed_count
+                else None
+            ),
+            num_tokens_output=(
+                int(row.output_tokens)
+                if usage_complete and row.reported_outputs == row.completed_count
+                else None
+            ),
+        )
 
     async def list_step_usage_receipts(
         self,

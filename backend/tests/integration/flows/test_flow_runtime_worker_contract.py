@@ -42,6 +42,7 @@ from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from eneo.flows.published_definition import build_published_definition_json
 from eneo.flows.runtime.executor import (
+    _PROVIDER_RESPONSE_RECEIVED_DISCLOSURE,
     _PROVIDER_WORK_AMBIGUITY_DISCLOSURE,
     FlowRunExecutor,
     FlowRunExecutorConfig,
@@ -950,7 +951,7 @@ async def test_typed_step_failure_persists_failed_state_for_fresh_sessions(
             error_message="The model output is not valid JSON.",
             contract_validation=None,
         )
-        + f" {_PROVIDER_WORK_AMBIGUITY_DISCLOSURE}"
+        + f" {_PROVIDER_RESPONSE_RECEIVED_DISCLOSURE}"
     )
     assert result["status"] == "failed"
     assert result["error"] == expected_message

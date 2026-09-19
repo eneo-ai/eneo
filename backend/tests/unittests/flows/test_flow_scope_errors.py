@@ -284,7 +284,7 @@ async def test_flow_run_control_endpoints_reject_scope_mismatch(monkeypatch):
             "step_attempts": [],
             "result_files": [],
             "debug_export": {
-                "schema_version": "eneo.flow.debug-export.v2",
+                "schema_version": "eneo.flow.debug-export.v3",
                 "generated_at": datetime.now(timezone.utc).isoformat(),
                 "run": {
                     "run_id": str(run.id),
@@ -298,9 +298,9 @@ async def test_flow_run_control_endpoints_reject_scope_mismatch(monkeypatch):
                     "checksum": "abc",
                     "steps_count": 0,
                 },
-                "definition_snapshot": {"steps": []},
                 "steps": [],
                 "security": {
+                    "content_included": False,
                     "redaction_applied": True,
                     "classification_field": "output_classification_override",
                 },

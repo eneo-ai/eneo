@@ -454,7 +454,7 @@ async def test_export_v16_hash_covers_all_provider_call_events(user):
     )
     export_without_event = await service.export_evidence_json(run_id=run.id)
 
-    assert export_with_event["schema_version"] == "flow-evidence-export.v16"
+    assert export_with_event["schema_version"] == "flow-evidence-export.v17"
     assert export_with_event["bundle"]["provider_calls"]["items"][0]["event_id"] == str(
         event.event_id
     )

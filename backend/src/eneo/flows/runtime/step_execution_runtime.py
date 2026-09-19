@@ -40,6 +40,8 @@ from eneo.flows.domain.runtime import (
 from eneo.flows.domain.runtime_invariant_exceptions import FlowRuntimeInvariantError
 from eneo.flows.domain.step_output import (
     OUTPUT_TEXT_OVERFLOW_KEY,
+    RejectedCompletion,
+    StepOutputValidationException,
     build_text_overflow_metadata,
 )
 from eneo.flows.enums import FlowOutputMode, FlowOutputType
@@ -1705,12 +1707,23 @@ async def _complete_step_execution(
         )
 
     completion = response.completion
+    rejected_completion = RejectedCompletion(
+        finish_reason=completion.finish_reason
+        if isinstance(completion, Completion)
+        else None,
+        provider_response_id=completion.provider_response_id
+        if isinstance(completion, Completion)
+        else None,
+    )
     if isinstance(completion, Completion) and completion.finish_reason == "length":
         raise attach_typed_failure_context(
-            TypedIOValidationException(
-                f"Step {step.step_order}: model output was truncated (finish_reason=length).",
-                code=FlowApiErrorCode.LLM_OUTPUT_TRUNCATED.value,
-                context={"finish_reason": completion.finish_reason},
+            StepOutputValidationException(
+                TypedIOValidationException(
+                    f"Step {step.step_order}: model output was truncated (finish_reason=length).",
+                    code=FlowApiErrorCode.LLM_OUTPUT_TRUNCATED.value,
+                    context={"finish_reason": completion.finish_reason},
+                ),
+                rejected_completion=rejected_completion,
             ),
             input_payload_for_result=prepared.input_payload_for_result,
             effective_prompt=actual_prompt,
@@ -1781,7 +1794,7 @@ async def _complete_step_execution(
         )
     except TypedIOValidationException as exc:
         raise attach_typed_failure_context(
-            exc,
+            StepOutputValidationException(exc, rejected_completion=rejected_completion),
             input_payload_for_result=prepared.input_payload_for_result,
             effective_prompt=actual_prompt,
             rejected_output=full_text,

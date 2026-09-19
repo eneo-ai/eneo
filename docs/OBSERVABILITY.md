@@ -263,6 +263,43 @@ ARQ job arguments do not carry `traceparent`, so Flow execution-worker spans
 are independent worker-root traces. Correlate execution-worker logs and spans
 by `flow.run.id` and `flow.run.trace_id`.
 
+### Flow troubleshooting files and review evidence
+
+Use **Download debug data** when sharing a Flow failure with support. The
+`debug_export` object (`eneo.flow.debug-export.v3`) contains an explicit selection
+of technical metadata: run and step identifiers, status, timing, model and provider
+identifiers, error codes, finish reasons, available token counts and retrieval
+counts. It excludes prompts, inputs, answers, free-form error messages, flow
+definitions, schema examples, file names and retrieved source text. Missing
+provider measurements remain unknown; a missing count is not a zero-token call.
+
+When a provider response is rejected for truncation or an output-contract failure,
+the failed attempt retains its completion identity and native usage where the
+provider-call records support it. This does not accept the incomplete output or
+retry the provider request. Use the finish reason and error code to distinguish
+output exhaustion from an invalid structured answer before deciding how to recover.
+
+**Evidence containing run content** is a separate, authorized review/export
+surface. Credential masking does not remove personal or case data from that
+evidence. Its `knowledge_traces` field contains the current attempt's source
+review details, subject to the existing passage-disclosure policy; the diagnostic
+export carries counts only. The AI Builder's existing instruction-repair path
+reads the authorized failed attempt and published definition directly. A metadata
+export alone cannot establish whether an answer is factually correct or supply
+the content needed to repair its instructions.
+
+Evidence exports use `flow-evidence-export.v17` for this layout: current-attempt
+source review moves from `bundle.debug_export.steps[].rag` to
+`bundle.knowledge_traces`, and the full definition remains at
+`bundle.definition_snapshot`. Consumers must check the export schema version;
+the diagnostic artifact also has its own `schema_version`.
+
+Older `debug_export` versions can contain source content. The frontend does not
+offer them as content-free troubleshooting files. Updating the application does
+not sanitize files that have already been downloaded. Technical identifiers can
+still be access-sensitive operational information; handle them under the
+organization's sharing policy.
+
 ---
 
 ## 7. Frontend Integration

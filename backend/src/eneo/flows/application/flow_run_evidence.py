@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from copy import deepcopy
 from datetime import datetime
 from typing import Annotated, Any, Literal, TypeAlias, cast
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -25,10 +26,18 @@ from eneo.flows.domain.rag_evidence import (
     omitted_view_totals,
     recompute_mapped_aggregates,
 )
+from eneo.flows.enums import (
+    FlowInputSource,
+    FlowInputType,
+    FlowOutputMode,
+    FlowOutputType,
+)
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_provenance import normalize_rag_payload
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
+from eneo.json_types import JsonObject
 
-DEBUG_EXPORT_SCHEMA_VERSION = "eneo.flow.debug-export.v2"
+DEBUG_EXPORT_SCHEMA_VERSION = "eneo.flow.debug-export.v3"
 
 EvidenceSectionIdentifier: TypeAlias = Literal[
     "run",
@@ -115,17 +124,49 @@ class DebugAttemptProjection(BaseModel):
     num_tokens_output: int | None
 
 
+class DebugRagSummary(BaseModel):
+    """Content-free retrieval counts; source review belongs to knowledge_traces."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    chunks_retrieved: int | None = Field(default=None, ge=0)
+    unique_sources: int | None = Field(default=None, ge=0)
+    retrieval_duration_ms: int | None = Field(default=None, ge=0)
+    raw_chunks_count: int | None = Field(default=None, ge=0)
+    deduped_chunks_count: int | None = Field(default=None, ge=0)
+    mapped_calls_complete: bool | None = None
+
+
 class DebugStepProjection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    step_id: Any
-    step_order: Any
-    assistant_id: Any
-    io_types: dict[str, Any]
-    input: dict[str, Any]
-    output: dict[str, Any]
-    rag: dict[str, Any] | None = None
+    step_id: str | None
+    step_order: int | None
+    assistant_id: str | None
+    io_types: JsonObject
+    input: JsonObject
+    output: JsonObject
+    rag: DebugRagSummary | None = None
     attempts: list[DebugAttemptProjection]
+
+
+class StepKnowledgeTrace(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    step_order: int
+    rag: JsonObject
+
+
+def build_step_knowledge_traces(
+    *, step_results: Sequence[FlowStepResult], step_attempts: Sequence[FlowStepAttempt]
+) -> tuple[StepKnowledgeTrace, ...]:
+    return tuple(
+        StepKnowledgeTrace(step_order=order, rag=normalized)
+        for order, rag in _current_attempt_rag_by_step_order(
+            step_results=step_results, step_attempts=step_attempts
+        ).items()
+        if (normalized := normalize_rag_payload(rag)) is not None
+    )
 
 
 class DebugRunSummaryProjection(BaseModel):
@@ -236,9 +277,9 @@ def build_debug_export(
             "checksum": version.definition_checksum,
             "steps_count": len(normalized_steps),
         },
-        "definition_snapshot": definition_snapshot,
         "steps": normalized_steps,
         "security": {
+            "content_included": False,
             "redaction_applied": False,
             "classification_field": "output_classification_override",
         },
@@ -281,30 +322,40 @@ def normalize_debug_step(
     attempts: list[DebugAttemptProjection] | None = None,
 ) -> dict[str, Any]:
     input_type = step.get("input_type")
+    if (
+        not isinstance(input_type, str)
+        or input_type not in FlowInputType._value2member_map_
+    ):
+        input_type = None
     output_type = step.get("output_type")
+    if (
+        not isinstance(output_type, str)
+        or output_type not in FlowOutputType._value2member_map_
+    ):
+        output_type = None
+    source = step.get("input_source")
+    if not isinstance(source, str) or source not in FlowInputSource._value2member_map_:
+        source = None
+    mode = step.get("output_mode")
+    if not isinstance(mode, str) or mode not in FlowOutputMode._value2member_map_:
+        mode = None
     return DebugStepProjection(
-        step_id=step.get("step_id"),
-        step_order=step.get("step_order"),
-        assistant_id=step.get("assistant_id"),
+        step_id=_diagnostic_uuid(step.get("step_id")),
+        step_order=parse_step_order(step.get("step_order")),
+        assistant_id=_diagnostic_uuid(step.get("assistant_id")),
         io_types={
             "input": input_type,
             "output": output_type,
         },
         input={
-            "source": step.get("input_source"),
+            "source": source,
             "type": input_type,
-            "contract": step.get("input_contract"),
-            "bindings": step.get("input_bindings"),
-            "config": step.get("input_config"),
         },
         output={
-            "mode": step.get("output_mode"),
+            "mode": mode,
             "type": output_type,
-            "contract": step.get("output_contract"),
-            "classification": step.get("output_classification_override"),
-            "config": step.get("output_config"),
         },
-        rag=_normalize_debug_rag(rag_metadata),
+        rag=_diagnostic_rag_summary(rag_metadata),
         attempts=list(attempts or []),
     ).model_dump(mode="json")
 
@@ -323,7 +374,11 @@ def normalize_debug_attempt(attempt: FlowStepAttempt) -> DebugAttemptProjection:
         attempt_no=attempt_no,
         status=_normalize_status(attempt.status),
         duration_ms=duration_ms,
-        error_code=attempt.error_code,
+        error_code=(
+            attempt.error_code
+            if attempt.error_code in FlowApiErrorCode._value2member_map_
+            else None
+        ),
         requested_model=attempt.requested_model,
         response_model=attempt.response_model,
         provider=attempt.provider,
@@ -341,8 +396,34 @@ def _normalize_status(value: Any) -> str | None:
     return status_value if isinstance(status_value, str) else None
 
 
-def _normalize_debug_rag(rag_metadata: dict[str, Any] | None) -> dict[str, Any] | None:
-    return normalize_rag_payload(rag_metadata)
+def _diagnostic_uuid(value: object) -> str | None:
+    if not isinstance(value, (str, UUID)):
+        return None
+    try:
+        return str(UUID(str(value)))
+    except ValueError:
+        return None
+
+
+def _diagnostic_rag_summary(
+    rag_metadata: dict[str, Any] | None,
+) -> DebugRagSummary | None:
+    if rag_metadata is None:
+        return None
+    counts = {
+        key: value
+        for key in DebugRagSummary.model_fields
+        if key != "mapped_calls_complete"
+        and type(value := rag_metadata.get(key)) is int
+        and value >= 0
+    }
+    complete = rag_metadata.get("mapped_calls_complete")
+    return DebugRagSummary.model_validate(
+        {
+            **counts,
+            "mapped_calls_complete": complete if type(complete) is bool else None,
+        }
+    )
 
 
 def _calculate_duration_ms(started_at: Any, finished_at: Any) -> int | None:

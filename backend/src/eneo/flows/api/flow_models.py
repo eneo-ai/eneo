@@ -61,6 +61,7 @@ from eneo.flows.api.flow_run_contract_models import (
     FormFieldPublic as FormFieldPublic,
 )
 from eneo.flows.application.flow_run_evidence import (
+    DebugRagSummary,
     EvidenceLimitIdentifier,
     EvidenceSectionIdentifier,
     RunViewEvidenceOmission,
@@ -1519,24 +1520,24 @@ class FlowRunRedispatchResponse(BaseModel):
 
 
 class FlowRunDebugIoTypes(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     input: str | None = None
     output: str | None = None
 
 
 class FlowRunDebugInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     source: str | None = None
     type: str | None = None
-    contract: dict[str, Any] | None = None
-    bindings: dict[str, Any] | None = None
-    config: dict[str, Any] | None = None
 
 
 class FlowRunDebugOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     mode: str | None = None
     type: str | None = None
-    contract: dict[str, Any] | None = None
-    classification: int | None = None
-    config: dict[str, Any] | None = None
 
 
 class FlowRunDebugRagReference(RetrievedSource):
@@ -1672,6 +1673,7 @@ class FlowRunDebugRag(BaseModel):
 
 class FlowRunDebugAttempt(BaseModel):
     model_config = ConfigDict(
+        extra="forbid",
         json_schema_extra={
             "example": {
                 "attempt_no": 1,
@@ -1685,7 +1687,7 @@ class FlowRunDebugAttempt(BaseModel):
                 "num_tokens_input": 321,
                 "num_tokens_output": 118,
             }
-        }
+        },
     )
 
     attempt_no: int
@@ -1702,16 +1704,25 @@ class FlowRunDebugAttempt(BaseModel):
 
 
 class FlowRunDebugStep(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     step_id: str | None = None
     step_order: int | None = None
     assistant_id: str | None = None
     io_types: FlowRunDebugIoTypes
     input: FlowRunDebugInput
     output: FlowRunDebugOutput
-    rag: FlowRunDebugRag | None = None
+    rag: DebugRagSummary | None = None
     attempts: list[FlowRunDebugAttempt] = Field(
         default_factory=lambda: cast(list[FlowRunDebugAttempt], [])
     )
+
+
+class FlowRunStepKnowledgeTrace(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    step_order: int
+    rag: FlowRunDebugRag
 
 
 def _empty_int_list() -> list[int]:
@@ -1786,6 +1797,8 @@ class FlowRunDebugKnowledgeEvidenceView(BaseModel):
 
 
 class FlowRunDebugRunSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     steps_count: int
     completed_steps: int
     failed_steps: int
@@ -1814,6 +1827,8 @@ class FlowRunDebugRunSummary(BaseModel):
 
 
 class FlowRunDebugRun(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     run_id: str
     flow_id: str
     flow_version: int
@@ -1843,6 +1858,8 @@ class FlowPublishedDefinitionIntegrityPublic(BaseModel):
 
 
 class FlowRunDebugDefinition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     flow_id: str
     version: int
     checksum: str
@@ -1850,6 +1867,9 @@ class FlowRunDebugDefinition(BaseModel):
 
 
 class FlowRunDebugSecurity(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    content_included: Literal[False]
     redaction_applied: bool
     classification_field: str
     masked_fields_count: int | None = None
@@ -1857,9 +1877,10 @@ class FlowRunDebugSecurity(BaseModel):
 
 class FlowRunDebugExport(BaseModel):
     model_config = ConfigDict(
+        extra="forbid",
         json_schema_extra={
             "example": {
-                "schema_version": "eneo.flow.debug-export.v2",
+                "schema_version": "eneo.flow.debug-export.v3",
                 "generated_at": "2026-03-31T12:00:00Z",
                 "run": {
                     "run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
@@ -1883,28 +1904,27 @@ class FlowRunDebugExport(BaseModel):
                     "checksum": "sha256:example",
                     "steps_count": 1,
                 },
-                "definition_snapshot": {"steps": []},
                 "steps": [],
                 "security": {
+                    "content_included": False,
                     "redaction_applied": True,
                     "classification_field": "output_classification_override",
                     "masked_fields_count": 2,
                 },
             }
-        }
+        },
     )
 
-    schema_version: str
+    schema_version: Literal["eneo.flow.debug-export.v3"]
     generated_at: datetime
     run: FlowRunDebugRun
     definition: FlowRunDebugDefinition
-    definition_snapshot: dict[str, Any]
     steps: list[FlowRunDebugStep]
     security: FlowRunDebugSecurity
 
 
 FLOW_RUN_DEBUG_EXPORT_EXAMPLE: dict[str, Any] = {
-    "schema_version": "eneo.flow.debug-export.v2",
+    "schema_version": "eneo.flow.debug-export.v3",
     "generated_at": "2026-03-31T12:00:00Z",
     "run": {
         "run_id": "00000000-0000-0000-0000-000000000301",
@@ -1928,7 +1948,6 @@ FLOW_RUN_DEBUG_EXPORT_EXAMPLE: dict[str, Any] = {
         "checksum": FLOW_PUBLISHED_DEFINITION_EXAMPLE_CHECKSUM,
         "steps_count": 1,
     },
-    "definition_snapshot": FLOW_PUBLISHED_DEFINITION_EXAMPLE,
     "steps": [
         {
             "step_id": "00000000-0000-0000-0000-000000000101",
@@ -1941,6 +1960,7 @@ FLOW_RUN_DEBUG_EXPORT_EXAMPLE: dict[str, Any] = {
         }
     ],
     "security": {
+        "content_included": False,
         "redaction_applied": True,
         "classification_field": "output_classification_override",
         "masked_fields_count": 2,
@@ -2216,17 +2236,24 @@ class FlowRunEvidenceResponse(BaseModel):
     webhook_deliveries: list[FlowRunWebhookDeliveryPublic]
     provider_calls: ProviderCallEvidencePage
     debug_export: FlowRunDebugExport
+    knowledge_traces: list[FlowRunStepKnowledgeTrace] = Field(
+        default_factory=list[FlowRunStepKnowledgeTrace],
+        description=(
+            "Current-attempt retrieved-source evidence for authorized review. "
+            "May include source names and disclosed passages; excluded from debug_export."
+        ),
+    )
 
 
 class FlowRunEvidenceExportResponse(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "schema_version": "flow-evidence-export.v16",
+                "schema_version": "flow-evidence-export.v17",
                 "generated_at": "2026-03-31T12:00:00Z",
-                "content_hash": "d9cc3fcbe1b1225ec590d424475bda6694d16825a92231363bf90f9e7c11c182",
+                "content_hash": "3717efc96f8b796387a55c11e0273b15898cdd32c68ddd3b70af8ce19999b36e",
                 "manifest": {
-                    "schema_version": "flow-evidence-export.v16",
+                    "schema_version": "flow-evidence-export.v17",
                     "app_version": "DEV",
                     "provenance_schema_version_min": "flow-attempt-provenance.v3",
                     "provenance_schema_version_current": "flow-attempt-provenance.v3",
@@ -2236,7 +2263,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
                     "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
                     "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8",
                     "flow_version": 3,
-                    "content_hash": "d9cc3fcbe1b1225ec590d424475bda6694d16825a92231363bf90f9e7c11c182",
+                    "content_hash": "3717efc96f8b796387a55c11e0273b15898cdd32c68ddd3b70af8ce19999b36e",
                     "content_hash_input": "redacted",
                     "exported_at": "2026-03-31T12:00:00Z",
                     "actor": {
@@ -2565,7 +2592,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
                     "masked_fields_count": 2,
                     "masked_paths": [
                         "bundle.run.input_payload_json.api_key",
-                        "bundle.debug_export.definition_snapshot.steps[0].output_config.headers.Authorization",
+                        "bundle.definition_snapshot.steps[0].output_config.headers.Authorization",
                     ],
                     "masked_fields": [
                         {
@@ -2595,7 +2622,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
         }
     )
 
-    schema_version: Literal["flow-evidence-export.v16"]
+    schema_version: Literal["flow-evidence-export.v17"]
     generated_at: datetime
     content_hash: str
     manifest: EvidenceExportManifest

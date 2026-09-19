@@ -223,7 +223,7 @@ async def test_get_flow_run_evidence_delegates_to_evidence_service(monkeypatch):
         "webhook_deliveries": [],
         "provider_calls": _empty_provider_calls(),
         "debug_export": {
-            "schema_version": "eneo.flow.debug-export.v2",
+            "schema_version": "eneo.flow.debug-export.v3",
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "run": {
                 "run_id": str(run.id),
@@ -237,9 +237,9 @@ async def test_get_flow_run_evidence_delegates_to_evidence_service(monkeypatch):
                 "checksum": "abc",
                 "steps_count": 0,
             },
-            "definition_snapshot": {"steps": []},
             "steps": [],
             "security": {
+                "content_included": False,
                 "redaction_applied": True,
                 "classification_field": "output_classification_override",
             },
@@ -419,7 +419,7 @@ async def test_get_flow_run_evidence_returns_failed_run_retryability(monkeypatch
         "webhook_deliveries": [],
         "provider_calls": _empty_provider_calls(),
         "debug_export": {
-            "schema_version": "eneo.flow.debug-export.v2",
+            "schema_version": "eneo.flow.debug-export.v3",
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "run": {
                 "run_id": str(run.id),
@@ -433,9 +433,9 @@ async def test_get_flow_run_evidence_returns_failed_run_retryability(monkeypatch
                 "checksum": "abc",
                 "steps_count": 0,
             },
-            "definition_snapshot": {"steps": []},
             "steps": [],
             "security": {
+                "content_included": False,
                 "redaction_applied": True,
                 "classification_field": "output_classification_override",
             },
@@ -510,7 +510,7 @@ async def test_get_flow_run_evidence_projects_redacted_artifact_result_files(
         "webhook_deliveries": [],
         "provider_calls": _empty_provider_calls(),
         "debug_export": {
-            "schema_version": "eneo.flow.debug-export.v2",
+            "schema_version": "eneo.flow.debug-export.v3",
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "run": {
                 "run_id": str(run.id),
@@ -524,9 +524,9 @@ async def test_get_flow_run_evidence_projects_redacted_artifact_result_files(
                 "checksum": "abc",
                 "steps_count": 0,
             },
-            "definition_snapshot": {"steps": []},
             "steps": [],
             "security": {
+                "content_included": False,
                 "redaction_applied": True,
                 "classification_field": "output_classification_override",
             },
@@ -622,7 +622,7 @@ async def test_get_flow_run_evidence_enriches_service_principal_actor_summaries(
         "webhook_deliveries": [],
         "provider_calls": _empty_provider_calls(),
         "debug_export": {
-            "schema_version": "eneo.flow.debug-export.v2",
+            "schema_version": "eneo.flow.debug-export.v3",
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "run": {
                 "run_id": str(run.id),
@@ -636,9 +636,9 @@ async def test_get_flow_run_evidence_enriches_service_principal_actor_summaries(
                 "checksum": "abc",
                 "steps_count": 0,
             },
-            "definition_snapshot": {"steps": []},
             "steps": [],
             "security": {
+                "content_included": False,
                 "redaction_applied": True,
                 "classification_field": "output_classification_override",
             },
@@ -751,7 +751,7 @@ async def test_get_flow_run_evidence_allows_space_admin_without_trace_permission
         "webhook_deliveries": [],
         "provider_calls": _empty_provider_calls(),
         "debug_export": {
-            "schema_version": "eneo.flow.debug-export.v2",
+            "schema_version": "eneo.flow.debug-export.v3",
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "run": {
                 "run_id": str(run.id),
@@ -765,9 +765,9 @@ async def test_get_flow_run_evidence_allows_space_admin_without_trace_permission
                 "checksum": "abc",
                 "steps_count": 0,
             },
-            "definition_snapshot": {"steps": []},
             "steps": [],
             "security": {
+                "content_included": False,
                 "redaction_applied": True,
                 "classification_field": "output_classification_override",
             },
@@ -902,7 +902,7 @@ async def test_get_flow_run_evidence_fails_closed_when_required_audit_is_unavail
         "webhook_deliveries": [],
         "provider_calls": _empty_provider_calls(),
         "debug_export": {
-            "schema_version": "eneo.flow.debug-export.v2",
+            "schema_version": "eneo.flow.debug-export.v3",
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "run": {
                 "run_id": str(run.id),
@@ -917,9 +917,9 @@ async def test_get_flow_run_evidence_fails_closed_when_required_audit_is_unavail
                 "checksum": "abc",
                 "steps_count": 0,
             },
-            "definition_snapshot": {"steps": []},
             "steps": [],
             "security": {
+                "content_included": False,
                 "redaction_applied": True,
                 "classification_field": "output_classification_override",
             },

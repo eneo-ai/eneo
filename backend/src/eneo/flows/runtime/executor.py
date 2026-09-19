@@ -67,7 +67,7 @@ from eneo.flows.domain.runtime import (
 )
 from eneo.flows.domain.runtime_input import build_runtime_input_config
 from eneo.flows.domain.runtime_invariant_exceptions import FlowRuntimeInvariantError
-from eneo.flows.domain.step_output import utf8_prefix
+from eneo.flows.domain.step_output import StepOutputValidationException, utf8_prefix
 from eneo.flows.enums import (
     FlowOutputMode,
     FlowOutputType,
@@ -248,6 +248,10 @@ _PROVIDER_WORK_AMBIGUITY_DISCLOSURE = (
     "Provider work may or may not have started; retrying can repeat provider work "
     "and spend."
 )
+_PROVIDER_RESPONSE_RECEIVED_DISCLOSURE = (
+    "The provider returned a response; retrying will make a new request "
+    "and can incur additional cost."
+)
 
 
 def _group_attempt_resolved_inputs(
@@ -262,9 +266,13 @@ def _group_attempt_resolved_inputs(
         ) from exc
 
 
-def _with_provider_work_disclosure(message: str, *, step: RuntimeStep) -> str:
+def _with_provider_work_disclosure(
+    message: str, *, step: RuntimeStep, completion_received: bool = False
+) -> str:
     if not step.may_call_completion_provider:
         return message
+    if completion_received:
+        return f"{message.rstrip()} {_PROVIDER_RESPONSE_RECEIVED_DISCLOSURE}"
     return f"{message.rstrip()} {_PROVIDER_WORK_AMBIGUITY_DISCLOSURE}"
 
 
@@ -1760,7 +1768,16 @@ class FlowRunExecutor:
     ) -> dict[str, Any]:
         failed_prompt = getattr(typed_exc, "effective_prompt", None)
         error_code = _typed_io_failure_code(typed_exc.code)
-        error_message = _with_provider_work_disclosure(str(typed_exc), step=step)
+        rejected_completion = (
+            typed_exc.rejected_completion
+            if isinstance(typed_exc, StepOutputValidationException)
+            else None
+        )
+        error_message = _with_provider_work_disclosure(
+            str(typed_exc),
+            step=step,
+            completion_received=rejected_completion is not None,
+        )
         run_error_message = _with_provider_work_disclosure(
             build_typed_failure_run_error_message(
                 step_order=step.step_order,
@@ -1769,6 +1786,7 @@ class FlowRunExecutor:
                 contract_validation=getattr(typed_exc, "contract_validation", None),
             ),
             step=step,
+            completion_received=rejected_completion is not None,
         )
         failure_plan = build_typed_failure_plan(
             claimed=claimed,
@@ -1805,6 +1823,7 @@ class FlowRunExecutor:
             status=failure_plan.attempt_status,
             error_code=failure_plan.error_code.value,
             error_message=failure_plan.error_message,
+            rejected_completion=rejected_completion,
             requested_model=requested_model
             if isinstance(requested_model, str)
             else None,

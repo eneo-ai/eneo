@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from typing import Final, TypeAlias, cast
 from uuid import UUID
 
+from eneo.main.exceptions import TypedIOValidationException
+
 OUTPUT_TEXT_OVERFLOW_KEY: Final = "text_overflow"
 REJECTED_OUTPUT_KEY: Final = "rejected_output"
 REJECTED_OUTPUT_TRUNCATED_KEY: Final = "rejected_output_truncated"
@@ -21,6 +23,28 @@ class StepOutputMetadataError(ValueError):
 class RejectedOutput:
     text: str
     truncated_by_runtime: bool
+
+
+@dataclass(frozen=True, slots=True)
+class RejectedCompletion:
+    """A received completion whose output failed validation, not an I/O failure."""
+
+    finish_reason: str | None
+    provider_response_id: str | None
+
+
+class StepOutputValidationException(TypedIOValidationException):
+    def __init__(
+        self,
+        cause: TypedIOValidationException,
+        *,
+        rejected_completion: RejectedCompletion,
+    ):
+        super().__init__(str(cause), code=cause.code, context=cause.context)
+        self.rejected_completion = rejected_completion
+        self.input_payload_json = cause.input_payload_json
+        self.effective_prompt = cause.effective_prompt
+        self.contract_validation = cause.contract_validation
 
 
 def utf8_prefix(text: str, *, max_bytes: int) -> str:

@@ -1296,14 +1296,28 @@ The default export is `detail=redacted` with reason `support_debug`. A raw expor
 requires an explicit non-default reason between 3 and 500 characters. The
 eneo-js wrapper exposes both generated options:
 
-The JSON response uses manifest schema `flow-evidence-export.v16`. Version 16
-adds exact per-attempt resolved-input lineage. Each attempt reports one typed
+The JSON response uses manifest schema `flow-evidence-export.v17`. Version 17
+separates diagnostic metadata from content-bearing evidence. The nested
+`debug_export` uses `eneo.flow.debug-export.v3` and excludes prompts, inputs,
+outputs, free-form errors, definitions and source text. It retains identifiers,
+statuses, timings, error codes, finish reasons and available token/retrieval
+counts. Missing measurements remain unknown.
+
+The full definition remains at `bundle.definition_snapshot`. Current-attempt
+knowledge details move from `bundle.debug_export.steps[].rag` to
+`bundle.knowledge_traces`; diagnostic RAG summaries contain counts only. The
+authorized evidence bundle retains recorded prompts, inputs, outputs and
+knowledge details under the existing disclosure rules. Credential masking does
+not anonymize case data. Consumers must check the manifest and nested diagnostic
+schema versions; older debug exports may contain source content.
+
+Version 16 added exact per-attempt resolved-input lineage. Each attempt reports one typed
 state: `tracked` with the persisted source edges, `not_tracked`,
 `retention_purged` with the retained aggregate and edge counts, or `corrupt`
 with a machine-readable integrity marker. The projection is admitted under the
 same attempt-evidence limits as the rest of the bundle. Version 15 introduced
-the strict immutable attempt-input envelope and remains intentionally
-incompatible because both versions change the content-hashed bundle.
+the strict immutable attempt-input envelope. These format changes are versioned
+because they change the content-hashed bundle.
 
 Exports are synchronous and complete-or-refuse. Four size guards are fixed
 service-safety invariants, not organization policy, because they bound the

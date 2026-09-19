@@ -16,7 +16,9 @@ from eneo.flows.application.citation_summary_projection import (
 from eneo.flows.application.flow_run_evidence import (
     RunViewEvidenceOmission,
     RunViewPassageOmission,
+    StepKnowledgeTrace,
     build_debug_export,
+    build_step_knowledge_traces,
 )
 from eneo.flows.domain.flow import (
     FlowRun,
@@ -93,6 +95,7 @@ class EvidenceBundle:
     ]
     citation_summaries_by_step_id: Mapping[UUID, FlowCitationSummaryPublic | None]
     debug_export: dict[str, Any]
+    knowledge_traces: tuple[StepKnowledgeTrace, ...] = ()
     review_checkpoint_edits: Sequence[FlowRunReviewCheckpointEdit] = ()
     transcript_correction_revisions: Sequence[FlowTranscriptCorrectionRevision] = ()
 
@@ -149,6 +152,9 @@ class EvidenceBundle:
                 ],
                 "provider_calls": self.provider_calls.model_dump(mode="json"),
                 "debug_export": dict(self.debug_export),
+                "knowledge_traces": [
+                    trace.model_dump(mode="json") for trace in self.knowledge_traces
+                ],
             },
             provenance_parse_results=tuple(provenance_parse_results),
         )
@@ -172,6 +178,7 @@ class RedactedEvidenceBundle:
     debug_export: dict[str, Any]
     masked_paths: tuple[str, ...]
     masked_fields: tuple[MaskedField, ...]
+    knowledge_traces: tuple[StepKnowledgeTrace, ...] = ()
     provenance_parse_results: tuple[FlowAttemptProvenanceParseResult, ...] = ()
     transcript_correction_revisions: tuple[dict[str, Any], ...] = ()
 
@@ -191,6 +198,9 @@ class RedactedEvidenceBundle:
                 "webhook_deliveries": [dict(item) for item in self.webhook_deliveries],
                 "provider_calls": self.provider_calls.model_dump(mode="json"),
                 "debug_export": dict(self.debug_export),
+                "knowledge_traces": [
+                    trace.model_dump(mode="json") for trace in self.knowledge_traces
+                ],
             },
             provenance_parse_results=self.provenance_parse_results,
         )
@@ -305,6 +315,9 @@ def build_evidence_bundle(
             knowledge_evidence_view=knowledge_evidence_view,
             omissions=omissions,
         ),
+        knowledge_traces=build_step_knowledge_traces(
+            step_results=step_results, step_attempts=step_attempts
+        ),
     )
 
 
@@ -393,6 +406,12 @@ def redact_evidence_bundle(bundle: EvidenceBundle) -> RedactedEvidenceBundle:
         bundle.debug_export, path="bundle.debug_export"
     )
     debug_export = cast(dict[str, Any], debug_result.value)
+    knowledge_result = redact_payload_with_manifest(
+        [trace.model_dump(mode="json") for trace in bundle.knowledge_traces],
+        path="bundle.knowledge_traces",
+    )
+    masked_paths.extend(knowledge_result.masked_paths)
+    masked_fields.extend(knowledge_result.masked_fields)
     security = debug_export.get("security")
     if isinstance(security, dict):
         security["redaction_applied"] = True
@@ -417,6 +436,9 @@ def redact_evidence_bundle(bundle: EvidenceBundle) -> RedactedEvidenceBundle:
         ),
         provider_calls=bundle.provider_calls,
         debug_export=debug_export,
+        knowledge_traces=tuple(
+            StepKnowledgeTrace.model_validate(trace) for trace in knowledge_result.value
+        ),
         masked_paths=tuple(
             dict.fromkeys(
                 tuple(run_result.masked_paths)

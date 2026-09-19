@@ -116,8 +116,7 @@
     loadError = false;
     try {
       evidence = await eneo.flows.runs.evidence({ id: runId, flowId });
-    } catch (e) {
-      console.error("Error loading evidence", e);
+    } catch {
       loadError = true;
     }
     loading = false;
@@ -175,8 +174,7 @@
       const rendered = serializeEvidencePayload(payload);
       await navigator.clipboard.writeText(rendered);
       setCopied(key);
-    } catch (error) {
-      console.error("Could not copy evidence payload", error);
+    } catch {
       toast.error(failureMessage);
     }
   }
@@ -184,8 +182,7 @@
   function downloadJsonArtifact(fileName: string, payload: unknown, failureMessage: string) {
     try {
       triggerJsonDownload(fileName, payload);
-    } catch (error) {
-      console.error("Could not download evidence payload", error);
+    } catch {
       toast.error(failureMessage);
     }
   }
@@ -207,7 +204,6 @@
     try {
       await downloadEvidenceExport({ eneo: eneo, flowId, runId });
     } catch (error) {
-      console.error("Could not download canonical evidence export", error);
       const recovery = exportRecoveryMessage(error);
       toast.error(
         recovery
@@ -283,8 +279,7 @@
         contentDisposition: "attachment"
       });
       window.open(url, "_blank");
-    } catch (e) {
-      console.error("Failed to download artifact", e);
+    } catch {
       toast.error(m.flow_run_download_artifact_failed());
     }
   }
@@ -294,8 +289,7 @@
   }
 
   function getStepRag(stepOrder: number) {
-    const debugStep = evidence?.debug_export?.steps?.find((step) => step.step_order === stepOrder);
-    return debugStep?.rag ?? null;
+    return evidence?.knowledge_traces?.find((trace) => trace.step_order === stepOrder)?.rag ?? null;
   }
 
   // The transcription step's audio and segments, available to every step card
@@ -442,7 +436,6 @@
     {#if $mode === "power_user"}
       <FlowRunEvidenceToolbar
         debugExport={evidence.debug_export}
-        {evidence}
         {copiedKey}
         {sensitiveCareDataFlow}
         onDownloadCanonicalEvidence={downloadCanonicalEvidenceExport}

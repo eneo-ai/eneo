@@ -701,6 +701,81 @@ def test_build_debug_export_uses_latest_evidence_timestamp() -> None:
     assert export["generated_at"] == attempt_timestamp.isoformat()
 
 
+def test_debug_export_withholds_content_but_preserves_failure_diagnostics() -> None:
+    canary = "PRIVATE_SYNTHETIC_CASE_91"
+    run, version = _evidence_run_and_version()
+    run = run.model_copy(update={"input_payload_json": {canary: canary}})
+    definition = {
+        "name": canary,
+        "steps": [
+            {
+                "step_id": str(uuid4()),
+                "step_order": 1,
+                "assistant_id": str(uuid4()),
+                "input_type": "text",
+                "output_type": "json",
+                "input_source": "flow_input",
+                "output_mode": "pass_through",
+                "name": canary,
+                "input_contract": {"description": canary},
+                "output_contract": {"properties": {canary: {"const": canary}}},
+                "input_bindings": {"question": canary},
+                "input_config": {"filename": canary},
+                "output_config": {"url": canary},
+                "assistant_snapshot": {"prompt": canary},
+            }
+        ],
+    }
+    version = version.model_copy(update={"definition_json": definition})
+    result = _step_result_for_run(run).model_copy(
+        update={
+            "current_attempt_no": 1,
+            "effective_prompt": canary,
+            "input_payload_json": {"text": canary},
+            "output_payload_json": {"rejected_output": canary},
+            "error_message": canary,
+        }
+    )
+    attempt = _attempt_with_rag(
+        run=run,
+        step_order=1,
+        rag={
+            "status": "success",
+            "chunks_retrieved": 2,
+            "source_names": [canary],
+            "references": [{"title": canary, "text": canary}],
+            "items": [{"source_label": canary, "passages": [canary]}],
+            "unexpected": {canary: canary},
+        },
+    ).model_copy(
+        update={
+            "status": FlowStepAttemptStatus.FAILED,
+            "error_code": "flow_llm_output_truncated",
+            "error_message": canary,
+            "finish_reason": "length",
+            "provider_response_id": "response-1",
+            "num_tokens_input": 200,
+            "num_tokens_output": 16384,
+            "input_payload_json": {"text": canary},
+            "output_payload_json": {"rejected_output": canary},
+        }
+    )
+    exported = build_debug_export(
+        run=run,
+        version=version,
+        step_results=[result],
+        step_attempts=[attempt],
+    )
+    assert canary not in json.dumps(exported)
+    assert "definition_snapshot" not in exported
+    assert exported["security"]["content_included"] is False
+    failure = exported["steps"][0]["attempts"][0]
+    assert failure["error_code"] == "flow_llm_output_truncated"
+    assert failure["finish_reason"] == "length"
+    assert failure["num_tokens_input"] == 200
+    assert failure["num_tokens_output"] == 16384
+
+
 def test_parse_step_order_handles_strings_and_bools():
     assert parse_step_order(" 7 ") == 7
     assert parse_step_order(True, default=9) == 9
@@ -709,7 +784,7 @@ def test_parse_step_order_handles_strings_and_bools():
     assert parse_step_order(7.2, default=4) == 4
 
 
-def test_normalize_debug_step_uses_rag_metadata():
+def test_normalize_debug_step_only_includes_rag_counts():
     step = normalize_debug_step(
         {
             "step_id": "step-1",
@@ -720,14 +795,61 @@ def test_normalize_debug_step_uses_rag_metadata():
             "output_mode": "pass_through",
             "output_type": "json",
         },
-        rag_metadata={"status": "success"},
+        rag_metadata={
+            "status": "success",
+            "chunks_retrieved": 3,
+            "source_names": ["Private source"],
+        },
     )
 
-    assert step["rag"]["status"] == "success"
-    assert step["rag"]["tracking"]["retrieval_tracked"] is True
+    assert step["rag"]["chunks_retrieved"] == 3
+    assert "source_names" not in step["rag"]
 
 
-def test_build_debug_export_preserves_degraded_rag_metadata_from_step_results():
+@pytest.mark.parametrize("redacted", [False, True])
+def test_evidence_export_reports_whether_masking_was_applied(redacted: bool):
+    run, version = _evidence_run_and_version()
+    bundle = build_evidence_bundle(
+        run=run, version=version, step_results=[], step_attempts=[]
+    )
+    export = render_evidence_json_export(
+        bundle=redact_evidence_bundle(bundle) if redacted else bundle,
+        context=_redacted_export_context() if redacted else _raw_export_context(),
+    )
+
+    assert export["manifest"]["redaction_applied"] is redacted
+    assert export["bundle"]["debug_export"]["security"]["redaction_applied"] is redacted
+    assert export["bundle"]["debug_export"]["security"]["content_included"] is False
+
+
+def test_debug_export_omits_invalid_metadata_without_echoing_its_values():
+    private_text = "PRIVATE_SYNTHETIC_METADATA_19"
+    step = normalize_debug_step(
+        {
+            "step_id": private_text,
+            "assistant_id": private_text,
+            "step_order": private_text,
+            "input_source": {"value": private_text},
+            "input_type": [private_text],
+            "output_type": private_text,
+            "output_mode": private_text,
+        },
+        rag_metadata={
+            "chunks_retrieved": private_text,
+            "unique_sources": True,
+            "mapped_calls_complete": private_text,
+        },
+    )
+
+    assert private_text not in json.dumps(step)
+    assert step["step_id"] is None
+    assert step["input"]["type"] is None
+    assert step["rag"]["chunks_retrieved"] is None
+    assert step["rag"]["unique_sources"] is None
+    assert step["rag"]["mapped_calls_complete"] is None
+
+
+def test_evidence_preserves_degraded_rag_metadata_for_review():
     now = datetime.now(timezone.utc)
     run = FlowRun(
         id=uuid4(),
@@ -836,18 +958,20 @@ def test_build_debug_export_preserves_degraded_rag_metadata_from_step_results():
         == (result.input_payload_json["diagnostics"])
     )
     assert export["definition"]["steps_count"] == 1
-    assert export["steps"][0]["rag"]["status"] == "no_chunks"
+    assert evidence["knowledge_traces"][0]["rag"]["status"] == "no_chunks"
     assert export["steps"][0]["rag"]["chunks_retrieved"] == 0
-    assert export["steps"][0]["rag"]["query_derivation"] == {
+    assert evidence["knowledge_traces"][0]["rag"]["query_derivation"] == {
         "strategy": "input_text",
         "input_truncated": True,
         "query_length": 2048,
     }
-    assert export["steps"][0]["rag"]["retrieval_policy"] == {
+    assert evidence["knowledge_traces"][0]["rag"]["retrieval_policy"] == {
         "version": 1,
         "mode": "best_effort",
     }
-    assert export["steps"][0]["rag"]["tracking"]["retrieval_tracked"] is True
+    assert (
+        evidence["knowledge_traces"][0]["rag"]["tracking"]["retrieval_tracked"] is True
+    )
 
 
 def test_build_debug_export_handles_empty_steps():
@@ -1041,7 +1165,7 @@ def test_parse_attempt_provenance_rejects_removed_retention_marker_schema() -> N
     )
 
 
-def test_build_debug_export_adds_rag_source_names_and_run_summary() -> None:
+def test_evidence_keeps_source_names_in_review_and_counts_in_debug_export() -> None:
     now = datetime.now(timezone.utc)
     run = FlowRun(
         id=uuid4(),
@@ -1101,7 +1225,7 @@ def test_build_debug_export_adds_rag_source_names_and_run_summary() -> None:
         updated_at=now,
     )
 
-    export = build_debug_export(
+    bundle = build_evidence_bundle(
         run=run,
         version=version,
         step_results=[result],
@@ -1139,10 +1263,12 @@ def test_build_debug_export_adds_rag_source_names_and_run_summary() -> None:
         ],
     )
 
+    export = bundle.debug_export
     assert export["run"]["summary"]["steps_count"] == 1
     assert export["run"]["summary"]["completed_steps"] == 1
-    assert export["steps"][0]["rag"]["source_names"] == ["Knowledge A"]
-    assert export["steps"][0]["rag"]["has_named_sources"] is True
+    assert bundle.knowledge_traces[0].rag["source_names"] == ["Knowledge A"]
+    assert bundle.knowledge_traces[0].rag["has_named_sources"] is True
+    assert "Knowledge A" not in json.dumps(export)
 
 
 def test_build_debug_export_uses_provider_call_token_usage_summary() -> None:

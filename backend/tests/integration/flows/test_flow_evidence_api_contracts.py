@@ -1061,7 +1061,7 @@ async def test_provider_call_evidence_endpoint_pages_relational_lifecycle_events
     )
     assert export_response.status_code == 200, export_response.text
     evidence_export = export_response.json()
-    assert evidence_export["schema_version"] == "flow-evidence-export.v16"
+    assert evidence_export["schema_version"] == "flow-evidence-export.v17"
     assert (
         evidence_export["manifest"]["schema_version"]
         == evidence_export["schema_version"]
@@ -1695,11 +1695,15 @@ async def test_flow_run_evidence_export_returns_redacted_json_attachment(
         headers={"Authorization": f"Bearer {trace_token}"},
     )
     assert reread.status_code == 200, reread.text
-    reread_step = reread.json()["debug_export"]["steps"][0]
+    reread_step = reread.json()["knowledge_traces"][0]
     assert reread_step["rag"]["references"][0]["passages"][0]["text"] == (
         "Beslutet grundas pa 4 kap. 1 SoL."
     )
     assert reread_step["rag"]["references"][0]["id"] == "source-1"
+    debug_export = reread.json()["debug_export"]
+    assert debug_export["security"]["content_included"] is False
+    assert "source-1" not in json.dumps(debug_export)
+    assert "Beslutet grundas" not in json.dumps(debug_export)
 
     assert payload["summary"]["citations"]["tracking_mode"] == "passive_inline_scan"
     assert payload["summary"]["citations"]["citation_expected"] is False

@@ -4040,22 +4040,18 @@ async def test_get_evidence_redacts_sensitive_values(user):
         "https://example.org/path?client_secret=%5BREDACTED%5D&client.secret=%5BREDACTED%5D&api-key=%5BREDACTED%5D"
     )
     assert evidence["step_attempts"][0]["error_message"] == "Bearer [REDACTED]"
-    assert evidence["debug_export"]["schema_version"] == "eneo.flow.debug-export.v2"
+    assert evidence["debug_export"]["schema_version"] == "eneo.flow.debug-export.v3"
     assert evidence["debug_export"]["definition"]["checksum"] == (
         flow_version_repo.get.return_value.definition_checksum
     )
     assert evidence["debug_export"]["run"]["status"] == "queued"
     assert evidence["debug_export"]["steps"][0]["input"]["source"] is None
-    assert (
-        evidence["debug_export"]["definition_snapshot"]["steps"][0]["output_config"][
-            "headers"
-        ]["Authorization"]
-        == "[REDACTED]"
-    )
+    assert "definition_snapshot" not in evidence["debug_export"]
+    assert evidence["debug_export"]["security"]["content_included"] is False
 
 
 @pytest.mark.asyncio
-async def test_get_evidence_includes_rag_metadata_in_debug_export(user):
+async def test_get_evidence_separates_source_review_from_debug_counts(user):
     user = _trace_user(user)
     flow_repo = _flow_repo()
     flow_run_repo = flow_run_repo_mock()
@@ -4152,23 +4148,19 @@ async def test_get_evidence_includes_rag_metadata_in_debug_export(user):
 
     evidence = (await service.get_redacted_evidence_bundle(run_id=run.id)).to_dict()
 
-    assert evidence["debug_export"]["steps"][0]["rag"]["status"] == "success"
+    assert evidence["knowledge_traces"][0]["rag"]["status"] == "success"
     assert evidence["debug_export"]["steps"][0]["rag"]["chunks_retrieved"] == 5
     assert evidence["debug_export"]["steps"][0]["rag"]["retrieval_duration_ms"] == 87
     assert evidence["debug_export"]["steps"][0]["rag"]["raw_chunks_count"] == 5
     assert evidence["debug_export"]["steps"][0]["rag"]["deduped_chunks_count"] == 2
     assert (
-        evidence["debug_export"]["steps"][0]["rag"]["references"][0]["title"]
+        evidence["knowledge_traces"][0]["rag"]["references"][0]["title"]
         == "Sundsvall source"
     )
-    passage = evidence["debug_export"]["steps"][0]["rag"]["references"][0]["passages"][
-        0
-    ]
+    passage = evidence["knowledge_traces"][0]["rag"]["references"][0]["passages"][0]
     assert passage["chunk_no"] == 1
     assert passage["text"] == "Sundsvall redovisar positivt resultat."
-    assert evidence["debug_export"]["steps"][0]["rag"]["source_ids_short"] == [
-        "aaaaaaaa"
-    ]
+    assert evidence["knowledge_traces"][0]["rag"]["source_ids_short"] == ["aaaaaaaa"]
 
 
 @pytest.mark.asyncio
@@ -4243,7 +4235,7 @@ async def test_get_evidence_includes_trace_id_and_attempts_in_debug_export(user)
 
     evidence = (await service.get_redacted_evidence_bundle(run_id=run.id)).to_dict()
 
-    assert evidence["debug_export"]["schema_version"] == "eneo.flow.debug-export.v2"
+    assert evidence["debug_export"]["schema_version"] == "eneo.flow.debug-export.v3"
     assert evidence["debug_export"]["run"]["trace_id"] == str(run.trace_id)
     assert evidence["debug_export"]["steps"][0]["attempts"][0]["attempt_no"] == 2
     assert evidence["debug_export"]["steps"][0]["attempts"][0]["duration_ms"] == 5000
@@ -4309,7 +4301,7 @@ async def test_export_evidence_json_hashes_returned_bundle_and_manifest_by_detai
         (redacted_export, "redacted"),
         (raw_export, "raw"),
     ):
-        assert export["schema_version"] == "flow-evidence-export.v16"
+        assert export["schema_version"] == "flow-evidence-export.v17"
         assert export["manifest"]["schema_version"] == export["schema_version"]
         assert isinstance(export["manifest"]["app_version"], str)
         assert export["manifest"]["app_version"]

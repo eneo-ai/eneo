@@ -36,6 +36,8 @@ from eneo.flows.domain.provider_call import (
     TranscriptionCallCompletion,
     TranscriptionProviderCallRequest,
 )
+from eneo.flows.domain.step_output import RejectedCompletion
+from eneo.flows.enums import FlowStepAttemptStatus
 from eneo.flows.flow_run_provenance import (
     FlowResolvedInputEdgeIndexes,
     FlowResolvedInputEdges,
@@ -570,6 +572,219 @@ async def test_provider_call_evidence_rejects_noncanonical_persisted_capabilitie
                 tenant_id=context.tenant_id,
                 limit=1,
             )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    (
+        "prior_call",
+        "input_tokens",
+        "input_source",
+        "expected_input",
+        "response_id",
+        "duplicate_id",
+        "expected_model",
+    ),
+    [
+        (False, 0, "provider", 0, "returned-response", False, "observed-model"),
+        (True, 13, "provider", 34, "returned-response", False, "observed-model"),
+        (
+            False,
+            None,
+            "not_reported",
+            None,
+            "returned-response",
+            False,
+            "observed-model",
+        ),
+        (False, 5, "estimated", None, "returned-response", False, "observed-model"),
+        (False, 13, "provider", 13, None, False, "observed-model"),
+        (True, 13, "provider", 34, "returned-response", True, None),
+    ],
+)
+async def test_rejected_completion_persists_receipts_without_recounting_usage(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    prior_call,
+    input_tokens,
+    input_source,
+    expected_input,
+    response_id,
+    duplicate_id,
+    expected_model,
+):
+    async with db_container() as container:
+        session = container.session()
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        calls = FlowProviderCallRepository(session)
+        request = CompletionProviderCallRequest(
+            provider_request_hash="f" * 64,
+            requested_model="configured-model",
+            provider="hosted_vllm",
+            requested_capabilities=(),
+        )
+        if prior_call:
+            earlier = await _start_provider_call(
+                repo=calls, context=context, request=request
+            )
+            await calls.complete_call(
+                call_id=earlier.id,
+                receipt=ProviderCallCompletion(
+                    response_model="earlier-model",
+                    provider_response_id=(
+                        "returned-response" if duplicate_id else "earlier-response"
+                    ),
+                    num_tokens_input=21,
+                    num_tokens_output=8,
+                    input_source="provider",
+                    output_source="provider",
+                ),
+            )
+        rejected = await _start_provider_call(
+            repo=calls, context=context, request=request
+        )
+        await calls.reject_call(
+            call_id=rejected.id,
+            reason=ProviderCallRejectionReason.RESPONSE_FORMAT_REJECTED,
+        )
+        returned = await _start_provider_call(
+            repo=calls, context=context, request=request
+        )
+        await calls.complete_call(
+            call_id=returned.id,
+            receipt=ProviderCallCompletion(
+                response_model="observed-model",
+                provider_response_id="returned-response",
+                num_tokens_input=input_tokens,
+                num_tokens_output=16384,
+                input_source=input_source,
+                output_source="provider",
+            ),
+        )
+        before = await calls.list_usage_for_runs(
+            run_ids=[context.run_id],
+            tenant_id=context.tenant_id,
+        )
+
+        run_repo = FlowRunRepository(session)
+        finish = dict(
+            run_id=context.run_id,
+            step_id=context.step_id,
+            attempt_no=context.attempt_no,
+            tenant_id=context.tenant_id,
+            status=FlowStepAttemptStatus.FAILED,
+            error_code="flow_llm_output_truncated",
+            rejected_completion=RejectedCompletion(
+                finish_reason="length",
+                provider_response_id=response_id,
+            ),
+        )
+        with pytest.raises(ValueError, match="diagnostics come from call receipts"):
+            await run_repo.finish_attempt(**finish, num_tokens_output=0)
+        invalid_status = {**finish, "status": FlowStepAttemptStatus.COMPLETED}
+        with pytest.raises(ValueError, match="only finish a failed attempt"):
+            await run_repo.finish_attempt(**invalid_status)
+        attempt = await run_repo.finish_attempt(**finish)
+
+        assert attempt is not None
+        assert attempt.status == FlowStepAttemptStatus.FAILED
+        assert attempt.finish_reason == "length"
+        assert attempt.response_model == expected_model
+        assert attempt.provider_response_id == "returned-response"
+        assert attempt.num_tokens_input == expected_input
+        assert attempt.num_tokens_output == 16384 + (8 if prior_call else 0)
+        assert (
+            await calls.list_usage_for_runs(
+                run_ids=[context.run_id],
+                tenant_id=context.tenant_id,
+            )
+            == before
+        )
+        assert (
+            await FlowRunRepository(session).finish_attempt(
+                run_id=context.run_id,
+                step_id=context.step_id,
+                attempt_no=context.attempt_no,
+                tenant_id=context.tenant_id,
+                status=FlowStepAttemptStatus.FAILED,
+                rejected_completion=RejectedCompletion("stop", "late-response"),
+            )
+            is None
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize("unresolved", [False, True])
+async def test_rejected_completion_does_not_invent_missing_receipts(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    unresolved,
+):
+    async with db_container() as container:
+        session = container.session()
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        calls = FlowProviderCallRepository(session)
+        if unresolved:
+            request = CompletionProviderCallRequest(
+                provider_request_hash="e" * 64,
+                requested_model="configured-model",
+                requested_capabilities=(),
+            )
+            for _ in range(2):
+                returned = await _start_provider_call(
+                    repo=calls, context=context, request=request
+                )
+                await calls.complete_call(
+                    call_id=returned.id,
+                    receipt=ProviderCallCompletion(
+                        response_model="observed-model",
+                        provider_response_id=None,
+                        num_tokens_input=2,
+                        num_tokens_output=3,
+                        input_source="provider",
+                        output_source="provider",
+                    ),
+                )
+            await _start_provider_call(repo=calls, context=context, request=request)
+
+        run_repo = FlowRunRepository(session)
+        finish = dict(
+            run_id=context.run_id,
+            step_id=context.step_id,
+            attempt_no=context.attempt_no,
+            status=FlowStepAttemptStatus.FAILED,
+            rejected_completion=RejectedCompletion(
+                finish_reason="length", provider_response_id=None
+            ),
+        )
+        assert await run_repo.finish_attempt(tenant_id=uuid4(), **finish) is None
+        attempt = await run_repo.finish_attempt(tenant_id=context.tenant_id, **finish)
+        assert attempt is not None
+        assert attempt.finish_reason == "length"
+        assert attempt.response_model is None
+        assert attempt.provider_response_id is None
+        assert attempt.num_tokens_input is None
+        assert attempt.num_tokens_output is None
 
 
 @pytest.mark.asyncio

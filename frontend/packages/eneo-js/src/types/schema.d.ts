@@ -14898,6 +14898,24 @@ export interface components {
       /** Watchdog Timestamp */
       watchdog_timestamp?: string | null;
     };
+    /**
+     * DebugRagSummary
+     * @description Content-free retrieval counts; source review belongs to knowledge_traces.
+     */
+    DebugRagSummary: {
+      /** Chunks Retrieved */
+      chunks_retrieved?: number | null;
+      /** Deduped Chunks Count */
+      deduped_chunks_count?: number | null;
+      /** Mapped Calls Complete */
+      mapped_calls_complete?: boolean | null;
+      /** Raw Chunks Count */
+      raw_chunks_count?: number | null;
+      /** Retrieval Duration Ms */
+      retrieval_duration_ms?: number | null;
+      /** Unique Sources */
+      unique_sources?: number | null;
+    };
     /** DefaultAssistant */
     DefaultAssistant: {
       allowed_attachments: components["schemas"]["FileRestrictions"];
@@ -15783,7 +15801,7 @@ export interface components {
        * Schema Version
        * @constant
        */
-      schema_version: "flow-evidence-export.v16";
+      schema_version: "flow-evidence-export.v17";
       /** Tenant Id */
       tenant_id: string;
       /** Trace Id */
@@ -18910,9 +18928,6 @@ export interface components {
      *         "steps_count": 1,
      *         "version": 3
      *       },
-     *       "definition_snapshot": {
-     *         "steps": []
-     *       },
      *       "generated_at": "2026-03-31T12:00:00Z",
      *       "run": {
      *         "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
@@ -18932,9 +18947,10 @@ export interface components {
      *         },
      *         "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8"
      *       },
-     *       "schema_version": "eneo.flow.debug-export.v2",
+     *       "schema_version": "eneo.flow.debug-export.v3",
      *       "security": {
      *         "classification_field": "output_classification_override",
+     *         "content_included": false,
      *         "masked_fields_count": 2,
      *         "redaction_applied": true
      *       },
@@ -18943,36 +18959,23 @@ export interface components {
      */
     FlowRunDebugExport: {
       definition: components["schemas"]["FlowRunDebugDefinition"];
-      /** Definition Snapshot */
-      definition_snapshot: {
-        [key: string]: unknown;
-      };
       /**
        * Generated At
        * Format: date-time
        */
       generated_at: string;
       run: components["schemas"]["FlowRunDebugRun"];
-      /** Schema Version */
-      schema_version: string;
+      /**
+       * Schema Version
+       * @constant
+       */
+      schema_version: "eneo.flow.debug-export.v3";
       security: components["schemas"]["FlowRunDebugSecurity"];
       /** Steps */
       steps: components["schemas"]["FlowRunDebugStep"][];
     };
     /** FlowRunDebugInput */
     FlowRunDebugInput: {
-      /** Bindings */
-      bindings?: {
-        [key: string]: unknown;
-      } | null;
-      /** Config */
-      config?: {
-        [key: string]: unknown;
-      } | null;
-      /** Contract */
-      contract?: {
-        [key: string]: unknown;
-      } | null;
       /** Source */
       source?: string | null;
       /** Type */
@@ -19038,16 +19041,6 @@ export interface components {
     };
     /** FlowRunDebugOutput */
     FlowRunDebugOutput: {
-      /** Classification */
-      classification?: number | null;
-      /** Config */
-      config?: {
-        [key: string]: unknown;
-      } | null;
-      /** Contract */
-      contract?: {
-        [key: string]: unknown;
-      } | null;
       /** Mode */
       mode?: string | null;
       /** Type */
@@ -19354,6 +19347,11 @@ export interface components {
     FlowRunDebugSecurity: {
       /** Classification Field */
       classification_field: string;
+      /**
+       * Content Included
+       * @constant
+       */
+      content_included: false;
       /** Masked Fields Count */
       masked_fields_count?: number | null;
       /** Redaction Applied */
@@ -19368,7 +19366,7 @@ export interface components {
       input: components["schemas"]["FlowRunDebugInput"];
       io_types: components["schemas"]["FlowRunDebugIoTypes"];
       output: components["schemas"]["FlowRunDebugOutput"];
-      rag?: components["schemas"]["FlowRunDebugRag"] | null;
+      rag?: components["schemas"]["DebugRagSummary"] | null;
       /** Step Id */
       step_id?: string | null;
       /** Step Order */
@@ -19740,23 +19738,6 @@ export interface components {
      *             "steps_count": 1,
      *             "version": 3
      *           },
-     *           "definition_snapshot": {
-     *             "description": "Transcribe a review conversation.",
-     *             "flow_id": "00000000-0000-0000-0000-000000000001",
-     *             "name": "Employee Review Summary",
-     *             "schema_version": 1,
-     *             "steps": [
-     *               {
-     *                 "assistant_id": "00000000-0000-0000-0000-000000000201",
-     *                 "input_source": "flow_input",
-     *                 "input_type": "audio",
-     *                 "output_mode": "transcribe_only",
-     *                 "output_type": "text",
-     *                 "step_id": "00000000-0000-0000-0000-000000000101",
-     *                 "step_order": 1
-     *               }
-     *             ]
-     *           },
      *           "generated_at": "2026-03-31T12:00:00Z",
      *           "run": {
      *             "flow_id": "00000000-0000-0000-0000-000000000001",
@@ -19776,9 +19757,10 @@ export interface components {
      *             },
      *             "trace_id": "00000000-0000-0000-0000-000000000302"
      *           },
-     *           "schema_version": "eneo.flow.debug-export.v2",
+     *           "schema_version": "eneo.flow.debug-export.v3",
      *           "security": {
      *             "classification_field": "output_classification_override",
+     *             "content_included": false,
      *             "masked_fields_count": 2,
      *             "redaction_applied": true
      *           },
@@ -20016,7 +19998,7 @@ export interface components {
      *           }
      *         ]
      *       },
-     *       "content_hash": "d9cc3fcbe1b1225ec590d424475bda6694d16825a92231363bf90f9e7c11c182",
+     *       "content_hash": "3717efc96f8b796387a55c11e0273b15898cdd32c68ddd3b70af8ce19999b36e",
      *       "generated_at": "2026-03-31T12:00:00Z",
      *       "manifest": {
      *         "actor": {
@@ -20052,7 +20034,7 @@ export interface components {
      *           "total_size_bytes": 14012,
      *           "tracking_state": "tracked"
      *         },
-     *         "content_hash": "d9cc3fcbe1b1225ec590d424475bda6694d16825a92231363bf90f9e7c11c182",
+     *         "content_hash": "3717efc96f8b796387a55c11e0273b15898cdd32c68ddd3b70af8ce19999b36e",
      *         "content_hash_input": "redacted",
      *         "detail_mode": "redacted",
      *         "export_reason": "support_debug",
@@ -20085,7 +20067,7 @@ export interface components {
      *           "count": 1
      *         },
      *         "run_id": "a8f5f167-f44f-4d5b-9c06-8ef0db6d7f3b",
-     *         "schema_version": "flow-evidence-export.v16",
+     *         "schema_version": "flow-evidence-export.v17",
      *         "tenant_id": "1f73af48-76fb-4a26-85ee-17f20b722808",
      *         "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8"
      *       },
@@ -20101,11 +20083,11 @@ export interface components {
      *         "masked_fields_count": 2,
      *         "masked_paths": [
      *           "bundle.run.input_payload_json.api_key",
-     *           "bundle.debug_export.definition_snapshot.steps[0].output_config.headers.Authorization"
+     *           "bundle.definition_snapshot.steps[0].output_config.headers.Authorization"
      *         ],
      *         "policy_version": "flow-evidence-redaction.v3"
      *       },
-     *       "schema_version": "flow-evidence-export.v16",
+     *       "schema_version": "flow-evidence-export.v17",
      *       "summary": {
      *         "artifact_details": [
      *           {
@@ -20438,7 +20420,7 @@ export interface components {
        * Schema Version
        * @constant
        */
-      schema_version: "flow-evidence-export.v16";
+      schema_version: "flow-evidence-export.v17";
       summary: components["schemas"]["EvidenceExportSummary"];
     };
     /**
@@ -20450,23 +20432,6 @@ export interface components {
      *           "flow_id": "00000000-0000-0000-0000-000000000001",
      *           "steps_count": 1,
      *           "version": 3
-     *         },
-     *         "definition_snapshot": {
-     *           "description": "Transcribe a review conversation.",
-     *           "flow_id": "00000000-0000-0000-0000-000000000001",
-     *           "name": "Employee Review Summary",
-     *           "schema_version": 1,
-     *           "steps": [
-     *             {
-     *               "assistant_id": "00000000-0000-0000-0000-000000000201",
-     *               "input_source": "flow_input",
-     *               "input_type": "audio",
-     *               "output_mode": "transcribe_only",
-     *               "output_type": "text",
-     *               "step_id": "00000000-0000-0000-0000-000000000101",
-     *               "step_order": 1
-     *             }
-     *           ]
      *         },
      *         "generated_at": "2026-03-31T12:00:00Z",
      *         "run": {
@@ -20487,9 +20452,10 @@ export interface components {
      *           },
      *           "trace_id": "00000000-0000-0000-0000-000000000302"
      *         },
-     *         "schema_version": "eneo.flow.debug-export.v2",
+     *         "schema_version": "eneo.flow.debug-export.v3",
      *         "security": {
      *           "classification_field": "output_classification_override",
+     *           "content_included": false,
      *           "masked_fields_count": 2,
      *           "redaction_applied": true
      *         },
@@ -20735,6 +20701,11 @@ export interface components {
       definition_snapshot: {
         [key: string]: unknown;
       };
+      /**
+       * Knowledge Traces
+       * @description Current-attempt retrieved-source evidence for authorized review. May include source names and disclosed passages; excluded from debug_export.
+       */
+      knowledge_traces?: components["schemas"]["FlowRunStepKnowledgeTrace"][];
       provider_calls: components["schemas"]["ProviderCallEvidencePage"];
       /** Result Files */
       result_files: components["schemas"]["FlowRunStepResultFile"][];
@@ -22053,6 +22024,12 @@ export interface components {
       should_poll: boolean;
       /** @description Flow run status value this capability row describes. */
       status: components["schemas"]["FlowRunStatus"];
+    };
+    /** FlowRunStepKnowledgeTrace */
+    FlowRunStepKnowledgeTrace: {
+      rag: components["schemas"]["FlowRunDebugRag"];
+      /** Step Order */
+      step_order: number;
     };
     /**
      * FlowRunStepPublic

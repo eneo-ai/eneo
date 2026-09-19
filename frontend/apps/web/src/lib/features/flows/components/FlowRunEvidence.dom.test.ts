@@ -13,6 +13,7 @@ vi.mock("$lib/features/flows/FlowUserMode", () => ({
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
 });
 
 function evidenceWithCorruptPassageAggregates(
@@ -81,9 +82,10 @@ function eneoReturning(evidence: FlowRunEvidenceWithTypedSteps): Eneo {
 
 describe("FlowRunEvidence", () => {
   it("offers a retry when the evidence request fails, and loads on retry", async () => {
+    const consoleError = vi.spyOn(console, "error");
     const evidence = vi
       .fn()
-      .mockRejectedValueOnce(new Error("gateway timeout"))
+      .mockRejectedValueOnce(new Error("PRIVATE_SYNTHETIC_ERROR_PAYLOAD"))
       .mockResolvedValueOnce(evidenceWithBoundedSections());
     render(FlowRunEvidence, {
       runId: "run-1",
@@ -93,6 +95,7 @@ describe("FlowRunEvidence", () => {
     });
 
     expect(await screen.findByText(m.flow_run_evidence_error())).toBeTruthy();
+    expect(consoleError).not.toHaveBeenCalled();
     await fireEvent.click(screen.getByRole("button", { name: m.flow_retry() }));
     await waitFor(() => expect(evidence).toHaveBeenCalledTimes(2));
     expect(await screen.findByTestId("evidence-view-omissions")).toBeTruthy();

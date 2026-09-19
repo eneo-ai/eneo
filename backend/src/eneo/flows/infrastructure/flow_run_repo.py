@@ -55,6 +55,7 @@ from eneo.flows.domain.flow_step_attempt_input import (
     merge_flow_step_attempt_input,
     parse_flow_step_attempt_input,
 )
+from eneo.flows.domain.step_output import RejectedCompletion
 from eneo.flows.domain.transcript_regeneration import TranscriptRegenerationSeed
 from eneo.flows.enums import (
     ACTIVE_FLOW_RUN_STATUSES,
@@ -2813,10 +2814,24 @@ class FlowRunRepository:
         provider_response_id: str | None = None,
         num_tokens_input: int | None = None,
         num_tokens_output: int | None = None,
+        rejected_completion: RejectedCompletion | None = None,
         provenance_json: dict[str, Any] | None = None,
         attempt_input: FlowStepAttemptInput | None = None,
         output_payload_json: FlowPersistedJsonObject | None = None,
     ) -> FlowStepAttempt | None:
+        if rejected_completion is not None and status != FlowStepAttemptStatus.FAILED:
+            raise ValueError("Rejected completions can only finish a failed attempt.")
+        if rejected_completion is not None and any(
+            value is not None
+            for value in (
+                response_model,
+                provider_response_id,
+                num_tokens_input,
+                num_tokens_output,
+                finish_reason,
+            )
+        ):
+            raise ValueError("Rejected completion diagnostics come from call receipts.")
         row = await self.session.scalar(
             sa.select(FlowStepAttempts)
             .where(FlowStepAttempts.flow_run_id == run_id)
@@ -2829,6 +2844,18 @@ class FlowRunRepository:
         )
         if row is None:
             return None
+        if rejected_completion is not None:
+            receipt = await FlowProviderCallRepository(
+                self.session
+            ).get_attempt_completion_receipt(
+                attempt_id=row.id,
+                provider_response_id=rejected_completion.provider_response_id,
+            )
+            response_model = receipt.response_model
+            provider_response_id = receipt.provider_response_id
+            num_tokens_input = receipt.num_tokens_input
+            num_tokens_output = receipt.num_tokens_output
+            finish_reason = rejected_completion.finish_reason
         terminalization_evidence = resolve_attempt_terminalization_evidence(
             row.provenance_json,
             provenance_json,

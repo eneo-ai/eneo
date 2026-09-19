@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from copy import deepcopy
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -11,6 +12,7 @@ from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_models import FileType
 from eneo.flows.api.flow_assembler import FlowAssembler, FlowRunResultProjectionError
 from eneo.flows.api.flow_models import (
+    FLOW_RUN_DEBUG_EXPORT_EXAMPLE,
     FLOW_RUN_PUBLIC_EXAMPLE,
     FLOW_RUN_SUMMARY_PUBLIC_EXAMPLE,
     FlowAssistantCreateRequest,
@@ -21,6 +23,7 @@ from eneo.flows.api.flow_models import (
     FlowRunContractPublic,
     FlowRunCreateRequest,
     FlowRunDebugAttempt,
+    FlowRunDebugExport,
     FlowRunEvidenceResponse,
     FlowRunPublic,
     FlowRunStepPublic,
@@ -984,7 +987,7 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
                 "next_after_event_id": None,
             },
             "debug_export": {
-                "schema_version": "eneo.flow.debug-export.v2",
+                "schema_version": "eneo.flow.debug-export.v3",
                 "generated_at": "2026-03-20T12:05:00Z",
                 "run": {
                     "run_id": str(run_id),
@@ -999,7 +1002,6 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
                     "checksum": "abc",
                     "steps_count": 1,
                 },
-                "definition_snapshot": {"steps": []},
                 "steps": [
                     {
                         "step_id": str(step_id),
@@ -1009,62 +1011,12 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
                         "input": {
                             "source": "flow_input",
                             "type": "text",
-                            "contract": None,
-                            "bindings": None,
-                            "config": None,
                         },
                         "output": {
                             "mode": "pass_through",
                             "type": "json",
-                            "contract": None,
-                            "classification": None,
-                            "config": None,
                         },
-                        "rag": {
-                            "attempted": True,
-                            "status": "success",
-                            "tracking": {
-                                "retrieval_tracked": True,
-                                "prompt_context_inclusion_tracked": True,
-                                "citation_tracked": False,
-                                "material_influence_tracked": False,
-                                "selection_basis": "semantic_search_ranked_chunks_grouped_by_source",
-                            },
-                            "prompt_context": {
-                                "tracked": True,
-                                "included_source_ids": ["source-1"],
-                                "included_source_titles": ["Beslut till underlag"],
-                                "included_source_display_names": [
-                                    "Beslut till underlag"
-                                ],
-                                "summary": {
-                                    "total_sources": 1,
-                                    "total_chunks": 2,
-                                    "truncated_by_token_budget": False,
-                                    "top_ranked_sources": [
-                                        {
-                                            "source_id": "source-1",
-                                            "display_name": "Beslut till underlag",
-                                            "source_kind": "website",
-                                            "included_group_count": 1,
-                                            "included_chunk_count": 2,
-                                            "best_score": 1.0,
-                                            "rank": 1,
-                                        }
-                                    ],
-                                },
-                                "included_groups": [
-                                    {
-                                        "source_id": "source-1",
-                                        "source_title": "Beslut till underlag",
-                                        "start_chunk": 1,
-                                        "end_chunk": 2,
-                                        "chunk_count": 2,
-                                        "relevance_score": 1.0,
-                                    }
-                                ],
-                            },
-                        },
+                        "rag": {"chunks_retrieved": 2},
                         "attempts": [
                             {
                                 "attempt_no": 1,
@@ -1083,10 +1035,59 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
                     }
                 ],
                 "security": {
+                    "content_included": False,
                     "redaction_applied": True,
                     "classification_field": "output_classification_override",
                 },
             },
+            "knowledge_traces": [
+                {
+                    "step_order": 1,
+                    "rag": {
+                        "attempted": True,
+                        "status": "success",
+                        "tracking": {
+                            "retrieval_tracked": True,
+                            "prompt_context_inclusion_tracked": True,
+                            "citation_tracked": False,
+                            "material_influence_tracked": False,
+                            "selection_basis": "semantic_search_ranked_chunks_grouped_by_source",
+                        },
+                        "prompt_context": {
+                            "tracked": True,
+                            "included_source_ids": ["source-1"],
+                            "included_source_titles": ["Beslut till underlag"],
+                            "included_source_display_names": ["Beslut till underlag"],
+                            "summary": {
+                                "total_sources": 1,
+                                "total_chunks": 2,
+                                "truncated_by_token_budget": False,
+                                "top_ranked_sources": [
+                                    {
+                                        "source_id": "source-1",
+                                        "display_name": "Beslut till underlag",
+                                        "source_kind": "website",
+                                        "included_group_count": 1,
+                                        "included_chunk_count": 2,
+                                        "best_score": 1.0,
+                                        "rank": 1,
+                                    }
+                                ],
+                            },
+                            "included_groups": [
+                                {
+                                    "source_id": "source-1",
+                                    "source_title": "Beslut till underlag",
+                                    "start_chunk": 1,
+                                    "end_chunk": 2,
+                                    "chunk_count": 2,
+                                    "relevance_score": 1.0,
+                                }
+                            ],
+                        },
+                    },
+                }
+            ],
         }
     )
 
@@ -1106,17 +1107,27 @@ def test_flow_run_evidence_response_parses_typed_nested_models() -> None:
     assert isinstance(response.debug_export.steps[0].attempts[0], FlowRunDebugAttempt)
     assert response.debug_export.steps[0].attempts[0].response_model == "gpt-4.1-mini"
     assert response.debug_export.steps[0].rag is not None
-    assert response.debug_export.steps[0].rag.prompt_context is not None
-    assert response.debug_export.steps[0].rag.prompt_context.included_source_ids == [
+    assert response.knowledge_traces[0].rag.prompt_context is not None
+    assert response.knowledge_traces[0].rag.prompt_context.included_source_ids == [
         "source-1"
     ]
-    assert response.debug_export.steps[0].rag.prompt_context.summary is not None
-    assert (
-        response.debug_export.steps[0].rag.prompt_context.summary["total_sources"] == 1
-    )
-    assert response.debug_export.steps[
+    assert response.knowledge_traces[0].rag.prompt_context.summary is not None
+    assert response.knowledge_traces[0].rag.prompt_context.summary["total_sources"] == 1
+    assert response.knowledge_traces[
         0
     ].rag.prompt_context.included_source_display_names == ["Beslut till underlag"]
+
+
+@pytest.mark.parametrize("content_location", ["definition", "source"])
+def test_debug_export_contract_rejects_content_fields(content_location: str) -> None:
+    payload = deepcopy(FLOW_RUN_DEBUG_EXPORT_EXAMPLE)
+    if content_location == "definition":
+        payload["definition_snapshot"] = {"prompt": "Private synthetic text"}
+    else:
+        payload["steps"][0]["rag"] = {"source_names": ["Private synthetic source"]}
+
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        FlowRunDebugExport.model_validate(payload)
 
 
 def _flow_run_step_public_payload() -> dict[str, object]:

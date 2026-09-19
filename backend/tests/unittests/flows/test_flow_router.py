@@ -169,11 +169,11 @@ def _evidence_export_payload(
         mode="json"
     )
     return {
-        "schema_version": "flow-evidence-export.v16",
+        "schema_version": "flow-evidence-export.v17",
         "generated_at": generated_at,
         "content_hash": content_hash,
         "manifest": {
-            "schema_version": "flow-evidence-export.v16",
+            "schema_version": "flow-evidence-export.v17",
             "app_version": "DEV",
             "provenance_schema_version_min": "flow-attempt-provenance.v3",
             "provenance_schema_version_current": "flow-attempt-provenance.v3",
@@ -254,7 +254,7 @@ def _evidence_export_payload(
             "step_attempts": [],
             "result_files": [],
             "debug_export": {
-                "schema_version": "eneo.flow.debug-export.v2",
+                "schema_version": "eneo.flow.debug-export.v3",
                 "generated_at": generated_at,
                 "run": {
                     "run_id": str(run.id),
@@ -269,9 +269,9 @@ def _evidence_export_payload(
                     "checksum": "abc",
                     "steps_count": 0,
                 },
-                "definition_snapshot": {"steps": []},
                 "steps": [],
                 "security": {
+                    "content_included": False,
                     "redaction_applied": True,
                     "classification_field": "output_classification_override",
                 },

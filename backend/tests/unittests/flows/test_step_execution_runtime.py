@@ -49,6 +49,7 @@ from eneo.flows.domain.runtime import (
     StepExecutionOutput,
     StepInputValue,
 )
+from eneo.flows.domain.step_output import StepOutputValidationException
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_provenance import (
     FlowResolvedInputFlowInputSource,
@@ -3114,7 +3115,12 @@ async def test_rejected_completion_attaches_exact_text_without_output_artifact(t
     assistant.get_response = AsyncMock(
         return_value=SimpleNamespace(
             total_token_count=4,
-            completion=text,
+            completion=Completion(
+                text=text,
+                finish_reason="stop",
+                provider_response_id="rejected-json",
+                reasoning_content="hidden reasoning",
+            ),
         )
     )
     prepared = PreparedStepExecution(
@@ -3153,6 +3159,9 @@ async def test_rejected_completion_attaches_exact_text_without_output_artifact(t
             prepared=prepared,
             deps=deps,
         )
+    assert isinstance(caught.value, StepOutputValidationException)
+    assert caught.value.rejected_completion.finish_reason == "stop"
+    assert caught.value.rejected_completion.provider_response_id == "rejected-json"
     assert getattr(caught.value, "rejected_output", None) == text
     assert caught.value.effective_prompt == "Return JSON"
     cap.assert_not_called()
@@ -3349,6 +3358,11 @@ async def test_reduced_cap_terminal_reason_controls_flow_consumption(
         assert error.code == "flow_llm_output_truncated"
         assert error.context == {"finish_reason": "length"}
         assert "length" in str(error)
+        rejected_completion = getattr(error, "rejected_completion", None)
+        assert rejected_completion is not None
+        assert rejected_completion.finish_reason == "length"
+        assert rejected_completion.provider_response_id == "response-1"
+        assert getattr(error, "rejected_output", None) is None
         process_output.assert_not_awaited()
         apply_cap.assert_not_awaited()
         failure = build_typed_failure_plan(
@@ -3357,6 +3371,7 @@ async def test_reduced_cap_terminal_reason_controls_flow_consumption(
             error_message=str(error),
             input_payload_json=error.input_payload_json,
             effective_prompt=error.effective_prompt,
+            max_inline_text_bytes=8,
         )
         assert failure.failed_result.status == FlowStepResultStatus.FAILED
         assert failure.failed_result.error_code == "flow_llm_output_truncated"

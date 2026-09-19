@@ -54,7 +54,11 @@ from eneo.flows.domain.review_checkpoint_exceptions import (
     FlowReviewOpenBlockedByActiveCheckpointError,
 )
 from eneo.flows.domain.runtime_invariant_exceptions import FlowRuntimeInvariantError
-from eneo.flows.domain.step_output import OUTPUT_TEXT_OVERFLOW_KEY
+from eneo.flows.domain.step_output import (
+    OUTPUT_TEXT_OVERFLOW_KEY,
+    RejectedCompletion,
+    StepOutputValidationException,
+)
 from eneo.flows.enums import (
     FlowRunLifecycleSource,
 )
@@ -1904,6 +1908,64 @@ async def test_typed_validation_failure_persists_input_context_for_export(user):
     assert saved_result.status == FlowStepResultStatus.FAILED
     assert saved_result.input_payload_json == typed_exc.input_payload_json
     assert saved_result.effective_prompt == "Categorize this"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error_code", ["flow_llm_output_truncated", "typed_io_contract_violation"]
+)
+async def test_rejected_completion_is_saved_as_failure_with_known_provider_outcome(
+    user, error_code
+):
+    executor, _, repo, _ = _build_executor(user)
+    step = RuntimeStep(
+        step_id=uuid4(),
+        step_order=1,
+        assistant_id=uuid4(),
+        user_description="Read JSON",
+        input_source="flow_input",
+        input_bindings=None,
+        input_config=None,
+        output_mode="pass_through",
+        output_config=None,
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    claimed = _claimed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=user.tenant_id,
+        step_id=step.step_id,
+        assistant_id=step.assistant_id,
+    )
+    completion = RejectedCompletion(
+        finish_reason="length" if error_code == "flow_llm_output_truncated" else "stop",
+        provider_response_id="rejected-response",
+    )
+    error = StepOutputValidationException(
+        TypedIOValidationException("Rejected output", code=error_code),
+        rejected_completion=completion,
+    )
+    repo.finish_attempt = AsyncMock()
+
+    result = await executor._handle_typed_step_failure(
+        run_id=run.id,
+        tenant_id=user.tenant_id,
+        step=step,
+        attempt_no=1,
+        claimed=claimed,
+        typed_exc=error,
+        failed_input_payload=None,
+    )
+
+    assert result["status"] == "failed"
+    finished = repo.finish_attempt.await_args.kwargs
+    assert finished["status"] == FlowStepAttemptStatus.FAILED
+    assert finished["rejected_completion"] == completion
+    assert "The provider returned a response" in finished["error_message"]
+    assert "may or may not" not in finished["error_message"]
+    assert "The provider returned a response" in result["error"]
+    assert "may or may not" not in result["error"]
+    executor.flow_run_review_checkpoint_repo.open_review_checkpoint_for_completed_step.assert_not_called()
 
 
 @pytest.mark.asyncio
