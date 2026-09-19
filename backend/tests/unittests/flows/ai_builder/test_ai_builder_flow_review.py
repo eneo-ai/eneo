@@ -2969,10 +2969,15 @@ async def test_failure_review_explains_truncation_from_content_free_attempt_meta
     rendered = render_review_evidence(evidence)
     assert "finish_reason=length" in rendered
     assert "Avvisad utdata" not in rendered
+    # The counts are the attempt's aggregate over its calls, said as such;
+    # they are never presented as the size of the cut-off answer.
+    assert "Försöket använde sammanlagt" in rendered
+    assert "inklusive eventuella verktygsrundor" in rendered
+    assert "avbröts av modellen (finish_reason=length) efter" not in rendered
     if tokens_known:
-        assert "4096" in rendered and "1200" in rendered
+        assert "4096 tokens ut och 1200 tokens in" in rendered
     else:
-        assert "okänt" in rendered
+        assert "okänt antal tokens ut och okänt antal tokens in" in rendered
     # The evidence states facts: usage and the recorded reason, never a
     # budget, and the contract lock; what to do belongs to the directive.
     assert "ligger fast" in rendered

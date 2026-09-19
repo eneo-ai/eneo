@@ -1150,6 +1150,7 @@
           assistantText={lastAssistantText}
           editContext={activeEditContext}
           editContextLabel={savedFlowStepScopeLabel}
+          editContextLocked={service.activeStepScopeLocked}
           oncleareditcontext={() => service.clearActiveStepScope()}
         />
       {/if}

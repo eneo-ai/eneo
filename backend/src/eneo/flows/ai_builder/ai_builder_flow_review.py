@@ -1075,15 +1075,18 @@ def _render_unretained_answer(failure: FlowReviewFailureFact) -> list[str]:
 
     A truncated answer has no text to show: the finish reason and the token
     counts from the call receipt are the facts, and an unknown count is said
-    to be unknown. Usage is not a budget, so no limit is stated. The rule for
-    what to do about it belongs to the revision directive, not to the
-    evidence."""
+    to be unknown. The counts are the attempt's aggregate over all its
+    completion calls (tool rounds and mapped items included), so they are
+    stated as such and never as the cut-off answer's own size; usage is not a
+    budget, so no limit is stated. The rule for what to do about it belongs to
+    the revision directive, not to the evidence."""
     finish = failure.finish_reason or "okänd"
     return [
         "--- Modellens svar sparades inte ---",
-        f"Svaret avbröts av modellen (finish_reason={finish}) efter "
-        f"{_token_count_sv(failure.num_tokens_output)} tokens ut; instruktion och "
-        f"indata var {_token_count_sv(failure.num_tokens_input)} tokens in.",
+        f"Det sista svaret avbröts av modellen (finish_reason={finish}). "
+        f"Försöket använde sammanlagt {_token_count_sv(failure.num_tokens_output)} "
+        f"tokens ut och {_token_count_sv(failure.num_tokens_input)} tokens in över "
+        "sina modellanrop, inklusive eventuella verktygsrundor.",
         "--- Slut ---",
         "Kontraktet för stegets utdata ligger fast — ändra instruktionen så att "
         "svaret uppfyller det.",

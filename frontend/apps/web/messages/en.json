@@ -4601,6 +4601,7 @@
   "ai_builder_step_choice_placeholder": "Step …",
   "ai_builder_step_choice_item": "Step {step}: {name}",
   "flow_package_continue_in_ai_builder": "Continue in the AI Builder",
+  "ai_builder_package_with_references_refused": "Drop the package on its own. Attach reference files in the imported flow's AI Builder.",
   "ai_builder_tab": "AI builder",
   "ai_builder_confirm_lead": "This is what gets built. Use Change on a row, or describe the change below.",
   "ai_builder_confirm_lead_confirmed": "Confirmed. The plan is built from this.",

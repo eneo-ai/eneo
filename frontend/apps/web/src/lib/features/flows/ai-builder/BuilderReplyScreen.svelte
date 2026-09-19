@@ -17,6 +17,7 @@
     assistantText: string | null;
     editContext?: AIBuilderEditContext | null;
     editContextLabel?: string | null;
+    editContextLocked?: boolean;
     oncleareditcontext?: () => void;
   }
 
@@ -26,6 +27,7 @@
     assistantText,
     editContext = null,
     editContextLabel = null,
+    editContextLocked = false,
     oncleareditcontext
   }: Props = $props();
 </script>
@@ -66,6 +68,7 @@
         <FlowAIBuilderInput
           {editContext}
           {editContextLabel}
+          {editContextLocked}
           {oncleareditcontext}
           placeholder={m.ai_builder_reply_placeholder()}
         />

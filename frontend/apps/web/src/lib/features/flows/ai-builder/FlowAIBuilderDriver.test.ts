@@ -4826,6 +4826,58 @@ describe("FlowAIBuilderDriver review turns", () => {
     expect(driver.state.session?.edit_scope?.step_number).toBe(2);
   });
 
+  it("blocks the next send when the read-back after a scoped turn fails", async () => {
+    const fetch = vi.fn(async () => {
+      throw new Error("session unavailable");
+    });
+    const stream = vi.fn(async (_path, _init, handlers) => completeStream(handlers));
+    const { driver } = makeDriver({ fetchImpl: fetch, streamImpl: stream });
+    driver.seedState({ session: makeSession() });
+
+    await driver.sendMessage("tydligare", undefined, undefined, {
+      kind: "saved_flow_step",
+      flow_step_id: "flow-step-2"
+    });
+
+    // The turn was delivered, but its scope is not known here until the
+    // server's snapshot arrives: the fence holds and the send stays refused.
+    expect(driver.state.error).not.toBeNull();
+    expect(driver.canStartNewTurn).toBe(false);
+    expect(await driver.sendMessage("och nu utan steg")).toBe("not_started");
+    expect(driver.state.snapshotVersion).toBe(0);
+  });
+
+  it("reads the session back after an unscoped turn while the server projected a scope", async () => {
+    const projected = makeSession({
+      edit_scope: {
+        context: { kind: "saved_flow_step", flow_step_id: "flow-step-2" },
+        step_number: 2,
+        step_name: "Sammanfatta",
+        preserves_output_contract: false
+      }
+    });
+    const cleared = makeSession();
+    const fetch = vi.fn(async () => cleared);
+    const stream = vi.fn(async (_path, _init, handlers) => {
+      handlers.onMessage?.(
+        { id: "", event: "usage", data: JSON.stringify({}) },
+        new AbortController()
+      );
+      completeStream(handlers);
+    });
+    const { driver } = makeDriver({ fetchImpl: fetch, streamImpl: stream });
+    driver.seedState({ session: projected });
+
+    await driver.sendMessage("beskriv hela flödet");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/v1/flows/ai-builder/sessions/{session_id}",
+      expect.objectContaining({ method: "get" })
+    );
+    expect(driver.state.session?.edit_scope ?? null).toBeNull();
+    expect(driver.state.snapshotVersion).toBe(1);
+  });
+
   it("replaces the plan when the turn emits a new one", async () => {
     const stream = vi.fn(async (_path, _init, handlers) => {
       handlers.onMessage?.(

@@ -346,14 +346,15 @@ class AIBuilderService:
             if (plan_ref and step.plan_step_ref == plan_ref) or (
                 not plan_ref and step.existing_step_ref == existing_ref
             ):
+                # Identity only: the request contract bounds the presentation
+                # name, a step's name is unbounded, and the label travels on
+                # the scope itself.
                 return AIBuilderSessionEditScope(
                     context=AIBuilderPlanEditContext(
                         scope="step",
                         plan_id=session.latest_plan_id,
                         target_plan_step_ref=step.plan_step_ref,
                         target_existing_step_ref=step.existing_step_ref,
-                        target_step_name=step.name,
-                        target_step_number=number,
                     ),
                     step_number=number,
                     step_name=step.name,

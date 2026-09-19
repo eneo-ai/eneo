@@ -4601,6 +4601,7 @@
   "ai_builder_step_choice_placeholder": "Steg …",
   "ai_builder_step_choice_item": "Steg {step}: {name}",
   "flow_package_continue_in_ai_builder": "Fortsätt i AI-byggaren",
+  "ai_builder_package_with_references_refused": "Släpp paketet för sig. Underlag och andra filer bifogar du i det importerade flödets AI-byggare.",
   "ai_builder_tab": "AI-byggaren",
   "ai_builder_confirm_lead": "Det här är vad som byggs. Använd Ändra på raden, eller beskriv ändringen nedan.",
   "ai_builder_confirm_lead_confirmed": "Bekräftad. Planen bygger på det här.",

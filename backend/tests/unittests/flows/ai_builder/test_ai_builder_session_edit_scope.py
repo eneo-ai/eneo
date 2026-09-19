@@ -233,6 +233,32 @@ async def test_a_plan_step_turn_that_produced_the_next_plan_follows_its_target(u
 
 
 @pytest.mark.asyncio
+async def test_a_projected_plan_context_carries_identity_only(user):
+    """A step's name is unbounded while the request contract bounds the
+    presentation name; the label travels on the scope, never in the context."""
+    service = _service(user)
+    flow_id, plan_id = uuid4(), uuid4()
+    long_name = "Steg med ett mycket långt namn " * 8  # > 200 characters
+    assert len(long_name) > 200
+    service.repo.get_plan.return_value = _plan(
+        plan_id,
+        ("step_1", "existing_step_1", long_name),
+        scoped=("step_1", "existing_step_1"),
+    )
+    saved = _user(
+        "x", edit_context=AIBuilderSavedFlowStepEditContext(flow_step_id=uuid4())
+    )
+    scope = await service.describe_session_edit_scope(
+        _session(user, saved, flow_id=flow_id, latest_plan_id=plan_id)
+    )
+    assert scope is not None
+    assert scope.step_name == long_name
+    assert scope.context.kind == "proposed_plan"
+    assert scope.context.target_step_name is None
+    assert scope.context.target_step_number is None
+
+
+@pytest.mark.asyncio
 async def test_a_declined_turn_keeps_its_newer_target_against_the_unchanged_plan(user):
     """P1 concerned step 1; the user then asked about step 2 and the Builder
     declined, so P1 is still current: the newer accepted target wins."""

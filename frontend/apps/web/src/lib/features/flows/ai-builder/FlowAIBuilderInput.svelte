@@ -3,6 +3,7 @@
      accent token via relative oklch() syntax; the rest are near-transparent
      shadow overlays with no token equivalent */
   import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
   import * as Select from "$lib/components/ui/select/index.js";
   import { getLocale } from "$lib/paraglide/runtime";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -155,9 +156,11 @@
       // Replace wholesale — one session's text must never leak into another.
       inputValue = stored?.text ?? "";
       restoredFiles = stored?.files ?? [];
+      scopeRequired = stored?.requireStepScope === true;
       draftRestored = stored !== null;
       clearUploads();
     } else if (stored) {
+      if (stored.requireStepScope) scopeRequired = true;
       // First session of this composer instance: a seeded prefill may already
       // be present, and it wins over the stored draft text.
       if (inputValue === "" && stored.text.length > 0) {
@@ -195,7 +198,10 @@
     // submission is in flight — but anything the user TYPES during the
     // flight is newer intent and is mirrored normally.
     if (pendingSubmission?.sessionId === sessionId && text.length === 0) return;
-    saveComposerDraft(sessionId, { text, files });
+    saveComposerDraft(
+      sessionId,
+      scopeRequired ? { text, files, requireStepScope: true } : { text, files }
+    );
   });
 
   async function removeRestoredFile(fileId: string) {
@@ -215,8 +221,14 @@
     persistedAttachments.length > 0 || $attachments.length > 0 || restoredFiles.length > 0
   );
   // A request carried from a package names changes to steps; without a
-  // chosen step it would be read as a whole-flow edit.
-  const stepScopeMissing = $derived(requireStepScope && !editContext);
+  // chosen step it would be read as a whole-flow edit. The requirement is
+  // the composer's own once seeded: it rides the persisted draft across a
+  // reload and lifts with the delivery that consumed the request.
+  let scopeRequired = $state(false);
+  $effect(() => {
+    if (requireStepScope) scopeRequired = true;
+  });
+  const stepScopeMissing = $derived(scopeRequired && !editContext);
   const canSubmit = $derived(
     (inputValue.trim().length > 0 || completedUploads.length > 0 || restoredFiles.length > 0) &&
       service.canSendMessage &&
@@ -315,6 +327,7 @@
     }
     pendingSubmission = null;
     if (outcome === "delivered") {
+      scopeRequired = false;
       clearComposerDraft(submitted.sessionId);
       if (activeDraftSessionId === submitted.sessionId) {
         restoredFiles = [];
@@ -365,15 +378,21 @@
     acceptsPackages ? `${$managerRules.acceptString},.eneopkg` : $managerRules.acceptString
   );
 
-  /** A package goes to the importer; everything else is an attachment. One
-   *  package per intake: the first wins, and the rest of the files are
-   *  queued as usual so nothing is silently dropped. */
+  /** A package goes to the importer; everything else is an attachment. The
+   *  handoff carries the typed request and nothing else, so a package that
+   *  arrives with other files, or into a composer that already holds some,
+   *  is refused whole rather than accepted with its references left behind. */
   function intake(files: File[]) {
     if (acceptsPackages) {
-      const index = files.findIndex((file) => isFlowPackageFile(file));
-      if (index >= 0) {
-        const [pkg] = files.splice(index, 1);
-        onpackage?.({ file: pkg!, text: inputValue });
+      const packages = files.filter((file) => isFlowPackageFile(file));
+      if (packages.length > 0) {
+        const others = files.length - packages.length;
+        if (packages.length > 1 || others > 0 || hasAttachments) {
+          toast.error(m.ai_builder_package_with_references_refused());
+          return;
+        }
+        onpackage?.({ file: packages[0]!, text: inputValue });
+        return;
       }
     }
     if (files.length > 0) queueValidUploads(files);

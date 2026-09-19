@@ -64,13 +64,21 @@ export class FlowAIBuilderService {
   #driver: FlowAIBuilderDriver;
   #stateVersion = $state(0);
   #hasSeenPlanInSession = $state(false);
-  /** The step the flow editor launched, before its first message is sent. */
+  /** The step the flow editor launched, before its first message is sent.
+   *  Bound to the session snapshot it was made against: the next committed
+   *  snapshot (a delivered turn read back, a retry reconciled, a plan
+   *  operation) retires it in favour of the server's projection. */
   #savedFlowStepScope = $state<{
     sessionId: string | null;
+    snapshotVersion: number;
     scope: AIBuilderSavedFlowStepScope;
   } | null>(null);
-  /** A dismissed projected scope, by identity, for the current session. */
-  #dismissedScope = $state<{ sessionId: string; key: string } | null>(null);
+  /** A dismissed projected scope, for one snapshot of the current session. */
+  #dismissedScope = $state<{
+    sessionId: string;
+    snapshotVersion: number;
+    key: string;
+  } | null>(null);
 
   hasSession = $derived(this.#state.session !== null);
   hasSeenPlanInSession = $derived(this.#hasSeenPlanInSession);
@@ -180,7 +188,9 @@ export class FlowAIBuilderService {
     const owned = this.#savedFlowStepScope;
     if (owned === null) return null;
     const sessionId = this.#state.session?.session_id ?? null;
-    return owned.sessionId === sessionId ? owned.scope : null;
+    return owned.sessionId === sessionId && owned.snapshotVersion === this.#state.snapshotVersion
+      ? owned.scope
+      : null;
   }
 
   /** The scope the server projected from the newest accepted turn, unless
@@ -195,6 +205,7 @@ export class FlowAIBuilderService {
     if (
       dismissed !== null &&
       dismissed.sessionId === session.session_id &&
+      dismissed.snapshotVersion === this.#state.snapshotVersion &&
       dismissed.key === scopeKey(projected.context)
     ) {
       return null;
@@ -208,9 +219,9 @@ export class FlowAIBuilderService {
   }
 
   /** The step the next message edits: the editor's unsent launch first, then
-   *  the server's projection. A delivered turn drops the launch, because the
-   *  driver reads the session back before the send settles and the
-   *  projection then names the step as the server resolved it. */
+   *  the server's projection. The launch is bound to the snapshot it was made
+   *  against, so the read-back a scoped turn forces (or any later snapshot)
+   *  retires it and the projection names the step as the server resolved it. */
   get #activeScope(): AIBuilderStepScopeState | null {
     const launched = this.savedFlowStepScope;
     if (launched) return { ...launched, locked: false };
@@ -236,6 +247,7 @@ export class FlowAIBuilderService {
     this.#dismissedScope = null;
     this.#savedFlowStepScope = {
       sessionId: this.#state.session?.session_id ?? null,
+      snapshotVersion: this.#state.snapshotVersion,
       scope
     };
   }
@@ -251,7 +263,11 @@ export class FlowAIBuilderService {
     const projected = session?.edit_scope ?? null;
     this.#dismissedScope =
       session && projected
-        ? { sessionId: session.session_id, key: scopeKey(projected.context) }
+        ? {
+            sessionId: session.session_id,
+            snapshotVersion: this.#state.snapshotVersion,
+            key: scopeKey(projected.context)
+          }
         : null;
   }
 
@@ -567,14 +583,6 @@ export class FlowAIBuilderService {
       editContext,
       reviewContext
     );
-    if (outcome === "delivered") {
-      // The server recorded the turn and the driver read the session back,
-      // so its projection now owns the scope: the editor's launch and any
-      // dismissal of the previous projection are spent. A refused send keeps
-      // the launch on screen and changes nothing.
-      this.#savedFlowStepScope = null;
-      this.#dismissedScope = null;
-    }
     if (outcome !== "not_started" && reviewContext) {
       if (reviewContext.kind === "run_failure") {
         if (outcome === "delivered") this.closeFailureRepair();

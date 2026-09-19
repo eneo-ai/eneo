@@ -16,6 +16,10 @@ export interface ComposerDraftFile {
 export interface ComposerDraft {
   text: string;
   files: ComposerDraftFile[];
+  /** A request carried from a package import: it names changes to steps and
+   *  is not sent until one is chosen. Kept with the draft so a reload cannot
+   *  send it unscoped. */
+  requireStepScope?: boolean;
 }
 
 const KEY_PREFIX = "eneo:ai-builder:draft:";
@@ -50,7 +54,9 @@ export function loadComposerDraft(sessionId: string): ComposerDraft | null {
     const text = typeof draft.text === "string" ? draft.text : "";
     const files = Array.isArray(draft.files) ? draft.files.filter(isDraftFile) : [];
     if (text.length === 0 && files.length === 0) return null;
-    return { text, files };
+    return draft.requireStepScope === true
+      ? { text, files, requireStepScope: true }
+      : { text, files };
   } catch {
     return null;
   }

@@ -157,6 +157,10 @@ export interface FlowAIBuilderState {
   draftSessions: AIBuilderDraftSession[];
   pendingOperation: PendingPlanOperation | null;
   createFailureOutcome: CreateFailureOutcome | null;
+  /** Advances every time an authoritative session snapshot is committed.
+   *  Browser-only scope state (an unsent launch, a dismissal) is bound to
+   *  the snapshot it was made against and retires with the next one. */
+  snapshotVersion: number;
   /** Assistant prose from a completed review turn that produced no new plan —
    *  a typed decline ("I cannot swap the model for you") or a plain answer.
    *  The plan stays; the review screen renders this as a dismissible notice. */
@@ -183,7 +187,8 @@ export function createInitialFlowAIBuilderState(): FlowAIBuilderState {
     draftSessions: [],
     pendingOperation: null,
     createFailureOutcome: null,
-    reviewNote: null
+    reviewNote: null,
+    snapshotVersion: 0
   };
 }
 
@@ -751,6 +756,7 @@ export class FlowAIBuilderDriver {
     this.#applyCommittedTurnOutcome(session, attemptedClientTurnId);
     this.#hydrateMessagesFromConversation(session.conversation ?? []);
     this.#state.currentPlan = plan;
+    this.#state.snapshotVersion += 1;
     this.#notify();
   }
 
@@ -1075,6 +1081,7 @@ export class FlowAIBuilderDriver {
     // `plan` event lands; a turn that produces no plan event lets the refreshed
     // session's latest_plan_id decide whether the plan is still the truth.
     const planBeforeTurn = this.#state.currentPlan;
+    const sessionHadProjectedScope = this.#state.session?.edit_scope != null;
     if (planBeforeTurn) {
       this.#state.applyResult = null;
     }
@@ -1196,11 +1203,15 @@ export class FlowAIBuilderDriver {
       const reviewTurnWithoutPlanEvent = planBeforeTurn !== null && !receivedPlanEvent;
       // The step the next turn edits is the server's projection of this
       // turn's accepted target onto the plan it produced (or left standing);
-      // the stream carries neither, so a scoped turn reads the session back
-      // before another send is allowed. An unscoped turn projects nothing,
-      // which the client already shows.
+      // the stream carries neither. A turn that sent a scope, or that ran
+      // while the server projected one, reads the session back before
+      // another send is allowed: the fence goes up first, so a failed read
+      // blocks the next send instead of letting it go unscoped.
       const scopeSettledOnServer =
-        requestBody.edit_context != null || requestBody.review_context != null;
+        requestBody.edit_context != null ||
+        requestBody.review_context != null ||
+        sessionHadProjectedScope;
+      if (scopeSettledOnServer) this.#requiresAuthoritativeRefresh = true;
       const shouldRefreshAfterStream =
         !receivedDone ||
         isRetry ||

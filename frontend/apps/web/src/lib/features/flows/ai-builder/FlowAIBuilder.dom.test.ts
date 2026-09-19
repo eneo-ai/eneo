@@ -3,6 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { m } from "$lib/paraglide/messages";
 
+const toastMock = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), info: vi.fn() }));
+vi.mock("$lib/components/toast", () => ({ toast: toastMock }));
+
 // The composer reads app-shell contexts (upload limits, API client) that only
 // the real layout provides; stub the minimum it touches.
 vi.mock("$lib/core/AppContext", () => ({
@@ -3751,6 +3754,49 @@ describe("FlowAIBuilder edit host contract", () => {
       message: "Skriv i du-form",
       edit_context: { kind: "saved_flow_step", flow_step_id: "flow-step-14" }
     });
+  });
+
+  it("keeps holding a carried request after a reload, from the persisted draft", async () => {
+    localStorage.setItem(
+      "eneo:ai-builder:draft:e-1",
+      JSON.stringify({ text: "Ändra steg 3", files: [], requireStepScope: true })
+    );
+    const { fetch } = makeFetch({ created: editSession() });
+    const { stream, calls } = makeStream();
+    const { service } = renderShell({
+      fetch,
+      stream,
+      targetKind: "edit",
+      flowId: "flow-1",
+      stepChoices: [{ id: "flow-step-3", name: "Fördela källuppgifter", order: 3 }]
+    });
+    await waitFor(() => expect(service().hasSession).toBe(true));
+    await waitFor(() => expect(textbox().value).toBe("Ändra steg 3"));
+
+    expect(await screen.findByText(m.ai_builder_step_choice_required())).toBeTruthy();
+    expect(button(m.ai_builder_send()).disabled).toBe(true);
+    await fireEvent.keyDown(textbox(), { key: "Enter" });
+    expect(calls).toHaveLength(0);
+
+    await chooseStep(m.ai_builder_step_choice_item({ step: 3, name: "Fördela källuppgifter" }));
+    await waitFor(() => expect(button(m.ai_builder_send()).disabled).toBe(false));
+  });
+
+  it("refuses a package that arrives with other files instead of stranding them", async () => {
+    const { fetch } = makeFetch();
+    const { stream } = makeStream();
+    const onpackage = vi.fn();
+    renderShell({ fetch, stream, targetKind: "create", onpackage });
+    await screen.findByRole("heading", { name: m.ai_builder_task_title() });
+
+    const pkg = new File(["zip"], "flow.eneopkg", { type: "application/zip" });
+    const pdf = new File(["pdf"], "underlag.pdf", { type: "application/pdf" });
+    const composer = textbox().closest(".composer")!;
+    await fireEvent.drop(composer, { dataTransfer: { files: [pkg, pdf] } });
+
+    expect(onpackage).not.toHaveBeenCalled();
+    expect(screen.queryByText("underlag.pdf")).toBeNull();
+    expect(toastMock.error).toHaveBeenCalledWith(m.ai_builder_package_with_references_refused());
   });
 
   it("holds a request carried from a package until a step is chosen", async () => {
