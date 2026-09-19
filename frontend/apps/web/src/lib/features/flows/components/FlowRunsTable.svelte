@@ -724,10 +724,20 @@
               </Table.Row>
               {#if isExpanded && !mobileViewport.current}
                 <Table.Row class="border-default hover:bg-transparent">
+                  <!-- `max-w-0` keeps this cell out of the column algorithm.
+                       The table is auto-layout, which sizes columns from the
+                       max-content width of their cells, and this one holds a
+                       `white-space: pre` prompt and megabytes of JSON. The
+                       inner `overflow-auto` stops those blocks scrolling the
+                       page but does not stop the table measuring what is
+                       behind them, so the table grew to 3113px inside its
+                       1353px scroll wrapper: a horizontal scrollbar onto
+                       blank space. Constrained, the cell still fills the row
+                       and the real columns keep their own proportions. -->
                   <Table.Cell
                     id={getEvidenceRowId(run.id)}
                     colspan={historyTableColumnCount}
-                    class="bg-muted/30 px-3 py-4"
+                    class="bg-muted/30 max-w-0 px-3 py-4"
                   >
                     <div class="t-evidence-reveal">
                       {@render stepRunDetail(run)}

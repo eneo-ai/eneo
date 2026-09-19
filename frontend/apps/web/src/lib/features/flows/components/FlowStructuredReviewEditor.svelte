@@ -43,7 +43,7 @@
   const id = $props.id();
 </script>
 
-<div class="flex max-w-[53.75rem] min-w-0 flex-col gap-4 2xl:max-w-[62.5rem]">
+<div class="@container/review-fields flex min-w-0 flex-col gap-4">
   <div class="flex min-w-0 flex-col gap-1">
     <div class="flex min-h-10 items-center justify-between gap-3">
       {#if !original}

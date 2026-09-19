@@ -198,7 +198,9 @@ describe("FlowRunReviewCheckpointPanel", () => {
     });
     const field = await screen.findByLabelText("Brukarens önskemål");
     await fireEvent.input(field, { target: { value: "Rättat önskemål" } });
-    await fireEvent.click(screen.getByRole("button", { name: m.approve() }));
+    await fireEvent.click(
+      screen.getByRole("button", { name: m.flow_transcript_editor_approve_continue() })
+    );
     await waitFor(() => expect(approve).toHaveBeenCalledTimes(1));
     expect(edit).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -227,7 +229,9 @@ describe("FlowRunReviewCheckpointPanel", () => {
     });
     const field = await screen.findByLabelText("Answer");
     await fireEvent.input(field, { target: { value: "Keep my correction" } });
-    await fireEvent.click(screen.getByRole("button", { name: m.approve() }));
+    await fireEvent.click(
+      screen.getByRole("button", { name: m.flow_transcript_editor_approve_continue() })
+    );
     await waitFor(() => expect(edit).toHaveBeenCalledTimes(1));
     expect(approve).not.toHaveBeenCalled();
     expect((field as HTMLTextAreaElement).value).toBe("Keep my correction");
@@ -242,7 +246,9 @@ describe("FlowRunReviewCheckpointPanel", () => {
     await fireEvent.click(screen.getByRole("button", { name: m.flow_run_review_show_original() }));
     expect(await screen.findByText("Draft answer.")).toBeTruthy();
     expect(screen.queryByLabelText("Answer")).toBeNull();
-    expect(screen.queryByRole("button", { name: m.approve() })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: m.flow_transcript_editor_approve_continue() })
+    ).toBeNull();
     await fireEvent.click(
       screen.getAllByRole("button", { name: m.flow_run_review_back_to_edit() })[0]
     );
@@ -271,7 +277,9 @@ describe("FlowRunReviewCheckpointPanel", () => {
     await fireEvent.input(await screen.findByLabelText(m.flow_run_review_current_payload()), {
       target: { value: "Corrected document" }
     });
-    await fireEvent.click(screen.getByRole("button", { name: m.approve() }));
+    await fireEvent.click(
+      screen.getByRole("button", { name: m.flow_transcript_editor_approve_continue() })
+    );
     await waitFor(() => expect(approve).toHaveBeenCalledTimes(1));
     expect(edit).toHaveBeenCalledWith(
       expect.objectContaining({ editedValue: "Corrected document" })
@@ -432,8 +440,10 @@ describe("FlowRunReviewCheckpointPanel", () => {
     });
 
     // The first (stale) request is still pending when approval refreshes the history.
-    await screen.findByRole("button", { name: m.approve() });
-    await fireEvent.click(screen.getByRole("button", { name: m.approve() }));
+    await screen.findByRole("button", { name: m.flow_transcript_editor_approve_continue() });
+    await fireEvent.click(
+      screen.getByRole("button", { name: m.flow_transcript_editor_approve_continue() })
+    );
     await screen.findByText(m.flow_run_review_history_revision({ revision: 3 }));
     releaseStale(stalePage);
     await waitFor(() => expect(edits).toHaveBeenCalledTimes(2));
@@ -538,7 +548,9 @@ describe("FlowRunReviewCheckpointPanel", () => {
     });
 
     await screen.findByText(m.flow_run_review_state_awaiting_review());
-    await fireEvent.click(screen.getByRole("button", { name: m.approve() }));
+    await fireEvent.click(
+      screen.getByRole("button", { name: m.flow_transcript_editor_approve_continue() })
+    );
 
     await screen.findByText(m.flow_error_flow_review_expired());
   });
@@ -593,7 +605,9 @@ describe("FlowRunReviewCheckpointPanel", () => {
     await fireEvent.click(screen.getByRole("button", { name: m.flow_run_review_save_edit() }));
 
     expect(screen.getAllByText(m.flow_run_review_payload_invalid()).length).toBeGreaterThan(0);
-    await fireEvent.click(screen.getByRole("button", { name: m.approve() }));
+    await fireEvent.click(
+      screen.getByRole("button", { name: m.flow_transcript_editor_approve_continue() })
+    );
     expect(eneo.flows.runs.reviewCheckpoints.approve).not.toHaveBeenCalled();
     expect(edit).not.toHaveBeenCalled();
 
@@ -652,9 +666,13 @@ describe("FlowRunReviewCheckpointPanel", () => {
       (screen.getByRole("button", { name: m.flow_run_review_save_edit() }) as HTMLButtonElement)
         .disabled
     ).toBe(true);
-    expect((screen.getByRole("button", { name: m.approve() }) as HTMLButtonElement).disabled).toBe(
-      false
-    );
+    expect(
+      (
+        screen.getByRole("button", {
+          name: m.flow_transcript_editor_approve_continue()
+        }) as HTMLButtonElement
+      ).disabled
+    ).toBe(false);
     expect(edit).not.toHaveBeenCalled();
   });
 
@@ -679,9 +697,13 @@ describe("FlowRunReviewCheckpointPanel", () => {
 
     await screen.findByText(m.flow_run_review_state_awaiting_review());
     expect(screen.queryByRole("button", { name: m.flow_run_review_resume() })).toBeNull();
-    await fireEvent.click(screen.getByRole("button", { name: m.approve() }));
-    await screen.findByText(m.flow_run_review_state_approved());
-    await fireEvent.click(screen.getByRole("button", { name: m.flow_run_review_resume() }));
+
+    // Approving is the decision and continuing is its consequence, so one
+    // press does both. `canResume` never carried a permission of its own,
+    // and transcript reviews already worked this way.
+    await fireEvent.click(
+      screen.getByRole("button", { name: m.flow_transcript_editor_approve_continue() })
+    );
 
     await waitFor(() => expect(resume).toHaveBeenCalledTimes(1));
     expect(approve).toHaveBeenCalledWith({
@@ -697,7 +719,38 @@ describe("FlowRunReviewCheckpointPanel", () => {
       expectedCheckpointRevision: 2,
       idempotencyKey: "flow-review-resume:checkpoint-1:2"
     });
-    expect(onChanged).toHaveBeenCalledTimes(2);
+    await screen.findByText(m.flow_run_review_state_resumed());
+    expect(screen.queryByRole("button", { name: m.flow_run_review_resume() })).toBeNull();
+    expect(onChanged).toHaveBeenCalled();
+  });
+
+  it("keeps the approval and offers Fortsätt again when continuing the run fails", async () => {
+    // The approval is applied before the resume is attempted, so a resume
+    // that fails must not cost the decision: the checkpoint stays approved
+    // and the button comes back as a retry.
+    const approve = vi.fn(async () => buildCheckpoint("approved", 2));
+    const resume = vi.fn(async () => {
+      throw new Error("worker unavailable");
+    });
+    const eneo = buildEneo({
+      activeCheckpoint: buildCheckpoint("awaiting_review", 1),
+      approve,
+      resume
+    });
+
+    render(FlowRunReviewCheckpointPanel, {
+      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
+    });
+
+    await screen.findByText(m.flow_run_review_state_awaiting_review());
+    await fireEvent.click(
+      screen.getByRole("button", { name: m.flow_transcript_editor_approve_continue() })
+    );
+
+    await waitFor(() => expect(resume).toHaveBeenCalledTimes(1));
+    expect(approve).toHaveBeenCalledTimes(1);
+    await screen.findByText(m.flow_run_review_state_approved());
+    expect(screen.getByRole("button", { name: m.flow_run_review_resume() })).toBeTruthy();
   });
 
   it("shows the review deadline and blocks decision actions after it passes", async () => {
@@ -720,9 +773,13 @@ describe("FlowRunReviewCheckpointPanel", () => {
       (screen.getByRole("button", { name: m.flow_run_review_save_edit() }) as HTMLButtonElement)
         .disabled
     ).toBe(true);
-    expect((screen.getByRole("button", { name: m.approve() }) as HTMLButtonElement).disabled).toBe(
-      true
-    );
+    expect(
+      (
+        screen.getByRole("button", {
+          name: m.flow_transcript_editor_approve_continue()
+        }) as HTMLButtonElement
+      ).disabled
+    ).toBe(true);
     expect((screen.getByRole("button", { name: m.reject() }) as HTMLButtonElement).disabled).toBe(
       true
     );
@@ -746,9 +803,13 @@ describe("FlowRunReviewCheckpointPanel", () => {
       (screen.getByRole("button", { name: m.flow_run_review_save_edit() }) as HTMLButtonElement)
         .disabled
     ).toBe(true);
-    expect((screen.getByRole("button", { name: m.approve() }) as HTMLButtonElement).disabled).toBe(
-      true
-    );
+    expect(
+      (
+        screen.getByRole("button", {
+          name: m.flow_transcript_editor_approve_continue()
+        }) as HTMLButtonElement
+      ).disabled
+    ).toBe(true);
     expect((screen.getByRole("button", { name: m.reject() }) as HTMLButtonElement).disabled).toBe(
       true
     );
@@ -856,9 +917,13 @@ describe("FlowRunReviewCheckpointPanel", () => {
       (screen.getByRole("button", { name: m.flow_run_review_save_edit() }) as HTMLButtonElement)
         .disabled
     ).toBe(true);
-    expect((screen.getByRole("button", { name: m.approve() }) as HTMLButtonElement).disabled).toBe(
-      true
-    );
+    expect(
+      (
+        screen.getByRole("button", {
+          name: m.flow_transcript_editor_approve_continue()
+        }) as HTMLButtonElement
+      ).disabled
+    ).toBe(true);
     expect((screen.getByRole("button", { name: m.reject() }) as HTMLButtonElement).disabled).toBe(
       true
     );

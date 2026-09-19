@@ -267,7 +267,16 @@
         {/if}
 
         {#if result.output_payload_json}
-          <div class="max-w-[68ch]">
+          <!-- 68ch is the right measure for prose output, and the wrong one
+               for a transcript: the player is a scrubber plus three columns
+               of timestamp, speaker and text, and it was being squeezed into
+               a reading column about a third of the card. The cap follows
+               what the block actually holds. -->
+          <div
+            class={transcriptSegments && transcriptContext && !hasResultFiles
+              ? "min-w-0"
+              : "max-w-[68ch]"}
+          >
             <div class="flex items-center justify-between">
               <h4 class="text-muted text-xs font-semibold">{m.flow_run_output()}</h4>
               <Button

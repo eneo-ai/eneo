@@ -7309,7 +7309,7 @@
   "flow_run_review_show_original": "Visa original",
   "flow_run_review_back_to_edit": "Tillbaka till granskningen",
   "flow_run_review_unsaved": "Osparade ändringar",
-  "flow_run_review_approve_help": "Godkänn sparar dina ändringar. Därefter kan du fortsätta körningen.",
+  "flow_run_review_approve_help": "Godkänn sparar dina ändringar och fortsätter körningen.",
   "flow_run_review_resume_help": "Granskningen är godkänd. Fortsätt för att köra nästa steg.",
   "flow_run_review_reject_open": "Avvisa resultatet…",
   "flow_run_review_reject_help": "Avvisning stoppar körningen. Beskriv vad som behöver rättas."

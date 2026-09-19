@@ -196,7 +196,17 @@
 
 {#snippet contents()}
   {#if kind === "object"}
-    <div class="flex min-w-0 flex-col gap-3">
+    <!-- Two-up at the top level once there is room. The panel used to cap
+         itself and leave the right third of the row empty while its
+         textareas ran to 137 characters, about twice a comfortable measure.
+         Splitting the columns spends the width on shorter lines rather than
+         longer ones. Nested objects stay single-column: a grid inside a
+         disclosure inside a grid stops being scannable. -->
+    <div
+      class={depth === 0
+        ? "grid min-w-0 gap-x-6 gap-y-3 @[1040px]/review-fields:grid-cols-2"
+        : "flex min-w-0 flex-col gap-3"}
+    >
       {#each shownFields as field (field.key)}
         <FlowStructuredReviewField
           schema={field.schema}
@@ -381,7 +391,7 @@
         {disabled}
         aria-describedby={helpOpen ? id + "-help" : undefined}
         autocomplete="off"
-        class="min-h-10 resize-none leading-relaxed"
+        class="min-h-10 max-w-[34rem] resize-none leading-relaxed"
         rows={1}
         oninput={(event) => onChange(event.currentTarget.value)}
       />
@@ -433,7 +443,7 @@
         step={schema.type === "integer" ? 1 : "any"}
         aria-describedby={helpOpen ? id + "-help" : undefined}
         autocomplete="off"
-        class="min-h-10"
+        class="min-h-10 max-w-[34rem]"
         oninput={(event) =>
           onChange(
             Number.isFinite(event.currentTarget.valueAsNumber)
