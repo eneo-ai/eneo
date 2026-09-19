@@ -10855,6 +10855,30 @@ export interface components {
       kind: "saved_flow_step";
     };
     /**
+     * AIBuilderSessionEditScope
+     * @description The step the session's next turn edits unless the user chooses another.
+     *
+     *     Projected from the edit context the newest accepted user turn persisted:
+     *     the client restores its scope chip and sends ``context`` back as the next
+     *     turn's edit_context after a reload instead of keeping a second copy. The
+     *     label is resolved against the flow (a saved step) or the current plan (a
+     *     proposed step) when read, so it names the step as it is now.
+     *     ``preserves_output_contract`` is the restriction a failure repair carries
+     *     on every later turn: the step's output contract stays as it failed.
+     */
+    AIBuilderSessionEditScope: {
+      /** Context */
+      context:
+        | components["schemas"]["AIBuilderPlanEditContext"]
+        | components["schemas"]["AIBuilderSavedFlowStepEditContext"];
+      /** Preserves Output Contract */
+      preserves_output_contract: boolean;
+      /** Step Name */
+      step_name: string | null;
+      /** Step Number */
+      step_number: number;
+    };
+    /**
      * AIBuilderStatus
      * @description What the Builder is doing right now. Transient: delivered as it happens,
      *     never persisted, never a percentage.
@@ -30988,6 +31012,8 @@ export interface components {
       conversation?: components["schemas"]["AIBuilderConversationMessage"][];
       /** Created At */
       created_at?: string | null;
+      /** @description The step the next turn edits, from the newest accepted user turn; null when the session edits the whole flow or plan, or when that step no longer resolves. */
+      edit_scope?: components["schemas"]["AIBuilderSessionEditScope"] | null;
       /** Flow Id */
       flow_id?: string | null;
       /** Latest Plan Id */

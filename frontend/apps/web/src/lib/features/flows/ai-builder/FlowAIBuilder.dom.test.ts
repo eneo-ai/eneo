@@ -471,6 +471,8 @@ interface ShellProps {
   flowId?: string | null;
   resumeSessionId?: string | null;
   canReview?: boolean;
+  stepChoices?: { id: string; name: string; order: number }[] | null;
+  onpackage?: (detail: { file: File; text: string }) => void;
 }
 
 function renderShell({ fetch, stream, ...props }: ShellProps) {
@@ -480,6 +482,7 @@ function renderShell({ fetch, stream, ...props }: ShellProps) {
         focusSavedFlowStep: (scope: AIBuilderSavedFlowStepScope) => Promise<void>;
         openReview: () => Promise<void>;
         launchFailureRepair: (target: { runId: string; stepOrder: number }) => Promise<void>;
+        carryRequest: (request: { text: string; requireStepScope: boolean }) => void;
       }
     | undefined;
   render(FlowAIBuilderHarness, {
@@ -3684,6 +3687,107 @@ describe("FlowAIBuilder edit host contract", () => {
   const editSession = () =>
     makeSession({ session_id: "e-1", target_kind: "edit", flow_id: "flow-1" });
 
+  /** bits-ui opens on pointer, not on click alone. */
+  const press = async (element: HTMLElement) => {
+    await fireEvent.pointerDown(element, { pointerType: "mouse", button: 0 });
+    await fireEvent.pointerUp(element, { pointerType: "mouse", button: 0 });
+    await fireEvent.click(element);
+  };
+  const chooseStep = async (label: string) => {
+    await press(screen.getByLabelText(m.ai_builder_step_choice_label()));
+    await press(await screen.findByRole("option", { name: label }));
+  };
+
+  it("hands a dropped flow package to the importer with the request typed so far", async () => {
+    const { fetch } = makeFetch();
+    const { stream } = makeStream();
+    const onpackage = vi.fn();
+    renderShell({ fetch, stream, targetKind: "create", onpackage });
+    await screen.findByRole("heading", { name: m.ai_builder_task_title() });
+    await fireEvent.input(textbox(), {
+      target: { value: "Vi vill ha detta flöde, men ändra steg 3" }
+    });
+
+    const pkg = new File(["zip"], "genomforandeplan.eneopkg", { type: "application/zip" });
+    const composer = textbox().closest(".composer")!;
+    await fireEvent.drop(composer, { dataTransfer: { files: [pkg] } });
+
+    expect(onpackage).toHaveBeenCalledWith({
+      file: pkg,
+      text: "Vi vill ha detta flöde, men ändra steg 3"
+    });
+    // The package is not reference material: no attachment chip appears.
+    expect(screen.queryByText("genomforandeplan.eneopkg")).toBeNull();
+    // The request stays in the composer for the draft's own Builder.
+    expect(textbox().value).toBe("Vi vill ha detta flöde, men ändra steg 3");
+  });
+
+  it("lets the first message be scoped to a saved step from the composer", async () => {
+    const { fetch } = makeFetch({ created: editSession() });
+    const { stream, calls } = makeStream();
+    const { service } = renderShell({
+      fetch,
+      stream,
+      targetKind: "edit",
+      flowId: "flow-1",
+      stepChoices: [
+        { id: "flow-step-3", name: "Fördela källuppgifter", order: 3 },
+        { id: "flow-step-14", name: "Skriv brukarversionen", order: 14 }
+      ]
+    });
+    await waitFor(() => expect(service().hasSession).toBe(true));
+
+    await chooseStep(m.ai_builder_step_choice_item({ step: 14, name: "Skriv brukarversionen" }));
+
+    expect(
+      await screen.findByText(
+        m.ai_builder_edit_context_step({ step: 14, name: "Skriv brukarversionen" })
+      )
+    ).toBeTruthy();
+    await fireEvent.input(textbox(), { target: { value: "Skriv i du-form" } });
+    await fireEvent.keyDown(textbox(), { key: "Enter" });
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]!.body).toMatchObject({
+      message: "Skriv i du-form",
+      edit_context: { kind: "saved_flow_step", flow_step_id: "flow-step-14" }
+    });
+  });
+
+  it("holds a request carried from a package until a step is chosen", async () => {
+    const { fetch } = makeFetch({ created: editSession() });
+    const { stream, calls } = makeStream();
+    const { service, builder } = renderShell({
+      fetch,
+      stream,
+      targetKind: "edit",
+      flowId: "flow-1",
+      stepChoices: [{ id: "flow-step-3", name: "Fördela källuppgifter", order: 3 }]
+    });
+    await waitFor(() => expect(service().hasSession).toBe(true));
+    await waitFor(() => expect(builder()).toBeDefined());
+    builder().carryRequest({
+      text: "Ändra steg 3 så att den listar saknade uppgifter",
+      requireStepScope: true
+    });
+
+    await waitFor(() =>
+      expect(textbox().value).toBe("Ändra steg 3 så att den listar saknade uppgifter")
+    );
+    expect(await screen.findByText(m.ai_builder_step_choice_required())).toBeTruthy();
+    // Unscoped, the request would rewrite prompts the model never saw.
+    expect(button(m.ai_builder_send()).disabled).toBe(true);
+    await fireEvent.keyDown(textbox(), { key: "Enter" });
+    expect(calls).toHaveLength(0);
+
+    await chooseStep(m.ai_builder_step_choice_item({ step: 3, name: "Fördela källuppgifter" }));
+    await waitFor(() => expect(button(m.ai_builder_send()).disabled).toBe(false));
+    await fireEvent.click(button(m.ai_builder_send()));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]!.body).toMatchObject({
+      edit_context: { kind: "saved_flow_step", flow_step_id: "flow-step-3" }
+    });
+  });
+
   it("scopes the next message to the focused saved Flow step", async () => {
     const { fetch } = makeFetch({ created: editSession() });
     const { stream, calls } = makeStream();
@@ -3797,7 +3901,20 @@ describe("FlowAIBuilder edit host contract", () => {
     const held = new Promise<void>((resolve) => {
       releaseCreate = resolve;
     });
-    const { fetch } = makeFetch({ created: editSession() });
+    const repaired = {
+      ...editSession(),
+      edit_scope: {
+        context: { kind: "saved_flow_step" as const, flow_step_id: "flow-step-1" },
+        step_number: 1,
+        step_name: "Steg",
+        preserves_output_contract: true
+      }
+    };
+    const { fetch } = makeFetch({
+      created: editSession(),
+      // The repair turn is read back: the server projects the failed step.
+      sessions: [[editSession(), repaired]]
+    });
     const baseFetch = fetch.getMockImplementation()!;
     fetch.mockImplementation(async (path, init) => {
       if (path === SESSIONS_ROUTE && init?.method === "post") await held;
@@ -3821,10 +3938,14 @@ describe("FlowAIBuilder edit host contract", () => {
 
     await fireEvent.click(await screen.findByTestId("repair-prepare"));
     await waitFor(() => expect(calls).toHaveLength(1));
-    // Once the fix request is sent the step is the conversation's scope label.
-    expect(service().activeStepScope).toEqual({ stepName: "Steg", stepNumber: 1 });
+    // Once the fix request is sent and read back, the failed step is the
+    // conversation's scope, locked to its output contract.
+    await waitFor(() =>
+      expect(service().activeStepScope).toEqual({ stepName: "Steg", stepNumber: 1 })
+    );
+    expect(service().activeStepScopeLocked).toBe(true);
     expect(calls[0]!.body).toMatchObject({
-      message: m.ai_builder_repair_message({ step: "1", name: "Steg" }),
+      message: m.ai_builder_repair_message({ step: "1" }),
       review_context: RUN_FAILURE_LAUNCH.reference
     });
     expect(calls[0]!.body).not.toHaveProperty("edit_context");

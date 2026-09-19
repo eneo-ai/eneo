@@ -1504,6 +1504,53 @@ def _source_hits(pattern: re.Pattern[str], *, exclude: set[str]) -> list[str]:
     return hits
 
 
+def test_the_initial_run_failure_handoff_is_a_command_and_later_turns_are_intent():
+    """The handoff turn carries the reference in its own metadata and the
+    server wrote its text, so meaning readers leave it out; the turns the
+    user types afterwards inherit the failure without carrying the reference
+    and are read as ordinary intent."""
+    from eneo.flows.ai_builder.ai_builder_flow_review import (
+        AIBuilderRunFailureContext,
+        repair_message,
+    )
+
+    reference = AIBuilderRunFailureContext(
+        flow_version=1, definition_checksum="sum", run_id=uuid4(), step_order=2
+    )
+    handoff = ConversationMessage(
+        role="user",
+        content=repair_message(2),
+        metadata=metadata_for_user_message(
+            review_context=reference, review_evidence_level=3, acts_on_review=True
+        ),
+    )
+    typed = ConversationMessage(
+        role="user",
+        content="Fix the error in step 2: the answer was an array, not an object",
+        metadata=metadata_for_user_message(acts_on_review=True, evidence_floor=3),
+    )
+    assert metadata_module.is_server_authored_review_command(handoff.metadata)
+    assert not metadata_module.is_server_authored_review_command(typed.metadata)
+    assert metadata_module.semantic_conversation([handoff]) == []
+    assert metadata_module.latest_turn_is_review_command([handoff])
+    assert metadata_module.review_command_is_the_only_user_intent([handoff])
+    # The user's own words after the handoff are intent again, text intact.
+    assert metadata_module.semantic_conversation([handoff, typed]) == [typed]
+    assert not metadata_module.latest_turn_is_review_command([handoff, typed])
+    assert not metadata_module.review_command_is_the_only_user_intent([handoff, typed])
+    # The failure itself is still the session's review and scope.
+    restored = metadata_module.latest_user_review_context([handoff, typed])
+    assert restored is not None and restored.kind == "run_failure"
+    scope = metadata_module.review_edit_scope_for_turn([handoff, typed])
+    assert scope is not None and scope.step_refs == frozenset({"existing_step_2"})
+    # Quoted error text with no reference was typed by the user: intent.
+    pasted = ConversationMessage(
+        role="user", content="Step 5 failed: typed_io_output_parse_failed. Fix it."
+    )
+    assert metadata_module.semantic_conversation([pasted]) == [pasted]
+    assert not metadata_module.latest_turn_is_review_command([pasted])
+
+
 def test_run_failure_reference_is_inherited_with_floor_and_step_scope():
     from eneo.flows.ai_builder.ai_builder_flow_review import AIBuilderRunFailureContext
 

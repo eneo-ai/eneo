@@ -66,50 +66,6 @@ function makePlan(overrides: Partial<ProposedPlan> = {}): ProposedPlan {
   };
 }
 
-function makeScopedEdit(
-  targetExistingStepRef: string | null,
-  targetPlanStepRef: string | null = null
-): NonNullable<ProposedPlan["proposal"]["edit"]> {
-  return {
-    base_flow_revision: 1,
-    scoped_target_existing_step_ref: targetExistingStepRef,
-    scoped_target_plan_step_ref: targetPlanStepRef,
-    removed_existing_step_refs: [],
-    diff: {
-      step_changes: [],
-      net_steps_added: 0,
-      net_steps_removed: 0,
-      flow_property_changes: {}
-    }
-  };
-}
-
-function makeExistingStep(
-  stepNumber: number,
-  name: string
-): ProposedPlan["proposal"]["spec"]["steps"][number] {
-  return {
-    plan_step_ref: `step_${stepNumber}`,
-    existing_step_ref: `existing_step_${stepNumber}`,
-    name,
-    assistant_spec: {
-      instructions: `Instructions for ${name}`,
-      model_ref: null,
-      knowledge_refs: []
-    },
-    input_source: stepNumber === 1 ? "flow_input" : "previous_step",
-    input_type: "text",
-    output_mode: "compose_text",
-    output_type: "text",
-    input_bindings: null,
-    input_contract: null,
-    output_contract: null,
-    input_config: null,
-    output_config: null,
-    review_policy: null
-  };
-}
-
 function makeAIBuilderError(overrides: Partial<AIBuilderError> = {}): AIBuilderError {
   return {
     schema_version: 2,
@@ -220,94 +176,81 @@ describe("FlowAIBuilderService", () => {
     expect(service.activeStepTransportContext).toEqual(scope.editContext);
   });
 
-  it("keeps the saved-step scope while its plan is reviewed", () => {
-    const service = makeService();
-    const scope = {
+  it("shows the editor's launch until a turn is delivered, then the server's projection", async () => {
+    const projected = {
+      context: {
+        kind: "proposed_plan" as const,
+        plan_id: "plan-1",
+        scope: "step" as const,
+        target_existing_step_ref: "existing_step_2",
+        target_plan_step_ref: "step_2",
+        target_step_name: "Extract facts",
+        target_step_number: 2
+      },
+      step_number: 2,
+      step_name: "Extract facts",
+      preserves_output_contract: false
+    };
+    const stream = vi.fn(async (_path, _init, handlers) => {
+      handlers.onMessage?.({ id: "", event: "done", data: "" }, new AbortController());
+      handlers.onClose?.();
+    });
+    const fetch = vi.fn(async () => makeSession({ session_id: "s-1", edit_scope: projected }));
+    const service = new FlowAIBuilderService(
+      { client: { fetch, stream } } as never,
+      "space-1",
+      "flow-1"
+    );
+    service.seedState({
+      session: makeSession({ session_id: "s-1" }),
+      availableModels: [
+        { id: "model-low", name: "Low", provider: "openai", availability: { state: "ready" } }
+      ],
+      defaultModelId: "model-low",
+      modelLoadStatus: "loaded"
+    });
+    const launch = {
       editContext: { kind: "saved_flow_step" as const, flow_step_id: "step-1" },
       stepName: "Extract facts",
       stepNumber: 2
     };
-    service.setSavedFlowStepScope(scope);
+    service.setSavedFlowStepScope(launch);
+    expect(service.activeStepTransportContext).toEqual(launch.editContext);
 
-    expect(service.activeStepTransportContext).toEqual(scope.editContext);
+    expect(await service.sendMessage("tydligare", undefined, undefined, launch.editContext)).toBe(
+      "delivered"
+    );
 
-    service.seedState({
-      currentPlan: makePlan({
-        status: "proposed",
-        proposal: {
-          ...makePlan().proposal,
-          edit: makeScopedEdit("existing_step_2", "step_2"),
-          spec: {
-            ...makePlan().proposal.spec,
-            steps: [
-              makeExistingStep(1, "Collect source"),
-              makeExistingStep(2, "Extract facts"),
-              makeExistingStep(3, "Write report")
-            ]
-          }
-        }
-      })
-    });
-
-    expect(service.savedFlowStepScope).toEqual(scope);
-    expect(service.activeStepTransportContext).toEqual({
-      kind: "proposed_plan",
-      plan_id: "plan-1",
-      scope: "step",
-      target_existing_step_ref: "existing_step_2",
-      target_plan_step_ref: "step_2",
-      target_step_name: "Extract facts",
-      target_step_number: 2
-    });
-  });
-
-  it("uses the backend-resolved step identity when order changed before planning", () => {
-    const service = makeService();
-    service.setSavedFlowStepScope({
-      editContext: { kind: "saved_flow_step", flow_step_id: "selected-step-id" },
-      stepName: "Originally second",
-      stepNumber: 2
-    });
-    service.seedState({
-      currentPlan: makePlan({
-        proposal: {
-          ...makePlan().proposal,
-          edit: makeScopedEdit("existing_step_3", "step_3"),
-          spec: {
-            ...makePlan().proposal.spec,
-            steps: [
-              makeExistingStep(1, "First"),
-              makeExistingStep(3, "Selected after reorder"),
-              makeExistingStep(2, "Moved step")
-            ]
-          }
-        }
-      })
-    });
-
-    expect(service.activeStepScope).toEqual({
-      stepName: "Selected after reorder",
-      stepNumber: 2
-    });
-    expect(service.activeStepTransportContext).toMatchObject({
-      kind: "proposed_plan",
-      target_existing_step_ref: "existing_step_3",
-      target_step_name: "Selected after reorder",
-      target_step_number: 2
-    });
+    // The scoped turn was read back from the server: the launch is spent and
+    // the projection names the step on the plan the turn produced.
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/v1/flows/ai-builder/sessions/{session_id}",
+      expect.objectContaining({ method: "get" })
+    );
+    expect(service.savedFlowStepScope).toBeNull();
+    expect(service.activeStepScope).toEqual({ stepName: "Extract facts", stepNumber: 2 });
+    expect(service.activeStepTransportContext).toEqual(projected.context);
+    expect(service.activeStepScopeLocked).toBe(false);
   });
 
   it("restores scoped plan transport after a page reload without browser-only scope", () => {
     const service = makeService();
     service.seedState({
-      currentPlan: makePlan({
-        proposal: {
-          ...makePlan().proposal,
-          edit: makeScopedEdit("existing_step_2", "step_2"),
-          spec: {
-            ...makePlan().proposal.spec,
-            steps: [makeExistingStep(1, "First"), makeExistingStep(2, "Selected")]
-          }
+      session: makeSession({
+        session_id: "s-1",
+        edit_scope: {
+          context: {
+            kind: "proposed_plan",
+            plan_id: "plan-1",
+            scope: "step",
+            target_existing_step_ref: "existing_step_2",
+            target_plan_step_ref: "step_2",
+            target_step_name: "Selected",
+            target_step_number: 2
+          },
+          step_number: 2,
+          step_name: "Selected",
+          preserves_output_contract: false
         }
       })
     });
@@ -315,82 +258,89 @@ describe("FlowAIBuilderService", () => {
     expect(service.activeStepScope).toEqual({ stepName: "Selected", stepNumber: 2 });
     expect(service.activeStepTransportContext).toMatchObject({
       kind: "proposed_plan",
+      plan_id: "plan-1",
       target_existing_step_ref: "existing_step_2"
     });
   });
 
-  it("restores proposal-only step scope after reload", () => {
+  it("restores a saved-step scope before any proposal exists, and a repair's locked scope", () => {
     const service = makeService();
-    const addedStep = {
-      ...makeExistingStep(2, "New report"),
-      existing_step_ref: null
-    };
+    const context = { kind: "saved_flow_step" as const, flow_step_id: "step-2" };
     service.seedState({
-      currentPlan: makePlan({
-        plan_id: "replacement-plan",
-        proposal: {
-          ...makePlan().proposal,
-          edit: makeScopedEdit(null, "step_2"),
-          spec: {
-            ...makePlan().proposal.spec,
-            steps: [makeExistingStep(1, "First"), addedStep]
-          }
+      session: makeSession({
+        session_id: "s-1",
+        edit_scope: {
+          context,
+          step_number: 2,
+          step_name: "Strukturera",
+          preserves_output_contract: true
         }
       })
     });
 
-    expect(service.activeStepScope).toEqual({ stepName: "New report", stepNumber: 2 });
-    expect(service.activeStepTransportContext).toEqual({
-      kind: "proposed_plan",
-      plan_id: "replacement-plan",
-      scope: "step",
-      target_existing_step_ref: null,
-      target_plan_step_ref: "step_2",
-      target_step_name: "New report",
-      target_step_number: 2
+    expect(service.activeStepScope).toEqual({ stepName: "Strukturera", stepNumber: 2 });
+    expect(service.activeStepTransportContext).toEqual(context);
+    // A repair keeps the failed step's contract whatever the composer shows.
+    expect(service.activeStepScopeLocked).toBe(true);
+    service.clearActiveStepScope();
+    expect(service.activeStepScope).toEqual({ stepName: "Strukturera", stepNumber: 2 });
+  });
+
+  it("names a projected step without a name after the flow's fallback", () => {
+    const service = makeService();
+    service.seedState({
+      session: makeSession({
+        session_id: "s-1",
+        edit_scope: {
+          context: { kind: "saved_flow_step", flow_step_id: "step-3" },
+          step_number: 3,
+          step_name: null,
+          preserves_output_contract: false
+        }
+      })
+    });
+    expect(service.activeStepScope).toEqual({
+      stepName: m.flow_step_unnamed(),
+      stepNumber: 3
     });
   });
 
-  it("suppresses persisted step scope only for the current plan", () => {
+  it("keeps a dismissed projection dismissed until a newer accepted turn projects another", () => {
     const service = makeService();
-    const scopedProposal = {
-      ...makePlan().proposal,
-      edit: makeScopedEdit(null, "step_2"),
-      spec: {
-        ...makePlan().proposal.spec,
-        steps: [
-          makeExistingStep(1, "First"),
-          { ...makeExistingStep(2, "New report"), existing_step_ref: null }
-        ]
-      }
-    };
-    service.seedState({
-      session: makeSession({ session_id: "session-1" }),
-      currentPlan: makePlan({ plan_id: "plan-1", proposal: scopedProposal })
+    const scopeOf = (ref: string, name: string) => ({
+      context: {
+        kind: "proposed_plan" as const,
+        plan_id: "plan-1",
+        scope: "step" as const,
+        target_existing_step_ref: ref,
+        target_plan_step_ref: null,
+        target_step_name: name,
+        target_step_number: 2
+      },
+      step_number: 2,
+      step_name: name,
+      preserves_output_contract: false
     });
+    service.seedState({
+      session: makeSession({ session_id: "s-1", edit_scope: scopeOf("existing_step_2", "Två") })
+    });
+    expect(service.activeStepScope).not.toBeNull();
 
     service.clearActiveStepScope();
+    expect(service.activeStepScope).toBeNull();
     expect(service.activeStepTransportContext).toBeNull();
+
+    // The same snapshot read again stays dismissed.
+    service.seedState({
+      session: makeSession({ session_id: "s-1", edit_scope: scopeOf("existing_step_2", "Två") })
+    });
     expect(service.activeStepScope).toBeNull();
 
+    // A newer accepted turn projects a different step: shown again.
     service.seedState({
-      currentPlan: makePlan({ plan_id: "plan-2", proposal: scopedProposal })
+      session: makeSession({ session_id: "s-1", edit_scope: scopeOf("existing_step_3", "Tre") })
     });
-    expect(service.activeStepTransportContext).toMatchObject({
-      kind: "proposed_plan",
-      plan_id: "plan-2",
-      target_plan_step_ref: "step_2"
-    });
-
-    service.seedState({
-      session: makeSession({ session_id: "session-2" }),
-      currentPlan: makePlan({ plan_id: "plan-1", proposal: scopedProposal })
-    });
-    expect(service.activeStepTransportContext).toMatchObject({
-      kind: "proposed_plan",
-      plan_id: "plan-1",
-      target_plan_step_ref: "step_2"
-    });
+    expect(service.activeStepScope).toEqual({ stepName: "Tre", stepNumber: 2 });
   });
 
   it("passes Driver-owned field getters through the reactive facade", () => {

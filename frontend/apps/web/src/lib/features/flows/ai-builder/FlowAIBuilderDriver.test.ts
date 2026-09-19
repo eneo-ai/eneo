@@ -4800,6 +4800,32 @@ describe("FlowAIBuilderDriver review turns", () => {
     });
   });
 
+  it("reads the session back after a scoped turn, so the server's projection owns the next scope", async () => {
+    const projected = makeSession({
+      edit_scope: {
+        context: { kind: "saved_flow_step", flow_step_id: "flow-step-2" },
+        step_number: 2,
+        step_name: "Sammanfatta",
+        preserves_output_contract: false
+      }
+    });
+    const fetch = vi.fn(async () => projected);
+    const stream = vi.fn(async (_path, _init, handlers) => completeStream(handlers));
+    const { driver } = makeDriver({ fetchImpl: fetch, streamImpl: stream });
+    driver.seedState({ session: makeSession() });
+
+    await driver.sendMessage("tydligare", undefined, undefined, {
+      kind: "saved_flow_step",
+      flow_step_id: "flow-step-2"
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/v1/flows/ai-builder/sessions/{session_id}",
+      expect.objectContaining({ method: "get", params: { path: { session_id: "session-1" } } })
+    );
+    expect(driver.state.session?.edit_scope?.step_number).toBe(2);
+  });
+
   it("replaces the plan when the turn emits a new one", async () => {
     const stream = vi.fn(async (_path, _init, handlers) => {
       handlers.onMessage?.(

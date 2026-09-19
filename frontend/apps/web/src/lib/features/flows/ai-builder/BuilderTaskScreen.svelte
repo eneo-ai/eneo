@@ -2,7 +2,7 @@
   import { m } from "$lib/paraglide/messages";
   import { Button } from "$lib/components/ui/button/index.js";
   import FlowAIBuilderInput from "./FlowAIBuilderInput.svelte";
-  import type { AIBuilderEditContext } from "./protocol";
+  import type { AIBuilderEditContext, AIBuilderStepChoice } from "./protocol";
 
   interface Props {
     targetKind: "create" | "edit";
@@ -11,8 +11,13 @@
     flowsHref: string;
     editContext?: AIBuilderEditContext | null;
     editContextLabel?: string | null;
+    editContextLocked?: boolean;
     oncleareditcontext?: () => void;
     onopenreview?: () => void;
+    stepChoices?: AIBuilderStepChoice[] | null;
+    onselectstep?: (choice: AIBuilderStepChoice) => void;
+    requireStepScope?: boolean;
+    onpackage?: (detail: { file: File; text: string }) => void;
   }
 
   let {
@@ -22,7 +27,12 @@
     flowsHref,
     editContext = null,
     editContextLabel = null,
-    oncleareditcontext
+    editContextLocked = false,
+    oncleareditcontext,
+    stepChoices = null,
+    onselectstep,
+    requireStepScope = false,
+    onpackage
   }: Props = $props();
 
   let inputRef = $state<FlowAIBuilderInput | undefined>();
@@ -64,7 +74,12 @@
         bind:this={inputRef}
         {editContext}
         {editContextLabel}
+        {editContextLocked}
         {oncleareditcontext}
+        {stepChoices}
+        {onselectstep}
+        {requireStepScope}
+        {onpackage}
         placeholder={isEdit
           ? m.ai_builder_task_placeholder_edit()
           : m.ai_builder_task_placeholder()}

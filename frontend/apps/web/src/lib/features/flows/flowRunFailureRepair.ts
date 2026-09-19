@@ -15,7 +15,10 @@ export interface FlowRunFailureRepairTarget {
 const FAILURE_REPAIR_CANDIDATE_CODES: ReadonlySet<string> = new Set([
   FLOW_API_ERROR_CODE.TYPED_IO_OUTPUT_PARSE_FAILED,
   FLOW_API_ERROR_CODE.TYPED_IO_CONTRACT_VIOLATION,
-  FLOW_API_ERROR_CODE.TYPED_IO_VALIDATION_FAILED
+  FLOW_API_ERROR_CODE.TYPED_IO_VALIDATION_FAILED,
+  // A truncated answer is never kept; the server explains it from the
+  // attempt's finish reason and token counts instead.
+  FLOW_API_ERROR_CODE.LLM_OUTPUT_TRUNCATED
 ]);
 
 export function isFailureRepairCandidate(errorCode: string | null | undefined): boolean {

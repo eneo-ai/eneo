@@ -339,6 +339,27 @@
     }
   });
 
+  // A request that travelled with a package import arrives in navigation
+  // state, is handed to the Builder once, and is dropped from the history
+  // entry so back or reload cannot replay it.
+  const stepChoices = $derived(
+    $update.steps
+      .filter((step) => step.id)
+      .map((step) => ({
+        id: step.id!,
+        name: step.user_description?.trim() || m.flow_step_unnamed(),
+        order: step.step_order
+      }))
+  );
+  $effect(() => {
+    const carried = page.state.aiBuilderPrefill;
+    if (!carried || !canUseAIBuilder || !aiBuilderHost) return;
+    // The current dynamic flow route stays; only history state changes.
+    // eslint-disable-next-line svelte/no-navigation-without-resolve
+    replaceState(page.url, { ...page.state, aiBuilderPrefill: undefined });
+    void aiBuilderHost.carryRequest({ text: carried, requireStepScope: true });
+  });
+
   $effect(() => {
     const urlTab = page.url.searchParams.get("tab");
     if (!isFlowPageTab(urlTab) || urlTab === activeTab) return;
@@ -1461,6 +1482,7 @@
           spaceId={$currentSpace.id}
           flowId={$resource.id}
           canReview={canReviewWithAIBuilder}
+          {stepChoices}
           onapplied={async (detail) => {
             try {
               const updated = await data.eneo.flows.get({ id: detail.flow_id });

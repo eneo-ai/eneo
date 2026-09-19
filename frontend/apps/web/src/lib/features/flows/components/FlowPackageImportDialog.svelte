@@ -1,7 +1,12 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
-  import { EneoError, type FlowPackageDependencyResolution, type Eneo } from "@eneo/eneo-js";
+  import {
+    EneoError,
+    type FlowPackageDependencyResolution,
+    type FlowPackageImportResult,
+    type Eneo
+  } from "@eneo/eneo-js";
   import AlertTriangle from "lucide-svelte/icons/alert-triangle";
   import CheckCircle2 from "lucide-svelte/icons/check-circle-2";
   import FileArchive from "lucide-svelte/icons/file-archive";
@@ -20,11 +25,11 @@
   import { Input } from "$lib/components/ui/input/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
-  import { getFlowsManager } from "$lib/features/flows/FlowsManager";
   import {
     buildSelectedFlowPackageResourceBindings,
     createInitialFlowPackageImportSelections,
     encodeFlowPackageFileToBase64,
+    isFlowPackageFile,
     getFlowPackageCandidateKey,
     getFlowPackageImportReadiness,
     getFlowPackageMcpOmissionCount,
@@ -39,20 +44,32 @@
   let {
     eneo,
     spaceId,
-    spaceRouteId
+    spaceRouteId,
+    open = $bindable(false),
+    showTrigger = true,
+    initialFile = null,
+    oninstalled
   }: {
     eneo: Eneo;
     spaceId: string;
     spaceRouteId: string;
+    open?: boolean;
+    /** The dialog's own "Importera" button; a caller that opens it itself
+     *  (the Builder, from a dropped package) renders none. */
+    showTrigger?: boolean;
+    /** A package chosen before the dialog opened: read when it opens. */
+    initialFile?: File | null;
+    /** What happens once the draft exists. The flows list refreshes its
+     *  rows; the Builder carries the user's request to the new draft. The
+     *  default lands on the draft's editor. Runs after the dialog closed, so
+     *  a failure here is never reported as a failed import. */
+    oninstalled?: (result: FlowPackageImportResult) => void | Promise<void>;
   } = $props();
 
-  const flowsManager = getFlowsManager();
   const SKIP_OPTIONAL_VALUE = "__skip_optional__";
-  const PACKAGE_EXTENSION = ".eneopkg";
   const FILE_ACCEPT =
     ".eneopkg,application/vnd.eneo.package+zip,application/octet-stream,application/zip";
 
-  let open = $state(false);
   let selectedFile = $state<File | null>(null);
   let plan = $state<Awaited<ReturnType<Eneo["flows"]["packages"]["createImportPlan"]>> | null>(
     null
@@ -81,6 +98,32 @@
     if (!next) reset();
   }
 
+  // The draft exists once the import returned; what follows (a list refresh,
+  // a navigation) belongs to the caller and is never mistaken for an import
+  // failure, which would invite a second import of the same package.
+  let installed = $state<FlowPackageImportResult | null>(null);
+  $effect(() => {
+    const result = installed;
+    if (!result) return;
+    installed = null;
+    void (async () => {
+      try {
+        if (oninstalled) await oninstalled(result);
+        else await goto(resolve(`/spaces/${spaceRouteId}/flows/${result.flow_id}`));
+      } catch (error) {
+        toast.error(error instanceof EneoError ? error.getReadableMessage() : String(error));
+      }
+    })();
+  });
+
+  // A package the caller already holds is read as soon as the dialog opens.
+  let consumedInitialFile = $state<File | null>(null);
+  $effect(() => {
+    if (!open || !initialFile || initialFile === consumedInitialFile) return;
+    consumedInitialFile = initialFile;
+    void consumeFile(initialFile);
+  });
+
   function reset() {
     cancelPlanLoad();
     selectedFile = null;
@@ -93,12 +136,8 @@
     isDragging = false;
   }
 
-  function isValidFlowPackage(file: File): boolean {
-    return file.name.toLowerCase().endsWith(PACKAGE_EXTENSION);
-  }
-
   async function consumeFile(file: File) {
-    if (!isValidFlowPackage(file)) {
+    if (!isFlowPackageFile(file)) {
       toast.error(m.flow_package_dropzone_invalid_format());
       return;
     }
@@ -176,11 +215,10 @@
         expectedTargetState: plan.target_state,
         selectedBindings
       });
-      await flowsManager.refreshFlows();
       toast.success(m.flow_package_import_success());
       open = false;
       reset();
-      goto(resolve(`/spaces/${spaceRouteId}/flows/${result.flow_id}`));
+      installed = result;
     } catch (error) {
       const message =
         mapFlowPackageImportError(error) ??
@@ -298,16 +336,18 @@
   }
 </script>
 
-<Button
-  variant="outline"
-  onclick={() => (open = true)}
-  aria-label={m.flow_package_import_button()}
-  title={m.flow_package_import_button()}
-  class="max-sm:aspect-square max-sm:px-0"
->
-  <Upload class="size-4" />
-  <span class="max-sm:sr-only">{m.flow_package_import_button()}</span>
-</Button>
+{#if showTrigger}
+  <Button
+    variant="outline"
+    onclick={() => (open = true)}
+    aria-label={m.flow_package_import_button()}
+    title={m.flow_package_import_button()}
+    class="max-sm:aspect-square max-sm:px-0"
+  >
+    <Upload class="size-4" />
+    <span class="max-sm:sr-only">{m.flow_package_import_button()}</span>
+  </Button>
+{/if}
 
 <Dialog.Root {open} onOpenChange={handleOpenChange}>
   <Dialog.Content

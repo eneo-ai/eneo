@@ -1206,6 +1206,49 @@ def test_revision_prompt_names_the_target_step_and_prior_refs() -> None:
     assert "modellväljare/model picker" in prompt
 
 
+@pytest.mark.parametrize("can_decline", [True, False])
+def test_revision_prompt_tells_a_repair_to_keep_the_contract_or_decline(
+    can_decline: bool,
+) -> None:
+    prior = _edit_spec(
+        [
+            _edit_step("step_a", "Analyze input", output_type=OutputType.JSON),
+            _edit_step("step_b", "Create final result", output_type=OutputType.TEXT),
+        ]
+    )
+    request = AIBuilderPlanEditContext(
+        scope="step",
+        plan_id=UUID("00000000-0000-0000-0000-000000000001"),
+        target_plan_step_ref="step_a",
+    )
+    repair = ResolvedAIBuilderEditContext(
+        request=request,
+        scope="step",
+        target_plan_step_ref="step_a",
+        plan_id=request.plan_id,
+        preserve_output_contract=True,
+    )
+    plain = ResolvedAIBuilderEditContext(
+        request=request,
+        scope="step",
+        target_plan_step_ref="step_a",
+        plan_id=request.plan_id,
+    )
+
+    repaired = build_plan_revision_prompt_block(
+        context=repair, prior_spec=prior, can_decline=can_decline
+    )
+    ordinary = build_plan_revision_prompt_block(
+        context=plain, prior_spec=prior, can_decline=can_decline
+    )
+
+    assert repaired is not None and ordinary is not None
+    assert "output_contract and output_config stay exactly as they are" in repaired
+    assert "Do not weaken the contract, raise a token limit" in repaired
+    assert ("requires_wider_edit" in repaired) == can_decline
+    assert "Repair:" not in ordinary
+
+
 def _model_revision_specs(
     *,
     proposed_model_ref: str | None,

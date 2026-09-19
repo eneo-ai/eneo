@@ -30,7 +30,9 @@
   import type { StructuredInputFieldAnswer } from "./structuredQuestionAnswer";
   import { reopenQuestionRequest } from "./structuredQuestionAnswer";
   import type {
+    AIBuilderCarriedRequest,
     AIBuilderSavedFlowStepScope,
+    AIBuilderStepChoice,
     ChatMessage,
     RequirementsSummary,
     AIBuilderReviewReference
@@ -51,6 +53,10 @@
     canReview?: boolean;
     /** A draft chosen in the Flöden list; the page opens that session instead of a new one. */
     resumeSessionId?: string | null;
+    /** Edit mode: the saved steps a first message may be scoped to. */
+    stepChoices?: AIBuilderStepChoice[] | null;
+    /** Create mode: a dropped flow package is handed to the importer. */
+    onpackage?: (detail: { file: File; text: string }) => void;
   }
 
   let {
@@ -58,7 +64,9 @@
     statusInPageHeader = false,
     onapplied,
     canReview = false,
-    resumeSessionId = null
+    resumeSessionId = null,
+    stepChoices = null,
+    onpackage
   }: Props = $props();
 
   const service = getAIBuilderService();
@@ -648,13 +656,44 @@
 
   // A cold launch from the flow editor can call in before the session exists
   // and the task screen is mounted; the focus request waits for the real composer.
-  let pendingTaskFocus = $state<{ placeholder: string } | null>(null);
+  let pendingTaskFocus = $state<{ placeholder?: string; prefill?: string } | null>(null);
   $effect(() => {
     if (pendingTaskFocus && taskScreenRef) {
       taskScreenRef.focusInput(pendingTaskFocus);
       pendingTaskFocus = null;
     }
   });
+
+  // A request carried in from a package names changes to particular steps;
+  // read as a whole-flow edit it would rewrite prompts the model never saw.
+  // It waits in the composer until a step is chosen, and the requirement
+  // lifts with the first delivered turn.
+  let carriedRequest = $state<AIBuilderCarriedRequest | null>(null);
+  const requireStepScope = $derived(
+    carriedRequest?.requireStepScope === true && service.messages.length === 0
+  );
+
+  /** Bring a request from outside the conversation into the composer. */
+  export function carryRequest(request: AIBuilderCarriedRequest) {
+    carriedRequest = request;
+    pendingTaskFocus = { prefill: request.text };
+  }
+
+  /** The saved steps a first message may be scoped to: none once a proposal
+   *  exists, because a saved-step scope only opens the first one. */
+  const firstTurnStepChoices = $derived(
+    targetKind === "edit" && service.currentPlan === null && service.session?.latest_plan_id == null
+      ? stepChoices
+      : null
+  );
+
+  function selectStepChoice(choice: AIBuilderStepChoice) {
+    service.setSavedFlowStepScope({
+      editContext: { kind: "saved_flow_step", flow_step_id: choice.id },
+      stepName: choice.name,
+      stepNumber: choice.order
+    });
+  }
 
   async function activateSavedFlowStep(scope: AIBuilderSavedFlowStepScope) {
     service.setSavedFlowStepScope(scope);
@@ -1009,8 +1048,13 @@
           {flowsHref}
           editContext={activeEditContext}
           editContextLabel={savedFlowStepScopeLabel}
+          editContextLocked={service.activeStepScopeLocked}
           oncleareditcontext={() => service.clearActiveStepScope()}
           onopenreview={canReview ? () => void launchReview() : undefined}
+          stepChoices={firstTurnStepChoices}
+          onselectstep={selectStepChoice}
+          {requireStepScope}
+          onpackage={targetKind === "create" ? onpackage : undefined}
         />
       {:else if screen === "question" && questionMessage}
         <BuilderQuestionScreen

@@ -409,9 +409,11 @@ async def _prepare_planner_request_for_test(
     before_provider_call: AsyncMock | None = None,
     prepared_attachment_context: AIBuilderAttachmentContext | None = None,
     prepared_schema_candidates: tuple[DeclaredSchemaCandidate, ...] | None = None,
+    review_evidence: object = None,
 ):
     return await prepare_planner_request(
         PlannerRequestPreparationInput(
+            review_evidence=cast(Any, review_evidence),
             conversation=conversation,
             litellm_client=planner.litellm_client,
             completion_model_route=completion_model_route,
@@ -5143,6 +5145,153 @@ def _reviewed_step(flow_id: UUID, step_order: int) -> FlowStep:
         output_mode="pass_through",
         output_type="text",
     )
+
+
+def _repair_handoff(flow: Any, *, language: str = "sv", step_order: int = 2):
+    """The initial failure handoff as the server records it: the reference in
+    the message's own metadata, the sentence written by the server, and the
+    evidence and step scope the turn resolved from the failed run."""
+    from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+        metadata_for_user_message,
+    )
+    from eneo.flows.ai_builder.ai_builder_flow_review import (
+        AIBuilderRunFailureContext,
+        FlowReviewEvidence,
+        FlowReviewFailureFact,
+        FlowReviewStep,
+        repair_message,
+    )
+    from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
+        AIBuilderSavedFlowStepEditContext,
+        ResolvedAIBuilderEditContext,
+        existing_step_ref_for_order,
+    )
+    from eneo.flows.domain.step_output import RejectedOutput
+
+    step = next(step for step in flow.steps if step.step_order == step_order)
+    reference = AIBuilderRunFailureContext(
+        flow_version=1, definition_checksum="sum", run_id=uuid4(), step_order=step_order
+    )
+    message = ConversationMessage(
+        role="user",
+        content=repair_message(step_order, "en" if language == "en" else "sv"),
+        metadata=metadata_for_user_message(
+            review_context=reference, review_evidence_level=1, acts_on_review=True
+        ),
+    )
+    evidence = FlowReviewEvidence(
+        flow_version=1,
+        definition_checksum="sum",
+        evidence_classification_level=1,
+        completed_run_count=0,
+        failed_run_count=1,
+        facts=[],
+        steps=[
+            FlowReviewStep(
+                step_id=step.id, step_order=step_order, label=step.user_description
+            )
+        ],
+        failure=FlowReviewFailureFact(
+            run_id=reference.run_id,
+            step_order=step_order,
+            attempt_no=1,
+            error_code="typed_io_output_parse_failed",
+            error_message="Expected an object, got an array",
+            effective_prompt="Return one JSON object with the fields below.",
+            rejected_output=RejectedOutput("[{}]", False),
+            requested_model=None,
+        ),
+    )
+    scope = ResolvedAIBuilderEditContext(
+        request=AIBuilderSavedFlowStepEditContext(flow_step_id=step.id),
+        scope="step",
+        target_existing_step_ref=existing_step_ref_for_order(step_order),
+        target_step_name=step.user_description,
+        target_step_number=step_order,
+        preserve_output_contract=True,
+    )
+    return message, evidence, scope
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("language", ["sv", "en"])
+async def test_a_run_failure_handoff_proposes_without_a_classifier_or_intake(
+    language: str,
+) -> None:
+    """The failed-step button is a command the server wrote: it goes to the
+    focused proposal for that step with the run's evidence, makes no
+    understanding call, asks no intake question and confirms no contract."""
+
+    planner = _make_planner()
+    flow = _reviewed_flow()
+    handoff, evidence, scope = _repair_handoff(flow, language=language)
+
+    prepared = await _prepare_planner_request_for_test(
+        planner,
+        conversation=[handoff],
+        completion_model_route=_route(),
+        persisted_planning_state=_document_architecture_state(),
+        flow=flow,
+        plan_edit_context=scope,
+        review_evidence=evidence,
+    )
+
+    planner.litellm_client.assert_not_awaited()
+    assert isinstance(prepared, ProposalPrepared)
+    assert prepared.slot_classification_metadata is None
+    prompt = json.dumps(prepared.llm_messages, ensure_ascii=False)
+    assert handoff.content in prompt
+    # The focused path: the failed step's own instruction and the rejected
+    # answer are in the prompt, and only that step may change.
+    assert "Return one JSON object with the fields below." in prompt
+    assert "Expected an object, got an array" in prompt
+    assert _modifiable_refs(prepared) == ["existing_step_2"]
+    # The repair directive locks the contract and names the honest way out.
+    assert "output_contract and output_config stay exactly as they are" in prompt
+    assert "requires_wider_edit" in prompt
+
+
+def _modifiable_refs(prepared: ProposalPrepared) -> list[str]:
+    """The steps the proposal tool lets the model modify: a saved-step edit
+    offers only their modifications, keyed by existing_step_ref."""
+    schema = prepared.proposal_tool_schema["function"]["parameters"]
+    steps = schema["properties"]["steps"]
+    assert "anyOf" not in steps["items"], "a whole-flow schema, not a saved-step one"
+    return list(steps["items"]["properties"]["existing_step_ref"]["enum"])
+
+
+@pytest.mark.asyncio
+async def test_the_user_typing_after_a_repair_handoff_keeps_their_text_as_intent() -> (
+    None
+):
+    """Later turns inherit the failure but are the user's own request."""
+
+    planner = _make_planner()
+    flow = _reviewed_flow()
+    handoff, evidence, scope = _repair_handoff(flow)
+    typed = ConversationMessage(
+        role="user", content="Be modellen svara med ett objekt, inte en lista"
+    )
+
+    prepared = await _prepare_planner_request_for_test(
+        planner,
+        conversation=[handoff, typed],
+        completion_model_route=_route(),
+        persisted_planning_state=_document_architecture_state(),
+        flow=flow,
+        plan_edit_context=scope,
+        review_evidence=evidence,
+    )
+
+    from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
+        semantic_conversation,
+    )
+
+    assert semantic_conversation([handoff, typed]) == [typed]
+    assert isinstance(prepared, ProposalPrepared)
+    prompt = json.dumps(prepared.llm_messages, ensure_ascii=False)
+    assert typed.content in prompt
+    assert _modifiable_refs(prepared) == ["existing_step_2"]
 
 
 @pytest.mark.asyncio

@@ -23,6 +23,7 @@ from eneo.completion_models.infrastructure.tenant_model_capabilities import (
 from eneo.files.file_models import File
 from eneo.flows.ai_builder.ai_builder_api_models import (
     AI_BUILDER_REASONING_EFFORT_MAX_LENGTH,
+    AIBuilderSessionEditScope,
     ApplyResultResponse,
     SessionListItemResponse,
 )
@@ -37,6 +38,7 @@ from eneo.flows.ai_builder.ai_builder_context import (
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     AIBuilderQuestionAnswerInput,
     conversation_evidence_floor,
+    latest_user_edit_context,
     latest_user_review_context,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
@@ -88,6 +90,8 @@ from eneo.flows.ai_builder.ai_builder_flow_review_suggestions import (
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderEditContext,
+    AIBuilderPlanEditContext,
+    AIBuilderSavedFlowStepEditContext,
 )
 from eneo.flows.ai_builder.ai_builder_plan_lifecycle import (
     AIBuilderPlanLifecycle,
@@ -119,7 +123,7 @@ if TYPE_CHECKING:
     )
     from eneo.files.file_service import FileService
     from eneo.flows.application.flow_service import FlowService
-    from eneo.flows.domain.flow import Flow
+    from eneo.flows.domain.flow import Flow, FlowStep
     from eneo.flows.flow_template_asset_service import FlowTemplateAssetService
     from eneo.spaces.space import Space
     from eneo.spaces.space_service import SpaceService
@@ -280,6 +284,94 @@ class AIBuilderService:
         return await self.repo.get_session(
             session_id=session_id,
             tenant_id=self.user.tenant_id,
+        )
+
+    async def describe_session_edit_scope(
+        self, session: BuilderSession
+    ) -> AIBuilderSessionEditScope | None:
+        """The step the next turn edits, for the client to restore after a reload.
+
+        The newest accepted user turn owns it: a refused request is never
+        persisted and so leaves the previous scope standing, a later unscoped
+        turn clears it, a later scoped turn moves it. What is persisted is
+        that turn's INPUT context; the projection is a context valid for the
+        NEXT turn. Before any plan exists the saved step is named from the
+        flow. Once a plan exists the target lives on the current plan: a turn
+        that produced it left its target on the proposal, and a turn that
+        produced nothing (a decline, a question) named its target against
+        the plan that is still current. A step that no longer resolves, or
+        metadata this build cannot read, projects nothing rather than a
+        stale or invented target.
+        """
+        context = latest_user_edit_context(session.conversation)
+        if context is None or (
+            isinstance(context, AIBuilderPlanEditContext) and context.scope != "step"
+        ):
+            return None
+        preserves_output_contract = isinstance(
+            latest_user_review_context(session.conversation),
+            AIBuilderRunFailureContext,
+        )
+        if session.latest_plan_id is None:
+            if not isinstance(context, AIBuilderSavedFlowStepEditContext):
+                return None
+            step = await self._saved_step_for_scope(session, context)
+            if step is None:
+                return None
+            return AIBuilderSessionEditScope(
+                context=context,
+                step_number=step.step_order,
+                step_name=step.user_description,
+                preserves_output_contract=preserves_output_contract,
+            )
+        try:
+            plan = await self.get_plan(session.latest_plan_id)
+        except NotFoundException:
+            return None
+        if (
+            isinstance(context, AIBuilderPlanEditContext)
+            and context.plan_id == session.latest_plan_id
+        ):
+            # The turn produced no plan: its own target, against the current plan.
+            plan_ref = context.target_plan_step_ref
+            existing_ref = context.target_existing_step_ref
+        else:
+            # The turn produced the current plan: the target it left on it.
+            edit = plan.proposal.content.edit
+            plan_ref = edit.scoped_target_plan_step_ref if edit else None
+            existing_ref = edit.scoped_target_existing_step_ref if edit else None
+        if not plan_ref and not existing_ref:
+            return None
+        for number, step in enumerate(plan.spec.steps, 1):
+            if (plan_ref and step.plan_step_ref == plan_ref) or (
+                not plan_ref and step.existing_step_ref == existing_ref
+            ):
+                return AIBuilderSessionEditScope(
+                    context=AIBuilderPlanEditContext(
+                        scope="step",
+                        plan_id=session.latest_plan_id,
+                        target_plan_step_ref=step.plan_step_ref,
+                        target_existing_step_ref=step.existing_step_ref,
+                        target_step_name=step.name,
+                        target_step_number=number,
+                    ),
+                    step_number=number,
+                    step_name=step.name,
+                    preserves_output_contract=preserves_output_contract,
+                )
+        return None
+
+    async def _saved_step_for_scope(
+        self, session: BuilderSession, context: AIBuilderSavedFlowStepEditContext
+    ) -> "FlowStep | None":
+        if session.flow_id is None:
+            return None
+        try:
+            flow = await self.flow_service.get_flow(session.flow_id)
+        except NotFoundException:
+            return None
+        return next(
+            (step for step in flow.steps if step.id == context.flow_step_id), None
         )
 
     async def get_planning_state(self, session_id: UUID) -> PlanningState | None:

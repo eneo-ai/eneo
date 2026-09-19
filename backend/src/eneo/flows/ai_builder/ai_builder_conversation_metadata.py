@@ -2330,17 +2330,24 @@ def names_a_review(metadata: object) -> bool:
     return review_reference_kind(metadata) is not None
 
 
+_SERVER_AUTHORED_REFERENCE_KINDS: frozenset[str] = frozenset(
+    {"flow_review_suggestion", "run_failure"}
+)
+
+
 def is_server_authored_review_command(metadata: object) -> bool:
     """Whether the server, not the user, wrote this user message.
 
-    A suggestion handoff is a command the review screen issued: the server
-    writes its text from the typed reference. It states no new intent about
-    what the flow should do, so every path that reads the conversation for
-    meaning — free-form aggregation, slot classification — leaves it out.
-    The user's own later messages are ordinary intent again.
+    A suggestion handoff and a failed-step handoff are commands a screen
+    issued: the server writes their text from the typed reference. They state
+    no new intent about what the flow should do, so every path that reads the
+    conversation for meaning — free-form aggregation, slot classification —
+    leaves them out. Only the handoff turn carries its reference; the user's
+    own later messages inherit the review without it and are ordinary intent
+    again.
     """
 
-    return review_reference_kind(metadata) == "flow_review_suggestion"
+    return review_reference_kind(metadata) in _SERVER_AUTHORED_REFERENCE_KINDS
 
 
 def conversation_acts_on_a_review(

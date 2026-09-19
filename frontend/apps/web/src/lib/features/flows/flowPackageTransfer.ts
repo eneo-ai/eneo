@@ -233,6 +233,14 @@ export function getFlowPackageImportReadiness(
   };
 }
 
+export const FLOW_PACKAGE_EXTENSION = ".eneopkg";
+
+/** A flow package is told apart by its extension: browsers report zip-based
+ *  files under several media types, none of them specific to Eneo. */
+export function isFlowPackageFile(file: Pick<File, "name">): boolean {
+  return file.name.toLowerCase().endsWith(FLOW_PACKAGE_EXTENSION);
+}
+
 export async function encodeFlowPackageFileToBase64(file: File): Promise<string> {
   const bytes = new Uint8Array(await file.arrayBuffer());
   const chunks: string[] = [];

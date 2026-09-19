@@ -5,6 +5,7 @@
   import { Page } from "$lib/components/layout";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import FlowAIBuilder from "$lib/features/flows/ai-builder/FlowAIBuilder.svelte";
+  import FlowPackageImportDialog from "$lib/features/flows/components/FlowPackageImportDialog.svelte";
   import BuilderSessionStatus from "$lib/features/flows/ai-builder/BuilderSessionStatus.svelte";
   import { initAIBuilderService } from "$lib/features/flows/ai-builder/FlowAIBuilderService.svelte.ts";
   import { m } from "$lib/paraglide/messages";
@@ -23,6 +24,20 @@
 
   // A draft chosen in the Flöden list arrives as ?session=<id>; read once at mount.
   const resumeSessionId = untrack(() => page.url.searchParams.get("session"));
+
+  // A flow package dropped into the composer is an existing flow, not
+  // reference material: the importer installs it exactly, and the request
+  // typed so far follows to the draft's own Builder, where it is scoped to a
+  // step before it is sent.
+  let packageImportOpen = $state(false);
+  let packageFile = $state<File | null>(null);
+  let carriedText = $state("");
+
+  function importPackage(detail: { file: File; text: string }) {
+    packageFile = detail.file;
+    carriedText = detail.text;
+    packageImportOpen = true;
+  }
 
   onDestroy(() => {
     aiBuilderService.destroy();
@@ -53,10 +68,27 @@
          padding, and only the vertical overflow is clipped so nothing cuts the
          panel short on the left. -->
     <div class="-ml-6 flex flex-1 flex-col overflow-y-clip">
+      <FlowPackageImportDialog
+        eneo={data.eneo}
+        spaceId={$currentSpace.id}
+        spaceRouteId={$currentSpace.routeId}
+        bind:open={packageImportOpen}
+        showTrigger={false}
+        initialFile={packageFile}
+        oninstalled={async (result) => {
+          const flowPath = resolve(`/spaces/${$currentSpace.routeId}/flows/${result.flow_id}`);
+          const text = carriedText.trim();
+          // eslint-disable-next-line svelte/no-navigation-without-resolve -- resolved route above, with the tab query appended
+          await goto(`${flowPath}?tab=ai-builder`, {
+            state: text ? { aiBuilderPrefill: text } : {}
+          });
+        }}
+      />
       <FlowAIBuilder
         targetKind="create"
         statusInPageHeader
         {resumeSessionId}
+        onpackage={importPackage}
         onapplied={async (detail) => {
           // Land on the steps that were just approved, not on the name and
           // description the Builder already filled in.

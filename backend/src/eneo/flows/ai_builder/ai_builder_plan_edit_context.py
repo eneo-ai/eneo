@@ -503,6 +503,33 @@ def build_plan_revision_prompt_block(
         "- Treat the user's latest message as a revision request for this flow.",
         model_rule,
     ]
+    if (
+        isinstance(context, ResolvedAIBuilderEditContext)
+        and context.preserve_output_contract
+    ):
+        # A failure repair: the step's output contract is the fixed point. A
+        # rejected answer is fixed through the instruction; an answer that was
+        # cut off is fixed through the instruction only when what the contract
+        # requires can still fit, otherwise the honest answer is a decline
+        # that names the wider edit (a split, a smaller contract) for the user
+        # to make deliberately. Never a weaker contract, a larger cap, another
+        # model or a retry.
+        lines.append(
+            "- Repair: the target step's output_type, output_mode, output_contract and "
+            "output_config stay exactly as they are; change the instruction so the "
+            "answer meets them. If the answer was cut off (finish_reason=length) and "
+            "the content the contract requires cannot fit the step's answer, "
+            + (
+                f"call `{DECLINE_FLOW_CHANGE_TOOL_NAME}` with reason "
+                "`requires_wider_edit` and say what must change: split the step or "
+                "reduce what its contract requires. "
+                if can_decline
+                else "say so in plan_rationale and propose the split or the smaller "
+                "contract as the wider edit. "
+            )
+            + "Do not weaken the contract, raise a token limit, change the model or "
+            "ask for a retry."
+        )
 
     if context.scope == "whole_plan":
         lines.extend(

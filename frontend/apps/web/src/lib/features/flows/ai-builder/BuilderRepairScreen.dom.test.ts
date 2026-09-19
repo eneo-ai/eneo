@@ -59,9 +59,23 @@ describe("BuilderRepairScreen", () => {
 
     await fireEvent.click(screen.getByTestId("repair-prepare"));
     expect(onprepare).toHaveBeenCalledWith({
-      message: m.ai_builder_repair_message({ step: "2", name: "Sammanfatta" }),
+      message: m.ai_builder_repair_message({ step: "2" }),
       reviewContext: makeLaunch().reference
     });
+  });
+
+  it("says what is read for a truncated answer, which was never kept", () => {
+    render(BuilderRepairScreen, {
+      repair: { status: "ready", launch: makeLaunch({ error_code: "flow_llm_output_truncated" }) },
+      onprepare: vi.fn(),
+      onclose: vi.fn(),
+      onretry: vi.fn()
+    });
+    const text = screen.getByTestId("builder-repair").textContent ?? "";
+    expect(text).toContain(m.flow_error_flow_llm_output_truncated());
+    expect(text).toContain(m.ai_builder_repair_hint_truncated());
+    expect(text).not.toContain(m.ai_builder_repair_hint());
+    expect(screen.getByTestId("repair-prepare")).toBeTruthy();
   });
 
   it("explains each refusal in words and retries only an unexplained failure", () => {

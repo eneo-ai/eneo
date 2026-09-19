@@ -3,6 +3,7 @@
      accent token via relative oklch() syntax; the rest are near-transparent
      shadow overlays with no token equivalent */
   import { m } from "$lib/paraglide/messages";
+  import * as Select from "$lib/components/ui/select/index.js";
   import { getLocale } from "$lib/paraglide/runtime";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Label } from "$lib/components/ui/label/index.js";
@@ -20,18 +21,32 @@
   import FlowAIBuilderModelSelect from "./FlowAIBuilderModelSelect.svelte";
   import FlowAIBuilderReasoningSelect from "./FlowAIBuilderReasoningSelect.svelte";
   import { getAIBuilderAttachmentRules } from "./builderAttachmentRules";
+  import { isFlowPackageFile } from "$lib/features/flows/flowPackageTransfer";
   import {
     clearComposerDraft,
     loadComposerDraft,
     saveComposerDraft,
     type ComposerDraftFile
   } from "./flowAIBuilderComposerDraft";
-  import type { AIBuilderEditContext } from "./protocol";
+  import type { AIBuilderEditContext, AIBuilderStepChoice } from "./protocol";
 
   interface Props {
     editContext?: AIBuilderEditContext | null;
     editContextLabel?: string | null;
+    /** A repair keeps the failed step's output contract on every later turn,
+     *  so its scope is shown with a note instead of a dismiss control. */
+    editContextLocked?: boolean;
     oncleareditcontext?: () => void;
+    /** The saved steps the next message may be scoped to, before a proposal
+     *  exists: a chosen step becomes the composer's scope. */
+    stepChoices?: AIBuilderStepChoice[] | null;
+    onselectstep?: (choice: AIBuilderStepChoice) => void;
+    /** A request carried over from a package: it names changes to steps, so
+     *  it is not sent until one of them is chosen. */
+    requireStepScope?: boolean;
+    /** A flow package is not reference material: it is handed to the
+     *  importer with the request typed so far. */
+    onpackage?: (detail: { file: File; text: string }) => void;
     /** Enables the plan-refinement label, character budget, and Ctrl/Cmd+Enter submit. */
     refinement?: boolean;
     /** First plan generation in flight: the textarea stays editable as a
@@ -44,7 +59,12 @@
   let {
     editContext = null,
     editContextLabel = null,
+    editContextLocked = false,
     oncleareditcontext,
+    stepChoices = null,
+    onselectstep,
+    requireStepScope = false,
+    onpackage,
     refinement = false,
     generationWait = false,
     placeholder = null
@@ -194,12 +214,16 @@
   const hasAttachments = $derived(
     persistedAttachments.length > 0 || $attachments.length > 0 || restoredFiles.length > 0
   );
+  // A request carried from a package names changes to steps; without a
+  // chosen step it would be read as a whole-flow edit.
+  const stepScopeMissing = $derived(requireStepScope && !editContext);
   const canSubmit = $derived(
     (inputValue.trim().length > 0 || completedUploads.length > 0 || restoredFiles.length > 0) &&
       service.canSendMessage &&
       service.modelSendBlock === null &&
       !$isUploading &&
-      !overLimit
+      !overLimit &&
+      !stepScopeMissing
   );
   const resolvedEditContextLabel = $derived.by(() => {
     if (editContextLabel) return editContextLabel;
@@ -258,7 +282,8 @@
       !service.canSendMessage ||
       service.modelSendBlock !== null ||
       $isUploading ||
-      overLimit
+      overLimit ||
+      stepScopeMissing
     ) {
       return;
     }
@@ -335,9 +360,28 @@
     if (textareaEl) textareaEl.style.height = "auto";
   }
 
+  const acceptsPackages = $derived(onpackage !== undefined);
+  const acceptString = $derived(
+    acceptsPackages ? `${$managerRules.acceptString},.eneopkg` : $managerRules.acceptString
+  );
+
+  /** A package goes to the importer; everything else is an attachment. One
+   *  package per intake: the first wins, and the rest of the files are
+   *  queued as usual so nothing is silently dropped. */
+  function intake(files: File[]) {
+    if (acceptsPackages) {
+      const index = files.findIndex((file) => isFlowPackageFile(file));
+      if (index >= 0) {
+        const [pkg] = files.splice(index, 1);
+        onpackage?.({ file: pkg!, text: inputValue });
+      }
+    }
+    if (files.length > 0) queueValidUploads(files);
+  }
+
   function handlePaste(event: ClipboardEvent) {
     if (!event.clipboardData?.files || event.clipboardData.files.length === 0) return;
-    queueValidUploads([...event.clipboardData.files]);
+    intake([...event.clipboardData.files]);
   }
 
   function handleDrop(event: DragEvent) {
@@ -345,12 +389,12 @@
     isDragging = false;
     const files = event.dataTransfer?.files;
     if (!files || files.length === 0) return;
-    queueValidUploads([...files]);
+    intake([...files]);
   }
 
   function handleFileInputChange() {
     if (!fileInputEl?.files) return;
-    queueValidUploads([...fileInputEl.files]);
+    intake([...fileInputEl.files]);
     // Reset so selecting the same file twice in a row re-triggers change
     fileInputEl.value = "";
   }
@@ -536,18 +580,61 @@
       </ul>
     {/if}
 
+    {#if !resolvedEditContextLabel && stepChoices && stepChoices.length > 0}
+      <div class="composer-edit-context" class:composer-edit-context-required={stepScopeMissing}>
+        <span class="composer-edit-context-dot" aria-hidden="true"></span>
+        <label class="composer-edit-context-text" for="ai-builder-step-choice">
+          {stepScopeMissing
+            ? m.ai_builder_step_choice_required()
+            : m.ai_builder_step_choice_label()}
+        </label>
+        <Select.Root
+          type="single"
+          value=""
+          disabled={!service.canSendMessage}
+          onValueChange={(next) => {
+            const choice = stepChoices?.find((candidate) => candidate.id === next);
+            if (choice) onselectstep?.(choice);
+          }}
+        >
+          <Select.Trigger
+            id="ai-builder-step-choice"
+            size="sm"
+            class="composer-control"
+            aria-label={m.ai_builder_step_choice_label()}
+          >
+            <span class="truncate">{m.ai_builder_step_choice_placeholder()}</span>
+          </Select.Trigger>
+          <Select.Content align="start">
+            {#each stepChoices as choice (choice.id)}
+              <Select.Item
+                value={choice.id}
+                label={m.ai_builder_step_choice_item({ step: choice.order, name: choice.name })}
+              >
+                {m.ai_builder_step_choice_item({ step: choice.order, name: choice.name })}
+              </Select.Item>
+            {/each}
+          </Select.Content>
+        </Select.Root>
+      </div>
+    {/if}
+
     {#if resolvedEditContextLabel}
       <div class="composer-edit-context" role="status" aria-live="polite">
         <span class="composer-edit-context-dot" aria-hidden="true"></span>
         <span class="composer-edit-context-text">{resolvedEditContextLabel}</span>
-        <button
-          type="button"
-          class="composer-edit-context-clear"
-          aria-label={m.ai_builder_edit_context_clear()}
-          onclick={clearEditContext}
-        >
-          {m.ai_builder_edit_context_clear_short()}
-        </button>
+        {#if editContextLocked}
+          <span class="composer-edit-context-note">{m.ai_builder_edit_context_repair_note()}</span>
+        {:else}
+          <button
+            type="button"
+            class="composer-edit-context-clear"
+            aria-label={m.ai_builder_edit_context_clear()}
+            onclick={clearEditContext}
+          >
+            {m.ai_builder_edit_context_clear_short()}
+          </button>
+        {/if}
       </div>
     {/if}
 
@@ -579,7 +666,7 @@
         <input
           bind:this={fileInputEl}
           type="file"
-          accept={$managerRules.acceptString}
+          accept={acceptString}
           multiple
           aria-label={m.attach_files()}
           class="sr-only"
@@ -873,6 +960,19 @@
   .composer-edit-context-clear:hover {
     color: var(--text-primary);
     background: var(--background-hover-default);
+  }
+
+  .composer-edit-context-note {
+    flex: 0 0 auto;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+  }
+
+  /* A request that cannot be sent yet says so where the choice is made;
+     the border strengthens, nothing flashes. */
+  .composer-edit-context-required {
+    border-color: var(--border-stronger);
+    color: var(--text-primary);
   }
 
   .composer-textarea-wrap {

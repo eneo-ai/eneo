@@ -123,6 +123,20 @@ export interface AIBuilderStepScopePresentation {
   stepNumber: number;
 }
 
+/** A saved step the composer may scope the next message to. */
+export interface AIBuilderStepChoice {
+  id: string;
+  name: string;
+  order: number;
+}
+
+/** A request carried into the Builder from outside its conversation (a
+ *  package's change request), with whether it may go unscoped. */
+export interface AIBuilderCarriedRequest {
+  text: string;
+  requireStepScope: boolean;
+}
+
 export type AIBuilderConversationMessage = GeneratedAIBuilderConversationMessage;
 
 export type AIBuilderAttachmentFile = GeneratedAIBuilderAttachmentFile;

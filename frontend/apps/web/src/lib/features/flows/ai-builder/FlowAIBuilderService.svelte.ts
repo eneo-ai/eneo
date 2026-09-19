@@ -1,4 +1,16 @@
 import type { FlowRunFailureRepairTarget } from "$lib/features/flows/flowRunFailureRepair";
+
+/** The composer's scope with what a send needs and what the chip shows. */
+interface AIBuilderStepScopeState extends AIBuilderStepScopePresentation {
+  editContext: AIBuilderEditContext | null;
+  locked: boolean;
+}
+
+/** One identity per projected scope, so a dismissal outlives re-renders of
+ *  the same snapshot but not a newer accepted turn. */
+function scopeKey(context: AIBuilderEditContext): string {
+  return JSON.stringify(context);
+}
 import { m } from "$lib/paraglide/messages";
 import { createClassContext } from "$lib/core/helpers/createClassContext";
 import type { Eneo } from "@eneo/eneo-js";
@@ -52,11 +64,13 @@ export class FlowAIBuilderService {
   #driver: FlowAIBuilderDriver;
   #stateVersion = $state(0);
   #hasSeenPlanInSession = $state(false);
+  /** The step the flow editor launched, before its first message is sent. */
   #savedFlowStepScope = $state<{
     sessionId: string | null;
     scope: AIBuilderSavedFlowStepScope;
   } | null>(null);
-  #suppressedPlanStepScope = $state<{ sessionId: string; planId: string } | null>(null);
+  /** A dismissed projected scope, by identity, for the current session. */
+  #dismissedScope = $state<{ sessionId: string; key: string } | null>(null);
 
   hasSession = $derived(this.#state.session !== null);
   hasSeenPlanInSession = $derived(this.#hasSeenPlanInSession);
@@ -169,79 +183,57 @@ export class FlowAIBuilderService {
     return owned.sessionId === sessionId ? owned.scope : null;
   }
 
-  /** The step of an ACCEPTED failure repair, shown as the composer's scope
-   *  while the repair conversation lasts. Set only once a repair turn was
-   *  sent: a launch that is closed unsent leaves no label behind. The server
-   *  derives the edit scope from the failure itself, so nothing is sent for
-   *  it. Bound to the session like the saved-step scope, and cleared with it. */
-  #failureRepairScope: {
-    sessionId: string | null;
-    scope: AIBuilderStepScopePresentation;
-  } | null = null;
-
-  get failureRepairScope(): AIBuilderStepScopePresentation | null {
-    const owned = this.#failureRepairScope;
-    if (owned === null) return null;
-    const sessionId = this.#state.session?.session_id ?? null;
-    return owned.sessionId === sessionId ? owned.scope : null;
-  }
-
-  get activeStepScope(): AIBuilderStepScopePresentation | null {
-    const context = this.activeStepTransportContext;
+  /** The scope the server projected from the newest accepted turn, unless
+   *  the user dismissed exactly that one. The projection names the step as
+   *  it is now and carries the repair restriction; it is what a reload
+   *  restores, so nothing here is a second copy of it. */
+  get #projectedScope(): AIBuilderStepScopeState | null {
+    const session = this.#state.session;
+    const projected = session?.edit_scope ?? null;
+    if (!session || !projected) return null;
+    const dismissed = this.#dismissedScope;
     if (
-      context?.kind === "proposed_plan" &&
-      context.target_step_name &&
-      context.target_step_number
-    ) {
-      return {
-        stepName: context.target_step_name,
-        stepNumber: context.target_step_number
-      };
-    }
-    return this.savedFlowStepScope ?? this.failureRepairScope;
-  }
-
-  get activeStepTransportContext(): AIBuilderEditContext | null {
-    const scope = this.savedFlowStepScope;
-    const plan = this.#state.currentPlan;
-    if (plan === null) return scope?.editContext ?? null;
-    const suppressedScope = this.#suppressedPlanStepScope;
-    if (
-      suppressedScope !== null &&
-      suppressedScope.sessionId === this.#state.session?.session_id &&
-      suppressedScope.planId === plan.plan_id
+      dismissed !== null &&
+      dismissed.sessionId === session.session_id &&
+      dismissed.key === scopeKey(projected.context)
     ) {
       return null;
     }
-
-    const targetExistingStepRef = plan.proposal.edit?.scoped_target_existing_step_ref;
-    const targetPlanStepRef = plan.proposal.edit?.scoped_target_plan_step_ref;
-    if (!targetExistingStepRef && !targetPlanStepRef) return scope?.editContext ?? null;
-    const targetPlanIndex = plan.proposal.spec.steps.findIndex(
-      (step) =>
-        (!targetPlanStepRef || step.plan_step_ref === targetPlanStepRef) &&
-        (!targetExistingStepRef || step.existing_step_ref === targetExistingStepRef)
-    );
-    const targetStep = plan.proposal.spec.steps[targetPlanIndex];
-    if (!targetStep?.plan_step_ref) {
-      // Keep any launch scope rather than silently widening the edit. The
-      // backend rejects stale saved-step identity against the current plan.
-      return scope?.editContext ?? null;
-    }
-
     return {
-      kind: "proposed_plan",
-      plan_id: plan.plan_id,
-      scope: "step",
-      target_existing_step_ref: targetExistingStepRef ?? null,
-      target_plan_step_ref: targetPlanStepRef ?? null,
-      target_step_name: targetStep.name,
-      target_step_number: targetPlanIndex + 1
+      editContext: projected.context,
+      stepName: projected.step_name?.trim() || m.flow_step_unnamed(),
+      stepNumber: projected.step_number,
+      locked: projected.preserves_output_contract
     };
   }
 
+  /** The step the next message edits: the editor's unsent launch first, then
+   *  the server's projection. A delivered turn drops the launch, because the
+   *  driver reads the session back before the send settles and the
+   *  projection then names the step as the server resolved it. */
+  get #activeScope(): AIBuilderStepScopeState | null {
+    const launched = this.savedFlowStepScope;
+    if (launched) return { ...launched, locked: false };
+    return this.#projectedScope;
+  }
+
+  get activeStepScope(): AIBuilderStepScopePresentation | null {
+    const scope = this.#activeScope;
+    return scope ? { stepName: scope.stepName, stepNumber: scope.stepNumber } : null;
+  }
+
+  /** A failure repair keeps the failed step's output contract on every later
+   *  turn whatever the composer shows, so its scope cannot be dismissed. */
+  get activeStepScopeLocked(): boolean {
+    return this.#activeScope?.locked ?? false;
+  }
+
+  get activeStepTransportContext(): AIBuilderEditContext | null {
+    return this.#activeScope?.editContext ?? null;
+  }
+
   setSavedFlowStepScope(scope: AIBuilderSavedFlowStepScope): void {
-    this.#suppressedPlanStepScope = null;
+    this.#dismissedScope = null;
     this.#savedFlowStepScope = {
       sessionId: this.#state.session?.session_id ?? null,
       scope
@@ -253,11 +245,14 @@ export class FlowAIBuilderService {
   }
 
   clearActiveStepScope(): void {
+    if (this.activeStepScopeLocked) return;
     this.#savedFlowStepScope = null;
-    this.#failureRepairScope = null;
-    const sessionId = this.#state.session?.session_id;
-    const planId = this.#state.currentPlan?.plan_id;
-    this.#suppressedPlanStepScope = sessionId && planId ? { sessionId, planId } : null;
+    const session = this.#state.session;
+    const projected = session?.edit_scope ?? null;
+    this.#dismissedScope =
+      session && projected
+        ? { sessionId: session.session_id, key: scopeKey(projected.context) }
+        : null;
   }
 
   get isStreaming(): boolean {
@@ -572,24 +567,17 @@ export class FlowAIBuilderService {
       editContext,
       reviewContext
     );
+    if (outcome === "delivered") {
+      // The server recorded the turn and the driver read the session back,
+      // so its projection now owns the scope: the editor's launch and any
+      // dismissal of the previous projection are spent. A refused send keeps
+      // the launch on screen and changes nothing.
+      this.#savedFlowStepScope = null;
+      this.#dismissedScope = null;
+    }
     if (outcome !== "not_started" && reviewContext) {
       if (reviewContext.kind === "run_failure") {
-        // Only a delivered turn is a repair the server recorded: it carries
-        // the reference from here on and its step becomes the composer's
-        // label. A refused send keeps the launch on screen and names no step.
-        const repair = this.failureRepair;
-        if (outcome === "delivered") {
-          if (repair.status === "ready") {
-            this.#failureRepairScope = {
-              sessionId: this.#state.session?.session_id ?? null,
-              scope: {
-                stepName: repair.launch.step_name?.trim() || m.flow_step_unnamed(),
-                stepNumber: repair.launch.step_number
-              }
-            };
-          }
-          this.closeFailureRepair();
-        }
+        if (outcome === "delivered") this.closeFailureRepair();
       } else {
         this.closeReview();
       }

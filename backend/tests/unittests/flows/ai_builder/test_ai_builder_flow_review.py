@@ -1424,6 +1424,50 @@ def test_a_suggestion_turn_is_canonical_before_fingerprint_and_snapshot():
     assert plain.canonical() is plain
 
 
+def test_a_run_failure_handoff_is_a_server_written_command():
+    """The initial repair handoff names a failed step by reference; the
+    server writes its sentence so no client prose is retained, the same
+    request retries as the same request, and the failed step's number is
+    the only fact in it. A later turn the user types keeps its own text."""
+    from eneo.flows.ai_builder.ai_builder_api_models import SendMessageRequest
+    from eneo.flows.ai_builder.ai_builder_flow_review import (
+        AIBuilderRunFailureContext,
+        repair_message,
+    )
+
+    reference = AIBuilderRunFailureContext(
+        flow_version=4, definition_checksum="sum", run_id=uuid4(), step_order=5
+    )
+    assert repair_message(5) == (
+        "Åtgärda felet i steg 5 så att modellens svar uppfyller stegets utdatakontrakt."
+    )
+    assert repair_message(5, "en") == (
+        "Fix the error in step 5 so that the model's answer meets the step's output contract."
+    )
+    first = SendMessageRequest(
+        client_turn_id=uuid4(), message="klientens text", review_context=reference
+    ).canonical()
+    second = SendMessageRequest(
+        client_turn_id=uuid4(), message="", review_context=reference
+    ).canonical()
+    english = SendMessageRequest(
+        client_turn_id=uuid4(),
+        message="x",
+        review_context=reference,
+        ui_language="en-GB",
+    ).canonical()
+    assert first.message == second.message == repair_message(5)
+    assert english.message == repair_message(5, "en")
+    assert first.retry_snapshot()["message"] == repair_message(5)
+    assert "klientens" not in json.dumps(first.retry_snapshot())
+    assert first.request_fingerprint() == second.request_fingerprint()
+    # The user's later turn, sent without the reference, is theirs verbatim.
+    later = SendMessageRequest(
+        client_turn_id=uuid4(), message="Gör instruktionen kortare i steg 5"
+    )
+    assert later.canonical() is later
+
+
 def test_suggestion_references_persist_with_the_resolved_level_and_parse_back():
     from eneo.flows.ai_builder.ai_builder_flow_review import (
         AIBuilderSuggestionContext,
@@ -1706,7 +1750,7 @@ def test_a_turn_stored_in_an_older_shape_loads_without_an_offer_to_retry_it():
             "step_orders": [1, 2],
         },
     }
-    response = _to_session_response(_session(older_shape))
+    response = _to_session_response(_session(older_shape), edit_scope=None)
     assert response.latest_turn is not None
     assert response.latest_turn.retry_request is None
     assert response.latest_turn.state is BuilderTurnState.FAILED_BEFORE_PROVIDER
@@ -1724,7 +1768,7 @@ def test_a_turn_stored_in_an_older_shape_loads_without_an_offer_to_retry_it():
             ],
         },
     }
-    replayable = _to_session_response(_session(current_shape))
+    replayable = _to_session_response(edit_scope=None, session=_session(current_shape))
     assert replayable.latest_turn is not None
     assert replayable.latest_turn.retry_request is not None
 
@@ -1738,7 +1782,8 @@ def test_a_turn_that_cannot_be_replayed_asks_for_no_spend_acknowledgement():
     from eneo.flows.ai_builder.ai_builder_router import _to_session_response
 
     response = _to_session_response(
-        BuilderSession(
+        edit_scope=None,
+        session=BuilderSession(
             id=uuid4(),
             tenant_id=uuid4(),
             space_id=uuid4(),
@@ -1751,7 +1796,7 @@ def test_a_turn_that_cannot_be_replayed_asks_for_no_spend_acknowledgement():
                 state=BuilderTurnState.PROVIDER_OUTCOME_UNKNOWN,
                 user_message_id=uuid4(),
             ),
-        )
+        ),
     )
     assert response.latest_turn is not None
     assert response.latest_turn.retry_request is None
@@ -2639,7 +2684,16 @@ def test_the_evidence_header_claims_reads_only_of_runs_whose_content_travels():
     assert read_lines(preview_only) == ["Utdrag ur 1 körning lästes."]
 
 
-def _failure_review_service(user, *, attempt_status="failed", retained="aåö"):
+def _failure_review_service(
+    user,
+    *,
+    attempt_status="failed",
+    retained="aåö",
+    error_code=None,
+    finish_reason=None,
+    num_tokens_input=None,
+    num_tokens_output=None,
+):
     from eneo.flows.application.flow_run_evidence_bundle import RedactedEvidenceBundle
     from eneo.flows.domain.flow import Flow, FlowRun, FlowStepAttempt, FlowVersion
     from eneo.flows.domain.flow_step_attempt_input import (
@@ -2700,11 +2754,17 @@ def _failure_review_service(user, *, attempt_status="failed", retained="aåö"):
         step_order=1,
         attempt_no=2,
         status=attempt_status,
-        error_code="typed_io_input_exceeds_model_window"
-        if retained is None
-        else "typed_io_output_parse_failed",
+        error_code=error_code
+        or (
+            "typed_io_input_exceeds_model_window"
+            if retained is None
+            else "typed_io_output_parse_failed"
+        ),
         error_message="Invalid JSON",
         requested_model="model",
+        finish_reason=finish_reason,
+        num_tokens_input=num_tokens_input,
+        num_tokens_output=num_tokens_output,
         started_at=_T0,
         created_at=_T0,
         updated_at=_T0,
@@ -2865,6 +2925,117 @@ async def test_failure_review_refuses_before_planner_work(user, reason):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("tokens_known", [True, False])
+async def test_failure_review_explains_truncation_from_content_free_attempt_metadata(
+    user, tokens_known
+):
+    """A truncated answer is never retained; the attempt's finish reason and
+    token counts are the evidence, unknown counts stay unknown, and the
+    contract stays locked."""
+    from eneo.flows.ai_builder.ai_builder_flow_review import AIBuilderRunFailureContext
+
+    service, flow, run, reader, repo = _failure_review_service(
+        user,
+        retained=None,
+        error_code="flow_llm_output_truncated",
+        finish_reason="length",
+        num_tokens_input=1200 if tokens_known else None,
+        num_tokens_output=4096 if tokens_known else None,
+    )
+    audit = AsyncMock()
+    evidence = await service.resolve_failure_evidence(
+        flow_id=flow.id,
+        space_id=flow.space_id,
+        reference=AIBuilderRunFailureContext(
+            flow_version=1, definition_checksum="sum", run_id=run.id, step_order=1
+        ),
+        audit=audit,
+    )
+    failure = evidence.failure
+    assert failure is not None
+    assert failure.error_code == "flow_llm_output_truncated"
+    assert failure.rejected_output is None
+    assert failure.rejected_output_availability == "not_recorded"
+    assert failure.finish_reason == "length"
+    assert failure.num_tokens_input == (1200 if tokens_known else None)
+    assert failure.num_tokens_output == (4096 if tokens_known else None)
+    assert failure.effective_prompt == "Return JSON"
+    audit.assert_awaited_once_with(run)
+    reader.get_run.assert_awaited_once_with(
+        run_id=run.id, flow_id=flow.id, access_kind="evidence_view"
+    )
+    repo.list_statuses.assert_not_called()
+
+    rendered = render_review_evidence(evidence)
+    assert "finish_reason=length" in rendered
+    assert "Avvisad utdata" not in rendered
+    if tokens_known:
+        assert "4096" in rendered and "1200" in rendered
+    else:
+        assert "okänt" in rendered
+    # The evidence states facts: usage and the recorded reason, never a
+    # budget, and the contract lock; what to do belongs to the directive.
+    assert "ligger fast" in rendered
+    assert "budget" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_failure_review_without_retained_output_needs_a_truncation_fact(user):
+    """A finish reason alone does not turn an unretained answer into evidence:
+    only the truncation failure is diagnosable without its text."""
+    from eneo.flows.ai_builder.ai_builder_flow_review import AIBuilderRunFailureContext
+
+    service, flow, run, _reader, _repo = _failure_review_service(
+        user,
+        retained=None,
+        error_code="typed_io_output_parse_failed",
+        finish_reason="stop",
+        num_tokens_output=17,
+    )
+    with pytest.raises(AIBuilderBadRequestException) as caught:
+        await service.resolve_failure_evidence(
+            flow_id=flow.id,
+            space_id=flow.space_id,
+            reference=AIBuilderRunFailureContext(
+                flow_version=1, definition_checksum="sum", run_id=run.id, step_order=1
+            ),
+            audit=AsyncMock(),
+        )
+    assert caught.value.context["reason"] == "output_not_retained"
+
+
+@pytest.mark.asyncio
+async def test_failure_review_masked_output_refuses_even_for_truncation(user):
+    """Masking is the reader's floor: a masked output path refuses the repair
+    before any attempt metadata is read, truncation or not."""
+    from dataclasses import replace
+
+    from eneo.flows.ai_builder.ai_builder_flow_review import AIBuilderRunFailureContext
+
+    service, flow, run, reader, _repo = _failure_review_service(
+        user,
+        retained=None,
+        error_code="flow_llm_output_truncated",
+        finish_reason="length",
+        num_tokens_output=4096,
+    )
+    reader.get_redacted_evidence_bundle.return_value = replace(
+        reader.get_redacted_evidence_bundle.return_value,
+        masked_paths=("bundle.step_attempts[0].output_payload_json",),
+    )
+    with pytest.raises(AIBuilderBadRequestException) as caught:
+        await service.resolve_failure_evidence(
+            flow_id=flow.id,
+            space_id=flow.space_id,
+            reference=AIBuilderRunFailureContext(
+                flow_version=1, definition_checksum="sum", run_id=run.id, step_order=1
+            ),
+            audit=AsyncMock(),
+        )
+    assert caught.value.context["reason"] == "output_masked"
+
+
+@pytest.mark.asyncio
 async def test_failure_review_inherited_reference_refuses_stale_before_proposal(
     user, monkeypatch
 ):
@@ -2953,3 +3124,49 @@ def test_failure_text_fits_budget_with_explicit_shortening(runtime_truncated, bu
     omitted_block = render_review_evidence(omitted)
     assert "Instruktionen: utelämnad av utrymmesskäl, inte läst" in omitted_block
     assert "Avvisad utdata: utelämnad av utrymmesskäl, inte läst" in omitted_block
+
+
+def test_content_free_failure_fits_budget_without_an_output_excerpt():
+    from eneo.flows.ai_builder.ai_builder_flow_review import FlowReviewFailureFact
+
+    evidence = FlowReviewEvidence(
+        flow_version=1,
+        definition_checksum="sum",
+        evidence_classification_level=3,
+        completed_run_count=0,
+        failed_run_count=1,
+        steps=[],
+        facts=[],
+        failure=FlowReviewFailureFact(
+            run_id=uuid4(),
+            step_order=2,
+            attempt_no=3,
+            error_code="flow_llm_output_truncated",
+            error_message="truncated",
+            effective_prompt="Return JSON. " * 1000,
+            rejected_output=None,
+            rejected_output_availability="not_recorded",
+            requested_model=None,
+            finish_reason="length",
+            num_tokens_input=None,
+            num_tokens_output=4096,
+        ),
+    )
+    fits = lambda candidate: len(render_review_evidence(candidate)) <= 4000
+    fitted = fit_review_evidence(evidence, fits=fits)
+    assert fits(fitted)
+    assert fitted.failure is not None
+    assert fitted.failure.rejected_output is None
+    assert fitted.failure.finish_reason == "length"
+    assert fitted.failure.num_tokens_output == 4096
+    rendered = render_review_evidence(fitted)
+    assert "Avvisad utdata" not in rendered
+    assert "finish_reason=length" in rendered
+    assert "4096 tokens ut" in rendered and "okänt antal tokens in" in rendered
+    assert "Instruktionen: kortad av utrymmesskäl" in rendered
+    assert len(fitted.excerpts) == 0
+    omitted = render_review_evidence(
+        fit_review_evidence(evidence, fits=lambda candidate: False)
+    )
+    assert "Instruktionen: utelämnad av utrymmesskäl, inte läst" in omitted
+    assert "finish_reason=length" in omitted and "Avvisad utdata" not in omitted

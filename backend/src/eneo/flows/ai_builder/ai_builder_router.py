@@ -36,6 +36,7 @@ from eneo.flows.ai_builder.ai_builder_api_models import (
     AIBuilderProposalTurnDiagnostic,
     AIBuilderProviderCallDiagnostic,
     AIBuilderRunFailureLaunchResponse,
+    AIBuilderSessionEditScope,
     AIBuilderTurnLifecycleResponse,
     ApplyPlanRequest,
     ApplyResultResponse,
@@ -758,11 +759,13 @@ def _replayable_request(
 def _to_session_response(
     session: BuilderSession,
     *,
+    edit_scope: AIBuilderSessionEditScope | None,
     attachments: list[FilePublic] | None = None,
     attachment_warnings: list[str] | None = None,
 ) -> SessionResponse:
     telemetry = summarize_session_telemetry(session.conversation)
     return SessionResponse(
+        edit_scope=edit_scope,
         session_id=session.id,
         status=session.status,
         target_kind=session.target_kind,
@@ -1220,6 +1223,7 @@ async def create_session(
         )
         response = _to_session_response(
             session,
+            edit_scope=await service.describe_session_edit_scope(session),
             attachments=[_to_file_public(file) for file in attachment_snapshot.files],
             attachment_warnings=list(attachment_snapshot.warnings),
         )
@@ -1709,6 +1713,7 @@ async def get_session(
 
     return _to_session_response(
         session,
+        edit_scope=await service.describe_session_edit_scope(session),
         attachments=[_to_file_public(file) for file in attachment_snapshot.files],
         attachment_warnings=list(attachment_snapshot.warnings),
     )
@@ -2132,7 +2137,9 @@ async def cancel_session(
         ),
     )
 
-    return _to_session_response(session)
+    return _to_session_response(
+        session, edit_scope=await service.describe_session_edit_scope(session)
+    )
 
 
 @router.post(

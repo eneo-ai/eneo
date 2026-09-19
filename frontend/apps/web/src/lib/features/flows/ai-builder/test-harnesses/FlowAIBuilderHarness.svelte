@@ -8,7 +8,7 @@
   import type { Space } from "@eneo/eneo-js";
   import { untrack } from "svelte";
   import type { AIBuilderClientTransport } from "../FlowAIBuilderDriver";
-  import type { TargetKind } from "../protocol";
+  import type { AIBuilderStepChoice, TargetKind } from "../protocol";
 
   interface Props {
     transport: AIBuilderClientTransport;
@@ -16,6 +16,8 @@
     flowId?: string | null;
     resumeSessionId?: string | null;
     canReview?: boolean;
+    stepChoices?: AIBuilderStepChoice[] | null;
+    onpackage?: (detail: { file: File; text: string }) => void;
     /** Test hook: receive the service instance to drive live session changes. */
     onservice?: (service: FlowAIBuilderService) => void;
     /** Test hook: receive the mounted shell to exercise its public launch actions. */
@@ -28,6 +30,8 @@
     flowId = null,
     resumeSessionId = null,
     canReview = false,
+    stepChoices = null,
+    onpackage,
     onservice,
     onbuilder
   }: Props = $props();
@@ -69,4 +73,11 @@
   });
 </script>
 
-<FlowAIBuilder bind:this={builder} {targetKind} {resumeSessionId} {canReview} />
+<FlowAIBuilder
+  bind:this={builder}
+  {targetKind}
+  {resumeSessionId}
+  {canReview}
+  {stepChoices}
+  {onpackage}
+/>

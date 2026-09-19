@@ -5,7 +5,11 @@
 
   import FlowAIBuilder from "./FlowAIBuilder.svelte";
   import { initAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
-  import type { AIBuilderSavedFlowStepScope } from "./protocol";
+  import type {
+    AIBuilderCarriedRequest,
+    AIBuilderSavedFlowStepScope,
+    AIBuilderStepChoice
+  } from "./protocol";
   import type { FlowRunFailureRepairTarget } from "$lib/features/flows/flowRunFailureRepair";
 
   interface Props {
@@ -15,9 +19,11 @@
     onapplied?: (detail: { flow_id: string; focusStepIndex: number | null }) => void;
     /** Whether the user may review the published version's runs. */
     canReview?: boolean;
+    /** The flow's saved steps, for the composer's step picker. */
+    stepChoices?: AIBuilderStepChoice[] | null;
   }
 
-  let { eneo, spaceId, flowId, onapplied, canReview = false }: Props = $props();
+  let { eneo, spaceId, flowId, onapplied, canReview = false, stepChoices = null }: Props = $props();
 
   const service = untrack(() => initAIBuilderService(eneo, spaceId, flowId));
   let builder = $state<FlowAIBuilder | undefined>();
@@ -46,6 +52,13 @@
     await builder?.launchFailureRepair(target);
   }
 
+  /** Bring a request from outside the Builder (a package's change request)
+   *  into the composer; it is sent only once a step is chosen. */
+  export async function carryRequest(request: AIBuilderCarriedRequest) {
+    await tick();
+    builder?.carryRequest(request);
+  }
+
   onDestroy(() => {
     service.destroy();
   });
@@ -55,5 +68,6 @@
   bind:this={builder}
   targetKind="edit"
   {canReview}
+  {stepChoices}
   onapplied={(detail) => onapplied?.(detail)}
 />

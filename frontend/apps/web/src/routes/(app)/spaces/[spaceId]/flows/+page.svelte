@@ -1,5 +1,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
+  import { goto } from "$app/navigation";
+  import { resolve } from "$app/paths";
   import type { FlowSparse, Eneo } from "@eneo/eneo-js";
   import { EneoError } from "@eneo/eneo-js";
   import type { RecoverableAIBuilderDraftSession } from "$lib/features/flows/ai-builder/protocol";
@@ -28,7 +30,8 @@
   // Flows manager consumes the initial data payload once; downstream reactivity lives
   // inside its own stores, so we untrack to silence the initial-reference warning.
   const {
-    state: { flows }
+    state: { flows },
+    refreshFlows
   } = untrack(() =>
     initFlowsManager({
       flows: data.flows,
@@ -73,6 +76,20 @@
           eneo={data.eneo}
           spaceId={$currentSpace.id}
           spaceRouteId={$currentSpace.routeId}
+          oninstalled={async (result) => {
+            await refreshFlows();
+            const flowPath = resolve(`/spaces/${$currentSpace.routeId}/flows/${result.flow_id}`);
+            // The draft is exact; the next thing most people want is to change
+            // it, so the Builder tab is one press away without leaving the row.
+            toast.success(m.flow_package_import_success(), {
+              action: {
+                label: m.flow_package_continue_in_ai_builder(),
+                // eslint-disable-next-line svelte/no-navigation-without-resolve -- resolved route above, with the tab query appended
+                onClick: () => void goto(`${flowPath}?tab=ai-builder`)
+              }
+            });
+            await goto(flowPath);
+          }}
         />
         <CreateFlowDialog bind:open={createOpen} />
       </div>

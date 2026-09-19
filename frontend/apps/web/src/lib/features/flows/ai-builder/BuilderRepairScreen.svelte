@@ -4,7 +4,10 @@
   import { Skeleton } from "$lib/components/ui/skeleton/index.js";
   import IconArrowLeft from "@lucide/svelte/icons/arrow-left";
   import IconSparkles from "@lucide/svelte/icons/sparkles";
-  import { getFlowRuntimeErrorMessageByCode } from "$lib/features/flows/flowRuntimeErrorMapping";
+  import {
+    FLOW_API_ERROR_CODE,
+    getFlowRuntimeErrorMessageByCode
+  } from "$lib/features/flows/flowRuntimeErrorMapping";
   import type { FlowRunFailureRepairTarget } from "$lib/features/flows/flowRunFailureRepair";
   import type { AIBuilderFailureRepairState, AIBuilderReviewReference } from "./protocol";
   import { repairFailureCopy } from "./flowFailureRepair";
@@ -24,14 +27,22 @@
   const errorLabel = $derived(
     launch ? (getFlowRuntimeErrorMessageByCode(launch.error_code) ?? launch.error_code) : ""
   );
+  // What the Builder reads depends on what the run kept: a rejected answer is
+  // read as text; a truncated answer was never kept, so the recorded finish
+  // reason and token counts are read instead.
+  const hint = $derived(
+    launch?.error_code === FLOW_API_ERROR_CODE.LLM_OUTPUT_TRUNCATED
+      ? m.ai_builder_repair_hint_truncated()
+      : m.ai_builder_repair_hint()
+  );
 
+  // The server writes the retained sentence from the reference (the step's
+  // number); the screen sends the same sentence so what the user saw sent is
+  // what the conversation keeps. The step's name stays on this screen.
   function prepare() {
     if (!launch) return;
     onprepare({
-      message: m.ai_builder_repair_message({
-        step: String(launch.step_number),
-        name: stepName
-      }),
+      message: m.ai_builder_repair_message({ step: String(launch.step_number) }),
       reviewContext: launch.reference
     });
   }
@@ -106,7 +117,7 @@
             <dd class="text-primary tabular-nums">{launch.attempt_no}</dd>
           </dl>
           <p class="text-secondary mt-4 text-[0.875rem] text-pretty">
-            {m.ai_builder_repair_hint()}
+            {hint}
           </p>
           <div class="mt-4">
             <Button class="h-9 gap-1.5" {disabled} onclick={prepare} data-testid="repair-prepare">

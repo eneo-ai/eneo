@@ -69,6 +69,10 @@ describe("FlowRunEvidenceStepCard", () => {
     expect(renderCard(false, failed("typed_io_output_parse_failed"), null, null)).not.toContain(
       m.flow_run_error_repair_action()
     );
+    // A truncated answer is repairable from what the run recorded about it.
+    expect(renderCard(false, failed("flow_llm_output_truncated"), null, repair)).toContain(
+      m.flow_run_error_repair_action()
+    );
     // A failure that happened before the model answered is not a repair.
     expect(
       renderCard(false, failed("typed_io_input_exceeds_model_window"), null, repair)

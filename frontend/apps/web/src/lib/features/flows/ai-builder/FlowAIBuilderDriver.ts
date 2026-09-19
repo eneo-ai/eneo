@@ -1194,11 +1194,19 @@ export class FlowAIBuilderDriver {
       // discloses a new summary and derivePhase lets that outrank the plan.
       // Never guess from the stream alone.
       const reviewTurnWithoutPlanEvent = planBeforeTurn !== null && !receivedPlanEvent;
+      // The step the next turn edits is the server's projection of this
+      // turn's accepted target onto the plan it produced (or left standing);
+      // the stream carries neither, so a scoped turn reads the session back
+      // before another send is allowed. An unscoped turn projects nothing,
+      // which the client already shows.
+      const scopeSettledOnServer =
+        requestBody.edit_context != null || requestBody.review_context != null;
       const shouldRefreshAfterStream =
         !receivedDone ||
         isRetry ||
         receivedStreamError ||
         reviewTurnWithoutPlanEvent ||
+        scopeSettledOnServer ||
         (requestBody.file_ids && requestBody.file_ids.length > 0) ||
         (!receivedUsageEvent && this.#state.currentPlan !== null) ||
         // A question we refused to append has to be settled against the

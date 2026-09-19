@@ -157,6 +157,7 @@
         bind:this={inputRef}
         editContext={activeEditContext}
         editContextLabel={savedFlowStepScopeLabel}
+        editContextLocked={!pendingEditContext && service.activeStepScopeLocked}
         oncleareditcontext={clearActiveEditContext}
         refinement={service.currentPlan !== null}
         placeholder={service.currentPlan === null && service.messages.length > 0

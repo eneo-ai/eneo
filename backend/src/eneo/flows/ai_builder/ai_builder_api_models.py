@@ -51,6 +51,7 @@ from eneo.flows.ai_builder.ai_builder_flow_review import (
     AIBuilderSuggestionContext,
     investigation_language,
     investigation_message,
+    repair_message,
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     AIBuilderEditContext,
@@ -661,6 +662,18 @@ class SendMessageRequest(BaseModel):
                     )
                 }
             )
+        if isinstance(self.review_context, AIBuilderRunFailureContext):
+            # The failed-step button: the reference is the request and the
+            # server writes its sentence. The client sends the reference only
+            # on this handoff, so the user's later turns keep their own text.
+            return self.model_copy(
+                update={
+                    "message": repair_message(
+                        self.review_context.step_order,
+                        investigation_language(self.ui_language),
+                    )
+                }
+            )
         return self
 
     def request_fingerprint(self) -> str:
@@ -730,6 +743,26 @@ class AIBuilderTurnLifecycleResponse(BaseModel):
     )
 
 
+class AIBuilderSessionEditScope(BaseModel):
+    """The step the session's next turn edits unless the user chooses another.
+
+    Projected from the edit context the newest accepted user turn persisted:
+    the client restores its scope chip and sends ``context`` back as the next
+    turn's edit_context after a reload instead of keeping a second copy. The
+    label is resolved against the flow (a saved step) or the current plan (a
+    proposed step) when read, so it names the step as it is now.
+    ``preserves_output_contract`` is the restriction a failure repair carries
+    on every later turn: the step's output contract stays as it failed.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    context: AIBuilderEditContext
+    step_number: int = Field(ge=1)
+    step_name: str | None
+    preserves_output_contract: bool
+
+
 class SessionResponse(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={"example": AI_BUILDER_SESSION_RESPONSE_EXAMPLE}
@@ -749,6 +782,14 @@ class SessionResponse(BaseModel):
         default_factory=lambda: cast(list[FilePublic], [])
     )
     attachment_warnings: list[str] = Field(default_factory=list)
+    edit_scope: AIBuilderSessionEditScope | None = Field(
+        default=None,
+        description=(
+            "The step the next turn edits, from the newest accepted user turn; "
+            "null when the session edits the whole flow or plan, or when that "
+            "step no longer resolves."
+        ),
+    )
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

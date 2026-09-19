@@ -414,6 +414,8 @@ def _make_container(
 
     # Services
     service = AsyncMock()
+    # No accepted step scope unless a test says otherwise.
+    service.describe_session_edit_scope.return_value = None
     service.get_session_attachment_snapshot.return_value = SimpleNamespace(
         files=[],
         warnings=[],
@@ -938,6 +940,40 @@ class TestCreateSessionEndpoint:
 
 
 class TestGetSessionEndpoint:
+    @pytest.mark.anyio
+    async def test_returns_the_accepted_step_scope_for_the_client_to_restore(self):
+        from eneo.flows.ai_builder.ai_builder_api_models import (
+            AIBuilderSessionEditScope,
+        )
+        from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
+            AIBuilderSavedFlowStepEditContext,
+        )
+        from eneo.flows.ai_builder.ai_builder_router import get_session
+
+        container = _make_container()
+        session = _make_session_domain(actor_user_id=container.user.return_value.id)
+        service = container.ai_builder_service.return_value
+        service.get_session.return_value = session
+        step_id = uuid4()
+        service.describe_session_edit_scope.return_value = AIBuilderSessionEditScope(
+            context=AIBuilderSavedFlowStepEditContext(flow_step_id=step_id),
+            step_number=3,
+            step_name="Sammanfatta",
+            preserves_output_contract=True,
+        )
+
+        response = await get_session(
+            request=_make_request(), session_id=session.id, container=container
+        )
+
+        service.describe_session_edit_scope.assert_awaited_once_with(session)
+        assert response.model_dump(mode="json")["edit_scope"] == {
+            "context": {"kind": "saved_flow_step", "flow_step_id": str(step_id)},
+            "step_number": 3,
+            "step_name": "Sammanfatta",
+            "preserves_output_contract": True,
+        }
+
     @pytest.mark.anyio
     async def test_returns_session_response(self):
         container = _make_container()
