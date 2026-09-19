@@ -4844,7 +4844,6 @@ describe("FlowAIBuilderDriver review turns", () => {
     expect(driver.state.error).not.toBeNull();
     expect(driver.canStartNewTurn).toBe(false);
     expect(await driver.sendMessage("och nu utan steg")).toBe("not_started");
-    expect(driver.state.snapshotVersion).toBe(0);
   });
 
   it("reads the session back after an unscoped turn while the server projected a scope", async () => {
@@ -4875,7 +4874,6 @@ describe("FlowAIBuilderDriver review turns", () => {
       expect.objectContaining({ method: "get" })
     );
     expect(driver.state.session?.edit_scope ?? null).toBeNull();
-    expect(driver.state.snapshotVersion).toBe(1);
   });
 
   it("replaces the plan when the turn emits a new one", async () => {

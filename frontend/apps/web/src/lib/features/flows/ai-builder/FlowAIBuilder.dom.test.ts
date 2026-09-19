@@ -3782,6 +3782,37 @@ describe("FlowAIBuilder edit host contract", () => {
     await waitFor(() => expect(button(m.ai_builder_send()).disabled).toBe(false));
   });
 
+  it("lifts a carried requirement once the server holds the accepted turn, even after a retry", async () => {
+    localStorage.setItem(
+      "eneo:ai-builder:draft:e-1",
+      JSON.stringify({ text: "Något nytt", files: [], requireStepScope: true })
+    );
+    const accepted = {
+      ...editSession(),
+      conversation: [
+        {
+          message_id: "u1",
+          role: "user",
+          content: "Ändra steg 3",
+          timestamp: "2026-07-11T09:00:00Z"
+        }
+      ]
+    };
+    const { fetch } = makeFetch({ created: accepted });
+    const { stream } = makeStream();
+    const { service } = renderShell({
+      fetch,
+      stream,
+      targetKind: "edit",
+      flowId: "flow-1",
+      stepChoices: [{ id: "flow-step-3", name: "Fördela källuppgifter", order: 3 }]
+    });
+    await waitFor(() => expect(service().hasSession).toBe(true));
+    await waitFor(() => expect(textbox().value).toBe("Något nytt"));
+    expect(screen.queryByText(m.ai_builder_step_choice_required())).toBeNull();
+    expect(button(m.ai_builder_send()).disabled).toBe(false);
+  });
+
   it("refuses a package that arrives with other files instead of stranding them", async () => {
     const { fetch } = makeFetch();
     const { stream } = makeStream();

@@ -200,7 +200,9 @@
     if (pendingSubmission?.sessionId === sessionId && text.length === 0) return;
     saveComposerDraft(
       sessionId,
-      scopeRequired ? { text, files, requireStepScope: true } : { text, files }
+      scopeRequired && acceptedUserTurns === 0
+        ? { text, files, requireStepScope: true }
+        : { text, files }
     );
   });
 
@@ -228,7 +230,13 @@
   $effect(() => {
     if (requireStepScope) scopeRequired = true;
   });
-  const stepScopeMissing = $derived(scopeRequired && !editContext);
+  // The carried request is the first message of its session; once the
+  // server holds an accepted turn (delivered here, or by a retry) it has been
+  // consumed, whatever the persisted draft still says.
+  const acceptedUserTurns = $derived(
+    (service.session?.conversation ?? []).filter((message) => message.role === "user").length
+  );
+  const stepScopeMissing = $derived(scopeRequired && acceptedUserTurns === 0 && !editContext);
   const canSubmit = $derived(
     (inputValue.trim().length > 0 || completedUploads.length > 0 || restoredFiles.length > 0) &&
       service.canSendMessage &&

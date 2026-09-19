@@ -195,7 +195,21 @@ describe("FlowAIBuilderService", () => {
       handlers.onMessage?.({ id: "", event: "done", data: "" }, new AbortController());
       handlers.onClose?.();
     });
-    const fetch = vi.fn(async () => makeSession({ session_id: "s-1", edit_scope: projected }));
+    // The read-back after the delivered turn carries the accepted user turn.
+    const fetch = vi.fn(async () =>
+      makeSession({
+        session_id: "s-1",
+        conversation: [
+          {
+            message_id: "u1",
+            role: "user",
+            content: "tydligare",
+            timestamp: "2026-07-11T09:00:00Z"
+          }
+        ],
+        edit_scope: projected
+      })
+    );
     const service = new FlowAIBuilderService(
       { client: { fetch, stream } } as never,
       "space-1",
@@ -233,38 +247,77 @@ describe("FlowAIBuilderService", () => {
     expect(service.activeStepScopeLocked).toBe(false);
   });
 
-  it("retires the editor's launch with the next committed snapshot, however it arrived", () => {
-    const service = makeService();
-    service.seedState({ session: makeSession({ session_id: "s-1" }), snapshotVersion: 3 });
+  it("keeps the editor's launch through a refused send and a plain re-read, and retires it with the accepted turn", async () => {
+    const same = makeSession({ session_id: "s-1" });
+    let deliver = false;
+    const fetch = vi.fn(async () =>
+      deliver
+        ? makeSession({
+            session_id: "s-1",
+            latest_plan_id: "plan-1",
+            conversation: [
+              {
+                message_id: "u1",
+                role: "user",
+                content: "tydligare",
+                timestamp: "2026-07-11T09:00:00Z"
+              }
+            ],
+            edit_scope: {
+              context: {
+                kind: "proposed_plan",
+                plan_id: "plan-1",
+                scope: "step",
+                target_existing_step_ref: "existing_step_2",
+                target_plan_step_ref: "step_2"
+              },
+              step_number: 2,
+              step_name: "Extract facts",
+              preserves_output_contract: false
+            }
+          })
+        : same
+    );
+    let fail = true;
+    const stream = vi.fn(async (_path, _init, handlers) => {
+      if (fail) throw new Error("transport down");
+      handlers.onMessage?.({ id: "", event: "done", data: "" }, new AbortController());
+      handlers.onClose?.();
+    });
+    const service = new FlowAIBuilderService(
+      { client: { fetch, stream } } as never,
+      "space-1",
+      "flow-1"
+    );
+    service.seedState({
+      session: same,
+      availableModels: [
+        { id: "model-low", name: "Low", provider: "openai", availability: { state: "ready" } }
+      ],
+      defaultModelId: "model-low",
+      modelLoadStatus: "loaded"
+    });
     const launch = {
       editContext: { kind: "saved_flow_step" as const, flow_step_id: "step-1" },
       stepName: "Extract facts",
       stepNumber: 2
     };
     service.setSavedFlowStepScope(launch);
+
+    // The send never reached the server: the read-back returns the same
+    // session and the selected step stays selected for the resubmission.
+    expect(
+      await service.sendMessage("tydligare", undefined, undefined, launch.editContext)
+    ).not.toBe("delivered");
+    await service.refreshSession();
     expect(service.activeStepTransportContext).toEqual(launch.editContext);
 
-    // A retry's reconciliation, a plan operation: the snapshot moved on and
-    // the server now says what the scope is (here: a proposed-plan step).
-    service.seedState({
-      session: makeSession({
-        session_id: "s-1",
-        latest_plan_id: "plan-1",
-        edit_scope: {
-          context: {
-            kind: "proposed_plan",
-            plan_id: "plan-1",
-            scope: "step",
-            target_existing_step_ref: "existing_step_2",
-            target_plan_step_ref: "step_2"
-          },
-          step_number: 2,
-          step_name: "Extract facts",
-          preserves_output_contract: false
-        }
-      }),
-      snapshotVersion: 4
-    });
+    // The accepted turn supersedes it: the server's projection owns the scope.
+    fail = false;
+    deliver = true;
+    expect(await service.sendMessage("tydligare", undefined, undefined, launch.editContext)).toBe(
+      "delivered"
+    );
     expect(service.savedFlowStepScope).toBeNull();
     expect(service.activeStepTransportContext).toMatchObject({
       kind: "proposed_plan",
@@ -369,17 +422,21 @@ describe("FlowAIBuilderService", () => {
     expect(service.activeStepScope).toBeNull();
     expect(service.activeStepTransportContext).toBeNull();
 
-    // The same snapshot re-read stays dismissed.
+    // The same session re-read (no new accepted turn) stays dismissed.
     service.seedState({
       session: makeSession({ session_id: "s-1", edit_scope: scopeOf("existing_step_2", "Två") })
     });
     expect(service.activeStepScope).toBeNull();
 
-    // The next committed snapshot is the server's word again, whatever it
-    // projects: a dismissal never outlives the snapshot it was made against.
+    // An accepted turn supersedes the dismissal: the server's word again.
     service.seedState({
-      session: makeSession({ session_id: "s-1", edit_scope: scopeOf("existing_step_3", "Tre") }),
-      snapshotVersion: 1
+      session: makeSession({
+        session_id: "s-1",
+        conversation: [
+          { message_id: "u1", role: "user", content: "x", timestamp: "2026-07-11T09:00:00Z" }
+        ],
+        edit_scope: scopeOf("existing_step_3", "Tre")
+      })
     });
     expect(service.activeStepScope).toEqual({ stepName: "Tre", stepNumber: 2 });
   });

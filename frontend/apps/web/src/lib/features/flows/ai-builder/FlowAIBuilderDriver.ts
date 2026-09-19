@@ -157,10 +157,6 @@ export interface FlowAIBuilderState {
   draftSessions: AIBuilderDraftSession[];
   pendingOperation: PendingPlanOperation | null;
   createFailureOutcome: CreateFailureOutcome | null;
-  /** Advances every time an authoritative session snapshot is committed.
-   *  Browser-only scope state (an unsent launch, a dismissal) is bound to
-   *  the snapshot it was made against and retires with the next one. */
-  snapshotVersion: number;
   /** Assistant prose from a completed review turn that produced no new plan —
    *  a typed decline ("I cannot swap the model for you") or a plain answer.
    *  The plan stays; the review screen renders this as a dismissible notice. */
@@ -187,8 +183,7 @@ export function createInitialFlowAIBuilderState(): FlowAIBuilderState {
     draftSessions: [],
     pendingOperation: null,
     createFailureOutcome: null,
-    reviewNote: null,
-    snapshotVersion: 0
+    reviewNote: null
   };
 }
 
@@ -756,7 +751,6 @@ export class FlowAIBuilderDriver {
     this.#applyCommittedTurnOutcome(session, attemptedClientTurnId);
     this.#hydrateMessagesFromConversation(session.conversation ?? []);
     this.#state.currentPlan = plan;
-    this.#state.snapshotVersion += 1;
     this.#notify();
   }
 

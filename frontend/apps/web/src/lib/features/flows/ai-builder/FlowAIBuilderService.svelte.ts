@@ -65,20 +65,31 @@ export class FlowAIBuilderService {
   #stateVersion = $state(0);
   #hasSeenPlanInSession = $state(false);
   /** The step the flow editor launched, before its first message is sent.
-   *  Bound to the session snapshot it was made against: the next committed
-   *  snapshot (a delivered turn read back, a retry reconciled, a plan
-   *  operation) retires it in favour of the server's projection. */
+   *  Bound to the turns the server had accepted when it was made: a refused
+   *  send or a plain re-read of the same session leaves it standing, and the
+   *  next accepted turn (a delivered send, a successful retry) retires it in
+   *  favour of the server's projection. */
   #savedFlowStepScope = $state<{
     sessionId: string | null;
-    snapshotVersion: number;
+    acceptedTurns: string;
     scope: AIBuilderSavedFlowStepScope;
   } | null>(null);
-  /** A dismissed projected scope, for one snapshot of the current session. */
+  /** A dismissed projected scope, until an accepted turn supersedes it. */
   #dismissedScope = $state<{
     sessionId: string;
-    snapshotVersion: number;
+    acceptedTurns: string;
     key: string;
   } | null>(null);
+
+  /** What the server has accepted so far: the user turns of the conversation
+   *  and the plan they produced. Browser-only intent is bound to this, never
+   *  to how many times the session was read. */
+  get #acceptedTurns(): string {
+    const session = this.#state.session;
+    if (!session) return "";
+    const userTurns = (session.conversation ?? []).filter((message) => message.role === "user");
+    return `${userTurns.length}:${session.latest_plan_id ?? ""}`;
+  }
 
   hasSession = $derived(this.#state.session !== null);
   hasSeenPlanInSession = $derived(this.#hasSeenPlanInSession);
@@ -188,7 +199,7 @@ export class FlowAIBuilderService {
     const owned = this.#savedFlowStepScope;
     if (owned === null) return null;
     const sessionId = this.#state.session?.session_id ?? null;
-    return owned.sessionId === sessionId && owned.snapshotVersion === this.#state.snapshotVersion
+    return owned.sessionId === sessionId && owned.acceptedTurns === this.#acceptedTurns
       ? owned.scope
       : null;
   }
@@ -205,7 +216,7 @@ export class FlowAIBuilderService {
     if (
       dismissed !== null &&
       dismissed.sessionId === session.session_id &&
-      dismissed.snapshotVersion === this.#state.snapshotVersion &&
+      dismissed.acceptedTurns === this.#acceptedTurns &&
       dismissed.key === scopeKey(projected.context)
     ) {
       return null;
@@ -219,9 +230,9 @@ export class FlowAIBuilderService {
   }
 
   /** The step the next message edits: the editor's unsent launch first, then
-   *  the server's projection. The launch is bound to the snapshot it was made
-   *  against, so the read-back a scoped turn forces (or any later snapshot)
-   *  retires it and the projection names the step as the server resolved it. */
+   *  the server's projection. The launch lives until a turn is accepted, so
+   *  the read-back a scoped turn forces retires it and the projection names
+   *  the step as the server resolved it. */
   get #activeScope(): AIBuilderStepScopeState | null {
     const launched = this.savedFlowStepScope;
     if (launched) return { ...launched, locked: false };
@@ -247,7 +258,7 @@ export class FlowAIBuilderService {
     this.#dismissedScope = null;
     this.#savedFlowStepScope = {
       sessionId: this.#state.session?.session_id ?? null,
-      snapshotVersion: this.#state.snapshotVersion,
+      acceptedTurns: this.#acceptedTurns,
       scope
     };
   }
@@ -265,7 +276,7 @@ export class FlowAIBuilderService {
       session && projected
         ? {
             sessionId: session.session_id,
-            snapshotVersion: this.#state.snapshotVersion,
+            acceptedTurns: this.#acceptedTurns,
             key: scopeKey(projected.context)
           }
         : null;
