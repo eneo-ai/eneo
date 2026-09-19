@@ -227,7 +227,12 @@ export function flowGraphLayoutKey(steps: FlowStep[]): string {
       input_type: step.input_type,
       output_type: step.output_type,
       output_mode: step.output_mode,
-      assistant_id: step.assistant_id
+      assistant_id: step.assistant_id,
+      // The graph draws these too, so an edit to either has to rebuild it.
+      // Without them, turning review on left the old node badge in place --
+      // and, once the graph could be exported, in the image as well.
+      review_policy: step.review_policy ?? null,
+      output_classification_override: step.output_classification_override ?? null
     }))
   );
 }
@@ -407,4 +412,203 @@ export function buildFlowGraphTopology(steps: FlowGraphTopologyStepLike[]): {
   }
 
   return { nodes, edges };
+}
+
+export type FlowGraphEmphasisEdge = { id: string; source: string; target: string };
+
+export type FlowGraphEmphasis = {
+  litNodes: Record<string, true>;
+  litEdges: Record<string, true>;
+  /** True only while someone is pointing at or tabbed to a step. */
+  isPreview: boolean;
+  /** Whether anything should be quieted at all. */
+  hasFocus: boolean;
+};
+
+/**
+ * Decides what the graph emphasises, given what is selected and what is being
+ * pointed at.
+ *
+ * Two questions, two answers, on the gestures a reader already has:
+ *
+ * - Pointing at or tabbing to a step answers "what feeds this step": its
+ *   underlag, one hop back. A wider answer would bury the one being asked for
+ *   while the step is being configured.
+ * - Selecting a step answers "where does this step sit in the flow": the whole
+ *   path it lies on, following edges to both ends.
+ *
+ * Forward means what a step's output reaches, not what runs next. The runtime
+ * executes in step order regardless of the edges, so the graph claims only
+ * what the edges say and the numbers carry the order.
+ *
+ * Either way this is the underlag configured in this flow, not every reference
+ * the runtime resolves, so it is emphasis and never a claim of complete
+ * provenance.
+ */
+/**
+ * What the reader is currently pointing at or tabbed to, and which of those
+ * gestures has already been spent opening a step.
+ *
+ * Activation has to stop previewing the step it opened, or the reader asks for
+ * the path through a step and keeps being shown the one hop back into it:
+ * focus stays on a node after Enter and the pointer stays over it after a
+ * click. But the suppression belongs to the gesture that caused it, not to the
+ * step -- tabbing away and back is a new gesture and must preview again.
+ */
+export type FlowGraphPreviewState = {
+  hoveredId: string | null;
+  focusedId: string | null;
+  pointerSpentOn: string | null;
+  focusSpentOn: string | null;
+};
+
+export type FlowGraphPreviewEvent =
+  | { type: "hover"; id: string }
+  | { type: "unhover" }
+  | { type: "focus"; id: string }
+  | { type: "blur" }
+  | { type: "activate"; id: string };
+
+export function emptyFlowGraphPreviewState(): FlowGraphPreviewState {
+  return { hoveredId: null, focusedId: null, pointerSpentOn: null, focusSpentOn: null };
+}
+
+export function reduceFlowGraphPreview(
+  state: FlowGraphPreviewState,
+  event: FlowGraphPreviewEvent
+): FlowGraphPreviewState {
+  switch (event.type) {
+    // Entering a node is always a fresh pointer gesture.
+    case "hover":
+      return { ...state, hoveredId: event.id, pointerSpentOn: null };
+    case "unhover":
+      return { ...state, hoveredId: null, pointerSpentOn: null };
+    // So is moving focus, including moving it back to where it was.
+    case "focus":
+      return { ...state, focusedId: event.id, focusSpentOn: null };
+    case "blur":
+      return { ...state, focusedId: null, focusSpentOn: null };
+    // Opening a step spends whichever gestures are currently on it.
+    case "activate":
+      return {
+        ...state,
+        pointerSpentOn: state.hoveredId === event.id ? event.id : state.pointerSpentOn,
+        focusSpentOn: state.focusedId === event.id ? event.id : state.focusSpentOn
+      };
+  }
+}
+
+/** The step being previewed, or null when the gesture on it has been spent. */
+export function resolveFlowGraphPreviewId(state: FlowGraphPreviewState): string | null {
+  if (state.hoveredId !== null) {
+    return state.hoveredId === state.pointerSpentOn ? null : state.hoveredId;
+  }
+  if (state.focusedId !== null) {
+    return state.focusedId === state.focusSpentOn ? null : state.focusedId;
+  }
+  return null;
+}
+
+export function computeFlowGraphEmphasis(params: {
+  edges: FlowGraphEmphasisEdge[];
+  activeId: string | null;
+  previewId: string | null;
+}): FlowGraphEmphasis {
+  const { edges, activeId, previewId } = params;
+  const litNodes: Record<string, true> = {};
+  const litEdges: Record<string, true> = {};
+
+  if (previewId !== null) {
+    litNodes[previewId] = true;
+    for (const edge of edges) {
+      if (edge.target === previewId) {
+        litEdges[edge.id] = true;
+        litNodes[edge.source] = true;
+      }
+    }
+  } else if (activeId !== null) {
+    litNodes[activeId] = true;
+    const bySource = new Map<string, FlowGraphEmphasisEdge[]>();
+    const byTarget = new Map<string, FlowGraphEmphasisEdge[]>();
+    for (const edge of edges) {
+      (bySource.get(edge.source) ?? bySource.set(edge.source, []).get(edge.source)!).push(edge);
+      (byTarget.get(edge.target) ?? byTarget.set(edge.target, []).get(edge.target)!).push(edge);
+    }
+    walkFlowGraph(byTarget, activeId, "source", litNodes, litEdges);
+    walkFlowGraph(bySource, activeId, "target", litNodes, litEdges);
+  }
+
+  return {
+    litNodes,
+    litEdges,
+    isPreview: previewId !== null,
+    hasFocus: Object.keys(litNodes).length > 0
+  };
+}
+
+/**
+ * Follows edges from one node to the end of the graph in one direction,
+ * over a prebuilt adjacency index so each edge is looked at once.
+ */
+function walkFlowGraph(
+  adjacency: Map<string, FlowGraphEmphasisEdge[]>,
+  startId: string,
+  to: "source" | "target",
+  litNodes: Record<string, true>,
+  litEdges: Record<string, true>
+): void {
+  const queue = [startId];
+  // An index rather than shift(), which is linear in the queue on every step.
+  for (let head = 0; head < queue.length; head += 1) {
+    for (const edge of adjacency.get(queue[head]) ?? []) {
+      if (litEdges[edge.id] === true) continue;
+      litEdges[edge.id] = true;
+      const next = edge[to];
+      if (litNodes[next] !== true) {
+        litNodes[next] = true;
+        queue.push(next);
+      }
+    }
+  }
+}
+
+/** Longest side a browser will reliably allocate for a canvas, with margin. */
+const FLOW_EXPORT_MAX_EDGE = 8192;
+/**
+ * And the area, because a long thin flow can clear the edge bound and not
+ * this. Both bound the captured graph; a caller that adds a caption band
+ * adds its height on top, which is a fixed strip rather than a factor.
+ */
+const FLOW_EXPORT_MAX_PIXELS = 16_000_000;
+/** Twice design size reads well in a document without being wasteful. */
+const FLOW_EXPORT_SCALE = 2;
+const FLOW_EXPORT_MARGIN = 32;
+
+/**
+ * Picks the pixel size of an exported flow image from the laid-out graph.
+ *
+ * The scale is applied through the viewport transform rather than a pixel
+ * ratio, so the image is of the flow at a known size rather than of whatever
+ * the reader had on screen. Both bounds floor rather than round: a ceiling
+ * that the result may exceed is not a ceiling.
+ */
+export function computeFlowExportSize(bounds: { width: number; height: number }): {
+  width: number;
+  height: number;
+  scale: number;
+} | null {
+  if (!(bounds.width > 0) || !(bounds.height > 0)) return null;
+  const boxWidth = bounds.width + FLOW_EXPORT_MARGIN * 2;
+  const boxHeight = bounds.height + FLOW_EXPORT_MARGIN * 2;
+  const scale = Math.min(
+    FLOW_EXPORT_SCALE,
+    FLOW_EXPORT_MAX_EDGE / boxWidth,
+    FLOW_EXPORT_MAX_EDGE / boxHeight,
+    Math.sqrt(FLOW_EXPORT_MAX_PIXELS / (boxWidth * boxHeight))
+  );
+  return {
+    width: Math.floor(boxWidth * scale),
+    height: Math.floor(boxHeight * scale),
+    scale
+  };
 }

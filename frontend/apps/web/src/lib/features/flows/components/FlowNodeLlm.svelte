@@ -5,6 +5,7 @@
   import * as Card from "$lib/components/ui/card/index.js";
   import { m } from "$lib/paraglide/messages";
   import { getDownstreamKindForOutput } from "$lib/features/flows/flowStepPresentation";
+  import UserCheck from "lucide-svelte/icons/user-check";
 
   let {
     data
@@ -23,9 +24,6 @@
       isActive: boolean;
       mode: "user" | "power_user";
       direction?: "LR" | "TB";
-      runStatus?: string;
-      numTokensInput?: number;
-      numTokensOutput?: number;
       modelName?: string;
       classLevel?: number | null;
       assistantClassLevel?: number | null;
@@ -74,19 +72,7 @@
     }
   });
 
-  const borderColor = $derived(
-    data.runStatus
-      ? data.runStatus === "completed"
-        ? "border-positive-default"
-        : data.runStatus === "failed"
-          ? "border-negative-default"
-          : data.runStatus === "running"
-            ? "border-accent-default"
-            : "border-default"
-      : data.isActive
-        ? "border-accent-default"
-        : "border-default"
-  );
+  const borderColor = $derived(data.isActive ? "border-accent-default" : "border-default");
   const surfaceClass = $derived(isAssembly ? "bg-warning-dimmer/25" : "bg-primary");
   const headerClass = $derived(isAssembly ? "bg-warning-dimmer/50" : "bg-hover-dimmer");
 </script>
@@ -94,30 +80,17 @@
 {#if isPowerUser}
   <!-- Power User: Technical card -->
   <Card.Root
-    class="{surfaceClass} border-2 py-0 shadow-sm transition-colors {borderColor}"
+    class="{surfaceClass} flow-node border-2 py-0 shadow-sm {borderColor}"
     style="width: 300px;"
   >
-    <Card.Header class="{headerClass} flex-row items-center justify-between gap-2 px-3 py-1.5">
-      <div class="flex min-w-0 items-center gap-2">
+    <Card.Header class="{headerClass} flex-row items-start justify-between gap-2 px-3 py-1.5">
+      <div class="flex min-w-0 items-start gap-2">
         <span
-          class="bg-hover-default flex size-5 shrink-0 items-center justify-center rounded text-xs font-bold"
+          class="bg-hover-default mt-px flex size-5 shrink-0 items-center justify-center rounded text-xs font-bold"
         >
           {data.step.step_order}
         </span>
-        <span class="truncate text-sm font-semibold" title={data.label}>{data.label}</span>
-        {#if isAssembly}
-          <Badge
-            variant="secondary"
-            class="bg-warning-dimmer text-warning-stronger text-xs font-bold"
-          >
-            {m.flow_node_assembly_format_badge()}
-          </Badge>
-        {/if}
-        {#if hasHumanReview}
-          <Badge variant="secondary" class="bg-accent-dimmer text-accent-stronger text-xs">
-            {m.flow_graph_review_badge()}
-          </Badge>
-        {/if}
+        <span class="flow-node-name text-sm font-semibold" title={data.label}>{data.label}</span>
       </div>
       <div class="flex items-center gap-1">
         {#if data.assistantClassLevel != null}
@@ -148,6 +121,19 @@
         <div class="text-secondary">{data.modelName}</div>
       {/if}
       <div class="flex flex-wrap items-center gap-1">
+        {#if isAssembly}
+          <Badge
+            variant="secondary"
+            class="bg-warning-dimmer text-warning-stronger text-xs font-bold"
+          >
+            {m.flow_node_assembly_format_badge()}
+          </Badge>
+        {/if}
+        {#if hasHumanReview}
+          <Badge variant="secondary" class="bg-accent-dimmer text-accent-stronger text-xs">
+            {m.flow_graph_review_badge()}
+          </Badge>
+        {/if}
         <Badge variant="secondary" class="bg-hover-dimmer text-primary text-xs">
           {m.flow_step_card_input_short()}: {inputTypeLabel}
         </Badge>
@@ -163,39 +149,55 @@
           {m.flow_step_card_chain_short()}: {nextChannelLabel}
         </Badge>
       </div>
-      {#if data.runStatus && (data.numTokensInput || data.numTokensOutput)}
-        <div class="text-secondary">
-          {m.flow_node_token_usage({
-            input: String(data.numTokensInput ?? 0),
-            output: String(data.numTokensOutput ?? 0)
-          })}
-        </div>
-      {/if}
     </Card.Content>
   </Card.Root>
 {:else}
   <!-- User Mode: Compact pill -->
   <Card.Root
-    class="bg-primary flex-row items-center gap-2 border-2 px-3 py-1.5 shadow-sm transition-colors {borderColor}"
-    style="min-width: 120px; max-width: {data.direction === 'TB' ? '260px' : '160px'};"
+    class="bg-primary flow-node flex-row items-center gap-2 border-2 px-3 py-1.5 shadow-sm {borderColor}"
+    style="min-width: 120px; max-width: {data.direction === 'TB' ? '260px' : '200px'};"
   >
     <span
       class="bg-hover-default flex size-5 shrink-0 items-center justify-center rounded text-xs font-bold"
     >
       {data.step.step_order}
     </span>
-    <span class="truncate text-xs font-medium" title={data.label}>{data.label}</span>
+    <span class="flow-node-name min-w-0 text-xs font-medium" title={data.label}>{data.label}</span>
     {#if hasHumanReview}
-      <Badge
-        variant="secondary"
-        class="bg-accent-dimmer text-accent-stronger shrink-0 px-1.5 text-xs"
+      <span
+        class="text-accent-stronger shrink-0"
+        role="img"
+        aria-label={m.flow_graph_review_badge()}
         title={m.flow_graph_review_badge()}
       >
-        {m.flow_graph_review_badge_short()}
-      </Badge>
+        <UserCheck class="size-3.5" />
+      </span>
     {/if}
   </Card.Root>
 {/if}
 
 <Handle type="target" position={data.direction === "TB" ? Position.Top : Position.Left} />
 <Handle type="source" position={data.direction === "TB" ? Position.Bottom : Position.Right} />
+
+<style>
+  /* Two lines of name before the ellipsis: a step called "11. Mellanmänskliga
+     interaktioner och relationer" says nothing in fourteen characters. */
+  .flow-node-name {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+  }
+
+  :global(.flow-node) {
+    transition: border-color var(--duration-fast) var(--ease-smooth-out);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    :global(.flow-node) {
+      transition: none;
+    }
+  }
+</style>

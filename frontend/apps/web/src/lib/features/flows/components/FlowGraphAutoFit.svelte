@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { useSvelteFlow, type FitViewOptions } from "@xyflow/svelte";
+  import { useSvelteFlow, type FitViewOptions, type Rect } from "@xyflow/svelte";
 
   /**
    * Keeps the graph framed inside whatever room it is given.
@@ -18,7 +18,8 @@
     container,
     options,
     revision,
-    fit = $bindable()
+    fit = $bindable(),
+    bounds = $bindable()
   }: {
     container: HTMLElement | undefined;
     options?: FitViewOptions;
@@ -29,12 +30,19 @@
      */
     revision?: number;
     fit?: (() => void) | undefined;
+    /**
+     * Laid-out bounds of the graph, from the store's measured nodes. Exposed
+     * here for the same reason `fit` is: the measurements live behind the
+     * context this component sits inside.
+     */
+    bounds?: (() => Rect) | undefined;
   } = $props();
 
   const flow = useSvelteFlow();
 
   $effect(() => {
     fit = () => void flow.fitView(options);
+    bounds = () => flow.getNodesBounds(flow.getNodes());
   });
 
   // A new layout can be a different size in the same box -- switching to

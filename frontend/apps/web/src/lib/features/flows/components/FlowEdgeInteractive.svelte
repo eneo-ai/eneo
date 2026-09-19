@@ -42,6 +42,8 @@
           payload?: Record<string, unknown> | null;
           classificationEscalation?: boolean;
           classificationViolation?: boolean;
+          onPath?: boolean;
+          dimmed?: boolean;
           onInsert?: (sourceStepOrder: number) => Promise<void> | void;
           onInspect?: (params: {
             sourceStepOrder: number;
@@ -78,6 +80,8 @@
         : undefined
   );
   const edgeKind = $derived(data?.edgeKind ?? "previous_step");
+  const isOnPath = $derived(Boolean(data?.onPath));
+  const isDimmed = $derived(Boolean(data?.dimmed));
   const isDirectEdge = $derived(edgeKind !== "all_previous_steps");
   const edgeStyle = $derived(
     [
@@ -118,13 +122,15 @@
   }
 </script>
 
-<BaseEdge {id} path={edgePath} {markerStart} {markerEnd} style={edgeStyle || undefined} />
+<g class="flow-edge-group" class:is-dimmed={isDimmed} class:is-on-path={isOnPath}>
+  <BaseEdge {id} path={edgePath} {markerStart} {markerEnd} style={edgeStyle || undefined} />
 
-{#if isDirectEdge}
-  <circle r="3" class="flow-dot">
-    <animateMotion dur="2s" repeatCount="indefinite" path={edgePath} />
-  </circle>
-{/if}
+  {#if isDirectEdge}
+    <circle r="3" class="flow-dot">
+      <animateMotion dur="2s" repeatCount="indefinite" path={edgePath} />
+    </circle>
+  {/if}
+</g>
 
 {#if isPowerUser}
   {#if isEscalation || isViolation}
@@ -219,8 +225,26 @@
      `display: none` loses to this hover selector every time. */
   @media (prefers-reduced-motion: no-preference) {
     :global(.svelte-flow__edge:hover) :global(.flow-dot),
-    :global(.svelte-flow__edge:focus-within) :global(.flow-dot) {
+    :global(.svelte-flow__edge:focus-within) :global(.flow-dot),
+    :global(.flow-edge-group.is-on-path) :global(.flow-dot) {
       display: block;
+    }
+  }
+
+  /* Quieting the rest is what makes one path traceable through a wide fan.
+     It is opacity only: nothing moves, nothing reflows, and the edge stays
+     exactly where it was for anyone reading it. */
+  :global(.flow-edge-group) {
+    transition: opacity var(--duration-fast) var(--ease-smooth-out);
+  }
+
+  :global(.flow-edge-group.is-dimmed) {
+    opacity: 0.22;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    :global(.flow-edge-group) {
+      transition: none;
     }
   }
 

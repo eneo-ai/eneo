@@ -8,8 +8,10 @@
     MarkerType,
     Panel,
     Position,
+    getViewportForBounds,
     type Node,
     type Edge,
+    type Rect,
     type NodeEventWithPointer
   } from "@xyflow/svelte";
   import "@xyflow/svelte/dist/style.css";
@@ -23,11 +25,16 @@
   import { getFlowEditor } from "$lib/features/flows/FlowEditor";
   import {
     buildFlowGraphTopology,
+    computeFlowExportSize,
+    computeFlowGraphEmphasis,
+    emptyFlowGraphPreviewState,
+    reduceFlowGraphPreview,
+    resolveFlowGraphPreviewId,
+    type FlowGraphPreviewEvent,
     flowGraphLayoutKey,
     getEdgePayloadKind
   } from "$lib/features/flows/flowStepPresentation";
   import { IconDownload } from "@eneo/icons/download";
-  import { tick } from "svelte";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import { m } from "$lib/paraglide/messages";
 
@@ -47,6 +54,16 @@
   let containerEl: HTMLDivElement | undefined = $state();
   let layoutRevision = $state(0);
   let fitGraph: (() => void) | undefined = $state();
+  let graphBounds: (() => Rect) | undefined = $state();
+  // The step the reader is pointing at or has tabbed to. Separate from
+  // activeStepId on purpose: looking at a step must not change which one
+  // the editor has open.
+  let previewState = $state(emptyFlowGraphPreviewState());
+  const previewStepId = $derived(resolveFlowGraphPreviewId(previewState));
+
+  function onPreview(event: FlowGraphPreviewEvent): void {
+    previewState = reduceFlowGraphPreview(previewState, event);
+  }
 
   type AssistantFlowMeta = {
     modelName: string | null;
@@ -116,20 +133,50 @@
       lastMode = currentMode;
       lastMetaJson = metaJson;
       cachedLayout = buildLayout(flow?.steps ?? [], activeStepId, currentMode);
-      nodes = cachedLayout.nodes;
-      edges = cachedLayout.edges;
       // A counter, not a signature: rewiring one step's underlag changes the
       // laid-out width without changing the mode, the JSON length, or the node
       // and edge counts, and a collision leaves the old frame in place.
       layoutRevision += 1;
-    } else {
-      // Only activeStepId changed — update isActive in-place
-      nodes = cachedLayout.nodes.map((n) => ({
-        ...n,
-        data: { ...n.data, isActive: n.id === activeStepId }
-      }));
     }
+    applyEmphasis(activeStepId, previewStepId);
   });
+
+  function applyEmphasis(activeId: string | null, previewId: string | null): void {
+    const emphasis = computeFlowGraphEmphasis({
+      edges: cachedLayout.edges.map((edge) => ({
+        id: edge.id,
+        source: edge.source,
+        target: edge.target
+      })),
+      activeId,
+      previewId
+    });
+    nodes = cachedLayout.nodes.map((node) => ({
+      ...node,
+      data: {
+        ...node.data,
+        isActive: node.id === activeId
+      }
+    }));
+    edges = cachedLayout.edges.map((edge) => ({
+      ...edge,
+      data: {
+        ...edge.data,
+        // The dot runs only while someone is pointing at a step. A selection
+        // persists, and a persistent selection lighting a dozen edges would
+        // leave a dozen animations running at rest -- ambient motion on a
+        // screen whose whole register is calm, and motion nobody started.
+        onPath: emphasis.isPreview && emphasis.litEdges[edge.id] === true,
+        dimmed: emphasis.hasFocus && emphasis.litEdges[edge.id] !== true
+      }
+    }));
+  }
+
+  function isStepNode(id: string | undefined): boolean {
+    if (!id) return false;
+    const node = cachedLayout.nodes.find((candidate) => candidate.id === id);
+    return node?.type === "llm" || node?.type === "assembly";
+  }
 
   function parseAssistantMeta(assistant: unknown): AssistantFlowMeta {
     if (assistant === null || typeof assistant !== "object") {
@@ -237,8 +284,11 @@
   ): { nodes: Node[]; edges: Edge[] } {
     const orderedSteps = structuredClone(steps).sort((a, b) => a.step_order - b.step_order);
     const isPowerUser = userMode === "power_user";
-    const nodeWidth = isPowerUser ? 300 : 160;
-    const nodeHeight = isPowerUser ? 150 : 48;
+    // These have to match what the nodes actually render, or dagre spaces the
+    // graph for a size that no longer exists: the pill grew to give names room
+    // and the card grew a second name line and a badge row.
+    const nodeWidth = isPowerUser ? 300 : 200;
+    const nodeHeight = isPowerUser ? 176 : 64;
     const inputNodeSize = { width: 160, height: 74 };
     const outputNodeSize = { width: 170, height: 78 };
 
@@ -400,7 +450,6 @@
           readOnly: flow.published_version != null,
           dataType: payloadKind,
           edgeKind: edge.kind,
-          animate: false,
           allowInsert,
           labelOffsetY,
           sourceStepOrder: edge.sourceStepOrder,
@@ -423,35 +472,183 @@
   }
 
   let isExporting = $state(false);
+  let exportFailed = $state(false);
+
+  /**
+   * Adds a caption band under the captured graph.
+   *
+   * The image leaves the app for a memo, an email or a printout, where none
+   * of the screen around it comes along: nothing says which flow it is, and a
+   * dashed edge means nothing without the convention that explains it. Both
+   * are drawn in, and the dashed key only when the flow actually has one.
+   *
+   * Everything here is measured before it is drawn. A long flow name and a
+   * narrow image -- which a tall graph scaled to the pixel ceiling produces --
+   * would otherwise run text off the edge or lay the key on top of the
+   * sentence, and a caption that loses its own words is worse than none.
+   */
+  async function addExportCaption(
+    dataUrl: string,
+    spec: { width: number; height: number; scale: number; hasBulkEdges: boolean }
+  ): Promise<string> {
+    const graph = new Image();
+    await new Promise((resolve, reject) => {
+      graph.onload = resolve;
+      graph.onerror = reject;
+      graph.src = dataUrl;
+    });
+
+    const style = getComputedStyle(containerEl!);
+    const font = Math.max(16, Math.round(13 * spec.scale));
+    const gap = Math.round(font * 0.6);
+    const margin = gap * 2;
+    const available = spec.width - margin * 2;
+    if (available <= font) return dataUrl;
+
+    const measure = document.createElement("canvas").getContext("2d");
+    if (!measure) return dataUrl;
+    const bodyFont = `${font}px ${style.fontFamily}`;
+    const titleFont = `600 ${font}px ${style.fontFamily}`;
+
+    const ellipsise = (text: string, maxWidth: number): string => {
+      measure.font = bodyFont;
+      if (measure.measureText(text).width <= maxWidth) return text;
+      let clipped = text;
+      while (clipped.length > 1 && measure.measureText(`${clipped}…`).width > maxWidth) {
+        clipped = clipped.slice(0, -1);
+      }
+      return `${clipped}…`;
+    };
+
+    measure.font = titleFont;
+    const rawTitle = flow.name ?? "";
+    let title = rawTitle;
+    if (measure.measureText(title).width > available) {
+      measure.font = titleFont;
+      while (title.length > 1 && measure.measureText(`${title}…`).width > available) {
+        title = title.slice(0, -1);
+      }
+      title = `${title}…`;
+    }
+
+    const legendLabel = spec.hasBulkEdges ? m.flow_graph_legend_all_previous() : null;
+    const keyWidth = font * 1.6;
+    measure.font = bodyFont;
+    const legendWidth =
+      legendLabel === null ? 0 : measure.measureText(legendLabel).width + gap + keyWidth;
+    const caption = m.flow_graph_export_caption();
+    const captionWidth = measure.measureText(caption).width;
+    // The key shares the sentence's row only when both fit on it.
+    const shareRow = legendLabel !== null && captionWidth + gap * 2 + legendWidth <= available;
+    const rows = 2 + (legendLabel !== null && !shareRow ? 1 : 0);
+    const band = font * rows + gap * (rows + 1);
+
+    const canvas = document.createElement("canvas");
+    canvas.width = spec.width;
+    canvas.height = spec.height + band;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return dataUrl;
+
+    // The token, falling back to the container's own resolved background
+    // rather than a literal, so the band always matches the capture.
+    ctx.fillStyle =
+      style.getPropertyValue("--background-color-primary").trim() || style.backgroundColor;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(graph, 0, 0);
+
+    ctx.textBaseline = "top";
+    ctx.fillStyle = style.color;
+    let row = spec.height + gap;
+    ctx.font = titleFont;
+    ctx.fillText(title, margin, row);
+
+    row += font + gap;
+    ctx.font = bodyFont;
+    ctx.globalAlpha = 0.75;
+    ctx.fillText(
+      ellipsise(caption, shareRow ? available - legendWidth - gap * 2 : available),
+      margin,
+      row
+    );
+
+    if (legendLabel !== null) {
+      const legendRow = shareRow ? row : row + font + gap;
+      const label = ellipsise(legendLabel, available - keyWidth - gap);
+      const labelWidth = measure.measureText(label).width;
+      const right = canvas.width - margin;
+      ctx.fillText(label, right - labelWidth, legendRow);
+      ctx.strokeStyle = style.color;
+      ctx.lineWidth = Math.max(1, Math.round(spec.scale));
+      ctx.setLineDash([font / 3, font / 3]);
+      ctx.beginPath();
+      ctx.moveTo(right - labelWidth - gap - keyWidth, legendRow + font / 2);
+      ctx.lineTo(right - labelWidth - gap, legendRow + font / 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    ctx.globalAlpha = 1;
+
+    return canvas.toDataURL("image/png");
+  }
 
   async function exportPng() {
     isExporting = true;
     try {
       const { toPng } = await import("html-to-image");
-      const el = containerEl?.querySelector(".svelte-flow") as HTMLElement | null;
-      if (!el) return;
-      // The image is of the whole flow, not of wherever the reader
-      // happens to have panned to.
-      fitGraph?.();
-      await tick();
-      await new Promise((r) => requestAnimationFrame(r));
-      const dataUrl = await toPng(el, {
+      const viewportEl = containerEl?.querySelector(".svelte-flow__viewport") as HTMLElement | null;
+      const bounds = graphBounds?.();
+      const size = bounds ? computeFlowExportSize(bounds) : null;
+      if (!viewportEl || !bounds || !size) return;
+
+      // The image is of the flow, not of the frame it is viewed through.
+      // Rasterising the on-screen element captured only what was visible at
+      // the current zoom -- a fitted 17-step flow draws its nodes at 0.17 --
+      // so the viewport layer is captured with a size and transform of our
+      // own instead, and comes out the same however the graph is framed.
+      const viewport = getViewportForBounds(
+        bounds,
+        size.width,
+        size.height,
+        size.scale,
+        size.scale,
+        0
+      );
+
+      const dataUrl = await toPng(viewportEl, {
         cacheBust: true,
-        pixelRatio: 2,
-        filter: (node: HTMLElement) => {
-          const cls = node.classList;
-          if (!cls) return true;
-          return (
-            !cls.contains("svelte-flow__panel") &&
-            !cls.contains("svelte-flow__controls") &&
-            !cls.contains("svelte-flow__minimap")
-          );
+        // The magnification is already in the transform below. Left alone,
+        // html-to-image multiplies by devicePixelRatio on top, which on a
+        // retina screen doubled the export past the ceiling just computed.
+        pixelRatio: 1,
+        width: size.width,
+        height: size.height,
+        backgroundColor: getComputedStyle(containerEl!)
+          .getPropertyValue("--background-color-primary")
+          .trim(),
+        style: {
+          width: `${size.width}px`,
+          height: `${size.height}px`,
+          transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`
         }
       });
+      const captioned = await addExportCaption(dataUrl, {
+        width: size.width,
+        height: size.height,
+        scale: size.scale,
+        hasBulkEdges: edges.some((edge) => edge.data?.edgeKind === "all_previous_steps")
+      });
+
       const link = document.createElement("a");
       link.download = `${flow.name ?? "flow"}-graph.png`;
-      link.href = dataUrl;
+      link.href = captioned;
       link.click();
+      exportFailed = false;
+    } catch (error) {
+      // A capture can fail on its own -- a canvas the browser declines to
+      // allocate, a font it will not inline. Silence left the reader pressing
+      // a button that did nothing.
+      console.error("[FlowGraph] flow image export failed", error);
+      exportFailed = true;
     } finally {
       isExporting = false;
     }
@@ -486,6 +683,7 @@
 
   const handleNodeClick: NodeEventWithPointer<MouseEvent | TouchEvent, Node> = ({ node }) => {
     if ((node?.type === "llm" || node?.type === "assembly") && node.data?.step) {
+      onPreview({ type: "activate", id: node.id });
       onnodeclick?.(node.id);
     }
   };
@@ -504,11 +702,29 @@
     const node = nodes.find((candidate) => candidate.id === id);
     if (node?.type !== "llm" && node?.type !== "assembly") return;
     event.preventDefault();
+    onPreview({ type: "activate", id });
     onnodeclick?.(id);
   }
 
   // xyflow ships these in English, and its stock node description offers a
   // delete this graph does not do.
+  // Tabbing to a node has to explain as much as pointing at one, so focus
+  // drives the same emphasis. Both are previews: neither opens the step.
+  function handleFocusIn(event: FocusEvent): void {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const id = target.closest<HTMLElement>(".svelte-flow__node")?.dataset.id;
+    // Moving focus is a new gesture wherever it lands, including back where
+    // it came from, so it is reported either way.
+    onPreview(isStepNode(id) && id ? { type: "focus", id } : { type: "blur" });
+  }
+
+  function handleFocusOut(event: FocusEvent): void {
+    const next = event.relatedTarget;
+    if (next instanceof HTMLElement && next.closest(".svelte-flow__node")) return;
+    onPreview({ type: "blur" });
+  }
+
   const ariaLabelConfig = $derived({
     "controls.ariaLabel": m.flow_graph_controls_label(),
     "controls.zoomIn.ariaLabel": m.flow_graph_zoom_in(),
@@ -528,6 +744,8 @@
   bind:this={containerEl}
   class="flow-graph h-full w-full {$mode === 'power_user' ? '' : 'user-mode'}"
   onkeydown={handleNodeKeydown}
+  onfocusin={handleFocusIn}
+  onfocusout={handleFocusOut}
 >
   <SvelteFlow
     {nodes}
@@ -544,12 +762,17 @@
     panOnDrag={true}
     zoomOnScroll={true}
     onnodeclick={handleNodeClick}
+    onnodepointerenter={({ node }) => {
+      if (isStepNode(node?.id)) onPreview({ type: "hover", id: node.id });
+    }}
+    onnodepointerleave={() => onPreview({ type: "unhover" })}
   >
     <FlowGraphAutoFit
       container={containerEl}
       options={fitViewOptions}
       revision={layoutRevision}
       bind:fit={fitGraph}
+      bind:bounds={graphBounds}
     />
     <Controls position="top-left" showLock={false} />
     {#if showMiniMap}
@@ -566,11 +789,28 @@
           <IconDownload class="size-3" />
           {m.flow_graph_download_png()}
         </button>
+        {#if exportFailed}
+          <p
+            class="border-negative-default bg-primary text-negative-stronger mt-1 max-w-[16rem] rounded border px-2 py-1 text-xs shadow-sm"
+            role="alert"
+          >
+            {m.flow_graph_download_failed()}
+          </p>
+        {/if}
       </Panel>
-      <Panel position="bottom-left">
-        <div
-          class="bg-primary text-secondary border-default flex items-center gap-3 rounded border px-2.5 py-1.5 text-xs shadow-sm"
-        >
+    {:else}
+      <Background variant={BackgroundVariant.Dots} size={0.5} gap={30} />
+    {/if}
+
+    <!-- The one sentence that makes the picture readable: a numbered chain
+         run in order, with arrows standing for what each step reads. It
+         belongs in Enkel most of all, so it sits outside the mode branch. -->
+    <Panel position="bottom-left">
+      <div
+        class="bg-primary text-secondary border-default flex flex-wrap items-center gap-x-3 gap-y-1 rounded border px-2.5 py-1.5 text-xs shadow-sm"
+      >
+        <span>{m.flow_graph_order_hint()}</span>
+        {#if $mode === "power_user"}
           <span class="flex items-center gap-1.5">
             <svg width="20" height="2"
               ><line x1="0" y1="1" x2="20" y2="1" stroke="currentColor" stroke-width="1.5" /></svg
@@ -592,11 +832,9 @@
             >
             {m.flow_graph_legend_all_previous()}
           </span>
-        </div>
-      </Panel>
-    {:else}
-      <Background variant={BackgroundVariant.Dots} size={0.5} gap={30} />
-    {/if}
+        {/if}
+      </div>
+    </Panel>
   </SvelteFlow>
 
   {#if $mode === "power_user" && inspectedEdge}
