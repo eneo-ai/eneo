@@ -395,6 +395,42 @@ describe("BuilderReviewScreen plan document", () => {
     expect(screen.queryByText(/Set output_fields/)).toBeNull();
   });
 
+  it("never shows the critic's raw repair text for any informational code", () => {
+    // The real package emitted json_output_text_interpolation on an untouched
+    // step; its message is a repair instruction for the model, not for people.
+    render(BuilderReviewScreenHarness, {
+      currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),
+      state: {
+        ...makeCreateState(),
+        currentPlan: makePlan({
+          proposal: makeProposal({
+            lint_warnings: [
+              {
+                step_ref: "step_c",
+                code: "json_output_text_interpolation",
+                message: "Prefer output.structured.<field> when only specific fields are needed.",
+                field_name: null,
+                severity: "info"
+              },
+              {
+                step_ref: "step_c",
+                code: "some_future_code",
+                message: "Internal repair guidance.",
+                field_name: null,
+                severity: "info"
+              }
+            ]
+          })
+        })
+      }
+    });
+
+    expect(screen.getByText(m.ai_builder_flow_note_json_output_text_interpolation())).toBeTruthy();
+    expect(screen.getByText(m.ai_builder_flow_note_generic())).toBeTruthy();
+    expect(screen.queryByText(/Prefer output\.structured/)).toBeNull();
+    expect(screen.queryByText("Internal repair guidance.")).toBeNull();
+  });
+
   it("counts only actionable warnings in the quality section", () => {
     render(BuilderReviewScreenHarness, {
       currentSpace: makeSpace({ transcriptionModels: [{ can_access: true }] }),

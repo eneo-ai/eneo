@@ -565,10 +565,18 @@
   const planFlowNotes = $derived(
     (plan?.proposal.lint_warnings ?? []).filter((warning) => warning.severity === "info")
   );
-  const flowNoteText = (note: { code: string; message: string }): string =>
-    note.code === "json_output_no_contract"
-      ? m.ai_builder_flow_note_json_output_no_contract()
-      : note.message;
+  // The lint message is the critic's repair instruction, written for the
+  // model; the screen only ever shows its own calm copy for a note.
+  const flowNoteCopy: Record<string, () => string> = {
+    json_output_no_contract: () => m.ai_builder_flow_note_json_output_no_contract(),
+    json_output_text_interpolation: () => m.ai_builder_flow_note_json_output_text_interpolation(),
+    shadowed_form_field_bare_reference: () =>
+      m.ai_builder_flow_note_shadowed_form_field_bare_reference(),
+    unused_form_field: () => m.ai_builder_flow_note_unused_form_field(),
+    vague_step_name: () => m.ai_builder_flow_note_vague_step_name()
+  };
+  const flowNoteText = (note: { code: string }): string =>
+    (flowNoteCopy[note.code] ?? m.ai_builder_flow_note_generic)();
 
   // ---- Errors, conflicts, prerequisites ------------------------------------
 
