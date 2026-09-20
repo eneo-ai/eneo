@@ -1,15 +1,15 @@
 """Raise unchanged upload seeds for long recordings and large documents.
 
-Revision ID: 202609202000
-Revises: 202609201000
+Revision ID: 202609201300
+Revises: 202609201200
 """
 
 import sqlalchemy as sa
 
 from alembic import op
 
-revision = "202609202000"
-down_revision = "202609201000"
+revision = "202609201300"
+down_revision = "202609201200"
 branch_labels = None
 depends_on = None
 

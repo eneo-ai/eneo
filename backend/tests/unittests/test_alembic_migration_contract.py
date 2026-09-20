@@ -247,7 +247,7 @@ def _string_constant(node: ast.expr) -> str | None:
 
 def test_upload_default_migration_literals_match_runtime_defaults() -> None:
     versions = Path(__file__).parents[2] / "alembic/versions"
-    path = versions / "202609202000_raise_upload_policy_defaults.py"
+    path = versions / "202609201300_raise_upload_policy_defaults.py"
     module = ast.parse(path.read_text())
     limits = next(
         node.value
@@ -296,14 +296,14 @@ def test_upload_default_migration_preserves_policy_on_downgrade(
 ):
     path = (
         Path(__file__).parents[2]
-        / "alembic/versions/202609202000_raise_upload_policy_defaults.py"
+        / "alembic/versions/202609201300_raise_upload_policy_defaults.py"
     )
     assert path.exists()
     spec = importlib.util.spec_from_file_location("raise_upload_defaults", path)
     assert spec is not None and spec.loader is not None
     migration = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(migration)
-    assert migration.revision == "202609202000"
+    assert migration.revision == "202609201300"
     assert migration.down_revision == "202609201000"
     engine = sa.create_engine("sqlite://")
     metadata = sa.MetaData()

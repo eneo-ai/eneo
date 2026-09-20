@@ -90,7 +90,7 @@ def test_inline_storage_rejects_invalid_sizes(value):
 def test_migrated_upload_defaults_admit_large_workloads(monkeypatch):
     path = (
         Path(__file__).parents[3]
-        / "alembic/versions/202609202000_raise_upload_policy_defaults.py"
+        / "alembic/versions/202609201300_raise_upload_policy_defaults.py"
     )
     spec = importlib.util.spec_from_file_location("upload_policy_defaults", path)
     assert spec is not None and spec.loader is not None
