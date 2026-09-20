@@ -3370,7 +3370,7 @@ async def test_create_run_rejects_oversized_input_payload(user):
     ) as exc_info:
         await service.create_run(
             flow_id=flow.id,
-            input_payload_json={"text": "x" * (2 * 1024 * 1024)},
+            input_payload_json={"text": "x" * (8 * 1024 * 1024 + 1)},
         )
     assert exc_info.value.code == "flow_run_input_payload_too_large"
 

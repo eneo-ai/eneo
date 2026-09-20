@@ -17533,7 +17533,7 @@ export interface components {
       file_max_size_ceiling_bytes: number;
       /**
        * Max Files Per Run
-       * @description Null means no tenant-level file count ceiling.
+       * @description Null means the deployment default (1000 files).
        */
       max_files_per_run: number | null;
     };
@@ -17562,7 +17562,7 @@ export interface components {
       file_max_size_bytes?: number | null;
       /**
        * Max Files Per Run
-       * @description Set the tenant ceiling, or send null for no tenant-level ceiling.
+       * @description Set the tenant ceiling, or send null to use the deployment default (1000 files).
        */
       max_files_per_run?: number | null;
     };
@@ -20104,7 +20104,7 @@ export interface components {
      *       "bundle": {
      *         "debug_export": {
      *           "definition": {
-     *             "checksum": "36898cbfd4977b077e1d848726b4edfc69da5bbc8a2f2c917368811a7fa10305",
+     *             "checksum": "3544af6ff93b38774b137d9ed4f4121a17555241ad66559f3540da92cc945235",
      *             "flow_id": "00000000-0000-0000-0000-000000000001",
      *             "steps_count": 1,
      *             "version": 3
@@ -20162,8 +20162,8 @@ export interface components {
      *           ]
      *         },
      *         "definition_integrity": {
-     *           "current_checksum": "36898cbfd4977b077e1d848726b4edfc69da5bbc8a2f2c917368811a7fa10305",
-     *           "expected_checksum": "36898cbfd4977b077e1d848726b4edfc69da5bbc8a2f2c917368811a7fa10305",
+     *           "current_checksum": "3544af6ff93b38774b137d9ed4f4121a17555241ad66559f3540da92cc945235",
+     *           "expected_checksum": "3544af6ff93b38774b137d9ed4f4121a17555241ad66559f3540da92cc945235",
      *           "status": "verified"
      *         },
      *         "definition_snapshot": {
@@ -20174,6 +20174,23 @@ export interface components {
      *           "steps": [
      *             {
      *               "assistant_id": "00000000-0000-0000-0000-000000000201",
+     *               "assistant_snapshot": {
+     *                 "assistant_id": "00000000-0000-0000-0000-000000000201",
+     *                 "attachments": [],
+     *                 "completion_model": {
+     *                   "model_id": "00000000-0000-0000-0000-000000000501",
+     *                   "provider_id": "00000000-0000-0000-0000-000000000502",
+     *                   "provider_type": "openai",
+     *                   "resolved_route": "example-model"
+     *                 },
+     *                 "completion_model_kwargs": {},
+     *                 "execution_surface_hash": "507803c88acdd0380394aa52ed37143e526faeccc8bfc651445a518ff3b3bff0",
+     *                 "inline_file_text": false,
+     *                 "instructions": "Transcribe uploaded audio into Swedish text.",
+     *                 "knowledge_refs": [],
+     *                 "origin": "flow_managed",
+     *                 "schema_version": 2
+     *               },
      *               "input_source": "flow_input",
      *               "input_type": "audio",
      *               "output_mode": "transcribe_only",
@@ -20371,7 +20388,7 @@ export interface components {
      *           }
      *         ]
      *       },
-     *       "content_hash": "a8ba11aba45e0bbf0ace7e29e739d8dcd7f4ccd071b5746df358e5f57646ecad",
+     *       "content_hash": "cfaa0ed0fa2dbeabba04329209f05abddb718dff0366da67fc078f382021ed73",
      *       "generated_at": "2026-03-31T12:00:00Z",
      *       "manifest": {
      *         "actor": {
@@ -20407,7 +20424,7 @@ export interface components {
      *           "total_size_bytes": 14012,
      *           "tracking_state": "tracked"
      *         },
-     *         "content_hash": "a8ba11aba45e0bbf0ace7e29e739d8dcd7f4ccd071b5746df358e5f57646ecad",
+     *         "content_hash": "cfaa0ed0fa2dbeabba04329209f05abddb718dff0366da67fc078f382021ed73",
      *         "content_hash_input": "redacted",
      *         "detail_mode": "redacted",
      *         "export_reason": "support_debug",
@@ -20801,7 +20818,7 @@ export interface components {
      * @example {
      *       "debug_export": {
      *         "definition": {
-     *           "checksum": "36898cbfd4977b077e1d848726b4edfc69da5bbc8a2f2c917368811a7fa10305",
+     *           "checksum": "3544af6ff93b38774b137d9ed4f4121a17555241ad66559f3540da92cc945235",
      *           "flow_id": "00000000-0000-0000-0000-000000000001",
      *           "steps_count": 1,
      *           "version": 3
@@ -20859,8 +20876,8 @@ export interface components {
      *         ]
      *       },
      *       "definition_integrity": {
-     *         "current_checksum": "36898cbfd4977b077e1d848726b4edfc69da5bbc8a2f2c917368811a7fa10305",
-     *         "expected_checksum": "36898cbfd4977b077e1d848726b4edfc69da5bbc8a2f2c917368811a7fa10305",
+     *         "current_checksum": "3544af6ff93b38774b137d9ed4f4121a17555241ad66559f3540da92cc945235",
+     *         "expected_checksum": "3544af6ff93b38774b137d9ed4f4121a17555241ad66559f3540da92cc945235",
      *         "status": "verified"
      *       },
      *       "definition_snapshot": {
@@ -20871,6 +20888,23 @@ export interface components {
      *         "steps": [
      *           {
      *             "assistant_id": "00000000-0000-0000-0000-000000000201",
+     *             "assistant_snapshot": {
+     *               "assistant_id": "00000000-0000-0000-0000-000000000201",
+     *               "attachments": [],
+     *               "completion_model": {
+     *                 "model_id": "00000000-0000-0000-0000-000000000501",
+     *                 "provider_id": "00000000-0000-0000-0000-000000000502",
+     *                 "provider_type": "openai",
+     *                 "resolved_route": "example-model"
+     *               },
+     *               "completion_model_kwargs": {},
+     *               "execution_surface_hash": "507803c88acdd0380394aa52ed37143e526faeccc8bfc651445a518ff3b3bff0",
+     *               "inline_file_text": false,
+     *               "instructions": "Transcribe uploaded audio into Swedish text.",
+     *               "knowledge_refs": [],
+     *               "origin": "flow_managed",
+     *               "schema_version": 2
+     *             },
      *             "input_source": "flow_input",
      *             "input_type": "audio",
      *             "output_mode": "transcribe_only",
@@ -24676,7 +24710,36 @@ export interface components {
        */
       updated_at: string;
     };
-    /** FlowTranscriptRegenerationPublic */
+    /**
+     * FlowTranscriptRegenerationPublic
+     * @example {
+     *       "correction_revision": 1,
+     *       "created": true,
+     *       "first_regenerated_step_id": "00000000-0000-0000-0000-000000000102",
+     *       "run": {
+     *         "created_at": "2026-03-17T10:05:00Z",
+     *         "dispatch_attempt_count": 0,
+     *         "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
+     *         "dispatch_pending_since": "2026-03-17T10:05:00Z",
+     *         "flow_id": "00000000-0000-0000-0000-000000000001",
+     *         "flow_version": 3,
+     *         "id": "00000000-0000-0000-0000-000000000301",
+     *         "input_payload_json": {
+     *           "employee_name": "Alex Example"
+     *         },
+     *         "job_id": "00000000-0000-0000-0000-000000000401",
+     *         "purpose": "production",
+     *         "result_files": [],
+     *         "revision": 1,
+     *         "run_label": "Case 123",
+     *         "status": "queued",
+     *         "tenant_id": "00000000-0000-0000-0000-000000000010",
+     *         "trace_id": "00000000-0000-0000-0000-000000000302",
+     *         "updated_at": "2026-03-17T10:05:00Z"
+     *       },
+     *       "source_run_id": "00000000-0000-0000-0000-000000000302"
+     *     }
+     */
     FlowTranscriptRegenerationPublic: {
       /** Correction Revision */
       correction_revision: number | null;
@@ -24694,7 +24757,14 @@ export interface components {
        */
       source_run_id: string;
     };
-    /** FlowTranscriptRegenerationRequest */
+    /**
+     * FlowTranscriptRegenerationRequest
+     * @example {
+     *       "expected_correction_revision": 1,
+     *       "expected_run_revision": 3,
+     *       "segments_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     *     }
+     */
     FlowTranscriptRegenerationRequest: {
       /**
        * Expected Correction Revision
@@ -56292,6 +56362,35 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
+          /**
+           * @example {
+           *       "correction_revision": 1,
+           *       "created": false,
+           *       "first_regenerated_step_id": "00000000-0000-0000-0000-000000000102",
+           *       "run": {
+           *         "created_at": "2026-03-17T10:05:00Z",
+           *         "dispatch_attempt_count": 0,
+           *         "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
+           *         "dispatch_pending_since": "2026-03-17T10:05:00Z",
+           *         "flow_id": "00000000-0000-0000-0000-000000000001",
+           *         "flow_version": 3,
+           *         "id": "00000000-0000-0000-0000-000000000301",
+           *         "input_payload_json": {
+           *           "employee_name": "Alex Example"
+           *         },
+           *         "job_id": "00000000-0000-0000-0000-000000000401",
+           *         "purpose": "production",
+           *         "result_files": [],
+           *         "revision": 1,
+           *         "run_label": "Case 123",
+           *         "status": "queued",
+           *         "tenant_id": "00000000-0000-0000-0000-000000000010",
+           *         "trace_id": "00000000-0000-0000-0000-000000000302",
+           *         "updated_at": "2026-03-17T10:05:00Z"
+           *       },
+           *       "source_run_id": "00000000-0000-0000-0000-000000000302"
+           *     }
+           */
           "application/json": components["schemas"]["FlowTranscriptRegenerationPublic"];
         };
       };
@@ -56312,6 +56411,7 @@ export interface operations {
         content: {
           /**
            * @example {
+           *       "code": "flow_transcript_corrections_stale_revision",
            *       "eneo_error_code": 9007,
            *       "message": "Stale source/revision, changed publication, unsupported layout or conflicting idempotency key."
            *     }
@@ -56327,6 +56427,7 @@ export interface operations {
         content: {
           /**
            * @example {
+           *       "code": "flow_run_access_denied",
            *       "eneo_error_code": 9001,
            *       "message": "The caller needs run and review access and source content access."
            *     }
@@ -56342,6 +56443,7 @@ export interface operations {
         content: {
           /**
            * @example {
+           *       "code": "not_found",
            *       "eneo_error_code": 9000,
            *       "message": "The source flow, run or transcript is unavailable in tenant scope."
            *     }
@@ -56366,6 +56468,7 @@ export interface operations {
         content: {
           /**
            * @example {
+           *       "code": "flow_run_concurrency_limit_reached",
            *       "eneo_error_code": 9007,
            *       "message": "Tenant concurrent-run capacity is exhausted."
            *     }
@@ -56381,6 +56484,7 @@ export interface operations {
         content: {
           /**
            * @example {
+           *       "code": "flow_evidence_audit_logging_failed",
            *       "eneo_error_code": 9024,
            *       "message": "Required audit failed; no new run was accepted."
            *     }

@@ -1620,18 +1620,51 @@ Read effective per-flow values from `GET /api/v1/flows/{id}/run-contract/`. The 
 | Audio and video types today | `audio/wav`, `audio/mpeg`, `audio/mp3`, `audio/mp4`, `audio/x-m4a`, `audio/ogg`, `audio/webm`, `video/mp4`, `video/webm`. Always read the contract rather than hardcoding this list                                     |
 | Upload timeout budget       | `runtime_upload_policy` in the run contract: minimum 120 s, 8 s per MiB, maximum 600 s, idle timeout 120 s                                                                                                              |
 | Oversize handling           | The size is checked after the request body has been received, so an oversized upload still spends the full transfer before returning `413`. Compare the file against `max_file_size_bytes` client-side before you start |
-| Audio duration              | No cap. Long audio is split into five-minute segments automatically                                                                                                                                                     |
+| Audio duration              | Default 5 hours per input (`FLOW_AUDIO_MAX_DURATION_SECONDS=18000`), with a separate 2 GiB decoded-audio ceiling                                                                                                                                                     |
 
-The deployment ceiling is the value that surprises teams: a deployment that keeps file bytes inside PostgreSQL can cap audio far below the tenant policy. The run contract always reports the resolved number, so trust it over any figure written down elsewhere.
+Fresh deployments allow **256 MiB per session or knowledge file** and **1,073,741,819 bytes per audio file** (1 GiB minus 5 bytes), for both session and knowledge audio. The default PostgreSQL inline ceiling is also 1,073,741,819 bytes, its maximum valid payload. The Flow hard maximum stays at 2 GiB. Persistent assistant attachments default to 256 MiB in total per assistant and must also fit the selected model's input context.
+
+The upload-policy migration raises each stored value only when it equals the old seed: 10 MiB for session/knowledge files or 200 MiB for audio. Other values, including deliberately lower policies, remain unchanged. Downgrade restores the old values only where a value equals the new default. Existing environment overrides remain effective; deployments retaining `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES=209715200` must remove or update that override to admit the larger audio workload.
+
+Tenant policies can lower the effective allowances. A null file-count override restores the deployment default of 1000 files, rather than removing the ceiling. The run contract reports the resolved limits after storage and tenant policy are applied.
 
 ### Text and payload sizes
 
-A single limit governs both: **1 MiB of UTF-8 bytes**, deployment-configurable through the `FLOW_MAX_INLINE_TEXT_BYTES` environment variable and not exposed as a tenant setting.
+The inline limit is **8 MiB of UTF-8 bytes**, configured through `FLOW_MAX_INLINE_TEXT_BYTES=8388608`. It is a deployment setting.
 
 - A step's text output above it is written to a file, and the run result arrives as `file_backed_text` instead of `inline_text`.
 - `input_payload_json` above it is rejected at run creation with `flow_run_input_payload_too_large`.
 - A review edit whose `text` is above it is rejected with `typed_io_validation_failed`, and the response's `context.max_inline_text_bytes` reports the limit in force.
 - A transcript above it fails the step with `typed_io_transcript_too_large` rather than overflowing to a file.
+
+Structured output uses the same 8 MiB ceiling, measured as serialized JSON including its framing. Retained rejected-output previews also use 8 MiB and end on a complete UTF-8 character. PDF extraction has an independent **128 MiB** ceiling for extracted text, including page markers; increasing the inline limit does not change it. Material-backed processing follows the effective file allowance, while structured output still has the inline ceiling.
+
+### Execution, PDF extraction, and Builder
+
+| Setting | Default | Applies to |
+| --- | --- | --- |
+| `TASK_EXECUTION_TIMEOUT_SECONDS` | 28,800 s (8 hours) | One worker invocation, shared by all steps; review pauses and requeues start a new invocation |
+| `FLOW_AUDIO_MAX_DURATION_SECONDS` | 18,000 s (5 hours) | Duration of each decoded audio input |
+| `FLOW_AUDIO_MAX_DECODED_BYTES` | 2,147,483,648 (2 GiB) | Decoded audio size, independently of compressed upload size |
+| `FLOW_MAPPED_STEP_MAX_PROVIDER_CALLS_DEFAULT` | 1000 | Provider calls per mapped step, including the native-JSON fallback reserve |
+| `FLOW_PDF_MAX_PAGES` | 2000 | Pages in each PDF extracted for a Flow |
+| `FLOW_PDF_MAX_EXTRACTED_BYTES` | 134,217,728 (128 MiB) | Extracted UTF-8 text, including page markers |
+| `FLOW_PDF_EXTRACTION_TIMEOUT_SECONDS` | 900 s | Supervised extraction of one PDF |
+| `AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS` | 300 s | Provider silence, including the wait for the first chunk; the separate whole-call ceiling is 1800 s |
+| `ATTACHMENT_MAX_FILES` | 100 | Persistent attachments per assistant; Builder separately allows up to 100 session attachments |
+
+For longer recordings, operators change **`FLOW_AUDIO_MAX_DURATION_SECONDS` and `TASK_EXECUTION_TIMEOUT_SECONDS` together**. The invocation budget still reserves 60 seconds for finalization, giving steps a maximum of 28,740 seconds within the remaining shared budget; the minimum invocation budget remains 65 seconds. Upload bytes, decoded bytes, and model/provider capacity must also admit the recording. These provisional duration and execution defaults may be revised by the measurement receipt tracked as `eneo-hy7c`.
+
+### Workload receipt
+
+This table checks workloads against the default limits. It does not establish provider throughput or extraction time for every document.
+
+| Workload | Limits it touches | Default admission |
+| --- | --- | --- |
+| 5-hour recording at 128 kbps | Audio upload, decoded duration/bytes, transcript bytes, shared invocation budget | About 288 MB compressed fits the audio ceiling; 5 hours fits the duration ceiling. Decoded audio must stay within 2 GiB and transcript text within 8 MiB; all steps share 8 hours. |
+| 2000-page PDF | File upload, page count, extracted text, extraction timeout | Up to 256 MiB uploaded, 2000 pages, 128 MiB extracted text, and 900 s extraction. Page count alone does not determine file size or processing time. |
+| 300 documents | Runtime file count, per-file bytes, mapped provider calls, structured output | Fits the default 1000-file count and 1000-call mapped-step budget for one call per document, including room for fallback. Each file and the combined structured output must fit their respective byte limits. |
+| 17-step Builder package with attachments | Proposal silence/whole-call deadlines, attachment count, selected model context | Step count does not consume attachment slots. Up to 100 Builder session attachments remain subject to tenant policy and model context; a streaming proposal has a 300 s silence deadline and an 1800 s whole-call ceiling. |
 
 ### Review checkpoints
 

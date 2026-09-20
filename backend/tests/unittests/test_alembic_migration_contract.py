@@ -9,10 +9,15 @@ from pathlib import Path
 from unittest.mock import MagicMock, call
 
 import pytest
+import sqlalchemy as sa
 
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from eneo.database.tables.flow_tables import FlowProviderCalls
+from eneo.object_content.configuration import (
+    DEFAULT_FILE_UPLOAD_LIMIT_BYTES,
+    MAXIMUM_INLINE_BYTES,
+)
 
 _ALEMBIC_VERSION_NUM_LIMIT = 32
 
@@ -238,3 +243,123 @@ def _string_constant(node: ast.expr) -> str | None:
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value
     return None
+
+
+def test_upload_default_migration_literals_match_runtime_defaults() -> None:
+    versions = Path(__file__).parents[2] / "alembic/versions"
+    path = versions / "202609202000_raise_upload_policy_defaults.py"
+    module = ast.parse(path.read_text())
+    limits = next(
+        node.value
+        for node in module.body
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "_LIMITS"
+            for target in node.targets
+        )
+    )
+    assert ast.literal_eval(limits) == {
+        "session_file_limit_bytes": (10485760, DEFAULT_FILE_UPLOAD_LIMIT_BYTES),
+        "knowledge_file_limit_bytes": (10485760, DEFAULT_FILE_UPLOAD_LIMIT_BYTES),
+        "transcription_audio_limit_bytes": (209715200, MAXIMUM_INLINE_BYTES),
+    }
+    for filename in ("202607251700_add_object_content_deployment_policy.py", path.name):
+        tree = ast.parse((versions / filename).read_text())
+        assert not any(
+            (
+                isinstance(node, ast.ImportFrom)
+                and (node.module or "").split(".")[0] == "eneo"
+            )
+            or (
+                isinstance(node, ast.Import)
+                and any(alias.name.split(".")[0] == "eneo" for alias in node.names)
+            )
+            for node in ast.walk(tree)
+        )
+
+
+@pytest.mark.parametrize(
+    ("stored", "raised"),
+    [
+        (None, (268435456, 268435456, 1073741819)),
+        ((1024, 2048, 4096), (1024, 2048, 4096)),
+        ((536870912, 536870912, 2147483648), (536870912, 536870912, 2147483648)),
+        ((10485760, 2048, 209715200), (268435456, 2048, 1073741819)),
+    ],
+)
+def test_upload_default_migration_preserves_overrides_and_reverses(
+    monkeypatch, stored, raised
+):
+    path = (
+        Path(__file__).parents[2]
+        / "alembic/versions/202609202000_raise_upload_policy_defaults.py"
+    )
+    assert path.exists()
+    spec = importlib.util.spec_from_file_location("raise_upload_defaults", path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    assert migration.revision == "202609202000"
+    assert migration.down_revision == "202609201000"
+    engine = sa.create_engine("sqlite://")
+    metadata = sa.MetaData()
+    table = sa.Table(
+        "object_content_deployment_policy",
+        metadata,
+        sa.Column("id", sa.Integer, primary_key=True),
+        sa.Column("revision", sa.Integer),
+        sa.Column("session_file_limit_bytes", sa.BigInteger),
+        sa.Column("knowledge_file_limit_bytes", sa.BigInteger),
+        sa.Column("transcription_audio_limit_bytes", sa.BigInteger),
+        sa.Column("session_image_limit_bytes", sa.BigInteger),
+        sa.Column("updated_at", sa.DateTime),
+        sa.Column("updated_by_actor", sa.String),
+        sa.Column("updated_by_user_id", sa.String),
+    )
+    columns = (
+        "session_file_limit_bytes",
+        "knowledge_file_limit_bytes",
+        "transcription_audio_limit_bytes",
+    )
+    if stored is None:
+        seed_path = path.with_name(
+            "202607251700_add_object_content_deployment_policy.py"
+        )
+        seed_spec = importlib.util.spec_from_file_location(
+            "upload_policy_seed", seed_path
+        )
+        assert seed_spec is not None and seed_spec.loader is not None
+        seed_migration = importlib.util.module_from_spec(seed_spec)
+        seed_spec.loader.exec_module(seed_migration)
+        seeds = seed_migration.resolve_seed_limits({})
+        stored = tuple(seeds[name] for name in columns)
+    try:
+        with engine.begin() as connection:
+            metadata.create_all(connection)
+            connection.execute(
+                table.insert().values(
+                    id=1,
+                    revision=7,
+                    session_image_limit_bytes=1234,
+                    updated_by_actor="storage_admin",
+                    updated_by_user_id="admin",
+                    **dict(zip(columns, stored)),
+                )
+            )
+            monkeypatch.setattr(migration.op, "execute", connection.execute)
+            migration.upgrade()
+            row = connection.execute(sa.select(table)).mappings().one()
+            assert tuple(row[name] for name in columns) == raised
+            assert row["session_image_limit_bytes"] == 1234
+            assert row["revision"] == 7 + (stored != raised)
+            migration.upgrade()
+            assert (
+                connection.execute(sa.select(table.c.revision)).scalar_one()
+                == row["revision"]
+            )
+            migration.downgrade()
+            row = connection.execute(sa.select(table)).mappings().one()
+            assert tuple(row[name] for name in columns) == stored
+            assert row["revision"] == 7 + 2 * (stored != raised)
+    finally:
+        engine.dispose()

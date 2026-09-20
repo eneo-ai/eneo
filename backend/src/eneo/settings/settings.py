@@ -223,7 +223,7 @@ class FlowInputLimitsPublic(BaseModel):
         ...,
         ge=1,
         le=FLOW_INPUT_MAX_FILES_COUNT,
-        description="Null means no tenant-level file count ceiling.",
+        description=f"Null means the deployment default ({FLOW_INPUT_MAX_FILES_COUNT} files).",
     )
     audio_max_files_per_run: int = Field(
         ge=1,
@@ -274,7 +274,7 @@ class FlowInputLimitsUpdate(BaseModel):
         default=None,
         ge=1,
         le=FLOW_INPUT_MAX_FILES_COUNT,
-        description="Set the tenant ceiling, or send null for no tenant-level ceiling.",
+        description=f"Set the tenant ceiling, or send null to use the deployment default ({FLOW_INPUT_MAX_FILES_COUNT} files).",
     )
     audio_max_files_per_run: int | None = Field(
         default=None,

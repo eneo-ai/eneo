@@ -6,6 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
+from pydantic.config import JsonDict
 
 from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_api_common import (
@@ -13,7 +14,7 @@ from eneo.flows.api.flow_api_common import (
     error_response,
 )
 from eneo.flows.api.flow_assembler import FlowAssembler
-from eneo.flows.api.flow_models import FlowRunPublic
+from eneo.flows.api.flow_models import FLOW_RUN_PUBLIC_EXAMPLE, FlowRunPublic
 from eneo.flows.api.flow_runtime_paths import FLOW_RUN_TRANSCRIPT_REGENERATION_PATH
 from eneo.flows.application.flow_dispatch import (
     dispatch_flow_run_recoverably_after_commit,
@@ -30,8 +31,25 @@ from eneo.server.dependencies.container import get_container_for_explicit_transa
 router = APIRouter()
 
 
+FLOW_TRANSCRIPT_REGENERATION_REQUEST_EXAMPLE: JsonDict = {
+    "expected_run_revision": 3,
+    "expected_correction_revision": 1,
+    "segments_hash": "a" * 64,
+}
+FLOW_TRANSCRIPT_REGENERATION_PUBLIC_EXAMPLE: JsonDict = {
+    "run": FLOW_RUN_PUBLIC_EXAMPLE,
+    "created": True,
+    "source_run_id": "00000000-0000-0000-0000-000000000302",
+    "correction_revision": 1,
+    "first_regenerated_step_id": "00000000-0000-0000-0000-000000000102",
+}
+
+
 class FlowTranscriptRegenerationRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"example": FLOW_TRANSCRIPT_REGENERATION_REQUEST_EXAMPLE},
+    )
 
     expected_run_revision: int = Field(ge=1)
     expected_correction_revision: int | None = Field(
@@ -42,7 +60,10 @@ class FlowTranscriptRegenerationRequest(BaseModel):
 
 
 class FlowTranscriptRegenerationPublic(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"example": FLOW_TRANSCRIPT_REGENERATION_PUBLIC_EXAMPLE},
+    )
 
     run: FlowRunPublic
     created: bool
@@ -81,31 +102,44 @@ Poll the returned run using the existing run endpoint.
         200: {
             "model": FlowTranscriptRegenerationPublic,
             "description": "Idempotent replay.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        **FLOW_TRANSCRIPT_REGENERATION_PUBLIC_EXAMPLE,
+                        "created": False,
+                    }
+                }
+            },
         },
         400: error_response(
             description="Stale source/revision, changed publication, unsupported layout or conflicting idempotency key.",
             message="Stale source/revision, changed publication, unsupported layout or conflicting idempotency key.",
             eneo_error_code=ErrorCodes.BAD_REQUEST,
+            code=FlowApiErrorCode.TRANSCRIPT_CORRECTIONS_STALE_REVISION,
         ),
         403: error_response(
             description="The caller needs run and review access and source content access.",
             message="The caller needs run and review access and source content access.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
+            code=FlowApiErrorCode.RUN_ACCESS_DENIED,
         ),
         404: error_response(
             description="The source flow, run or transcript is unavailable in tenant scope.",
             message="The source flow, run or transcript is unavailable in tenant scope.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
+            code="not_found",
         ),
         429: error_response(
             description="Tenant concurrent-run capacity is exhausted.",
             message="Tenant concurrent-run capacity is exhausted.",
             eneo_error_code=ErrorCodes.BAD_REQUEST,
+            code=FlowApiErrorCode.RUN_CONCURRENCY_LIMIT_REACHED,
         ),
         503: error_response(
             description="Required audit failed; no new run was accepted.",
             message="Required audit failed; no new run was accepted.",
             eneo_error_code=ErrorCodes.INTERNAL_SERVER_ERROR,
+            code=FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED,
         ),
     },
 )

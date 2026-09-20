@@ -75,6 +75,7 @@ from eneo.flows.application.flow_run_evidence_export_manifest import (
 from eneo.flows.application.flow_run_evidence_export_summary import (
     EvidenceExportSummary,
 )
+from eneo.flows.assistant_execution_snapshot import assistant_execution_surface_hash
 from eneo.flows.domain.flow import (
     FlowRunReviewCheckpointEdit,
     FlowStepRetrievalPolicy,
@@ -249,6 +250,26 @@ FLOW_STEP_PUBLIC_EXAMPLE: dict[str, Any] = {
     "updated_at": "2026-03-17T09:30:00Z",
 }
 
+FLOW_ASSISTANT_EXECUTION_SNAPSHOT_EXAMPLE: JsonDict = {
+    "schema_version": 2,
+    "assistant_id": "00000000-0000-0000-0000-000000000201",
+    "origin": "flow_managed",
+    "instructions": "Transcribe uploaded audio into Swedish text.",
+    "completion_model": {
+        "model_id": "00000000-0000-0000-0000-000000000501",
+        "provider_id": "00000000-0000-0000-0000-000000000502",
+        "provider_type": "openai",
+        "resolved_route": "example-model",
+    },
+    "completion_model_kwargs": {},
+    "knowledge_refs": [],
+    "attachments": [],
+    "inline_file_text": False,
+}
+FLOW_ASSISTANT_EXECUTION_SNAPSHOT_EXAMPLE["execution_surface_hash"] = (
+    assistant_execution_surface_hash(FLOW_ASSISTANT_EXECUTION_SNAPSHOT_EXAMPLE)
+)
+
 FLOW_PUBLISHED_DEFINITION_EXAMPLE: JsonDict = {
     "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
     "flow_id": "00000000-0000-0000-0000-000000000001",
@@ -259,6 +280,7 @@ FLOW_PUBLISHED_DEFINITION_EXAMPLE: JsonDict = {
             "step_id": "00000000-0000-0000-0000-000000000101",
             "step_order": 1,
             "assistant_id": "00000000-0000-0000-0000-000000000201",
+            "assistant_snapshot": FLOW_ASSISTANT_EXECUTION_SNAPSHOT_EXAMPLE,
             "input_source": "flow_input",
             "input_type": "audio",
             "output_mode": "transcribe_only",
@@ -2333,7 +2355,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
             "example": {
                 "schema_version": "flow-evidence-export.v17",
                 "generated_at": "2026-03-31T12:00:00Z",
-                "content_hash": "a8ba11aba45e0bbf0ace7e29e739d8dcd7f4ccd071b5746df358e5f57646ecad",
+                "content_hash": "cfaa0ed0fa2dbeabba04329209f05abddb718dff0366da67fc078f382021ed73",
                 "manifest": {
                     "schema_version": "flow-evidence-export.v17",
                     "app_version": "DEV",
@@ -2345,7 +2367,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
                     "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
                     "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8",
                     "flow_version": 3,
-                    "content_hash": "a8ba11aba45e0bbf0ace7e29e739d8dcd7f4ccd071b5746df358e5f57646ecad",
+                    "content_hash": "cfaa0ed0fa2dbeabba04329209f05abddb718dff0366da67fc078f382021ed73",
                     "content_hash_input": "redacted",
                     "exported_at": "2026-03-31T12:00:00Z",
                     "actor": {

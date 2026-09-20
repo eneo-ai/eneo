@@ -11,6 +11,8 @@ from urllib.parse import urlparse
 from pydantic import Field, computed_field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from eneo.object_content.configuration import DEFAULT_FILE_UPLOAD_LIMIT_BYTES
+
 # Version manifest lookup:
 # - Docker: Package is installed with --no-editable, so __file__ points to site-packages.
 #   The manifest is placed at /app/.release-please-manifest.json by inject-backend-version.sh
@@ -345,16 +347,16 @@ class Settings(BaseSettings):
     task_maintenance_queue: str = "tasks:maintenance"
     task_execution_max_jobs: int = 4
     task_maintenance_max_jobs: int = 2
-    task_execution_timeout_seconds: int = 14400
+    task_execution_timeout_seconds: int = 28800
     task_maintenance_timeout_seconds: int = 120
-    flow_max_inline_text_bytes: int = 1_048_576
-    flow_pdf_max_pages: int = Field(default=500, gt=0)
-    flow_pdf_max_extracted_bytes: int = Field(default=32 * 1024 * 1024, gt=0)
-    flow_pdf_extraction_timeout_seconds: int = Field(default=120, gt=0)
+    flow_max_inline_text_bytes: int = 8 * 1024 * 1024
+    flow_pdf_max_pages: int = Field(default=2000, gt=0)
+    flow_pdf_max_extracted_bytes: int = Field(default=128 * 1024 * 1024, gt=0)
+    flow_pdf_extraction_timeout_seconds: int = Field(default=900, gt=0)
     flow_http_request_timeout_seconds: int = 30
     flow_http_max_timeout_seconds: int = 120
     flow_http_allow_private_networks: bool = False
-    flow_audio_max_duration_seconds: int = 4 * 60 * 60
+    flow_audio_max_duration_seconds: int = 5 * 60 * 60
     flow_audio_max_decoded_bytes: int = 2 * 1024 * 1024 * 1024
     # External transcription service: when set, flow transcribe-only steps
     # delegate transcription to it (async job API: submit multipart, poll,
@@ -383,7 +385,7 @@ class Settings(BaseSettings):
     # Deployment fallback for the per-mapped-step model-call ceiling. Applies when
     # an organization has never configured its own value; None disables mapped
     # authoring platform-wide unless an organization opts in explicitly.
-    flow_mapped_step_max_provider_calls_default: int | None = 100
+    flow_mapped_step_max_provider_calls_default: int | None = 1000
     ai_builder_conversation_safety_buffer_tokens: int = 2_000
     ai_builder_minimum_conversation_budget_tokens: int = 4_000
     ai_builder_answer_reserve_share: float = AI_BUILDER_ANSWER_RESERVE_SHARE_DEFAULT
@@ -476,7 +478,7 @@ class Settings(BaseSettings):
     # silently truncated. The file count is only an abuse guardrail and the byte
     # cap only bounds storage.
     attachment_max_files: int = 100
-    attachment_max_size_bytes: int = 26214400  # 25 MB
+    attachment_max_size_bytes: int = DEFAULT_FILE_UPLOAD_LIMIT_BYTES
     # Tokens kept free in the input window for the live question (and a little
     # history) when checking whether the prompt + attachments fit.
     attachment_context_reserve_tokens: int = 2000

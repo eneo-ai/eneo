@@ -4,14 +4,6 @@ from pydantic import ValidationError
 from eneo.main.config import Settings
 
 
-def test_pdf_extraction_limit_defaults():
-    settings = Settings()
-
-    assert settings.flow_pdf_max_pages == 500
-    assert settings.flow_pdf_max_extracted_bytes == 32 * 1024 * 1024
-    assert settings.flow_pdf_extraction_timeout_seconds == 120
-
-
 @pytest.mark.parametrize(
     "name",
     [

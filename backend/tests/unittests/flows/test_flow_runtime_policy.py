@@ -192,7 +192,6 @@ def test_step_timeout_uses_policy_default_and_rejects_override_above_max() -> No
 def test_invocation_ceiling_defines_the_effective_policy() -> None:
     from eneo.main.config import Settings
 
-    assert Settings.model_fields["task_execution_timeout_seconds"].default == 14400
     defaults = Settings.model_construct(task_execution_timeout_seconds=14400)
     policy = resolve_flow_runtime_policy(None, defaults=defaults)
     assert policy.default_step_timeout_seconds == 14340
