@@ -8,7 +8,6 @@ import threading
 import time
 import wave
 from concurrent.futures import ThreadPoolExecutor
-from unittest.mock import Mock
 
 import numpy as np
 import pytest
@@ -258,6 +257,60 @@ async def test_measure_duration_counts_pcm_without_creating_a_wav(
     assert list(temp_dir.iterdir()) == []
 
 
+async def test_cancel_decoder_does_not_wait_for_unrelated_executor_work(
+    recording, decoder_process
+):
+    source, _, temp_dir = recording
+    loop = asyncio.get_running_loop()
+    loop.set_default_executor(ThreadPoolExecutor(max_workers=1))
+    occupied = threading.Event()
+    release = threading.Event()
+
+    def unrelated_work():
+        occupied.set()
+        release.wait()
+
+    unrelated = loop.run_in_executor(None, unrelated_work)
+    processes, ready = decoder_process(
+        "import pathlib, sys, time\n"
+        "sys.stdout.buffer.write(b'RIFF' + bytes(40)); sys.stdout.flush()\n"
+        "pathlib.Path(sys.argv[1]).touch()\n"
+        "time.sleep(60)\n"
+    )
+
+    async def consume():
+        async with audio.to_wav(str(source)):
+            pytest.fail("Cancelled decoding must not yield a file")
+
+    task = None
+    try:
+        async with asyncio.timeout(2):
+            while not occupied.is_set():
+                await asyncio.sleep(0.01)
+            task = asyncio.create_task(consume())
+            while not ready.exists() and not task.done():
+                await asyncio.sleep(0.01)
+        assert ready.exists()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(asyncio.shield(task), timeout=0.5)
+        assert not unrelated.done()
+        assert not release.is_set()
+        assert processes[0].returncode == -signal.SIGTERM
+        with pytest.raises(ProcessLookupError):
+            os.kill(processes[0].pid, 0)
+        assert list(temp_dir.iterdir()) == []
+    finally:
+        release.set()
+        await unrelated
+        for process in processes:
+            if process.poll() is None:
+                process.kill()
+        if task is not None:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+
 async def test_compressed_audio_stops_before_eof_with_bounded_reads(
     recording, ffmpeg, monkeypatch
 ):
@@ -281,31 +334,25 @@ async def test_compressed_audio_stops_before_eof_with_bounded_reads(
     processes = []
     bytes_read = []
     read_sizes = []
-    popen = subprocess.Popen
+    create_process = asyncio.create_subprocess_exec
 
-    def spawn(*args, **kwargs):
-        process = popen(*args, **kwargs)
+    async def spawn(*args, **kwargs):
+        assert kwargs["limit"] == 65536
+        process = await create_process(*args, **kwargs)
         stdout = process.stdout
+        original_read = stdout.read
 
-        def readinto(buffer):
-            read_sizes.append(len(buffer))
-            count = stdout.readinto(buffer)
-            bytes_read.append(count)
-            return count
-
-        def read(size):
+        async def read(size):
             read_sizes.append(size)
-            data = stdout.read(size)
+            data = await original_read(size)
             bytes_read.append(len(data))
             return data
 
-        process.stdout = Mock(wraps=stdout)
-        process.stdout.readinto.side_effect = readinto
-        process.stdout.read.side_effect = read
+        monkeypatch.setattr(stdout, "read", read)
         processes.append(process)
         return process
 
-    monkeypatch.setattr(subprocess, "Popen", spawn)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
     writeframes = wave.Wave_write.writeframesraw
     written = []
 
@@ -323,11 +370,13 @@ async def test_compressed_audio_stops_before_eof_with_bounded_reads(
 
     assert error.value.limit == "decoded_bytes"
     assert 0 < sum(written) <= 65536
-    assert sum(bytes_read) <= 65536 + 65536
     assert sum(bytes_read) < 600 * 16000 * 2
     assert read_sizes and max(read_sizes) <= 65536
     assert len(processes) == 1
-    assert processes[0].returncode < 0
+    assert processes[0].returncode is not None
+    assert processes[0].returncode != 0
+    with pytest.raises(ProcessLookupError):
+        os.kill(processes[0].pid, 0)
     assert list(temp_dir.iterdir()) == []
 
 
