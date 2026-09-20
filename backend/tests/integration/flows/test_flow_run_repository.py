@@ -83,6 +83,7 @@ from eneo.flows.runtime.step_result_builder import (
     build_activated_attempt_input,
     build_terminal_attempt_input,
 )
+from tests.flow_snapshot_fixtures import assistant_snapshot
 from tests.integration.flows.test_flow_run_listing_and_evidence_measurement import (
     _capture_queries,
     _decode_explain,
@@ -284,6 +285,9 @@ async def attempt_provenance_context(
                     {
                         "step_id": str(flow.steps[0].id),
                         "assistant_id": str(flow.steps[0].assistant_id),
+                        "assistant_snapshot": assistant_snapshot(
+                            flow.steps[0].assistant_id
+                        ),
                         "step_order": 1,
                     }
                 ]
@@ -438,11 +442,17 @@ async def test_create_run_preseeds_pending_step_results(
                     {
                         "step_id": str(flow.steps[0].id),
                         "assistant_id": str(flow.steps[0].assistant_id),
+                        "assistant_snapshot": assistant_snapshot(
+                            flow.steps[0].assistant_id
+                        ),
                         "step_order": 1,
                     },
                     {
                         "step_id": str(flow.steps[1].id),
                         "assistant_id": str(flow.steps[1].assistant_id),
+                        "assistant_snapshot": assistant_snapshot(
+                            flow.steps[1].assistant_id
+                        ),
                         "step_order": 2,
                     },
                 ]
@@ -538,6 +548,7 @@ async def test_save_step_result_upserts_on_run_and_step(
                     {
                         "step_id": str(step_id),
                         "assistant_id": str(assistant.id),
+                        "assistant_snapshot": assistant_snapshot(assistant.id),
                         "step_order": 1,
                     }
                 ]
@@ -686,6 +697,9 @@ async def test_list_runs_filters_by_flow_id(
                     {
                         "step_id": str(first_flow.steps[0].id),
                         "assistant_id": str(first_flow.steps[0].assistant_id),
+                        "assistant_snapshot": assistant_snapshot(
+                            first_flow.steps[0].assistant_id
+                        ),
                         "step_order": 1,
                     }
                 ]
@@ -700,6 +714,9 @@ async def test_list_runs_filters_by_flow_id(
                     {
                         "step_id": str(second_flow.steps[0].id),
                         "assistant_id": str(second_flow.steps[0].assistant_id),
+                        "assistant_snapshot": assistant_snapshot(
+                            second_flow.steps[0].assistant_id
+                        ),
                         "step_order": 1,
                     }
                 ]
@@ -1155,6 +1172,9 @@ async def test_count_active_runs_counts_only_queued_and_running_statuses(
                     {
                         "step_id": str(flow.steps[0].id),
                         "assistant_id": str(flow.steps[0].assistant_id),
+                        "assistant_snapshot": assistant_snapshot(
+                            flow.steps[0].assistant_id
+                        ),
                         "step_order": 1,
                     }
                 ]
@@ -1308,6 +1328,9 @@ async def test_create_run_rejects_cross_tenant_flow_reference(
                     {
                         "step_id": str(flow.steps[0].id),
                         "assistant_id": str(flow.steps[0].assistant_id),
+                        "assistant_snapshot": assistant_snapshot(
+                            flow.steps[0].assistant_id
+                        ),
                         "step_order": 1,
                     }
                 ]
@@ -1387,6 +1410,9 @@ async def test_terminalization_is_idempotent_after_terminal_transition(
                     {
                         "step_id": str(flow.steps[0].id),
                         "assistant_id": str(flow.steps[0].assistant_id),
+                        "assistant_snapshot": assistant_snapshot(
+                            flow.steps[0].assistant_id
+                        ),
                         "step_order": 1,
                     }
                 ]
@@ -1487,6 +1513,9 @@ async def test_get_sanitizes_corrupt_persisted_run_error_json(
                     {
                         "step_id": str(flow.steps[0].id),
                         "assistant_id": str(flow.steps[0].assistant_id),
+                        "assistant_snapshot": assistant_snapshot(
+                            flow.steps[0].assistant_id
+                        ),
                         "step_order": 1,
                     }
                 ]
@@ -1575,6 +1604,9 @@ async def test_failed_terminalization_stamps_active_step_result_error_code(
                     {
                         "step_id": str(flow.steps[0].id),
                         "assistant_id": str(flow.steps[0].assistant_id),
+                        "assistant_snapshot": assistant_snapshot(
+                            flow.steps[0].assistant_id
+                        ),
                         "step_order": 1,
                     }
                 ]
@@ -1670,6 +1702,9 @@ async def test_claim_step_result_is_single_winner(
                     {
                         "step_id": str(flow.steps[0].id),
                         "assistant_id": str(flow.steps[0].assistant_id),
+                        "assistant_snapshot": assistant_snapshot(
+                            flow.steps[0].assistant_id
+                        ),
                         "step_order": 1,
                     }
                 ]
@@ -1758,6 +1793,9 @@ async def test_claim_step_result_is_single_winner_under_concurrency(
                     {
                         "step_id": str(flow.steps[0].id),
                         "assistant_id": str(flow.steps[0].assistant_id),
+                        "assistant_snapshot": assistant_snapshot(
+                            flow.steps[0].assistant_id
+                        ),
                         "step_order": 1,
                     }
                 ]
@@ -1845,6 +1883,9 @@ async def test_claim_step_result_serializes_against_terminalization(
                     {
                         "step_id": str(flow.steps[0].id),
                         "assistant_id": str(flow.steps[0].assistant_id),
+                        "assistant_snapshot": assistant_snapshot(
+                            flow.steps[0].assistant_id
+                        ),
                         "step_order": 1,
                     }
                 ]
@@ -1964,6 +2005,9 @@ async def test_mark_running_if_claimable_is_single_winner(
                     {
                         "step_id": str(flow.steps[0].id),
                         "assistant_id": str(flow.steps[0].assistant_id),
+                        "assistant_snapshot": assistant_snapshot(
+                            flow.steps[0].assistant_id
+                        ),
                         "step_order": 1,
                     }
                 ]
@@ -2041,6 +2085,9 @@ async def test_mark_running_if_claimable_is_single_winner_under_concurrency(
                     {
                         "step_id": str(flow.steps[0].id),
                         "assistant_id": str(flow.steps[0].assistant_id),
+                        "assistant_snapshot": assistant_snapshot(
+                            flow.steps[0].assistant_id
+                        ),
                         "step_order": 1,
                     }
                 ]
@@ -2125,6 +2172,9 @@ async def test_dispatch_claim_has_one_winner_under_concurrency(
                     {
                         "step_id": str(flow.steps[0].id),
                         "assistant_id": str(flow.steps[0].assistant_id),
+                        "assistant_snapshot": assistant_snapshot(
+                            flow.steps[0].assistant_id
+                        ),
                         "step_order": 1,
                     }
                 ]
@@ -2215,6 +2265,9 @@ async def test_update_input_payload_applies_transcription_patch_without_clobberi
                     {
                         "step_id": str(flow.steps[0].id),
                         "assistant_id": str(flow.steps[0].assistant_id),
+                        "assistant_snapshot": assistant_snapshot(
+                            flow.steps[0].assistant_id
+                        ),
                         "step_order": 1,
                     }
                 ]
@@ -2311,6 +2364,9 @@ async def test_list_runs_supports_limit_and_offset(
                     {
                         "step_id": str(flow.steps[0].id),
                         "assistant_id": str(flow.steps[0].assistant_id),
+                        "assistant_snapshot": assistant_snapshot(
+                            flow.steps[0].assistant_id
+                        ),
                         "step_order": 1,
                     }
                 ]
@@ -2419,6 +2475,9 @@ async def test_claim_step_result_returns_none_for_wrong_tenant(
                     {
                         "step_id": str(flow.steps[0].id),
                         "assistant_id": str(flow.steps[0].assistant_id),
+                        "assistant_snapshot": assistant_snapshot(
+                            flow.steps[0].assistant_id
+                        ),
                         "step_order": 1,
                     }
                 ]
@@ -2490,6 +2549,9 @@ async def test_create_or_get_attempt_started_is_idempotent(
                     {
                         "step_id": str(flow.steps[0].id),
                         "assistant_id": str(flow.steps[0].assistant_id),
+                        "assistant_snapshot": assistant_snapshot(
+                            flow.steps[0].assistant_id
+                        ),
                         "step_order": 1,
                     }
                 ]
@@ -3218,6 +3280,9 @@ async def test_create_or_get_attempt_started_is_single_row_under_concurrency(
                     {
                         "step_id": str(flow.steps[0].id),
                         "assistant_id": str(flow.steps[0].assistant_id),
+                        "assistant_snapshot": assistant_snapshot(
+                            flow.steps[0].assistant_id
+                        ),
                         "step_order": 1,
                     }
                 ]
@@ -3312,6 +3377,9 @@ async def test_attempt_start_serializes_against_terminalization(
                     {
                         "step_id": str(flow.steps[0].id),
                         "assistant_id": str(flow.steps[0].assistant_id),
+                        "assistant_snapshot": assistant_snapshot(
+                            flow.steps[0].assistant_id
+                        ),
                         "step_order": 1,
                     }
                 ]
@@ -3451,11 +3519,17 @@ async def test_cancel_terminalization_only_updates_pending_or_running_steps(
                     {
                         "step_id": str(flow.steps[0].id),
                         "assistant_id": str(flow.steps[0].assistant_id),
+                        "assistant_snapshot": assistant_snapshot(
+                            flow.steps[0].assistant_id
+                        ),
                         "step_order": 1,
                     },
                     {
                         "step_id": str(flow.steps[1].id),
                         "assistant_id": str(flow.steps[1].assistant_id),
+                        "assistant_snapshot": assistant_snapshot(
+                            flow.steps[1].assistant_id
+                        ),
                         "step_order": 2,
                     },
                 ]
@@ -3571,6 +3645,9 @@ async def test_finish_attempt_is_idempotent(
                     {
                         "step_id": str(flow.steps[0].id),
                         "assistant_id": str(flow.steps[0].assistant_id),
+                        "assistant_snapshot": assistant_snapshot(
+                            flow.steps[0].assistant_id
+                        ),
                         "step_order": 1,
                     }
                 ]
@@ -3762,6 +3839,9 @@ async def test_dispatch_lifecycle_uses_one_durable_epoch_and_exact_cas(
                         {
                             "step_id": str(flow.steps[0].id),
                             "assistant_id": str(flow.steps[0].assistant_id),
+                            "assistant_snapshot": assistant_snapshot(
+                                flow.steps[0].assistant_id
+                            ),
                             "step_order": 1,
                         }
                     ]
@@ -4194,11 +4274,17 @@ async def test_provenance_measurement_and_bounded_attempt_read(
                     {
                         "step_id": str(flow.steps[0].id),
                         "assistant_id": str(flow.steps[0].assistant_id),
+                        "assistant_snapshot": assistant_snapshot(
+                            flow.steps[0].assistant_id
+                        ),
                         "step_order": 1,
                     },
                     {
                         "step_id": str(flow.steps[1].id),
                         "assistant_id": str(flow.steps[1].assistant_id),
+                        "assistant_snapshot": assistant_snapshot(
+                            flow.steps[1].assistant_id
+                        ),
                         "step_order": 2,
                     },
                 ]

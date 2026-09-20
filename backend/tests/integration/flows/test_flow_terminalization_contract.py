@@ -49,6 +49,7 @@ from eneo.flows.runtime.step_execution_result import (
     WebhookDeliveryIntent,
     WebhookPayloadRef,
 )
+from tests.flow_snapshot_fixtures import assistant_snapshot
 
 LIFECYCLE_LOGGER = "eneo.flows.application.flow_run_lifecycle_events"
 
@@ -190,6 +191,7 @@ async def _create_running_run(
                 {
                     "step_id": str(step.id),
                     "assistant_id": str(step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(step.assistant_id),
                     "step_order": step.step_order,
                 }
                 for step in flow.steps

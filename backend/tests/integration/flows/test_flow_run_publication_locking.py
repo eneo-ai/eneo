@@ -20,6 +20,7 @@ from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from eneo.flows.published_definition import build_published_definition_json
 from eneo.main.container.container import Container
 from eneo.main.exceptions import BadRequestException
+from tests.flow_snapshot_fixtures import assistant_snapshot
 
 
 async def _create_published_flow_with_two_versions(
@@ -87,6 +88,7 @@ async def _create_published_flow_with_two_versions(
             {
                 "step_id": str(step.id),
                 "assistant_id": str(step.assistant_id),
+                "assistant_snapshot": assistant_snapshot(step.assistant_id),
                 "step_order": step.step_order,
                 "user_description": step.user_description,
                 "input_source": step.input_source.value,

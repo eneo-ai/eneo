@@ -79,6 +79,7 @@ from eneo.roles.permissions import Permission
 from eneo.server.main import app
 from eneo.spaces.api.space_models import SpaceRoleValue
 from eneo.users.user import UserAdd, UserInDB, UserState
+from tests.flow_snapshot_fixtures import assistant_snapshot
 
 _RUNTIME_INPUT_ORIGINAL = b"%PDF evidence".ljust(256, b"\x00")
 _RUNTIME_INPUT_EXTRACTED_TEXT = b"case file text"
@@ -334,6 +335,7 @@ async def _seed_flow_run_contract_data(
                     {
                         "step_id": str(step.id),
                         "assistant_id": str(step.assistant_id),
+                        "assistant_snapshot": assistant_snapshot(step.assistant_id),
                         "step_order": 1,
                         "output_config": {
                             "url": "https://example.org/hook?token=top-secret",
@@ -718,6 +720,7 @@ async def _replace_flow_definition_with_outbound_http_snapshot(
                     "step_id": str(step_result.step_id),
                     "step_order": step_result.step_order,
                     "assistant_id": str(step_result.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(step_result.assistant_id),
                     "input_source": "flow_input",
                     "input_type": "text",
                     "output_mode": "http_post",
@@ -1136,6 +1139,7 @@ async def test_completed_verified_evidence_projects_redacted_structured_result(
                     "step_id": str(step_result.step_id),
                     "step_order": step_result.step_order,
                     "assistant_id": str(step_result.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(step_result.assistant_id),
                     "input_source": "flow_input",
                     "input_type": "text",
                     "output_mode": "pass_through",

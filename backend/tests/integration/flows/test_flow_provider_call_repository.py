@@ -66,6 +66,7 @@ from eneo.token_usage.infrastructure.token_usage_analyzer import TokenUsageAnaly
 from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
     LiteLLMTranscriptionAdapter,
 )
+from tests.flow_snapshot_fixtures import assistant_snapshot
 
 
 class _TranscriptionCredentialResolverStub:
@@ -215,6 +216,7 @@ async def _create_started_attempt(
                 {
                     "step_id": str(step.id),
                     "assistant_id": str(step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(step.assistant_id),
                     "step_order": step.step_order,
                 }
             ]

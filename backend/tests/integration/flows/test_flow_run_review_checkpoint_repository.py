@@ -77,6 +77,7 @@ from eneo.flows.runtime.flow_runtime_health import (
     build_flow_runtime_health_policy,
     load_flow_runtime_health_snapshot,
 )
+from tests.flow_snapshot_fixtures import assistant_snapshot
 from tests.integration.flows.test_flow_run_listing_and_evidence_measurement import (
     _capture_queries,
 )
@@ -513,11 +514,13 @@ async def _create_review_checkpoint_scenario(
                 {
                     "step_id": str(_require_uuid(first_step.id)),
                     "assistant_id": str(first_step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(first_step.assistant_id),
                     "step_order": 1,
                 },
                 {
                     "step_id": str(_require_uuid(second_step.id)),
                     "assistant_id": str(second_step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(second_step.assistant_id),
                     "step_order": 2,
                 },
             ]

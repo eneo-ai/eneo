@@ -76,6 +76,7 @@ from eneo.flows.infrastructure.flow_run_step_input_file_rows import (
 )
 from eneo.flows.principal import FlowPrincipal
 from eneo.flows.published_definition import build_published_definition_json
+from tests.flow_snapshot_fixtures import assistant_snapshot
 
 REPORT_SCHEMA_VERSION = "flow-run-listing-evidence-measurement.v1"
 WORKLOAD_SEED = 20260726
@@ -233,6 +234,7 @@ def _published_definition(flow: Flow) -> dict[str, object]:
         )
         payload["step_id"] = str(step.id)
         payload["assistant_id"] = str(step.assistant_id)
+        payload["assistant_snapshot"] = assistant_snapshot(step.assistant_id)
         steps.append(payload)
     return build_published_definition_json(
         flow_id=flow.id,

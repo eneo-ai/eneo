@@ -44,6 +44,7 @@ from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
 )
 from eneo.flows.published_definition import FLOW_DEFINITION_SCHEMA_VERSION
 from eneo.object_content.content import ContentFailureCode, ContentState
+from tests.flow_snapshot_fixtures import assistant_snapshot
 
 
 def _flow(
@@ -158,6 +159,7 @@ async def _create_version(
                 {
                     "step_id": str(step.id),
                     "assistant_id": str(step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(step.assistant_id),
                     "step_order": step.step_order,
                     "input_source": step.input_source,
                     "input_type": step.input_type,

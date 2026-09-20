@@ -31,6 +31,7 @@ from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
 )
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
+from tests.flow_snapshot_fixtures import assistant_snapshot
 
 
 def _build_flow(
@@ -111,6 +112,9 @@ async def _create_flow_and_run(
                 {
                     "step_id": str(flow.steps[0].id),
                     "assistant_id": str(flow.steps[0].assistant_id),
+                    "assistant_snapshot": assistant_snapshot(
+                        flow.steps[0].assistant_id
+                    ),
                     "step_order": 1,
                 }
             ]

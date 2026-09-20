@@ -25,6 +25,9 @@ from eneo.flows.infrastructure.flow_transcript_corrections_repo import (
     FlowTranscriptCorrectionsRepository,
 )
 from eneo.flows.principal import FlowPrincipal
+from tests.flow_snapshot_fixtures import (
+    assistant_snapshot as fixture_assistant_snapshot,
+)
 from tests.integration.flows.test_flow_run_listing_and_evidence_measurement import (
     _capture_queries,
 )
@@ -160,7 +163,7 @@ async def _create_scenario(
     )
     first_step, second_step = flow.steps
     runtime_assistant = None
-    assistant_snapshot = None
+    assistant_snapshot = fixture_assistant_snapshot(assistant.id)
     if runtime_definition:
         from types import SimpleNamespace
 
@@ -220,11 +223,7 @@ async def _create_scenario(
                     "step_id": str(_require_uuid(first_step.id)),
                     "assistant_id": str(first_step.assistant_id),
                     "step_order": 1,
-                    **(
-                        {"assistant_snapshot": assistant_snapshot}
-                        if runtime_definition
-                        else {}
-                    ),
+                    "assistant_snapshot": assistant_snapshot,
                     **(
                         {
                             "input_source": "flow_input",
@@ -241,11 +240,7 @@ async def _create_scenario(
                     "step_id": str(_require_uuid(second_step.id)),
                     "assistant_id": str(second_step.assistant_id),
                     "step_order": 2,
-                    **(
-                        {"assistant_snapshot": assistant_snapshot}
-                        if runtime_definition
-                        else {}
-                    ),
+                    "assistant_snapshot": assistant_snapshot,
                     **(
                         {
                             "input_source": "previous_step",

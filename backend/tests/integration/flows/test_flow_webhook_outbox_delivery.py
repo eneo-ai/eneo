@@ -62,6 +62,7 @@ from eneo.flows.runtime.step_execution_result import (
 from eneo.flows.runtime.tasks import enable_autobegin_for_flow_task_session
 from eneo.flows.variable_resolver import FlowVariableResolver
 from eneo.main.container.container import Container
+from tests.flow_snapshot_fixtures import assistant_snapshot
 
 
 def _build_flow(
@@ -187,6 +188,9 @@ async def _create_running_webhook_run(
                 {
                     "step_id": str(published_step.id),
                     "assistant_id": str(published_step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(
+                        published_step.assistant_id
+                    ),
                     "step_order": published_step.step_order,
                     "user_description": published_step.user_description,
                     "input_source": published_step.input_source,

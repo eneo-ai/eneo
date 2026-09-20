@@ -30,6 +30,7 @@ from eneo.object_content.content import (
     ContentState,
     StorageKind,
 )
+from tests.flow_snapshot_fixtures import assistant_snapshot
 
 
 def _flow(
@@ -88,6 +89,7 @@ def _definition_json(
             {
                 "step_id": str(step.id),
                 "assistant_id": str(step.assistant_id),
+                "assistant_snapshot": assistant_snapshot(step.assistant_id),
                 "step_order": step.step_order,
                 "input_source": step.input_source,
                 "input_type": step.input_type,
@@ -223,6 +225,7 @@ async def test_create_derives_definition_checksum_from_stored_definition(
                 {
                     "step_id": str(step.id),
                     "assistant_id": str(step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(step.assistant_id),
                     "step_order": step.step_order,
                     "input_source": step.input_source,
                     "input_type": step.input_type,
