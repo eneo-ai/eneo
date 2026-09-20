@@ -973,13 +973,17 @@ async def test_service_preflight_measures_the_outgoing_package(package_case, str
             request["model_kwargs"] = ModelKwargs()
         if proxy is not None:
             request["mcp_servers"] = [SimpleNamespace(is_enabled=True)]
-        request["prompt"] = "This later change must not replace the admitted package."
-        await service.get_response(
+        request["prompt"] = (
+            "This later change must not replace the admitted package. " * 2000
+        )
+        response = await service.get_response(
             **request,
             useful_output_reserve_tokens=32,
             stream=stream,
             prepared_request=package,
             file_reference_urls=result.file_reference_urls,
+            reject_context_over_limit=True,
+            extended_logging=True,
         )
     transport.assert_awaited_once()
     sent = transport.await_args.kwargs
@@ -992,6 +996,10 @@ async def test_service_preflight_measures_the_outgoing_package(package_case, str
     assert measured[-1] == expected
     assert sent["max_tokens"] == package.output_cap_tokens
     assert "prepared_request" not in sent
+    assert json.loads(response.extended_logging.json_body) == sent["messages"]
+    assert response.extended_logging.model_kwargs.get("response_format") == sent.get(
+        "response_format"
+    )
     if package_case == "attachments":
         assert b"Attachment marker." in expected
     if package_case == "retrieved":

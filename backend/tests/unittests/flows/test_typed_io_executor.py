@@ -4230,14 +4230,28 @@ async def test_per_item_map_executes_one_model_call_per_previous_document_at_sca
 
 
 @pytest.mark.asyncio
-async def test_per_item_map_rejects_many_small_packages_before_provider_dispatch(user):
+@pytest.mark.parametrize(
+    "preferred_tokens,fallback_tokens,ceiling",
+    [(6, (6, 6), 10), (144, (176, 177), 320)],
+)
+async def test_per_item_map_rejects_many_small_packages_before_provider_dispatch(
+    user, preferred_tokens, fallback_tokens, ceiling
+):
     executor, _, _, _ = _build_executor(user)
     executor.mapped_execution_policy = FlowMappedExecutionPolicy(
         max_provider_calls_per_mapped_step=3,
-        max_estimated_input_tokens_per_mapped_step=10,
+        max_estimated_input_tokens_per_mapped_step=ceiling,
     )
-    assistant = _mock_assistant_for_execute_step()
-    assistant.preflight_response_context = AsyncMock(return_value=_context_preflight(6))
+    assistant = _mock_assistant_for_execute_step(response_text='{"sections":[]}')
+    assistant.preflight_response_context = AsyncMock(
+        side_effect=[
+            replace(
+                _context_preflight(preferred_tokens),
+                fallback=_context_preflight(tokens).preferred,
+            )
+            for tokens in fallback_tokens
+        ]
+    )
     executor._load_assistant = AsyncMock(return_value=assistant)
     run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
     previous = _completed_step_result(

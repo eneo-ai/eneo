@@ -44,7 +44,11 @@ class CompletionModelAdapter(ABC):
         return self.model.get_model_route()
 
     def get_logging_details(
-        self, context: "Context", model_kwargs: "ModelKwargs | dict[str, Any] | None"
+        self,
+        context: "Context",
+        model_kwargs: "ModelKwargs | dict[str, Any] | None",
+        *,
+        prepared_request: CompletionRequestPackage | None = None,
     ) -> "LoggingDetails":
         raise NotImplementedError()
 

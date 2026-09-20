@@ -2995,6 +2995,8 @@ class TenantModelAdapter(CompletionModelAdapter):
         self,
         context: "Context",
         model_kwargs: ModelKwargs | dict[str, Any] | None,
+        *,
+        prepared_request: CompletionRequestPackage | None = None,
     ) -> LoggingDetails:
         """
         Build logging details for extended logging.
@@ -3008,11 +3010,15 @@ class TenantModelAdapter(CompletionModelAdapter):
         """
         import json
 
-        messages = self._create_messages_from_context(context)
+        messages = (
+            prepared_request.messages
+            if prepared_request is not None
+            else self._create_messages_from_context(context)
+        )
 
         # Convert model_kwargs to a plain dict
         if isinstance(model_kwargs, dict):
-            kwargs_dict = model_kwargs
+            kwargs_dict = dict(model_kwargs)
         else:
             kwargs_dict = (
                 model_kwargs.model_dump(exclude_none=True)
@@ -3020,6 +3026,10 @@ class TenantModelAdapter(CompletionModelAdapter):
                 else {}
             )
 
+        if prepared_request is not None:
+            kwargs_dict.pop("response_format", None)
+            if prepared_request.response_format is not None:
+                kwargs_dict["response_format"] = prepared_request.response_format
         return LoggingDetails(
             model_kwargs=kwargs_dict,
             json_body=json.dumps(messages),

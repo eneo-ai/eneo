@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Literal, Optional, TypeAlias
 from uuid import UUID
 
@@ -11,6 +11,7 @@ from eneo.ai_models.completion_models.completion_model import (
     Completion,
     CompletionModel,
     CompletionModelResponse,
+    Context,
     ModelKwargs,
     ResponseType,
     sends_strict_tool_schemas,
@@ -18,7 +19,11 @@ from eneo.ai_models.completion_models.completion_model import (
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
-from eneo.authentication.signed_urls import build_signed_original_download_url
+from eneo.authentication.signed_urls import (
+    build_signed_original_download_url,
+    parse_file_reference_url,
+    verify_file_original_download_token,
+)
 from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
@@ -528,6 +533,24 @@ class CompletionService:
                 )
         return urls
 
+    @staticmethod
+    def _file_reference_urls_expiry(urls: dict[UUID, str]) -> int | None:
+        expiries: list[int] = []
+        for file_id, url in urls.items():
+            reference = parse_file_reference_url(url)
+            claims = (
+                verify_file_original_download_token(
+                    reference[1], expected_file_id=file_id
+                )
+                if reference is not None
+                else None
+            )
+            expiry = claims.get("expires_at") if claims is not None else None
+            if type(expiry) is not int:
+                return 0
+            expiries.append(expiry)
+        return min(expiries, default=None)
+
     async def _audit_file_reference_mints(
         self,
         files: list[File],
@@ -735,10 +758,13 @@ class CompletionService:
             provider_input = adapter.prepare_provider_input(
                 context, mcp_proxy=mcp_proxy, skill_runtime=skill_runtime
             )
-            return adapter.package_request(
-                provider_input,
-                model_kwargs=kwargs,
-                useful_output_reserve_tokens=useful_output_reserve_tokens,
+            return replace(
+                adapter.package_request(
+                    provider_input,
+                    model_kwargs=kwargs,
+                    useful_output_reserve_tokens=useful_output_reserve_tokens,
+                ),
+                context=context,
             )
 
         preferred = package(prompt, model_kwargs)
@@ -764,6 +790,9 @@ class CompletionService:
             preferred=preferred,
             fallback=fallback,
             file_reference_urls=file_reference_urls,
+            file_reference_urls_expires_at=self._file_reference_urls_expiry(
+                file_reference_urls
+            ),
             refusal=refusal,
         )
 
@@ -882,38 +911,46 @@ class CompletionService:
             )
 
         try:
-            context = self.context_builder.build_context(
-                input_str=text_input,
-                max_tokens=max_tokens,
-                model_name=model_adapter.get_model_route(),
-                files=files,
-                prompt=prompt,
-                session=session,
-                info_blob_chunks=info_blob_chunks,
-                prompt_files=prompt_files,
-                transcription_inputs=transcription_inputs,
-                version=version,
-                mcp_tools=(
-                    [skill_runtime.tool_definition]
-                    if skill_runtime is not None
-                    and skill_runtime.tool_definition is not None
-                    else None
-                ),
-                knowledge_catalog=knowledge_catalog,
-                vision=model.vision,
-                extra_tool_dicts=(
-                    mcp_proxy.get_tools_for_llm()
-                    if mcp_proxy and model.supports_tool_calling
-                    else None
-                ),
-                reject_over_limit=reject_context_over_limit,
-                file_reference_urls=file_reference_urls,
-                inline_file_text=inline_file_text,
-            )
+            if prepared_request is not None:
+                context = prepared_request.context or Context(
+                    input="", token_count=prepared_request.input_reserve.tokens
+                )
+            else:
+                context = self.context_builder.build_context(
+                    input_str=text_input,
+                    max_tokens=max_tokens,
+                    model_name=model_adapter.get_model_route(),
+                    files=files,
+                    prompt=prompt,
+                    session=session,
+                    info_blob_chunks=info_blob_chunks,
+                    prompt_files=prompt_files,
+                    transcription_inputs=transcription_inputs,
+                    version=version,
+                    mcp_tools=(
+                        [skill_runtime.tool_definition]
+                        if skill_runtime is not None
+                        and skill_runtime.tool_definition is not None
+                        else None
+                    ),
+                    knowledge_catalog=knowledge_catalog,
+                    vision=model.vision,
+                    extra_tool_dicts=(
+                        mcp_proxy.get_tools_for_llm()
+                        if mcp_proxy and model.supports_tool_calling
+                        else None
+                    ),
+                    reject_over_limit=reject_context_over_limit,
+                    file_reference_urls=file_reference_urls,
+                    inline_file_text=inline_file_text,
+                )
 
             if extended_logging:
+                logging_options: dict[str, Any] = {}
+                if prepared_request is not None:
+                    logging_options["prepared_request"] = prepared_request
                 logging_details = model_adapter.get_logging_details(
-                    context=context, model_kwargs=model_kwargs
+                    context=context, model_kwargs=model_kwargs, **logging_options
                 )
             else:
                 logging_details = None
@@ -1044,7 +1081,11 @@ class CompletionService:
         total_token_count = (
             adapter_input_estimate
             if adapter_input_estimate is not None
-            else context.token_count
+            else (
+                prepared_request.input_reserve.tokens
+                if prepared_request is not None
+                else context.token_count
+            )
             + max(
                 final_skill_tokens - initial_skill_tokens,
                 0,

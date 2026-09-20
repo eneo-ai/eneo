@@ -430,10 +430,125 @@ async def test_preview_reuses_measured_fallback_after_capability_rejection(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("elapsed", [3590, 3601])
+@pytest.mark.parametrize("capability_retry", [False, True])
+async def test_dispatch_refreshes_expiring_references_and_remeasures(
+    preflight_dispatch, monkeypatch, elapsed, capability_retry
+):
+    from dataclasses import replace
+
+    from eneo.authentication.signed_urls import (
+        parse_file_reference_url,
+        verify_file_original_download_token,
+    )
+    from eneo.files.file_models import File, FileType
+    from eneo.flows.runtime.step_deadline import StepDeadline
+
+    h = preflight_dispatch
+    clock = {"wall": 2_000_000_000, "elapsed": 0}
+    monkeypatch.setattr("time.time", lambda: clock["wall"])
+    monkeypatch.setattr(
+        "eneo.flows.runtime.step_deadline._now", lambda: clock["elapsed"]
+    )
+    monkeypatch.setattr(
+        "eneo.files.file_reference.file_reference_base_url",
+        lambda: "https://files.example",
+    )
+    h.service.config = h.service.config.model_copy(
+        update={
+            "file_reference_base_url": "https://files.example",
+            "file_reference_url_expiry_seconds": 3600,
+        }
+    )
+    h.service.tenant = SimpleNamespace(id=uuid4())
+    h.service._build_file_reference_urls = MagicMock(
+        wraps=h.service._build_file_reference_urls
+    )
+    h.deps = replace(h.deps, deadline=StepDeadline.start(7200))
+    now = datetime.now(timezone.utc)
+    file = File(
+        id=uuid4(),
+        created_at=now,
+        updated_at=now,
+        name="source.txt",
+        checksum="test",
+        size=20,
+        file_type=FileType.TEXT,
+        text="Attachment marker.",
+        owner_type=PrincipalType.USER,
+        tenant_id=h.service.tenant.id,
+        original_available=True,
+    )
+    h.prepared.llm_files = [file]
+    measured = []
+
+    def measure(messages, tools, route, *, response_format=None):
+        measured.append((clock["elapsed"], json.dumps(messages)))
+        return measure_provider_input_reserve(
+            messages, tools, route, response_format=response_format
+        )
+
+    monkeypatch.setattr(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter.measure_provider_input_reserve",
+        measure,
+    )
+    await preview_step_execution_context(
+        step=h.step, state=h.state, prepared=h.prepared, deps=h.deps
+    )
+    original = h.prepared.completion_call.preflight.file_reference_urls[file.id]
+
+    def advance():
+        clock["wall"] += elapsed
+        clock["elapsed"] += elapsed
+
+    if capability_retry:
+
+        async def respond(**kwargs):
+            if h.transport.await_count == 1:
+                advance()
+                raise ProviderCapabilityRejectedException(
+                    "Response format unsupported",
+                    capability="response_format",
+                    retry_without_capability_safe=True,
+                    code="provider_capability_rejected",
+                )
+            return h.transport.return_value
+
+        h.transport.side_effect = respond
+    else:
+        advance()
+    await complete_step_execution(
+        step=h.step, run=_run(), state=h.state, prepared=h.prepared, deps=h.deps
+    )
+
+    assert h.deps.deadline.remaining() == 7200 - elapsed
+    fresh = h.prepared.completion_call.preflight.file_reference_urls[file.id]
+    assert fresh != original
+    parsed = parse_file_reference_url(fresh)
+    assert parsed is not None
+    claims = verify_file_original_download_token(parsed[1], expected_file_id=file.id)
+    assert claims is not None
+    assert claims["expires_at"] == clock["wall"] + 3600
+    assert (
+        h.prepared.completion_call.preflight.file_reference_urls_expires_at
+        == claims["expires_at"]
+    )
+    sent = h.transport.await_args.kwargs
+    assert fresh in json.dumps(sent["messages"])
+    assert original not in json.dumps(sent["messages"])
+    package = h.prepared.completion_call.selected_package
+    assert json.dumps(sent["messages"]) == json.dumps(package.messages)
+    assert sent["max_tokens"] == package.output_cap_tokens
+    assert (elapsed, json.dumps(package.messages)) in measured
+    assert h.service._build_file_reference_urls.call_count == 2
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("retrieved", [False, True])
 async def test_preview_reuses_signed_file_references_at_dispatch(
     preflight_dispatch, retrieved
 ):
+    from eneo.authentication.signed_urls import build_signed_original_download_url
     from eneo.files.file_models import File, FileType
     from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 
@@ -452,8 +567,18 @@ async def test_preview_reuses_signed_file_references_at_dispatch(
         tenant_id=uuid4(),
     )
     h.prepared.llm_files = [file]
-    original = f"https://files.example/{file.id}?signature=first"
-    changed = f"https://files.example/{file.id}?signature=later-and-longer"
+    original = build_signed_original_download_url(
+        file_id=file.id,
+        base_url="https://files.example",
+        expires_in=3600,
+        tenant_id=file.tenant_id,
+    )
+    changed = build_signed_original_download_url(
+        file_id=file.id,
+        base_url="https://files.example",
+        expires_in=3599,
+        tenant_id=file.tenant_id,
+    )
     h.service._build_file_reference_urls = MagicMock(
         side_effect=[{file.id: original}, {file.id: changed}]
     )

@@ -5,6 +5,7 @@ import contextlib
 import hashlib
 import json
 import logging
+import time
 from dataclasses import dataclass, replace
 from typing import Any, Awaitable, Final, Literal, Protocol, Sequence, cast
 from uuid import UUID
@@ -119,6 +120,7 @@ logger = logging.getLogger(__name__)
 # Log the first failed cancel probe and then every Nth, so a database outage
 # leaves a trail without one line per tick for the rest of a long provider call.
 _CANCEL_WATCH_FAILURE_LOG_INTERVAL = 15
+_FILE_REFERENCE_REFRESH_MARGIN_SECONDS: Final[int] = 30
 LLM_TASK_CANCELLATION_GRACE_SECONDS: Final[float] = 2.0
 RAG_RETRIEVAL_QUERY_CHAR_LIMIT: Final[int] = 2048
 
@@ -1436,6 +1438,43 @@ def build_prepared_completion_call(
     )
 
 
+async def _refresh_completion_preflight(
+    *,
+    completion_call: PreparedCompletionCall,
+    prepared: PreparedStepExecution,
+    deps: StepExecutionRuntimeDeps,
+) -> PreparedCompletionCall:
+    preflight = completion_call.preflight
+    if (
+        preflight is None
+        or preflight.file_reference_urls_expires_at is None
+        or preflight.file_reference_urls_expires_at
+        > time.time() + _FILE_REFERENCE_REFRESH_MARGIN_SECONDS
+    ):
+        return completion_call
+    refreshed = await prepared.assistant.preflight_response_context(
+        question=completion_call.question,
+        completion_service=deps.completion_service,
+        files=prepared.llm_files,
+        prompt_override=completion_call.effective_prompt,
+        version=completion_call.assistant_context_version,
+        model_kwargs=completion_call.preferred_model_kwargs,
+        capability_fallback_prompt=completion_call.capability_fallback_prompt,
+        useful_output_reserve_tokens=completion_call.useful_output_reserve_tokens,
+    )
+    selected = (
+        refreshed.fallback
+        if completion_call.selected_package is preflight.fallback
+        and completion_call.selected_package is not preflight.preferred
+        else refreshed.selected_package or refreshed.preferred
+    )
+    completion_call = replace(
+        completion_call, preflight=refreshed, selected_package=selected
+    )
+    prepared.completion_call = completion_call
+    return completion_call
+
+
 async def preview_step_execution_context(
     *,
     step: RuntimeStep,
@@ -1513,7 +1552,7 @@ async def preview_step_execution_context(
     prepared.completion_call = replace(
         completion_call, preflight=preview, selected_package=selected_package
     )
-    return selected_package.input_reserve.tokens
+    return preview.admission_input_reserve_tokens
 
 
 async def complete_step_execution(
@@ -1663,6 +1702,9 @@ async def _complete_step_execution(
             effective_prompt=completion_call.effective_prompt,
         )
 
+    completion_call = await _refresh_completion_preflight(
+        completion_call=completion_call, prepared=prepared, deps=deps
+    )
     cache_key = json_mode_cache_key(prepared.assistant)
     use_capability_fallback = (
         completion_call.capability_fallback_model_kwargs is not None
@@ -1760,6 +1802,9 @@ async def _complete_step_execution(
                 state.json_schema_rejected_models.add(cache_key)
             else:
                 state.json_mode_supported[cache_key] = False
+            completion_call = await _refresh_completion_preflight(
+                completion_call=completion_call, prepared=prepared, deps=deps
+            )
             fallback_kwargs = completion_call.capability_fallback_model_kwargs
             assert fallback_kwargs is not None
             fallback_model_parameters = (
