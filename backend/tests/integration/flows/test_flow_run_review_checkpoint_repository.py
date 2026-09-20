@@ -73,6 +73,10 @@ from eneo.flows.infrastructure.flow_transcript_corrections_repo import (
 )
 from eneo.flows.principal import FlowPrincipal
 from eneo.flows.runtime import tasks as flow_runtime_tasks
+from eneo.flows.runtime.flow_runtime_health import (
+    build_flow_runtime_health_policy,
+    load_flow_runtime_health_snapshot,
+)
 from tests.integration.flows.test_flow_run_listing_and_evidence_measurement import (
     _capture_queries,
 )
@@ -1524,6 +1528,306 @@ async def test_resume_review_checkpoint_requeues_run_and_replays_idempotently(
         "flow_run_review_checkpoint_approved",
         "flow_run_review_checkpoint_resumed",
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_approve_and_resume_review_checkpoint_is_one_transition_and_replays(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_review_checkpoint_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        repo = FlowRunRepository(session=session)
+        checkpoint_repo = _review_checkpoint_repo(session=session, run_repo=repo)
+        principal = FlowPrincipal.from_user(admin_user)
+        await repo.mark_running_if_claimable(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+            expected_revision=scenario.run.revision,
+        )
+        await _complete_reviewed_step_result(session=session, scenario=scenario)
+        opened = await checkpoint_repo.open_review_checkpoint_for_completed_step(
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            step_id=scenario.step_ids[0],
+            step_order=1,
+            attempt_no=1,
+            requester_principal=principal,
+            next_step_ids=(scenario.step_ids[1],),
+            review_mode=FlowStepReviewMode.VIEW,
+            output_type=FlowOutputType.JSON,
+        )
+        ids = {
+            "checkpoint_id": opened.checkpoint.id,
+            "tenant_id": scenario.tenant_id,
+            "flow_id": scenario.flow_id,
+            "flow_run_id": scenario.flow_run_id,
+        }
+
+        # A stale revision is refused before either hop writes anything.
+        with pytest.raises(FlowReviewCheckpointStaleRevisionError):
+            await checkpoint_repo.approve_and_resume_review_checkpoint(
+                **ids,
+                expected_revision=opened.checkpoint.revision + 1,
+                resume_idempotency_key="continue-key",
+                principal=principal,
+            )
+        untouched = await checkpoint_repo.find_review_resume_replay(
+            **ids, resume_idempotency_key="continue-key"
+        )
+
+        continued = await checkpoint_repo.approve_and_resume_review_checkpoint(
+            **ids,
+            expected_revision=opened.checkpoint.revision,
+            resume_idempotency_key="continue-key",
+            principal=principal,
+        )
+        replayed = await checkpoint_repo.approve_and_resume_review_checkpoint(
+            **ids,
+            expected_revision=opened.checkpoint.revision,
+            resume_idempotency_key="continue-key",
+            principal=principal,
+        )
+        replay_lookup = await checkpoint_repo.find_review_resume_replay(
+            **ids, resume_idempotency_key="continue-key"
+        )
+        with pytest.raises(FlowReviewCheckpointAlreadyResumedError):
+            await checkpoint_repo.approve_and_resume_review_checkpoint(
+                **ids,
+                expected_revision=opened.checkpoint.revision,
+                resume_idempotency_key="another-key",
+                principal=principal,
+            )
+        with pytest.raises(FlowReviewCheckpointAlreadyResumedError):
+            await checkpoint_repo.find_review_resume_replay(
+                **ids, resume_idempotency_key="another-key"
+            )
+        outbox_rows = (
+            (
+                await session.execute(
+                    sa.select(FlowRunAuditOutbox)
+                    .where(
+                        FlowRunAuditOutbox.review_checkpoint_id == opened.checkpoint.id
+                    )
+                    .order_by(FlowRunAuditOutbox.checkpoint_revision.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        outbox_summary = [
+            (row.action, row.checkpoint_revision, row.run_revision)
+            for row in outbox_rows
+        ]
+
+    assert untouched is None
+    assert continued.accepted is True
+    assert continued.checkpoint.state == FlowRunReviewCheckpointState.RESUMED
+    assert continued.checkpoint.revision == opened.checkpoint.revision + 2
+    assert continued.checkpoint.approved_at is not None
+    assert continued.checkpoint.resumed_at is not None
+    assert continued.checkpoint.resume_idempotency_key == "continue-key"
+    assert continued.run.status == FlowRunStatus.QUEUED
+    assert continued.run.revision == opened.run.revision + 1
+    assert continued.run.dispatch_pending_since is not None
+    assert (
+        continued.run.dispatch_next_attempt_at == continued.run.dispatch_pending_since
+    )
+    assert continued.run.dispatch_attempt_count == 0
+    assert continued.run.dispatch_exhausted_at is None
+    assert replayed.accepted is False
+    assert replayed.checkpoint.revision == continued.checkpoint.revision
+    assert replayed.run.revision == continued.run.revision
+    assert replay_lookup is not None and replay_lookup.accepted is False
+    # Two transitions in the trail, each at its own checkpoint revision; the
+    # resume row carries the requeued run revision, exactly like the split path.
+    assert outbox_summary == [
+        ("flow_run_review_checkpoint_opened", 1, opened.run.revision),
+        ("flow_run_review_checkpoint_approved", 2, opened.run.revision),
+        ("flow_run_review_checkpoint_resumed", 3, opened.run.revision + 1),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_approve_and_resume_review_checkpoint_rolls_back_both_hops_together(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_review_checkpoint_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        repo = FlowRunRepository(session=session)
+        checkpoint_repo = _review_checkpoint_repo(session=session, run_repo=repo)
+        principal = FlowPrincipal.from_user(admin_user)
+        await repo.mark_running_if_claimable(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+            expected_revision=scenario.run.revision,
+        )
+        await _complete_reviewed_step_result(session=session, scenario=scenario)
+        opened = await checkpoint_repo.open_review_checkpoint_for_completed_step(
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            step_id=scenario.step_ids[0],
+            step_order=1,
+            attempt_no=1,
+            requester_principal=principal,
+            next_step_ids=(scenario.step_ids[1],),
+            review_mode=FlowStepReviewMode.VIEW,
+            output_type=FlowOutputType.JSON,
+        )
+
+        savepoint = await session.begin_nested()
+        try:
+            continued = await checkpoint_repo.approve_and_resume_review_checkpoint(
+                checkpoint_id=opened.checkpoint.id,
+                tenant_id=scenario.tenant_id,
+                flow_id=scenario.flow_id,
+                flow_run_id=scenario.flow_run_id,
+                expected_revision=opened.checkpoint.revision,
+                resume_idempotency_key="continue-rollback",
+                principal=principal,
+            )
+            assert continued.accepted is True
+            await savepoint.rollback()
+        except Exception:
+            if savepoint.is_active:
+                await savepoint.rollback()
+            raise
+
+        checkpoint_row = await session.scalar(
+            sa.select(FlowRunReviewCheckpoints).where(
+                FlowRunReviewCheckpoints.id == opened.checkpoint.id
+            )
+        )
+        run_row = await session.scalar(
+            sa.select(FlowRuns).where(FlowRuns.id == scenario.flow_run_id)
+        )
+        outbox_actions = (
+            (
+                await session.execute(
+                    sa.select(FlowRunAuditOutbox.action).where(
+                        FlowRunAuditOutbox.review_checkpoint_id == opened.checkpoint.id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert checkpoint_row is not None and run_row is not None
+        checkpoint_values = (
+            checkpoint_row.state,
+            checkpoint_row.revision,
+            checkpoint_row.approved_at,
+            checkpoint_row.resume_idempotency_key,
+        )
+        run_values = (run_row.status, run_row.revision)
+
+    assert checkpoint_values == (
+        FlowRunReviewCheckpointState.AWAITING_REVIEW.value,
+        opened.checkpoint.revision,
+        None,
+        None,
+    )
+    assert run_values == (FlowRunStatus.AWAITING_REVIEW.value, opened.run.revision)
+    assert outbox_actions == ["flow_run_review_checkpoint_opened"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_runtime_health_counts_approved_checkpoints_still_waiting_for_resume(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_review_checkpoint_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        repo = FlowRunRepository(session=session)
+        checkpoint_repo = _review_checkpoint_repo(session=session, run_repo=repo)
+        principal = FlowPrincipal.from_user(admin_user)
+        policy = build_flow_runtime_health_policy(task_timeout_seconds=3600)
+        await repo.mark_running_if_claimable(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+            expected_revision=scenario.run.revision,
+        )
+        await _complete_reviewed_step_result(session=session, scenario=scenario)
+        opened = await checkpoint_repo.open_review_checkpoint_for_completed_step(
+            tenant_id=scenario.tenant_id,
+            flow_id=scenario.flow_id,
+            flow_run_id=scenario.flow_run_id,
+            step_id=scenario.step_ids[0],
+            step_order=1,
+            attempt_no=1,
+            requester_principal=principal,
+            next_step_ids=(scenario.step_ids[1],),
+            review_mode=FlowStepReviewMode.VIEW,
+            output_type=FlowOutputType.JSON,
+        )
+        ids = {
+            "checkpoint_id": opened.checkpoint.id,
+            "tenant_id": scenario.tenant_id,
+            "flow_id": scenario.flow_id,
+            "flow_run_id": scenario.flow_run_id,
+        }
+
+        async def _approved_unresumed() -> tuple[int, object]:
+            snapshot = await load_flow_runtime_health_snapshot(
+                session=session, now=datetime.now(timezone.utc), policy=policy
+            )
+            return (
+                snapshot.approved_unresumed_review_checkpoint_count,
+                snapshot.oldest_approved_unresumed_review_checkpoint_approved_at,
+            )
+
+        while_waiting = await _approved_unresumed()
+        approved = await checkpoint_repo.approve_review_checkpoint(
+            **ids, expected_revision=opened.checkpoint.revision, principal=principal
+        )
+        while_approved = await _approved_unresumed()
+        await checkpoint_repo.resume_review_checkpoint(
+            **ids,
+            expected_revision=approved.revision,
+            resume_idempotency_key="resume-key",
+            principal=principal,
+        )
+        after_resume = await _approved_unresumed()
+
+    assert while_waiting == (0, None)
+    assert while_approved == (1, approved.approved_at)
+    assert after_resume == (0, None)
 
 
 @pytest.mark.asyncio

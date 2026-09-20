@@ -327,7 +327,8 @@ Example response:
       "edit_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/review-checkpoints/{checkpoint_id}/",
       "approve_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve/",
       "reject_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/review-checkpoints/{checkpoint_id}/reject/",
-      "resume_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/review-checkpoints/{checkpoint_id}/resume/"
+      "resume_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/review-checkpoints/{checkpoint_id}/resume/",
+      "approve_and_continue_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve-and-continue/"
     },
     "get_graph_for_run_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/graph/?run_id={run_id}",
     "get_run_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/",
@@ -949,9 +950,9 @@ Consumer sequence:
 7. Send nothing else. Runtime-owned payload keys are carried over from the stored checkpoint, and an output whose text overflowed into a generated file cannot be edited at all — approve or reject it instead.
 8. Offer edit review only when `review_mode` is `edit`; a `view` checkpoint returns `flow_review_edit_not_allowed`. PDF and DOCX artifact outputs can use view review but are not publishable with edit review.
 9. Approve with the latest checkpoint `revision`, or reject with that revision **and** a non-empty `reason`.
-10. Resume the approved checkpoint with the latest `revision` and an `Idempotency-Key` header. Approve does not resume the run by itself.
+10. Resume the approved checkpoint with the latest `revision` and an `Idempotency-Key` header. Approve does not resume the run by itself. If you do not need to hold the run between the decision and the continuation, `POST .../approve-and-continue/` does both in one transaction with the checkpoint revision you observed and a required `Idempotency-Key`.
 
-`Idempotency-Key` behaves differently across these five endpoints, and getting it
+`Idempotency-Key` behaves differently across these six endpoints, and getting it
 wrong is the most common integration mistake:
 
 | Endpoint                     | `Idempotency-Key`     | Note                                                                                                                 |
@@ -961,6 +962,7 @@ wrong is the most common integration mistake:
 | `POST .../approve/`          | Not accepted          | Same                                                                                                                 |
 | `POST .../reject/`           | Not accepted          | Same                                                                                                                 |
 | `POST .../resume/`           | **Required**          | Missing it returns `400 flow_review_idempotency_key_required`                                                        |
+| `POST .../approve-and-continue/` | **Required**      | Same rule as resume; a replayed key returns the current checkpoint and run without approving or dispatching again    |
 
 Generate the resume key **once per logical resume** and keep reusing that same
 key for every retry of that resume. Minting a new key on retry throws away the

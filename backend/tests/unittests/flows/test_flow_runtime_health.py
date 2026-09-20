@@ -182,6 +182,25 @@ def test_expired_review_checkpoints_degrade_before_reconciler_grace_expires() ->
     assert response.review.oldest_expired_checkpoint_age_seconds == 30
 
 
+def test_approved_checkpoints_waiting_for_resume_are_reported_without_a_flag() -> None:
+    # The split approve/resume API lets an integration hold the run between
+    # the two calls on purpose, so the count is a metric, never a health flag.
+    response = _classify(
+        FlowRuntimeHealthSnapshot(
+            awaiting_review_count=2,
+            approved_unresumed_review_checkpoint_count=1,
+            oldest_approved_unresumed_review_checkpoint_approved_at=datetime(
+                2026, 5, 2, 11, 0, tzinfo=timezone.utc
+            ),
+        )
+    )
+
+    assert response.status == FlowRuntimeHealthStatus.HEALTHY
+    assert response.status_flags == []
+    assert response.review.approved_unresumed_checkpoint_count == 1
+    assert response.review.oldest_approved_unresumed_checkpoint_age_seconds == 3600
+
+
 def test_expired_review_checkpoints_become_unhealthy_after_reconciler_grace_expires() -> (
     None
 ):

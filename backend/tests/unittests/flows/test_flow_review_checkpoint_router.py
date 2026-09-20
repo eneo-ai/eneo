@@ -22,6 +22,7 @@ from eneo.flows.api.flow_models import (
     FlowRunReviewCheckpointResumeRequest,
 )
 from eneo.flows.api.flow_run_review_router import (
+    approve_and_continue_flow_run_review_checkpoint,
     approve_flow_run_review_checkpoint,
     edit_flow_run_review_checkpoint,
     get_active_flow_run_review_checkpoint,
@@ -338,6 +339,116 @@ async def test_resume_review_checkpoint_schedules_dispatch_after_commit(monkeypa
         "tenant_id": user.tenant_id,
         "expected_revision": run.revision,
     }
+
+
+def _approve_and_continue_context(monkeypatch, *, accepted: bool):
+    container = MagicMock()
+    flow_id = uuid4()
+    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+    run = _run(flow_id=flow_id, tenant_id=user.tenant_id).model_copy(
+        update={"status": FlowRunStatus.QUEUED}
+    )
+    checkpoint = _review_checkpoint(
+        flow_id=flow_id,
+        run_id=run.id,
+        tenant_id=user.tenant_id,
+        step_id=uuid4(),
+    )
+    events: list[str] = []
+    review_service = AsyncMock()
+    review_service.approve_and_resume_review_checkpoint.return_value = SimpleNamespace(
+        checkpoint=checkpoint,
+        run=run,
+        accepted=accepted,
+        corrections_fold=None,
+    )
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = _flow(flow_id)
+    container.flow_run_service.return_value = AsyncMock()
+    container.flow_run_review_checkpoint_service.return_value = review_service
+    container.flow_service.return_value = flow_service
+    container.user.return_value = user
+    _enable_space_access(container)
+    _enable_explicit_transaction(container, events)
+    _record_review_checkpoint_public(monkeypatch, events)
+    monkeypatch.setattr(
+        flow_access_context_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+    return SimpleNamespace(
+        container=container,
+        flow_id=flow_id,
+        user=user,
+        run=run,
+        checkpoint=checkpoint,
+        events=events,
+        review_service=review_service,
+    )
+
+
+@pytest.mark.asyncio
+async def test_approve_and_continue_review_checkpoint_dispatches_after_commit(
+    monkeypatch,
+):
+    ctx = _approve_and_continue_context(monkeypatch, accepted=True)
+    background_tasks = _RecordingBackgroundTasks(ctx.events)
+
+    response = await approve_and_continue_flow_run_review_checkpoint(
+        id=ctx.flow_id,
+        run_id=ctx.run.id,
+        checkpoint_id=ctx.checkpoint.id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        review_in=FlowRunReviewCheckpointApproveRequest(
+            expected_checkpoint_revision=ctx.checkpoint.revision
+        ),
+        background_tasks=background_tasks,
+        idempotency_key="approve-and-continue",
+        container=ctx.container,
+    )
+
+    assert response.run.id == ctx.run.id
+    assert response.checkpoint.id == ctx.checkpoint.id
+    # The service receives the header as given; the key rule is its decision.
+    called = ctx.review_service.approve_and_resume_review_checkpoint.await_args.kwargs
+    assert called["idempotency_key"] == "approve-and-continue"
+    assert called["expected_checkpoint_revision"] == ctx.checkpoint.revision
+    assert ctx.events == [
+        "transaction_enter",
+        "present_review_checkpoint",
+        "transaction_exit",
+        "add_task",
+    ]
+    scheduled = background_tasks.tasks[0]
+    assert scheduled.func is dispatch_flow_run_recoverably_after_commit
+    assert scheduled.kwargs == {
+        "run_id": ctx.run.id,
+        "tenant_id": ctx.user.tenant_id,
+        "expected_revision": ctx.run.revision,
+    }
+
+
+@pytest.mark.asyncio
+async def test_approve_and_continue_replay_dispatches_nothing(monkeypatch):
+    ctx = _approve_and_continue_context(monkeypatch, accepted=False)
+    background_tasks = _RecordingBackgroundTasks(ctx.events)
+
+    response = await approve_and_continue_flow_run_review_checkpoint(
+        id=ctx.flow_id,
+        run_id=ctx.run.id,
+        checkpoint_id=ctx.checkpoint.id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        review_in=FlowRunReviewCheckpointApproveRequest(
+            expected_checkpoint_revision=ctx.checkpoint.revision
+        ),
+        background_tasks=background_tasks,
+        idempotency_key="approve-and-continue",
+        container=ctx.container,
+    )
+
+    assert response.run.id == ctx.run.id
+    assert background_tasks.tasks == []
+    assert "add_task" not in ctx.events
 
 
 @pytest.mark.asyncio

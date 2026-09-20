@@ -5065,6 +5065,43 @@ export interface paths {
     patch: operations["edit_flow_run_review_checkpoint"];
     trace?: never;
   };
+  "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve-and-continue/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Approve flow run review checkpoint and continue the run
+     * @description Approve a human review checkpoint and resume its run in one request.
+     *
+     *     The checkpoint ends `resumed` and the run `queued` in the same transaction, or nothing
+     *     changes: there is no window where the decision is stored but the run stays waiting. The
+     *     audit trail still records the approval and the resume as two transitions, each with its
+     *     own checkpoint revision. Send the checkpoint `expected_checkpoint_revision` you observed;
+     *     the approved revision is never exposed to you and needs no reconciliation.
+     *
+     *     The `Idempotency-Key` header is required. Replaying the same key returns the current
+     *     checkpoint and run without approving, folding or dispatching again, even when the first
+     *     response was lost; a different key on an already resumed checkpoint returns `400` with code
+     *     `flow_review_already_resumed`.
+     *
+     *     The separate approve and resume endpoints remain for integrations that must persist the
+     *     decision before dispatching work. Service-key principals may use this endpoint only for runs
+     *     they own (key must have `resource_permissions.flows = write`).
+     *
+     *     Successful runtime mutations are committed before the response is returned, so clients can immediately use the returned id or revision in the next poll/edit/approve/resume request.
+     */
+    post: operations["approve_and_continue_flow_run_review_checkpoint"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve/": {
     parameters: {
       query?: never;
@@ -18404,6 +18441,11 @@ export interface components {
        */
       active_template: string;
       /**
+       * Approve And Continue Template
+       * @description POST template that approves a checkpoint and resumes its run in one request. Replace `{run_id}` and `{checkpoint_id}` with values returned by create_run and active checkpoint polling, send the checkpoint `expected_checkpoint_revision`, and set an `Idempotency-Key` header so a retry replays instead of failing.
+       */
+      approve_and_continue_template: string;
+      /**
        * Approve Template
        * @description POST template for approving a checkpoint. Replace `{run_id}` and `{checkpoint_id}` with values returned by create_run and active checkpoint polling, and send `expected_checkpoint_revision` from the latest checkpoint response.
        */
@@ -22932,6 +22974,7 @@ export interface components {
      *         "redispatch_run_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/redispatch/",
      *         "review_checkpoints": {
      *           "active_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/review-checkpoints/active/",
+     *           "approve_and_continue_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve-and-continue/",
      *           "approve_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve/",
      *           "edit_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/review-checkpoints/{checkpoint_id}/",
      *           "reject_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/review-checkpoints/{checkpoint_id}/reject/",
@@ -22972,10 +23015,21 @@ export interface components {
     /** FlowRuntimeReviewSummary */
     FlowRuntimeReviewSummary: {
       /**
+       * Approved Unresumed Checkpoint Count
+       * @description Checkpoints approved through the separate approve endpoint whose run still waits for a resume call. Informational: the API keeps approval and continuation apart for integrations, so the count carries no health flag.
+       * @default 0
+       */
+      approved_unresumed_checkpoint_count?: number;
+      /**
        * Expired Checkpoint Count
        * @default 0
        */
       expired_checkpoint_count?: number;
+      /**
+       * Oldest Approved Unresumed Checkpoint Age Seconds
+       * @description Seconds since the oldest such approval was recorded.
+       */
+      oldest_approved_unresumed_checkpoint_age_seconds?: number | null;
       /** Oldest Expired Checkpoint Age Seconds */
       oldest_expired_checkpoint_age_seconds?: number | null;
     };
@@ -54373,6 +54427,166 @@ export interface operations {
            *       },
            *       "eneo_error_code": 9001,
            *       "message": "You do not have permission to review flows."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Run or checkpoint not found for this flow and tenant. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_review_checkpoint_not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "Review checkpoint not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  approve_and_continue_flow_run_review_checkpoint: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description Required caller-supplied idempotency key for review resume retries, 1 to 255 characters after trimming. A missing or blank key returns `400` with code `flow_review_idempotency_key_required`; a longer key returns `400` with code `flow_run_invalid_idempotency_key`. Both bounds are enforced as typed errors rather than as schema constraints, so a validator generated from this document will not catch them. Derive one stable key per logical resume and send that same key on every retry: replaying it returns the current checkpoint and run without dispatching again, while a different key against an already-resumed checkpoint returns `400` with code `flow_review_already_resumed`. */
+        "Idempotency-Key": string;
+      };
+      path: {
+        /** @description Identifier of the flow that owns the run. */
+        id: string;
+        /** @description Identifier of the run to continue. */
+        run_id: string;
+        /** @description Identifier of the review checkpoint to approve. */
+        checkpoint_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowRunReviewCheckpointApproveRequest"];
+      };
+    };
+    responses: {
+      /** @description Approval stored and continuation accepted in one transaction. Poll the returned run until it reaches a terminal status; a replayed key returns the same shape with the current rows. */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "checkpoint": {
+           *         "approved_at": "2026-03-17T10:07:30Z",
+           *         "attempt_no": 1,
+           *         "created_at": "2026-03-17T10:05:30Z",
+           *         "current_payload_json": {
+           *           "structured": {
+           *             "answer": "Edited answer."
+           *           },
+           *           "text": "{\"answer\": \"Edited answer.\"}"
+           *         },
+           *         "decided_by_principal_type": "user",
+           *         "decided_by_user_id": "00000000-0000-0000-0000-000000000030",
+           *         "edited_at": "2026-03-17T10:06:30Z",
+           *         "expires_at": "2026-03-31T10:05:30Z",
+           *         "flow_id": "00000000-0000-0000-0000-000000000001",
+           *         "flow_run_id": "00000000-0000-0000-0000-000000000301",
+           *         "id": "00000000-0000-0000-0000-000000000901",
+           *         "next_step_ids": [
+           *           "00000000-0000-0000-0000-000000000104"
+           *         ],
+           *         "original_payload_json": {
+           *           "structured": {
+           *             "answer": "Draft answer."
+           *           },
+           *           "text": "{\"answer\": \"Draft answer.\"}"
+           *         },
+           *         "output_contract": {
+           *           "properties": {
+           *             "answer": {
+           *               "type": "string"
+           *             }
+           *           },
+           *           "type": "object"
+           *         },
+           *         "output_type": "json",
+           *         "requester_principal_type": "user",
+           *         "requester_user_id": "00000000-0000-0000-0000-000000000030",
+           *         "resumed_at": "2026-03-17T10:08:00Z",
+           *         "review_mode": "edit",
+           *         "revision": 4,
+           *         "schema_version": 1,
+           *         "state": "resumed",
+           *         "step_id": "00000000-0000-0000-0000-000000000103",
+           *         "step_label": "Review transcription",
+           *         "step_order": 2,
+           *         "tenant_id": "00000000-0000-0000-0000-000000000010",
+           *         "updated_at": "2026-03-17T10:05:30Z"
+           *       },
+           *       "run": {
+           *         "created_at": "2026-03-17T10:05:00Z",
+           *         "dispatch_attempt_count": 0,
+           *         "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
+           *         "dispatch_pending_since": "2026-03-17T10:05:00Z",
+           *         "flow_id": "00000000-0000-0000-0000-000000000001",
+           *         "flow_version": 3,
+           *         "id": "00000000-0000-0000-0000-000000000301",
+           *         "input_payload_json": {
+           *           "employee_name": "Alex Example"
+           *         },
+           *         "job_id": "00000000-0000-0000-0000-000000000401",
+           *         "purpose": "production",
+           *         "result_files": [],
+           *         "revision": 2,
+           *         "run_label": "Case 123",
+           *         "status": "queued",
+           *         "tenant_id": "00000000-0000-0000-0000-000000000010",
+           *         "trace_id": "00000000-0000-0000-0000-000000000302",
+           *         "updated_at": "2026-03-17T10:05:00Z"
+           *       }
+           *     }
+           */
+          "application/json": components["schemas"]["FlowRunReviewCheckpointResumeResponse"];
+        };
+      };
+      /** @description Approval or continuation refused; nothing was stored. Representative machine-readable codes include `flow_review_idempotency_key_required`, `flow_run_invalid_idempotency_key`, `flow_review_stale_revision`, `flow_review_expired`, `flow_review_not_active`, and `flow_review_already_resumed`. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden. Caller scope, tenant or space permission, and run visibility are evaluated before returning Flow runtime data. Machine-readable codes include `insufficient_scope`, `flow_run_access_denied`, and `flow_service_key_principal_not_supported`. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_tenant_permission",
+           *       "context": {
+           *         "auth_layer": "tenant_role"
+           *       },
+           *       "eneo_error_code": 9001,
+           *       "message": "You do not have permission to resume flows."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];

@@ -50,6 +50,7 @@ from eneo.flows.domain.step_output import (
     StepOutputMetadataError,
     interpret_step_text,
 )
+from eneo.flows.domain.transcript_corrections import FlowTranscriptCorrectionSet
 from eneo.flows.domain.transcript_words import LocatedWord, locate_words
 from eneo.flows.enums import FlowOutputType, FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
@@ -111,6 +112,40 @@ class FlowReviewCheckpointApproval:
 
     checkpoint: FlowRunReviewCheckpoint
     corrections_fold: TranscriptCorrectionsFoldOutcome | None
+
+
+@dataclass(frozen=True, slots=True)
+class FlowReviewCheckpointContinuation:
+    """An approved checkpoint whose run continues in the same command.
+
+    ``accepted`` is False when the idempotency key replayed an earlier
+    continuation: the rows are current and nothing was folded, written or
+    queued again, so ``corrections_fold`` is None.
+    """
+
+    checkpoint: FlowRunReviewCheckpoint
+    run: FlowRun
+    accepted: bool
+    corrections_fold: TranscriptCorrectionsFoldOutcome | None
+
+
+@dataclass(frozen=True, slots=True)
+class _ApprovalFold:
+    """The transcript corrections an approval folds in, resolved before the
+    transition so both approval commands share one fold owner."""
+
+    outcome: TranscriptCorrectionsFoldOutcome | None
+    pre_fold_checkpoint: FlowRunReviewCheckpoint | None
+
+    @property
+    def folded_payload(self) -> FlowPersistedJsonObject | None:
+        return self.outcome.folded_payload if self.outcome is not None else None
+
+    @property
+    def correction_set(self) -> FlowTranscriptCorrectionSet | None:
+        if self.outcome is None or self.outcome.folded_payload is None:
+            return None
+        return self.outcome.correction_set
 
 
 def review_open_terminal_invariant_error(
@@ -715,25 +750,125 @@ class FlowRunReviewCheckpointService:
             flow_id=flow_id,
             access_kind="content",
         )
-        fold: TranscriptCorrectionsFoldOutcome | None = None
-        pre_fold_checkpoint: FlowRunReviewCheckpoint | None = None
-        if (
-            self.transcript_corrections_repo is not None
-            and self.flow_run_repo is not None
-        ):
-            pre_fold_checkpoint = await self._with_review_lifecycle_translation(
-                self.flow_run_review_checkpoint_repo.get_review_checkpoint_for_edit(
-                    checkpoint_id=checkpoint_id,
-                    tenant_id=self.user.tenant_id,
-                    flow_id=flow_id,
-                    flow_run_id=run.id,
-                    expected_revision=expected_checkpoint_revision,
-                )
+        fold = await self._fold_for_approval(
+            run=run,
+            flow_id=flow_id,
+            checkpoint_id=checkpoint_id,
+            expected_checkpoint_revision=expected_checkpoint_revision,
+        )
+        approved = await self._with_review_lifecycle_translation(
+            self.flow_run_review_checkpoint_repo.approve_review_checkpoint(
+                checkpoint_id=checkpoint_id,
+                tenant_id=self.user.tenant_id,
+                flow_id=flow_id,
+                flow_run_id=run.id,
+                expected_revision=expected_checkpoint_revision,
+                principal=principal,
+                current_payload_json=fold.folded_payload,
+                correction_set=fold.correction_set,
             )
-            fold = await self._fold_transcript_corrections(
-                run=run,
-                checkpoint=pre_fold_checkpoint,
+        )
+        await self._sync_folded_transcript(run=run, fold=fold)
+        return FlowReviewCheckpointApproval(
+            checkpoint=approved,
+            corrections_fold=fold.outcome,
+        )
+
+    async def approve_and_resume_review_checkpoint(
+        self,
+        *,
+        flow_id: UUID,
+        run_id: UUID,
+        checkpoint_id: UUID,
+        expected_checkpoint_revision: int,
+        idempotency_key: str | None,
+    ) -> FlowReviewCheckpointContinuation:
+        """Approve the checkpoint and continue its run as one command.
+
+        Replay of the idempotency key is settled first, under the transition
+        locks: a retry after a lost response returns the resumed rows without
+        folding corrections, bumping revisions or queueing the run again.
+        """
+        principal = self._principal()
+        normalized_key = self._validate_review_resume_idempotency_key(idempotency_key)
+        run = await self.access_policy.load_run(
+            run_id=run_id,
+            flow_id=flow_id,
+            access_kind="content",
+        )
+        repo = self.flow_run_review_checkpoint_repo
+        replay = await self._with_review_lifecycle_translation(
+            repo.find_review_resume_replay(
+                checkpoint_id=checkpoint_id,
+                tenant_id=self.user.tenant_id,
+                flow_id=flow_id,
+                flow_run_id=run.id,
+                resume_idempotency_key=normalized_key,
             )
+        )
+        if replay is not None:
+            return FlowReviewCheckpointContinuation(
+                checkpoint=replay.checkpoint,
+                run=replay.run,
+                accepted=False,
+                corrections_fold=None,
+            )
+        fold = await self._fold_for_approval(
+            run=run,
+            flow_id=flow_id,
+            checkpoint_id=checkpoint_id,
+            expected_checkpoint_revision=expected_checkpoint_revision,
+        )
+        result = await self._with_review_lifecycle_translation(
+            repo.approve_and_resume_review_checkpoint(
+                checkpoint_id=checkpoint_id,
+                tenant_id=self.user.tenant_id,
+                flow_id=flow_id,
+                flow_run_id=run.id,
+                expected_revision=expected_checkpoint_revision,
+                resume_idempotency_key=normalized_key,
+                principal=principal,
+                current_payload_json=fold.folded_payload,
+                correction_set=fold.correction_set,
+            )
+        )
+        await self._sync_folded_transcript(run=run, fold=fold)
+        return FlowReviewCheckpointContinuation(
+            checkpoint=result.checkpoint,
+            run=result.run,
+            accepted=result.accepted,
+            corrections_fold=fold.outcome,
+        )
+
+    async def _fold_for_approval(
+        self,
+        *,
+        run: FlowRun,
+        flow_id: UUID,
+        checkpoint_id: UUID,
+        expected_checkpoint_revision: int,
+    ) -> _ApprovalFold:
+        """Resolve the checkpoint's transcript corrections before approval.
+
+        Reads the checkpoint under the transition guards (a stale revision or
+        an inactive checkpoint fails here, before any fold), and refuses a
+        schema-version 3 correction set that could not be propagated.
+        """
+        if self.transcript_corrections_repo is None or self.flow_run_repo is None:
+            return _ApprovalFold(outcome=None, pre_fold_checkpoint=None)
+        pre_fold_checkpoint = await self._with_review_lifecycle_translation(
+            self.flow_run_review_checkpoint_repo.get_review_checkpoint_for_edit(
+                checkpoint_id=checkpoint_id,
+                tenant_id=self.user.tenant_id,
+                flow_id=flow_id,
+                flow_run_id=run.id,
+                expected_revision=expected_checkpoint_revision,
+            )
+        )
+        fold = await self._fold_transcript_corrections(
+            run=run,
+            checkpoint=pre_fold_checkpoint,
+        )
         if (
             fold is not None
             and fold.correction_set.schema_version >= 3
@@ -747,37 +882,26 @@ class FlowRunReviewCheckpointService:
                     "skip_reason": fold.skip_reason,
                 },
             )
-        folded_payload = fold.folded_payload if fold is not None else None
-        approved = await self._with_review_lifecycle_translation(
-            self.flow_run_review_checkpoint_repo.approve_review_checkpoint(
-                checkpoint_id=checkpoint_id,
-                tenant_id=self.user.tenant_id,
-                flow_id=flow_id,
-                flow_run_id=run.id,
-                expected_revision=expected_checkpoint_revision,
-                principal=principal,
-                current_payload_json=folded_payload,
-                correction_set=fold.correction_set
-                if fold is not None and folded_payload is not None
-                else None,
-            )
-        )
+        return _ApprovalFold(outcome=fold, pre_fold_checkpoint=pre_fold_checkpoint)
+
+    async def _sync_folded_transcript(
+        self, *, run: FlowRun, fold: _ApprovalFold
+    ) -> None:
+        outcome = fold.outcome
+        folded_payload = fold.folded_payload
         if (
-            fold is not None
-            and folded_payload is not None
-            and fold.previous_text is not None
-            and pre_fold_checkpoint is not None
+            outcome is None
+            or folded_payload is None
+            or outcome.previous_text is None
+            or fold.pre_fold_checkpoint is None
         ):
-            await self._sync_run_transcript(
-                run=run,
-                checkpoint=pre_fold_checkpoint,
-                source_text=fold.previous_text,
-                new_text=str(folded_payload.get("text", "")),
-                required=fold.correction_set.schema_version >= 3,
-            )
-        return FlowReviewCheckpointApproval(
-            checkpoint=approved,
-            corrections_fold=fold,
+            return
+        await self._sync_run_transcript(
+            run=run,
+            checkpoint=fold.pre_fold_checkpoint,
+            source_text=outcome.previous_text,
+            new_text=str(folded_payload.get("text", "")),
+            required=outcome.correction_set.schema_version >= 3,
         )
 
     async def _fold_transcript_corrections(

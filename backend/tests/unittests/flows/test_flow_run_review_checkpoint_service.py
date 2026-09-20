@@ -239,6 +239,7 @@ async def test_get_active_review_checkpoint_preserves_multiple_active_conflict(u
         "approve_review_checkpoint",
         "reject_review_checkpoint",
         "resume_review_checkpoint",
+        "approve_and_resume_review_checkpoint",
     ],
 )
 async def test_review_mutations_allow_service_key_for_own_run(user, method_name):
@@ -283,6 +284,14 @@ async def test_review_mutations_allow_service_key_for_own_run(user, method_name)
             accepted=True,
         )
     )
+    checkpoint_repo.find_review_resume_replay.return_value = None
+    checkpoint_repo.approve_and_resume_review_checkpoint.return_value = (
+        FlowRunReviewCheckpointResumeResult(
+            checkpoint=checkpoint,
+            run=run,
+            accepted=True,
+        )
+    )
     kwargs = {
         "flow_id": flow_id,
         "run_id": run.id,
@@ -293,7 +302,10 @@ async def test_review_mutations_allow_service_key_for_own_run(user, method_name)
         kwargs["edited_value"] = {"title": "Edited"}
     if method_name == "reject_review_checkpoint":
         kwargs["reason"] = "Reject the draft."
-    if method_name == "resume_review_checkpoint":
+    if method_name in {
+        "resume_review_checkpoint",
+        "approve_and_resume_review_checkpoint",
+    }:
         kwargs["idempotency_key"] = "resume-key"
 
     result = await method(**kwargs)
@@ -301,6 +313,12 @@ async def test_review_mutations_allow_service_key_for_own_run(user, method_name)
     if method_name == "resume_review_checkpoint":
         assert result.checkpoint == checkpoint
         awaited = checkpoint_repo.resume_review_checkpoint.await_args.kwargs
+    elif method_name == "approve_and_resume_review_checkpoint":
+        assert result.checkpoint == checkpoint
+        assert result.accepted is True
+        assert result.corrections_fold is None
+        awaited = checkpoint_repo.approve_and_resume_review_checkpoint.await_args.kwargs
+        assert awaited["resume_idempotency_key"] == "resume-key"
     elif method_name == "approve_review_checkpoint":
         # Approval reports the corrections fold alongside the checkpoint; a
         # service wired without the corrections repository never folds.
@@ -976,6 +994,77 @@ async def test_resume_review_checkpoint_requires_idempotency_key(user):
 
     assert exc_info.value.code == "flow_review_idempotency_key_required"
     checkpoint_repo.resume_review_checkpoint.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_approve_and_resume_review_checkpoint_requires_idempotency_key(user):
+    checkpoint_repo = AsyncMock()
+    access_policy = AsyncMock()
+    service = _service(
+        user, checkpoint_repo=checkpoint_repo, access_policy=access_policy
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.approve_and_resume_review_checkpoint(
+            flow_id=uuid4(),
+            run_id=uuid4(),
+            checkpoint_id=uuid4(),
+            expected_checkpoint_revision=1,
+            idempotency_key=None,
+        )
+
+    assert exc_info.value.code == "flow_review_idempotency_key_required"
+    access_policy.load_run.assert_not_awaited()
+    checkpoint_repo.approve_and_resume_review_checkpoint.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_approve_and_resume_replay_is_settled_before_the_corrections_fold(user):
+    """A retry after a lost response finds the checkpoint RESUMED. The fold
+    path reads the checkpoint under the approval guards, which would refuse
+    that state, so replay must be answered first and nothing folded again."""
+    checkpoint_repo = AsyncMock()
+    access_policy = AsyncMock()
+    corrections_repo = AsyncMock()
+    flow_run_repo = AsyncMock()
+    flow_id = uuid4()
+    run = _run(user=user, flow_id=flow_id).model_copy(
+        update={"status": FlowRunStatus.QUEUED}
+    )
+    resumed = _review_checkpoint(
+        user,
+        run,
+        state=FlowRunReviewCheckpointState.RESUMED,
+        revision=3,
+        resume_idempotency_key="continue-key",
+    )
+    access_policy.load_run.return_value = run
+    checkpoint_repo.find_review_resume_replay.return_value = (
+        FlowRunReviewCheckpointResumeResult(checkpoint=resumed, run=run, accepted=False)
+    )
+    service = FlowRunReviewCheckpointService(
+        user=user,
+        flow_run_review_checkpoint_repo=checkpoint_repo,
+        access_policy=access_policy,
+        flow_run_terminalizer=AsyncMock(),
+        flow_run_repo=flow_run_repo,
+        transcript_corrections_repo=corrections_repo,
+    )
+
+    result = await service.approve_and_resume_review_checkpoint(
+        flow_id=flow_id,
+        run_id=run.id,
+        checkpoint_id=resumed.id,
+        expected_checkpoint_revision=1,
+        idempotency_key="continue-key",
+    )
+
+    assert result.accepted is False
+    assert result.checkpoint == resumed
+    assert result.corrections_fold is None
+    checkpoint_repo.get_review_checkpoint_for_edit.assert_not_awaited()
+    corrections_repo.get_for_step.assert_not_awaited()
+    checkpoint_repo.approve_and_resume_review_checkpoint.assert_not_awaited()
 
 
 @pytest.mark.asyncio

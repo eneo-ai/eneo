@@ -908,6 +908,39 @@ export function initFlows(client) {
         },
 
         /**
+         * Approve the checkpoint and resume its run in one transaction. The
+         * checkpoint ends `resumed` and the run `queued`, or nothing changes.
+         * `idempotencyKey` is required; replaying it returns the current
+         * checkpoint and run without approving or dispatching again.
+         *
+         * @param {{flowId: string, runId: string, checkpointId: string, expectedCheckpointRevision: number, idempotencyKey: string}} params
+         * @returns {Promise<import('../types/resources').FlowRunReviewCheckpointResumeResponse>}
+         */
+        approveAndContinue: async ({
+          flowId,
+          runId,
+          checkpointId,
+          expectedCheckpointRevision,
+          idempotencyKey
+        }) => {
+          return _fetch(
+            "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve-and-continue/",
+            {
+              method: "post",
+              params: {
+                path: { id: flowId, run_id: runId, checkpoint_id: checkpointId },
+                header: { "Idempotency-Key": idempotencyKey }
+              },
+              requestBody: {
+                "application/json": {
+                  expected_checkpoint_revision: expectedCheckpointRevision
+                }
+              }
+            }
+          );
+        },
+
+        /**
          * @param {{flowId: string, runId: string, checkpointId: string, expectedCheckpointRevision: number, reason: string}} params
          * @returns {Promise<import('../types/resources').FlowRunReviewCheckpoint>}
          */

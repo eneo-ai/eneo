@@ -489,11 +489,26 @@ describe("flows templates endpoint", () => {
       expectedCheckpointRevision: 3,
       idempotencyKey: "flow-review-resume:checkpoint-1:3"
     });
+    await flows.runs.reviewCheckpoints.approveAndContinue({
+      flowId: "flow-1",
+      runId: "run-1",
+      checkpointId: "checkpoint-1",
+      expectedCheckpointRevision: 1,
+      idempotencyKey: "flow-review-continue:checkpoint-1:1"
+    });
 
     expect(fetch.mock.calls.map((call) => call[0])).toEqual([
       "https://api.example.test/api/v1/flows/flow-1/runs/",
-      "https://api.example.test/api/v1/flows/flow-1/runs/run-1/review-checkpoints/checkpoint-1/resume/"
+      "https://api.example.test/api/v1/flows/flow-1/runs/run-1/review-checkpoints/checkpoint-1/resume/",
+      "https://api.example.test/api/v1/flows/flow-1/runs/run-1/review-checkpoints/checkpoint-1/approve-and-continue/"
     ]);
+    expect(fetch.mock.calls[2][1].headers).toMatchObject({
+      "Content-Type": "application/json",
+      "Idempotency-Key": "flow-review-continue:checkpoint-1:1"
+    });
+    expect(JSON.parse(fetch.mock.calls[2][1].body)).toEqual({
+      expected_checkpoint_revision: 1
+    });
     expect(fetch.mock.calls[0][1].headers).toMatchObject({
       "Content-Type": "application/json",
       "Idempotency-Key": "flow-run:client-request-1"

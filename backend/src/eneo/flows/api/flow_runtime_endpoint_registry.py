@@ -9,6 +9,7 @@ from eneo.flows.api.flow_runtime_paths import (
     DELETE_RUNTIME_FILE_PATH,
     FLOW_GRAPH_PATH,
     FLOW_REVIEW_ACTIVE_PATH,
+    FLOW_REVIEW_APPROVE_AND_CONTINUE_PATH,
     FLOW_REVIEW_APPROVE_PATH,
     FLOW_REVIEW_CHECKPOINT_PATH,
     FLOW_REVIEW_REJECT_PATH,
@@ -191,6 +192,15 @@ FLOW_RUNTIME_ENDPOINT_CONTRACTS: tuple[FlowRuntimeEndpointContract, ...] = (
         operation_id="resume_flow_run_review_checkpoint",
         success_status=status.HTTP_202_ACCEPTED,
         runtime_path_fields=(_field("review_checkpoints", "resume_template"),),
+    ),
+    FlowRuntimeEndpointContract(
+        route_path=FLOW_REVIEW_APPROVE_AND_CONTINUE_PATH,
+        method="post",
+        operation_id="approve_and_continue_flow_run_review_checkpoint",
+        success_status=status.HTTP_202_ACCEPTED,
+        runtime_path_fields=(
+            _field("review_checkpoints", "approve_and_continue_template"),
+        ),
     ),
     FlowRuntimeEndpointContract(
         route_path=FLOW_RUN_CANCEL_PATH,

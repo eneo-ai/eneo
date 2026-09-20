@@ -1055,6 +1055,10 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
     assert review_paths["resume_template"].endswith(
         f"/flows/{flow_id}/runs/{{run_id}}/review-checkpoints/{{checkpoint_id}}/resume/"
     )
+    assert review_paths["approve_and_continue_template"].endswith(
+        f"/flows/{flow_id}/runs/{{run_id}}/review-checkpoints/"
+        "{checkpoint_id}/approve-and-continue/"
+    )
 
     run_payload = {
         "expected_flow_version": flow["published_version"],
@@ -2747,11 +2751,16 @@ async def test_flow_consumer_golden_journey_uses_review_runtime_paths(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+@pytest.mark.parametrize(
+    "continuation",
+    ["approve_then_resume", "approve_and_continue"],
+)
 async def test_flow_service_key_can_drive_human_review_runtime_paths(
     client,
     db_container,
     admin_token,
     monkeypatch,
+    continuation: str,
 ):
     monkeypatch.setattr(
         flow_run_lifecycle_router,
@@ -2874,33 +2883,87 @@ async def test_flow_service_key_can_drive_human_review_runtime_paths(
     }
     assert edited_checkpoint["decided_by_principal_type"] == "service_key"
 
-    approve_response = await client.post(
-        _runtime_path(
-            review_paths["approve_template"],
+    if continuation == "approve_and_continue":
+        continue_path = _runtime_path(
+            review_paths["approve_and_continue_template"],
             run_id=run["id"],
             checkpoint_id=checkpoint_id,
-        ),
-        json={"expected_checkpoint_revision": edited_checkpoint["revision"]},
-        headers=service_headers,
-    )
-    assert approve_response.status_code == 200, approve_response.text
-    approved_checkpoint = approve_response.json()
-    assert approved_checkpoint["decided_by_principal_type"] == "service_key"
+        )
+        continue_body = {"expected_checkpoint_revision": edited_checkpoint["revision"]}
+        continue_key = f"service-review-continue:{uuid4().hex}"
+        # Ownership is decided before any write: another key is refused and
+        # the checkpoint is still the edited revision afterwards.
+        other_key_response = await client.post(
+            continue_path,
+            json=continue_body,
+            headers={**other_service_headers, "Idempotency-Key": continue_key},
+        )
+        assert other_key_response.status_code == 403, other_key_response.text
+        assert other_key_response.json()["code"] == "flow_run_access_denied"
+        missing_key_response = await client.post(
+            continue_path, json=continue_body, headers=service_headers
+        )
+        assert missing_key_response.status_code == 400, missing_key_response.text
+        assert (
+            missing_key_response.json()["code"]
+            == "flow_review_idempotency_key_required"
+        )
+        still_edited = await client.get(active_path, headers=service_headers)
+        assert still_edited.json()["state"] == "edited"
+        assert still_edited.json()["revision"] == edited_checkpoint["revision"]
 
-    resume_response = await client.post(
-        _runtime_path(
-            review_paths["resume_template"],
-            run_id=run["id"],
-            checkpoint_id=checkpoint_id,
-        ),
-        json={"expected_checkpoint_revision": approved_checkpoint["revision"]},
-        headers={
-            **service_headers,
-            "Idempotency-Key": f"service-review-resume:{uuid4().hex}",
-        },
-    )
-    assert resume_response.status_code == 202, resume_response.text
-    resumed_payload = resume_response.json()
+        continue_response = await client.post(
+            continue_path,
+            json=continue_body,
+            headers={**service_headers, "Idempotency-Key": continue_key},
+        )
+        assert continue_response.status_code == 202, continue_response.text
+        resumed_payload = continue_response.json()
+        assert resumed_payload["checkpoint"]["state"] == "resumed"
+        assert (
+            resumed_payload["checkpoint"]["revision"]
+            == edited_checkpoint["revision"] + 2
+        )
+        assert resumed_payload["run"]["status"] == "queued"
+        replay_response = await client.post(
+            continue_path,
+            json=continue_body,
+            headers={**service_headers, "Idempotency-Key": continue_key},
+        )
+        assert replay_response.status_code == 202, replay_response.text
+        assert replay_response.json()["checkpoint"] == resumed_payload["checkpoint"]
+        assert (
+            replay_response.json()["run"]["revision"]
+            == (resumed_payload["run"]["revision"])
+        )
+    else:
+        approve_response = await client.post(
+            _runtime_path(
+                review_paths["approve_template"],
+                run_id=run["id"],
+                checkpoint_id=checkpoint_id,
+            ),
+            json={"expected_checkpoint_revision": edited_checkpoint["revision"]},
+            headers=service_headers,
+        )
+        assert approve_response.status_code == 200, approve_response.text
+        approved_checkpoint = approve_response.json()
+        assert approved_checkpoint["decided_by_principal_type"] == "service_key"
+
+        resume_response = await client.post(
+            _runtime_path(
+                review_paths["resume_template"],
+                run_id=run["id"],
+                checkpoint_id=checkpoint_id,
+            ),
+            json={"expected_checkpoint_revision": approved_checkpoint["revision"]},
+            headers={
+                **service_headers,
+                "Idempotency-Key": f"service-review-resume:{uuid4().hex}",
+            },
+        )
+        assert resume_response.status_code == 202, resume_response.text
+        resumed_payload = resume_response.json()
     assert resumed_payload["checkpoint"]["id"] == checkpoint_id
     assert resumed_payload["checkpoint"]["decided_by_principal_type"] == "service_key"
     assert resumed_payload["run"]["id"] == run["id"]

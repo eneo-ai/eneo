@@ -101,6 +101,7 @@ function buildEneo({
   edits,
   edit = vi.fn(),
   approve = vi.fn(),
+  approveAndContinue = vi.fn(),
   reject = vi.fn(),
   resume = vi.fn()
 }: {
@@ -109,6 +110,7 @@ function buildEneo({
   edits?: ReturnType<typeof vi.fn>;
   edit?: ReturnType<typeof vi.fn>;
   approve?: ReturnType<typeof vi.fn>;
+  approveAndContinue?: ReturnType<typeof vi.fn>;
   reject?: ReturnType<typeof vi.fn>;
   resume?: ReturnType<typeof vi.fn>;
   steps?: ReturnType<typeof vi.fn>;
@@ -137,6 +139,7 @@ function buildEneo({
           edits: edits ?? vi.fn(async () => emptyHistory),
           edit,
           approve,
+          approveAndContinue,
           reject,
           resume
         }
@@ -191,8 +194,11 @@ describe("FlowRunReviewCheckpointPanel", () => {
       current_payload_json: { structured: { answer: "Rättat önskemål", retained: { ref: "F001" } } }
     };
     const edit = vi.fn(async () => saved);
-    const approve = vi.fn(async () => ({ ...saved, state: "approved" as const, revision: 3 }));
-    const eneo = buildEneo({ activeCheckpoint: checkpoint, edit, approve });
+    const approveAndContinue = vi.fn(async () => ({
+      checkpoint: { ...saved, state: "resumed" as const, revision: 4 },
+      run: buildRun("queued")
+    }));
+    const eneo = buildEneo({ activeCheckpoint: checkpoint, edit, approveAndContinue });
     render(FlowRunReviewCheckpointPanel, {
       props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
     });
@@ -201,17 +207,23 @@ describe("FlowRunReviewCheckpointPanel", () => {
     await fireEvent.click(
       screen.getByRole("button", { name: m.flow_transcript_editor_approve_continue() })
     );
-    await waitFor(() => expect(approve).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(approveAndContinue).toHaveBeenCalledTimes(1));
     expect(edit).toHaveBeenCalledWith(
       expect.objectContaining({
         expectedCheckpointRevision: 1,
         editedValue: { answer: "Rättat önskemål", retained: { ref: "F001" } }
       })
     );
-    expect(approve).toHaveBeenCalledWith(
-      expect.objectContaining({ expectedCheckpointRevision: 2 })
+    // The key follows the saved revision: the edit is part of the decision.
+    expect(approveAndContinue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedCheckpointRevision: 2,
+        idempotencyKey: "flow-review-continue:checkpoint-1:2"
+      })
     );
-    expect(edit.mock.invocationCallOrder[0]).toBeLessThan(approve.mock.invocationCallOrder[0]);
+    expect(edit.mock.invocationCallOrder[0]).toBeLessThan(
+      approveAndContinue.mock.invocationCallOrder[0]
+    );
   });
 
   it("keeps the visible edit and does not approve when saving it fails", async () => {
@@ -269,8 +281,11 @@ describe("FlowRunReviewCheckpointPanel", () => {
       revision: 2,
       current_payload_json: { text: "Corrected document" }
     }));
-    const approve = vi.fn(async () => ({ ...checkpoint, state: "approved" as const, revision: 3 }));
-    const eneo = buildEneo({ activeCheckpoint: checkpoint, edit, approve });
+    const approveAndContinue = vi.fn(async () => ({
+      checkpoint: { ...checkpoint, state: "resumed" as const, revision: 4 },
+      run: buildRun("queued")
+    }));
+    const eneo = buildEneo({ activeCheckpoint: checkpoint, edit, approveAndContinue });
     render(FlowRunReviewCheckpointPanel, {
       props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
     });
@@ -280,11 +295,11 @@ describe("FlowRunReviewCheckpointPanel", () => {
     await fireEvent.click(
       screen.getByRole("button", { name: m.flow_transcript_editor_approve_continue() })
     );
-    await waitFor(() => expect(approve).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(approveAndContinue).toHaveBeenCalledTimes(1));
     expect(edit).toHaveBeenCalledWith(
       expect.objectContaining({ editedValue: "Corrected document" })
     );
-    expect(approve).toHaveBeenCalledWith(
+    expect(approveAndContinue).toHaveBeenCalledWith(
       expect.objectContaining({ expectedCheckpointRevision: 2 })
     );
   });
@@ -432,8 +447,11 @@ describe("FlowRunReviewCheckpointPanel", () => {
         () => new Promise<FlowRunReviewCheckpointEditPage>((resolve) => (releaseStale = resolve))
       )
       .mockResolvedValueOnce(fullPage);
-    const approve = vi.fn(async () => buildCheckpoint("approved", 3));
-    const eneo = buildEneo({ activeCheckpoint: checkpoint, edits, approve });
+    const approveAndContinue = vi.fn(async () => ({
+      checkpoint: buildCheckpoint("resumed", 5),
+      run: buildRun("queued")
+    }));
+    const eneo = buildEneo({ activeCheckpoint: checkpoint, edits, approveAndContinue });
 
     render(FlowRunReviewCheckpointPanel, {
       props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
@@ -536,12 +554,15 @@ describe("FlowRunReviewCheckpointPanel", () => {
           expires_at: "2026-03-17T10:35:00Z"
         }
       },
-      { endpoint: "POST@/review-checkpoints/checkpoint-1/approve" }
+      { endpoint: "POST@/review-checkpoints/checkpoint-1/approve-and-continue" }
     );
-    const approve = vi.fn(async () => {
+    const approveAndContinue = vi.fn(async () => {
       throw expiredError;
     });
-    const eneo = buildEneo({ activeCheckpoint: buildCheckpoint("awaiting_review", 1), approve });
+    const eneo = buildEneo({
+      activeCheckpoint: buildCheckpoint("awaiting_review", 1),
+      approveAndContinue
+    });
 
     render(FlowRunReviewCheckpointPanel, {
       props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
@@ -676,11 +697,11 @@ describe("FlowRunReviewCheckpointPanel", () => {
     expect(edit).not.toHaveBeenCalled();
   });
 
-  it("approves and resumes through checkpoint state returned by the backend", async () => {
-    const approvedCheckpoint = buildCheckpoint("approved", 2);
+  it("approves and continues the run with one request", async () => {
     const resumedCheckpoint = buildCheckpoint("resumed", 3);
-    const approve = vi.fn(async () => approvedCheckpoint);
-    const resume = vi.fn(async () => ({
+    const approve = vi.fn();
+    const resume = vi.fn();
+    const approveAndContinue = vi.fn(async () => ({
       checkpoint: resumedCheckpoint,
       run: buildRun("queued")
     }));
@@ -688,6 +709,7 @@ describe("FlowRunReviewCheckpointPanel", () => {
     const eneo = buildEneo({
       activeCheckpoint: buildCheckpoint("awaiting_review", 1),
       approve,
+      approveAndContinue,
       resume
     });
 
@@ -699,43 +721,42 @@ describe("FlowRunReviewCheckpointPanel", () => {
     expect(screen.queryByRole("button", { name: m.flow_run_review_resume() })).toBeNull();
 
     // Approving is the decision and continuing is its consequence, so one
-    // press does both. `canResume` never carried a permission of its own,
-    // and transcript reviews already worked this way.
+    // press is one request: the server approves and resumes in a single
+    // transaction, and the key is bound to the revision the reviewer saw.
     await fireEvent.click(
       screen.getByRole("button", { name: m.flow_transcript_editor_approve_continue() })
     );
 
-    await waitFor(() => expect(resume).toHaveBeenCalledTimes(1));
-    expect(approve).toHaveBeenCalledWith({
+    await waitFor(() => expect(approveAndContinue).toHaveBeenCalledTimes(1));
+    expect(approveAndContinue).toHaveBeenCalledWith({
       flowId: "flow-1",
       runId: "run-1",
       checkpointId: "checkpoint-1",
-      expectedCheckpointRevision: 1
+      expectedCheckpointRevision: 1,
+      idempotencyKey: "flow-review-continue:checkpoint-1:1"
     });
-    expect(resume).toHaveBeenCalledWith({
-      flowId: "flow-1",
-      runId: "run-1",
-      checkpointId: "checkpoint-1",
-      expectedCheckpointRevision: 2,
-      idempotencyKey: "flow-review-resume:checkpoint-1:2"
-    });
+    expect(approve).not.toHaveBeenCalled();
+    expect(resume).not.toHaveBeenCalled();
     await screen.findByText(m.flow_run_review_state_resumed());
     expect(screen.queryByRole("button", { name: m.flow_run_review_resume() })).toBeNull();
     expect(onChanged).toHaveBeenCalled();
   });
 
-  it("keeps the approval and offers Fortsätt again when continuing the run fails", async () => {
-    // The approval is applied before the resume is attempted, so a resume
-    // that fails must not cost the decision: the checkpoint stays approved
-    // and the button comes back as a retry.
-    const approve = vi.fn(async () => buildCheckpoint("approved", 2));
-    const resume = vi.fn(async () => {
-      throw new Error("worker unavailable");
-    });
+  it("keeps the decision open and retries with the same key when the request fails", async () => {
+    // Nothing is stored when the combined request fails, so the checkpoint is
+    // still awaiting review and the same button is the retry. The retry
+    // reuses the key: a request whose response was lost replays server-side
+    // instead of failing on a revision the reviewer never saw.
+    const approveAndContinue = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("worker unavailable"))
+      .mockResolvedValueOnce({
+        checkpoint: buildCheckpoint("resumed", 3),
+        run: buildRun("queued")
+      });
     const eneo = buildEneo({
       activeCheckpoint: buildCheckpoint("awaiting_review", 1),
-      approve,
-      resume
+      approveAndContinue
     });
 
     render(FlowRunReviewCheckpointPanel, {
@@ -747,10 +768,18 @@ describe("FlowRunReviewCheckpointPanel", () => {
       screen.getByRole("button", { name: m.flow_transcript_editor_approve_continue() })
     );
 
-    await waitFor(() => expect(resume).toHaveBeenCalledTimes(1));
-    expect(approve).toHaveBeenCalledTimes(1);
-    await screen.findByText(m.flow_run_review_state_approved());
-    expect(screen.getByRole("button", { name: m.flow_run_review_resume() })).toBeTruthy();
+    await screen.findByText(m.flow_run_review_approve_failed());
+    expect(screen.getByText(m.flow_run_review_state_awaiting_review())).toBeTruthy();
+    expect(screen.queryByRole("button", { name: m.flow_run_review_resume() })).toBeNull();
+    const retry = screen.getByRole("button", { name: m.flow_transcript_editor_approve_continue() });
+    await waitFor(() => expect((retry as HTMLButtonElement).disabled).toBe(false));
+    await fireEvent.click(retry);
+
+    await waitFor(() => expect(approveAndContinue).toHaveBeenCalledTimes(2));
+    expect(approveAndContinue.mock.calls[0][0].idempotencyKey).toBe(
+      approveAndContinue.mock.calls[1][0].idempotencyKey
+    );
+    await screen.findByText(m.flow_run_review_state_resumed());
   });
 
   it("shows the review deadline and blocks decision actions after it passes", async () => {
@@ -962,10 +991,8 @@ describe("FlowRunReviewCheckpointPanel speaker mapping", () => {
     async (fails) => {
       let release!: (value: unknown) => void;
       const checkpoint = buildSpeakerCheckpoint();
-      const approved = { ...checkpoint, state: "approved" as const, revision: 2 };
-      const approve = vi.fn(async () => approved);
-      const resume = vi.fn(async () => ({
-        checkpoint: { ...approved, state: "resumed" as const, revision: 3 },
+      const approveAndContinue = vi.fn(async () => ({
+        checkpoint: { ...checkpoint, state: "resumed" as const, revision: 3 },
         run: buildRun("queued")
       }));
       const steps = vi.fn(async () => [
@@ -991,7 +1018,7 @@ describe("FlowRunReviewCheckpointPanel speaker mapping", () => {
           }
         }
       ]);
-      const eneo = buildEneo({ activeCheckpoint: checkpoint, steps, approve, resume });
+      const eneo = buildEneo({ activeCheckpoint: checkpoint, steps, approveAndContinue });
       const save = vi.fn(
         () =>
           new Promise((resolve) => {
@@ -1015,37 +1042,35 @@ describe("FlowRunReviewCheckpointPanel speaker mapping", () => {
       await fireEvent.click(screen.getByRole("button", { name: "Bekräfta Anna" }));
       await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
       await fireEvent.click(screen.getByRole("button", { name: "Godkänn och fortsätt" }));
-      expect(approve).not.toHaveBeenCalled();
-      expect(resume).not.toHaveBeenCalled();
+      expect(approveAndContinue).not.toHaveBeenCalled();
       release({ revision: 1, stale: fails, occurrences: [], speaker_edits: [] });
       if (fails) {
         await screen.findByText("Hämta osparade rättningar");
-        expect(approve).not.toHaveBeenCalled();
-        expect(resume).not.toHaveBeenCalled();
+        expect(approveAndContinue).not.toHaveBeenCalled();
       } else {
-        await waitFor(() => expect(resume).toHaveBeenCalledTimes(1));
-        expect(approve).toHaveBeenCalledTimes(1);
-        expect(resume).toHaveBeenCalledWith(
+        await waitFor(() => expect(approveAndContinue).toHaveBeenCalledTimes(1));
+        expect(approveAndContinue).toHaveBeenCalledWith(
           expect.objectContaining({
-            expectedCheckpointRevision: 2,
-            idempotencyKey: "flow-review-resume:checkpoint-1:2"
+            expectedCheckpointRevision: 1,
+            idempotencyKey: "flow-review-continue:checkpoint-1:1"
           })
         );
       }
     }
   );
 
-  it("keeps an approved checkpoint available for resume retry after dispatch failure", async () => {
+  it("keeps a speaker-mapping checkpoint retryable with the same key after a failed request", async () => {
     const checkpoint = buildSpeakerCheckpoint();
-    const approved = { ...checkpoint, state: "approved" as const, revision: 2 };
-    const resume = vi
+    const approveAndContinue = vi
       .fn()
       .mockRejectedValueOnce(new Error("unavailable"))
-      .mockResolvedValueOnce({ checkpoint: { ...approved, state: "resumed", revision: 3 } });
+      .mockResolvedValueOnce({
+        checkpoint: { ...checkpoint, state: "resumed", revision: 3 },
+        run: buildRun("queued")
+      });
     const eneo = buildEneo({
       activeCheckpoint: checkpoint,
-      approve: vi.fn(async () => approved),
-      resume,
+      approveAndContinue,
       steps: vi.fn(async () => [
         {
           step_id: "step-0",
@@ -1067,11 +1092,14 @@ describe("FlowRunReviewCheckpointPanel speaker mapping", () => {
     const button = await screen.findByRole("button", { name: "Godkänn och fortsätt" });
     await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
     await fireEvent.click(button);
-    const retry = await screen.findByRole("button", { name: m.flow_run_review_resume() });
+    await screen.findByText(m.flow_run_review_approve_failed());
+    const retry = screen.getByRole("button", { name: "Godkänn och fortsätt" });
     await waitFor(() => expect((retry as HTMLButtonElement).disabled).toBe(false));
     await fireEvent.click(retry);
-    await waitFor(() => expect(resume).toHaveBeenCalledTimes(2));
-    expect(resume.mock.calls[0][0].idempotencyKey).toBe(resume.mock.calls[1][0].idempotencyKey);
+    await waitFor(() => expect(approveAndContinue).toHaveBeenCalledTimes(2));
+    expect(approveAndContinue.mock.calls[0][0].idempotencyKey).toBe(
+      approveAndContinue.mock.calls[1][0].idempotencyKey
+    );
   });
 
   beforeEach(() => {

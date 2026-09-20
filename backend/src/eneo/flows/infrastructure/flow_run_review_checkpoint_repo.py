@@ -949,6 +949,115 @@ class FlowRunReviewCheckpointRepository:
             flow_id=flow_id,
             flow_run_id=flow_run_id,
         )
+        self._require_review_checkpoint_approvable(
+            checkpoint_row=checkpoint_row,
+            run_row=run_row,
+            expected_revision=expected_revision,
+        )
+        return await self._approve_locked_review_checkpoint(
+            checkpoint_row=checkpoint_row,
+            run_row=run_row,
+            principal=principal,
+            current_payload_json=current_payload_json,
+            correction_set=correction_set,
+        )
+
+    async def approve_and_resume_review_checkpoint(
+        self,
+        *,
+        checkpoint_id: UUID,
+        tenant_id: UUID,
+        flow_id: UUID,
+        flow_run_id: UUID,
+        expected_revision: int,
+        resume_idempotency_key: str,
+        principal: FlowPrincipal,
+        current_payload_json: FlowPersistedJsonObject | None = None,
+        correction_set: FlowTranscriptCorrectionSet | None = None,
+    ) -> FlowRunReviewCheckpointResumeResult:
+        """Approve the checkpoint and resume its run under one lock scope.
+
+        The two transitions keep their own checkpoint revisions and audit
+        outbox rows, so the trail reads exactly like approve followed by
+        resume; the caller's transaction makes them land together or not at
+        all. ``expected_revision`` guards the approval hop only: the client
+        never observes the approved revision, so the resume hop needs no CAS.
+        A replay of ``resume_idempotency_key`` on an already resumed
+        checkpoint returns the current rows before any approval guard runs,
+        so a retry after a lost response cannot fail on state it caused.
+        """
+        (
+            checkpoint_row,
+            run_row,
+        ) = await self._load_review_checkpoint_and_run_rows_for_update(
+            checkpoint_id=checkpoint_id,
+            tenant_id=tenant_id,
+            flow_id=flow_id,
+            flow_run_id=flow_run_id,
+        )
+        replay = self._review_resume_replay(
+            checkpoint_row=checkpoint_row,
+            run_row=run_row,
+            resume_idempotency_key=resume_idempotency_key,
+        )
+        if replay is not None:
+            return replay
+        self._require_review_checkpoint_approvable(
+            checkpoint_row=checkpoint_row,
+            run_row=run_row,
+            expected_revision=expected_revision,
+        )
+        await self._approve_locked_review_checkpoint(
+            checkpoint_row=checkpoint_row,
+            run_row=run_row,
+            principal=principal,
+            current_payload_json=current_payload_json,
+            correction_set=correction_set,
+        )
+        return await self._resume_locked_review_checkpoint(
+            checkpoint_id=checkpoint_id,
+            tenant_id=tenant_id,
+            flow_id=flow_id,
+            flow_run_id=flow_run_id,
+            resume_idempotency_key=resume_idempotency_key,
+            principal=principal,
+        )
+
+    async def find_review_resume_replay(
+        self,
+        *,
+        checkpoint_id: UUID,
+        tenant_id: UUID,
+        flow_id: UUID,
+        flow_run_id: UUID,
+        resume_idempotency_key: str,
+    ) -> FlowRunReviewCheckpointResumeResult | None:
+        """The rows an earlier resume with this key produced, or None when the
+        key is new. Takes the transition locks so a caller can settle replay
+        before approval work that a resumed checkpoint would refuse.
+        """
+        (
+            checkpoint_row,
+            run_row,
+        ) = await self._load_review_checkpoint_and_run_rows_for_update(
+            checkpoint_id=checkpoint_id,
+            tenant_id=tenant_id,
+            flow_id=flow_id,
+            flow_run_id=flow_run_id,
+        )
+        return self._review_resume_replay(
+            checkpoint_row=checkpoint_row,
+            run_row=run_row,
+            resume_idempotency_key=resume_idempotency_key,
+        )
+
+    def _require_review_checkpoint_approvable(
+        self,
+        *,
+        checkpoint_row: FlowRunReviewCheckpoints,
+        run_row: FlowRuns,
+        expected_revision: int,
+    ) -> None:
         self._require_review_checkpoint_not_expired(checkpoint_row)
         self._require_review_run_waiting(run_row)
         self._require_review_checkpoint_revision(
@@ -962,6 +1071,21 @@ class FlowRunReviewCheckpointRepository:
                 FlowRunReviewCheckpointState.EDITED,
             ),
         )
+
+    async def _approve_locked_review_checkpoint(
+        self,
+        *,
+        checkpoint_row: FlowRunReviewCheckpoints,
+        run_row: FlowRuns,
+        principal: FlowPrincipal,
+        current_payload_json: FlowPersistedJsonObject | None,
+        correction_set: FlowTranscriptCorrectionSet | None,
+    ) -> FlowRunReviewCheckpoint:
+        """The APPROVED write on rows the caller locked and guarded."""
+        checkpoint_id = checkpoint_row.id
+        tenant_id = checkpoint_row.tenant_id
+        flow_id = checkpoint_row.flow_id
+        flow_run_id = checkpoint_row.flow_run_id
         before = (
             canonical_json_hash(checkpoint_row.current_payload_json)
             if current_payload_json is not None
@@ -1110,20 +1234,59 @@ class FlowRunReviewCheckpointRepository:
             flow_run_id=flow_run_id,
         )
         self._require_review_checkpoint_not_expired(checkpoint_row)
-        if checkpoint_row.state == FlowRunReviewCheckpointState.RESUMED.value:
-            if checkpoint_row.resume_idempotency_key == resume_idempotency_key:
-                return FlowRunReviewCheckpointResumeResult(
-                    checkpoint=FlowRunReviewCheckpoint.model_validate(checkpoint_row),
-                    run=FlowRun.model_validate(run_row),
-                    accepted=False,
-                )
-            raise FlowReviewCheckpointAlreadyResumedError()
+        replay = self._review_resume_replay(
+            checkpoint_row=checkpoint_row,
+            run_row=run_row,
+            resume_idempotency_key=resume_idempotency_key,
+        )
+        if replay is not None:
+            return replay
         self._require_review_resume_source_state(checkpoint_row)
         self._require_review_run_waiting(run_row)
         self._require_review_checkpoint_revision(
             checkpoint_row=checkpoint_row,
             expected_revision=expected_revision,
         )
+        return await self._resume_locked_review_checkpoint(
+            checkpoint_id=checkpoint_id,
+            tenant_id=tenant_id,
+            flow_id=flow_id,
+            flow_run_id=flow_run_id,
+            resume_idempotency_key=resume_idempotency_key,
+            principal=principal,
+        )
+
+    @staticmethod
+    def _review_resume_replay(
+        *,
+        checkpoint_row: FlowRunReviewCheckpoints,
+        run_row: FlowRuns,
+        resume_idempotency_key: str,
+    ) -> FlowRunReviewCheckpointResumeResult | None:
+        """Idempotent replay: a resumed checkpoint holding the same key returns
+        its current rows; one holding another key is a conflict."""
+        if checkpoint_row.state != FlowRunReviewCheckpointState.RESUMED.value:
+            return None
+        if checkpoint_row.resume_idempotency_key == resume_idempotency_key:
+            return FlowRunReviewCheckpointResumeResult(
+                checkpoint=FlowRunReviewCheckpoint.model_validate(checkpoint_row),
+                run=FlowRun.model_validate(run_row),
+                accepted=False,
+            )
+        raise FlowReviewCheckpointAlreadyResumedError()
+
+    async def _resume_locked_review_checkpoint(
+        self,
+        *,
+        checkpoint_id: UUID,
+        tenant_id: UUID,
+        flow_id: UUID,
+        flow_run_id: UUID,
+        resume_idempotency_key: str,
+        principal: FlowPrincipal,
+    ) -> FlowRunReviewCheckpointResumeResult:
+        """The RESUMED write plus the run's requeue on rows the caller locked
+        and guarded."""
         updated_checkpoint = await self._update_review_checkpoint_state(
             checkpoint_id=checkpoint_id,
             tenant_id=tenant_id,

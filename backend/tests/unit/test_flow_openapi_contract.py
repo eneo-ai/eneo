@@ -1865,6 +1865,7 @@ def test_openapi_runtime_paths_expose_review_checkpoint_templates(
         "approve_template",
         "reject_template",
         "resume_template",
+        "approve_and_continue_template",
     } <= set(review_properties)
     assert "{run_id}" in review_properties["active_template"]["description"]
     assert "{checkpoint_id}" in review_properties["edit_template"]["description"]
@@ -1879,6 +1880,10 @@ def test_openapi_runtime_paths_expose_review_checkpoint_templates(
     assert (
         "expected_checkpoint_revision"
         in review_properties["resume_template"]["description"]
+    )
+    assert (
+        "Idempotency-Key"
+        in review_properties["approve_and_continue_template"]["description"]
     )
     assert "upload_flow_file" not in runtime_paths
     assert (

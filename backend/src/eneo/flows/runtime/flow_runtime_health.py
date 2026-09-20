@@ -33,6 +33,7 @@ from eneo.flows.enums import (
     OPEN_FLOW_STEP_ATTEMPT_STATUS_VALUES,
     RECONCILABLE_REVIEW_CHECKPOINT_STATES,
     TERMINAL_FLOW_RUN_STATUS_VALUES,
+    FlowRunReviewCheckpointState,
     FlowRunStatus,
 )
 from eneo.flows.flow_review_expiry_policy import (
@@ -99,6 +100,8 @@ class FlowRuntimeHealthSnapshot:
     oldest_accepted_dispatch_exhausted_at: datetime | None = None
     expired_review_checkpoint_count: int = 0
     oldest_expired_review_checkpoint_expires_at: datetime | None = None
+    approved_unresumed_review_checkpoint_count: int = 0
+    oldest_approved_unresumed_review_checkpoint_approved_at: datetime | None = None
     terminal_runs_with_open_attempts_count: int = 0
     oldest_terminal_run_with_open_attempts_updated_at: datetime | None = None
     terminal_runs_with_active_step_results_count: int = 0
@@ -165,6 +168,19 @@ class FlowRuntimeRunSummary(BaseModel):
 class FlowRuntimeReviewSummary(BaseModel):
     expired_checkpoint_count: int = 0
     oldest_expired_checkpoint_age_seconds: int | None = None
+    approved_unresumed_checkpoint_count: int = Field(
+        default=0,
+        description=(
+            "Checkpoints approved through the separate approve endpoint whose run "
+            "still waits for a resume call. Informational: the API keeps approval "
+            "and continuation apart for integrations, so the count carries no "
+            "health flag."
+        ),
+    )
+    oldest_approved_unresumed_checkpoint_age_seconds: int | None = Field(
+        default=None,
+        description="Seconds since the oldest such approval was recorded.",
+    )
 
 
 class FlowRuntimeDataIntegrity(BaseModel):
@@ -278,6 +294,9 @@ async def load_flow_runtime_health_snapshot(
         session=session,
         expires_before=now,
     )
+    approved_unresumed = await _load_approved_unresumed_review_checkpoint_summary(
+        session=session
+    )
     terminal_open_attempts = await _load_terminal_runs_with_open_attempts_summary(
         session=session,
         updated_after=terminal_integrity_after,
@@ -313,6 +332,10 @@ async def load_flow_runtime_health_snapshot(
         expired_review_checkpoint_count=expired_review_checkpoints.count,
         oldest_expired_review_checkpoint_expires_at=(
             expired_review_checkpoints.oldest_expires_at
+        ),
+        approved_unresumed_review_checkpoint_count=approved_unresumed.count,
+        oldest_approved_unresumed_review_checkpoint_approved_at=(
+            approved_unresumed.oldest_anchor_at
         ),
         terminal_runs_with_open_attempts_count=terminal_open_attempts.count,
         oldest_terminal_run_with_open_attempts_updated_at=(
@@ -360,6 +383,9 @@ def classify_flow_runtime_health(
     expired_review_checkpoint_age = _age_seconds(
         now,
         snapshot.oldest_expired_review_checkpoint_expires_at,
+    )
+    approved_unresumed_age = _age_seconds(
+        now, snapshot.oldest_approved_unresumed_review_checkpoint_approved_at
     )
     open_attempt_age = _age_seconds(
         now, snapshot.oldest_terminal_run_with_open_attempts_updated_at
@@ -424,6 +450,10 @@ def classify_flow_runtime_health(
         review=FlowRuntimeReviewSummary(
             expired_checkpoint_count=snapshot.expired_review_checkpoint_count,
             oldest_expired_checkpoint_age_seconds=expired_review_checkpoint_age,
+            approved_unresumed_checkpoint_count=(
+                snapshot.approved_unresumed_review_checkpoint_count
+            ),
+            oldest_approved_unresumed_checkpoint_age_seconds=approved_unresumed_age,
         ),
         data_integrity=FlowRuntimeDataIntegrity(
             terminal_runs_with_open_attempts_count=(
@@ -653,6 +683,37 @@ async def _load_expired_review_checkpoint_summary(
     return _ReviewCheckpointExpirySummary(
         count=int(count or 0),
         oldest_expires_at=_normalize_datetime(oldest_expires_at),
+    )
+
+
+async def _load_approved_unresumed_review_checkpoint_summary(
+    *,
+    session: AsyncSession,
+) -> _RunSummary:
+    count, oldest_approved_at = (
+        await session.execute(
+            sa.select(
+                sa.func.count(FlowRunReviewCheckpoints.id),
+                sa.func.min(FlowRunReviewCheckpoints.approved_at),
+            )
+            .select_from(FlowRunReviewCheckpoints)
+            .join(
+                FlowRuns,
+                sa.and_(
+                    FlowRuns.id == FlowRunReviewCheckpoints.flow_run_id,
+                    FlowRuns.tenant_id == FlowRunReviewCheckpoints.tenant_id,
+                ),
+            )
+            .where(
+                FlowRunReviewCheckpoints.state
+                == FlowRunReviewCheckpointState.APPROVED.value
+            )
+            .where(FlowRuns.status == FlowRunStatus.AWAITING_REVIEW.value)
+        )
+    ).one()
+    return _RunSummary(
+        count=int(count or 0),
+        oldest_anchor_at=_normalize_datetime(oldest_approved_at),
     )
 
 

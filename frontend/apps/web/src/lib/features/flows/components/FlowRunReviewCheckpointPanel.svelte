@@ -175,6 +175,8 @@
   // Attached by every checkpoint response (active read and mutations), so
   // an edit flips staleness in the same response without a second fetch.
   const citationSummary = $derived(readAttachedCitationSummary(checkpoint));
+  // Only a checkpoint approved through the split API (approve, then resume)
+  // waits here; the panel's own button never leaves one behind.
   const canResume = $derived(checkpoint?.state === "approved");
   const checkpointStateLabel = $derived(
     checkpoint ? getCheckpointStateLabel(checkpoint.state) : null
@@ -480,41 +482,25 @@
         });
         applyCheckpoint(current);
       }
-      applyCheckpoint(
-        await eneo.flows.runs.reviewCheckpoints.approve({
-          flowId,
-          runId,
-          checkpointId: current.id,
-          expectedCheckpointRevision: current.revision
-        })
-      );
       // Approving is the decision; continuing the run is its consequence, not
-      // a second one. `canResume` carries no permission of its own, only
-      // `state === "approved"`, and transcript reviews already continued
-      // straight through. Every review type now does. If the resume itself
-      // fails the approval still stands, so the checkpoint stays approved and
-      // the Fortsätt button returns as a retry.
-      if (checkpoint?.state === "approved") {
-        activeAction = "resume";
-        const result = await eneo.flows.runs.reviewCheckpoints.resume({
-          flowId,
-          runId,
-          checkpointId: checkpoint.id,
-          expectedCheckpointRevision: checkpoint.revision,
-          idempotencyKey: `flow-review-resume:${checkpoint.id}:${checkpoint.revision}`
-        });
-        applyCheckpoint(result.checkpoint);
-        toast.success(m.flow_run_review_resumed());
-      } else toast.success(m.flow_run_review_approved());
+      // a second one, so the server does both in one transaction. Either the
+      // checkpoint ends resumed and the run continues, or nothing changes and
+      // the same button is the retry. The key is bound to the revision the
+      // reviewer approved: a retry after a lost response replays it, a new
+      // edit mints a new one.
+      const result = await eneo.flows.runs.reviewCheckpoints.approveAndContinue({
+        flowId,
+        runId,
+        checkpointId: current.id,
+        expectedCheckpointRevision: current.revision,
+        idempotencyKey: `flow-review-continue:${current.id}:${current.revision}`
+      });
+      applyCheckpoint(result.checkpoint);
+      toast.success(m.flow_run_review_resumed());
       onChanged?.();
     } catch (error) {
       console.error("Failed to approve review checkpoint", error);
-      actionError = getFlowRuntimeErrorMessage(
-        error,
-        activeAction === "resume"
-          ? m.flow_run_review_resume_failed()
-          : m.flow_run_review_approve_failed()
-      );
+      actionError = getFlowRuntimeErrorMessage(error, m.flow_run_review_approve_failed());
     } finally {
       activeAction = null;
     }

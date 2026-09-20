@@ -29,6 +29,10 @@ def _runtime_review_paths_payload() -> dict[str, str]:
             "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/"
             "{checkpoint_id}/resume/"
         ),
+        "approve_and_continue_template": (
+            "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/"
+            "{checkpoint_id}/approve-and-continue/"
+        ),
     }
 
 
@@ -106,6 +110,11 @@ def test_build_flow_runtime_paths_uses_explicit_api_prefix() -> None:
         runtime_paths.review_checkpoints.resume_template
         == f"/custom-api/flows/{flow_id}/runs/{{run_id}}/"
         "review-checkpoints/{checkpoint_id}/resume/"
+    )
+    assert (
+        runtime_paths.review_checkpoints.approve_and_continue_template
+        == f"/custom-api/flows/{flow_id}/runs/{{run_id}}/"
+        "review-checkpoints/{checkpoint_id}/approve-and-continue/"
     )
     assert runtime_paths.get_run_status_template == (
         f"/custom-api/flows/{flow_id}/runs/{{run_id}}/status/"

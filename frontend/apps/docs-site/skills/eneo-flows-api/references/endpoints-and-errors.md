@@ -4,30 +4,31 @@ Paths are relative to the deployment API base. Prefer `runtime_paths` from `GET 
 
 ## Runtime endpoint map
 
-| Purpose                        | Method and path                                                            |
-| ------------------------------ | -------------------------------------------------------------------------- |
-| Status behavior                | `GET /flows/runs/status-capabilities/`                                     |
-| Capacity snapshot              | `GET /flows/runs/capacity/`                                                |
-| List published Flows           | `GET /flows/?space_id={space_id}&limit={limit}&offset={offset}`            |
-| Published projection and paths | `GET /flows/{flow_id}/published/`                                          |
-| Current run contract           | `GET /flows/{flow_id}/run-contract/`                                       |
-| Runtime-safe graph             | `GET /flows/{flow_id}/graph/`                                              |
-| Upload a step input            | `POST /flows/{flow_id}/steps/{step_id}/runtime-files/`                     |
-| Delete an abandoned upload     | `DELETE /flows/{flow_id}/runtime-files/{file_id}/`                         |
-| Create or list runs            | `POST` or `GET /flows/{flow_id}/runs/`                                     |
-| Poll content-free status       | `GET /flows/{flow_id}/runs/{run_id}/status/`                               |
-| Read audited run detail        | `GET /flows/{flow_id}/runs/{run_id}/`                                      |
-| Cancel                         | `POST /flows/{flow_id}/runs/{run_id}/cancel/`                              |
-| Redispatch a stale queued run  | `POST /flows/{flow_id}/runs/{run_id}/redispatch/`                          |
-| Active review                  | `GET /flows/{flow_id}/runs/{run_id}/review-checkpoints/active/`            |
-| Edit review                    | `PATCH /flows/{flow_id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/` |
-| Approve, reject, or resume     | `POST` the corresponding `.../{checkpoint_id}/{action}/` path              |
-| Step outputs                   | `GET /flows/{flow_id}/runs/{run_id}/steps/`                                |
-| Rerun one step                 | `POST /flows/{flow_id}/runs/{run_id}/steps/{step_id}/rerun/`               |
-| Artifact authorization         | `POST /flows/{flow_id}/runs/{run_id}/artifacts/{file_id}/signed-url/`      |
-| Evidence                       | `GET /flows/{flow_id}/runs/{run_id}/evidence/`                             |
-| Provider calls                 | `GET /flows/{flow_id}/runs/{run_id}/provider-calls/`                       |
-| Evidence export                | `GET /flows/{flow_id}/runs/{run_id}/evidence/export` (no trailing slash)   |
+| Purpose                             | Method and path                                                            |
+| ----------------------------------- | -------------------------------------------------------------------------- |
+| Status behavior                     | `GET /flows/runs/status-capabilities/`                                     |
+| Capacity snapshot                   | `GET /flows/runs/capacity/`                                                |
+| List published Flows                | `GET /flows/?space_id={space_id}&limit={limit}&offset={offset}`            |
+| Published projection and paths      | `GET /flows/{flow_id}/published/`                                          |
+| Current run contract                | `GET /flows/{flow_id}/run-contract/`                                       |
+| Runtime-safe graph                  | `GET /flows/{flow_id}/graph/`                                              |
+| Upload a step input                 | `POST /flows/{flow_id}/steps/{step_id}/runtime-files/`                     |
+| Delete an abandoned upload          | `DELETE /flows/{flow_id}/runtime-files/{file_id}/`                         |
+| Create or list runs                 | `POST` or `GET /flows/{flow_id}/runs/`                                     |
+| Poll content-free status            | `GET /flows/{flow_id}/runs/{run_id}/status/`                               |
+| Read audited run detail             | `GET /flows/{flow_id}/runs/{run_id}/`                                      |
+| Cancel                              | `POST /flows/{flow_id}/runs/{run_id}/cancel/`                              |
+| Redispatch a stale queued run       | `POST /flows/{flow_id}/runs/{run_id}/redispatch/`                          |
+| Active review                       | `GET /flows/{flow_id}/runs/{run_id}/review-checkpoints/active/`            |
+| Edit review                         | `PATCH /flows/{flow_id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/` |
+| Approve, reject, or resume          | `POST` the corresponding `.../{checkpoint_id}/{action}/` path              |
+| Approve and continue in one request | `POST .../{checkpoint_id}/approve-and-continue/` with `Idempotency-Key`    |
+| Step outputs                        | `GET /flows/{flow_id}/runs/{run_id}/steps/`                                |
+| Rerun one step                      | `POST /flows/{flow_id}/runs/{run_id}/steps/{step_id}/rerun/`               |
+| Artifact authorization              | `POST /flows/{flow_id}/runs/{run_id}/artifacts/{file_id}/signed-url/`      |
+| Evidence                            | `GET /flows/{flow_id}/runs/{run_id}/evidence/`                             |
+| Provider calls                      | `GET /flows/{flow_id}/runs/{run_id}/provider-calls/`                       |
+| Evidence export                     | `GET /flows/{flow_id}/runs/{run_id}/evidence/export` (no trailing slash)   |
 
 Run creation returns a content-bearing run. Run lists and status return summaries. Detail is the audited content-bearing read.
 

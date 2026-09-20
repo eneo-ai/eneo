@@ -40,6 +40,9 @@ FLOW_REVIEW_REJECT_PATH: Final[str] = (
 FLOW_REVIEW_RESUME_PATH: Final[str] = (
     "/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/resume/"
 )
+FLOW_REVIEW_APPROVE_AND_CONTINUE_PATH: Final[str] = (
+    "/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve-and-continue/"
+)
 
 FLOW_RUN_STEPS_PATH: Final[str] = "/{id}/runs/{run_id}/steps/"
 FLOW_GRAPH_PATH: Final[str] = "/{id}/graph/"
@@ -112,6 +115,15 @@ class FlowReviewCheckpointRuntimePathsPublic(BaseModel):
             "`{run_id}` and `{checkpoint_id}` with values returned by create_run "
             "and active checkpoint polling, then send the approved checkpoint "
             "`expected_checkpoint_revision`."
+        )
+    )
+    approve_and_continue_template: str = Field(
+        description=(
+            "POST template that approves a checkpoint and resumes its run in one "
+            "request. Replace `{run_id}` and `{checkpoint_id}` with values "
+            "returned by create_run and active checkpoint polling, send the "
+            "checkpoint `expected_checkpoint_revision`, and set an "
+            "`Idempotency-Key` header so a retry replays instead of failing."
         )
     )
 
@@ -366,6 +378,11 @@ def build_flow_runtime_paths(
             ),
             resume_template=_flow_path(
                 FLOW_REVIEW_RESUME_PATH,
+                flow_id=flow_id_value,
+                api_prefix=api_prefix,
+            ),
+            approve_and_continue_template=_flow_path(
+                FLOW_REVIEW_APPROVE_AND_CONTINUE_PATH,
                 flow_id=flow_id_value,
                 api_prefix=api_prefix,
             ),

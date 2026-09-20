@@ -1108,6 +1108,10 @@ async def test_review_checkpoint_edit_validates_output_contract_before_persistin
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+@pytest.mark.parametrize(
+    "continuation",
+    ["approve_then_resume", "approve_and_continue"],
+)
 async def test_edit_approve_resume_uses_edited_payload_for_downstream_steps(
     setup_database,
     admin_user,
@@ -1115,6 +1119,7 @@ async def test_edit_approve_resume_uses_edited_payload_for_downstream_steps(
     completion_model_factory,
     space_factory,
     assistant_factory,
+    continuation: str,
 ):
     completion_service = SimpleNamespace(
         get_response=AsyncMock(
@@ -1170,19 +1175,30 @@ async def test_edit_approve_resume_uses_edited_payload_for_downstream_steps(
             expected_checkpoint_revision=checkpoint.revision,
             edited_value=edited_value,
         )
-        approved = await review_service.approve_review_checkpoint(
-            flow_id=context.flow_id,
-            run_id=context.run_id,
-            checkpoint_id=checkpoint.id,
-            expected_checkpoint_revision=edited.revision,
-        )
-        resumed = await review_service.resume_review_checkpoint(
-            flow_id=context.flow_id,
-            run_id=context.run_id,
-            checkpoint_id=checkpoint.id,
-            expected_checkpoint_revision=approved.checkpoint.revision,
-            idempotency_key=f"resume-{uuid4()}",
-        )
+        if continuation == "approve_then_resume":
+            approved = await review_service.approve_review_checkpoint(
+                flow_id=context.flow_id,
+                run_id=context.run_id,
+                checkpoint_id=checkpoint.id,
+                expected_checkpoint_revision=edited.revision,
+            )
+            resumed = await review_service.resume_review_checkpoint(
+                flow_id=context.flow_id,
+                run_id=context.run_id,
+                checkpoint_id=checkpoint.id,
+                expected_checkpoint_revision=approved.checkpoint.revision,
+                idempotency_key=f"resume-{uuid4()}",
+            )
+        else:
+            # One command from the edited revision: the worker, the edited
+            # payload and the audit sequence below must not tell the difference.
+            resumed = await review_service.approve_and_resume_review_checkpoint(
+                flow_id=context.flow_id,
+                run_id=context.run_id,
+                checkpoint_id=checkpoint.id,
+                expected_checkpoint_revision=edited.revision,
+                idempotency_key=f"continue-{uuid4()}",
+            )
         stale_epoch_result = await context.executor.execute(
             run_id=context.run_id,
             flow_id=context.flow_id,

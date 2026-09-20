@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Annotated, Final
 from uuid import UUID
 
@@ -45,6 +46,7 @@ from eneo.flows.api.flow_models import (
 from eneo.flows.api.flow_run_contract_models import FlowCitationSummaryPublic
 from eneo.flows.api.flow_runtime_paths import (
     FLOW_REVIEW_ACTIVE_PATH,
+    FLOW_REVIEW_APPROVE_AND_CONTINUE_PATH,
     FLOW_REVIEW_APPROVE_PATH,
     FLOW_REVIEW_CHECKPOINT_PATH,
     FLOW_REVIEW_REJECT_PATH,
@@ -63,9 +65,13 @@ from eneo.flows.application.flow_dispatch import (
 from eneo.flows.application.flow_run_evidence_snapshot import (
     flow_run_evidence_snapshot_transaction,
 )
+from eneo.flows.application.flow_run_service import FlowRunWithResultFilesAndUsage
 from eneo.flows.application.flow_trace_audit import (
     log_flow_trace_audit_or_raise,
     raise_flow_trace_audit_unavailable,
+)
+from eneo.flows.application.flow_transcript_corrections_propagation import (
+    TranscriptCorrectionsFoldOutcome,
 )
 from eneo.flows.domain.flow import FlowRun, FlowRunReviewCheckpoint, FlowRunStatus
 from eneo.flows.flow_access_policy import FlowApiAction
@@ -505,6 +511,49 @@ _FLOW_RUN_REVIEW_RESUME_ERROR_EXAMPLES: dict[str, dict[str, object]] = {
         "value": _FLOW_RUN_REVIEW_CANCELLED_ERROR_EXAMPLE,
     },
 }
+_FLOW_RUN_REVIEW_APPROVE_AND_CONTINUE_ERROR_EXAMPLES: dict[str, dict[str, object]] = {
+    FlowApiErrorCode.REVIEW_IDEMPOTENCY_KEY_REQUIRED.value: {
+        "summary": "Request did not include a retry key.",
+        "value": _FLOW_RUN_REVIEW_IDEMPOTENCY_KEY_REQUIRED_ERROR_EXAMPLE,
+    },
+    FlowApiErrorCode.RUN_INVALID_IDEMPOTENCY_KEY.value: {
+        "summary": "Retry key exceeded the accepted length.",
+        "value": _FLOW_RUN_INVALID_IDEMPOTENCY_KEY_ERROR_EXAMPLE,
+    },
+    **_FLOW_RUN_REVIEW_STALE_AND_EXPIRED_ERROR_EXAMPLES,
+    FlowApiErrorCode.REVIEW_NOT_ACTIVE.value: {
+        "summary": "Checkpoint state no longer accepts approval.",
+        "value": _FLOW_RUN_REVIEW_NOT_ACTIVE_ERROR_EXAMPLE,
+    },
+    FlowApiErrorCode.REVIEW_ALREADY_RESUMED.value: {
+        "summary": "Checkpoint was already resumed with another retry key.",
+        "value": _FLOW_RUN_REVIEW_ALREADY_RESUMED_ERROR_EXAMPLE,
+    },
+}
+_FLOW_RUN_REVIEW_APPROVE_AND_CONTINUE_DESCRIPTION = (
+    """
+Approve a human review checkpoint and resume its run in one request.
+
+The checkpoint ends `resumed` and the run `queued` in the same transaction, or nothing
+changes: there is no window where the decision is stored but the run stays waiting. The
+audit trail still records the approval and the resume as two transitions, each with its
+own checkpoint revision. Send the checkpoint `expected_checkpoint_revision` you observed;
+the approved revision is never exposed to you and needs no reconciliation.
+
+The `Idempotency-Key` header is required. Replaying the same key returns the current
+checkpoint and run without approving, folding or dispatching again, even when the first
+response was lost; a different key on an already resumed checkpoint returns `400` with code
+`flow_review_already_resumed`.
+
+The separate approve and resume endpoints remain for integrations that must persist the
+decision before dispatching work. Service-key principals may use this endpoint only for runs
+they own (key must have `resource_permissions.flows = write`).
+
+"""
+    + FLOW_RUN_COMMIT_BEFORE_RESPONSE_CLAUSE
+    + """
+    """
+)
 _FLOW_RUN_REVIEW_APPROVE_DESCRIPTION = (
     """
 Approve the current payload for a human review checkpoint.
@@ -818,38 +867,13 @@ async def approve_flow_run_review_checkpoint(
             checkpoint_id=checkpoint_id,
             expected_checkpoint_revision=review_in.expected_checkpoint_revision,
         )
-        fold = approval.corrections_fold
-        if fold is not None:
-            user = container.user()
-            actor_kwargs = audit_actor_kwargs(user)
-            await container.audit_service().log_async(
-                tenant_id=user.tenant_id,
-                actor_id=actor_kwargs["actor_id"],
-                actor_type=actor_kwargs["actor_type"],
-                actor_api_key_id=actor_kwargs["actor_api_key_id"],
-                action=ActionType.FLOW_RUN_TRANSCRIPT_CORRECTIONS_APPLIED,
-                entity_type=EntityType.FLOW_RUN,
-                entity_id=run_id,
-                description=(
-                    "Resolved transcript corrections at review checkpoint approval"
-                ),
-                metadata=AuditMetadata.standard(
-                    actor=user,
-                    target=fold.correction_set,
-                    extra={
-                        "flow_id": str(id),
-                        "run_id": str(run_id),
-                        "step_id": str(fold.correction_set.step_id),
-                        "checkpoint_id": str(checkpoint_id),
-                        "occurrence_count": len(fold.correction_set.occurrences_json),
-                        "speaker_edit_count": len(
-                            fold.correction_set.speaker_edits_json
-                        ),
-                        "propagated": fold.propagated,
-                        "skip_reason": fold.skip_reason,
-                    },
-                ),
-            )
+        await _audit_transcript_corrections_fold(
+            container,
+            flow_id=id,
+            run_id=run_id,
+            checkpoint_id=checkpoint_id,
+            fold=approval.corrections_fold,
+        )
         response = await _present_review_checkpoint(
             container=container, checkpoint=approval.checkpoint
         )
@@ -1004,8 +1028,6 @@ async def resume_flow_run_review_checkpoint(
         get_container_for_explicit_transaction(with_user=True)
     ),
 ):
-    dispatch_run = None
-    completed_run_view = None
     async with commit_flow_runtime_write_before_response(container):
         await flow_access_context.enforce_flow_scope(
             request,
@@ -1022,38 +1044,216 @@ async def resume_flow_run_review_checkpoint(
             expected_checkpoint_revision=review_in.expected_checkpoint_revision,
             idempotency_key=idempotency_key,
         )
-        if result.accepted:
-            dispatch_run = result.run
-        elif result.run.status is FlowRunStatus.COMPLETED:
-            completed_run_view = await container.flow_run_service().enrich_run_with_result_files_and_usage(
-                run=result.run,
-            )
-        checkpoint = await _present_review_checkpoint(
-            container=container,
+        continuation = await _prepare_continuation_response(
+            container,
             checkpoint=result.checkpoint,
+            run=result.run,
+            accepted=result.accepted,
         )
-    if dispatch_run is not None:
+    return _continuation_response(continuation, background_tasks=background_tasks)
+
+
+@router.post(
+    FLOW_REVIEW_APPROVE_AND_CONTINUE_PATH,
+    response_model=FlowRunReviewCheckpointResumeResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    operation_id="approve_and_continue_flow_run_review_checkpoint",
+    openapi_extra={
+        "parameters": [_FLOW_REVIEW_RESUME_IDEMPOTENCY_HEADER_PARAMETER],
+    },
+    summary="Approve flow run review checkpoint and continue the run",
+    description=_FLOW_RUN_REVIEW_APPROVE_AND_CONTINUE_DESCRIPTION,
+    responses={
+        202: {
+            "description": (
+                "Approval stored and continuation accepted in one transaction. Poll "
+                "the returned run until it reaches a terminal status; a replayed "
+                "key returns the same shape with the current rows."
+            ),
+            "content": {
+                "application/json": {
+                    "example": FLOW_RUN_REVIEW_CHECKPOINT_RESUME_RESPONSE_EXAMPLE,
+                }
+            },
+        },
+        400: error_response(
+            description=(
+                "Approval or continuation refused; nothing was stored. Representative "
+                "machine-readable codes include `flow_review_idempotency_key_required`, "
+                "`flow_run_invalid_idempotency_key`, `flow_review_stale_revision`, "
+                "`flow_review_expired`, `flow_review_not_active`, and "
+                "`flow_review_already_resumed`."
+            ),
+            examples=_FLOW_RUN_REVIEW_APPROVE_AND_CONTINUE_ERROR_EXAMPLES,
+        ),
+        403: error_response(
+            description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
+            message="You do not have permission to resume flows.",
+            eneo_error_code=ErrorCodes.UNAUTHORIZED,
+            code="insufficient_tenant_permission",
+            context={"auth_layer": "tenant_role"},
+        ),
+        404: error_response(
+            description="Run or checkpoint not found for this flow and tenant.",
+            message="Review checkpoint not found.",
+            eneo_error_code=ErrorCodes.NOT_FOUND,
+            code=FlowApiErrorCode.REVIEW_CHECKPOINT_NOT_FOUND.value,
+        ),
+    },
+)
+async def approve_and_continue_flow_run_review_checkpoint(
+    id: Annotated[UUID, Path(description="Identifier of the flow that owns the run.")],
+    run_id: Annotated[UUID, Path(description="Identifier of the run to continue.")],
+    checkpoint_id: Annotated[
+        UUID, Path(description="Identifier of the review checkpoint to approve.")
+    ],
+    request: Request,
+    review_in: FlowRunReviewCheckpointApproveRequest,
+    background_tasks: BackgroundTasks,
+    idempotency_key: Annotated[
+        str | None,
+        Header(
+            alias="Idempotency-Key",
+            include_in_schema=False,
+            description=_FLOW_REVIEW_RESUME_IDEMPOTENCY_HEADER_DESCRIPTION,
+        ),
+    ] = None,
+    container: Container = Depends(
+        get_container_for_explicit_transaction(with_user=True)
+    ),
+):
+    async with commit_flow_runtime_write_before_response(container):
+        await flow_access_context.enforce_flow_scope(
+            request,
+            container,
+            flow_id=id,
+            required_access=FlowApiAction.RESUME,
+            allow_service_key_principals=True,
+        )
+        result = await container.flow_run_review_checkpoint_service().approve_and_resume_review_checkpoint(
+            flow_id=id,
+            run_id=run_id,
+            checkpoint_id=checkpoint_id,
+            expected_checkpoint_revision=review_in.expected_checkpoint_revision,
+            idempotency_key=idempotency_key,
+        )
+        await _audit_transcript_corrections_fold(
+            container,
+            flow_id=id,
+            run_id=run_id,
+            checkpoint_id=checkpoint_id,
+            fold=result.corrections_fold,
+        )
+        continuation = await _prepare_continuation_response(
+            container,
+            checkpoint=result.checkpoint,
+            run=result.run,
+            accepted=result.accepted,
+        )
+    return _continuation_response(continuation, background_tasks=background_tasks)
+
+
+@dataclass(frozen=True, slots=True)
+class _ContinuationResponseParts:
+    checkpoint: FlowRunReviewCheckpointPublic
+    run: FlowRun
+    dispatch_run: FlowRun | None
+    completed_run_view: FlowRunWithResultFilesAndUsage | None
+
+
+async def _prepare_continuation_response(
+    container: Container,
+    *,
+    checkpoint: FlowRunReviewCheckpoint,
+    run: FlowRun,
+    accepted: bool,
+) -> _ContinuationResponseParts:
+    """Inside the transaction: present the checkpoint, and for a replay of an
+    already completed run, read its results so the reply is self-contained."""
+    completed_run_view = None
+    if not accepted and run.status is FlowRunStatus.COMPLETED:
+        completed_run_view = (
+            await container.flow_run_service().enrich_run_with_result_files_and_usage(
+                run=run,
+            )
+        )
+    return _ContinuationResponseParts(
+        checkpoint=await _present_review_checkpoint(
+            container=container, checkpoint=checkpoint
+        ),
+        run=run,
+        dispatch_run=run if accepted else None,
+        completed_run_view=completed_run_view,
+    )
+
+
+def _continuation_response(
+    parts: _ContinuationResponseParts,
+    *,
+    background_tasks: BackgroundTasks,
+) -> FlowRunReviewCheckpointResumeResponse:
+    """After commit: schedule the accepted run's dispatch, then answer."""
+    if parts.dispatch_run is not None:
         background_tasks.add_task(
             dispatch_flow_run_recoverably_after_commit,
-            run_id=dispatch_run.id,
-            tenant_id=dispatch_run.tenant_id,
-            expected_revision=dispatch_run.revision,
+            run_id=parts.dispatch_run.id,
+            tenant_id=parts.dispatch_run.tenant_id,
+            expected_revision=parts.dispatch_run.revision,
         )
     assembler = FlowAssembler()
+    view = parts.completed_run_view
     public_run = (
         assembler.to_run_public(
-            completed_run_view.run,
-            result_files=completed_run_view.result_files,
-            token_usage=completed_run_view.token_usage,
-            transcription_usage=completed_run_view.transcription_usage,
-            final_output=completed_run_view.final_output,
+            view.run,
+            result_files=view.result_files,
+            token_usage=view.token_usage,
+            transcription_usage=view.transcription_usage,
+            final_output=view.final_output,
         )
-        if completed_run_view is not None
-        else assembler.to_run_public(result.run)
+        if view is not None
+        else assembler.to_run_public(parts.run)
     )
     return FlowRunReviewCheckpointResumeResponse(
-        checkpoint=checkpoint,
+        checkpoint=parts.checkpoint,
         run=public_run,
+    )
+
+
+async def _audit_transcript_corrections_fold(
+    container: Container,
+    *,
+    flow_id: UUID,
+    run_id: UUID,
+    checkpoint_id: UUID,
+    fold: TranscriptCorrectionsFoldOutcome | None,
+) -> None:
+    if fold is None:
+        return
+    user = container.user()
+    actor_kwargs = audit_actor_kwargs(user)
+    await container.audit_service().log_async(
+        tenant_id=user.tenant_id,
+        actor_id=actor_kwargs["actor_id"],
+        actor_type=actor_kwargs["actor_type"],
+        actor_api_key_id=actor_kwargs["actor_api_key_id"],
+        action=ActionType.FLOW_RUN_TRANSCRIPT_CORRECTIONS_APPLIED,
+        entity_type=EntityType.FLOW_RUN,
+        entity_id=run_id,
+        description=("Resolved transcript corrections at review checkpoint approval"),
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=fold.correction_set,
+            extra={
+                "flow_id": str(flow_id),
+                "run_id": str(run_id),
+                "step_id": str(fold.correction_set.step_id),
+                "checkpoint_id": str(checkpoint_id),
+                "occurrence_count": len(fold.correction_set.occurrences_json),
+                "speaker_edit_count": len(fold.correction_set.speaker_edits_json),
+                "propagated": fold.propagated,
+                "skip_reason": fold.skip_reason,
+            },
+        ),
     )
 
 
