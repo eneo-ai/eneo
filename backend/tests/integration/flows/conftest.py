@@ -5,7 +5,6 @@ import os
 import signal
 import subprocess
 import sys
-import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
@@ -44,59 +43,6 @@ from tests.integration.conftest import (
     _container_network_ip,
     _host_resolves,
 )
-
-_HOST_LOCK = Path(
-    os.environ.get("ENEO_FLOWS_INTEGRATION_LOCK", "/tmp/eneo-flows-integration.lock")
-)
-
-
-@pytest.fixture(scope="session", autouse=True)
-def _one_flows_integration_session_per_host() -> Iterator[None]:
-    """Serialise flows integration sessions on a host.
-
-    Two sessions against the shared database reset each other's rows mid-test
-    (an outbox delivery run then reports zero attempts). A launcher that already
-    holds the lock sets ENEO_FLOWS_INTEGRATION_LOCK_HELD=1; any other session
-    waits for it here, up to 45 minutes.
-    """
-    if os.environ.get("ENEO_FLOWS_INTEGRATION_LOCK_HELD") == "1":
-        yield
-        return
-    waited = 0.0
-    while True:
-        try:
-            _HOST_LOCK.mkdir()
-            break
-        except FileExistsError:
-            owner = (
-                (_HOST_LOCK / "owner").read_text().split()[0:1]
-                if (_HOST_LOCK / "owner").exists()
-                else []
-            )
-            if owner:
-                try:
-                    os.kill(int(owner[0]), 0)
-                except (OSError, ValueError):
-                    # The holder is gone: a killed run left its lock behind.
-                    for child in _HOST_LOCK.iterdir():
-                        child.unlink()
-                    _HOST_LOCK.rmdir()
-                    continue
-            if waited >= 2700:
-                pytest.exit(
-                    "flows integration lock held for 45 minutes; aborting",
-                    returncode=75,
-                )
-            time.sleep(20)
-            waited += 20
-    (_HOST_LOCK / "owner").write_text(f"{os.getpid()} pytest-session")
-    try:
-        yield
-    finally:
-        for child in _HOST_LOCK.iterdir():
-            child.unlink()
-        _HOST_LOCK.rmdir()
-
 
 _FLOW_TASK_TIMEOUT_SECONDS = 5
 _WORKER_PARENT_ENV_ALLOWLIST = (
