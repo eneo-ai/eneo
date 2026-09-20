@@ -851,9 +851,15 @@ class RemoteFlowTranscriber:
                     deadline=cleanup_deadline,
                 )
             raise
-        except ProviderCallObserverError:
+        except ProviderCallObserverError as persistence_error:
             settle_provider_request(known=False)
-            await self.client.cancel(job_id)
+            try:
+                await self.client.cancel(job_id)
+            except (asyncio.CancelledError, TimeoutError) as interruption:
+                # The best-effort cancel was interrupted (task cancellation or
+                # the outer deadline); the persistence-gap facts carry the known
+                # job id and must reach terminal error handling, not be replaced.
+                raise persistence_error from interruption
             raise
         except (FlowStepCancelledError, RemoteTranscriptionCancelledException):
             settle_provider_request(known=False)

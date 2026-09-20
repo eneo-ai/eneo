@@ -155,6 +155,48 @@ async def test_stalled_acceptance_is_bounded_and_preserves_gap_identity(
             pass
 
 
+async def test_interrupted_cancel_after_stalled_acceptance_keeps_gap_identity(
+    accepted_call_recorder, monkeypatch
+):
+    """An outer deadline during the DELETE must not replace the gap error."""
+    from eneo.flows.flow_run_error import FlowRunErrorDetails
+
+    recorder, row, session, commits = accepted_call_recorder
+    transcriber, file, requests = _accepted_transcriber(
+        recorder, row, monkeypatch, result_timeout=0.02
+    )
+    release = asyncio.Event()
+
+    async def flush():
+        if row.status == "started":
+            await release.wait()
+
+    session.flush.side_effect = flush
+    deleting = asyncio.Event()
+
+    async def hanging_cancel(job_id, *, client=None):
+        deleting.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(transcriber.client, "cancel", hanging_cancel)
+
+    async def run():
+        async with asyncio.timeout(0.3):
+            await transcriber.transcribe(file, SimpleNamespace(), observer=recorder)
+
+    try:
+        with pytest.raises(ProviderCallEvidencePersistenceError) as exc_info:
+            await run()
+        assert deleting.is_set()
+        details = FlowRunErrorDetails(provider_call_evidence_gap=exc_info.value.facts)
+        gap = details.model_dump(mode="json")["provider_call_evidence_gap"]
+        assert gap["provider_response_id"] == "job-1"
+        assert gap["outcome"] == "started"
+        assert commits == []
+    finally:
+        release.set()
+
+
 async def test_unlink_failure_after_acceptance_keeps_receipt_and_cancels_job(
     accepted_call_recorder, monkeypatch
 ):
