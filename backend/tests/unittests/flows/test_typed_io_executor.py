@@ -4084,6 +4084,76 @@ async def test_per_item_map_timeout_inside_a_request_reports_completed_items(
 
 
 @pytest.mark.asyncio
+async def test_per_item_prompts_read_complete_material_once_per_attempt(user):
+    from tests.unittests.flows.test_resolved_input_runtime import _file_backed_material
+
+    executor, _, run_repo, _ = _build_executor(user)
+    executor.max_inline_text_bytes = 2048
+    text = "Complete mapped prompt material.\n" * 200
+    material_result, file, reference = _file_backed_material(text)
+    executor.file_service.get_owned_file_infos.side_effect = None
+    executor.file_service.get_owned_file_infos.return_value = [file]
+    executor.file_service.repo.get_content_references.return_value = [reference]
+    executor.file_service.get_file_content.return_value = file
+    assistant = _mock_assistant_for_execute_step(response_text='{"sections":[]}')
+    assistant.get_prompt_text.return_value = "Read {{step_1.output.text}}"
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    documents = [{"title": "One"}, {"title": "Two"}]
+    previous = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=2,
+        text='{"documents":[]}',
+        structured={"documents": documents},
+    )
+    state = RunExecutionState(
+        completed_by_order={1: material_result, 2: previous},
+        prior_results=[material_result, previous],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    step = _runtime_step(
+        step_order=3,
+        input_source="previous_step",
+        input_type="json",
+        input_contract={
+            "type": "object",
+            "properties": {"documents": {"type": "array", "items": {"type": "object"}}},
+            "required": ["documents"],
+        },
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {"sections": {"type": "array", "items": {"type": "object"}}},
+            "required": ["sections"],
+        },
+        input_config={"item_map": {"enabled": True, "max_items": 2}},
+    )
+
+    for attempt_no in (1, 2):
+        result = await executor._execute_step(
+            step=step, run=run, state=state, attempt_no=attempt_no
+        )
+        assert result.output.structured_output == {"sections": []}
+        calls = assistant.get_response.await_args_list[-2:]
+        assert len(calls) == 2
+        for call, document in zip(calls, documents, strict=True):
+            assert text in call.kwargs["prompt_override"]
+            assert document["title"] in call.kwargs["question"]
+        execution_inputs = run_repo.activate_step_attempt.await_args.kwargs[
+            "attempt_input"
+        ].execution_inputs
+        assert len(execution_inputs) == 2
+        for execution, document in zip(execution_inputs, documents, strict=True):
+            assert document["title"] in execution.question
+            assert execution.material_aliases[0].file_id == file.id
+        assert executor.file_service.get_file_content.await_count == attempt_no
+
+
+@pytest.mark.asyncio
 async def test_per_item_map_executes_one_model_call_per_previous_document_at_scale(
     user,
 ):

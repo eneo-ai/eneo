@@ -249,6 +249,7 @@ class ResolveStepInputFn(Protocol):
         requested_file_ids: Sequence[UUID],
         transcription_call_observer: ProviderCallObserver | None,
         prompt_template: str = "",
+        step_input_override: StepInputValue | None = None,
     ) -> Awaitable[StepInputValue]: ...
 
 
@@ -1164,43 +1165,42 @@ async def prepare_step_execution(
         "input_source": step.input_source,
         "used_question_binding": False,
     }
-    if step_input_override is None:
-        # Input resolution can wait minutes on an external transcription job;
-        # publish the run's cancellation probe so that wait can be cut short.
-        async def run_cancelled() -> bool:
-            if deps.run_cancelled is None:
-                return False
-            return await deps.run_cancelled(
-                run_id=run.id, flow_id=run.flow_id, tenant_id=run.tenant_id
-            )
 
-        try:
-            with run_cancel_probe_scope(
-                run_cancelled if deps.run_cancelled is not None else None
-            ):
-                step_input = await deps.resolve_step_input(
-                    step=step,
-                    context=context,
-                    run=run,
-                    prior_results=state.prior_results,
-                    state=state,
-                    version_metadata=version_metadata,
-                    requested_file_ids=requested_file_ids,
-                    prompt_template=prompt_text,
-                    transcription_call_observer=(
-                        deps.build_transcription_call_observer()
-                        if deps.build_transcription_call_observer is not None
-                        else None
-                    ),
-                )
-        except TypedIOValidationException as exc:
-            raise attach_typed_failure_context(
-                exc,
-                input_payload_for_result=input_payload_for_result,
-                effective_prompt=effective_prompt,
-            ) from exc
-    else:
-        step_input = step_input_override
+    # Input resolution can wait minutes on an external transcription job;
+    # publish the run's cancellation probe so that wait can be cut short.
+    async def run_cancelled() -> bool:
+        if deps.run_cancelled is None:
+            return False
+        return await deps.run_cancelled(
+            run_id=run.id, flow_id=run.flow_id, tenant_id=run.tenant_id
+        )
+
+    try:
+        with run_cancel_probe_scope(
+            run_cancelled if deps.run_cancelled is not None else None
+        ):
+            step_input = await deps.resolve_step_input(
+                step=step,
+                context=context,
+                run=run,
+                prior_results=state.prior_results,
+                state=state,
+                version_metadata=version_metadata,
+                requested_file_ids=requested_file_ids,
+                prompt_template=prompt_text,
+                step_input_override=step_input_override,
+                transcription_call_observer=(
+                    deps.build_transcription_call_observer()
+                    if deps.build_transcription_call_observer is not None
+                    else None
+                ),
+            )
+    except TypedIOValidationException as exc:
+        raise attach_typed_failure_context(
+            exc,
+            input_payload_for_result=input_payload_for_result,
+            effective_prompt=effective_prompt,
+        ) from exc
 
     record_step_phase(FlowStepPhase.INPUT_RESOLUTION)
     input_payload_for_result.update(

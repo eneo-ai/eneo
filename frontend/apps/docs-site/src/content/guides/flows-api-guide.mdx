@@ -211,6 +211,8 @@ These are admin surfaces, not end-user runtime endpoints:
 
 Complete text from a generated step artifact is admitted for processing against the file upload ceiling before content is read; when a rendered prompt exceeds the inline storage ceiling, only its UTF-8 prefix is stored with `effective_prompt_truncated=true`, and the complete prompt is not persisted: the flow revision holds the template and the input aliases hold the material identities.
 
+Persisted input `text`, `source_text`, and execution `question` retain their own UTF-8 prefixes with corresponding `_truncated` flags; `material_aliases` separately records the flat artifact identities used by the input or prompt.
+
 Mapped execution has two independent positive-integer ceilings:
 
 - `max_provider_calls_per_mapped_step` limits the number of per-source or per-item provider calls in one step attempt. Lowering the tenant value clamps future attempts without rewriting published definitions.

@@ -3,6 +3,7 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from eneo.flows.domain.step_output import (
     FileBackedStepText,
@@ -13,6 +14,27 @@ from eneo.flows.domain.step_output import (
     interpret_rejected_output,
     interpret_step_text,
 )
+
+
+@pytest.mark.parametrize(
+    "updates,message",
+    [
+        ({"inline_text_bytes": 1}, "preview size does not match"),
+        ({"full_text_bytes": 2}, "preview must be smaller"),
+        ({"source_step_id": uuid4()}, "both step and attempt"),
+        ({"source_attempt_no": 1}, "both step and attempt"),
+    ],
+)
+def test_file_backed_alias_rejects_incoherent_preview_or_source(updates, message):
+    payload = {
+        "preview": "å",
+        "file_id": uuid4(),
+        "inline_text_bytes": 2,
+        "full_text_bytes": 3,
+    }
+    assert FileBackedStepText.model_validate(payload).preview == "å"
+    with pytest.raises(ValidationError, match=message):
+        FileBackedStepText.model_validate({**payload, **updates})
 
 
 @pytest.mark.parametrize(

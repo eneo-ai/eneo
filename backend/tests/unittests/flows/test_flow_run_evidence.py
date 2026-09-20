@@ -431,17 +431,29 @@ def test_evidence_bundle_projects_exact_resolved_input_lineage_per_attempt() -> 
     }
 
 
-def test_evidence_and_public_attempt_keep_consumed_material_aliases():
-    from eneo.flows.api.flow_models import FlowStepAttemptPublic
+@pytest.mark.parametrize(
+    "redacted,text",
+    [
+        (False, "password=hunter2 Complete private material.\n" * 200),
+        (True, "password=hunter2 Complete private material.\n" * 200),
+        (True, "password=x\nY"),
+    ],
+    ids=["raw", "redacted", "redacted-preview-expands-past-artifact-size"],
+)
+def test_evidence_and_public_attempt_keep_consumed_material_aliases(redacted, text):
+    from eneo.flows.api.flow_models import (
+        FlowRunEvidenceResponse,
+        FlowRunPublic,
+        FlowStepAttemptPublic,
+    )
     from eneo.flows.domain.step_output import (
         FileBackedStepText,
         ResolvedStepMaterial,
-        build_step_text_alias,
+        build_step_material_aliases,
     )
     from eneo.flows.runtime.step_result_builder import build_step_input_payload
 
     run, version = _evidence_run_and_version()
-    text = "Complete private material.\n" * 200
     material = ResolvedStepMaterial(
         source_step_id=uuid4(),
         source_attempt_no=2,
@@ -450,7 +462,7 @@ def test_evidence_and_public_attempt_keep_consumed_material_aliases():
         byte_size=len(text.encode()),
         text=text,
     )
-    alias = build_step_text_alias(text, materials=(material,), max_inline_bytes=2048)
+    alias = build_step_material_aliases(materials=(material,), max_inline_bytes=2048)
     assert isinstance(alias, tuple)
     assert isinstance(alias[0], FileBackedStepText)
     payload = build_step_input_payload(
@@ -468,7 +480,9 @@ def test_evidence_and_public_attempt_keep_consumed_material_aliases():
         ),
         execution_inputs=(
             FlowStepAttemptExecutionInput(
-                question=alias,
+                question=text[:2048],
+                question_truncated=True,
+                material_aliases=alias,
                 effective_prompt="Complete private material.",
                 effective_prompt_truncated=True,
                 assistant_context_version=1,
@@ -496,12 +510,31 @@ def test_evidence_and_public_attempt_keep_consumed_material_aliases():
     assert public.input_text_aliases == alias
     assert public.input_payload_json == attempt_input
 
-    evidence = build_evidence_bundle(
+    bundle = build_evidence_bundle(
         run=run,
         version=version,
         step_results=[result],
         step_attempts=[attempt],
-    ).to_dict()
+    )
+    if redacted:
+        evidence = redact_evidence_bundle(bundle).to_dict()
+        evidence["run"] = {
+            key: value
+            for key, value in evidence["run"].items()
+            if key in FlowRunPublic.model_fields
+        }
+        public_evidence = FlowRunEvidenceResponse.model_validate(evidence)
+        serialized = public_evidence.model_dump_json()
+        assert "hunter2" not in serialized
+        assert "password=x" not in serialized
+        for record in (*public_evidence.step_results, *public_evidence.step_attempts):
+            reference = record.input_text_aliases[0]
+            assert reference.inline_text_bytes == len(reference.preview.encode())
+            assert reference.inline_text_bytes < reference.full_text_bytes
+            assert reference.file_id == material.file_id
+            assert reference.checksum == material.checksum
+        return
+    evidence = bundle.to_dict()
     exported_attempt = evidence["step_attempts"][0]["input_payload_json"]
     assert (
         FlowStepAttemptInput.model_validate_json(json.dumps(exported_attempt))

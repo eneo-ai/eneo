@@ -23642,8 +23642,18 @@ export interface components {
        * @default false
        */
       effective_prompt_truncated?: boolean;
+      /**
+       * Material Aliases
+       * @default []
+       */
+      material_aliases?: components["schemas"]["FileBackedStepText"][];
       /** Question */
-      question: string | components["schemas"]["FileBackedStepText"][];
+      question: string;
+      /**
+       * Question Truncated
+       * @default false
+       */
+      question_truncated?: boolean;
     };
     /** FlowStepAttemptInput */
     FlowStepAttemptInput: {

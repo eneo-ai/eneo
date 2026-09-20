@@ -65,7 +65,9 @@ class FlowStepAttemptCompletionConfiguration(_FlowStepAttemptInputModel):
 
 
 class FlowStepAttemptExecutionInput(_FlowStepAttemptInputModel):
-    question: str | tuple[FileBackedStepText, ...]
+    question: str
+    question_truncated: bool = False
+    material_aliases: tuple[FileBackedStepText, ...] = ()
     effective_prompt: str
     effective_prompt_truncated: bool = Field(
         default=False,

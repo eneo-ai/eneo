@@ -69,7 +69,7 @@ from eneo.flows.domain.runtime_input import build_runtime_input_config
 from eneo.flows.domain.runtime_invariant_exceptions import FlowRuntimeInvariantError
 from eneo.flows.domain.step_output import (
     StepOutputValidationException,
-    build_step_text_alias,
+    build_step_material_aliases,
     utf8_prefix,
 )
 from eneo.flows.enums import (
@@ -461,8 +461,13 @@ def _attempt_completion_evidence(
         ),
         tuple(
             FlowStepAttemptExecutionInput(
-                question=build_step_text_alias(
+                question=utf8_prefix(
                     call.question,
+                    max_bytes=prepared.deps.max_inline_text_bytes,
+                ),
+                question_truncated=len(call.question.encode("utf-8"))
+                > prepared.deps.max_inline_text_bytes,
+                material_aliases=build_step_material_aliases(
                     materials=prepared.prepared.step_input.materials,
                     max_inline_bytes=prepared.deps.max_inline_text_bytes,
                 ),
@@ -2376,6 +2381,7 @@ class FlowRunExecutor:
         requested_file_ids: Sequence[UUID] = (),
         transcription_call_observer: "ProviderCallObserver | None" = None,
         prompt_template: str = "",
+        step_input_override: StepInputValue | None = None,
     ) -> StepInputValue:
         deps = self._build_step_input_resolution_deps(transcription_call_observer)
         return await resolve_step_input_runtime(
@@ -2387,6 +2393,7 @@ class FlowRunExecutor:
             version_metadata=version_metadata,
             requested_file_ids=requested_file_ids,
             prompt_template=prompt_template,
+            step_input_override=step_input_override,
             deps=deps,
         )
 

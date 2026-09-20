@@ -152,6 +152,7 @@ async def resolve_step_input(
     version_metadata: dict[str, Any] | None = None,
     requested_file_ids: Sequence[UUID] = (),
     prompt_template: str = "",
+    step_input_override: StepInputValue | None = None,
     deps: StepInputResolutionDeps,
 ) -> StepInputValue:
     if step.step_order == 1 and step.input_source in {
@@ -195,6 +196,7 @@ async def resolve_step_input(
         prompt_template=prompt_template,
         runtime_admission=runtime_admission,
         runtime_file_ids=requested_ids,
+        step_input_override=step_input_override,
     )
     if state is not None:
         merged_materials = {
@@ -207,6 +209,12 @@ async def resolve_step_input(
         if materials and deps.input_limits is not None
         else None
     )
+    if step_input_override is not None:
+        return replace(
+            step_input_override,
+            materials=materials,
+            processing_ceiling_bytes=processing_ceiling_bytes,
+        )
     structured: dict[str, Any] | list[Any] | None = None
     http_edges: tuple[FlowResolvedInputEdge, ...] = ()
     if step.input_source == "http_get":
@@ -1193,10 +1201,15 @@ async def _resolve_step_materials(
     prompt_template: str = "",
     runtime_admission: InputFileAdmission | None = None,
     runtime_file_ids: Sequence[UUID] = (),
+    step_input_override: StepInputValue | None = None,
 ) -> tuple[ResolvedStepMaterial, ...]:
     results = _prior_results_by_order(prior_results=prior_results, state=state)
     selected: list[FlowStepResult] = []
-    template = effective_question_binding(step.input_bindings)
+    template = (
+        effective_question_binding(step.input_bindings)
+        if step_input_override is None
+        else None
+    )
     for selected_template in (template, prompt_template):
         if not selected_template:
             continue
@@ -1212,10 +1225,15 @@ async def _resolve_step_materials(
                 continue
             if order is not None and order < step.step_order and order in results:
                 selected.append(results[order])
-    if template is None and step.input_source in {
-        "previous_step",
-        "all_previous_steps",
-    }:
+    if (
+        step_input_override is None
+        and template is None
+        and step.input_source
+        in {
+            "previous_step",
+            "all_previous_steps",
+        }
+    ):
         selected.extend(
             [
                 result
@@ -1269,12 +1287,18 @@ async def _resolve_step_materials(
         step_names_by_order=state.step_names_by_order if state else None,
         step_ref_mapping=state.step_ref_mapping if state else None,
         resolved_step_text=empty_material,
-        current_step_input=runtime_metadata,
+        current_step_input=(
+            step_input_override.runtime_input_metadata
+            if step_input_override is not None
+            else runtime_metadata
+        ),
     )
     inline_text = deps.variable_resolver.interpolate(
         prompt_template, interpolation_context
     )
-    if template is not None:
+    if step_input_override is not None:
+        inline_text += step_input_override.text
+    elif template is not None:
         inline_text += deps.variable_resolver.interpolate(
             template, interpolation_context
         )

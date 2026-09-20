@@ -33,6 +33,7 @@ from eneo.flows.domain.flow import (
 from eneo.flows.domain.flow_step_attempt_input import parse_flow_step_attempt_input
 from eneo.flows.domain.provider_call import ProviderCallEvidencePage
 from eneo.flows.domain.runtime import RuntimeStep
+from eneo.flows.domain.step_output import FileBackedStepText, utf8_prefix
 from eneo.flows.domain.transcript_corrections import FlowTranscriptCorrectionRevision
 from eneo.flows.enums import FlowRunReviewCheckpointState
 from eneo.flows.flow_run_contract_service import build_final_output_contract
@@ -490,7 +491,12 @@ def _redact_record_payloads(
             record_payload,
             path=f"{section_path}[{index}]",
         )
-        redacted_records.append(cast(dict[str, Any], result.value))
+        redacted_records.append(
+            cast(
+                dict[str, Any],
+                _cohere_redacted_material_aliases(record_payload, result.value),
+            )
+        )
         masked_paths.extend(result.masked_paths)
         masked_fields.extend(result.masked_fields)
     return RedactedEvidenceSection(
@@ -498,6 +504,37 @@ def _redact_record_payloads(
         masked_paths=tuple(masked_paths),
         masked_fields=tuple(masked_fields),
     )
+
+
+def _cohere_redacted_material_aliases(
+    original: JsonValue, redacted: JsonValue
+) -> JsonValue:
+    if isinstance(original, dict) and isinstance(redacted, dict):
+        if original.get("kind") == "file_backed_step_text":
+            alias = FileBackedStepText.model_validate(original)
+            redacted_preview = redacted["preview"]
+            if not isinstance(redacted_preview, str):
+                raise ValueError("Redacted material preview must remain text.")
+            # Redaction can expand a preview; its byte count describes the public
+            # preview, while the size and checksum still identify the stored artifact.
+            preview = utf8_prefix(redacted_preview, max_bytes=alias.full_text_bytes - 1)
+            return FileBackedStepText.model_validate(
+                {
+                    **redacted,
+                    "preview": preview,
+                    "inline_text_bytes": len(preview.encode("utf-8")),
+                }
+            ).model_dump(mode="json")
+        return {
+            key: _cohere_redacted_material_aliases(original[key], value)
+            for key, value in redacted.items()
+        }
+    if isinstance(original, list) and isinstance(redacted, list):
+        return [
+            _cohere_redacted_material_aliases(before, after)
+            for before, after in zip(original, redacted, strict=True)
+        ]
+    return redacted
 
 
 def _runtime_input_file_ids_for_result(

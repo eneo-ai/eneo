@@ -118,14 +118,13 @@ class ResolvedStepMaterial:
     text: str
 
 
-def build_step_text_alias(
-    text: str,
+def build_step_material_aliases(
     *,
     materials: Sequence[ResolvedStepMaterial],
     max_inline_bytes: int,
-) -> str | tuple[FileBackedStepText, ...]:
+) -> tuple[FileBackedStepText, ...]:
     if not materials:
-        return text
+        return ()
     aliases = tuple(
         FileBackedStepText(
             preview=(
@@ -144,22 +143,15 @@ def build_step_text_alias(
     )
     if (
         len(
-            json.dumps(step_text_alias_payload(aliases), ensure_ascii=False).encode(
-                "utf-8"
-            )
+            json.dumps(
+                [alias.model_dump(mode="json") for alias in aliases],
+                ensure_ascii=False,
+            ).encode("utf-8")
         )
         > max_inline_bytes
     ):
         raise _alias_too_large()
     return aliases
-
-
-def step_text_alias_payload(
-    value: str | tuple[FileBackedStepText, ...],
-) -> str | list[dict[str, object]]:
-    if isinstance(value, tuple):
-        return [alias.model_dump(mode="json") for alias in value]
-    return value
 
 
 def parse_step_text_aliases(value: object) -> tuple[FileBackedStepText, ...]:

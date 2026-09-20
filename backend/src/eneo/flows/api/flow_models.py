@@ -1531,7 +1531,9 @@ class FlowRunStepPublic(BaseModel):
     @computed_field
     @property
     def input_text_aliases(self) -> tuple[FileBackedStepText, ...]:
-        return parse_step_text_aliases((self.input_payload_json or {}).get("text"))
+        return parse_step_text_aliases(
+            (self.input_payload_json or {}).get("material_aliases")
+        )
 
 
 class FlowRunRedispatchRequest(BaseModel):
@@ -2076,7 +2078,7 @@ class FlowStepAttemptPublic(BaseModel):
         resolved = (
             self.input_payload_json.resolved_input if self.input_payload_json else None
         )
-        return parse_step_text_aliases((resolved or {}).get("text"))
+        return parse_step_text_aliases((resolved or {}).get("material_aliases"))
 
 
 class FlowRunReviewCheckpointEditPublic(FlowRunReviewCheckpointEdit):

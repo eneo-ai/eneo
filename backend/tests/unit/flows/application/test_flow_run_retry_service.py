@@ -219,11 +219,16 @@ async def test_retry_import_copies_bounded_consumed_material_alias(context):
         for call in session.execute.await_args_list[-2:]
     ]
     assert copied_inputs == [payload, payload]
-    assert payload["text"][0]["source_step_id"] == str(material.source_step_id)
-    assert payload["text"][0]["source_attempt_no"] == 3
-    assert payload["text"][0]["checksum"] == material.checksum
+    assert payload["text"] == text[:2048]
+    assert payload["text_truncated"] is True
+    assert payload["material_aliases"][0]["source_step_id"] == str(
+        material.source_step_id
+    )
+    assert payload["material_aliases"][0]["source_attempt_no"] == 3
+    assert payload["material_aliases"][0]["checksum"] == material.checksum
     assert text not in json.dumps(copied_inputs)
-    assert len(json.dumps(payload["text"]).encode()) <= 2048
+    assert len(payload["text"].encode()) <= 2048
+    assert len(json.dumps(payload["material_aliases"]).encode()) <= 2048
 
 
 @pytest.mark.parametrize(

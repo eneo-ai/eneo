@@ -18,8 +18,7 @@ from eneo.flows.domain.runtime import RuntimeStep, StepExecutionOutput
 from eneo.flows.domain.step_output import (
     ResolvedStepMaterial,
     build_rejected_output_payload,
-    build_step_text_alias,
-    step_text_alias_payload,
+    build_step_material_aliases,
     utf8_prefix,
 )
 from eneo.flows.flow_run_provenance import (
@@ -175,16 +174,22 @@ def build_step_input_payload(
     max_inline_text_bytes: int,
 ) -> dict[str, Any]:
     return {
-        "text": step_text_alias_payload(
-            build_step_text_alias(
-                text, materials=materials, max_inline_bytes=max_inline_text_bytes
+        "text": utf8_prefix(text, max_bytes=max_inline_text_bytes)
+        if max_inline_text_bytes > 0
+        else text,
+        "text_truncated": max_inline_text_bytes > 0
+        and len(text.encode("utf-8")) > max_inline_text_bytes,
+        "source_text": utf8_prefix(source_text, max_bytes=max_inline_text_bytes)
+        if max_inline_text_bytes > 0
+        else source_text,
+        "source_text_truncated": max_inline_text_bytes > 0
+        and len(source_text.encode("utf-8")) > max_inline_text_bytes,
+        "material_aliases": [
+            alias.model_dump(mode="json")
+            for alias in build_step_material_aliases(
+                materials=materials, max_inline_bytes=max_inline_text_bytes
             )
-        ),
-        "source_text": step_text_alias_payload(
-            build_step_text_alias(
-                source_text, materials=materials, max_inline_bytes=max_inline_text_bytes
-            )
-        ),
+        ],
         "input_source": input_source,
         "used_question_binding": used_question_binding,
     }

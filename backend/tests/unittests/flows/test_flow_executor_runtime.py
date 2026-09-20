@@ -122,20 +122,26 @@ _DEFAULT_SNAPSHOT_PROMPT = "Execute this flow step."
 
 
 @pytest.mark.parametrize(
-    "prompt_template,truncated",
-    [("Read: {{step_1.output.text}}", True), ("Read the question.", False)],
+    "prompt_template,truncated,input_source",
+    [
+        ("Read: {{step_1.output.text}}", True, "previous_step"),
+        ("Read the question.", False, "previous_step"),
+        ("Read: {{step_1.output.text}}", True, "http_get"),
+    ],
 )
 @pytest.mark.asyncio
 async def test_complete_material_reaches_provider_and_all_persisted_aliases_are_bounded(
     user,
     prompt_template,
     truncated,
+    input_source,
 ):
     from eneo.ai_models.completion_models.completion_model import ModelKwargs
     from eneo.flows.domain.step_output import (
         FileBackedStepText,
         parse_step_text_aliases,
     )
+    from eneo.flows.runtime.http_orchestration import FlowHttpInputResolution
     from eneo.flows.runtime.step_result_builder import (
         build_completed_step_input_payload,
     )
@@ -167,7 +173,17 @@ async def test_complete_material_reaches_provider_and_all_persisted_aliases_are_
     executor._load_assistant = AsyncMock(return_value=assistant)
     executor._retrieve_rag_chunks = AsyncMock(return_value=([], None, []))
     executor._run_is_cancelled = AsyncMock(return_value=False)
-    step = _runtime_step(step_order=2, input_source="previous_step")
+    input_text = (
+        "Live HTTP response: approved at revision 42"
+        if input_source == "http_get"
+        else text
+    )
+    executor._resolve_http_input_source_text = AsyncMock(
+        return_value=FlowHttpInputResolution(
+            text=input_text, structured=None, resolved_input_edges=()
+        )
+    )
+    step = _runtime_step(step_order=2, input_source=input_source)
     state = _empty_execution_state()
     state.prior_results = [prior]
     state.completed_by_order = {1: prior}
@@ -175,10 +191,14 @@ async def test_complete_material_reaches_provider_and_all_persisted_aliases_are_
     result = await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
 
     sent = assistant.get_response.await_args.kwargs
-    assert sent["question"] == text
+    assert sent["question"] == input_text
     assert (text in sent["prompt_override"]) is truncated
     attempt_input = run_repo.activate_step_attempt.await_args.kwargs["attempt_input"]
-    question = attempt_input.execution_inputs[0].question[0]
+    execution = attempt_input.execution_inputs[0]
+    expected_text = input_text.encode("utf-8")[:2048].decode("utf-8", errors="ignore")
+    assert execution.question == expected_text
+    assert execution.question_truncated is (input_source != "http_get")
+    question = execution.material_aliases[0]
     prompt = attempt_input.execution_inputs[0].effective_prompt
     assert isinstance(question, FileBackedStepText)
     assert isinstance(prompt, str)
@@ -192,7 +212,11 @@ async def test_complete_material_reaches_provider_and_all_persisted_aliases_are_
     assert question.checksum == file.checksum
     completed_input = build_completed_step_input_payload(result.output)
     assert completed_input["text"] == attempt_input.resolved_input["text"]
-    assert parse_step_text_aliases(completed_input["text"]) == (question,)
+    assert completed_input["text"] == expected_text
+    assert completed_input["source_text"] == expected_text
+    assert completed_input["text_truncated"] is (input_source != "http_get")
+    assert completed_input["source_text_truncated"] is (input_source != "http_get")
+    assert parse_step_text_aliases(completed_input["material_aliases"]) == (question,)
     assert text not in str(completed_input)
     assert text not in attempt_input.model_dump_json()
     assert len(question.model_dump_json().encode()) <= executor.max_inline_text_bytes
@@ -854,7 +878,10 @@ async def test_webhook_enqueue_keeps_completed_step_evidence(user):
     assert saved.status == FlowStepResultStatus.COMPLETED
     assert saved.input_payload_json == {
         "text": "hello",
+        "text_truncated": False,
         "source_text": "hello",
+        "source_text_truncated": False,
+        "material_aliases": [],
         "input_source": "flow_input",
         "used_question_binding": False,
         "effective_prompt_truncated": False,
