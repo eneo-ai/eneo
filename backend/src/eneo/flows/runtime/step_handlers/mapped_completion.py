@@ -75,6 +75,11 @@ async def execute_section_completion(
         version_metadata=version_metadata,
         attempt_no=attempt_no,
     )
+    if base.prepared.assistant.has_knowledge():
+        raise TypedIOValidationException(
+            "Section processing does not support knowledge retrieval.",
+            code=FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION.value,
+        )
     sections = await prepare_text_sections(
         step=per_call_step,
         run=run,
@@ -94,6 +99,11 @@ async def execute_section_completion(
     )
     outputs: list[StepExecutionOutput] = []
     records: list[dict[str, Any]] = []
+    output_budget = StructuredOutputBudget(
+        array_key=array_key,
+        ceiling_bytes=base.deps.max_inline_text_bytes,
+        total_items=total,
+    )
     try:
         for index, call in enumerate(calls):
             record_step_phase(FlowStepPhase.MAPPED_ITEM)
@@ -126,7 +136,9 @@ async def execute_section_completion(
                     "Each section must produce exactly one record.",
                     code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
                 )
-            records.append(cast(dict[str, Any], items[0]))
+            record = cast(dict[str, Any], items[0])
+            output_budget.admit([record], completed_items=len(outputs) + 1)
+            records.append(record)
             outputs.append(output)
             record_step_progress(
                 f"{len(outputs)} of {total} sections completed",
@@ -138,11 +150,6 @@ async def execute_section_completion(
         typed_output = await base.deps.process_typed_output(
             full_text=full_text, step=step, run=run
         )
-        StructuredOutputBudget(
-            array_key=array_key,
-            ceiling_bytes=base.deps.max_inline_text_bytes,
-            total_items=total,
-        ).admit(records, completed_items=len(outputs))
         persisted_text, generated_file_ids = await base.deps.apply_output_cap(
             text=full_text,
             run=run,
@@ -177,18 +184,21 @@ async def execute_section_completion(
             )
         )
     except BaseException as exc:
+        completed_items = len(outputs)
         if isinstance(exc, TypedIOValidationException):
             exc.context = {
                 **(exc.context or {}),
                 "completed_items": len(outputs),
                 "total_items": total,
             }
+            output_budget.set_failure_progress(exc, completed_items=completed_items + 1)
+            completed_items = exc.context["completed_items"]
             attach_typed_failure_context(
                 exc,
                 input_payload_for_result=base.prepared.input_payload_for_result,
                 effective_prompt=base.prepared.effective_prompt,
             )
-        setattr(exc, "completed_items", len(outputs))
+        setattr(exc, "completed_items", completed_items)
         setattr(exc, "total_items", total)
         evidence.admit(getattr(exc, "rag_metadata", None))
         partial = evidence.partial_payload()

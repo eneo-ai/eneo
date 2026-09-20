@@ -15,7 +15,6 @@ from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_error import FlowRunErrorDetails
 from eneo.flows.runtime.step_deadline import current_step_deadline_scope
 from eneo.flows.runtime.step_execution_runtime import build_output_payload
-from eneo.flows.runtime.structured_output_budget import StructuredOutputBudget
 from eneo.main.exceptions import (
     ProviderRejectedRequestException,
     TypedIOValidationException,
@@ -49,6 +48,7 @@ def _case(
     executor.file_service.repo.get_content_references.return_value = [reference]
     executor.file_service.get_file_content.return_value = file
     assistant = _mock_assistant_for_execute_step()
+    assistant.has_knowledge.return_value = False
     assistant.get_prompt_text.return_value = prompt
     executor._load_assistant = AsyncMock(return_value=assistant)
     questions = []
@@ -135,20 +135,10 @@ def _case(
     )
 
 
-async def test_sections_use_measured_packages_and_persist_order_and_provenance(
-    user, monkeypatch
-):
+async def test_sections_use_measured_packages_and_persist_order_and_provenance(user):
     executor, run_repo, assistant, run, state, step, text, file, questions, progress = (
         _case(user)
     )
-    admissions = []
-    admit = StructuredOutputBudget.admit
-
-    def track_admission(self, items, *, completed_items):
-        admissions.append(completed_items)
-        return admit(self, items, completed_items=completed_items)
-
-    monkeypatch.setattr(StructuredOutputBudget, "admit", track_admission)
     result = await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
 
     assert len(questions) > 1
@@ -169,7 +159,6 @@ async def test_sections_use_measured_packages_and_persist_order_and_provenance(
     )
     assert [s.output_index for s in manifest.sections] == list(range(len(questions)))
     assert progress == [(i, len(questions)) for i in range(len(questions))]
-    assert admissions == [len(questions)]
     assert build_output_payload(result.output)[
         "section_manifest"
     ] == manifest.model_dump(mode="json")
@@ -191,6 +180,48 @@ async def test_longer_prompt_reduces_section_size(user):
     assert sizes[1] < sizes[0]
 
 
+async def test_prompt_only_material_preserves_independent_flow_input_question(user):
+    executor, _, assistant, run, state, step, text, _, questions, _ = _case(
+        user, prompt="Material:\n{{step_1.output.text}}\nDone."
+    )
+    instruction = "ONLY INCLUDE RECORDS ABOUT SCHOOLS"
+    run = run.model_copy(update={"input_payload_json": {"text": instruction}})
+    step = replace(step, input_source="flow_input")
+
+    result = await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+
+    manifest = SectionManifest.model_validate(
+        result.output.output_payload_extensions["section_manifest"]
+    )
+    sections = manifest.resplit(text)
+    assert len(sections) > 1
+    for section, question, call in zip(
+        sections, questions, assistant.get_response.await_args_list, strict=True
+    ):
+        assert question == instruction
+        assert call.kwargs["prompt_override"].split("\nDone.")[0] == (
+            "Material:\n" + section
+        )
+
+
+async def test_sections_refuse_knowledge_before_preflight_or_provider_calls(user):
+    executor, run_repo, assistant, run, state, step, _, _, _, _ = _case(user)
+    assistant.has_knowledge.return_value = True
+    executor._retrieve_rag_chunks = AsyncMock(return_value=([], None, []))
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+
+    assert (
+        exc_info.value.code
+        == FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION.value
+    )
+    executor._retrieve_rag_chunks.assert_not_awaited()
+    assistant.preflight_response_context.assert_not_awaited()
+    assistant.get_response.assert_not_awaited()
+    run_repo.activate_step_attempt.assert_not_awaited()
+
+
 async def test_failing_section_reports_completed_and_total_sections(user):
     executor, _, _, run, state, step, _, _, questions, progress = _case(user, fail_at=2)
     with pytest.raises(TypedIOValidationException) as exc_info:
@@ -202,7 +233,7 @@ async def test_failing_section_reports_completed_and_total_sections(user):
     assert details.total_items > 1
 
 
-async def test_section_aggregate_uses_existing_output_refusal(user):
+async def test_section_aggregate_overflow_stops_before_the_next_call(user):
     executor, _, _, run, state, step, _, _, questions, progress = _case(
         user, output_size=500
     )
@@ -212,8 +243,12 @@ async def test_section_aggregate_uses_existing_output_refusal(user):
         exc_info.value.code
         == FlowApiErrorCode.TYPED_IO_STRUCTURED_OUTPUT_EXCEEDS_LIMIT.value
     )
-    assert exc_info.value.context["completed_items"] == len(questions)
-    assert exc_info.value.context["total_items"] == progress[0][1]
+    details = FlowRunErrorDetails.from_budget_context(exc_info.value.context)
+    assert details.completed_items == len(questions) == 4
+    assert details.total_items == progress[0][1]
+    assert details.total_items > 4
+    assert exc_info.value.completed_items == 4
+    assert exc_info.value.total_items == details.total_items
 
 
 @pytest.mark.parametrize("binding", [None, "repeat", "prompt_only"])

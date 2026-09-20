@@ -22,6 +22,7 @@ from eneo.flows.runtime.step_execution_runtime import (
 )
 from eneo.flows.runtime.step_handlers.base import PreparedAssistantStep
 from eneo.flows.runtime.step_handlers.mapped_outputs import mapped_admission_payload
+from eneo.flows.runtime.step_input_resolution import resolve_default_step_input_text
 from eneo.main.exceptions import TypedIOValidationException
 
 
@@ -113,13 +114,25 @@ async def prepare_text_sections(
                 step.output_contract
             ),
         )
-        question = (
-            base.deps.variable_resolver.interpolate_with_evidence(
+        if question_template is not None:
+            question = base.deps.variable_resolver.interpolate_with_evidence(
                 question_template, context, binding_ref="input_bindings.question"
             ).text
-            if question_template is not None
-            else section_text
-        )
+        else:
+            _, question = resolve_default_step_input_text(
+                step=step,
+                run=run,
+                prior_results=state.prior_results,
+                state=state,
+                source_text=step_input.source_text,
+                runtime_input_text=section_text if material is None else None,
+                resolved_step_text=(
+                    {material.source_step_id: section_text}
+                    if material is not None
+                    else None
+                ),
+                logger=None,
+            )
         prepared = replace(
             base.prepared,
             effective_prompt=prompt,

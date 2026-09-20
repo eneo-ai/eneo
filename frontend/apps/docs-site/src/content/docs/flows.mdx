@@ -216,6 +216,8 @@ Set `output_type` to `json` and author an output contract containing one array o
 objects, such as `records`. Each section produces exactly one object using that
 array's item schema. The combined array preserves section order. This mode cannot
 be combined with `item_map` or `per_source` mapping.
+Assistants with knowledge retrieval configured are refused before model calls;
+knowledge retrieval with section processing is planned for a later release.
 
 Select exactly one file-backed previous-step material or one runtime file. A step
 that resolves multiple materials is refused before model calls; processing multiple

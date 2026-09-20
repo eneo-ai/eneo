@@ -344,26 +344,13 @@ async def resolve_step_input(
         runtime_file_edges = _runtime_file_edges(resolved_files)
 
     if materials:
-        material_by_step = {material.source_step_id: material for material in materials}
-
-        def resolved_result(result: FlowStepResult) -> FlowStepResult:
-            material = material_by_step.get(result.step_id)
-            if material is None:
-                return result
-            payload = dict(result.output_payload_json or {})
-            payload.pop(OUTPUT_TEXT_OVERFLOW_KEY, None)
-            payload["text"] = material.text
-            return result.model_copy(update={"output_payload_json": payload})
-
-        prior_results = [resolved_result(result) for result in prior_results]
-        if state is not None:
-            state = replace(
-                state,
-                completed_by_order={
-                    order: resolved_result(result)
-                    for order, result in state.completed_by_order.items()
-                },
-            )
+        prior_results, state = _substitute_step_text(
+            prior_results=prior_results,
+            state=state,
+            resolved_step_text={
+                material.source_step_id: material.text for material in materials
+            },
+        )
 
     bindings = step.input_bindings if isinstance(step.input_bindings, dict) else None
     explicit_binding_edges: tuple[FlowResolvedInputEdge, ...] = ()
@@ -482,19 +469,18 @@ async def resolve_step_input(
                         code=FlowApiErrorCode.RUNTIME_INPUT_NOT_CONSUMED.value,
                     )
 
-    if not used_question_binding and step.input_source != "http_get":
-        # http_get resolved its text above; every other implicit source is
-        # read only now that no underlag replaced it.
-        source_text = resolve_input_source_text(
-            input_source=step.input_source,
-            input_type=step.input_type,
+    if not used_question_binding:
+        source_text, input_text = resolve_default_step_input_text(
+            step=step,
             run=run,
-            step_order=step.step_order,
             prior_results=prior_results,
             state=state,
+            source_text=source_text,
+            runtime_input_text=runtime_input_text
+            if runtime_input_metadata is not None
+            else None,
             logger=deps.logger,
         )
-        input_text = source_text
 
     runtime_input_replaces_chain = (
         runtime_input_metadata is not None
@@ -505,14 +491,9 @@ async def resolve_step_input(
         runtime_input_config.enabled
         and runtime_input_metadata is not None
         and not used_question_binding
+        and runtime_input_text
     ):
-        input_text = _compose_runtime_and_chained_input(
-            runtime_text=runtime_input_text,
-            chained_text=source_text,
-            replace_chain=runtime_input_replaces_chain,
-        )
-        if runtime_input_text:
-            raw_extracted_text = runtime_input_text or raw_extracted_text
+        raw_extracted_text = runtime_input_text
 
     if step.input_type == "json":
         if used_question_binding and not used_structured_source_refs:
@@ -1884,6 +1865,73 @@ def enforce_inline_input_cap(
         f"Step {step_order}: resolved input for '{input_source}' exceeded max inline text bytes.",
         code=FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value,
     )
+
+
+def _substitute_step_text(
+    *,
+    prior_results: list[FlowStepResult],
+    state: RunExecutionState | None,
+    resolved_step_text: Mapping[UUID, str],
+) -> tuple[list[FlowStepResult], RunExecutionState | None]:
+    def resolved_result(result: FlowStepResult) -> FlowStepResult:
+        if result.step_id not in resolved_step_text:
+            return result
+        payload = dict(result.output_payload_json or {})
+        payload.pop(OUTPUT_TEXT_OVERFLOW_KEY, None)
+        payload["text"] = resolved_step_text[result.step_id]
+        return result.model_copy(update={"output_payload_json": payload})
+
+    prior_results = [resolved_result(result) for result in prior_results]
+    if state is not None:
+        state = replace(
+            state,
+            completed_by_order={
+                order: resolved_result(result)
+                for order, result in state.completed_by_order.items()
+            },
+        )
+    return prior_results, state
+
+
+def resolve_default_step_input_text(
+    *,
+    step: RuntimeStep,
+    run: FlowRun,
+    prior_results: list[FlowStepResult],
+    state: RunExecutionState | None,
+    source_text: str,
+    runtime_input_text: str | None,
+    logger: Any,
+    resolved_step_text: Mapping[UUID, str] | None = None,
+) -> tuple[str, str]:
+    if resolved_step_text:
+        prior_results, state = _substitute_step_text(
+            prior_results=prior_results,
+            state=state,
+            resolved_step_text=resolved_step_text,
+        )
+    # HTTP text is already resolved; other implicit sources are read only
+    # after explicit underlag has been ruled out.
+    if step.input_source != "http_get":
+        source_text = resolve_input_source_text(
+            input_source=step.input_source,
+            input_type=step.input_type,
+            run=run,
+            step_order=step.step_order,
+            prior_results=prior_results,
+            state=state,
+            logger=logger,
+        )
+    input_text = source_text
+    runtime_config = build_runtime_input_config(step.input_config)
+    if runtime_config.enabled and runtime_input_text is not None:
+        input_text = _compose_runtime_and_chained_input(
+            runtime_text=runtime_input_text,
+            chained_text=source_text,
+            replace_chain=runtime_config.input_format == "audio"
+            and step.output_mode == "transcribe_only",
+        )
+    return source_text, input_text
 
 
 def resolve_input_source_text(
