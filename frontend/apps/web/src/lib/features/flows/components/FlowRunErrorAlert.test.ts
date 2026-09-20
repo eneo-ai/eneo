@@ -54,6 +54,70 @@ describe("FlowRunErrorAlert", () => {
     expect(body).toContain("Step 2: typed input/output validation failed.");
   });
 
+  it("renders the step-timeout facts instead of the generic caveat when the run error carries them", () => {
+    const { body } = render(FlowRunErrorAlert, {
+      props: {
+        error: runError({
+          code: FLOW_API_ERROR_CODE.STEP_TIMEOUT,
+          message:
+            "Step 2: execution budget of 3600s exhausted during provider request after 3600s.",
+          details: {
+            phase: "provider_request",
+            completed_items: 1,
+            total_items: 3,
+            provider_work_may_have_completed: true
+          }
+        }),
+        errorCode: FLOW_API_ERROR_CODE.STEP_TIMEOUT,
+        message: "Step 2: execution budget of 3600s exhausted during provider request after 3600s."
+      }
+    });
+
+    expect(body).toContain(m.flow_run_error_step_timeout_summary());
+    expect(body).toContain(m.flow_run_error_phase_provider_request());
+    expect(body).toContain(
+      m.flow_run_error_step_timeout_progress_value({ completed: "1", total: "3" })
+    );
+    expect(body).toContain(m.flow_run_error_step_timeout_provider_unknown());
+    expect(body).toContain(m.flow_run_error_step_timeout_action());
+    expect(body).not.toContain(m.flow_error_flow_step_timeout());
+  });
+
+  it("omits the provider caveat and progress when the facts say no request was interrupted", () => {
+    const { body } = render(FlowRunErrorAlert, {
+      props: {
+        error: runError({
+          code: FLOW_API_ERROR_CODE.STEP_TIMEOUT,
+          message: "Step 1: execution budget exhausted during transcription.",
+          details: { phase: "transcription", provider_work_may_have_completed: false }
+        }),
+        message: "Step 1: execution budget exhausted during transcription."
+      }
+    });
+
+    expect(body).toContain(m.flow_run_error_phase_transcription());
+    expect(body).not.toContain(m.flow_run_error_step_timeout_provider_unknown());
+    expect(body).not.toContain(m.flow_run_error_step_timeout_progress());
+  });
+
+  it("falls back to the catalog message for a step timeout without facts", () => {
+    const { body } = render(FlowRunErrorAlert, {
+      props: {
+        error: runError({
+          code: FLOW_API_ERROR_CODE.STEP_TIMEOUT,
+          message: "Step 1: execution budget exhausted.",
+          details: null
+        }),
+        message: "Step 1: execution budget exhausted."
+      }
+    });
+
+    expect(body).toContain(m.flow_error_flow_step_timeout());
+    // The catalog sentence opens the same way as the facts summary, so the
+    // facts-only action line is the distinguishing mark.
+    expect(body).not.toContain(m.flow_run_error_step_timeout_action());
+  });
+
   it("keeps the generic summary for message-only step error alerts", () => {
     const { body } = render(FlowRunErrorAlert, {
       props: {

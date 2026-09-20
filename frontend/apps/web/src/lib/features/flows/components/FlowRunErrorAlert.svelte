@@ -5,6 +5,7 @@
   import IconSparkles from "@lucide/svelte/icons/sparkles";
   import { m } from "$lib/paraglide/messages";
   import {
+    FLOW_API_ERROR_CODE,
     getFlowRuntimeErrorMessageByCode,
     getFlowRunErrorMessage,
     getReviewPolicyAffectedStepsFromRunError,
@@ -34,6 +35,38 @@
   const localizedStepErrorMessage = $derived(getFlowRuntimeErrorMessageByCode(errorCode));
   const localizedRunErrorMessage = $derived(getFlowRunErrorMessage(error));
   const localizedErrorMessage = $derived(localizedStepErrorMessage ?? localizedRunErrorMessage);
+  // A step that ran out of its time budget reports where it was and what it
+  // had finished; those facts replace the generic catalog sentence so the
+  // provider caveat is only shown when a request really was interrupted.
+  const stepTimeoutFacts = $derived(
+    error?.code === FLOW_API_ERROR_CODE.STEP_TIMEOUT &&
+      error.details &&
+      (errorCode === null || errorCode === error.code)
+      ? error.details
+      : null
+  );
+  const stepTimeoutPhaseLabels: Record<string, () => string> = {
+    input_resolution: () => m.flow_run_error_phase_input_resolution(),
+    transcription: () => m.flow_run_error_phase_transcription(),
+    retrieval: () => m.flow_run_error_phase_retrieval(),
+    provider_request: () => m.flow_run_error_phase_provider_request(),
+    mapped_item: () => m.flow_run_error_phase_mapped_item(),
+    finalization: () => m.flow_run_error_phase_finalization(),
+    step_execution: () => m.flow_run_error_phase_step_execution()
+  };
+  const stepTimeoutPhaseLabel = $derived(
+    stepTimeoutFacts?.phase ? stepTimeoutPhaseLabels[stepTimeoutFacts.phase]?.() : undefined
+  );
+  const stepTimeoutProgress = $derived(
+    stepTimeoutFacts &&
+      typeof stepTimeoutFacts.completed_items === "number" &&
+      typeof stepTimeoutFacts.total_items === "number"
+      ? m.flow_run_error_step_timeout_progress_value({
+          completed: String(stepTimeoutFacts.completed_items),
+          total: String(stepTimeoutFacts.total_items)
+        })
+      : null
+  );
   const reviewPolicySteps = $derived(getReviewPolicyAffectedStepsFromRunError(error, steps));
   const hasExactReviewPolicyStep = $derived(isReviewPolicyRunErrorStepExact(error));
   const affectedStepsLabel = $derived(
@@ -72,6 +105,24 @@
           </ul>
         </div>
       {/if}
+    {:else if stepTimeoutFacts}
+      <span>{m.flow_run_error_step_timeout_summary()}</span>
+      {#if stepTimeoutPhaseLabel || stepTimeoutProgress}
+        <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+          {#if stepTimeoutPhaseLabel}
+            <dt class="font-medium">{m.flow_run_error_step_timeout_phase()}</dt>
+            <dd>{stepTimeoutPhaseLabel}</dd>
+          {/if}
+          {#if stepTimeoutProgress}
+            <dt class="font-medium">{m.flow_run_error_step_timeout_progress()}</dt>
+            <dd class="tabular-nums">{stepTimeoutProgress}</dd>
+          {/if}
+        </dl>
+      {/if}
+      {#if stepTimeoutFacts.provider_work_may_have_completed}
+        <span>{m.flow_run_error_step_timeout_provider_unknown()}</span>
+      {/if}
+      <span>{m.flow_run_error_step_timeout_action()}</span>
     {:else if localizedErrorMessage}
       <span>{localizedErrorMessage}</span>
     {:else}
