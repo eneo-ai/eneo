@@ -15,6 +15,10 @@ from tenacity import (
 )
 
 from eneo.files.audio import AudioFile
+
+# The flow attempt's budget, when a flow step is what runs this adapter; the
+# scope is ambient (like the run-cancel probe) so no caller threads it.
+from eneo.flows.runtime.step_deadline import require_step_budget
 from eneo.main.exceptions import (
     ProviderRejectedRequestException,
     TypedIOValidationException,
@@ -163,6 +167,7 @@ class LiteLLMTranscriptionAdapter:
 
         async with audio_file.asplit_file(seconds=five_minutes) as files:
             for chunk_index, path in enumerate(files):
+                require_step_budget(phase=f"transcription chunk {chunk_index + 1}")
                 measured_seconds = await asyncio.to_thread(_measure_seconds, path)
                 block_text = await self._transcribe_chunk(
                     path,
@@ -260,6 +265,9 @@ class LiteLLMTranscriptionAdapter:
                 )
             )
 
+        # Also guards every retry: a request is never started after the
+        # step's budget ran out.
+        require_step_budget(phase="transcription request")
         try:
             with open(file_path, "rb") as audio_file:
                 response = await litellm_transport.atranscription(

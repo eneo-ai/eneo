@@ -28,7 +28,10 @@ from eneo.flows.flow_run_provenance import (
     MappedProviderCallProvenance,
     sum_complete_token_counts,
 )
-from eneo.flows.runtime.step_deadline import require_step_budget
+from eneo.flows.runtime.step_deadline import (
+    record_step_progress,
+    require_step_budget,
+)
 from eneo.flows.runtime.step_execution_result import StepExecutionResult
 from eneo.flows.runtime.step_execution_runtime import (
     StepExecutionRuntimeDeps,
@@ -221,6 +224,9 @@ async def execute_per_source_reader(
             # more passage text than its budget allows.
             mapped_evidence.admit(source_call.output.rag_metadata)
             per_source_calls.append(source_call)
+            record_step_progress(
+                f"{len(per_source_calls)} of {len(prepared_sources)} sources completed"
+            )
         per_source_calls = _with_deduped_source_labels(per_source_calls)
         return StepExecutionResult(
             output=await _assemble_per_source_output(

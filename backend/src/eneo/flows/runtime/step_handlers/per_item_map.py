@@ -30,7 +30,10 @@ from eneo.flows.flow_run_provenance import (
     sum_complete_token_counts,
 )
 from eneo.flows.input_binding_contract_rules import has_explicit_underlag
-from eneo.flows.runtime.step_deadline import require_step_budget
+from eneo.flows.runtime.step_deadline import (
+    record_step_progress,
+    require_step_budget,
+)
 from eneo.flows.runtime.step_execution_result import StepExecutionResult
 from eneo.flows.runtime.step_execution_runtime import (
     StepExecutionRuntimeDeps,
@@ -223,6 +226,9 @@ async def execute_per_item_map(
             # more passage text than its budget allows.
             mapped_evidence.admit(item_call.output.rag_metadata)
             item_calls.append(item_call)
+            record_step_progress(
+                f"{len(item_calls)} of {len(prepared_items)} items completed"
+            )
 
         return StepExecutionResult(
             output=await _assemble_per_item_output(

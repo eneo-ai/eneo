@@ -71,7 +71,10 @@ from eneo.flows.runtime.run_cancellation import (
     FlowStepCancelledError,
     run_cancel_probe_scope,
 )
-from eneo.flows.runtime.step_deadline import StepDeadline
+from eneo.flows.runtime.step_deadline import (
+    StepDeadline,
+    mark_provider_request_in_flight,
+)
 from eneo.flows.runtime.step_input_resolution import (
     RUNTIME_INPUT_SOURCE_EMPTY_TEXT_DIAGNOSTIC_CODE,
     enforce_inline_input_cap,
@@ -625,6 +628,7 @@ async def call_assistant_with_timeout(
         )
     )
     state.in_flight_llm_task = llm_task
+    mark_provider_request_in_flight(True)
 
     def _consume_abandoned_llm_task(task: asyncio.Task[Any]) -> None:
         try:
@@ -811,6 +815,7 @@ async def call_assistant_with_timeout(
                 await cancel_watcher
         if state.in_flight_llm_task is llm_task:
             state.in_flight_llm_task = None
+            mark_provider_request_in_flight(False)
 
 
 def build_output_payload(output: StepExecutionOutput) -> dict[str, Any]:
@@ -1477,7 +1482,9 @@ async def complete_step_execution(
             deps=deps,
             captured_rag=captured_rag,
         )
-    except Exception as exc:
+    except BaseException as exc:
+        # Also for a cancellation (the executor's backstop): what retrieval
+        # read before finalization was cut short is still evidence.
         rag_metadata = captured_rag.get("rag")
         if (
             isinstance(rag_metadata, dict)

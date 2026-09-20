@@ -1568,6 +1568,64 @@ async def test_complete_step_execution_shares_deadline_across_json_mode_retry(
 
 
 @pytest.mark.asyncio
+async def test_complete_step_execution_keeps_retrieval_evidence_when_finalization_is_cancelled(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The executor's backstop cancels finalization; what retrieval read
+    before that is evidence and must ride the cancellation out."""
+    monkeypatch.setattr(
+        "eneo.flows.runtime.step_execution_runtime.detect_native_json_output_support",
+        lambda assistant: None,
+    )
+    run = _run()
+    state = _state()
+    step = _step(output_type="json")
+    assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
+    assistant.completion_model_kwargs = MagicMock()
+    assistant.get_response = AsyncMock(
+        return_value=SimpleNamespace(total_token_count=4, completion='{"ok": true}')
+    )
+    prepared = PreparedStepExecution(
+        assistant=assistant,
+        step_input=StepInputValue(
+            text="hello", source_text="hello", input_source="flow_input"
+        ),
+        effective_prompt="Prompt",
+        input_payload_for_result={
+            "text": "hello",
+            "source_text": "hello",
+            "input_source": "flow_input",
+        },
+        contract_validation=None,
+        diagnostics=[],
+        llm_files=[],
+    )
+    retrieved = {"status": "retrieved", "chunk_count": 2}
+
+    async def cancelled_finalization(**_kwargs: object):
+        raise asyncio.CancelledError()
+
+    deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1_000_000,
+        variable_resolver=FlowVariableResolver(),
+        completion_service=object(),
+        load_assistant=AsyncMock(),
+        resolve_step_input=AsyncMock(),
+        retrieve_rag_chunks=AsyncMock(return_value=([], retrieved, [])),
+        process_typed_output=AsyncMock(side_effect=cancelled_finalization),
+        apply_output_cap=AsyncMock(return_value=('{"ok": true}', [])),
+    )
+
+    with pytest.raises(asyncio.CancelledError) as exc_info:
+        await complete_step_execution(
+            step=step, run=run, state=state, prepared=prepared, deps=deps
+        )
+
+    assert getattr(exc_info.value, "rag_metadata") == retrieved
+
+
+@pytest.mark.asyncio
 async def test_complete_step_execution_fast_fails_when_deadline_already_exhausted(
     monkeypatch: pytest.MonkeyPatch,
 ):

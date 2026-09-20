@@ -45,10 +45,12 @@ from eneo.flows.runtime.run_cancellation import (
     RunCancelProbe,
     current_run_cancel_probe,
 )
+from eneo.flows.runtime.step_deadline import require_step_budget
 from eneo.main.exceptions import (
     APIKeyNotConfiguredException,
     OpenAIException,
     ProviderRejectedRequestException,
+    TypedIOValidationException,
 )
 from eneo.main.logging import get_logger
 from eneo.model_providers.domain.provider_call_observer import (
@@ -756,7 +758,11 @@ class RemoteFlowTranscriber:
             # request again: the provider already did the work and may already
             # have charged for it.
             litellm_transport.NON_RETRYABLE_PROVIDER_ERRORS
-            + (ProviderCallObserverError,)
+            + (
+                ProviderCallObserverError,
+                asyncio.CancelledError,
+                TypedIOValidationException,
+            )
         ),
         reraise=True,
     )
@@ -783,6 +789,9 @@ class RemoteFlowTranscriber:
         the unknown outcomes they are rather than duplicating the job. The
         returned call id stays open for the poll phase to close.
         """
+        # Also guards every retry: no job is submitted after the step's
+        # budget ran out.
+        require_step_budget(phase="transcription job submission")
         call_id: UUID | None = None
         if observer is not None:
             # A diarize job is its own provider call on the same audio; the

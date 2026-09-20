@@ -11,6 +11,9 @@ backstop for work that cannot check.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Generator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
@@ -53,9 +56,20 @@ class StepDeadline:
         step_order: int,
         phase: str,
         completed: str | None = None,
-        provider_request_in_flight: bool = False,
+        provider_request_in_flight: bool | None = None,
     ) -> TypedIOValidationException:
-        """The typed refusal for an exhausted budget, naming where it ran out."""
+        """The typed refusal for an exhausted budget, naming where it ran out.
+
+        Facts the caller does not know (mapped progress, whether a provider
+        request is in flight) come from the attempt's published scope.
+        """
+        scope = _scope.get()
+        if completed is None and scope is not None:
+            completed = scope.progress
+        if provider_request_in_flight is None:
+            provider_request_in_flight = (
+                scope.provider_request_in_flight if scope is not None else False
+            )
         completed_detail = f" ({completed})" if completed else ""
         disclosure = (
             " A provider request was in flight; the provider may still complete "
@@ -72,19 +86,83 @@ class StepDeadline:
         )
 
 
+@dataclass(slots=True)
+class StepDeadlineScope:
+    """The attempt's budget as ambient context.
+
+    Published by the executor around the handler so work it cannot reach by
+    parameter (transcription chunks, remote job submission) can refuse to
+    start once the budget is spent, and so the timeout message can name the
+    mapped progress and the in-flight provider request the executor's
+    backstop would otherwise not know about.
+    """
+
+    deadline: StepDeadline
+    step_order: int
+    progress: str | None = None
+    provider_request_in_flight: bool = False
+
+
+_scope: ContextVar[StepDeadlineScope | None] = ContextVar(
+    "flow_step_deadline_scope", default=None
+)
+
+
+def current_step_deadline_scope() -> StepDeadlineScope | None:
+    return _scope.get()
+
+
+@contextmanager
+def step_deadline_scope(
+    deadline: StepDeadline, *, step_order: int
+) -> Generator[StepDeadlineScope]:
+    scope = StepDeadlineScope(deadline=deadline, step_order=step_order)
+    token = _scope.set(scope)
+    try:
+        yield scope
+    finally:
+        _scope.reset(token)
+
+
+def record_step_progress(progress: str) -> None:
+    """What a mapped step has completed so far, for the timeout message."""
+    scope = _scope.get()
+    if scope is not None:
+        scope.progress = progress
+
+
+def mark_provider_request_in_flight(in_flight: bool) -> None:
+    scope = _scope.get()
+    if scope is not None:
+        scope.provider_request_in_flight = in_flight
+
+
 def require_step_budget(
-    deadline: StepDeadline | None,
+    deadline: StepDeadline | None = None,
     *,
-    step_order: int,
     phase: str,
+    step_order: int | None = None,
     completed: str | None = None,
 ) -> None:
     """Refuse to start ``phase`` when the attempt's budget is already spent.
 
-    No deadline means a caller outside an executor attempt (direct runtime
-    use in tests); such work is bounded by its own provider wait only.
+    ``deadline`` defaults to the published scope's; with neither (direct
+    runtime use in tests, a transcription outside a flow attempt) there is
+    no budget to refuse against.
     """
-    if deadline is not None and deadline.expired():
-        raise deadline.timeout_error(
-            step_order=step_order, phase=phase, completed=completed
-        )
+    scope = _scope.get()
+    resolved = (
+        deadline
+        if deadline is not None
+        else (scope.deadline if scope is not None else None)
+    )
+    if resolved is None or not resolved.expired():
+        return
+    if step_order is None:
+        step_order = scope.step_order if scope is not None else 0
+    raise resolved.timeout_error(
+        step_order=step_order,
+        phase=phase,
+        completed=completed,
+        provider_request_in_flight=False,
+    )

@@ -3,12 +3,14 @@ from __future__ import annotations
 import asyncio
 import io
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import httpx
 import pytest
 
 from eneo.flows.runtime import remote_transcription
+from eneo.flows.runtime import step_deadline as step_deadline_module
 from eneo.flows.runtime.remote_transcription import (
     RemoteFlowTranscriber,
     RemoteTranscriptionCancelledException,
@@ -19,10 +21,12 @@ from eneo.flows.runtime.run_cancellation import (
     FlowStepCancelledError,
     run_cancel_probe_scope,
 )
+from eneo.flows.runtime.step_deadline import StepDeadline, step_deadline_scope
 from eneo.main.exceptions import (
     APIKeyNotConfiguredException,
     OpenAIException,
     ProviderRejectedRequestException,
+    TypedIOValidationException,
 )
 from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
     TranscriptSegment,
@@ -413,6 +417,42 @@ async def test_failed_job_is_rejected_and_recorded() -> None:
     assert [reason for _, reason in observer.rejected_calls] == ["provider_rejected"]
     assert observer.unknown_calls == []
     assert service.submit_count == 1
+
+
+async def test_cancelled_submission_is_not_resubmitted() -> None:
+    """The step's budget ran out while the job was being submitted: the
+    cancellation propagates without the retry policy sending the job again."""
+    service = ScriptedService()
+    transcriber = RemoteFlowTranscriber(make_client(service))
+    transcriber.client.submit = AsyncMock(side_effect=asyncio.CancelledError())  # type: ignore[method-assign]
+    observer = RecordingObserver()
+
+    with pytest.raises(asyncio.CancelledError):
+        await transcriber.transcribe(audio_file(), SimpleNamespace(), observer=observer)
+
+    assert transcriber.client.submit.await_count == 1
+    assert [reason for _, reason in observer.unknown_calls] == ["request_cancelled"]
+    assert service.submit_count == 0
+
+
+async def test_no_job_is_submitted_after_the_step_budget_expires(monkeypatch) -> None:
+    clock = {"now": 0.0}
+    monkeypatch.setattr(step_deadline_module, "_now", lambda: clock["now"])
+    service = ScriptedService(submit_responses=[accepted()])
+    transcriber = RemoteFlowTranscriber(make_client(service))
+    observer = RecordingObserver()
+
+    with step_deadline_scope(StepDeadline.start(10.0), step_order=3):
+        clock["now"] = 11.0
+        with pytest.raises(TypedIOValidationException) as exc_info:
+            await transcriber.transcribe(
+                audio_file(), SimpleNamespace(), observer=observer
+            )
+
+    assert exc_info.value.code == "flow_step_timeout"
+    assert "transcription job submission" in str(exc_info.value)
+    assert service.submit_count == 0
+    assert observer.started_facts == []
 
 
 async def test_poll_deadline_cancels_job_and_is_unknown_outcome() -> None:

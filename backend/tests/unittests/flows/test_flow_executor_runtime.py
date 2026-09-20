@@ -4671,6 +4671,57 @@ async def test_execute_step_backstop_fails_typed_with_completed_call_evidence(
 
 
 @pytest.mark.asyncio
+async def test_execute_step_leaves_an_inner_timeout_alone_when_the_budget_holds(user):
+    """Only the backstop's own expiry means the budget ran out; another
+    wait's TimeoutError keeps its identity."""
+    executor, _, _, _ = _build_executor(user)
+    executor._step_deadline_seconds = lambda step: 30.0
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = _step_for_execute_step()
+
+    class _Handler:
+        async def execute(self, **_kwargs):
+            raise TimeoutError("some inner wait")
+
+    executor._build_step_handler = MagicMock(return_value=_Handler())
+
+    with pytest.raises(TimeoutError, match="some inner wait"):
+        await executor._execute_step(
+            step=step, run=run, state=_empty_execution_state(), attempt_no=1
+        )
+
+
+@pytest.mark.asyncio
+async def test_execute_step_refuses_a_result_that_completed_after_the_budget(
+    user, monkeypatch
+):
+    """The backstop grace exists so a provider wait can report first; a
+    result that arrives inside it, after the budget, is not a completed step."""
+    monkeypatch.setattr(
+        step_deadline_module, "STEP_DEADLINE_BACKSTOP_GRACE_SECONDS", 2.0
+    )
+    executor, _, _, _ = _build_executor(user)
+    executor._step_deadline_seconds = lambda step: 0.05
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = _step_for_execute_step(step_order=2)
+
+    class _Handler:
+        async def execute(self, **_kwargs):
+            await asyncio.sleep(0.15)
+            return _step_result(_minimal_step_execution_output())
+
+    executor._build_step_handler = MagicMock(return_value=_Handler())
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(
+            step=step, run=run, state=_empty_execution_state(), attempt_no=1
+        )
+
+    assert exc_info.value.code == "flow_step_timeout"
+    assert "during finalization" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
 async def test_execute_step_marks_flow_step_span_failed(user, captured_flow_spans):
     executor, _, _, _ = _build_executor(user)
     run = _run(status=FlowRunStatus.RUNNING, user=user)

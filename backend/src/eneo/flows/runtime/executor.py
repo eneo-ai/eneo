@@ -161,7 +161,7 @@ from eneo.flows.runtime.step_attempt_runtime import (
     build_typed_failure_plan,
     build_typed_failure_run_error_message,
 )
-from eneo.flows.runtime.step_deadline import StepDeadline
+from eneo.flows.runtime.step_deadline import StepDeadline, step_deadline_scope
 from eneo.flows.runtime.step_execution_result import StepExecutionResult
 from eneo.flows.runtime.step_execution_runtime import (
     FlowStepCancelledError,
@@ -1177,33 +1177,48 @@ class FlowRunExecutor:
                 output_type=step.output_type,
                 output_mode=step.output_mode,
             ) as step_span:
+                backstop: asyncio.Timeout | None = None
                 try:
                     # Backstop for phases that cannot check the budget
                     # themselves (decoding, extraction, a stalled retrieval).
-                    # Phases that can (mapped items, provider waits) refuse
-                    # earlier with a more precise message.
-                    async with asyncio.timeout(
-                        deadline.remaining()
-                        + step_deadline_module.STEP_DEADLINE_BACKSTOP_GRACE_SECONDS
-                    ):
-                        result = await handler.execute(
-                            step=step,
-                            run=run,
-                            state=state,
-                            version_metadata=version_metadata,
-                            attempt_no=attempt_no,
-                        )
+                    # Phases that can (mapped items, provider waits,
+                    # transcription requests) refuse earlier with a more
+                    # precise message through the published scope.
+                    with step_deadline_scope(deadline, step_order=step.step_order):
+                        async with asyncio.timeout(
+                            deadline.remaining()
+                            + step_deadline_module.STEP_DEADLINE_BACKSTOP_GRACE_SECONDS
+                        ) as backstop:
+                            result = await handler.execute(
+                                step=step,
+                                run=run,
+                                state=state,
+                                version_metadata=version_metadata,
+                                attempt_no=attempt_no,
+                            )
+                        if deadline.expired():
+                            # Finished inside the grace, after the budget: the
+                            # budget is the contract, so the result is not
+                            # accepted as a completed step.
+                            raise deadline.timeout_error(
+                                step_order=step.step_order,
+                                phase="finalization (the result completed after the budget)",
+                                provider_request_in_flight=False,
+                            )
                 except TimeoutError as exc:
-                    if not deadline.expired():
+                    if backstop is None or not backstop.expired():
                         # Some inner wait timed out on its own; only the
                         # backstop's expiry is the step's budget running out.
                         raise
                     typed = deadline.timeout_error(
                         step_order=step.step_order, phase="step execution"
                     )
-                    # asyncio.timeout chains the cancellation it converted; a
-                    # mapped handler hangs its completed-call evidence on it.
-                    partial_evidence = getattr(exc.__cause__, "rag_metadata", None)
+                    # asyncio.timeout chains the cancellation it converted; the
+                    # runtime and the mapped handlers hang their completed-call
+                    # evidence on that cancellation (or on the error itself).
+                    partial_evidence = getattr(exc, "rag_metadata", None)
+                    if partial_evidence is None:
+                        partial_evidence = getattr(exc.__cause__, "rag_metadata", None)
                     if partial_evidence is not None:
                         setattr(typed, "rag_metadata", partial_evidence)
                     raise typed from exc

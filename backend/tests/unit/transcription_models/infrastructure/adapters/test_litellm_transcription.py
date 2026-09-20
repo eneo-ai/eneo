@@ -11,6 +11,9 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from eneo.flows.runtime import step_deadline as step_deadline_module
+from eneo.flows.runtime.step_deadline import StepDeadline, step_deadline_scope
+from eneo.main.exceptions import TypedIOValidationException
 from eneo.transcription_models.infrastructure.adapters import litellm_transcription
 from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
     LiteLLMTranscriptionAdapter,
@@ -135,6 +138,32 @@ async def test_chunk_headings_follow_the_measured_offsets(
         TranscriptSegment("b", 300.7, 601.4),
         TranscriptSegment("c", 601.4, 661.4),
     )
+
+
+async def test_no_chunk_is_sent_after_the_step_budget_expires(
+    monkeypatch, tmp_path
+) -> None:
+    """Inside a flow attempt the adapter refuses the next chunk once the
+    published budget is spent, even inside the executor's backstop grace."""
+    clock = {"now": 0.0}
+    monkeypatch.setattr(step_deadline_module, "_now", lambda: clock["now"])
+
+    async def fake(**kwargs):
+        clock["now"] += 1.0
+        return SimpleNamespace(text="ord")
+
+    transport = AsyncMock(side_effect=fake)
+    monkeypatch.setattr(TRANSPORT, transport)
+    audio = _audio(tmp_path, [300.0, 300.0, 300.0], monkeypatch)
+
+    with step_deadline_scope(StepDeadline.start(1.5), step_order=2):
+        with pytest.raises(TypedIOValidationException) as exc_info:
+            await _adapter().get_text_from_file(audio)  # type: ignore[arg-type]
+
+    assert exc_info.value.code == "flow_step_timeout"
+    assert "Step 2: " in str(exc_info.value)
+    assert "transcription chunk 3" in str(exc_info.value)
+    assert transport.await_count == 2
 
 
 async def test_cancelled_chunk_request_is_not_retried(monkeypatch, tmp_path) -> None:

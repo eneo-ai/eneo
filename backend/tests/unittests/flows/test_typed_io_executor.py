@@ -6,6 +6,7 @@ input contract validation, file resolution, canary flag, error propagation.
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import json
 from datetime import datetime, timezone
@@ -3637,6 +3638,107 @@ async def test_per_item_map_refuses_the_next_item_once_the_step_budget_is_spent(
     assert assistant.get_response.await_count == 2
     assert "mapped item 3 of 3" in str(exc_info.value)
     assert "2 of 3 items completed" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_per_item_map_timeout_inside_a_request_reports_completed_items(
+    user, monkeypatch
+):
+    """When the budget runs out while the second item's request is in
+    flight, the refusal still says one item completed and that a provider
+    request may still complete."""
+    from eneo.flows.runtime import step_deadline as step_deadline_module
+
+    clock = {"now": 0.0}
+    monkeypatch.setattr(step_deadline_module, "_now", lambda: clock["now"])
+    monkeypatch.setattr(
+        step_deadline_module, "STEP_DEADLINE_BACKSTOP_GRACE_SECONDS", 30.0
+    )
+    executor, _, _, _ = _build_executor(user)
+    executor._step_deadline_seconds = lambda step: 1.5
+    documents = [
+        {
+            "title": f"Document {index}",
+            "summary": f"document-{index:02d}",
+            "source_label": f"source-{index:02d}.pdf",
+            "source_file_id": f"file-{index:02d}",
+        }
+        for index in range(1, 4)
+    ]
+    assistant = _mock_assistant_for_execute_step()
+    calls = {"n": 0}
+
+    async def _respond(**_kwargs):
+        calls["n"] += 1
+        clock["now"] += 1.0
+        if calls["n"] == 2:
+            # The budget (fake clock) ran out while this request is pending;
+            # the wait loop's real timer expires before the sleep ends.
+            await asyncio.sleep(1.5)
+        return SimpleNamespace(
+            completion='{"sections":[{"heading":"h","body":"b"}]}',
+            total_token_count=3,
+        )
+
+    assistant.get_response = AsyncMock(side_effect=_respond)
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    previous = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=1,
+        text='{"documents":[]}',
+        structured={"documents": documents},
+    )
+    state = RunExecutionState(
+        completed_by_order={1: previous},
+        prior_results=[previous],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    step = _runtime_step(
+        step_order=2,
+        input_source="previous_step",
+        input_type="json",
+        input_contract={
+            "type": "object",
+            "properties": {"documents": {"type": "array", "items": {"type": "object"}}},
+            "required": ["documents"],
+        },
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {
+                "sections": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "heading": {"type": "string"},
+                            "body": {"type": "string"},
+                        },
+                        "required": ["heading", "body"],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            "required": ["sections"],
+            "additionalProperties": False,
+        },
+        input_config={"item_map": {"enabled": True, "max_items": 40}},
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+
+    assert exc_info.value.code == "flow_step_timeout"
+    message = str(exc_info.value)
+    assert "during provider request" in message
+    assert "1 of 3 items completed" in message
+    assert "may still complete" in message
+    assert assistant.get_response.await_count == 2
 
 
 @pytest.mark.asyncio
