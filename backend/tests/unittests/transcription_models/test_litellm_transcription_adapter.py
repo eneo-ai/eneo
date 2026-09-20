@@ -222,12 +222,7 @@ def _write_wav(path: Path, *, seconds: float, samplerate: int = 8000) -> None:
 async def test_recorded_duration_is_the_audio_each_request_actually_sent(
     monkeypatch, tmp_path
 ):
-    """The five-minute markers in the transcript are nominal; the rows are not.
-
-    The splitter emits whole blocks and only checks the boundary after writing
-    one, so an intermediate chunk overruns the interval its timestamp claims.
-    Recording the interval would report a number the request never sent.
-    """
+    """Accounting follows the exact chunk and the shorter final remainder."""
     sent_durations: list[float] = []
 
     async def fake_atranscription(**kwargs):
@@ -253,12 +248,9 @@ async def test_recorded_duration_is_the_audio_each_request_actually_sent(
     )
 
     recorded = [request.audio_seconds for request in observer.started_requests]
-    assert len(recorded) > 1
     # Every row is the file that request sent, measured.
     assert recorded == pytest.approx(sent_durations, abs=0.05)
-    # And at least one emitted chunk is not the nominal five-minute interval its
-    # transcript header claims, which is why the interval cannot be recorded.
-    assert any(abs(seconds - 300.0) > 0.5 for seconds in recorded[:-1])
+    assert recorded == [300.0, 18.0]
 
 
 @pytest.mark.asyncio

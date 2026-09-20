@@ -97,6 +97,7 @@ export declare const FLOW_API_ERROR_CODE: Readonly<{
   TYPED_IO_AUDIO_MISSING_FILE: "typed_io_audio_missing_file";
   TYPED_IO_AUDIO_SOURCE_UNSUPPORTED: "typed_io_audio_source_unsupported";
   TYPED_IO_AUDIO_TOO_MANY_FILES: "typed_io_audio_too_many_files";
+  TYPED_IO_AUDIO_EXCEEDS_LIMIT: "typed_io_audio_exceeds_limit";
   TYPED_IO_DOCUMENT_SOURCE_UNSUPPORTED: "typed_io_document_source_unsupported";
   TYPED_IO_EMPTY_EXTRACTION: "typed_io_empty_extraction";
   TYPED_IO_FILE_NOT_FOUND: "typed_io_file_not_found";
@@ -272,6 +273,7 @@ export type FlowApiErrorCode =
   | "typed_io_audio_missing_file"
   | "typed_io_audio_source_unsupported"
   | "typed_io_audio_too_many_files"
+  | "typed_io_audio_exceeds_limit"
   | "typed_io_document_source_unsupported"
   | "typed_io_empty_extraction"
   | "typed_io_file_not_found"

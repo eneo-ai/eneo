@@ -165,8 +165,7 @@ class LiteLLMTranscriptionAdapter:
 
         Each chunk's measured length is accumulated so the returned segments
         and the transcript's chunk headings place every chunk's text in its
-        absolute window of the whole file: the splitter emits whole blocks, so
-        a chunk can be longer than its nominal five minutes.
+        absolute window of the whole file, including the shorter final chunk.
         """
         record_step_phase(FlowStepPhase.TRANSCRIPTION)
         text = ""
@@ -175,7 +174,9 @@ class LiteLLMTranscriptionAdapter:
         offset_seconds = 0.0
 
         async with audio_file.asplit_file(seconds=five_minutes) as files:
-            for chunk_index, path in enumerate(files):
+            chunk_index = -1
+            async for path in files:
+                chunk_index += 1
                 require_step_budget(phase=f"transcription chunk {chunk_index + 1}")
                 measured_seconds = await asyncio.to_thread(_measure_seconds, path)
                 block_text = await self._transcribe_chunk(

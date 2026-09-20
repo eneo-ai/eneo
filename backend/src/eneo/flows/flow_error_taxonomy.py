@@ -850,6 +850,21 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Attach exactly the allowed number of audio files before starting the run.",
         user_action="Remove extra audio files and start again.",
     ),
+    FlowApiErrorCode.TYPED_IO_AUDIO_EXCEEDS_LIMIT: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause=(
+            "An audio input exceeds a deployment duration or decoded-byte ceiling; "
+            "decoding stopped before submitting the recording."
+        ),
+        consumer_action=(
+            "Do not retry the same recording; split it or ask an administrator "
+            "to review the audio ceilings."
+        ),
+        user_action=(
+            "Split the recording or ask an administrator to review the audio ceilings."
+        ),
+    ),
     FlowApiErrorCode.TYPED_IO_DOCUMENT_SOURCE_UNSUPPORTED: _entry(
         category="Typed input/output",
         surfaced_through="Run error payload",

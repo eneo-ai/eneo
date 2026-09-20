@@ -80,7 +80,11 @@ def _audio(tmp_path: Path, chunk_seconds: list[float], monkeypatch) -> SimpleNam
 
     @asynccontextmanager
     async def asplit_file(*, seconds: int):
-        yield paths
+        async def chunks():
+            for path in paths:
+                yield path
+
+        yield chunks()
 
     return SimpleNamespace(duration=sum(chunk_seconds), asplit_file=asplit_file)
 
@@ -106,8 +110,7 @@ async def test_segments_are_the_measured_chunk_windows(monkeypatch, tmp_path) ->
     # Provider timestamps are never requested.
     assert all("response_format" not in call for call in calls)
     assert all("timestamp_granularities" not in call for call in calls)
-    # Each chunk's window is placed by the measured lengths of the chunks
-    # before it, not by the nominal five minutes the transcript header claims.
+    # Chunk windows accumulate the measured lengths, including fractional seconds.
     assert result.segments == (
         TranscriptSegment("hej", 0.0, 300.7),
         TranscriptSegment("du", 300.7, 420.7),
@@ -118,9 +121,7 @@ async def test_segments_are_the_measured_chunk_windows(monkeypatch, tmp_path) ->
 async def test_chunk_headings_follow_the_measured_offsets(
     monkeypatch, tmp_path
 ) -> None:
-    """The splitter emits whole blocks, so chunks overrun their nominal five
-    minutes; the transcript headings must place each chunk where its
-    segment says it is, not at the nominal marker."""
+    """Transcript headings use the same measured offsets as their segments."""
     texts = iter(["a", "b", "c"])
 
     async def fake(**kwargs):

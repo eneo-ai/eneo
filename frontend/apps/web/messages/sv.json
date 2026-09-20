@@ -5418,6 +5418,7 @@
   "flow_error_typed_io_audio_missing_file": "Ljudsteget saknar sin indatafil. Koppla den obligatoriska ljudfilen och starta körningen igen.",
   "flow_error_typed_io_audio_source_unsupported": "Ljudsteget använder en indatakälla som inte stöds. Konfigurera det för runtime-filer eller ett stött föregående steg och publicera igen.",
   "flow_error_typed_io_audio_too_many_files": "Ljudsteget fick för många filer. Ta bort extra filer och starta körningen igen.",
+  "flow_error_typed_io_audio_exceeds_limit": "Ljudfilen är längre än vad installationen tillåter, eller blir för stor när den avkodas. Dela upp inspelningen eller be en administratör se över gränserna för ljud.",
   "flow_error_typed_io_document_source_unsupported": "Dokumentsteget använder en indatakälla som inte stöds. Konfigurera det för runtime-filer och publicera igen.",
   "flow_error_typed_io_empty_extraction": "Ingen text kunde extraheras från den skickade filen. Använd en fil med läsbart innehåll och starta körningen igen.",
   "flow_error_typed_io_file_not_found": "En obligatorisk runtime-fil kunde inte hittas. Ladda upp filen igen och kör om steget.",

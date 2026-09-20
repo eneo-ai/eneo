@@ -29,7 +29,6 @@ from typing import TYPE_CHECKING, Any, BinaryIO, Literal, NoReturn, cast
 from urllib.parse import urlsplit
 from uuid import UUID
 
-import audioread  # pyright: ignore[reportMissingTypeStubs]
 import httpx
 from tenacity import (
     retry,
@@ -38,7 +37,7 @@ from tenacity import (
     wait_random_exponential,
 )
 
-from eneo.files.audio import AudioMimeTypes
+from eneo.files.audio import AudioMimeTypes, to_wav
 from eneo.files.transcriber import TranscribedAudio
 from eneo.flows.enums import FlowStepPhase
 from eneo.flows.runtime.run_cancellation import (
@@ -710,9 +709,8 @@ class RemoteFlowTranscriber:
         if file.blob is None or not AudioMimeTypes.has_value(mimetype):
             raise ValueError("File needs to be an audio file")
 
-        # The original bytes are sent as-is; the service decodes server-side.
-        # A temp copy exists only to measure duration and digest without
-        # holding a second in-memory copy.
+        # Validate both decoded ceilings locally before sending the original
+        # bytes; the service still owns its transcription and diarization decode.
         suffix = Path(str(file.name or "")).suffix or ".audio"
         temp_file_path: Path | None = None
         try:
@@ -720,9 +718,8 @@ class RemoteFlowTranscriber:
                 temp_file_path = Path(temp_file.name)
                 temp_file.write(file.blob)
 
-            audio_seconds = await asyncio.to_thread(
-                _measure_original_seconds, temp_file_path
-            )
+            async with to_wav(str(temp_file_path)) as decoded:
+                audio_seconds = decoded.duration
             audio_digest = await asyncio.to_thread(_digest_file, temp_file_path)
 
             job_id, call_id = await self._submit_job(
@@ -1052,12 +1049,6 @@ def _json_object(response: httpx.Response) -> dict[str, object]:
     if isinstance(body, dict):
         return cast(dict[str, object], body)
     return {}
-
-
-def _measure_original_seconds(file_path: Path) -> float:
-    # audioread lacks type stubs; its file handles expose ``duration``.
-    with audioread.audio_open(str(file_path)) as handle:  # pyright: ignore[reportUnknownMemberType]
-        return float(handle.duration)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType, reportAttributeAccessIssue]
 
 
 def _digest_file(file_path: Path) -> str:

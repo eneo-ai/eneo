@@ -106,6 +106,7 @@ class FlowApiErrorCode(str, Enum):
     TYPED_IO_AUDIO_MISSING_FILE = "typed_io_audio_missing_file"
     TYPED_IO_AUDIO_SOURCE_UNSUPPORTED = "typed_io_audio_source_unsupported"
     TYPED_IO_AUDIO_TOO_MANY_FILES = "typed_io_audio_too_many_files"
+    TYPED_IO_AUDIO_EXCEEDS_LIMIT = "typed_io_audio_exceeds_limit"
     TYPED_IO_DOCUMENT_SOURCE_UNSUPPORTED = "typed_io_document_source_unsupported"
     TYPED_IO_EMPTY_EXTRACTION = "typed_io_empty_extraction"
     TYPED_IO_FILE_NOT_FOUND = "typed_io_file_not_found"
@@ -219,6 +220,7 @@ FLOW_TYPED_IO_ERROR_CODES: frozenset[FlowApiErrorCode] = frozenset(
         FlowApiErrorCode.TYPED_IO_AUDIO_MISSING_FILE,
         FlowApiErrorCode.TYPED_IO_AUDIO_SOURCE_UNSUPPORTED,
         FlowApiErrorCode.TYPED_IO_AUDIO_TOO_MANY_FILES,
+        FlowApiErrorCode.TYPED_IO_AUDIO_EXCEEDS_LIMIT,
         FlowApiErrorCode.TYPED_IO_DOCUMENT_SOURCE_UNSUPPORTED,
         FlowApiErrorCode.TYPED_IO_EMPTY_EXTRACTION,
         FlowApiErrorCode.TYPED_IO_FILE_NOT_FOUND,

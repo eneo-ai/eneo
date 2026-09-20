@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Protocol, TypeAlias
 from uuid import UUID
 
 from eneo.completion_models.infrastructure.context_builder import count_tokens
-from eneo.files.audio import AudioMimeTypes
+from eneo.files.audio import AudioDecodeLimitExceeded, AudioMimeTypes
 from eneo.flows.domain.speaker_labels import (
     build_label_renumbering,
     build_speaker_inventory,
@@ -454,6 +454,12 @@ async def transcribe_audio_input(
             # fault, and the executor already reports it as the evidence gap it
             # is. Flattening it here would hide which request went unrecorded.
             raise
+        except AudioDecodeLimitExceeded as exc:
+            raise TypedIOValidationException(
+                str(exc),
+                code=FlowApiErrorCode.TYPED_IO_AUDIO_EXCEEDS_LIMIT.value,
+                context=exc.context,
+            ) from exc
         except Exception as exc:
             raise TypedIOValidationException(
                 (

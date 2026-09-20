@@ -5418,6 +5418,7 @@
   "flow_error_typed_io_audio_missing_file": "The audio step is missing its input file. Attach the required audio file and start the run again.",
   "flow_error_typed_io_audio_source_unsupported": "This audio step uses an unsupported input source. Configure it to use runtime files or a supported previous step and republish.",
   "flow_error_typed_io_audio_too_many_files": "The audio step received too many files. Remove extra files and start the run again.",
+  "flow_error_typed_io_audio_exceeds_limit": "The recording is longer than this installation allows, or becomes too large when decoded. Split the recording or ask an administrator to review the audio limits.",
   "flow_error_typed_io_document_source_unsupported": "This document step uses an unsupported input source. Configure it to use runtime files and republish.",
   "flow_error_typed_io_empty_extraction": "No text could be extracted from the submitted file. Use a file with readable content and start the run again.",
   "flow_error_typed_io_file_not_found": "A required runtime file could not be found. Upload the file again and rerun the step.",
