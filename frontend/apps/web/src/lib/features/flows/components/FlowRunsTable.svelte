@@ -175,6 +175,7 @@
   }
   let redispatchingRunId: string | null = $state(null);
   let cancellingRunId: string | null = $state(null);
+  let retryingRunId: string | null = $state(null);
   let showCancelConfirm = $state(false);
   let pendingCancelRunId: string | null = $state(null);
   let progressSnapshotsByRunId = $state<Record<string, FlowRunProgressSnapshot>>({});
@@ -296,6 +297,27 @@
       toast.error(m.flow_run_redispatch_failed());
     } finally {
       redispatchingRunId = null;
+    }
+  }
+
+  // The server chooses the first unfinished step and reuses the completed
+  // prefix; the key is stable per source revision, so a double click returns
+  // the same child run instead of a second one.
+  async function retryRun(run: FlowRunSummary) {
+    retryingRunId = run.id;
+    try {
+      const result = await eneo.flows.runs.retryFromFailedStep({
+        flowId: flow.id,
+        runId: run.id,
+        idempotencyKey: `flow-run-retry:${run.id}:${run.revision}`
+      });
+      toast.success(m.flow_run_retry_started({ step: String(result.first_executed_step_order) }));
+      await loadRuns();
+    } catch (error) {
+      console.error("Failed to retry run", error);
+      toast.error(getFlowRuntimeErrorMessage(error, m.flow_run_retry_failed()));
+    } finally {
+      retryingRunId = null;
     }
   }
 
@@ -706,6 +728,17 @@
                         {redispatchingRunId === run.id
                           ? m.flow_run_redispatching()
                           : m.flow_run_redispatch()}
+                      </Button>
+                    {/if}
+                    {#if run.status === "failed"}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        data-testid={`flow-run-retry-${run.id}`}
+                        disabled={retryingRunId === run.id}
+                        onclick={() => void retryRun(run)}
+                      >
+                        {retryingRunId === run.id ? m.flow_run_retrying() : m.flow_run_retry()}
                       </Button>
                     {/if}
                     {#if isFlowRunCancellable(run.status)}

@@ -118,16 +118,38 @@ export function makeRunsListEneo(
     graph?: (call: number) => FlowGraph;
     /** Step list for the n-th audited step read (1-based); default: none. */
     steps?: (call: number) => FlowRunStep[];
+    /** Retry response for the n-th retry (1-based); default: a child from step 2. */
+    retry?: (call: number) => Awaited<ReturnType<Eneo["flows"]["runs"]["retryFromFailedStep"]>>;
   } = {}
 ) {
   const calls: Array<{ limit: number; offset: number }> = [];
+  const retryCalls: Array<{ pathname: string; idempotencyKey: string | null }> = [];
   const evidenceCalls: string[] = [];
   const graphCalls: string[] = [];
   const stepCalls: string[] = [];
   const eneo: Eneo = createEneo({
     baseUrl: "http://backend.invalid",
-    fetch: async (input: RequestInfo | URL) => {
+    fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input instanceof Request ? input.url : input));
+      if (/\/retry\/$/.test(url.pathname)) {
+        const headers = input instanceof Request ? input.headers : init?.headers;
+        retryCalls.push({
+          pathname: url.pathname,
+          idempotencyKey: new Headers(headers).get("Idempotency-Key")
+        });
+        type RetryResult = Awaited<ReturnType<Eneo["flows"]["runs"]["retryFromFailedStep"]>>;
+        const retryBody: RetryResult = detail.retry?.(retryCalls.length) ?? {
+          run: makeFlowRun({ id: "retry-child" }),
+          created: true,
+          source_run_id: "aaa",
+          first_executed_step_order: 2,
+          reused_step_orders: [1]
+        };
+        return new Response(JSON.stringify(retryBody), {
+          status: 201,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
       if (/\/evidence\/$/.test(url.pathname)) {
         evidenceCalls.push(url.pathname);
         // Typed against the generated evidence return so the fixture cannot
@@ -192,5 +214,5 @@ export function makeRunsListEneo(
       });
     }
   });
-  return { eneo, calls, evidenceCalls, graphCalls, stepCalls };
+  return { eneo, calls, evidenceCalls, graphCalls, stepCalls, retryCalls };
 }

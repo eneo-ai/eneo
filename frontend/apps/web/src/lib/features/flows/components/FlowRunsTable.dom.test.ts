@@ -24,6 +24,10 @@ vi.mock("./flowRunHistoryState", async (importOriginal) => {
   return { ...original, MAX_LOADED_FLOW_RUNS: 3 };
 });
 
+vi.mock("$lib/components/toast", () => ({
+  toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() }
+}));
+import { toast } from "$lib/components/toast";
 import FlowRunsTable from "./FlowRunsTable.svelte";
 
 function run(id: string, created: string): FlowRun {
@@ -55,6 +59,34 @@ function renderTable(eneo: Eneo) {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+});
+
+describe("FlowRunsTable retry from the failed step", () => {
+  it("offers a failed run a retry, sends a stable key, and reports the restart step", async () => {
+    let listCalls = 0;
+    const { eneo, calls, retryCalls } = makeRunsListEneo(() => {
+      listCalls += 1;
+      return {
+        items: [
+          makeFlowRun({ id: "aaa", status: "failed", revision: 4 }),
+          makeFlowRun({ id: "bbb", status: "completed" })
+        ],
+        has_more: false
+      };
+    });
+    renderTable(eneo);
+    await waitFor(() => expect(calls).toHaveLength(1));
+
+    const retryButton = await screen.findByTestId("flow-run-retry-aaa");
+    expect(screen.queryByTestId("flow-run-retry-bbb")).toBeNull();
+    await fireEvent.click(retryButton);
+
+    await waitFor(() => expect(retryCalls).toHaveLength(1));
+    expect(retryCalls[0].pathname).toMatch(/\/runs\/aaa\/retry\/$/);
+    expect(retryCalls[0].idempotencyKey).toBe("flow-run-retry:aaa:4");
+    await waitFor(() => expect(listCalls).toBeGreaterThanOrEqual(2));
+    expect(toast.success).toHaveBeenCalledWith(m.flow_run_retry_started({ step: "2" }));
+  });
 });
 
 describe("FlowRunsTable search and pagination", () => {
