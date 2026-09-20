@@ -29,6 +29,8 @@ Fields that carry no value are omitted rather than sent as `null`, so treat ever
 
 For `flow_run_upload_pdf_exceeds_limit`, context contains `limit` (`pages`, `extracted_bytes`, or `seconds`), `measured`, and `ceiling`. The deployment settings `FLOW_PDF_MAX_PAGES`, `FLOW_PDF_MAX_EXTRACTED_BYTES`, and `FLOW_PDF_EXTRACTION_TIMEOUT_SECONDS` default to 500 pages, 33554432 extracted UTF-8 bytes (including page markers and separators), and 120 seconds. These defaults are provisional pending measurement and have no tenant overrides. They apply only to flow runtime uploads; other PDF uploads keep their existing extraction behavior. The byte ceiling applies to extracted text, not the uploaded file. A timeout kills the extraction process, whose own deadline remains active if the request worker exits.
 
+Each server worker admits at most half its reported CPU count in concurrent PDF extraction processes, rounded down with a minimum of one (one when the CPU count is unavailable). Waiting for capacity counts against the same extraction timeout. If that wait exhausts the deadline, the response has `limit: "seconds"` and `reason: "extraction_capacity"` in its context, and no parser is started. Back off before retrying an upload refused for capacity. The process holds its slot until it has exited and been reaped, including when the request is cancelled.
+
 ## Codes that are not `FlowApiErrorCode`
 
 The catalog below covers Flow-specific failures. A Flow client will also meet these platform-level codes, most of them on the authentication and upload paths, and they are not in the `FlowApiErrorCode` enum:

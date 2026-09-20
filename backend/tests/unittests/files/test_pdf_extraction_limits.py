@@ -1,3 +1,4 @@
+import asyncio
 import multiprocessing
 import os
 import signal
@@ -11,6 +12,7 @@ from unittest.mock import patch
 
 import pytest
 
+from eneo.files import text
 from eneo.files.text import (
     ExtractionError,
     PdfExtractionLimitExceeded,
@@ -83,6 +85,177 @@ class _RefusingExtractor(TextExtractor):
         raise PdfExtractionLimitExceeded("extracted_bytes", 11, 10)
 
 
+class _ControlledExtractor(TextExtractor):
+    @classmethod
+    def _extract_pdf_page(cls, page):
+        path = Path(page.pdf.stream.name)
+        path.with_suffix(".pid").write_text(str(os.getpid()))
+        while not path.with_suffix(".release").exists():
+            time.sleep(0.01)
+        return super()._extract_pdf_page(page)
+
+
+@pytest.fixture
+def pdf_capacity(monkeypatch):
+    capacity = asyncio.Semaphore(1)
+    monkeypatch.setattr(text, "_PDF_EXTRACTION_SEMAPHORE", capacity)
+    return capacity
+
+
+async def _wait_for_parser(path):
+    async with asyncio.timeout(2):
+        while not path.with_suffix(".pid").exists():
+            await asyncio.sleep(0.01)
+    return int(path.with_suffix(".pid").read_text())
+
+
+@pytest.mark.asyncio
+async def test_pdf_capacity_serializes_child_processes(tmp_path, pdf_capacity):
+    first = _write_pdf(tmp_path / "first.pdf", 1)
+    second = _write_pdf(tmp_path / "second.pdf", 1)
+    limits = replace(_LIMITS, timeout_seconds=5)
+    context = multiprocessing.get_context("spawn")
+    tasks = []
+    with patch.object(context, "Process", wraps=context.Process) as spawn:
+        try:
+            tasks.append(
+                asyncio.create_task(
+                    _ControlledExtractor.extract_from_pdf_async(first, limits=limits)
+                )
+            )
+            first_pid = await _wait_for_parser(first)
+            tasks.append(
+                asyncio.create_task(
+                    _ControlledExtractor.extract_from_pdf_async(second, limits=limits)
+                )
+            )
+            await asyncio.sleep(0.1)
+            assert spawn.call_count == 1
+            assert not second.with_suffix(".pid").exists()
+
+            first.with_suffix(".release").touch()
+            await _wait_for_parser(second)
+            with pytest.raises(ProcessLookupError):
+                os.kill(first_pid, 0)
+            assert spawn.call_count == 2
+            second.with_suffix(".release").touch()
+            assert await asyncio.gather(*tasks) == ["[PAGE 1]\nå", "[PAGE 1]\nå"]
+            assert not pdf_capacity.locked()
+        finally:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_pdf_capacity_timeout_refuses_without_spawning(tmp_path, pdf_capacity):
+    path = _write_pdf(tmp_path / "queued.pdf", 1)
+    context = multiprocessing.get_context("spawn")
+    await pdf_capacity.acquire()
+    started = time.monotonic()
+    try:
+        with patch.object(context, "Process", wraps=context.Process) as spawn:
+            async with asyncio.timeout(2):
+                with pytest.raises(PdfExtractionLimitExceeded) as caught:
+                    await TextExtractor.extract_from_pdf_async(
+                        path, limits=replace(_LIMITS, timeout_seconds=1)
+                    )
+            spawn.assert_not_called()
+        assert caught.value.limit == "seconds"
+        assert caught.value.ceiling == 1
+        assert caught.value.reason == "extraction_capacity"
+        assert 1 <= caught.value.measured <= time.monotonic() - started < 1.5
+        assert pdf_capacity.locked()
+    finally:
+        pdf_capacity.release()
+    assert (
+        await TextExtractor.extract_from_pdf_async(path, limits=_LIMITS)
+        == "[PAGE 1]\nå"
+    )
+
+
+@pytest.mark.asyncio
+async def test_pdf_cancellation_while_waiting_preserves_capacity(
+    tmp_path, pdf_capacity
+):
+    path = _write_pdf(tmp_path / "cancelled.pdf", 1)
+    context = multiprocessing.get_context("spawn")
+    await pdf_capacity.acquire()
+    task = asyncio.create_task(
+        TextExtractor.extract_from_pdf_async(path, limits=_LIMITS)
+    )
+    try:
+        with patch.object(context, "Process", wraps=context.Process) as spawn:
+            await asyncio.sleep(0.05)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            spawn.assert_not_called()
+        assert pdf_capacity.locked()
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        pdf_capacity.release()
+    assert (
+        await TextExtractor.extract_from_pdf_async(path, limits=_LIMITS)
+        == "[PAGE 1]\nå"
+    )
+
+
+@pytest.mark.asyncio
+async def test_pdf_cancellation_reaps_before_releasing_capacity(tmp_path, pdf_capacity):
+    path = _write_pdf(tmp_path / "cancelled.pdf", 1)
+    task = asyncio.create_task(
+        _ControlledExtractor.extract_from_pdf_async(path, limits=_LIMITS)
+    )
+    try:
+        pid = await _wait_for_parser(path)
+        assert pdf_capacity.locked()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
+        assert not pdf_capacity.locked()
+        assert (
+            await TextExtractor.extract_from_pdf_async(path, limits=_LIMITS)
+            == "[PAGE 1]\nå"
+        )
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_pdf_capacity_wait_consumes_extraction_deadline(
+    tmp_path, pdf_capacity, monkeypatch
+):
+    monkeypatch.setattr(
+        TextExtractor, "_extract_pdf_in_child", staticmethod(_hanging_child)
+    )
+    path = _write_pdf(tmp_path / "queued-hang.pdf", 1)
+    await pdf_capacity.acquire()
+
+    async def release_capacity():
+        await asyncio.sleep(1)
+        pdf_capacity.release()
+
+    release = asyncio.create_task(release_capacity())
+    started = time.monotonic()
+    try:
+        with pytest.raises(PdfExtractionLimitExceeded) as caught:
+            await TextExtractor.extract_from_pdf_async(path, limits=_LIMITS)
+        assert caught.value.limit == "seconds"
+        assert 2 <= caught.value.measured <= time.monotonic() - started < 2.75
+        assert caught.value.reason is None
+        pid = int(path.with_suffix(".pid").read_text())
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
+        assert not pdf_capacity.locked()
+    finally:
+        await release
+
+
 def _hanging_page(page):
     Path(page.pdf.stream.name).with_suffix(".pid").write_text(str(os.getpid()))
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
@@ -108,7 +281,7 @@ def _hung_supervisor(path):
             partial(TemporaryDirectory, dir=path.parent),
         ),
     ):
-        TextExtractor.extract_from_pdf(path, limits=_LIMITS)
+        asyncio.run(TextExtractor.extract_from_pdf_async(path, limits=_LIMITS))
 
 
 def test_pdf_child_deadline_survives_killed_supervisor(tmp_path):
@@ -148,11 +321,14 @@ def test_pdf_child_deadline_survives_killed_supervisor(tmp_path):
                 os.kill(child_pid, signal.SIGKILL)
 
 
-def test_pdf_page_limit_refuses_before_reading_any_page(tmp_path):
+@pytest.mark.asyncio
+async def test_pdf_page_limit_refuses_before_reading_any_page(tmp_path):
     path = _write_pdf(tmp_path / "many.pdf", 3)
 
     with pytest.raises(PdfExtractionLimitExceeded) as caught:
-        _ObservedExtractor.extract_from_pdf(path, limits=replace(_LIMITS, max_pages=2))
+        await _ObservedExtractor.extract_from_pdf_async(
+            path, limits=replace(_LIMITS, max_pages=2)
+        )
 
     assert (caught.value.limit, caught.value.measured, caught.value.ceiling) == (
         "pages",
@@ -162,11 +338,12 @@ def test_pdf_page_limit_refuses_before_reading_any_page(tmp_path):
     assert not path.with_suffix(".pages").exists()
 
 
-def test_pdf_byte_limit_includes_utf8_markers_and_page_separators(tmp_path):
+@pytest.mark.asyncio
+async def test_pdf_byte_limit_includes_utf8_markers_and_page_separators(tmp_path):
     path = _write_pdf(tmp_path / "many.pdf", 3)
 
     with pytest.raises(PdfExtractionLimitExceeded) as caught:
-        _ObservedExtractor.extract_from_pdf(
+        await _ObservedExtractor.extract_from_pdf_async(
             path, limits=replace(_LIMITS, max_extracted_bytes=23)
         )
 
@@ -178,18 +355,20 @@ def test_pdf_byte_limit_includes_utf8_markers_and_page_separators(tmp_path):
     assert path.with_suffix(".pages").read_text() == "1\n2\n"
 
 
-def test_pdf_at_page_and_byte_limits_is_accepted(tmp_path):
+@pytest.mark.asyncio
+async def test_pdf_at_page_and_byte_limits_is_accepted(tmp_path):
     path = _write_pdf(tmp_path / "exact.pdf", 2)
 
     assert (
-        _ObservedExtractor.extract_from_pdf(
+        await _ObservedExtractor.extract_from_pdf_async(
             path, limits=replace(_LIMITS, max_pages=2, max_extracted_bytes=24)
         )
         == "[PAGE 1]\nå\n\n[PAGE 2]\nå"
     )
 
 
-def test_hanging_pdf_parser_is_killed_and_reaped(tmp_path, monkeypatch):
+@pytest.mark.asyncio
+async def test_hanging_pdf_parser_is_killed_and_reaped(tmp_path, monkeypatch):
     monkeypatch.setattr(
         TextExtractor, "_extract_pdf_in_child", staticmethod(_hanging_child)
     )
@@ -197,7 +376,7 @@ def test_hanging_pdf_parser_is_killed_and_reaped(tmp_path, monkeypatch):
     started = time.monotonic()
 
     with pytest.raises(PdfExtractionLimitExceeded) as caught:
-        TextExtractor.extract_from_pdf(path, limits=_LIMITS)
+        await TextExtractor.extract_from_pdf_async(path, limits=_LIMITS)
 
     elapsed = time.monotonic() - started
     assert caught.value.limit == "seconds"
@@ -209,11 +388,12 @@ def test_hanging_pdf_parser_is_killed_and_reaped(tmp_path, monkeypatch):
         os.kill(pid, 0)
 
 
-def test_pdf_refusal_bypasses_plain_text_fallback(tmp_path):
+@pytest.mark.asyncio
+async def test_pdf_refusal_bypasses_plain_text_fallback(tmp_path):
     path = _write_pdf(tmp_path / "refusal.pdf", 1)
 
     with pytest.raises(PdfExtractionLimitExceeded) as caught:
-        _RefusingExtractor.extract_from_pdf(path, limits=_LIMITS)
+        await _RefusingExtractor.extract_from_pdf_async(path, limits=_LIMITS)
 
     assert (caught.value.limit, caught.value.measured, caught.value.ceiling) == (
         "extracted_bytes",
@@ -222,14 +402,17 @@ def test_pdf_refusal_bypasses_plain_text_fallback(tmp_path):
     )
 
 
-def test_pdf_child_crash_is_an_extraction_error_and_is_reaped(tmp_path, monkeypatch):
+@pytest.mark.asyncio
+async def test_pdf_child_crash_is_an_extraction_error_and_is_reaped(
+    tmp_path, monkeypatch
+):
     monkeypatch.setattr(
         TextExtractor, "_extract_pdf_in_child", staticmethod(_crashed_child)
     )
     path = _write_pdf(tmp_path / "crash.pdf", 1)
 
     with pytest.raises(ExtractionError, match="exited with code 17"):
-        TextExtractor.extract_from_pdf(path, limits=_LIMITS)
+        await TextExtractor.extract_from_pdf_async(path, limits=_LIMITS)
 
     pid = int(path.with_suffix(".pid").read_text())
     assert all(child.pid != pid for child in multiprocessing.active_children())
@@ -247,7 +430,7 @@ async def test_pdf_fixture_preserves_golden_text(bounded):
     result = (
         await TextExtractor.extract_from_pdf_async(fixture, limits=_LIMITS)
         if bounded
-        else TextExtractor.extract_from_pdf(fixture, limits=None)
+        else TextExtractor.extract_from_pdf(fixture)
     )
     assert result == (
         "[PAGE 1]\nProtokollsutdrag - Barn- och utbildningsnamndens arbetsutskott\n"

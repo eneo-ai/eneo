@@ -339,6 +339,7 @@ class FlowRuntimeFileService:
                     "limit": exc.limit,
                     "measured": exc.measured,
                     "ceiling": exc.ceiling,
+                    **({"reason": exc.reason} if exc.reason is not None else {}),
                 },
             ) from exc
         except FileTooLargeException as exc:

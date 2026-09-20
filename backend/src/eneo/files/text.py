@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import multiprocessing
+import os
 import signal
 import time
 import zipfile
@@ -23,6 +24,10 @@ from pptx.exc import PackageNotFoundError
 from pydantic import BaseModel, TypeAdapter
 
 logger = logging.getLogger(__name__)
+
+# Use half the reported CPUs for PDF parsing, with at least one slot and a
+# two-CPU fallback when the CPU count is unavailable.
+_PDF_EXTRACTION_SEMAPHORE = asyncio.Semaphore(max(1, (os.cpu_count() or 2) // 2))
 
 
 # =============================================================================
@@ -52,10 +57,18 @@ class PdfExtractionLimits:
 class PdfExtractionLimitExceeded(ExtractionError):
     """Raised when PDF text extraction exceeds a deployment ceiling."""
 
-    def __init__(self, limit: PdfExtractionLimit, measured: int | float, ceiling: int):
+    def __init__(
+        self,
+        limit: PdfExtractionLimit,
+        measured: int | float,
+        ceiling: int,
+        *,
+        reason: Literal["extraction_capacity"] | None = None,
+    ):
         self.limit: PdfExtractionLimit = limit
         self.measured = measured
         self.ceiling = ceiling
+        self.reason = reason
         super().__init__(
             f"PDF extraction exceeds {limit} limit ({measured} > {ceiling})"
         )
@@ -345,22 +358,10 @@ class TextExtractor:
         cls,
         filepath: Path,
         filename: str | None = None,
-        *,
-        limits: PdfExtractionLimits | None = None,
     ) -> str:
         display_name = filename or filepath.name
         with cls._pdf_errors(display_name):
-            if limits is None:
-                return cls._extract_pdf_text(filepath, display_name, limits=None)
-            with cls._pdf_process(filepath, display_name, limits) as (
-                process,
-                result_path,
-                started,
-            ):
-                process.join(
-                    max(0, limits.timeout_seconds - (time.monotonic() - started))
-                )
-                return cls._pdf_process_result(process, result_path, started, limits)
+            return cls._extract_pdf_text(filepath, display_name, limits=None)
 
     @classmethod
     async def extract_from_pdf_async(
@@ -370,29 +371,58 @@ class TextExtractor:
         *,
         limits: PdfExtractionLimits,
     ) -> str:
+        started = time.monotonic()
         display_name = filename or filepath.name
-        with cls._pdf_errors(display_name):
-            with cls._pdf_process(filepath, display_name, limits) as (
-                process,
-                result_path,
-                started,
-            ):
-                while process.is_alive():
-                    remaining = limits.timeout_seconds - (time.monotonic() - started)
-                    if remaining <= 0:
-                        break
-                    await asyncio.sleep(min(0.05, remaining))
-                return cls._pdf_process_result(process, result_path, started, limits)
+        semaphore = _PDF_EXTRACTION_SEMAPHORE
+        try:
+            async with asyncio.timeout(limits.timeout_seconds):
+                await semaphore.acquire()
+        except TimeoutError as exc:
+            raise PdfExtractionLimitExceeded(
+                "seconds",
+                time.monotonic() - started,
+                limits.timeout_seconds,
+                reason="extraction_capacity",
+            ) from exc
+        try:
+            elapsed = time.monotonic() - started
+            if elapsed >= limits.timeout_seconds:
+                raise PdfExtractionLimitExceeded(
+                    "seconds",
+                    elapsed,
+                    limits.timeout_seconds,
+                    reason="extraction_capacity",
+                )
+            with cls._pdf_errors(display_name):
+                with cls._pdf_process(filepath, display_name, limits, started) as (
+                    process,
+                    result_path,
+                ):
+                    while process.is_alive():
+                        remaining = limits.timeout_seconds - (
+                            time.monotonic() - started
+                        )
+                        if remaining <= 0:
+                            break
+                        await asyncio.sleep(min(0.05, remaining))
+                    return cls._pdf_process_result(
+                        process, result_path, started, limits
+                    )
+        finally:
+            semaphore.release()
 
     @classmethod
     @contextmanager
     def _pdf_process(
-        cls, filepath: Path, display_name: str, limits: PdfExtractionLimits
-    ) -> Generator[tuple[BaseProcess, Path, float]]:
+        cls,
+        filepath: Path,
+        display_name: str,
+        limits: PdfExtractionLimits,
+        started: float,
+    ) -> Generator[tuple[BaseProcess, Path]]:
         # A file avoids a full result pipe blocking child exit before join().
         with TemporaryDirectory(prefix="eneo-pdf-") as directory:
             result_path = Path(directory) / "result.json"
-            started = time.monotonic()
             process = multiprocessing.get_context("spawn").Process(
                 target=cls._extract_pdf_in_child,
                 args=(
@@ -405,7 +435,7 @@ class TextExtractor:
             )
             try:
                 process.start()
-                yield process, result_path, started
+                yield process, result_path
             finally:
                 if process.is_alive():
                     process.kill()
@@ -683,8 +713,6 @@ class TextExtractor:
         filepath: Path,
         mimetype: str | None = None,
         filename: str | None = None,
-        *,
-        pdf_limits: PdfExtractionLimits | None = None,
     ) -> str:
         mimetype = mimetype or magic.from_file(filepath, mime=True)  # pyright: ignore[reportUnknownMemberType]  # python-magic stubs are incomplete
         # Use original filename for error messages, fallback to temp filepath
@@ -714,9 +742,7 @@ class TextExtractor:
             ):
                 extracted_text = self.extract_from_plain_text(filepath, display_name)
             case TextMimeTypes.PDF:
-                extracted_text = self.extract_from_pdf(
-                    filepath, display_name, limits=pdf_limits
-                )
+                extracted_text = self.extract_from_pdf(filepath, display_name)
             case TextMimeTypes.DOCX:
                 extracted_text = self.extract_from_docx(filepath, display_name)
             case TextMimeTypes.PPTX:

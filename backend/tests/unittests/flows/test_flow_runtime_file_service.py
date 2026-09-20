@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from io import BytesIO
 from types import SimpleNamespace
@@ -12,6 +13,7 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
 
+from eneo.files import text
 from eneo.files.file_protocol import FileProtocol
 from eneo.files.file_service import FileService
 from eneo.files.file_size_service import FileSizeService
@@ -1632,15 +1634,18 @@ async def test_delete_runtime_file_reraises_unrelated_integrity_error() -> None:
     assert exc_info.value is error
 
 
-@pytest.mark.parametrize("corrupt", [False, True])
-def test_runtime_pdf_upload_error_response(tmp_path, monkeypatch, corrupt):
+@pytest.mark.parametrize("failure", ["pages", "corrupt", "capacity"])
+def test_runtime_pdf_upload_error_response(tmp_path, monkeypatch, failure):
     settings = get_settings()
     upload_directory = tmp_path / "uploads"
     upload_directory.mkdir()
     monkeypatch.setattr(settings, "upload_tmp_dir", upload_directory)
     monkeypatch.setattr(settings, "flow_pdf_max_pages", 1)
+    if failure == "capacity":
+        monkeypatch.setattr(settings, "flow_pdf_extraction_timeout_seconds", 1)
+        monkeypatch.setattr(text, "_PDF_EXTRACTION_SEMAPHORE", asyncio.Semaphore(0))
     pdf = _write_pdf(tmp_path / "source.pdf", 2)
-    payload = b"%PDF-1.4\ncorrupt" if corrupt else pdf.read_bytes()
+    payload = b"%PDF-1.4\ncorrupt" if failure == "corrupt" else pdf.read_bytes()
     flow = _flow(step=_step(step_order=1, input_type="document"))
     step = flow.steps[0]
     user = _user(tenant_id=flow.tenant_id)
@@ -1695,12 +1700,18 @@ def test_runtime_pdf_upload_error_response(tmp_path, monkeypatch, corrupt):
 
     assert response.status_code == 400
     body = response.json()
-    if corrupt:
+    if failure == "corrupt":
         assert body["code"] == "EXTRACTION_FAILED"
         assert body["message"] == (
             "PDF extraction failed for 'source.pdf': No /Root object! - Is this really a PDF?"
         )
         assert "context" not in body
+    elif failure == "capacity":
+        assert body["code"] == "flow_run_upload_pdf_exceeds_limit"
+        assert body["context"]["limit"] == "seconds"
+        assert body["context"]["ceiling"] == 1
+        assert body["context"]["measured"] >= 1
+        assert body["context"]["reason"] == "extraction_capacity"
     else:
         assert body["code"] == "flow_run_upload_pdf_exceeds_limit"
         assert body["context"] == {"limit": "pages", "measured": 2, "ceiling": 1}
