@@ -662,7 +662,17 @@ class FlowRunExecutor:
                     retry_count=retry_count,
                 )
         except FlowExecutionOwnershipLost:
-            return {"status": "skipped", "reason": "execution_ownership_lost"}
+            # Ownership is lost either because recovery terminalized the run
+            # (report the honest terminal outcome, as a late write always did)
+            # or because another owner holds a newer revision of a still
+            # running run (only then is "ownership lost" the whole truth).
+            await self._rollback()
+            try:
+                return await self._return_after_terminalized_step_write(
+                    run_id=run_id, flow_id=flow_id, tenant_id=tenant_id
+                )
+            except RuntimeError:
+                return {"status": "skipped", "reason": "execution_ownership_lost"}
 
     async def execute_claimed(
         self,

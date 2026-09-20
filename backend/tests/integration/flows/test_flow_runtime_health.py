@@ -659,7 +659,8 @@ async def test_flow_runtime_health_snapshot_reports_audit_outbox_delivery_state(
     assert response.audit_outbox.pending_count == 1
     assert response.audit_outbox.delivery_backlog_count == 1
     assert response.audit_outbox.dead_lettered_count == 1
-    assert response.audit_outbox.oldest_delivery_backlog_age_seconds == 600
+    # Ages derive from database time; the boundary second may floor to 599.
+    assert response.audit_outbox.oldest_delivery_backlog_age_seconds in (599, 600)
     assert response.audit_outbox.oldest_dead_lettered_age_seconds == 120
     assert delivery_result.delivered_count == 2
     assert recovered_response.status == FlowRuntimeHealthStatus.HEALTHY
@@ -784,6 +785,6 @@ async def test_flow_runtime_health_snapshot_reports_webhook_outbox_delivery_stat
     assert response.webhook_outbox.delivery_backlog_count == 1
     assert response.webhook_outbox.expired_claim_count == 1
     assert response.webhook_outbox.dead_lettered_count == 1
-    assert response.webhook_outbox.oldest_delivery_backlog_age_seconds == 600
+    assert response.webhook_outbox.oldest_delivery_backlog_age_seconds in (599, 600)
     assert response.webhook_outbox.oldest_expired_claim_age_seconds == 120
     assert response.webhook_outbox.oldest_dead_lettered_age_seconds == 180
