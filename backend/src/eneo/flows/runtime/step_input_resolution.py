@@ -361,7 +361,6 @@ async def resolve_step_input(
         )
 
     explicit_binding_edges: tuple[FlowResolvedInputEdge, ...] = ()
-    used_structured_source_refs = False
     binding = resolve_step_input_binding(
         step=step,
         run=run,
@@ -378,7 +377,6 @@ async def resolve_step_input(
         used_question_binding = True
         if binding.structured is not None:
             structured = binding.structured
-            used_structured_source_refs = True
         explicit_binding_edges = binding.edges
         diagnostics.append(binding.diagnostic)
 
@@ -408,31 +406,13 @@ async def resolve_step_input(
     ):
         raw_extracted_text = runtime_input_text
 
-    if step.input_type == "json":
-        if used_question_binding and not used_structured_source_refs:
-            # Explicit underlag is the complete LLM input; JSON normalization
-            # may parse it for contracts, but must not replace it with source data.
-            try:
-                structured = json.loads(input_text)
-            except (json.JSONDecodeError, ValueError):
-                structured = None
-        elif structured is not None:
-            input_text = json.dumps(structured, ensure_ascii=False)
-        elif step.input_source == "previous_step":
-            prev = next(
-                (r for r in prior_results if r.step_order == step.step_order - 1),
-                None,
-            )
-            if prev and isinstance(prev.output_payload_json, dict):
-                prev_structured = prev.output_payload_json.get("structured")
-                if prev_structured is not None:
-                    structured = prev_structured
-                    input_text = json.dumps(prev_structured, ensure_ascii=False)
-        if structured is None:
-            try:
-                structured = json.loads(input_text)
-            except (json.JSONDecodeError, ValueError):
-                pass
+    input_text, structured = finalize_step_input_question(
+        step=step,
+        text=input_text,
+        structured=structured,
+        binding=binding,
+        prior_results=prior_results,
+    )
 
     implicit_edges = (
         ()
@@ -535,6 +515,43 @@ async def resolve_step_input(
         runtime_input_metadata=runtime_input_metadata,
         edges=resolved_edges,
     )
+
+
+def finalize_step_input_question(
+    *,
+    step: RuntimeStep,
+    text: str,
+    structured: dict[str, Any] | list[Any] | None,
+    binding: ResolvedStepInputBinding | None,
+    prior_results: list[FlowStepResult],
+) -> tuple[str, dict[str, Any] | list[Any] | None]:
+    if step.input_type != "json":
+        return text, structured
+    if binding is not None and binding.structured is None:
+        # Explicit underlag is the complete LLM input; JSON normalization
+        # may parse it for contracts, but must not replace it with source data.
+        try:
+            structured = json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            structured = None
+    elif structured is not None:
+        text = json.dumps(structured, ensure_ascii=False)
+    elif step.input_source == "previous_step":
+        prev = next(
+            (r for r in prior_results if r.step_order == step.step_order - 1),
+            None,
+        )
+        if prev and isinstance(prev.output_payload_json, dict):
+            prev_structured = prev.output_payload_json.get("structured")
+            if prev_structured is not None:
+                structured = prev_structured
+                text = json.dumps(prev_structured, ensure_ascii=False)
+    if structured is None:
+        try:
+            structured = json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return text, structured
 
 
 def _implicit_input_source_edges(

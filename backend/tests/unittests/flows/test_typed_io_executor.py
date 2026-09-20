@@ -1094,10 +1094,14 @@ async def test_resolve_step_input_json_previous_step_structured_only_emits_under
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("section_processing", [False, True])
+@pytest.mark.parametrize(
+    ("section_processing", "implicit_previous_output"),
+    [(False, None), (True, None), (True, "pruned_raw"), (True, "structured_only")],
+)
 async def test_resolve_step_input_json_source_refs_build_exact_structured_projection(
     user,
     section_processing,
+    implicit_previous_output,
 ):
     executor, _, _, _ = _build_executor(user)
     run = _run(status=FlowRunStatus.RUNNING, user=user)
@@ -1261,6 +1265,20 @@ async def test_resolve_step_input_json_source_refs_build_exact_structured_projec
             },
             input_contract=input_contract,
         )
+        if implicit_previous_output is not None:
+            previous = _completed_step_result(
+                run_id=run.id,
+                flow_id=run.flow_id,
+                tenant_id=run.tenant_id,
+                step_order=4,
+                text=json.dumps({**resolved.structured, "unused": "pruned"})
+                if implicit_previous_output == "pruned_raw"
+                else "",
+                structured=resolved.structured,
+            )
+            state.prior_results.append(previous)
+            state.completed_by_order[4] = previous
+            section_step = replace(section_step, step_order=5, input_bindings=None)
 
         result = await executor._execute_step(
             step=section_step, run=run, state=state, attempt_no=1
@@ -1274,6 +1292,8 @@ async def test_resolve_step_input_json_source_refs_build_exact_structured_projec
         for section, call in zip(
             sections, assistant.get_response.await_args_list, strict=True
         ):
+            assert call.kwargs["question"]
+            assert "unused" not in call.kwargs["question"]
             assert json.loads(call.kwargs["question"]) == {
                 "meeting": {"summary": "Grounded summary"},
                 "decisions": ["Approve"],

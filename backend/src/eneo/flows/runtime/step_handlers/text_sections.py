@@ -22,6 +22,7 @@ from eneo.flows.runtime.step_execution_runtime import (
 from eneo.flows.runtime.step_handlers.base import PreparedAssistantStep
 from eneo.flows.runtime.step_handlers.mapped_outputs import mapped_admission_payload
 from eneo.flows.runtime.step_input_resolution import (
+    finalize_step_input_question,
     resolve_default_step_input_text,
     resolve_step_input_binding,
 )
@@ -145,15 +146,22 @@ async def prepare_text_sections(
                 ),
                 logger=None,
             )
+        question, structured = finalize_step_input_question(
+            step=step,
+            text=question,
+            structured=binding.structured
+            if binding is not None and binding.structured is not None
+            else step_input.structured,
+            binding=binding,
+            prior_results=state.prior_results,
+        )
         prepared = replace(
             base.prepared,
             effective_prompt=prompt,
             step_input=replace(
                 base.prepared.step_input,
                 text=question,
-                structured=binding.structured
-                if binding is not None and binding.structured is not None
-                else step_input.structured,
+                structured=structured,
                 source_text=section_text,
                 raw_extracted_text=section_text,
             ),
