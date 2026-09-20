@@ -38,7 +38,10 @@ from eneo.main.exceptions import NotFoundException, TypedIOValidationException
 
 
 @pytest.mark.asyncio
-async def test_remote_failure_facts_survive_executor_terminalization(user, monkeypatch):
+@pytest.mark.parametrize("failure_kind", ["capacity", "provider"])
+async def test_remote_failure_facts_survive_executor_terminalization(
+    user, monkeypatch, failure_kind
+):
     from eneo.flows.api.flow_models import FlowRunPublic
     from eneo.flows.domain.flow import FlowStepResult
     from eneo.flows.flow_run_error import dump_flow_run_error, parse_flow_run_error
@@ -48,15 +51,19 @@ async def test_remote_failure_facts_survive_executor_terminalization(user, monke
     monkeypatch.setattr(
         remote_transcription, "measure_duration", AsyncMock(return_value=42.0)
     )
-    reason = "No GPU capacity. " * 100
+    reason = "No GPU capacity. " * 100 if failure_kind == "capacity" else None
+    observer = AsyncMock(operation_scope="tenant/run/step/attempt-1")
+    observer.started.return_value = uuid4()
 
     def handle(request):
         if request.method == "POST":
             return httpx.Response(202, json={"job_id": "job-1"})
+        if request.url.path.endswith("/result"):
+            raise httpx.ReadTimeout("result download timed out", request=request)
         return httpx.Response(
             200,
             json={
-                "status": "failed",
+                "status": "failed" if failure_kind == "capacity" else "completed",
                 "stage": "transcribing",
                 "failure_kind": "capacity",
                 "error": reason,
@@ -84,6 +91,7 @@ async def test_remote_failure_facts_survive_executor_terminalization(user, monke
             max_files=1,
             max_inline_text_bytes=1024,
             load_audio_payload=AsyncMock(return_value=file),
+            transcription_call_observer=observer,
         )
     executor, _, _, _, _ = _build_executor(user)
     executor._terminalize_run = AsyncMock()
@@ -122,8 +130,15 @@ async def test_remote_failure_facts_survive_executor_terminalization(user, monke
     assert public.error.code.value == "typed_io_transcription_failed"
     assert public.error.retryable is False
     assert public.error.details.phase.value == "transcription"
-    assert public.error.details.transcription_failure_kind.value == "capacity"
-    assert public.error.details.transcription_service_reason == reason[:512]
+    assert public.error.details.transcription_failure_kind.value == failure_kind
+    assert public.error.details.transcription_service_reason == (
+        reason[:512] if reason else None
+    )
+    if failure_kind == "provider":
+        observer.outcome_unknown.assert_awaited_once_with(
+            observer.started.return_value, "provider_error"
+        )
+        assert exc_info.value.__cause__.details["retryable"] is True
 
 
 def _transcribed(text: str, *, duration_seconds: float = 30.0) -> TranscribedAudio:

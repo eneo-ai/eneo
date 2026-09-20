@@ -255,8 +255,18 @@ async def test_lost_submission_response_resubmits_once_with_same_key(error):
 
 
 @pytest.mark.parametrize("refusal", [429, 503])
-@pytest.mark.parametrize("retry_after", ["2", "Sun, 20 Sep 2026 10:00:02 GMT"])
-async def test_admission_wait_honours_retry_after(refusal, retry_after, monkeypatch):
+@pytest.mark.parametrize(
+    "retry_after, expected_wait",
+    [
+        ("2", 2),
+        ("Sun, 20 Sep 2026 10:00:02 GMT", 2),
+        ("0", 1),
+        ("Sun, 20 Sep 2026 09:59:00 GMT", 1),
+    ],
+)
+async def test_admission_wait_honours_retry_after(
+    refusal, retry_after, expected_wait, monkeypatch
+):
     clock = {"now": 0.0}
     waits = []
 
@@ -273,6 +283,7 @@ async def test_admission_wait_honours_retry_after(refusal, retry_after, monkeypa
             return datetime(2026, 9, 20, 10, 0, 0, tzinfo=timezone.utc)
 
     monkeypatch.setattr(remote_transcription, "datetime", Clock)
+    monkeypatch.setattr(remote_transcription.random, "uniform", lambda *_: 1.0)
     service = ScriptedService(
         submit_responses=[
             httpx.Response(refusal, headers={"Retry-After": retry_after}),
@@ -286,7 +297,7 @@ async def test_admission_wait_honours_retry_after(refusal, retry_after, monkeypa
         await RemoteFlowTranscriber(
             make_client(service, poll_interval_seconds=1)
         ).transcribe(audio_file(), SimpleNamespace(), observer=observer)
-    assert sum(waits) == 2
+    assert sum(waits) == expected_wait
     assert service.submit_count == 2
     assert len(observer.started_facts) == 1
     assert observer.unknown_calls == []
@@ -303,7 +314,7 @@ async def test_admission_deadline_records_known_refusal(monkeypatch):
     service = ScriptedService(
         submit_responses=[
             httpx.Response(
-                429, headers={"Retry-After": "5"}, json={"error": "queue full"}
+                429, headers={"Retry-After": "5"}, json={"detail": "job queue is full"}
             )
         ]
     )
@@ -323,7 +334,57 @@ async def test_admission_deadline_records_known_refusal(monkeypatch):
 
     details = FlowRunErrorDetails.from_budget_context(exc_info.value.context)
     assert details.transcription_failure_kind.value == "capacity"
-    assert details.transcription_service_reason == "queue full"
+    assert details.transcription_service_reason == "job queue is full"
+
+
+@pytest.mark.parametrize(
+    "detail, expected",
+    [
+        ("unsupported input " * 100, ("unsupported input " * 100)[:512]),
+        (
+            [
+                {"loc": ["body", "file"], "msg": "Field required", "type": "missing"},
+                {"msg": "Second error"},
+            ],
+            "Field required",
+        ),
+    ],
+)
+async def test_submission_validation_reason_uses_vemsa_detail(detail, expected):
+    service = ScriptedService(
+        submit_responses=[httpx.Response(422, json={"detail": detail})]
+    )
+    observer = RecordingObserver()
+    with pytest.raises(ProviderRejectedRequestException) as exc_info:
+        await RemoteFlowTranscriber(make_client(service)).transcribe(
+            audio_file(), SimpleNamespace(), observer=observer
+        )
+    assert exc_info.value.failure_kind.value == "input"
+    assert exc_info.value.service_reason == expected
+    assert observer.unknown_calls == []
+    assert [reason for _, reason in observer.rejected_calls] == ["provider_rejected"]
+
+
+async def test_cancellation_before_dispatch_keeps_audio_usage_complete():
+    from eneo.flows.application.flow_run_service import _transcription_usage
+
+    service = ScriptedService()
+    observer = RecordingObserver()
+    with (
+        run_cancel_probe_scope(AsyncMock(return_value=True)),
+        step_deadline_scope(StepDeadline.start(20), step_order=1) as scope,
+    ):
+        with pytest.raises(FlowStepCancelledError):
+            await RemoteFlowTranscriber(make_client(service)).transcribe(
+                audio_file(), SimpleNamespace(), observer=observer
+            )
+    assert service.submit_count == 0
+    assert observer.unknown_calls == []
+    assert observer.started_facts == []
+    assert scope.provider_outcome_unresolved is False
+    usage = _transcription_usage(None, recording_seconds=42)
+    assert usage.audio_seconds == 0
+    assert usage.completeness == "complete"
 
 
 async def test_poll_ticks_publish_transcription_progress():

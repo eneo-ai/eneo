@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
+import httpx
 import pytest
 from sqlalchemy.exc import OperationalError
 
@@ -46,7 +49,12 @@ def accepted_call_recorder(monkeypatch):
 
     @asynccontextmanager
     async def transaction():
-        yield
+        original_id = row.provider_response_id
+        try:
+            yield
+        except BaseException:
+            row.provider_response_id = original_id
+            raise
         commits.append(row.provider_response_id)
 
     @asynccontextmanager
@@ -67,6 +75,66 @@ def accepted_call_recorder(monkeypatch):
         resolved_input_edge_indexes=(),
     )
     return recorder, row, session, commits
+
+
+async def test_cancellation_during_acceptance_commits_job_identity(
+    accepted_call_recorder, monkeypatch
+):
+    from eneo.flows.runtime import remote_transcription
+
+    recorder, row, session, commits = accepted_call_recorder
+    monkeypatch.setattr(recorder, "started", AsyncMock(return_value=row.id))
+    monkeypatch.setattr(
+        remote_transcription, "measure_duration", AsyncMock(return_value=42.0)
+    )
+    accepting = asyncio.Event()
+    release = asyncio.Event()
+
+    async def flush():
+        if row.status == "started":
+            accepting.set()
+            await release.wait()
+
+    session.flush.side_effect = flush
+    requests = []
+
+    def handle(request):
+        requests.append(request.method)
+        assert request.method in {"POST", "DELETE"}
+        return httpx.Response(202, json={"job_id": "job-1"})
+
+    transcriber = remote_transcription.RemoteFlowTranscriber(
+        remote_transcription.RemoteTranscriptionClient(
+            base_url="http://transcription.test",
+            api_key="test",
+            submit_timeout_seconds=10,
+            poll_interval_seconds=0.001,
+            result_timeout_seconds=10,
+            transport=httpx.MockTransport(handle),
+        )
+    )
+    task = asyncio.create_task(
+        transcriber.transcribe(
+            SimpleNamespace(
+                id=uuid4(), name="audio.mp3", mimetype="audio/mpeg", blob=b"audio"
+            ),
+            SimpleNamespace(),
+            observer=recorder,
+        )
+    )
+    try:
+        await asyncio.wait_for(accepting.wait(), timeout=2)
+        task.cancel()
+        await asyncio.sleep(0)
+    finally:
+        release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert row.provider_response_id == "job-1"
+    assert row.status == "outcome_unknown"
+    assert row.outcome_reason == "request_cancelled"
+    assert commits == ["job-1", "job-1"]
+    assert requests == ["POST", "DELETE"]
 
 
 @pytest.mark.parametrize("terminal", ["rejected", "outcome_unknown"])

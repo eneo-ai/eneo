@@ -44,7 +44,11 @@ def _install_constraint(shape: str) -> None:
         f"ALTER TABLE {_TABLE} ADD CONSTRAINT {_CONSTRAINT} CHECK ({shape}) NOT VALID"
     )
     with op.get_context().autocommit_block():
-        op.execute(f"ALTER TABLE {_TABLE} VALIDATE CONSTRAINT {_CONSTRAINT}")
+        op.execute("SET lock_timeout = '5s'")
+        try:
+            op.execute(f"ALTER TABLE {_TABLE} VALIDATE CONSTRAINT {_CONSTRAINT}")
+        finally:
+            op.execute("RESET lock_timeout")
 
 
 def upgrade() -> None:

@@ -216,7 +216,7 @@ class FlowRunErrorDetails(BaseModel):
     )
     transcription_failure_kind: TranscriptionFailureKind | None = Field(
         default=None,
-        description="Transcription failure category from upstream protocol facts. Does not imply that a new run is safe to retry.",
+        description="Transcription failure category from local preparation or upstream protocol facts. Does not imply that a new run is safe to retry.",
     )
     transcription_service_reason: str | None = Field(
         default=None,

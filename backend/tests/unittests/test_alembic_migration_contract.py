@@ -4,7 +4,7 @@ import ast
 import runpy
 import sqlite3
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import pytest
 
@@ -48,9 +48,38 @@ def test_accepted_job_migration_upgrade_matches_model(monkeypatch):
     assert sql == [
         "SET LOCAL lock_timeout = '5s'",
         f"ALTER TABLE flow_provider_calls ADD CONSTRAINT ck_flow_provider_calls_lifecycle_shape CHECK ({constraint.sqltext}) NOT VALID",
+        "SET lock_timeout = '5s'",
         "ALTER TABLE flow_provider_calls VALIDATE CONSTRAINT ck_flow_provider_calls_lifecycle_shape",
+        "RESET lock_timeout",
     ]
     operations.get_context.return_value.autocommit_block.assert_called_once()
+    calls = operations.mock_calls
+    assert calls.index(call.get_context().autocommit_block().__enter__()) < calls.index(
+        call.execute("SET lock_timeout = '5s'")
+    )
+    assert calls.index(call.execute("RESET lock_timeout")) < calls.index(
+        call.get_context().autocommit_block().__exit__(None, None, None)
+    )
+
+
+@pytest.mark.parametrize("direction", ["upgrade", "downgrade"])
+def test_accepted_job_validation_failure_resets_lock_timeout(monkeypatch, direction):
+    migration = _accepted_job_migration()
+    operations = MagicMock()
+    operations.get_bind.return_value.execute.return_value.scalar_one.return_value = 0
+
+    def execute(sql):
+        if "VALIDATE CONSTRAINT" in str(sql):
+            raise RuntimeError("lock unavailable")
+
+    operations.execute.side_effect = execute
+    for name in ("execute", "drop_constraint", "get_context", "get_bind"):
+        monkeypatch.setattr(
+            migration[direction].__globals__["op"], name, getattr(operations, name)
+        )
+    with pytest.raises(RuntimeError, match="lock unavailable"):
+        migration[direction]()
+    operations.execute.assert_called_with("RESET lock_timeout")
 
 
 @pytest.mark.parametrize("retained", [0, 2])

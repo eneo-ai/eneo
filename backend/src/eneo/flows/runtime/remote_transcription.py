@@ -560,9 +560,12 @@ class RemoteTranscriptionClient:
     async def _fetch_result(
         self, client: httpx.AsyncClient, job_id: str
     ) -> RemoteTranscriptionResult | None:
-        response = await client.get(
-            f"{self.base_url}/v1/jobs/{job_id}/result", headers=self._headers
-        )
+        try:
+            response = await client.get(
+                f"{self.base_url}/v1/jobs/{job_id}/result", headers=self._headers
+            )
+        except httpx.TransportError as exc:
+            self._raise_transport_error(exc)
         if response.status_code == 409:
             return None
         if response.status_code == 401:
@@ -793,9 +796,11 @@ class RemoteFlowTranscriber:
 
         # The job is provider work in flight until the service answers.
         mark_provider_request_in_flight(True)
+        acceptance: asyncio.Task[None] | None = None
         try:
             if observer is not None and call_id is not None:
-                await observer.accepted(call_id, job_id)
+                acceptance = asyncio.create_task(observer.accepted(call_id, job_id))
+                await asyncio.shield(acceptance)
             result = await self.client.wait_for_result(
                 job_id, run_cancelled=current_run_cancel_probe()
             )
@@ -805,7 +810,12 @@ class RemoteFlowTranscriber:
             # already delivered to this task cannot interrupt the request. The
             # stop is best effort, so the provider outcome remains unresolved.
             settle_provider_request(known=False)
-            await asyncio.shield(self.client.cancel(job_id))
+            try:
+                # Retain the known job id before terminalizing its receipt.
+                if acceptance is not None:
+                    await asyncio.shield(acceptance)
+            finally:
+                await asyncio.shield(self.client.cancel(job_id))
             if observer is not None and call_id is not None:
                 await observer.outcome_unknown(call_id, "request_cancelled")
             raise
@@ -861,6 +871,11 @@ class RemoteFlowTranscriber:
         """Own admission retries for one logical job and one provider receipt."""
         record_step_phase(FlowStepPhase.TRANSCRIPTION)
         require_step_budget(phase="transcription job submission")
+        probe = current_run_cancel_probe()
+        if probe is not None and await probe():
+            raise FlowStepCancelledError(
+                "Run was cancelled during transcription admission."
+            )
         call_id: UUID | None = None
         if observer is not None:
             # A diarize job is its own provider call on the same audio; the
@@ -904,7 +919,7 @@ class RemoteFlowTranscriber:
             ).encode()
         ).hexdigest()
         uncertain = False
-        known_refusal = False
+        submission_outcome: Literal["unsent", "refused", "uncertain"] = "unsent"
         last_refusal: RemoteSubmissionRefused | None = None
         try:
             while True:
@@ -921,13 +936,16 @@ class RemoteFlowTranscriber:
                             "transcription_service_reason": last_refusal.service_reason,
                         }
                     raise error
-                probe = current_run_cancel_probe()
-                if probe is not None and await probe():
+                if (
+                    submission_outcome != "unsent"
+                    and probe is not None
+                    and await probe()
+                ):
                     raise FlowStepCancelledError(
                         "Run was cancelled during transcription admission."
                     )
                 timeout = asyncio.timeout(deadline.remaining())
-                known_refusal = False
+                submission_outcome = "uncertain"
                 try:
                     async with timeout:
                         with open(file_path, "rb") as payload:
@@ -947,13 +965,15 @@ class RemoteFlowTranscriber:
                     return job_id, call_id
                 except RemoteSubmissionRefused as exc:
                     last_refusal = exc
-                    known_refusal = not uncertain
-                    if known_refusal:
+                    submission_outcome = "uncertain" if uncertain else "refused"
+                    if submission_outcome == "refused":
                         settle_provider_request(known=True)
                     delay = exc.retry_after
-                    if delay is None:
-                        delay = self.client.poll_interval_seconds * random.uniform(
-                            0.8, 1.2
+                    if delay is None or delay < self.client.poll_interval_seconds:
+                        delay = max(
+                            delay or 0,
+                            self.client.poll_interval_seconds
+                            * random.uniform(0.8, 1.2),
                         )
                     while delay > 0 and not deadline.expired():
                         if probe is not None and await probe():
@@ -968,12 +988,11 @@ class RemoteFlowTranscriber:
                         await asyncio.sleep(interval)
                         delay -= interval
                 except RemoteSubmissionUnknown:
-                    known_refusal = False
                     if uncertain:
                         raise
                     uncertain = True
                 except ProviderRejectedRequestException:
-                    known_refusal = not uncertain
+                    submission_outcome = "uncertain" if uncertain else "refused"
                     raise
                 except TimeoutError:
                     if not timeout.expired():
@@ -984,17 +1003,19 @@ class RemoteFlowTranscriber:
                         provider_request_in_flight=True,
                     ) from None
         except (asyncio.CancelledError, FlowStepCancelledError):
-            settle_provider_request(known=known_refusal)
+            settle_provider_request(known=submission_outcome != "uncertain")
             if observer is not None and call_id is not None:
-                if known_refusal:
+                if submission_outcome == "refused":
                     await observer.rejected(call_id, "provider_rejected")
                 else:
                     await observer.outcome_unknown(call_id, "request_cancelled")
             raise
         except Exception:
-            settle_provider_request(known=known_refusal)
+            settle_provider_request(known=submission_outcome != "uncertain")
             if observer is not None and call_id is not None:
-                if known_refusal:
+                if submission_outcome == "unsent":
+                    await observer.rejected(call_id, "budget_exhausted")
+                elif submission_outcome == "refused":
                     await observer.rejected(call_id, "provider_rejected")
                 else:
                     await observer.outcome_unknown(call_id, "provider_error")
@@ -1024,8 +1045,19 @@ def _response_service_reason(response: httpx.Response) -> str | None:
         body = response.json()
     except ValueError:
         return None
+    if not isinstance(body, dict):
+        return None
+    reason = cast(dict[str, Any], body).get("detail")
+    if isinstance(reason, list):
+        reason = (
+            cast(dict[str, Any], reason[0]).get("msg")
+            if reason and isinstance(reason[0], dict)
+            else None
+        )
     return (
-        _service_reason(cast(dict[str, Any], body)) if isinstance(body, dict) else None
+        reason[:TRANSCRIPTION_SERVICE_REASON_MAX_LENGTH]
+        if isinstance(reason, str)
+        else None
     )
 
 
