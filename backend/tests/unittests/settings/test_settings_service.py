@@ -12,6 +12,7 @@ from eneo.flows.flow_evidence_policy import (
     FLOW_EVIDENCE_POLICY_STORAGE_VERSION,
     FLOW_EVIDENCE_POLICY_STORAGE_VERSION_KEY,
 )
+from eneo.flows.flow_input_limits import FLOW_INPUT_MAX_FILES_COUNT
 from eneo.flows.flow_retention_policy import (
     FLOW_RETENTION_POLICY_STORAGE_VERSION,
     FLOW_RETENTION_POLICY_STORAGE_VERSION_KEY,
@@ -335,7 +336,7 @@ async def test_get_flow_input_limits_reads_tenant_override():
     assert limits.audio_max_size_bytes == 28_000_000
 
 
-async def test_get_flow_input_limits_resolves_stored_null_audio_count_to_default():
+async def test_get_flow_input_limits_resolves_stored_null_counts_to_defaults():
     repo = MockRepo()
     tenant_repo = MockTenantRepo()
     tenant = await tenant_repo.get(TEST_USER.tenant_id)
@@ -364,7 +365,9 @@ async def test_get_flow_input_limits_resolves_stored_null_audio_count_to_default
 
     limits = await service.get_flow_input_limits()
 
-    assert limits.max_files_per_run is None
+    # A stored null is "not configured": both counts resolve to the deployment
+    # defaults; there is no unlimited file count.
+    assert limits.max_files_per_run == FLOW_INPUT_MAX_FILES_COUNT
     assert limits.audio_max_files_per_run == 10
 
 
@@ -741,7 +744,8 @@ async def test_update_flow_input_limits_null_clears_nullable_overrides():
         FlowInputLimitsUpdate(max_files_per_run=None, audio_max_files_per_run=None)
     )
 
-    assert updated.max_files_per_run is None
+    # Clearing the overrides resolves both counts to the deployment defaults.
+    assert updated.max_files_per_run == FLOW_INPUT_MAX_FILES_COUNT
     assert updated.audio_max_files_per_run == 10
     tenant = await tenant_repo.get(TEST_USER.tenant_id)
     assert "max_files_per_run" not in tenant.flow_settings["input_limits"]
