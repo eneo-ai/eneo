@@ -50,6 +50,28 @@ from tests.unit.api_key_test_utils import flatten_routes
 FLOW_SETTINGS_PATH_PREFIX = "/api/v1/settings/flow-"
 
 
+def test_retry_failed_run_contract(openapi_spec):
+    operation = openapi_spec["paths"]["/api/v1/flows/{id}/runs/{run_id}/retry/"]["post"]
+    assert operation["operationId"] == "retry_flow_run_from_failed_step"
+    assert {"200", "201", "400", "403", "404", "409", "422", "429", "503"} <= set(
+        operation["responses"]
+    )
+    header = next(p for p in operation["parameters"] if p["name"] == "Idempotency-Key")
+    assert header["in"] == "header"
+    assert header["required"] is True
+    response = _resolve_component_ref(
+        openapi_spec,
+        operation["responses"]["201"]["content"]["application/json"]["schema"],
+    )
+    assert set(response["required"]) == {
+        "run",
+        "created",
+        "source_run_id",
+        "first_executed_step_order",
+        "reused_step_orders",
+    }
+
+
 def _is_non_ai_builder_flow_related_path(path: str) -> bool:
     if path.startswith("/api/v1/flows/ai-builder"):
         return False

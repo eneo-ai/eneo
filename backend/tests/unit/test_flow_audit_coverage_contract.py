@@ -336,6 +336,12 @@ FLOW_ROUTE_AUDIT_CONTRACTS: dict[str, FlowAuditContract] = {
         metadata_keys=("flow_id", "run_id", "revision", "transcript_regeneration"),
         idempotency="same key and source revision replay one accepted snapshot",
     ),
+    "retry_flow_run_from_failed_step": _required_transaction(
+        ActionType.FLOW_RUN_CREATED,
+        owner="FlowRunRetryService.retry_from_failed_step",
+        metadata_keys=("flow_id", "run_id", "revision", "reused_prefix"),
+        idempotency="same key and source revision replay one child without a duplicate event",
+    ),
     "create_flow_run": _required_transaction(
         ActionType.FLOW_RUN_CREATED,
         owner="flow_run_lifecycle_router.create_flow_run",

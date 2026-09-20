@@ -149,6 +149,7 @@ async def _create_published_flow(
     output_type: str = "json",
     output_contract: dict[str, object] | None = None,
     output_config: dict[str, object] | None = None,
+    two_steps: bool = False,
 ) -> dict:
     create_response = await client.post(
         "/api/v1/flows/",
@@ -188,12 +189,23 @@ async def _create_published_flow(
         step_payload["review_policy"] = {"mode": "view"}
         step_payload["output_contract"] = review_output_contract
 
+    steps = [step_payload]
+    if two_steps:
+        steps.append(
+            {
+                **step_payload,
+                "user_description": "Finish the consumer-visible result",
+                "step_order": 2,
+                "input_source": "previous_step",
+                "input_type": "json",
+            }
+        )
     update_response = await client.patch(
         f"/api/v1/flows/{flow_id}/",
         json={
             "name": f"Consumer API Flow {flow_id[:8]}",
             "description": "Runtime API consumer contract flow",
-            "steps": [step_payload],
+            "steps": steps,
         },
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -207,6 +219,136 @@ async def _create_published_flow(
     assert publish_response.status_code == 200, publish_response.text
     flow["published_version"] = publish_response.json()["published_version"]
     return flow
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [None, "audit", "capacity"])
+async def test_retry_failed_run_reuses_prefix_and_replays_after_commit(
+    client, admin_token, admin_user, db_container, monkeypatch, failure
+):
+    from eneo.flows.api import flow_run_retry_router
+    from eneo.flows.domain.flow import FlowRunStatus
+    from eneo.flows.enums import FlowRunLifecycleSource
+    from eneo.flows.flow_api_error_code import FlowApiErrorCode
+    from eneo.flows.flow_run_error import FlowRunError
+
+    monkeypatch.setattr(
+        flow_run_lifecycle_router,
+        "dispatch_flow_run_recoverably_after_commit",
+        _noop_dispatch_flow_run_recoverably_after_commit,
+    )
+    dispatched = []
+
+    async def record_committed_child(*, run_id, tenant_id, expected_revision):
+        async with db_container() as container:
+            run = await container.flow_run_repo().get(
+                run_id=run_id, tenant_id=tenant_id
+            )
+            results = await container.flow_run_repo().list_step_results(
+                run_id=run_id, tenant_id=tenant_id
+            )
+            assert run.revision == expected_revision
+            assert results[0].status == FlowStepResultStatus.COMPLETED
+        dispatched.append(run_id)
+
+    monkeypatch.setattr(
+        flow_run_retry_router,
+        "dispatch_flow_run_recoverably_after_commit",
+        record_committed_child,
+    )
+    space_id = await _create_space(client, token=admin_token)
+    flow = await _create_published_flow(
+        client, token=admin_token, space_id=space_id, two_steps=True
+    )
+    flow_id = flow["id"]
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    response = await client.post(
+        f"/api/v1/flows/{flow_id}/runs/",
+        json={"input_payload_json": {"question": "Retry me"}},
+        headers=headers,
+    )
+    assert response.status_code == 201, response.text
+    source_id = response.json()["id"]
+    await _mark_first_step_completed(
+        db_container=db_container,
+        run_id=source_id,
+        flow_id=flow_id,
+        tenant_id=str(admin_user.tenant_id),
+    )
+    async with db_container() as container:
+        await container.flow_run_terminalizer().terminalize_run(
+            run_id=UUID(source_id),
+            tenant_id=admin_user.tenant_id,
+            target_status=FlowRunStatus.FAILED,
+            source=FlowRunLifecycleSource.EXECUTOR_FAILED,
+            error=FlowRunError(
+                code=FlowApiErrorCode.STEP_EXECUTION_FAILED,
+                message="Step two failed",
+            ),
+        )
+    url = f"/api/v1/flows/{flow_id}/runs/{source_id}/retry/"
+    retry_headers = {**headers, "Idempotency-Key": "retry-consumer"}
+    if failure == "audit":
+
+        async def unavailable(self, audit_log):
+            raise RuntimeError("audit storage unavailable")
+
+        monkeypatch.setattr(AuditLogRepositoryImpl, "create", unavailable)
+    elif failure == "capacity":
+        from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
+
+        monkeypatch.setattr(
+            FlowRunRepository, "count_active_runs", AsyncMock(return_value=4)
+        )
+    response = await client.post(url, headers=retry_headers)
+    if failure is not None:
+        assert response.status_code == (503 if failure == "audit" else 429), (
+            response.text
+        )
+        assert response.json()["code"] == (
+            "flow_evidence_audit_logging_failed"
+            if failure == "audit"
+            else "flow_run_concurrency_limit_reached"
+        )
+        if failure == "capacity":
+            assert response.headers["Retry-After"] == "60"
+        assert (
+            await _flow_run_first_page_count(client, flow_id=flow_id, token=admin_token)
+            == 1
+        )
+        assert dispatched == []
+        return
+    assert response.status_code == 201, response.text
+    retry = response.json()
+    assert retry["created"] is True
+    assert retry["source_run_id"] == source_id
+    assert retry["first_executed_step_order"] == 2
+    assert retry["reused_step_orders"] == [1]
+    assert retry["run"]["id"] != source_id
+    assert retry["run"]["status"] == "queued"
+    assert dispatched == [UUID(retry["run"]["id"])]
+
+    response = await client.post(url, headers=retry_headers)
+    assert response.status_code == 200, response.text
+    assert response.json()["created"] is False
+    assert response.json()["run"]["id"] == retry["run"]["id"]
+    assert dispatched == [UUID(retry["run"]["id"])]
+
+    missing_header = await client.post(url, headers=headers)
+    assert missing_header.status_code == 422, missing_header.text
+    await _mark_run_completed(db_container=db_container, run_id=retry["run"]["id"])
+    refused = await client.post(
+        f"/api/v1/flows/{flow_id}/runs/{retry['run']['id']}/retry/",
+        headers={**headers, "Idempotency-Key": "completed-run"},
+    )
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["code"] == "flow_run_retry_source_not_failed"
+    assert refused.json()["context"] == {"status": "completed"}
+    assert (
+        await _flow_run_first_page_count(client, flow_id=flow_id, token=admin_token)
+        == 2
+    )
 
 
 async def _create_published_required_runtime_input_flow(

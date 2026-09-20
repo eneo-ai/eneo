@@ -702,6 +702,22 @@ export function initFlows(client) {
       },
 
       /**
+       * Reuse a failed run's completed prefix and execute from its first unfinished step.
+       * Replaying the required idempotency key returns the same child run.
+       * @param {{flowId: string, runId: string, idempotencyKey: string}} params
+       * @throws {EneoError}
+       */
+      retryFromFailedStep: async ({ flowId, runId, idempotencyKey }) => {
+        return _fetch("/api/v1/flows/{id}/runs/{run_id}/retry/", {
+          method: "post",
+          params: {
+            path: { id: flowId, run_id: runId },
+            header: { "Idempotency-Key": idempotencyKey }
+          }
+        });
+      },
+
+      /**
        * Derive a stable Idempotency-Key value for upload-driven Flow runs.
        * @param {{
        *  flowId: string,

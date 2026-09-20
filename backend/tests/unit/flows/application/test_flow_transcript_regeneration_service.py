@@ -150,7 +150,7 @@ def context():
 async def test_naming_snapshot_preserves_confirmed_unresolved_and_provisional(context):
     await context.service.regenerate(**context.request)
     args = context.service.run_service.create_run.await_args.kwargs
-    seed = args["transcript_seed"]
+    seed = args["prefix_seed"]
     assert "Anna: Confirmed." in seed.transcript
     assert "[Talare går inte att avgöra]: Unresolved." in seed.transcript
     assert "[Överlappande tal – osäker talare]: Pending." in seed.transcript
@@ -261,7 +261,7 @@ async def test_null_revision_can_regenerate_an_unedited_transcript(context):
     context.service.corrections_repo.get_for_step.return_value = None
     context.request["expected_correction_revision"] = None
     await context.service.regenerate(**context.request)
-    seed = context.service.run_service.create_run.await_args.kwargs["transcript_seed"]
+    seed = context.service.run_service.create_run.await_args.kwargs["prefix_seed"]
     assert seed.provenance["correction_revision"] is None
     assert seed.transcript.count("[Överlappande tal – osäker talare]") == 3
     context.service.corrections_repo.copy_snapshot.assert_not_awaited()
@@ -274,3 +274,23 @@ async def test_regeneration_copies_source_run_label(context, label):
     args = context.service.run_service.create_run.await_args.kwargs
     assert "run_label" in args
     assert args["run_label"] == label
+
+
+async def test_regeneration_replays_accepted_prefix_after_source_changes(context):
+    await context.service.regenerate(**context.request)
+    args = context.service.run_service.create_run.await_args.kwargs
+    child = context.service.run_service.create_run.return_value.run
+    child.input_payload_json = {
+        "transcript_regeneration": args["prefix_seed"].provenance
+    }
+    context.service.run_repo.get_idempotent_run.return_value = (child, "fingerprint")
+    context.source.revision = 2
+    context.service.run_service.create_run.reset_mock()
+    context.service.audit_service.log.reset_mock()
+
+    replay = await context.service.regenerate(**context.request)
+
+    assert replay.run is child
+    assert replay.created is False
+    context.service.run_service.create_run.assert_not_awaited()
+    context.service.audit_service.log.assert_not_awaited()

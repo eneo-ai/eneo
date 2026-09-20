@@ -5,7 +5,7 @@ import json
 import unicodedata
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
-from typing import Sequence
+from typing import Any, Sequence, cast
 from uuid import UUID
 
 from eneo.authentication.api_key_resolver import resolve_effective_resource_permission
@@ -41,7 +41,7 @@ from eneo.flows.domain.run_step_input_exceptions import (
 from eneo.flows.domain.runtime_invariant_exceptions import (
     FlowPublishedDefinitionWithoutExecutableStepsError,
 )
-from eneo.flows.domain.transcript_regeneration import TranscriptRegenerationSeed
+from eneo.flows.domain.transcript_regeneration import FlowRunPrefixSeed
 from eneo.flows.enums import (
     FlowRunLifecycleSource,
     FlowRunPurpose,
@@ -115,6 +115,43 @@ class FlowRunStepResultWithFiles:
 class CreateRunResult:
     run: FlowRun
     created: bool
+
+
+async def find_prefix_seed_replay(
+    *,
+    run_repo: FlowRunRepository,
+    tenant_id: UUID,
+    flow_id: UUID,
+    principal: FlowPrincipal,
+    idempotency_key: str,
+    request_hash: str,
+) -> CreateRunResult | None:
+    if not idempotency_key or len(idempotency_key) > 255:
+        raise FlowBadRequestException(
+            "Idempotency key must contain 1 to 255 characters.",
+            code=FlowApiErrorCode.RUN_INVALID_IDEMPOTENCY_KEY,
+        )
+    # All creation paths acquire the tenant lock before the flow publication lock.
+    await run_repo.acquire_tenant_run_creation_lock(tenant_id=tenant_id)
+    existing = await run_repo.get_idempotent_run(
+        tenant_id=tenant_id,
+        flow_id=flow_id,
+        idempotency_key=idempotency_key,
+        principal=principal,
+    )
+    if existing is None:
+        return None
+    run, _fingerprint = existing
+    provenance = (run.input_payload_json or {}).get(TRANSCRIPT_REGENERATION_KEY)
+    if (
+        not isinstance(provenance, dict)
+        or cast(dict[str, Any], provenance).get("request_hash") != request_hash
+    ):
+        raise FlowBadRequestException(
+            "Idempotency key was already used with a different run request.",
+            code=FlowApiErrorCode.RUN_IDEMPOTENCY_CONFLICT,
+        )
+    return CreateRunResult(run=run, created=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -298,7 +335,7 @@ class FlowRunService:
         expected_flow_version: int | None = None,
         step_inputs: FlowRunStepInputs | None = None,
         idempotency_key: str | None = None,
-        transcript_seed: TranscriptRegenerationSeed | None = None,
+        prefix_seed: FlowRunPrefixSeed | None = None,
         purpose: FlowRunPurpose = FlowRunPurpose.PRODUCTION,
     ) -> CreateRunResult:
         idempotency_key = self._validate_idempotency_key(idempotency_key)
@@ -332,12 +369,13 @@ class FlowRunService:
             step_inputs=step_inputs,
             purpose=purpose,
         )
-        if transcript_seed is not None:
+        if prefix_seed is not None:
             payload = {
                 **(prepared.input_payload_json or {}),
-                FLOW_INPUT_TRANSCRIPTION_KEY: transcript_seed.transcript,
-                TRANSCRIPT_REGENERATION_KEY: transcript_seed.provenance,
+                TRANSCRIPT_REGENERATION_KEY: prefix_seed.provenance,
             }
+            if prefix_seed.transcript is not None:
+                payload[FLOW_INPUT_TRANSCRIPTION_KEY] = prefix_seed.transcript
             ensure_inline_payload_size_allowed(
                 flow_id=flow_id, input_payload_json=payload
             )
@@ -372,10 +410,10 @@ class FlowRunService:
             idempotency_key=idempotency_key,
             purpose=purpose,
         )
-        if transcript_seed is not None:
-            await self.flow_run_repo.seed_reviewed_transcript(
+        if prefix_seed is not None:
+            await self.flow_run_repo.seed_validated_prefix(
                 run=created_run,
-                seed=transcript_seed,
+                seed=prefix_seed,
             )
         return CreateRunResult(run=created_run, created=True)
 

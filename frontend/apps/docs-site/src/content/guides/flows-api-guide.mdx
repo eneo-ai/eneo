@@ -804,6 +804,66 @@ only for `flow_dispatch_failed` and `flow_step_attempt_start_failed`. A true
 value does not start work automatically; the consumer still decides whether
 and when to submit a new run.
 
+#### Retry a failed run from the first unfinished step
+
+Use this endpoint when a run fails after completing one or more steps. It creates
+a child run that imports the completed prefix and executes from the first
+unfinished step. The server chooses that step; the request has no body.
+
+```http
+POST /api/v1/flows/{flow_id}/runs/{run_id}/retry/
+Authorization: Bearer YOUR_TOKEN
+Idempotency-Key: retry-report-2026-09
+```
+
+A successful request returns `201`. This response excerpt shows a run that failed
+at step 3 after completing steps 1 and 2:
+
+```json
+{
+  "run": { "id": "CHILD_RUN_ID", "status": "queued" },
+  "created": true,
+  "source_run_id": "SOURCE_RUN_ID",
+  "first_executed_step_order": 3,
+  "reused_step_orders": [1, 2]
+}
+```
+
+`run` uses the normal `FlowRunPublic` shape. Poll its id to follow execution. With
+the SDK, call:
+
+```js
+const retry = await client.flows.runs.retryFromFailedStep({
+  flowId,
+  runId,
+  idempotencyKey: "retry-report-2026-09"
+});
+```
+
+Reuse the same key after a timeout or lost response. While the source history is
+available, an accepted request replays the same child with `200` and
+`created: false`, without dispatching again. A key used for a different request
+is refused. Use a new key only when you intend to create another child.
+
+The source must be failed, belong to the same user or service principal, and use
+the flow's current published version. The child keeps its label, purpose, semantic
+inputs, and every step's ordered input-file selections. Completed outputs are
+copied inline, including approved review edits. Imported steps have provenance
+linking them to their source and do not make provider calls. The child's usage
+counts only new calls made after the imported prefix.
+
+Retry refuses a stale version, a run with no completed prefix, prefix outputs
+stored in files, and prefix review checkpoints that are not approved. These
+refusals return `409`; the [error reference](/guides/flows/reference/errors) gives each
+code and recovery action. Existing input size and concurrency limits still apply.
+A missing `Idempotency-Key` returns `422`, and exhausted run capacity returns
+`429`. If the required creation audit fails, the transaction rolls back and the
+API returns `503`.
+
+The source remains unchanged. Its history may expire independently after the
+child is created: copied outputs and the child's own input-file references keep
+the child readable without the source history.
+
 #### What redispatch does
 
 `redispatch` is for **stale queued runs**. It asks the system to try dispatching a queued run again if it appears stuck before execution started. It is not the same as creating a brand-new run.

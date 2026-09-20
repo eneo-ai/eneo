@@ -4973,6 +4973,36 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/flows/{id}/runs/{run_id}/retry/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Retry a failed run from its first unfinished step
+     * @description Create a child run that reuses the contiguous completed prefix of a failed run.
+     *     The source must belong to the same principal and use the current published version.
+     *     Only inline outputs can be imported, and any prefix review checkpoint must be approved.
+     *     The server selects the first unfinished step; earlier steps do not execute again.
+     *     The child preserves the source's semantic inputs, file selections, label and purpose.
+     *     Only new provider calls contribute to the child's usage.
+     *
+     *     Idempotency-Key is required. Repeating an accepted request with the same key returns
+     *     the same child (200). Creation, imported results and the required audit commit before
+     *     dispatch. The source run remains unchanged and can expire under its retention policy;
+     *     shared input files remain available while the child references them.
+     */
+    post: operations["retry_flow_run_from_failed_step"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/active/": {
     parameters: {
       query?: never;
@@ -16649,6 +16679,10 @@ export interface components {
       | "flow_service_key_principal_not_supported"
       | "flow_run_invalid_idempotency_key"
       | "flow_run_stale_version"
+      | "flow_run_retry_source_not_failed"
+      | "flow_run_retry_source_version_stale"
+      | "flow_run_retry_nothing_to_reuse"
+      | "flow_run_retry_prefix_unsupported"
       | "flow_run_required_step_input_missing"
       | "flow_run_runtime_input_disabled"
       | "flow_run_top_level_file_ids_not_supported"
@@ -21511,6 +21545,54 @@ export interface components {
       has_more: boolean;
       /** Items */
       items: components["schemas"]["FlowRunRetentionSpaceTarget"][];
+    };
+    /**
+     * FlowRunRetryPublic
+     * @example {
+     *       "created": true,
+     *       "first_executed_step_order": 2,
+     *       "reused_step_orders": [
+     *         1
+     *       ],
+     *       "run": {
+     *         "created_at": "2026-03-17T10:05:00Z",
+     *         "dispatch_attempt_count": 1,
+     *         "dispatch_last_attempt_at": "2026-03-17T10:05:01Z",
+     *         "dispatch_next_attempt_at": "2026-03-17T10:05:31Z",
+     *         "dispatch_pending_since": "2026-03-17T10:05:00Z",
+     *         "dispatched_at": "2026-03-17T10:05:01Z",
+     *         "flow_id": "00000000-0000-0000-0000-000000000001",
+     *         "flow_version": 3,
+     *         "id": "00000000-0000-0000-0000-000000000301",
+     *         "input_payload_json": {
+     *           "employee_name": "Alex Example"
+     *         },
+     *         "job_id": "00000000-0000-0000-0000-000000000401",
+     *         "purpose": "production",
+     *         "result_files": [],
+     *         "revision": 1,
+     *         "run_label": "Case 123",
+     *         "status": "queued",
+     *         "tenant_id": "00000000-0000-0000-0000-000000000010",
+     *         "trace_id": "00000000-0000-0000-0000-000000000302",
+     *         "updated_at": "2026-03-17T10:05:01Z"
+     *       },
+     *       "source_run_id": "00000000-0000-0000-0000-000000000099"
+     *     }
+     */
+    FlowRunRetryPublic: {
+      /** Created */
+      created: boolean;
+      /** First Executed Step Order */
+      first_executed_step_order: number;
+      /** Reused Step Orders */
+      reused_step_orders: number[];
+      run: components["schemas"]["FlowRunPublic"];
+      /**
+       * Source Run Id
+       * Format: uuid
+       */
+      source_run_id: string;
     };
     /**
      * FlowRunReviewCheckpointApproveRequest
@@ -54436,6 +54518,181 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  retry_flow_run_from_failed_step: {
+    parameters: {
+      query?: never;
+      header: {
+        "Idempotency-Key": string;
+      };
+      path: {
+        id: string;
+        run_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Idempotent replay. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "created": false,
+           *       "first_executed_step_order": 2,
+           *       "reused_step_orders": [
+           *         1
+           *       ],
+           *       "run": {
+           *         "created_at": "2026-03-17T10:05:00Z",
+           *         "dispatch_attempt_count": 1,
+           *         "dispatch_last_attempt_at": "2026-03-17T10:05:01Z",
+           *         "dispatch_next_attempt_at": "2026-03-17T10:05:31Z",
+           *         "dispatch_pending_since": "2026-03-17T10:05:00Z",
+           *         "dispatched_at": "2026-03-17T10:05:01Z",
+           *         "flow_id": "00000000-0000-0000-0000-000000000001",
+           *         "flow_version": 3,
+           *         "id": "00000000-0000-0000-0000-000000000301",
+           *         "input_payload_json": {
+           *           "employee_name": "Alex Example"
+           *         },
+           *         "job_id": "00000000-0000-0000-0000-000000000401",
+           *         "purpose": "production",
+           *         "result_files": [],
+           *         "revision": 1,
+           *         "run_label": "Case 123",
+           *         "status": "queued",
+           *         "tenant_id": "00000000-0000-0000-0000-000000000010",
+           *         "trace_id": "00000000-0000-0000-0000-000000000302",
+           *         "updated_at": "2026-03-17T10:05:01Z"
+           *       },
+           *       "source_run_id": "00000000-0000-0000-0000-000000000099"
+           *     }
+           */
+          "application/json": components["schemas"]["FlowRunRetryPublic"];
+        };
+      };
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunRetryPublic"];
+        };
+      };
+      /** @description Invalid or conflicting idempotency key, input limit or changed publication. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_run_invalid_idempotency_key",
+           *       "eneo_error_code": 9007,
+           *       "message": "Invalid or conflicting idempotency key, input limit or changed publication."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Run access and the source principal are required. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_run_access_denied",
+           *       "eneo_error_code": 9001,
+           *       "message": "Run access and the source principal are required."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The source flow or run is unavailable in tenant scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "The source flow or run is unavailable in tenant scope."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Source is not failed, its version is stale, or its prefix cannot be reused. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_run_retry_source_not_failed",
+           *       "context": {
+           *         "status": "completed"
+           *       },
+           *       "eneo_error_code": 9057,
+           *       "message": "Source is not failed, its version is stale, or its prefix cannot be reused."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Tenant concurrent-run capacity is exhausted. */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_run_concurrency_limit_reached",
+           *       "eneo_error_code": 9007,
+           *       "message": "Tenant concurrent-run capacity is exhausted."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Required audit failed; no retry run was accepted. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_evidence_audit_logging_failed",
+           *       "eneo_error_code": 9024,
+           *       "message": "Required audit failed; no retry run was accepted."
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };

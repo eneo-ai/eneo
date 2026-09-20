@@ -12,7 +12,11 @@ from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.flows.application.flow_run_access_policy import FlowRunAccessPolicy
-from eneo.flows.application.flow_run_service import CreateRunResult, FlowRunService
+from eneo.flows.application.flow_run_service import (
+    CreateRunResult,
+    FlowRunService,
+    find_prefix_seed_replay,
+)
 from eneo.flows.application.flow_transcript_corrections_service import (
     extract_transcription_segments,
 )
@@ -34,12 +38,11 @@ from eneo.flows.domain.transcript_corrections import (
     validate_occurrences,
     validate_speaker_edits,
 )
-from eneo.flows.domain.transcript_regeneration import TranscriptRegenerationSeed
+from eneo.flows.domain.transcript_regeneration import FlowRunPrefixSeed
 from eneo.flows.domain.transcript_words import locate_words
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_run_input_envelope import (
-    TRANSCRIPT_REGENERATION_KEY,
     read_semantic_flow_input_payload,
 )
 from eneo.flows.flow_run_step_inputs import FlowRunStepInputFiles
@@ -125,11 +128,6 @@ class FlowTranscriptRegenerationService:
             access_kind="content",
         )
         key = idempotency_key.strip()
-        if not key or len(key) > 255:
-            raise FlowBadRequestException(
-                "Idempotency key must contain 1 to 255 characters.",
-                code=FlowApiErrorCode.RUN_INVALID_IDEMPOTENCY_KEY,
-            )
         request_hash = hashlib.sha256(
             json.dumps(
                 {
@@ -143,29 +141,16 @@ class FlowTranscriptRegenerationService:
                 sort_keys=True,
             ).encode()
         ).hexdigest()
-        # Match normal creation's lock order. A retry replays the accepted snapshot
-        # even when another correction has subsequently been saved on the source.
-        await self.run_repo.acquire_tenant_run_creation_lock(
-            tenant_id=self.user.tenant_id
-        )
-        existing = await self.run_repo.get_idempotent_run(
+        existing = await find_prefix_seed_replay(
+            run_repo=self.run_repo,
             tenant_id=self.user.tenant_id,
             flow_id=flow_id,
-            idempotency_key=key,
             principal=FlowPrincipal.from_user(self.user),
+            idempotency_key=key,
+            request_hash=request_hash,
         )
-        if existing:
-            run, _fingerprint = existing
-            provenance = (run.input_payload_json or {}).get(TRANSCRIPT_REGENERATION_KEY)
-            if (
-                not isinstance(provenance, dict)
-                or cast(dict[str, Any], provenance).get("request_hash") != request_hash
-            ):
-                raise FlowBadRequestException(
-                    "Idempotency key was already used with a different run request.",
-                    code=FlowApiErrorCode.RUN_IDEMPOTENCY_CONFLICT,
-                )
-            return CreateRunResult(run=run, created=False)
+        if existing is not None:
+            return existing
         if source.status != FlowRunStatus.COMPLETED:
             _invalid("source_run_not_completed")
         if source.revision != expected_run_revision:
@@ -325,9 +310,9 @@ class FlowTranscriptRegenerationService:
             expected_flow_version=source.flow_version,
             step_inputs=step_inputs,
             idempotency_key=key,
-            transcript_seed=TranscriptRegenerationSeed(
+            prefix_seed=FlowRunPrefixSeed(
+                kind="reviewed_transcript_snapshot",
                 source_run_id=source.id,
-                transcript_step_id=step_id,
                 transcript=reviewed,
                 provenance=provenance,
                 results=tuple(prefix),

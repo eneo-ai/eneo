@@ -53,7 +53,7 @@ from eneo.flows.domain.run_step_input_exceptions import (
 from eneo.flows.domain.runtime_invariant_exceptions import (
     FlowPublishedDefinitionWithoutExecutableStepsError,
 )
-from eneo.flows.domain.transcript_regeneration import TranscriptRegenerationSeed
+from eneo.flows.domain.transcript_regeneration import FlowRunPrefixSeed
 from eneo.flows.enums import (
     FlowRunLifecycleSource,
     FlowStepAttemptStatus,
@@ -5047,20 +5047,20 @@ async def test_create_run_rejects_invalid_run_label(label_creation, label):
     "replay_label,conflict",
     [("Årende", False), (" A\u030arende ", False), ("Different", True), (None, True)],
 )
-@pytest.mark.parametrize("with_transcript_seed", [False, True])
+@pytest.mark.parametrize("with_prefix_seed", [False, True])
 async def test_create_run_idempotency_includes_normalized_run_label(
-    label_creation, replay_label, conflict, with_transcript_seed
+    label_creation, replay_label, conflict, with_prefix_seed
 ):
     service, flow, run_repo = label_creation
     seed = (
-        TranscriptRegenerationSeed(
+        FlowRunPrefixSeed(
+            kind="reviewed_transcript_snapshot",
             source_run_id=uuid4(),
-            transcript_step_id=flow.steps[0].id,
             transcript="Reviewed text",
             provenance={"version": 1},
             results=(),
         )
-        if with_transcript_seed
+        if with_prefix_seed
         else None
     )
     first = await service.create_run(
@@ -5068,9 +5068,17 @@ async def test_create_run_idempotency_includes_normalized_run_label(
         input_payload_json=None,
         run_label="Årende",
         idempotency_key="label-key",
-        transcript_seed=seed,
+        prefix_seed=seed,
     )
     fingerprint = run_repo.create.await_args.kwargs["request_fingerprint"]
+    if seed is not None:
+        assert (
+            run_repo.create.await_args.kwargs["input_payload_json"]["transkribering"]
+            == "Reviewed text"
+        )
+        run_repo.seed_validated_prefix.assert_awaited_once_with(
+            run=first.run, seed=seed
+        )
     run_repo.get_idempotent_run.return_value = (first.run, fingerprint)
     if conflict:
         with pytest.raises(FlowBadRequestException) as exc_info:
@@ -5079,7 +5087,7 @@ async def test_create_run_idempotency_includes_normalized_run_label(
                 input_payload_json=None,
                 run_label=replay_label,
                 idempotency_key="label-key",
-                transcript_seed=seed,
+                prefix_seed=seed,
             )
         assert exc_info.value.code == FlowApiErrorCode.RUN_IDEMPOTENCY_CONFLICT
     else:
@@ -5088,7 +5096,7 @@ async def test_create_run_idempotency_includes_normalized_run_label(
             input_payload_json=None,
             run_label=replay_label,
             idempotency_key="label-key",
-            transcript_seed=seed,
+            prefix_seed=seed,
         )
         assert replay.created is False
         assert replay.run.id == first.run.id

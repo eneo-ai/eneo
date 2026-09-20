@@ -324,6 +324,178 @@ async def attempt_provenance_context(
         )
 
 
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_seed_validated_prefix_copies_results_without_provider_usage(
+    attempt_provenance_context, admin_user, db_container
+):
+    from eneo.database.tables.files_table import Files
+    from eneo.database.tables.flow_tables import (
+        FlowRunStepInputFiles,
+        FlowRuntimeUploadedFiles,
+    )
+    from eneo.files.file_models import FileType
+    from eneo.flows.domain.transcript_regeneration import FlowRunPrefixSeed
+    from eneo.flows.infrastructure.flow_provider_call_repo import (
+        FlowProviderCallRepository,
+    )
+    from eneo.flows.infrastructure.flow_run_history_purge_repo import (
+        FlowRunHistoryPurgeRepository,
+    )
+
+    context = attempt_provenance_context
+    async with db_container(user=admin_user) as container:
+        session = container.session()
+        repo = FlowRunRepository(session=session)
+        source = (
+            await repo.list_step_results(
+                run_id=context.run_id, tenant_id=context.tenant_id
+            )
+        )[0].model_copy(
+            update={
+                "status": FlowStepResultStatus.COMPLETED,
+                "current_attempt_no": 3,
+                "input_payload_json": {"text": "Source input"},
+                "output_payload_json": {"text": "Approved output"},
+                "flow_step_execution_hash": "a" * 64,
+                "num_tokens_input": 11,
+                "num_tokens_output": 23,
+            }
+        )
+        file = await container.file_service().save_generated_file(
+            payload=b"Shared source input",
+            name="retry-input.txt",
+            mimetype="text/plain",
+            file_type=FileType.TEXT,
+        )
+        session.add(
+            FlowRuntimeUploadedFiles(
+                file_id=file.id,
+                flow_id=context.flow_id,
+                tenant_id=context.tenant_id,
+                uploaded_for_step_id=context.step_id,
+                owner_type="user",
+                owner_user_id=admin_user.id,
+            )
+        )
+        await session.flush()
+        session.add(
+            FlowRunStepInputFiles(
+                flow_run_id=context.run_id,
+                flow_id=context.flow_id,
+                tenant_id=context.tenant_id,
+                step_id=context.step_id,
+                step_order=1,
+                attempt_no=1,
+                ordinal=1,
+                file_id=file.id,
+            )
+        )
+        await session.flush()
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == context.run_id)
+            .values(status="failed")
+        )
+        child = await repo.create(
+            flow_id=context.flow_id,
+            flow_version=1,
+            tenant_id=context.tenant_id,
+            principal_user_id=admin_user.id,
+            input_payload_json={"question": "Retry"},
+            step_input_files=[
+                {"step_id": context.step_id, "step_order": 1, "file_ids": [file.id]}
+            ],
+            preseed_steps=[
+                {
+                    "step_id": context.step_id,
+                    "assistant_id": source.assistant_id,
+                    "step_order": 1,
+                }
+            ],
+        )
+        await repo.seed_validated_prefix(
+            run=child,
+            seed=FlowRunPrefixSeed(
+                source_run_id=context.run_id,
+                results=(source,),
+                provenance={"source_run_id": str(context.run_id), "request_hash": "r"},
+                kind="reused_prefix",
+            ),
+        )
+        results = await repo.list_step_results(
+            run_id=child.id, tenant_id=context.tenant_id
+        )
+        assert len(results) == 1
+        imported = results[0]
+        assert imported.status == FlowStepResultStatus.COMPLETED
+        assert imported.current_attempt_no == 1
+        assert imported.input_payload_json == {"text": "Source input"}
+        assert imported.output_payload_json == {"text": "Approved output"}
+        assert imported.flow_step_execution_hash == "a" * 64
+        assert imported.num_tokens_input == imported.num_tokens_output == 0
+        assert imported.model_parameters_json == {
+            "mode": "reused_prefix",
+            "source_run_id": str(context.run_id),
+        }
+        attempts = (
+            await repo.list_step_attempts(run_id=child.id, tenant_id=context.tenant_id)
+        ).attempts
+        assert len(attempts) == 1
+        attempt = attempts[0]
+        assert attempt.status == FlowStepAttemptStatus.COMPLETED
+        assert attempt.attempt_no == 1
+        assert attempt.input_payload_json == imported.input_payload_json
+        assert attempt.output_payload_json == imported.output_payload_json
+        assert attempt.num_tokens_input == attempt.num_tokens_output == 0
+        assert attempt.provenance_json == {
+            "kind": "reused_prefix",
+            "source_run_id": str(context.run_id),
+            "source_step_result_id": str(source.id),
+            "source_step_id": str(source.step_id),
+            "source_attempt_no": 3,
+            "request_hash": "r",
+        }
+        provider_repo = FlowProviderCallRepository(session=session)
+        assert (
+            await provider_repo.measure_evidence_row_count(
+                run_id=child.id, tenant_id=context.tenant_id, ceiling=1
+            )
+            == 0
+        )
+        assert (
+            await provider_repo.list_usage_for_runs(
+                run_ids=[child.id], tenant_id=context.tenant_id
+            )
+            == {}
+        )
+        purged = await FlowRunHistoryPurgeRepository(session=session).purge_run_history(
+            [context.run_id]
+        )
+        assert purged.counts.flow_runs_purged == 1
+        assert (
+            await session.scalar(
+                sa.select(FlowRuns.id).where(FlowRuns.id == context.run_id)
+            )
+            is None
+        )
+        assert (
+            await session.scalar(sa.select(Files.id).where(Files.id == file.id))
+            == file.id
+        )
+        assert (
+            await repo.get(run_id=child.id, tenant_id=context.tenant_id)
+        ).id == child.id
+        retained_results = await repo.list_step_results(
+            run_id=child.id, tenant_id=context.tenant_id
+        )
+        assert retained_results[0].output_payload_json == {"text": "Approved output"}
+        retained_inputs = await repo.list_current_step_input_file_ids_by_step_result_id(
+            run_id=child.id, tenant_id=context.tenant_id, step_results=retained_results
+        )
+        assert retained_inputs == {retained_results[0].id: (file.id,)}
+
+
 async def _insert_service_key(
     session,
     *,

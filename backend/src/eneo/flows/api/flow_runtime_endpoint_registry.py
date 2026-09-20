@@ -23,6 +23,7 @@ from eneo.flows.api.flow_runtime_paths import (
     FLOW_RUN_PATH,
     FLOW_RUN_PROVIDER_CALLS_PATH,
     FLOW_RUN_REDISPATCH_PATH,
+    FLOW_RUN_RETRY_PATH,
     FLOW_RUN_STATUS_CAPABILITIES_PATH,
     FLOW_RUN_STATUS_PATH,
     FLOW_RUN_STEP_TRANSCRIPT_CORRECTIONS_PATH,
@@ -81,6 +82,12 @@ def _field(
 
 
 FLOW_RUNTIME_ENDPOINT_CONTRACTS: tuple[FlowRuntimeEndpointContract, ...] = (
+    FlowRuntimeEndpointContract(
+        route_path=FLOW_RUN_RETRY_PATH,
+        method="post",
+        operation_id="retry_flow_run_from_failed_step",
+        success_status=status.HTTP_201_CREATED,
+    ),
     FlowRuntimeEndpointContract(
         route_path=PUBLISHED_FLOW_RUNTIME_PATH,
         method="get",

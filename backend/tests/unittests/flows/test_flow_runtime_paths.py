@@ -11,6 +11,30 @@ from eneo.flows.api.flow_runtime_paths import (
 )
 
 
+def test_retry_path_has_registered_runtime_operation():
+    from eneo.flows.api.flow_runtime_endpoint_registry import (
+        FLOW_RUNTIME_ENDPOINT_CONTRACTS,
+    )
+    from eneo.flows.api.flow_runtime_paths import (
+        FLOW_RUN_RETRY_PATH,
+        build_flow_endpoint_template,
+    )
+
+    assert FLOW_RUN_RETRY_PATH == "/{id}/runs/{run_id}/retry/"
+    assert (
+        build_flow_endpoint_template(FLOW_RUN_RETRY_PATH, api_prefix="/custom")
+        == "/custom/flows/{id}/runs/{run_id}/retry/"
+    )
+    contract = next(
+        c
+        for c in FLOW_RUNTIME_ENDPOINT_CONTRACTS
+        if c.route_path == FLOW_RUN_RETRY_PATH
+    )
+    assert contract.method == "post"
+    assert contract.success_status == 201
+    assert contract.operation_id == "retry_flow_run_from_failed_step"
+
+
 def _runtime_review_paths_payload() -> dict[str, str]:
     return {
         "active_template": "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/active/",

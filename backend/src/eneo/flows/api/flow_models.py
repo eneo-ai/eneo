@@ -421,6 +421,14 @@ FLOW_RUN_REDISPATCH_RESPONSE_EXAMPLE: dict[str, Any] = {
     "redispatched_count": 1,
 }
 
+FLOW_RUN_RETRY_PUBLIC_EXAMPLE: dict[str, Any] = {
+    "run": FLOW_RUN_QUEUED_AFTER_DISPATCH_EXAMPLE,
+    "created": True,
+    "source_run_id": "00000000-0000-0000-0000-000000000099",
+    "first_executed_step_order": 2,
+    "reused_step_orders": [1],
+}
+
 # Step identity here matches the review step in FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE, so a
 # reader who follows the documented journey sees one consistent flow across every example.
 FLOW_RUN_REVIEW_CHECKPOINT_PUBLIC_EXAMPLE: dict[str, Any] = {
@@ -2977,3 +2985,15 @@ class FlowTranscriptWordsPublic(BaseModel):
     )
     created_at: datetime
     updated_at: datetime
+
+
+class FlowRunRetryPublic(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid", json_schema_extra={"example": FLOW_RUN_RETRY_PUBLIC_EXAMPLE}
+    )
+
+    run: FlowRunPublic
+    created: bool
+    source_run_id: UUID
+    first_executed_step_order: int
+    reused_step_orders: list[int]

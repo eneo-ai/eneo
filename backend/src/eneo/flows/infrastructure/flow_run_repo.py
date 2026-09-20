@@ -56,7 +56,7 @@ from eneo.flows.domain.flow_step_attempt_input import (
     parse_flow_step_attempt_input,
 )
 from eneo.flows.domain.step_output import RejectedCompletion
-from eneo.flows.domain.transcript_regeneration import TranscriptRegenerationSeed
+from eneo.flows.domain.transcript_regeneration import FlowRunPrefixSeed
 from eneo.flows.enums import (
     ACTIVE_FLOW_RUN_STATUSES,
     ACTIVE_FLOW_STEP_RESULT_STATUS_VALUES,
@@ -532,18 +532,18 @@ class FlowRunRepository:
 
         return FlowRun.model_validate(run_row)
 
-    async def seed_reviewed_transcript(
+    async def seed_validated_prefix(
         self,
         *,
         run: FlowRun,
-        seed: TranscriptRegenerationSeed,
+        seed: FlowRunPrefixSeed,
     ) -> None:
         """Import a validated prefix; the caller commits its required creation audit."""
         now = datetime.now(timezone.utc)
         for source in seed.results:
             provenance = {
                 **seed.provenance,
-                "kind": "reviewed_transcript_snapshot",
+                "kind": seed.kind,
                 "source_step_result_id": str(source.id),
                 "source_step_id": str(source.step_id),
                 "source_attempt_no": source.current_attempt_no,
@@ -553,7 +553,10 @@ class FlowRunRepository:
                 current_attempt_no=1,
                 input_payload_json=source.input_payload_json,
                 output_payload_json=source.output_payload_json,
-                model_parameters_json={"mode": "reviewed_transcript_snapshot"},
+                model_parameters_json={
+                    "mode": seed.kind,
+                    "source_run_id": str(seed.source_run_id),
+                },
                 flow_step_execution_hash=source.flow_step_execution_hash,
                 num_tokens_input=0,
                 num_tokens_output=0,
@@ -2140,6 +2143,17 @@ class FlowRunRepository:
             step_result_id: tuple(metadata)
             for step_result_id, metadata in metadata_by_step_result_id.items()
         }
+
+    async def list_step_orders_with_result_files(
+        self, *, run_id: UUID, tenant_id: UUID
+    ) -> set[int]:
+        result = await self.session.scalars(
+            sa.select(FlowRunStepResultFiles.step_order)
+            .where(FlowRunStepResultFiles.flow_run_id == run_id)
+            .where(FlowRunStepResultFiles.tenant_id == tenant_id)
+            .distinct()
+        )
+        return set(result.all())
 
     async def list_result_files(
         self,

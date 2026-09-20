@@ -8,6 +8,10 @@ export declare const FLOW_API_ERROR_CODE: Readonly<{
   SERVICE_KEY_PRINCIPAL_NOT_SUPPORTED: "flow_service_key_principal_not_supported";
   RUN_INVALID_IDEMPOTENCY_KEY: "flow_run_invalid_idempotency_key";
   RUN_STALE_VERSION: "flow_run_stale_version";
+  RUN_RETRY_SOURCE_NOT_FAILED: "flow_run_retry_source_not_failed";
+  RUN_RETRY_SOURCE_VERSION_STALE: "flow_run_retry_source_version_stale";
+  RUN_RETRY_NOTHING_TO_REUSE: "flow_run_retry_nothing_to_reuse";
+  RUN_RETRY_PREFIX_UNSUPPORTED: "flow_run_retry_prefix_unsupported";
   RUN_REQUIRED_STEP_INPUT_MISSING: "flow_run_required_step_input_missing";
   RUN_RUNTIME_INPUT_DISABLED: "flow_run_runtime_input_disabled";
   RUN_TOP_LEVEL_FILE_IDS_NOT_SUPPORTED: "flow_run_top_level_file_ids_not_supported";
@@ -179,6 +183,10 @@ export type FlowApiErrorCode =
   | "flow_service_key_principal_not_supported"
   | "flow_run_invalid_idempotency_key"
   | "flow_run_stale_version"
+  | "flow_run_retry_source_not_failed"
+  | "flow_run_retry_source_version_stale"
+  | "flow_run_retry_nothing_to_reuse"
+  | "flow_run_retry_prefix_unsupported"
   | "flow_run_required_step_input_missing"
   | "flow_run_runtime_input_disabled"
   | "flow_run_top_level_file_ids_not_supported"
