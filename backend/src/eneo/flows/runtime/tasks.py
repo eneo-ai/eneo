@@ -26,7 +26,7 @@ from eneo.flows.application.flow_webhook_delivery_policy import (
 )
 from eneo.flows.domain.flow import FlowRunStatus
 from eneo.flows.domain.flow_run_recovery_policy import (
-    flow_stale_running_reconcile_after_seconds,
+    FLOW_EXECUTION_HEARTBEAT_EXPIRY_SECONDS,
 )
 from eneo.flows.domain.mapped_execution_policy import (
     resolve_flow_mapped_execution_policy,
@@ -43,12 +43,21 @@ from eneo.flows.flow_run_dispatch_request import (
     FlowRunUserDispatchRequest,
     parse_flow_run_dispatch_task_kwargs,
 )
-from eneo.flows.flow_run_error import FlowRunError
+from eneo.flows.flow_run_error import (
+    FlowRunError,
+    FlowRunErrorDetails,
+    FlowRunRecoveryFacts,
+)
 from eneo.flows.flow_runtime_policy import resolve_flow_runtime_policy
+from eneo.flows.infrastructure.flow_run_repo import FlowRunExecutionOwner
 from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRow,
 )
 from eneo.flows.runtime.diarizing_transcription import DiarizingFlowTranscriber
+from eneo.flows.runtime.execution_heartbeat import (
+    FlowExecutionOwnershipLost,
+    execution_heartbeats,
+)
 from eneo.flows.runtime.executor import FlowRunExecutor, FlowRunExecutorConfig
 from eneo.flows.runtime.flow_run_actor import (
     FlowRunActor,
@@ -269,108 +278,116 @@ async def _execute_flow_run_async_traced(
                 flow_span.set_result_from_mapping(result)
                 return result
 
-            try:
-                run_actor = await _resolve_flow_run_actor(
-                    container=runtime_container,
-                    user_repo=user_repo,
-                    run=run,
-                    expected_principal_type=principal_type,
-                    expected_principal_user_id=principal_user_id,
-                    expected_principal_service_id=principal_service_id,
-                )
-            except FlowRunServicePrincipalInactiveError as exc:
-                await _terminalize_actor_resolution_failure(
-                    container=runtime_container,
-                    session=session,
-                    run_id=run_id,
-                    tenant_id=tenant_id,
-                    code=FlowApiErrorCode.RUN_SERVICE_PRINCIPAL_DISABLED,
-                    message=f"flow_service_principal_disabled: {exc}",
-                )
-                result = {"status": "failed", "reason": "service_principal_disabled"}
-                flow_span.set_result_from_mapping(result)
-                return result
-            except FlowRunActorError as exc:
-                await _terminalize_actor_resolution_failure(
-                    container=runtime_container,
-                    session=session,
-                    run_id=run_id,
-                    tenant_id=tenant_id,
-                    code=FlowApiErrorCode.RUN_RUNTIME_ACTOR_INVALID,
-                    message=f"flow_runtime_actor_invalid: {exc}",
-                )
-                result = {"status": "failed", "reason": "runtime_actor_invalid"}
-                flow_span.set_result_from_mapping(result)
-                return result
+            async with execution_heartbeats().track(
+                FlowRunExecutionOwner(run_id, tenant_id, run_revision)
+            ):
+                try:
+                    run_actor = await _resolve_flow_run_actor(
+                        container=runtime_container,
+                        user_repo=user_repo,
+                        run=run,
+                        expected_principal_type=principal_type,
+                        expected_principal_user_id=principal_user_id,
+                        expected_principal_service_id=principal_service_id,
+                    )
+                except FlowRunServicePrincipalInactiveError as exc:
+                    await _terminalize_actor_resolution_failure(
+                        container=runtime_container,
+                        session=session,
+                        run_id=run_id,
+                        tenant_id=tenant_id,
+                        code=FlowApiErrorCode.RUN_SERVICE_PRINCIPAL_DISABLED,
+                        message=f"flow_service_principal_disabled: {exc}",
+                    )
+                    result = {
+                        "status": "failed",
+                        "reason": "service_principal_disabled",
+                    }
+                    flow_span.set_result_from_mapping(result)
+                    return result
+                except FlowRunActorError as exc:
+                    await _terminalize_actor_resolution_failure(
+                        container=runtime_container,
+                        session=session,
+                        run_id=run_id,
+                        tenant_id=tenant_id,
+                        code=FlowApiErrorCode.RUN_RUNTIME_ACTOR_INVALID,
+                        message=f"flow_runtime_actor_invalid: {exc}",
+                    )
+                    result = {"status": "failed", "reason": "runtime_actor_invalid"}
+                    flow_span.set_result_from_mapping(result)
+                    return result
 
-            upload_admission = await load_upload_admission_snapshot(
-                session,
-                inline_maximum_bytes=object_content_runtime.inline_maximum_bytes,
-                object_store_maximum_bytes=(
-                    object_content_runtime.object_store_maximum_bytes
-                ),
-            )
-            flow_limits = resolve_flow_input_limits(
-                tenant.flow_settings,
-                defaults=upload_admission,
-            )
-            document_render_limits = resolve_flow_document_render_limits(
-                tenant.flow_settings
-            )
-            runtime_policy = resolve_flow_runtime_policy(tenant.flow_settings)
-            mapped_execution_policy = resolve_flow_mapped_execution_policy(
-                tenant.flow_settings
-            )
-            rag_evidence_policy = resolve_flow_rag_evidence_policy(tenant.flow_settings)
-            runtime_file_service = runtime_container.file_service(
-                user=None,
-                owner=run_actor.principal.file_owner(tenant_id=tenant_id),
-            )
+                upload_admission = await load_upload_admission_snapshot(
+                    session,
+                    inline_maximum_bytes=object_content_runtime.inline_maximum_bytes,
+                    object_store_maximum_bytes=(
+                        object_content_runtime.object_store_maximum_bytes
+                    ),
+                )
+                flow_limits = resolve_flow_input_limits(
+                    tenant.flow_settings,
+                    defaults=upload_admission,
+                )
+                document_render_limits = resolve_flow_document_render_limits(
+                    tenant.flow_settings
+                )
+                runtime_policy = resolve_flow_runtime_policy(tenant.flow_settings)
+                mapped_execution_policy = resolve_flow_mapped_execution_policy(
+                    tenant.flow_settings
+                )
+                rag_evidence_policy = resolve_flow_rag_evidence_policy(
+                    tenant.flow_settings
+                )
+                runtime_file_service = runtime_container.file_service(
+                    user=None,
+                    owner=run_actor.principal.file_owner(tenant_id=tenant_id),
+                )
 
-            executor = FlowRunExecutor(
-                invocation_deadline=invocation_deadline,
-                runtime_actor=run_actor,
-                session=session,
-                flow_repo=runtime_container.flow_repo(),
-                flow_run_repo=flow_run_repo,
-                flow_run_review_checkpoint_repo=runtime_container.flow_run_review_checkpoint_repo(),
-                flow_run_terminalizer=runtime_container.flow_run_terminalizer(),
-                flow_version_repo=runtime_container.flow_version_repo(),
-                space_repo=runtime_container.tenant_scoped_space_repo(),
-                completion_service=runtime_container.completion_service(
-                    user=run_actor.user
-                ),
-                file_repo=runtime_container.file_repo(),
-                file_content_loader=runtime_container.file_content_loader(),
-                file_service=runtime_file_service,
-                template_asset_repo=runtime_container.flow_template_asset_repo(),
-                encryption_service=runtime_container.encryption_service(),
-                audit_service=runtime_container.audit_service(),
-                references_service=runtime_container.references_service(),
-                transcriber=_build_flow_transcriber(
-                    runtime_container.transcriber(file_service=runtime_file_service)
-                ),
-                transcript_words_repo=runtime_container.flow_transcript_words_repo(),
-                config=FlowRunExecutorConfig.from_settings(
-                    max_inline_text_bytes=get_settings().flow_max_inline_text_bytes,
-                    input_limits=flow_limits,
-                    max_audio_files=flow_limits.audio_max_files_per_run,
-                    max_generic_files=flow_limits.max_files_per_run,
-                    document_render_limits=document_render_limits,
-                    runtime_policy=runtime_policy,
-                    mapped_execution_policy=mapped_execution_policy,
-                    rag_evidence_policy=rag_evidence_policy,
-                ),
-            )
-            result = await executor.execute_claimed(
-                run_id=run_id,
-                flow_id=flow_id,
-                tenant_id=tenant_id,
-                dispatch_task_id=task_id,
-                retry_count=retry_count,
-            )
-            flow_span.set_result_from_mapping(result)
-            return {key: str(value) for key, value in result.items()}
+                executor = FlowRunExecutor(
+                    invocation_deadline=invocation_deadline,
+                    runtime_actor=run_actor,
+                    session=session,
+                    flow_repo=runtime_container.flow_repo(),
+                    flow_run_repo=flow_run_repo,
+                    flow_run_review_checkpoint_repo=runtime_container.flow_run_review_checkpoint_repo(),
+                    flow_run_terminalizer=runtime_container.flow_run_terminalizer(),
+                    flow_version_repo=runtime_container.flow_version_repo(),
+                    space_repo=runtime_container.tenant_scoped_space_repo(),
+                    completion_service=runtime_container.completion_service(
+                        user=run_actor.user
+                    ),
+                    file_repo=runtime_container.file_repo(),
+                    file_content_loader=runtime_container.file_content_loader(),
+                    file_service=runtime_file_service,
+                    template_asset_repo=runtime_container.flow_template_asset_repo(),
+                    encryption_service=runtime_container.encryption_service(),
+                    audit_service=runtime_container.audit_service(),
+                    references_service=runtime_container.references_service(),
+                    transcriber=_build_flow_transcriber(
+                        runtime_container.transcriber(file_service=runtime_file_service)
+                    ),
+                    transcript_words_repo=runtime_container.flow_transcript_words_repo(),
+                    config=FlowRunExecutorConfig.from_settings(
+                        max_inline_text_bytes=get_settings().flow_max_inline_text_bytes,
+                        input_limits=flow_limits,
+                        max_audio_files=flow_limits.audio_max_files_per_run,
+                        max_generic_files=flow_limits.max_files_per_run,
+                        document_render_limits=document_render_limits,
+                        runtime_policy=runtime_policy,
+                        mapped_execution_policy=mapped_execution_policy,
+                        rag_evidence_policy=rag_evidence_policy,
+                    ),
+                )
+                result = await executor.execute_claimed(
+                    run_id=run_id,
+                    flow_id=flow_id,
+                    tenant_id=tenant_id,
+                    dispatch_task_id=task_id,
+                    retry_count=retry_count,
+                )
+                flow_span.set_result_from_mapping(result)
+                return {key: str(value) for key, value in result.items()}
 
 
 async def terminalize_flow_run_failure(
@@ -508,6 +525,8 @@ async def execute_flow_run_task(
                 retry_count=retry_count,
                 invocation_deadline=invocation_timeout.when(),
             )
+    except FlowExecutionOwnershipLost:
+        return {"status": "skipped", "reason": "execution_ownership_lost"}
     except TimeoutError:
         error_message = (
             "flow_task_timeout: Flow execution timed out before task completion."
@@ -580,14 +599,13 @@ def _fail_task_if_tenants_were_skipped(
     )
 
 
+_stale_running_cursor: tuple[datetime, UUID] | None = None
+
+
 async def _reconcile_stale_running_runs_all_tenants(
     *, limit: int = 100
 ) -> dict[str, int | str]:
-    stale_before = datetime.now(timezone.utc) - timedelta(
-        seconds=flow_stale_running_reconcile_after_seconds(
-            task_timeout_seconds=get_settings().task_execution_timeout_seconds
-        )
-    )
+    global _stale_running_cursor
     reconciled = 0
     skipped_tenant_ids: list[UUID] = []
     async with sessionmanager.session() as session:
@@ -596,43 +614,53 @@ async def _reconcile_stale_running_runs_all_tenants(
         run_repo = container.flow_run_repo()
         provider_call_repo = container.flow_provider_call_repo()
         terminalizer = container.flow_run_terminalizer()
-        tenant_repo = container.tenant_repo()
         async with session.begin():
-            tenant_ids = await tenant_repo.get_all_tenant_ids()
-        for tenant_id in tenant_ids:
+            stale_runs = await run_repo.list_stale_running_runs(
+                limit=limit, after=_stale_running_cursor
+            )
+            if not stale_runs and _stale_running_cursor is not None:
+                _stale_running_cursor = None
+                stale_runs = await run_repo.list_stale_running_runs(
+                    limit=limit, after=None
+                )
+        for run in stale_runs:
             try:
                 async with session.begin():
-                    stale_runs = await run_repo.list_stale_running_runs(
-                        tenant_id=tenant_id,
-                        stale_before=stale_before,
-                        limit=limit,
+                    result = await terminalizer.terminalize_stale_running_run(
+                        run_id=run.id,
+                        tenant_id=run.tenant_id,
+                        expected_revision=run.revision,
+                        error=FlowRunError.from_source(
+                            FlowRunLifecycleSource.STALE_RUNNING_RECONCILER,
+                            code=FlowApiErrorCode.RUN_WORKER_STALLED,
+                            message="flow_worker_stalled: Flow execution heartbeat expired.",
+                            details=FlowRunErrorDetails(
+                                recovery=FlowRunRecoveryFacts(
+                                    reason="execution_heartbeat_expired",
+                                    heartbeat_at=run.execution_heartbeat_at,
+                                    expires_at=run.execution_heartbeat_at
+                                    + timedelta(
+                                        seconds=FLOW_EXECUTION_HEARTBEAT_EXPIRY_SECONDS
+                                    ),
+                                )
+                            ),
+                        ),
                     )
-                for run in stale_runs:
-                    async with session.begin():
-                        result = await terminalizer.terminalize_stale_running_run(
+                    if result.did_transition:
+                        await provider_call_repo.mark_started_calls_outcome_unknown_for_run(
                             run_id=run.id,
                             tenant_id=run.tenant_id,
-                            stale_before=stale_before,
-                            error=FlowRunError.from_source(
-                                FlowRunLifecycleSource.STALE_RUNNING_RECONCILER,
-                                code=FlowApiErrorCode.RUN_WORKER_STALLED,
-                                message=(
-                                    "flow_worker_stalled: Flow run exceeded the execution timeout and was reconciled as failed."
-                                ),
-                            ),
+                            reason=ProviderCallUnknownReason.STALE_STARTED,
                         )
-                        if result.did_transition:
-                            await provider_call_repo.mark_started_calls_outcome_unknown_for_run(
-                                run_id=run.id,
-                                tenant_id=run.tenant_id,
-                                reason=ProviderCallUnknownReason.STALE_STARTED,
-                            )
-                            reconciled += 1
+                        reconciled += 1
             except Exception:
-                skipped_tenant_ids.append(tenant_id)
+                skipped_tenant_ids.append(run.tenant_id)
                 _log_tenant_sweep_failure(
-                    task_name="flows.reconcile_running", tenant_id=tenant_id
+                    task_name="flows.reconcile_running", tenant_id=run.tenant_id
                 )
+            finally:
+                # Advance even after failure so one old run cannot starve other tenants.
+                _stale_running_cursor = (run.execution_heartbeat_at, run.id)
     _fail_task_if_tenants_were_skipped(
         task_name="flows.reconcile_running", skipped_tenant_ids=skipped_tenant_ids
     )

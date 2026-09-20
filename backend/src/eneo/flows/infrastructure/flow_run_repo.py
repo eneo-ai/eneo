@@ -46,6 +46,7 @@ from eneo.flows.domain.flow_run_exceptions import (
 )
 from eneo.flows.domain.flow_run_recovery_policy import (
     FLOW_DISPATCH_MAX_ATTEMPTS,
+    FLOW_EXECUTION_HEARTBEAT_EXPIRY_SECONDS,
     FLOW_QUEUED_REDISPATCH_AFTER_SECONDS,
     flow_dispatch_retry_delay_seconds,
     start_flow_dispatch_epoch,
@@ -116,6 +117,21 @@ class PreseedStep(TypedDict):
     step_id: UUID
     assistant_id: UUID
     step_order: int
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunExecutionOwner:
+    run_id: UUID
+    tenant_id: UUID
+    revision: int
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunRecoveryCandidate:
+    id: UUID
+    tenant_id: UUID
+    revision: int
+    execution_heartbeat_at: datetime
 
 
 def _recorded_passage_byte_expressions() -> tuple[Any, Any]:
@@ -767,19 +783,76 @@ class FlowRunRepository:
     async def list_stale_running_runs(
         self,
         *,
-        tenant_id: UUID,
-        stale_before: datetime,
+        tenant_id: UUID | None = None,
         limit: int = 25,
-    ) -> list[FlowRun]:
+        after: tuple[datetime, UUID] | None = None,
+    ) -> list[FlowRunRecoveryCandidate]:
+        if limit < 1:
+            return []
         stmt = (
-            sa.select(FlowRuns)
-            .where(FlowRuns.tenant_id == tenant_id)
-            .where(stale_running_flow_run_predicate(stale_before=stale_before))
-            .order_by(FlowRuns.updated_at.asc())
+            sa.select(
+                FlowRuns.id,
+                FlowRuns.tenant_id,
+                FlowRuns.revision,
+                FlowRuns.execution_heartbeat_at,
+            )
+            .where(stale_running_flow_run_predicate())
+            .order_by(FlowRuns.execution_heartbeat_at.asc(), FlowRuns.id.asc())
             .limit(limit)
         )
-        rows = (await self.session.execute(stmt)).scalars().all()
-        return [FlowRun.model_validate(row) for row in rows]
+        if tenant_id is not None:
+            stmt = stmt.where(FlowRuns.tenant_id == tenant_id)
+        if after is not None:
+            stmt = stmt.where(
+                sa.tuple_(FlowRuns.execution_heartbeat_at, FlowRuns.id) > after
+            )
+        rows = (await self.session.execute(stmt)).all()
+        return [FlowRunRecoveryCandidate(*row) for row in rows]
+
+    async def renew_execution_heartbeats(
+        self, *, owners: Sequence[FlowRunExecutionOwner]
+    ) -> set[FlowRunExecutionOwner]:
+        if not owners:
+            return set()
+        rows = await self.session.execute(
+            sa.update(FlowRuns)
+            .where(
+                sa.tuple_(FlowRuns.id, FlowRuns.tenant_id, FlowRuns.revision).in_(
+                    [
+                        (owner.run_id, owner.tenant_id, owner.revision)
+                        for owner in owners
+                    ]
+                )
+            )
+            .where(FlowRuns.status == FlowRunStatus.RUNNING.value)
+            .where(
+                FlowRuns.execution_heartbeat_at
+                > sa.func.clock_timestamp()
+                - timedelta(seconds=FLOW_EXECUTION_HEARTBEAT_EXPIRY_SECONDS)
+            )
+            .values(
+                execution_heartbeat_at=sa.func.clock_timestamp(),
+                updated_at=FlowRuns.updated_at,
+            )
+            .returning(FlowRuns.id, FlowRuns.tenant_id, FlowRuns.revision)
+        )
+        return {FlowRunExecutionOwner(*row) for row in rows.all()}
+
+    async def has_execution_ownership(self, *, owner: FlowRunExecutionOwner) -> bool:
+        return (
+            await self.session.scalar(
+                sa.select(FlowRuns.id).where(
+                    FlowRuns.id == owner.run_id,
+                    FlowRuns.tenant_id == owner.tenant_id,
+                    FlowRuns.revision == owner.revision,
+                    FlowRuns.status == FlowRunStatus.RUNNING.value,
+                    FlowRuns.execution_heartbeat_at
+                    > sa.func.clock_timestamp()
+                    - timedelta(seconds=FLOW_EXECUTION_HEARTBEAT_EXPIRY_SECONDS),
+                )
+            )
+            is not None
+        )
 
     async def claim_queued_run_for_dispatch(
         self,
@@ -1039,7 +1112,7 @@ class FlowRunRepository:
         error: FlowRunError | None = None,
         output_payload_json: FlowPersistedJsonObject | None = None,
         cancelled_at: datetime | None = None,
-        stale_before: datetime | None = None,
+        stale_running_revision: int | None = None,
     ) -> FlowRun | None:
         if target_status not in TERMINAL_FLOW_RUN_STATUSES:
             raise ValueError("target_status must be terminal")
@@ -1064,9 +1137,10 @@ class FlowRunRepository:
             .where(FlowRuns.tenant_id == tenant_id)
             .where(FlowRuns.status.in_(source_statuses))
         )
-        if stale_before is not None:
+        if stale_running_revision is not None:
             stmt = stmt.where(
-                stale_running_flow_run_predicate(stale_before=stale_before)
+                stale_running_flow_run_predicate(),
+                FlowRuns.revision == stale_running_revision,
             )
         run_row = await self.session.scalar(stmt.values(**values).returning(FlowRuns))
         if run_row is None:
@@ -2484,6 +2558,7 @@ class FlowRunRepository:
             .where(FlowRuns.revision == expected_revision)
             .values(
                 status=FlowRunStatus.RUNNING.value,
+                execution_heartbeat_at=sa.func.clock_timestamp(),
                 started_at=sa.func.coalesce(FlowRuns.started_at, now_utc),
                 dispatched_at=sa.func.coalesce(FlowRuns.dispatched_at, now_utc),
                 dispatch_next_attempt_at=None,

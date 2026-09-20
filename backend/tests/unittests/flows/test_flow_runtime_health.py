@@ -10,9 +10,43 @@ from eneo.flows.runtime.flow_runtime_health import (
     FlowRuntimeProbe,
     FlowRuntimeProbeFailure,
     FlowRuntimeRunSummary,
+    build_flow_runtime_health_policy,
     classify_flow_runtime_health,
     flow_runtime_health_probe_failure_response,
 )
+
+
+def test_running_health_uses_heartbeat_expiry_plus_one_sweep() -> None:
+    policy = build_flow_runtime_health_policy(task_timeout_seconds=14400)
+    assert policy.stale_running_after_seconds == 180
+    assert policy.stale_running_unhealthy_after_seconds == 240
+
+
+def test_running_health_flips_using_database_time_despite_application_clock_skew() -> (
+    None
+):
+    now = datetime(2026, 9, 20, 18, 0, tzinfo=timezone.utc)
+    policy = build_flow_runtime_health_policy(task_timeout_seconds=14400)
+    for age, expected in (
+        (239, FlowRuntimeHealthStatus.DEGRADED),
+        (241, FlowRuntimeHealthStatus.UNHEALTHY),
+    ):
+        response = classify_flow_runtime_health(
+            snapshot=FlowRuntimeHealthSnapshot(
+                database_observed_at=now,
+                running_count=1,
+                stale_running_count=1,
+                oldest_stale_running_heartbeat_at=now - timedelta(seconds=age),
+            ),
+            now=now - timedelta(hours=2),
+            policy=policy,
+            probe=FlowRuntimeProbe(
+                db_query_ok=True,
+                execution_worker_ready=True,
+                maintenance_worker_ready=True,
+            ),
+        )
+        assert response.status == expected
 
 
 def _policy() -> FlowRuntimeHealthPolicy:
@@ -138,7 +172,7 @@ def test_stale_running_runs_degrade_before_reconciler_grace_expires() -> None:
         FlowRuntimeHealthSnapshot(
             running_count=1,
             stale_running_count=1,
-            oldest_stale_running_updated_at=datetime(
+            oldest_stale_running_heartbeat_at=datetime(
                 2026, 5, 2, 11, 58, tzinfo=timezone.utc
             ),
         )
@@ -154,7 +188,7 @@ def test_stale_running_runs_become_unhealthy_after_reconciler_grace_expires() ->
         FlowRuntimeHealthSnapshot(
             running_count=1,
             stale_running_count=1,
-            oldest_stale_running_updated_at=datetime(
+            oldest_stale_running_heartbeat_at=datetime(
                 2026, 5, 2, 11, 55, tzinfo=timezone.utc
             ),
         )

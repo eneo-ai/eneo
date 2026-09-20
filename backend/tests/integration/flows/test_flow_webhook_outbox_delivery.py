@@ -230,6 +230,7 @@ async def _create_running_webhook_run(
         .where(FlowRuns.id == run.id)
         .values(
             status=FlowRunStatus.RUNNING.value,
+            execution_heartbeat_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
             updated_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
         )
     )
@@ -518,7 +519,6 @@ async def test_flow_webhook_delivery_claims_pending_rows_and_skips_stale_reconci
             session=session,
         ).list_stale_running_runs(
             tenant_id=admin_user.tenant_id,
-            stale_before=datetime.now(timezone.utc),
         )
         claimed = await webhook_repo.claim_due_delivery_rows(
             now=datetime.now(timezone.utc),

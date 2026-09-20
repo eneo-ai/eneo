@@ -3253,7 +3253,7 @@ async def test_retry_requires_durable_review_of_current_attempt(
         await container.session().execute(
             sa.update(FlowRuns)
             .where(FlowRuns.id == UUID(run["id"]))
-            .values(status="running")
+            .values(status="running", execution_heartbeat_at=sa.func.clock_timestamp())
         )
         await container.session().execute(
             sa.update(FlowStepResults)

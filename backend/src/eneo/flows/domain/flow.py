@@ -278,6 +278,8 @@ class FlowRunStatusSnapshot(BaseModel):
 class FlowRun(FlowRunStatusSnapshot):
     """Complete persisted run, including content required by execution and detail reads."""
 
+    execution_heartbeat_at: datetime | None = None
+
     error: FlowRunError | None = Field(
         default=None,
         validation_alias=AliasChoices("error", "error_json"),

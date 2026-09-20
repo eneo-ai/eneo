@@ -4426,7 +4426,10 @@ async def test_dispatch_lifecycle_uses_one_durable_epoch_and_exact_cas(
         await session.execute(
             sa.update(FlowRuns)
             .where(FlowRuns.id == exhausted.id)
-            .values(status=FlowRunStatus.RUNNING.value)
+            .values(
+                status=FlowRunStatus.RUNNING.value,
+                execution_heartbeat_at=sa.func.clock_timestamp(),
+            )
         )
         converged = await run_repo.rearm_exhausted_accepted_dispatch_for_redrive(
             run_id=exhausted.id,

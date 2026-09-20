@@ -28,6 +28,97 @@ class _Diagnostic:
 
 
 @pytest.mark.asyncio
+async def test_claim_initializes_execution_heartbeat_in_the_same_update() -> None:
+    session = AsyncMock()
+    session.execute.return_value = SimpleNamespace(rowcount=1)
+    repo = FlowRunRepository(session=session)
+    run_id, tenant_id = uuid4(), uuid4()
+
+    assert await repo.mark_running_if_claimable(
+        run_id=run_id, tenant_id=tenant_id, expected_revision=7
+    )
+
+    assert session.execute.await_count == 1
+    statement = session.execute.await_args.args[0]
+    compiled = statement.compile(dialect=postgresql.dialect())
+    assert "execution_heartbeat_at=clock_timestamp()" in str(compiled)
+    assert run_id in compiled.params.values()
+    assert tenant_id in compiled.params.values()
+    assert 7 in compiled.params.values()
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_renewal_is_fenced_and_does_not_touch_run_history() -> None:
+    from eneo.flows.infrastructure.flow_run_repo import FlowRunExecutionOwner
+
+    session = AsyncMock()
+    owner = FlowRunExecutionOwner(uuid4(), uuid4(), 7)
+    rows = MagicMock()
+    rows.all.return_value = [(owner.run_id, owner.tenant_id, owner.revision)]
+    session.execute.return_value = rows
+    repo = FlowRunRepository(session=session)
+
+    assert await repo.renew_execution_heartbeats(owners=[owner]) == {owner}
+
+    statement = session.execute.await_args.args[0]
+    sql = str(statement.compile(dialect=postgresql.dialect()))
+    assert "execution_heartbeat_at=clock_timestamp()" in sql
+    assert "updated_at=flow_runs.updated_at" in sql
+    assert "(flow_runs.id, flow_runs.tenant_id, flow_runs.revision) IN" in sql
+    assert "flow_runs.status =" in sql
+    assert "flow_runs.execution_heartbeat_at > clock_timestamp() -" in sql
+    assert "revision=" not in sql
+
+
+@pytest.mark.asyncio
+async def test_stale_discovery_has_one_payload_free_global_budget() -> None:
+    session = AsyncMock()
+    rows = MagicMock()
+    rows.all.return_value = []
+    session.execute.return_value = rows
+    repo = FlowRunRepository(session=session)
+
+    assert await repo.list_stale_running_runs(limit=3) == []
+
+    statement = session.execute.await_args.args[0]
+    assert list(statement.selected_columns.keys()) == [
+        "id",
+        "tenant_id",
+        "revision",
+        "execution_heartbeat_at",
+    ]
+    sql = str(statement.compile(dialect=postgresql.dialect()))
+    assert "flow_runs.execution_heartbeat_at <= statement_timestamp() -" in sql
+    assert "NOT (EXISTS" in sql
+    assert "ORDER BY flow_runs.execution_heartbeat_at ASC, flow_runs.id ASC" in sql
+    assert statement._limit_clause.value == 3
+
+
+@pytest.mark.asyncio
+async def test_stale_terminal_update_rechecks_revision_heartbeat_and_delivery() -> None:
+    session = AsyncMock()
+    session.scalar.return_value = None
+    repo = FlowRunRepository(session=session)
+
+    assert (
+        await repo.terminalize_run_status(
+            run_id=uuid4(),
+            tenant_id=uuid4(),
+            target_status=FlowRunStatus.FAILED,
+            stale_running_revision=7,
+        )
+        is None
+    )
+
+    statement = session.scalar.await_args.args[0]
+    sql = str(statement.compile(dialect=postgresql.dialect()))
+    assert "flow_runs.revision =" in sql
+    assert "flow_runs.execution_heartbeat_at <= statement_timestamp() -" in sql
+    assert "NOT (EXISTS" in sql
+    assert "flow_run_webhook_deliveries.tenant_id = flow_runs.tenant_id" in sql
+
+
+@pytest.mark.asyncio
 async def test_retained_input_snapshot_selects_only_file_identities():
     session = AsyncMock()
     rows = MagicMock()

@@ -76,7 +76,7 @@ class FlowRunTerminalizer:
             output_payload_json=output_payload_json,
             cancelled_at=cancelled_at,
             principal=principal,
-            stale_before=None,
+            stale_running_revision=None,
         )
 
     async def terminalize_stale_running_run(
@@ -84,7 +84,7 @@ class FlowRunTerminalizer:
         *,
         run_id: UUID,
         tenant_id: UUID,
-        stale_before: datetime,
+        expected_revision: int,
         error: FlowRunError,
     ) -> FlowRunTerminalizationResult:
         return await self._terminalize_run(
@@ -93,7 +93,7 @@ class FlowRunTerminalizer:
             target_status=FlowRunStatus.FAILED,
             source=FlowRunLifecycleSource.STALE_RUNNING_RECONCILER,
             error=error,
-            stale_before=stale_before,
+            stale_running_revision=expected_revision,
         )
 
     async def _terminalize_run(
@@ -107,7 +107,7 @@ class FlowRunTerminalizer:
         output_payload_json: FlowPersistedJsonObject | None = None,
         cancelled_at: datetime | None = None,
         principal: FlowPrincipal | None = None,
-        stale_before: datetime | None = None,
+        stale_running_revision: int | None = None,
     ) -> FlowRunTerminalizationResult:
         if not is_terminal_flow_run_status(target_status):
             raise ValueError("target_status must be a terminal FlowRunStatus")
@@ -160,7 +160,7 @@ class FlowRunTerminalizer:
             error=error,
             output_payload_json=output_payload_json,
             cancelled_at=cancelled_at,
-            stale_before=stale_before,
+            stale_running_revision=stale_running_revision,
         )
         if terminal_run is None:
             existing_run = await self.flow_run_repo.get(

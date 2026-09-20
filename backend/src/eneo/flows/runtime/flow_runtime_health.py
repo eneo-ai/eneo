@@ -89,13 +89,14 @@ class FlowRuntimeHealthPolicy:
 
 @dataclass(frozen=True, slots=True)
 class FlowRuntimeHealthSnapshot:
+    database_observed_at: datetime | None = None
     queued_count: int = 0
     running_count: int = 0
     awaiting_review_count: int = 0
     stale_queued_count: int = 0
     stale_running_count: int = 0
     oldest_stale_queued_pending_since: datetime | None = None
-    oldest_stale_running_updated_at: datetime | None = None
+    oldest_stale_running_heartbeat_at: datetime | None = None
     accepted_dispatch_exhausted_count: int = 0
     oldest_accepted_dispatch_exhausted_at: datetime | None = None
     expired_review_checkpoint_count: int = 0
@@ -266,6 +267,10 @@ async def load_flow_runtime_health_snapshot(
     now: datetime,
     policy: FlowRuntimeHealthPolicy,
 ) -> FlowRuntimeHealthSnapshot:
+    database_now = await session.scalar(sa.select(sa.func.clock_timestamp()))
+    if not isinstance(database_now, datetime):
+        raise RuntimeError("Flow runtime health requires the database clock.")
+    now = database_now
     stale_queued_before = now - timedelta(seconds=policy.stale_queued_after_seconds)
     stale_running_before = now - timedelta(seconds=policy.stale_running_after_seconds)
     terminal_integrity_after = now - policy.terminal_integrity_lookback
@@ -318,13 +323,14 @@ async def load_flow_runtime_health_snapshot(
     )
 
     return FlowRuntimeHealthSnapshot(
+        database_observed_at=database_now,
         queued_count=status_counts.get(FlowRunStatus.QUEUED.value, 0),
         running_count=status_counts.get(FlowRunStatus.RUNNING.value, 0),
         awaiting_review_count=status_counts.get(FlowRunStatus.AWAITING_REVIEW.value, 0),
         stale_queued_count=stale_queued.count,
         stale_running_count=stale_running.count,
         oldest_stale_queued_pending_since=stale_queued.oldest_anchor_at,
-        oldest_stale_running_updated_at=stale_running.oldest_anchor_at,
+        oldest_stale_running_heartbeat_at=stale_running.oldest_anchor_at,
         accepted_dispatch_exhausted_count=accepted_dispatch_exhausted.count,
         oldest_accepted_dispatch_exhausted_at=(
             accepted_dispatch_exhausted.oldest_anchor_at
@@ -375,8 +381,9 @@ def classify_flow_runtime_health(
     policy: FlowRuntimeHealthPolicy,
     probe: FlowRuntimeProbe,
 ) -> FlowRuntimeHealthResponse:
+    now = snapshot.database_observed_at or now
     stale_queued_age = _age_seconds(now, snapshot.oldest_stale_queued_pending_since)
-    stale_running_age = _age_seconds(now, snapshot.oldest_stale_running_updated_at)
+    stale_running_age = _age_seconds(now, snapshot.oldest_stale_running_heartbeat_at)
     accepted_dispatch_exhausted_age = _age_seconds(
         now, snapshot.oldest_accepted_dispatch_exhausted_at
     )
@@ -587,11 +594,11 @@ async def _load_stale_run_summary(
     age_anchor = (
         FlowRuns.dispatch_pending_since
         if status == FlowRunStatus.QUEUED
-        else FlowRuns.updated_at
+        else FlowRuns.execution_heartbeat_at
     )
     stmt = sa.select(sa.func.count(), sa.func.min(age_anchor)).select_from(FlowRuns)
     if status == FlowRunStatus.RUNNING:
-        stmt = stmt.where(stale_running_flow_run_predicate(stale_before=stale_before))
+        stmt = stmt.where(stale_running_flow_run_predicate())
     else:
         stmt = stmt.where(FlowRuns.status == status.value).where(
             age_anchor <= stale_before

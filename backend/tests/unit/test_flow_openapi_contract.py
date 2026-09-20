@@ -2424,6 +2424,7 @@ def test_openapi_flow_run_public_exposes_structured_error(openapi_spec: dict) ->
     assert details_schema.get("title") == "FlowRunErrorDetails"
     assert details_schema.get("additionalProperties") is False
     assert set(details_schema.get("properties", {})) == {
+        "recovery",
         "step_description",
         "provider_call_evidence_gap",
         # Step-timeout facts: where the budget ran out and what had finished.
@@ -2439,6 +2440,29 @@ def test_openapi_flow_run_public_exposes_structured_error(openapi_spec: dict) ->
         "measured_bytes",
         "ceiling_bytes",
     }
+    recovery_ref = next(
+        option
+        for option in details_schema["properties"]["recovery"]["anyOf"]
+        if option.get("type") != "null"
+    )
+    recovery_schema = _resolve_component_ref(openapi_spec, recovery_ref)
+    assert set(recovery_schema["required"]) == {"reason", "heartbeat_at", "expires_at"}
+    assert (
+        recovery_schema["properties"]["reason"]["const"]
+        == "execution_heartbeat_expired"
+    )
+    for field in ("heartbeat_at", "expires_at"):
+        assert recovery_schema["properties"][field]["format"] == "date-time"
+    stalled_example = next(
+        example
+        for example in error_schema["examples"]
+        if example["code"] == "flow_worker_stalled"
+    )
+    from eneo.flows.flow_run_error import FlowRunError
+
+    stalled_error = FlowRunError.model_validate(stalled_example)
+    assert stalled_error.details.recovery.reason == "execution_heartbeat_expired"
+    assert stalled_error.retryable is False
     phase_property = details_schema["properties"]["phase"]
     assert openapi_spec["components"]["schemas"]["TranscriptionFailureKind"][
         "enum"

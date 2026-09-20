@@ -287,6 +287,7 @@ async def _add_retained_runtime_input(
             tenant_id=fixture.upload.tenant_id,
             trace_id=uuid4(),
             status=FlowRunStatus.RUNNING.value,
+            execution_heartbeat_at=now,
             started_at=now,
             finished_at=None,
             input_payload_json={"input": "retained source"},

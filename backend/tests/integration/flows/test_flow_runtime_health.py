@@ -41,8 +41,8 @@ from tests.flow_snapshot_fixtures import assistant_snapshot
 def _policy() -> FlowRuntimeHealthPolicy:
     return FlowRuntimeHealthPolicy(
         stale_queued_after_seconds=30,
-        stale_running_after_seconds=60,
-        stale_running_unhealthy_after_seconds=120,
+        stale_running_after_seconds=180,
+        stale_running_unhealthy_after_seconds=240,
         review_expiry_unhealthy_after_seconds=120,
         terminal_integrity_lookback=timedelta(hours=24),
         audit_outbox_backlog_grace_seconds=300,
@@ -309,7 +309,7 @@ async def test_recovery_and_health_share_webhook_protected_stale_running_family(
             )
             .values(
                 status=FlowRunStatus.RUNNING.value,
-                updated_at=stale_before - timedelta(seconds=5),
+                execution_heartbeat_at=stale_before - timedelta(seconds=5),
             )
         )
         for run, claim_token in (
@@ -340,7 +340,6 @@ async def test_recovery_and_health_share_webhook_protected_stale_running_family(
 
         recoverable = await run_repo.list_stale_running_runs(
             tenant_id=admin_user.tenant_id,
-            stale_before=stale_before,
         )
         snapshot = await load_flow_runtime_health_snapshot(
             session=session,
@@ -350,7 +349,7 @@ async def test_recovery_and_health_share_webhook_protected_stale_running_family(
 
     assert [run.id for run in recoverable] == [unprotected.id]
     assert snapshot.stale_running_count == 1
-    assert snapshot.oldest_stale_running_updated_at == stale_before - timedelta(
+    assert snapshot.oldest_stale_running_heartbeat_at == stale_before - timedelta(
         seconds=5
     )
 
@@ -445,7 +444,7 @@ async def test_flow_runtime_health_snapshot_reports_stale_runs_and_open_terminal
             .where(FlowRuns.id == stale_running.id)
             .values(
                 status=FlowRunStatus.RUNNING.value,
-                updated_at=now
+                execution_heartbeat_at=now
                 - timedelta(seconds=policy.stale_running_unhealthy_after_seconds + 5),
             )
         )

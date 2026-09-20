@@ -760,6 +760,7 @@ async def purge_history(db_container, admin_user, published_flow_ids, user_facto
                 principal_user_id=user_id,
                 trace_id=uuid4(),
                 status=status,
+                execution_heartbeat_at=old if status == "running" else None,
                 started_at=old,
                 finished_at=old if status == "completed" else None,
                 created_at=old,

@@ -62,6 +62,10 @@ from eneo.flows.flow_run_provenance import (
     merge_resolved_input_edges,
 )
 from eneo.flows.output_processing import schema_yields_top_level_object
+from eneo.flows.runtime.execution_heartbeat import (
+    FlowExecutionOwnershipLost,
+    execution_ownership_is_lost,
+)
 from eneo.flows.runtime.inherited_citations import (
     build_inherited_citation_prompt_appendix,
     collect_inherited_citation_context,
@@ -634,6 +638,9 @@ async def call_assistant_with_timeout(
             prepared.resolved_input_edge_indexes,
             completion_model.id,
         )
+
+    if await execution_ownership_is_lost():
+        raise FlowExecutionOwnershipLost()
 
     llm_task: asyncio.Task[Any] = asyncio.create_task(
         prepared.assistant.get_response(

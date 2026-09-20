@@ -8,10 +8,9 @@ from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
-from freezegun import freeze_time
 from httpx import AsyncClient
 
-from eneo.database.tables.flow_tables import FlowRunAuditOutbox
+from eneo.database.tables.flow_tables import FlowRunAuditOutbox, FlowRuns
 from eneo.flows.domain.flow_run_recovery_policy import (
     FLOW_RUNNING_RECONCILE_INTERVAL_SECONDS,
     flow_stale_running_reconcile_after_seconds,
@@ -21,41 +20,10 @@ from eneo.flows.enums import FlowRunLifecycleSource
 from tests.integration.flows.conftest import FlowBrokerWorkerSeam
 
 
-def test_updated_at_staleness_clock_has_bounded_transcription_reset_ceiling() -> None:
-    task_timeout_seconds = 3600
-    run_started_at = datetime(2026, 7, 22, 8, 0, tzinfo=timezone.utc)
-    hard_timeout_seconds = flow_task_hard_timeout_seconds(
-        task_timeout_seconds=task_timeout_seconds
-    )
-    stale_after_seconds = flow_stale_running_reconcile_after_seconds(
-        task_timeout_seconds=task_timeout_seconds
-    )
-    assert hard_timeout_seconds == stale_after_seconds == 3660
-
-    latest_transcription_patch_at = run_started_at + timedelta(
-        seconds=hard_timeout_seconds
-    )
-    stale_eligible_at = latest_transcription_patch_at + timedelta(
-        seconds=stale_after_seconds
-    )
-    assert stale_eligible_at - run_started_at == timedelta(seconds=7320)
-
-    with freeze_time(stale_eligible_at - timedelta(microseconds=1)):
-        stale_before = datetime.now(timezone.utc) - timedelta(
-            seconds=stale_after_seconds
-        )
-        assert latest_transcription_patch_at > stale_before
-
-    with freeze_time(stale_eligible_at):
-        stale_before = datetime.now(timezone.utc) - timedelta(
-            seconds=stale_after_seconds
-        )
-        assert latest_transcription_patch_at <= stale_before
-
-    reconciled_by = stale_eligible_at + timedelta(
-        seconds=FLOW_RUNNING_RECONCILE_INTERVAL_SECONDS
-    )
-    assert reconciled_by - run_started_at == timedelta(seconds=7380)
+def test_execution_heartbeat_recovery_is_independent_of_invocation_ceiling() -> None:
+    assert flow_task_hard_timeout_seconds(task_timeout_seconds=14400) == 14460
+    assert flow_stale_running_reconcile_after_seconds(task_timeout_seconds=14400) == 180
+    assert FLOW_RUNNING_RECONCILE_INTERVAL_SECONDS == 60
 
 
 @pytest.mark.asyncio
@@ -148,14 +116,19 @@ async def test_hard_exited_worker_stale_recovery_converges(
         )
     assert pre_recovery_audit_count == 0
 
-    updated_at = running_run["updated_at"]
-    assert isinstance(updated_at, str)
+    async with db_container() as container:
+        heartbeat_at = await container.session().scalar(
+            sa.select(FlowRuns.execution_heartbeat_at).where(
+                FlowRuns.id == UUID(run_id)
+            )
+        )
+    assert heartbeat_at is not None
     await _wait_for_real_stale_threshold(
         client=client,
         headers=flow_process_auth_headers,
         flow_id=flow.flow_id,
         run_id=run_id,
-        run_updated_at=_parse_api_datetime(updated_at),
+        heartbeat_at=heartbeat_at,
         worker=flow_broker_worker_seam,
     )
 
@@ -272,13 +245,13 @@ async def _wait_for_real_stale_threshold(
     headers: Mapping[str, str],
     flow_id: str,
     run_id: str,
-    run_updated_at: datetime,
+    heartbeat_at: datetime,
     worker: FlowBrokerWorkerSeam,
 ) -> None:
     stale_after_seconds = flow_stale_running_reconcile_after_seconds(
         task_timeout_seconds=worker.task_timeout_seconds
     )
-    eligible_at = run_updated_at + timedelta(seconds=stale_after_seconds + 1)
+    eligible_at = heartbeat_at + timedelta(seconds=stale_after_seconds + 1)
     timeout_seconds = (
         max(
             (eligible_at - datetime.now(timezone.utc)).total_seconds(),
@@ -299,10 +272,6 @@ async def _wait_for_real_stale_threshold(
             return
         await asyncio.sleep(0.5)
     raise AssertionError("Flow run did not reach the real stale-recovery threshold.")
-
-
-def _parse_api_datetime(value: str) -> datetime:
-    return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 def _deduplicate_adjacent(values: list[str]) -> list[str]:

@@ -110,7 +110,10 @@ from eneo.flows.infrastructure.flow_provider_call_recorder import (
     ProviderCallEvidencePersistenceError,
 )
 from eneo.flows.infrastructure.flow_repo import FlowRepository
-from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
+from eneo.flows.infrastructure.flow_run_repo import (
+    FlowRunExecutionOwner,
+    FlowRunRepository,
+)
 from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
 )
@@ -131,6 +134,12 @@ from eneo.flows.runtime.document_rendering.limits import (
 )
 from eneo.flows.runtime.document_rendering.service import (
     default_document_render_service,
+)
+from eneo.flows.runtime.execution_heartbeat import (
+    FlowExecutionOwnershipLost,
+    current_execution_ownership_lost,
+    execution_heartbeats,
+    execution_ownership_is_lost,
 )
 from eneo.flows.runtime.execution_state_builder import build_run_execution_state
 from eneo.flows.runtime.flow_run_actor import FlowRunActor
@@ -640,13 +649,19 @@ class FlowRunExecutor:
             )
             return {"status": "skipped", "reason": f"run_{latest.status.value}"}
 
-        return await self.execute_claimed(
-            run_id=run_id,
-            flow_id=flow_id,
-            tenant_id=tenant_id,
-            dispatch_task_id=dispatch_task_id,
-            retry_count=retry_count,
-        )
+        try:
+            async with execution_heartbeats().track(
+                FlowRunExecutionOwner(run_id, tenant_id, run_revision)
+            ):
+                return await self.execute_claimed(
+                    run_id=run_id,
+                    flow_id=flow_id,
+                    tenant_id=tenant_id,
+                    dispatch_task_id=dispatch_task_id,
+                    retry_count=retry_count,
+                )
+        except FlowExecutionOwnershipLost:
+            return {"status": "skipped", "reason": "execution_ownership_lost"}
 
     async def execute_claimed(
         self,
@@ -1773,13 +1788,16 @@ class FlowRunExecutor:
         call. Isolated short transactions are the same shape the provider-call
         recorder uses for the same reason.
         """
+        ownership_lost = await execution_ownership_is_lost()
+        if ownership_lost is not None:
+            return ownership_lost
         async with sessionmanager.session() as session, session.begin():
             run = await FlowRunRepository(session=session).get(
                 run_id=run_id,
                 flow_id=flow_id,
                 tenant_id=tenant_id,
             )
-        return run.status == FlowRunStatus.CANCELLED
+        return run.status != FlowRunStatus.RUNNING
 
     async def _return_after_terminalized_step_write(
         self,
@@ -1868,6 +1886,8 @@ class FlowRunExecutor:
         state: RunExecutionState | None,
     ) -> dict[str, Any]:
         await self._rollback()
+        if current_execution_ownership_lost():
+            raise FlowExecutionOwnershipLost()
         attempt_start = _attempt_start_for_step(state=state, step=step)
         requested_model, provider = (
             (

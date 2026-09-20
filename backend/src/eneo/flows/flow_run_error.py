@@ -7,6 +7,7 @@ from uuid import UUID
 
 from pydantic import (
     AfterValidator,
+    AwareDatetime,
     BaseModel,
     BeforeValidator,
     ConfigDict,
@@ -185,10 +186,27 @@ class TranscriptionFailureKind(StrEnum):
     PROVIDER = "provider"
     INTERNAL = "internal"
     CANCELLED = "cancelled"
+class FlowRunRecoveryFacts(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    reason: Literal["execution_heartbeat_expired"]
+    heartbeat_at: AwareDatetime
+    expires_at: AwareDatetime
+
+    @model_validator(mode="after")
+    def _validate_deadline(self) -> FlowRunRecoveryFacts:
+        if self.expires_at <= self.heartbeat_at:
+            raise ValueError("Recovery expiry must follow the execution heartbeat.")
+        return self
 
 
 class FlowRunErrorDetails(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
+
+    recovery: FlowRunRecoveryFacts | None = Field(
+        default=None,
+        description="Execution heartbeat facts used to recover a stalled worker.",
+    )
 
     measured_bytes: int | None = Field(default=None, ge=0, strict=True)
     ceiling_bytes: int | None = Field(default=None, ge=0, strict=True)
@@ -331,6 +349,16 @@ class FlowRunError(BaseModel):
                         "transcription_failure_kind": "capacity",
                         "transcription_service_reason": "Transcription capacity is unavailable.",
                         "transcription_stage": "transcribing",
+                    "code": FlowApiErrorCode.RUN_WORKER_STALLED.value,
+                    "message": "Flow execution heartbeat expired.",
+                    "source": "stale_running_reconciler",
+                    "retryable": False,
+                    "details": {
+                        "recovery": {
+                            "reason": "execution_heartbeat_expired",
+                            "heartbeat_at": "2026-09-20T18:00:00Z",
+                            "expires_at": "2026-09-20T18:03:00Z",
+                        }
                     },
                 }
             ],

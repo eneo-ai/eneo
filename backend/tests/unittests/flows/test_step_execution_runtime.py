@@ -2242,7 +2242,19 @@ async def test_complete_step_execution_times_out_llm_request():
 
 
 @pytest.mark.asyncio
-async def test_complete_step_execution_cancels_llm_request_when_run_is_cancelled():
+@pytest.mark.parametrize("ownership_lost", [False, True])
+async def test_complete_step_execution_cancels_llm_request_when_run_is_cancelled(
+    monkeypatch, ownership_lost
+):
+    import eneo.flows.runtime.step_execution_runtime as runtime
+    from eneo.flows.runtime.execution_heartbeat import FlowExecutionOwnershipLost
+
+    monkeypatch.setattr(
+        runtime,
+        "execution_ownership_is_lost",
+        AsyncMock(return_value=ownership_lost),
+        raising=False,
+    )
     run = _run()
     state = _state()
     step = _step(output_type="text")
@@ -2293,7 +2305,9 @@ async def test_complete_step_execution_cancels_llm_request_when_run_is_cancelled
         run_cancel_poll_interval_seconds=0.001,
     )
 
-    with pytest.raises(FlowStepCancelledError):
+    with pytest.raises(
+        FlowExecutionOwnershipLost if ownership_lost else FlowStepCancelledError
+    ):
         await complete_step_execution(
             step=step,
             run=run,
@@ -2302,7 +2316,10 @@ async def test_complete_step_execution_cancels_llm_request_when_run_is_cancelled
             deps=deps,
         )
 
-    assert cancelled.is_set()
+    if ownership_lost:
+        assistant.get_response.assert_not_awaited()
+    else:
+        assert cancelled.is_set()
     assert state.in_flight_llm_task is None
 
 

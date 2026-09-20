@@ -57,11 +57,6 @@ from tests.flow_snapshot_fixtures import assistant_snapshot
 
 
 def _stale_run_age() -> timedelta:
-    """Older than the reconciler's threshold, derived from the same owner it reads.
-
-    The threshold follows TASK_EXECUTION_TIMEOUT_SECONDS (one worker invocation,
-    4 h by default), so a fixed age would silently stop being stale.
-    """
     return timedelta(
         seconds=flow_stale_running_reconcile_after_seconds(
             task_timeout_seconds=get_settings().task_execution_timeout_seconds
@@ -182,6 +177,7 @@ async def _create_running_run(
     completion_model_factory,
     space_factory,
     assistant_factory,
+    start_attempt=True,
 ):
     model = await completion_model_factory(session, "gpt-4o-mini")
     space = await space_factory(session, "Terminalization contract space", [model.id])
@@ -242,6 +238,8 @@ async def _create_running_run(
         tenant_id=admin_user.tenant_id,
         expected_revision=run.revision,
     )
+    if not start_attempt:
+        return run, flow, run_repo
     claimed = await run_repo.claim_step_result(
         run_id=run.id,
         step_id=flow.steps[0].id,
@@ -461,7 +459,7 @@ async def test_stale_running_reconcile_task_commits_failure_for_fresh_sessions(
             sa.update(FlowRuns)
             .where(FlowRuns.id == run_id)
             .where(FlowRuns.tenant_id == tenant_id)
-            .values(updated_at=datetime.now(timezone.utc) - _stale_run_age())
+            .values(execution_heartbeat_at=sa.func.clock_timestamp() - _stale_run_age())
         )
 
     result = await flow_runtime_tasks._reconcile_stale_running_runs_all_tenants(
@@ -482,7 +480,7 @@ async def test_stale_running_reconcile_task_commits_failure_for_fresh_sessions(
         assert run_error.code == FlowApiErrorCode.RUN_WORKER_STALLED.value
         assert run_error.source == FlowRunLifecycleSource.STALE_RUNNING_RECONCILER
         assert run_error.message == (
-            "flow_worker_stalled: Flow run exceeded the execution timeout and was reconciled as failed."
+            "flow_worker_stalled: Flow execution heartbeat expired."
         )
 
         step_statuses = (
@@ -598,7 +596,6 @@ async def test_stale_running_query_excludes_awaiting_review_runs(
 
         stale_runs = await run_repo.list_stale_running_runs(
             tenant_id=admin_user.tenant_id,
-            stale_before=datetime.now(timezone.utc),
         )
 
     assert stale_runs == []
@@ -613,7 +610,6 @@ async def test_pending_webhook_committed_after_stale_discovery_blocks_terminaliz
     assistant_factory,
     admin_user,
 ):
-    stale_before = datetime.now(timezone.utc)
     async with sessionmanager.session() as setup_session, setup_session.begin():
         run, flow, _run_repo = await _create_running_run(
             session=setup_session,
@@ -626,7 +622,9 @@ async def test_pending_webhook_committed_after_stale_discovery_blocks_terminaliz
             sa.update(FlowRuns)
             .where(FlowRuns.id == run.id)
             .where(FlowRuns.tenant_id == admin_user.tenant_id)
-            .values(updated_at=stale_before - timedelta(hours=1))
+            .values(
+                execution_heartbeat_at=sa.func.clock_timestamp() - timedelta(hours=1)
+            )
         )
         run_id = run.id
         flow_id = flow.id
@@ -644,7 +642,6 @@ async def test_pending_webhook_committed_after_stale_discovery_blocks_terminaliz
             async with recovery_session.begin():
                 stale_runs = await run_repo.list_stale_running_runs(
                     tenant_id=admin_user.tenant_id,
-                    stale_before=stale_before,
                 )
             assert [candidate.id for candidate in stale_runs] == [run_id]
             stale_run_discovered.set()
@@ -653,7 +650,7 @@ async def test_pending_webhook_committed_after_stale_discovery_blocks_terminaliz
                 return await terminalizer.terminalize_stale_running_run(
                     run_id=run_id,
                     tenant_id=admin_user.tenant_id,
-                    stale_before=stale_before,
+                    expected_revision=run.revision,
                     error=FlowRunError.from_source(
                         FlowRunLifecycleSource.STALE_RUNNING_RECONCILER,
                         code=FlowApiErrorCode.RUN_WORKER_STALLED,
@@ -903,7 +900,7 @@ async def test_tenant_sweeps_survive_a_tenant_row_the_model_refuses(
             sa.update(FlowRuns)
             .where(FlowRuns.id == run_id)
             .where(FlowRuns.tenant_id == tenant_id)
-            .values(updated_at=datetime.now(timezone.utc) - _stale_run_age())
+            .values(execution_heartbeat_at=sa.func.clock_timestamp() - _stale_run_age())
         )
         await setup_session.execute(
             sa.insert(Tenants).values(
@@ -927,3 +924,243 @@ async def test_tenant_sweeps_survive_a_tenant_row_the_model_refuses(
             limit=10
         )
     )["status"] == "ok"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_death_after_claim_before_first_attempt_is_recovered(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    monkeypatch,
+):
+    async with sessionmanager.session() as session, session.begin():
+        run, _, _ = await _create_running_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            start_attempt=False,
+        )
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run.id)
+            .values(
+                execution_heartbeat_at=sa.func.clock_timestamp()
+                - timedelta(seconds=181)
+            )
+        )
+    monkeypatch.setattr(flow_runtime_tasks, "_stale_running_cursor", None)
+    await flow_runtime_tasks._reconcile_stale_running_runs_all_tenants()
+    async with sessionmanager.session() as session, session.begin():
+        recovered = await FlowRunRepository(session=session).get(
+            run_id=run.id, tenant_id=run.tenant_id
+        )
+        assert recovered.status == FlowRunStatus.FAILED
+        assert recovered.error.code == FlowApiErrorCode.RUN_WORKER_STALLED
+        facts = recovered.error.details.recovery
+        assert facts.reason == "execution_heartbeat_expired"
+        assert facts.expires_at - facts.heartbeat_at == timedelta(seconds=180)
+        assert (
+            await session.scalar(
+                sa.select(sa.func.count())
+                .select_from(FlowStepAttempts)
+                .where(FlowStepAttempts.flow_run_id == run.id)
+            )
+            == 0
+        )
+        assert (
+            await session.scalar(
+                sa.select(sa.func.count())
+                .select_from(FlowRunAuditOutbox)
+                .where(FlowRunAuditOutbox.flow_run_id == run.id)
+            )
+            == 1
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_long_work_renews_but_old_revision_and_expired_owner_cannot(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    from eneo.flows.infrastructure.flow_run_repo import FlowRunExecutionOwner
+
+    async with sessionmanager.session() as session, session.begin():
+        run, _, repo = await _create_running_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            start_attempt=False,
+        )
+        old_updated_at = datetime.now(timezone.utc) - timedelta(hours=5)
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run.id)
+            .values(updated_at=old_updated_at)
+        )
+    owner = FlowRunExecutionOwner(run.id, run.tenant_id, run.revision)
+    old_owner = FlowRunExecutionOwner(run.id, run.tenant_id, run.revision - 1)
+    for _ in range(3):
+        async with sessionmanager.session() as session, session.begin():
+            repo = FlowRunRepository(session=session)
+            await session.execute(
+                sa.update(FlowRuns)
+                .where(FlowRuns.id == run.id)
+                .values(
+                    execution_heartbeat_at=sa.func.clock_timestamp()
+                    - timedelta(seconds=170),
+                    updated_at=FlowRuns.updated_at,
+                )
+            )
+            assert await repo.renew_execution_heartbeats(owners=[old_owner]) == set()
+            assert await repo.renew_execution_heartbeats(owners=[owner]) == {owner}
+            renewed = await repo.get(run_id=run.id, tenant_id=run.tenant_id)
+            assert renewed.updated_at == old_updated_at
+            assert renewed.revision == owner.revision
+            assert renewed.execution_heartbeat_at > datetime.now(
+                timezone.utc
+            ) - timedelta(seconds=10)
+            assert run.id not in {
+                row.id
+                for row in await repo.list_stale_running_runs(tenant_id=run.tenant_id)
+            }
+    async with sessionmanager.session() as session, session.begin():
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run.id)
+            .values(
+                execution_heartbeat_at=sa.func.clock_timestamp()
+                - timedelta(seconds=181)
+            )
+        )
+        assert (
+            await FlowRunRepository(session=session).renew_execution_heartbeats(
+                owners=[owner]
+            )
+            == set()
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize("expired", [False, True])
+async def test_renewal_and_two_recoveries_have_one_terminal_owner(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    expired,
+):
+    from eneo.flows.infrastructure.flow_run_repo import FlowRunExecutionOwner
+
+    async with sessionmanager.session() as session, session.begin():
+        run, _, _ = await _create_running_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run.id)
+            .values(
+                execution_heartbeat_at=sa.func.clock_timestamp()
+                - timedelta(seconds=181 if expired else 30)
+            )
+        )
+    owner = FlowRunExecutionOwner(run.id, run.tenant_id, run.revision)
+    barrier = asyncio.Barrier(3)
+
+    async def renew():
+        async with sessionmanager.session() as session, session.begin():
+            await barrier.wait()
+            return await FlowRunRepository(session=session).renew_execution_heartbeats(
+                owners=[owner]
+            )
+
+    async def recover():
+        async with sessionmanager.session() as session, session.begin():
+            await barrier.wait()
+            return await _flow_run_terminalizer(
+                FlowRunRepository(session=session)
+            ).terminalize_stale_running_run(
+                run_id=run.id,
+                tenant_id=run.tenant_id,
+                expected_revision=run.revision,
+                error=FlowRunError.from_source(
+                    FlowRunLifecycleSource.STALE_RUNNING_RECONCILER,
+                    code=FlowApiErrorCode.RUN_WORKER_STALLED,
+                    message="Execution heartbeat expired.",
+                ),
+            )
+
+    renewed, first, second = await asyncio.gather(renew(), recover(), recover())
+    assert renewed == (set() if expired else {owner})
+    assert sum(result.did_transition for result in (first, second)) == int(expired)
+    async with sessionmanager.session() as session, session.begin():
+        assert await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(FlowRunAuditOutbox)
+            .where(FlowRunAuditOutbox.flow_run_id == run.id)
+        ) == int(expired)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.migration_isolation
+async def test_heartbeat_migration_cutover_preserves_existing_running_history(
+    db_container, completion_model_factory, space_factory, assistant_factory, admin_user
+):
+    import importlib.util
+    from pathlib import Path
+
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    async with db_container() as container:
+        session = container.session()
+        run, _, repo = await _create_running_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            start_attempt=False,
+        )
+        existing = await repo.get(run_id=run.id, tenant_id=run.tenant_id)
+        path = (
+            Path(__file__).parents[3]
+            / "alembic/versions/202609202000_flow_execution_heartbeat.py"
+        )
+        spec = importlib.util.spec_from_file_location("heartbeat_migration", path)
+        migration = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(migration)
+
+        def cycle(connection):
+            with Operations.context(MigrationContext.configure(connection)):
+                migration.downgrade()
+                assert "execution_heartbeat_at" not in {
+                    column["name"]
+                    for column in sa.inspect(connection).get_columns("flow_runs")
+                }
+                migration.upgrade()
+
+        await (await session.connection()).run_sync(cycle)
+        session.expire_all()
+        restored = await repo.get(run_id=run.id, tenant_id=run.tenant_id)
+        assert restored.execution_heartbeat_at == existing.updated_at
+        assert restored.updated_at == existing.updated_at
+        assert restored.revision == existing.revision
+        assert restored.status == existing.status == FlowRunStatus.RUNNING

@@ -340,7 +340,7 @@ async def test_execute_task_rejects_malformed_payload_without_terminalizing(
     execute.assert_not_awaited()
 
 
-async def test_reconciler_leaves_a_ninety_minute_run_within_four_hour_ceiling(
+async def test_reconciler_uses_one_global_budget_and_advances_after_failure(
     monkeypatch,
 ):
     from contextlib import asynccontextmanager
@@ -351,16 +351,16 @@ async def test_reconciler_leaves_a_ninety_minute_run_within_four_hour_ceiling(
     now = datetime.now(timezone.utc)
     tenant_id = uuid4()
     run = SimpleNamespace(
-        id=uuid4(), tenant_id=tenant_id, updated_at=now - timedelta(minutes=90)
+        id=uuid4(),
+        tenant_id=tenant_id,
+        revision=3,
+        execution_heartbeat_at=now - timedelta(minutes=4),
     )
     repo = AsyncMock()
 
-    async def stale_runs(*, stale_before, **kwargs):
-        assert stale_before < now - timedelta(hours=4)
-        return [run] if run.updated_at < stale_before else []
-
-    repo.list_stale_running_runs.side_effect = stale_runs
+    repo.list_stale_running_runs.side_effect = [[run], []]
     terminalizer = AsyncMock()
+    terminalizer.terminalize_stale_running_run.side_effect = RuntimeError("unavailable")
     tenant_repo = AsyncMock()
     tenant_repo.get_all_tenant_ids.return_value = [tenant_id]
     container = SimpleNamespace(
@@ -385,9 +385,15 @@ async def test_reconciler_leaves_a_ninety_minute_run_within_four_hour_ceiling(
         "get_settings",
         lambda: SimpleNamespace(task_execution_timeout_seconds=14400),
     )
-    assert await tasks._reconcile_stale_running_runs_all_tenants() == {
-        "status": "ok",
-        "reconciled": 0,
-    }
-    repo.list_stale_running_runs.assert_awaited_once()
-    terminalizer.terminalize_stale_running_run.assert_not_awaited()
+    monkeypatch.setattr(tasks, "_stale_running_cursor", None, raising=False)
+    with pytest.raises(tasks.FlowTenantSweepPartialFailure):
+        await tasks._reconcile_stale_running_runs_all_tenants(limit=1)
+    assert repo.list_stale_running_runs.await_args.kwargs == {"limit": 1, "after": None}
+    assert tasks._stale_running_cursor == (run.execution_heartbeat_at, run.id)
+    assert (
+        terminalizer.terminalize_stale_running_run.await_args.kwargs[
+            "expected_revision"
+        ]
+        == 3
+    )
+    tenant_repo.get_all_tenant_ids.assert_not_awaited()

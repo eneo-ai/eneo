@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import ast
+import importlib.util
+import io
 import runpy
 import sqlite3
 from pathlib import Path
@@ -8,6 +10,8 @@ from unittest.mock import MagicMock, call
 
 import pytest
 
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 from eneo.database.tables.flow_tables import FlowProviderCalls
 
 _ALEMBIC_VERSION_NUM_LIMIT = 32
@@ -147,6 +151,37 @@ def test_provider_call_lifecycle_retains_accepted_job_id(status):
         assert connection.execute(
             f"SELECT ({constraint.sqltext}) FROM (SELECT {select})", values
         ).fetchone() == (1,)
+
+
+def test_heartbeat_migration_backfills_running_rows_and_reverses_schema() -> None:
+    migration_path = (
+        Path(__file__).parents[2]
+        / "alembic"
+        / "versions"
+        / "202609202000_flow_execution_heartbeat.py"
+    )
+    spec = importlib.util.spec_from_file_location("heartbeat_migration", migration_path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    output = io.StringIO()
+    context = MigrationContext.configure(
+        dialect_name="postgresql", opts={"as_sql": True, "output_buffer": output}
+    )
+    with Operations.context(context):
+        migration.upgrade()
+    sql = output.getvalue()
+    assert "execution_heartbeat_at = updated_at WHERE status = 'running'" in sql
+    assert "status <> 'running' OR execution_heartbeat_at IS NOT NULL" in sql
+    assert "ix_flow_runs_running_execution_heartbeat" in sql
+    assert "DROP INDEX ix_flow_runs_running_updated_at" in sql
+    output.truncate(0)
+    output.seek(0)
+    with Operations.context(context):
+        migration.downgrade()
+    sql = output.getvalue()
+    assert "DROP COLUMN execution_heartbeat_at" in sql
+    assert "CREATE INDEX ix_flow_runs_running_updated_at" in sql
 
 
 def test_alembic_revision_ids_fit_default_version_table() -> None:

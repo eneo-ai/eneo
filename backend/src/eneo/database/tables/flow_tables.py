@@ -817,6 +817,9 @@ class FlowRuns(BasePublic):
     started_at: Mapped[Optional[datetime]] = mapped_column(
         sa.DateTime(timezone=True), nullable=True
     )
+    execution_heartbeat_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
     finished_at: Mapped[Optional[datetime]] = mapped_column(
         sa.DateTime(timezone=True), nullable=True
     )
@@ -867,6 +870,10 @@ class FlowRuns(BasePublic):
         CheckConstraint(
             "dispatch_attempt_count >= 0",
             name="ck_flow_runs_dispatch_attempt_count_nonnegative",
+        ),
+        CheckConstraint(
+            "status <> 'running' OR execution_heartbeat_at IS NOT NULL",
+            name="ck_flow_runs_running_execution_heartbeat",
         ),
         CheckConstraint(
             "dispatch_last_error IS NULL "
@@ -931,9 +938,10 @@ class FlowRuns(BasePublic):
             postgresql_where=sa.text("principal_type = 'service_key'"),
         ),
         Index(
-            "ix_flow_runs_running_updated_at",
-            "status",
-            "updated_at",
+            "ix_flow_runs_running_execution_heartbeat",
+            "execution_heartbeat_at",
+            "id",
+            postgresql_include=("tenant_id", "revision"),
             postgresql_where=sa.text("status = 'running'"),
         ),
         Index(

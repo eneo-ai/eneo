@@ -3,8 +3,12 @@ from __future__ import annotations
 from typing import cast
 from uuid import UUID
 
-from eneo.flows.domain.flow_run_recovery_policy import flow_task_hard_timeout_seconds
+from eneo.flows.domain.flow_run_recovery_policy import (
+    FLOW_RUNNING_RECONCILE_INTERVAL_SECONDS,
+    flow_task_hard_timeout_seconds,
+)
 from eneo.flows.flow_run_dispatch_request import FlowRunDispatchTaskKwargs
+from eneo.flows.runtime.execution_heartbeat import execution_heartbeats
 from eneo.flows.runtime.tasks import (
     deliver_flow_audit_outbox,
     deliver_flow_webhook_outbox,
@@ -23,7 +27,7 @@ from eneo.tasks.routing import (
     FLOW_RECONCILE_RUNNING_TASK,
     FLOW_REDISPATCH_STALE_QUEUED_TASK,
 )
-from eneo.worker.worker import Worker
+from eneo.worker.worker import ARQContext, Worker
 
 execution_worker = Worker(enable_feeder=False)
 maintenance_worker = Worker(enable_feeder=False)
@@ -51,7 +55,7 @@ async def execute_flow_run(
 @maintenance_worker.cron_job(
     manages_own_session=True,
     name=FLOW_RECONCILE_RUNNING_TASK,
-    second=0,
+    second=set(range(0, 60, FLOW_RUNNING_RECONCILE_INTERVAL_SECONDS)),
     keep_result=60,
 )
 async def reconcile_running(*, container: Container) -> dict[str, int | str]:
@@ -103,13 +107,25 @@ async def deliver_webhook_outbox(*, container: Container) -> dict[str, int | str
     return await deliver_flow_webhook_outbox()
 
 
+async def execution_startup(ctx: ARQContext) -> None:
+    await execution_worker.on_startup(ctx)
+    execution_heartbeats().start()
+
+
+async def execution_shutdown(ctx: ARQContext) -> None:
+    try:
+        await execution_heartbeats().stop()
+    finally:
+        await execution_worker.on_shutdown(ctx)
+
+
 class PlatformExecutionWorkerSettings:
     settings = get_settings()
     functions = execution_worker.functions
     cron_jobs: list[object] = []
     redis_settings = execution_worker.redis_settings
-    on_startup = execution_worker.on_startup
-    on_shutdown = execution_worker.on_shutdown
+    on_startup = execution_startup
+    on_shutdown = execution_shutdown
     retry_jobs = execution_worker.retry_jobs
     job_serializer = execution_worker.job_serializer
     job_deserializer = execution_worker.job_deserializer

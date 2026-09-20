@@ -31,6 +31,38 @@ For `flow_run_upload_pdf_exceeds_limit`, context contains `limit` (`pages`, `ext
 
 Each server worker admits at most half its reported CPU count in concurrent PDF extraction processes, rounded down with a minimum of one (one when the CPU count is unavailable). Waiting for capacity counts against the same extraction timeout. If that wait exhausts the deadline, the response has `limit: "seconds"` and `reason: "extraction_capacity"` in its context, and no parser is started. Back off before retrying an upload refused for capacity. The process holds its slot until it has exited and been reaped, including when the request is cancelled.
 
+## Stalled execution workers
+
+`flow_worker_stalled` means the execution worker's heartbeat expired. Workers
+renew every 30 seconds; the heartbeat expires after 180 seconds and recovery
+runs every 60 seconds. A run normally becomes failed about 3–4 minutes after
+its last renewal. A maintenance backlog or unavailable database or worker can
+delay recovery. Health reports unhealthy when the heartbeat is older than
+240 seconds. Runs waiting for pending outbound delivery are excluded.
+
+The terminal run error includes typed recovery facts:
+
+```json
+{
+  "code": "flow_worker_stalled",
+  "message": "Flow execution heartbeat expired.",
+  "source": "stale_running_reconciler",
+  "retryable": false,
+  "details": {
+    "recovery": {
+      "reason": "execution_heartbeat_expired",
+      "heartbeat_at": "2026-09-20T18:00:00Z",
+      "expires_at": "2026-09-20T18:03:00Z"
+    }
+  }
+}
+```
+
+These timestamps use the database clock. Existing run history and provider
+receipts remain available; unfinished provider calls have an unknown outcome.
+Inspect that evidence before submitting a new run, since provider work may
+already have happened.
+
 ## Codes that are not `FlowApiErrorCode`
 
 The catalog below covers Flow-specific failures. A Flow client will also meet these platform-level codes, most of them on the authentication and upload paths, and they are not in the `FlowApiErrorCode` enum:

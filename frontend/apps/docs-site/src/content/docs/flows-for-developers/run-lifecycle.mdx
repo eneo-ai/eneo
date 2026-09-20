@@ -89,6 +89,33 @@ on the platform maintenance queue.
 
 ## Recovery and maintenance
 
+Claiming a run atomically records `execution_heartbeat_at`. Each execution
+worker renews its active runs every 30 seconds, using the run revision as the
+ownership fence. Renewals use database time and leave `updated_at` and the
+revision unchanged. A worker that loses ownership stops its invocation and
+cancels in-flight provider work; three consecutive renewal failures also stop
+execution.
+
+A heartbeat expires after 180 seconds. The maintenance worker checks every
+60 seconds, so recovery normally occurs about 3–4 minutes after the last
+renewal. A backlog, unavailable database, or unavailable maintenance worker can
+delay recovery. Health becomes unhealthy once an expired heartbeat is older
+than 240 seconds. The invocation timeout does not determine worker liveness.
+
+Recovery processes a bounded set across tenants, rechecks the heartbeat,
+revision, and pending-delivery exclusion in the terminal update, and records
+`flow_worker_stalled`. Its `details.recovery` object contains the typed
+`reason: "execution_heartbeat_expired"`, `heartbeat_at`, and `expires_at` facts.
+Open provider-call receipts become `outcome_unknown` with reason
+`stale_started`. Run history is retained. A run waiting for pending outbound
+delivery belongs to the delivery worker and is excluded from stalled-worker
+recovery and its health signal.
+
+The migration initializes existing running heartbeats from `updated_at`;
+older running rows can therefore be recovered on the first sweep after
+cutover. Running rows require a heartbeat. Deploy the migration together with
+the execution and maintenance worker changes.
+
 The platform maintenance worker schedules five Flow jobs:
 
 - stale-running reconciliation;
