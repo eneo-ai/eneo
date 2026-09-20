@@ -351,7 +351,6 @@ class Settings(BaseSettings):
     flow_pdf_max_pages: int = Field(default=500, gt=0)
     flow_pdf_max_extracted_bytes: int = Field(default=32 * 1024 * 1024, gt=0)
     flow_pdf_extraction_timeout_seconds: int = Field(default=120, gt=0)
-    flow_step_budget_seconds: int = 3600
     flow_http_request_timeout_seconds: int = 30
     flow_http_max_timeout_seconds: int = 120
     flow_http_allow_private_networks: bool = False
@@ -777,13 +776,6 @@ class Settings(BaseSettings):
             logging.error(
                 "FLOW_MAX_INLINE_TEXT_BYTES must be greater than zero. Current value: %s",
                 self.flow_max_inline_text_bytes,
-            )
-            sys.exit(1)
-
-        if self.flow_step_budget_seconds <= 0:
-            logging.error(
-                "FLOW_STEP_BUDGET_SECONDS must be greater than zero. Current value: %s",
-                self.flow_step_budget_seconds,
             )
             sys.exit(1)
 

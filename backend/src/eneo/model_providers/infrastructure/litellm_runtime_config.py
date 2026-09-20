@@ -5,7 +5,7 @@ inference fails. The application uses structured logging; dependency
 debug prints should not leak into backend logs or SSE-adjacent output.
 
 Retries are disabled and requests outside a flow attempt use the deployment
-step budget as their default timeout. Flow requests supply their remaining
+runtime policy as their default timeout. Flow requests supply their remaining
 attempt budget at the request boundary.
 """
 
@@ -21,13 +21,15 @@ def configure_litellm_runtime(
 ) -> None:
     """Apply application-wide LiteLLM settings idempotently.
 
-    When omitted, the process default follows `settings.flow_step_budget_seconds`.
+    When omitted, the process default follows the deployment runtime policy.
     A flow attempt overrides it per request with its remaining effective budget.
     """
     if request_timeout_seconds is None:
-        from eneo.main.config import get_settings
+        from eneo.flows.flow_runtime_policy import default_flow_runtime_policy
 
-        request_timeout_seconds = float(get_settings().flow_step_budget_seconds)
+        request_timeout_seconds = float(
+            default_flow_runtime_policy().default_step_timeout_seconds
+        )
     setattr(litellm_module, "suppress_debug_info", True)
     setattr(litellm_module, "num_retries", 0)
     setattr(litellm_module, "request_timeout", request_timeout_seconds)

@@ -111,7 +111,12 @@ def _run(*, status: FlowRunStatus, user, input_payload=None) -> FlowRun:
     )
 
 
-def _build_executor(user, *, max_inline_text_bytes: int = 1024 * 1024):
+def _build_executor(
+    user,
+    *,
+    max_inline_text_bytes: int = 1024 * 1024,
+    invocation_deadline: float | None = None,
+):
     flow_repo = AsyncMock()
     session = AsyncMock()
     session.commit = AsyncMock()
@@ -194,6 +199,7 @@ def _build_executor(user, *, max_inline_text_bytes: int = 1024 * 1024):
         encryption_service=encryption_service,
         flow_run_terminalizer=flow_run_terminalizer,
         max_inline_text_bytes=max_inline_text_bytes,
+        invocation_deadline=invocation_deadline,
         input_limits=FlowInputLimits(
             file_max_size_bytes=100_000_000, audio_max_size_bytes=100_000_000
         ),
@@ -5064,7 +5070,12 @@ def test_document_output_prompt_with_contract_requests_validated_json() -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "duration,override,succeeds",
-    [(2700, None, True), (5400, None, False), (5400, 7200, True)],
+    [
+        (5400, None, True),
+        (15000, None, False),
+        (5400, 7200, True),
+        (5400, 3600, False),
+    ],
 )
 async def test_each_step_spends_its_effective_budget_at_the_provider_boundary(
     user, monkeypatch, duration, override, succeeds
@@ -5078,15 +5089,12 @@ async def test_each_step_spends_its_effective_budget_at_the_provider_boundary(
 
     clock = {"now": 0.0}
     monkeypatch.setattr(step_deadline, "_now", lambda: clock["now"])
-    executor, _, _, _ = _build_executor(user)
     from eneo.flows.flow_runtime_policy import default_flow_runtime_policy
+    from eneo.main.config import get_settings
 
-    executor.runtime_policy = default_flow_runtime_policy(
-        defaults=SimpleNamespace(
-            flow_step_budget_seconds=3600,
-            task_execution_timeout_seconds=14400,
-        )
-    )
+    monkeypatch.setattr(get_settings(), "task_execution_timeout_seconds", 14400)
+    executor, _, _, _ = _build_executor(user)
+    policy = default_flow_runtime_policy()
     assistant = _mock_assistant_for_execute_step()
     timeouts = []
 
@@ -5118,7 +5126,75 @@ async def test_each_step_spends_its_effective_budget_at_the_provider_boundary(
                 await executor._execute_step(
                     step=step, run=run, state=state, attempt_no=1
                 )
-    assert timeouts == [float(override or 3600)] * (2 if succeeds else 1)
+    assert timeouts == [float(override or policy.default_step_timeout_seconds)] * (
+        2 if succeeds else 1
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("override", [None, 500])
+async def test_later_step_uses_remaining_invocation_budget(user, monkeypatch, override):
+    import litellm
+
+    from eneo.flows.runtime import step_deadline
+    from eneo.main.config import get_settings
+    from eneo.model_providers.infrastructure import litellm_transport
+
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(asyncio.get_running_loop(), "time", lambda: clock["now"])
+    monkeypatch.setattr(get_settings(), "task_execution_timeout_seconds", 600)
+    executor, _, _, _ = _build_executor(user, invocation_deadline=1600.0)
+    assistant = _mock_assistant_for_execute_step()
+    timeouts = []
+    deadlines = []
+
+    async def provider(**kwargs):
+        timeouts.append(kwargs["timeout"])
+        scope = step_deadline.current_step_deadline_scope()
+        assert scope is not None
+        deadlines.append(scope.deadline)
+        clock["now"] += 480 if len(timeouts) == 1 else 30
+        return SimpleNamespace(completion="done", total_token_count=3)
+
+    async def respond(**kwargs):
+        return await litellm_transport.acompletion(model="test", messages=[])
+
+    monkeypatch.setattr(litellm, "acompletion", provider)
+    assistant.get_response = AsyncMock(side_effect=respond)
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    for order in (1, 2):
+        step = replace(_runtime_step(step_order=order), timeout_seconds=override)
+        await executor._execute_step(step=step, run=run, attempt_no=1)
+
+    assert timeouts == [540.0 if override is None else 500.0, 60.0]
+    assert [deadline.budget_seconds for deadline in deadlines] == timeouts
+    assert all(deadline.expires_at <= 1540.0 for deadline in deadlines)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("remaining", [59.0, 60.0, -1.0])
+async def test_step_refuses_before_handler_when_invocation_buffer_is_reached(
+    user, monkeypatch, remaining
+):
+    from eneo.flows.enums import FlowStepPhase
+    from eneo.flows.runtime.step_deadline import StepDeadlineExceeded
+
+    monkeypatch.setattr(asyncio.get_running_loop(), "time", lambda: 1000.0)
+    executor, _, _, _ = _build_executor(user, invocation_deadline=1000.0 + remaining)
+    handler = SimpleNamespace(execute=AsyncMock())
+    executor._build_step_handler = MagicMock(return_value=handler)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+
+    with pytest.raises(StepDeadlineExceeded) as exc_info:
+        await executor._execute_step(step=_runtime_step(), run=run, attempt_no=1)
+
+    assert exc_info.value.code == FlowApiErrorCode.STEP_TIMEOUT.value
+    assert exc_info.value.step_phase is FlowStepPhase.STEP_EXECUTION
+    assert exc_info.value.provider_work_may_have_completed is False
+    assert exc_info.value.completed_items is None
+    assert exc_info.value.total_items is None
+    handler.execute.assert_not_awaited()
 
 
 @pytest.mark.asyncio

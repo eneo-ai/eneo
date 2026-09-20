@@ -185,6 +185,7 @@ async def _execute_flow_run_async(
     principal_service_id: UUID | None,
     task_id: str | None,
     retry_count: int,
+    invocation_deadline: float | None,
 ) -> dict[str, str]:
     with trace_flow_run(
         run_id=run_id,
@@ -204,6 +205,7 @@ async def _execute_flow_run_async(
             task_id=task_id,
             retry_count=retry_count,
             flow_span=flow_span,
+            invocation_deadline=invocation_deadline,
         )
 
 
@@ -219,6 +221,7 @@ async def _execute_flow_run_async_traced(
     task_id: str | None,
     retry_count: int,
     flow_span: FlowRunSpanContext,
+    invocation_deadline: float | None,
 ) -> dict[str, str]:
     async with sessionmanager.session() as session:
         enable_autobegin_for_flow_task_session(session)
@@ -325,6 +328,7 @@ async def _execute_flow_run_async_traced(
             )
 
             executor = FlowRunExecutor(
+                invocation_deadline=invocation_deadline,
                 runtime_actor=run_actor,
                 session=session,
                 flow_repo=runtime_container.flow_repo(),
@@ -489,7 +493,9 @@ async def execute_flow_run_task(
             assert_never(dispatch_request)
 
     try:
-        async with asyncio.timeout(get_settings().task_execution_timeout_seconds):
+        async with asyncio.timeout(
+            get_settings().task_execution_timeout_seconds
+        ) as invocation_timeout:
             return await _execute_flow_run_async(
                 run_id=run_id_uuid,
                 flow_id=flow_id_uuid,
@@ -500,6 +506,7 @@ async def execute_flow_run_task(
                 principal_service_id=resolved_principal_service_id,
                 task_id=task_id,
                 retry_count=retry_count,
+                invocation_deadline=invocation_timeout.when(),
             )
     except TimeoutError:
         error_message = (

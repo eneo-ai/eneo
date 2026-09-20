@@ -1281,7 +1281,6 @@ async def test_get_flow_runtime_policy_reads_tenant_override(monkeypatch):
         flow_runtime_policy,
         "get_settings",
         lambda: SimpleNamespace(
-            flow_step_budget_seconds=600,
             task_execution_timeout_seconds=3600,
         ),
     )
@@ -1318,7 +1317,6 @@ async def test_update_flow_runtime_policy_persists_and_audits(monkeypatch):
         flow_runtime_policy,
         "get_settings",
         lambda: SimpleNamespace(
-            flow_step_budget_seconds=600,
             task_execution_timeout_seconds=3600,
         ),
     )

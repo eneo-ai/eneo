@@ -91,6 +91,7 @@ from eneo.flows.flow_run_provenance import (
 )
 from eneo.flows.flow_run_step_result_file import build_step_result_file_references
 from eneo.flows.flow_runtime_policy import (
+    STEP_TIMEOUT_TASK_BUFFER_SECONDS,
     FlowRuntimePolicy,
     default_flow_runtime_policy,
     resolve_step_timeout_seconds,
@@ -165,6 +166,7 @@ from eneo.flows.runtime.step_attempt_runtime import (
 from eneo.flows.runtime.step_deadline import (
     StepDeadline,
     record_step_phase,
+    require_step_budget,
     step_deadline_scope,
 )
 from eneo.flows.runtime.step_execution_result import StepExecutionResult
@@ -523,6 +525,7 @@ class FlowRunExecutor:
         max_generic_files: int | None = None,
         config: FlowRunExecutorConfig | None = None,
         transcript_words_repo: "FlowTranscriptWordsRepository | None" = None,
+        invocation_deadline: float | None = None,
     ) -> None:
         resolved_config = config
         if resolved_config is None:
@@ -577,6 +580,7 @@ class FlowRunExecutor:
         self.runtime_policy = resolved_config.runtime_policy
         self.mapped_execution_policy = resolved_config.mapped_execution_policy
         self._step_deadline_seconds = resolved_config.step_deadline_seconds
+        self.invocation_deadline = invocation_deadline
         # The budget of the attempt currently executing; every dependency
         # built while it is set shares it (mapped previews rebuild deps per
         # item and must not restart the clock).
@@ -1192,6 +1196,7 @@ class FlowRunExecutor:
                 # recorded in it.
                 with step_deadline_scope(deadline, step_order=step.step_order):
                     record_step_phase(FlowStepPhase.STEP_EXECUTION)
+                    require_step_budget(phase="step execution")
                     try:
                         # Backstop for phases that cannot check the budget
                         # themselves (decoding, extraction, a stalled
@@ -1256,6 +1261,13 @@ class FlowRunExecutor:
                 code=exc.code,
                 context=exc.context,
             ) from exc
+        if self.invocation_deadline is not None:
+            remaining = (
+                self.invocation_deadline
+                - asyncio.get_running_loop().time()
+                - STEP_TIMEOUT_TASK_BUFFER_SECONDS
+            )
+            budget_seconds = min(budget_seconds, max(0.0, remaining))
         return StepDeadline.start(budget_seconds)
 
     def _build_step_handler(self, mode: FlowOutputMode) -> StepHandler:

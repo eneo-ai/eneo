@@ -14,11 +14,9 @@ from eneo.main.exceptions import BadRequestException
 
 def _settings(
     *,
-    llm_timeout: int = 600,
     task_timeout: int = 3600,
 ) -> SimpleNamespace:
     return SimpleNamespace(
-        flow_step_budget_seconds=llm_timeout,
         task_execution_timeout_seconds=task_timeout,
     )
 
@@ -26,10 +24,10 @@ def _settings(
 def test_resolve_runtime_policy_uses_deployment_defaults() -> None:
     policy = resolve_flow_runtime_policy(
         None,
-        defaults=_settings(llm_timeout=900, task_timeout=2000),
+        defaults=_settings(task_timeout=2000),
     )
 
-    assert policy.default_step_timeout_seconds == 900
+    assert policy.default_step_timeout_seconds == 1940
     assert policy.max_step_timeout_seconds == 2000 - STEP_TIMEOUT_TASK_BUFFER_SECONDS
     assert policy.hard_ceiling_seconds == 2000 - STEP_TIMEOUT_TASK_BUFFER_SECONDS
 
@@ -39,7 +37,7 @@ def test_resolve_clamps_deployment_default_to_a_lower_tenant_maximum() -> None:
     resolve to default > max; the deployment default clamps to the maximum."""
     policy = resolve_flow_runtime_policy(
         {"runtime_policy": {"version": 1, "max_step_timeout_seconds": 300}},
-        defaults=_settings(llm_timeout=600),
+        defaults=_settings(),
     )
 
     assert policy.max_step_timeout_seconds == 300
@@ -114,20 +112,20 @@ def test_resolve_runtime_policy_ignores_unsupported_storage_version() -> None:
                 "max_step_timeout_seconds": 2400,
             }
         },
-        defaults=_settings(llm_timeout=700, task_timeout=1800),
+        defaults=_settings(task_timeout=1800),
     )
 
-    assert policy.default_step_timeout_seconds == 700
+    assert policy.default_step_timeout_seconds == 1740
     assert policy.max_step_timeout_seconds == 1800 - STEP_TIMEOUT_TASK_BUFFER_SECONDS
 
 
 def test_resolve_runtime_policy_ignores_version_only_storage_envelope() -> None:
     policy = resolve_flow_runtime_policy(
         {"runtime_policy": {"version": 1}},
-        defaults=_settings(llm_timeout=700, task_timeout=1800),
+        defaults=_settings(task_timeout=1800),
     )
 
-    assert policy.default_step_timeout_seconds == 700
+    assert policy.default_step_timeout_seconds == 1740
     assert policy.max_step_timeout_seconds == 1800 - STEP_TIMEOUT_TASK_BUFFER_SECONDS
 
 
@@ -191,16 +189,13 @@ def test_step_timeout_uses_policy_default_and_rejects_override_above_max() -> No
     assert exc_info.value.code == "flow_step_timeout_exceeds_tenant_max"
 
 
-def test_two_deployment_limits_define_the_effective_policy() -> None:
+def test_invocation_ceiling_defines_the_effective_policy() -> None:
     from eneo.main.config import Settings
 
-    assert Settings.model_fields["flow_step_budget_seconds"].default == 3600
     assert Settings.model_fields["task_execution_timeout_seconds"].default == 14400
-    defaults = SimpleNamespace(
-        flow_step_budget_seconds=3600, task_execution_timeout_seconds=14400
-    )
+    defaults = Settings.model_construct(task_execution_timeout_seconds=14400)
     policy = resolve_flow_runtime_policy(None, defaults=defaults)
-    assert policy.default_step_timeout_seconds == 3600
+    assert policy.default_step_timeout_seconds == 14340
     assert policy.hard_ceiling_seconds == 14340
     assert (
         resolve_step_timeout_seconds(step_timeout_seconds=7200, policy=policy) == 7200
@@ -209,10 +204,7 @@ def test_two_deployment_limits_define_the_effective_policy() -> None:
         validate_flow_runtime_policy_object(
             {"max_step_timeout_seconds": 14400}, defaults=defaults
         )
-    defaults.flow_step_budget_seconds = 20000
-    assert (
-        resolve_flow_runtime_policy(
-            None, defaults=defaults
-        ).default_step_timeout_seconds
-        == 14340
-    )
+    with pytest.raises(BadRequestException, match="exceeds max_step_timeout_seconds"):
+        validate_flow_runtime_policy_object(
+            {"default_step_timeout_seconds": 14400}, defaults=defaults
+        )

@@ -68,9 +68,10 @@ Set both variables on the backend API **and** the flow execution worker
 | `FLOW_TRANSCRIPTION_SERVICE_RESULT_TIMEOUT_SECONDS` | no | 120 | HTTP timeout for status and result requests. |
 | `FLOW_TRANSCRIPTION_SERVICE_MODE` | no | `full` | `full` or `diarize`; see Modes above. |
 
-Polling uses the step attempt's remaining execution budget. The default step
-budget is `FLOW_STEP_BUDGET_SECONDS` (3600); a step's `timeout_seconds` can raise
-it within the deployment ceiling.
+Polling uses the step attempt's remaining execution budget. By default a step may
+use the whole invocation ceiling (`TASK_EXECUTION_TIMEOUT_SECONDS` minus the
+finalization allowance) less what earlier steps of the run consumed; a step's
+`timeout_seconds` can lower it, never raise it past the ceiling.
 
 ### Service-side requirements (Tolka)
 

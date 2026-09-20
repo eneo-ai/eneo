@@ -816,13 +816,18 @@ Example run response:
 }
 ```
 
-`FLOW_STEP_BUDGET_SECONDS` defaults to 3,600 seconds per step attempt.
 `TASK_EXECUTION_TIMEOUT_SECONDS` defaults to 14,400 seconds per worker invocation;
-a review checkpoint or requeue starts a fresh invocation. The step ceiling is the
-invocation ceiling minus 60 seconds, and the default step budget is clamped to
-that ceiling. Organisation runtime policy and a step's `timeout_seconds` can
-change its effective budget within those limits. Completion requests and remote
-transcription polling use the remaining attempt budget. For `flow_step_timeout`,
+a review checkpoint or requeue starts a fresh invocation. The default step budget
+and hard ceiling both equal the invocation timeout minus a 60-second finalization
+allowance. A step no longer has a separate one-hour boundary. Organisation runtime
+policy and a step's `timeout_seconds` can lower its budget within that ceiling.
+Each step's budget is also clamped to the invocation's remaining time minus the
+same finalization allowance, so earlier steps leave less time for later steps.
+
+One budget bounds the entire step attempt: preparation, provider calls, retries,
+mapped items, and finalization. Completion requests and remote transcription
+polling use the remaining attempt budget. A step refuses to start when only the
+invocation's finalization allowance remains. For `flow_step_timeout`,
 read `error.details.phase` and
 `completed_items` / `total_items` when present to locate the interruption.
 `provider_work_may_have_completed: true` means an interrupted provider request

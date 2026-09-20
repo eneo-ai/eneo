@@ -5070,7 +5070,10 @@ async def test_execute_step_records_attempt_start_before_llm_dispatch(user):
     assert attempt_start is not None
     assert attempt_start.requested_model == "gpt-4o-mini"
     assert attempt_start.provider == "openai"
-    assert attempt_start.resolved_timeout_seconds == 3600
+    assert (
+        attempt_start.resolved_timeout_seconds
+        == executor.runtime_policy.default_step_timeout_seconds
+    )
     assert attempt_start.input_text_length == 5
     assert attempt_input.resolved_input is not None
     assert attempt_input.resolved_input["text"] == "hello"

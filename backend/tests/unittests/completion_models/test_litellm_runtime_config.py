@@ -38,19 +38,24 @@ def test_config_sets_request_timeout_and_disables_retries(
     assert litellm.request_timeout > 0
 
 
-def test_config_default_request_timeout_tracks_step_budget_setting(
+def test_config_default_request_timeout_tracks_runtime_policy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Requests outside an attempt inherit the deployment step budget."""
+    """Requests outside an attempt inherit the deployment runtime policy."""
+    from eneo.flows.flow_runtime_policy import default_flow_runtime_policy
     from eneo.main.config import get_settings
 
     settings = get_settings()
-    monkeypatch.setattr(settings, "flow_step_budget_seconds", 777)
+    monkeypatch.setattr(settings, "task_execution_timeout_seconds", 837)
     monkeypatch.setattr(litellm, "request_timeout", None, raising=False)
 
     configure_litellm_runtime(litellm)
 
     assert litellm.request_timeout == 777
+    assert (
+        litellm.request_timeout
+        == default_flow_runtime_policy().default_step_timeout_seconds
+    )
 
 
 @pytest.mark.asyncio

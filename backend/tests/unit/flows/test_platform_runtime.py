@@ -199,6 +199,7 @@ async def test_execute_task_cancels_before_timeout_terminalization(monkeypatch) 
     from eneo.flows.runtime import tasks
 
     ordering: list[str] = []
+    errors = []
 
     async def execute(**_kwargs: object) -> dict[str, str]:
         try:
@@ -209,6 +210,7 @@ async def test_execute_task_cancels_before_timeout_terminalization(monkeypatch) 
 
     async def terminalize(**kwargs: object) -> None:
         ordering.append(f"terminalize:{kwargs['source']}")
+        errors.append(kwargs["error"])
 
     monkeypatch.setattr(tasks, "_execute_flow_run_async", execute)
     monkeypatch.setattr(tasks, "terminalize_flow_run_failure", terminalize)
@@ -234,6 +236,32 @@ async def test_execute_task_cancels_before_timeout_terminalization(monkeypatch) 
         "execution_cancelled",
         f"terminalize:{FlowRunLifecycleSource.TASK_TIMEOUT}",
     ]
+    assert errors[0].code.value == "flow_task_timeout"
+    assert errors[0].details is None
+    assert errors[0].retryable is False
+
+
+async def test_execute_task_passes_its_existing_invocation_deadline(monkeypatch):
+    from eneo.flows.runtime import tasks
+
+    invocation_timeout = asyncio.timeout(600)
+    monkeypatch.setattr(tasks.asyncio, "timeout", lambda seconds: invocation_timeout)
+    execute = AsyncMock(return_value={"status": "completed"})
+    monkeypatch.setattr(tasks, "_execute_flow_run_async", execute)
+
+    result = await tasks.execute_flow_run_task(
+        run_id=str(uuid4()),
+        flow_id=str(uuid4()),
+        tenant_id=str(uuid4()),
+        run_revision=1,
+        principal_type="user",
+        principal_user_id=str(uuid4()),
+        task_id=str(uuid4()),
+        retry_count=0,
+    )
+
+    assert result == {"status": "completed"}
+    assert execute.await_args.kwargs["invocation_deadline"] == invocation_timeout.when()
 
 
 async def test_registered_worker_leaves_time_to_persist_execution_timeout(
