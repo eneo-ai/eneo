@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import io
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import httpx
