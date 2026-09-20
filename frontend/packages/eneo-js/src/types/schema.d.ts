@@ -19927,11 +19927,15 @@ export interface components {
     };
     /** FlowRunErrorDetails */
     FlowRunErrorDetails: {
+      /** Ceiling Bytes */
+      ceiling_bytes?: number | null;
       /**
        * Completed Items
        * @description Mapped items completed before the interruption.
        */
       completed_items?: number | null;
+      /** Measured Bytes */
+      measured_bytes?: number | null;
       /** @description Observed execution phase when the budget expired. */
       phase?: components["schemas"]["FlowStepPhase"] | null;
       /** @description Secret-free provider-call facts retained when the local evidence transaction failed after bounded retries. This describes a local persistence gap, not an unknown remote outcome. */
