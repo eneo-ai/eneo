@@ -19891,6 +19891,11 @@ export interface components {
       show_model_pricing?: boolean;
       /** Privacy Policy */
       privacy_policy?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
       /** Default Role Id */
       default_role_id?: string | null;
     };
