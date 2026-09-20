@@ -22,6 +22,7 @@ from eneo.flows.runtime.run_cancellation import (
     run_cancel_probe_scope,
 )
 from eneo.flows.runtime.step_deadline import StepDeadline, step_deadline_scope
+from eneo.main.config import Settings
 from eneo.main.exceptions import (
     APIKeyNotConfiguredException,
     OpenAIException,
@@ -131,7 +132,6 @@ def make_client(
         api_key="devtoken",
         submit_timeout_seconds=overrides.get("submit_timeout_seconds", 5.0),
         poll_interval_seconds=overrides.get("poll_interval_seconds", 0.001),
-        poll_timeout_seconds=overrides.get("poll_timeout_seconds", 5.0),
         result_timeout_seconds=overrides.get("result_timeout_seconds", 5.0),
         transport=httpx.MockTransport(service.handler),
     )
@@ -512,11 +512,14 @@ async def test_poll_deadline_cancels_job_and_is_unknown_outcome() -> None:
         submit_responses=[accepted()],
         status_responses=[status("queued", queue_position=3) for _ in range(50)],
     )
-    transcriber = RemoteFlowTranscriber(make_client(service, poll_timeout_seconds=0.01))
+    transcriber = RemoteFlowTranscriber(make_client(service))
     observer = RecordingObserver()
 
-    with pytest.raises(OpenAIException):
-        await transcriber.transcribe(audio_file(), SimpleNamespace(), observer=observer)
+    with step_deadline_scope(StepDeadline.start(0.01), step_order=1):
+        with pytest.raises(TypedIOValidationException):
+            await transcriber.transcribe(
+                audio_file(), SimpleNamespace(), observer=observer
+            )
 
     assert [reason for _, reason in observer.unknown_calls] == ["provider_error"]
     assert service.submit_count == 1
@@ -745,7 +748,6 @@ def test_build_remote_flow_transcriber_requires_configuration() -> None:
         flow_transcription_service_api_key="devtoken",
         flow_transcription_service_submit_timeout_seconds=600,
         flow_transcription_service_poll_interval_seconds=5.0,
-        flow_transcription_service_poll_timeout_seconds=3300,
         flow_transcription_service_result_timeout_seconds=120,
     )
     transcriber = build_remote_flow_transcriber(configured)
@@ -933,6 +935,14 @@ async def test_remote_poll_spends_the_attempt_budget(
         clock["now"] += duration
 
     monkeypatch.setattr(remote_transcription.asyncio, "sleep", advance)
+    timeouts = []
+    real_timeout = asyncio.timeout
+
+    def capture_timeout(delay):
+        timeouts.append(delay)
+        return real_timeout(delay)
+
+    monkeypatch.setattr(remote_transcription.asyncio, "timeout", capture_timeout)
     service = ScriptedService(
         status_responses=[
             status("running"),
@@ -945,8 +955,15 @@ async def test_remote_poll_spends_the_attempt_budget(
             httpx.Response(200, json=RESULT_BODY),
         ],
     )
-    client = make_client(service, poll_timeout_seconds=10000)
+    client = build_remote_flow_transcriber(
+        Settings.model_construct(
+            flow_transcription_service_url="http://tolka.test",
+            flow_transcription_service_api_key="devtoken",
+        )
+    ).client
+    client._transport = httpx.MockTransport(service.handler)
     for _ in range(2 if succeeds else 1):
+        timeout_index = len(timeouts)
         with step_deadline_scope(StepDeadline.start(budget), step_order=1):
             if succeeds:
                 result = await client.wait_for_result(JOB_ID)
@@ -956,24 +973,37 @@ async def test_remote_poll_spends_the_attempt_budget(
                     await client.wait_for_result(JOB_ID)
                 assert exc_info.value.code == "flow_step_timeout"
                 assert exc_info.value.step_phase.value == "transcription"
+        assert timeouts[timeout_index] == budget
 
 
-@pytest.mark.parametrize("configured,budget", [(1.0, 0.02), (0.02, 1.0)])
-async def test_remote_poll_bounds_a_stalled_request_by_the_smaller_budget(
-    monkeypatch, configured, budget
-):
+async def test_remote_poll_bounds_a_stalled_request_by_the_attempt_budget(monkeypatch):
     service = ScriptedService()
-    client = make_client(service, poll_timeout_seconds=configured)
+    client = make_client(service)
 
     async def stalled(*args):
         await asyncio.Event().wait()
 
     monkeypatch.setattr(client, "_poll_once", stalled)
-    with step_deadline_scope(StepDeadline.start(budget), step_order=1):
-        expected = (
-            TypedIOValidationException if budget < configured else OpenAIException
-        )
+    with step_deadline_scope(StepDeadline.start(0.02), step_order=1):
         async with asyncio.timeout(0.3):
-            with pytest.raises(expected):
+            with pytest.raises(TypedIOValidationException):
                 await client.wait_for_result(JOB_ID)
     assert service.cancel_count == 1
+
+
+async def test_remote_poll_without_attempt_has_no_duration_limit(monkeypatch):
+    timeouts = []
+    real_timeout = asyncio.timeout
+
+    def capture_timeout(delay):
+        timeouts.append(delay)
+        return real_timeout(delay)
+
+    monkeypatch.setattr(remote_transcription.asyncio, "timeout", capture_timeout)
+    service = ScriptedService(
+        status_responses=[status("running"), status("completed")],
+        result_responses=[httpx.Response(200, json=RESULT_BODY)],
+    )
+    result = await make_client(service).wait_for_result(JOB_ID)
+    assert result.text == RESULT_BODY["text"]
+    assert timeouts == [None]

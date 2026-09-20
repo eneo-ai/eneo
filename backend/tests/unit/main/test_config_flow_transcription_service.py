@@ -48,23 +48,11 @@ def test_configured_service_with_key_is_valid() -> None:
     assert settings.flow_transcription_service_poll_interval_seconds > 0
 
 
-@pytest.mark.parametrize("ceiling", [3600, 14400])
-def test_poll_timeout_must_stay_below_task_execution_timeout(ceiling: int) -> None:
-    with pytest.raises(SystemExit):
-        make_settings(
-            flow_transcription_service_url="http://tolka.test",
-            flow_transcription_service_api_key="devtoken",
-            task_execution_timeout_seconds=ceiling,
-            flow_transcription_service_poll_timeout_seconds=ceiling,
-        )
-
-
 @pytest.mark.parametrize(
     "field",
     [
         "flow_transcription_service_submit_timeout_seconds",
         "flow_transcription_service_poll_interval_seconds",
-        "flow_transcription_service_poll_timeout_seconds",
         "flow_transcription_service_result_timeout_seconds",
     ],
 )

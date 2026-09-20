@@ -42,6 +42,7 @@ class _Observer:
         self.started_requests: list[object] = []
         self.completed_calls: list[UUID] = []
         self.rejected_reasons: list[str] = []
+        self.unknown_reasons: list[str] = []
 
     async def started(self, request: object) -> UUID:
         self.started_requests.append(request)
@@ -54,7 +55,7 @@ class _Observer:
         self.rejected_reasons.append(reason)
 
     async def outcome_unknown(self, call_id: UUID, reason: str) -> None:
-        pass
+        self.unknown_reasons.append(reason)
 
 
 def _adapter() -> LiteLLMTranscriptionAdapter:
@@ -225,6 +226,36 @@ async def test_settled_request_clears_the_in_flight_fact(monkeypatch, tmp_path) 
     with step_deadline_scope(StepDeadline.start(30.0), step_order=1) as scope:
         await _adapter().get_text_from_file(audio)  # type: ignore[arg-type]
         assert scope.provider_request_in_flight is False
+
+
+async def test_timed_out_request_keeps_unknown_outcome_on_budget_refusal(
+    monkeypatch, tmp_path
+) -> None:
+    clock = {"now": 0.0}
+    monkeypatch.setattr(step_deadline_module, "_now", lambda: clock["now"])
+    monkeypatch.setattr(
+        LiteLLMTranscriptionAdapter._transcribe_chunk.retry, "sleep", AsyncMock()
+    )
+
+    async def timed_out(**kwargs):
+        clock["now"] += kwargs["timeout"]
+        raise TimeoutError("Request timed out after dispatch")
+
+    transport = AsyncMock(side_effect=timed_out)
+    monkeypatch.setattr(TRANSPORT, transport)
+    audio = _audio(tmp_path, [300.0], monkeypatch)
+    observer = _Observer()
+    with step_deadline_scope(StepDeadline.start(30), step_order=1):
+        with pytest.raises(TypedIOValidationException) as exc_info:
+            await _adapter().get_text_from_file(audio, observer=observer)
+
+    transport.assert_awaited_once()
+    assert len(observer.started_requests) == 1
+    assert observer.unknown_reasons == ["provider_error"]
+    assert observer.completed_calls == []
+    assert observer.rejected_reasons == []
+    assert exc_info.value.code == "flow_step_timeout"
+    assert exc_info.value.provider_work_may_have_completed is True
 
 
 async def test_cancelled_chunk_request_is_not_retried(monkeypatch, tmp_path) -> None:

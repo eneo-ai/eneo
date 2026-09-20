@@ -168,7 +168,6 @@ class RemoteTranscriptionClient:
         api_key: str,
         submit_timeout_seconds: float,
         poll_interval_seconds: float,
-        poll_timeout_seconds: float,
         result_timeout_seconds: float,
         transport: httpx.AsyncBaseTransport | None = None,
         include_speaker_review: bool = False,
@@ -177,7 +176,6 @@ class RemoteTranscriptionClient:
         self._api_key = api_key
         self.submit_timeout_seconds = submit_timeout_seconds
         self.poll_interval_seconds = poll_interval_seconds
-        self.poll_timeout_seconds = poll_timeout_seconds
         self.result_timeout_seconds = result_timeout_seconds
         self._transport = transport
         self.include_speaker_review = include_speaker_review
@@ -301,12 +299,7 @@ class RemoteTranscriptionClient:
         record_step_phase(FlowStepPhase.TRANSCRIPTION)
         scope = current_step_deadline_scope()
         remaining = scope.deadline.remaining() if scope is not None else None
-        poll_timeout = (
-            min(self.poll_timeout_seconds, remaining)
-            if remaining is not None
-            else self.poll_timeout_seconds
-        )
-        timeout = asyncio.timeout(poll_timeout)
+        timeout = asyncio.timeout(remaining)
         try:
             async with timeout:
                 return await self._poll_until_result(
@@ -316,23 +309,13 @@ class RemoteTranscriptionClient:
             await self.cancel(job_id)
             raise
         except TimeoutError:
-            if not timeout.expired():
+            if not timeout.expired() or scope is None:
                 raise
             await self.cancel(job_id)
-            if (
-                scope is not None
-                and remaining is not None
-                and remaining <= self.poll_timeout_seconds
-            ):
-                raise scope.deadline.timeout_error(
-                    step_order=scope.step_order,
-                    phase="transcription",
-                    provider_request_in_flight=True,
-                ) from None
-            raise OpenAIException(
-                litellm_transport.PROVIDER_ERROR_MESSAGE,
-                code="provider_error",
-                details={"reason": "provider_error", "retryable": True},
+            raise scope.deadline.timeout_error(
+                step_order=scope.step_order,
+                phase="transcription",
+                provider_request_in_flight=True,
             ) from None
 
     async def _poll_until_result(
@@ -927,9 +910,6 @@ def build_remote_flow_transcriber(settings: "Settings") -> RemoteFlowTranscriber
             ),
             poll_interval_seconds=(
                 settings.flow_transcription_service_poll_interval_seconds
-            ),
-            poll_timeout_seconds=(
-                settings.flow_transcription_service_poll_timeout_seconds
             ),
             result_timeout_seconds=(
                 settings.flow_transcription_service_result_timeout_seconds

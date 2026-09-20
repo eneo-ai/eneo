@@ -9,11 +9,17 @@ from uuid import UUID, uuid4
 import pytest
 
 from eneo.files.file_models import FileType
+from eneo.flows.enums import FlowStepPhase
 from eneo.flows.runtime.document_rendering.limits import DocumentRenderLimits
 from eneo.flows.runtime.output_runtime import (
     OutputRuntimeDeps,
     TypedOutputProcessingResult,
     process_typed_output,
+)
+from eneo.flows.runtime.step_deadline import (
+    StepDeadline,
+    current_step_deadline_scope,
+    step_deadline_scope,
 )
 from eneo.main.exceptions import TypedIOValidationException
 
@@ -100,15 +106,25 @@ async def test_process_typed_output_docx_creates_artifact_file() -> None:
     step = _Step(step_order=3, output_type="docx", output_contract=None)
     run = _Run(tenant_id=uuid4())
     file_id = uuid4()
+    phases = []
+
+    def compile_validators(steps):
+        phases.append(current_step_deadline_scope().phase)
+        return {}
+
+    async def save_generated_file(**kwargs):
+        phases.append(current_step_deadline_scope().phase)
+        return SimpleNamespace(id=file_id)
+
     file_service = SimpleNamespace(
-        save_generated_file=AsyncMock(return_value=SimpleNamespace(id=file_id))
+        save_generated_file=AsyncMock(side_effect=save_generated_file)
     )
     blob = b"docx-bytes"
     mimetype = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     filename = "step-3-output.docx"
     deps = OutputRuntimeDeps(
         file_service=file_service,
-        compile_validators=lambda steps: {},
+        compile_validators=compile_validators,
         parse_json_output=lambda text: {"unused": True},
         validate_against_contract=lambda data, schema, label: None,
         render_document=lambda text, output_type, step_order: (
@@ -123,12 +139,16 @@ async def test_process_typed_output_docx_creates_artifact_file() -> None:
         ),
     )
 
-    result = await process_typed_output(
-        full_text="Rendered docx content",
-        step=step,
-        run=run,
-        deps=deps,
-    )
+    with step_deadline_scope(StepDeadline.start(30), step_order=3) as scope:
+        scope.phase = FlowStepPhase.INPUT_RESOLUTION
+        result = await process_typed_output(
+            full_text="Rendered docx content",
+            step=step,
+            run=run,
+            deps=deps,
+        )
+
+    assert phases == [FlowStepPhase.FINALIZATION, FlowStepPhase.FINALIZATION]
 
     assert result.structured_output is None
     assert result.artifacts == [

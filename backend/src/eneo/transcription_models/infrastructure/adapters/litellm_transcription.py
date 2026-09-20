@@ -303,7 +303,6 @@ class LiteLLMTranscriptionAdapter:
                 await observer.outcome_unknown(call_id, "request_cancelled")
             raise
         except Exception as e:
-            mark_provider_request_in_flight(False)
             logger.exception(f"[LiteLLM] {self.litellm_model}: Unknown exception:")
             try:
                 litellm_transport.raise_public_litellm_error(
@@ -313,6 +312,7 @@ class LiteLLMTranscriptionAdapter:
                     raise_unavailable=litellm_transport.raise_provider_unavailable,
                 )
             except ProviderRejectedRequestException:
+                mark_provider_request_in_flight(False)
                 # The provider answered and refused. That is a known outcome, so
                 # it must not leave the run's audio total marked incomplete.
                 if observer is not None and call_id is not None:

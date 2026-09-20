@@ -8,7 +8,14 @@ from litellm.exceptions import BadRequestError
 from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
     TenantModelAdapter,
 )
-from eneo.main.exceptions import OpenAIException, ProviderCapabilityRejectedException
+from eneo.flows.enums import FlowStepPhase
+from eneo.flows.runtime import step_deadline
+from eneo.flows.runtime.step_deadline import StepDeadline, step_deadline_scope
+from eneo.main.exceptions import (
+    OpenAIException,
+    ProviderCapabilityRejectedException,
+    TypedIOValidationException,
+)
 from eneo.model_providers.domain.provider_call_observer import (
     ProviderCallObserverError,
 )
@@ -402,6 +409,58 @@ async def test_provider_call_observer_wraps_actual_non_streaming_io():
     assert result.provider_response_id == "observed-response"
     assert result.response_model == "observed-model"
     observer.rejected.assert_not_awaited()
+    observer.outcome_unknown.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("completed_calls", [0, 1])
+async def test_budget_refusal_preserves_typed_error_and_rejects_unsent_receipt(
+    monkeypatch, completed_calls
+):
+    adapter = _make_adapter()
+    clock = {"now": 0.0}
+    monkeypatch.setattr(step_deadline, "_now", lambda: clock["now"])
+    call_ids = []
+
+    async def started(request):
+        if len(call_ids) == completed_calls:
+            clock["now"] = 1.0
+        call_ids.append(uuid4())
+        return call_ids[-1]
+
+    observer = SimpleNamespace(
+        started=AsyncMock(side_effect=started),
+        completed=AsyncMock(),
+        rejected=AsyncMock(),
+        outcome_unknown=AsyncMock(),
+    )
+    response = _response(
+        response_id="initial",
+        tool_calls=[_tool_call()],
+        finish_reason="tool_calls",
+    )
+    with (
+        patch(
+            "eneo.model_providers.infrastructure.litellm_transport.litellm.acompletion",
+            AsyncMock(return_value=response),
+        ) as request,
+        step_deadline_scope(StepDeadline.start(1), step_order=1) as scope,
+    ):
+        scope.phase = FlowStepPhase.PROVIDER_REQUEST
+        with pytest.raises(TypedIOValidationException) as exc_info:
+            await adapter.get_response(
+                context=SimpleNamespace(),
+                model_kwargs={},
+                mcp_proxy=_FakeMCPProxy(),
+                provider_call_observer=observer,
+            )
+
+    assert exc_info.value.code == "flow_step_timeout"
+    assert exc_info.value.step_phase is FlowStepPhase.PROVIDER_REQUEST
+    assert request.await_count == completed_calls
+    assert observer.started.await_count == completed_calls + 1
+    assert observer.completed.await_count == completed_calls
+    observer.rejected.assert_awaited_once_with(call_ids[-1], "budget_exhausted")
     observer.outcome_unknown.assert_not_awaited()
 
 

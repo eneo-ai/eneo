@@ -75,12 +75,14 @@ from eneo.completion_models.infrastructure.tenant_model_capabilities import (
 from eneo.completion_models.infrastructure.tenant_model_capabilities import (
     get_supported_openai_params as get_model_supported_openai_params,
 )
+from eneo.flows.runtime.step_deadline import StepDeadlineExceeded
 from eneo.logging.logging import LoggingDetails
 from eneo.main.exceptions import (
     APIKeyNotConfiguredException,
     OpenAIException,
     ProviderCapabilityRejectedException,
     ProviderRejectedRequestException,
+    TypedIOValidationException,
 )
 from eneo.main.logging import get_logger
 from eneo.model_providers.domain.provider_call_observer import (
@@ -1593,7 +1595,7 @@ class TenantModelAdapter(CompletionModelAdapter):
             )
             return completion
 
-        except ProviderCallObserverError:
+        except (ProviderCallObserverError, TypedIOValidationException):
             raise
         except Exception as exc:
             logger.exception(
@@ -1654,6 +1656,12 @@ class TenantModelAdapter(CompletionModelAdapter):
         except asyncio.CancelledError:
             if observer is not None and call_id is not None:
                 await observer.outcome_unknown(call_id, "request_cancelled")
+            raise
+        except StepDeadlineExceeded:
+            if observer is not None and call_id is not None:
+                await observer.rejected(call_id, "budget_exhausted")
+            raise
+        except TypedIOValidationException:
             raise
         except Exception as exc:
             try:
@@ -1781,6 +1789,8 @@ class TenantModelAdapter(CompletionModelAdapter):
                 eneo_tools=provider_input.built_in_tools,
             )
 
+        except TypedIOValidationException:
+            raise
         except Exception as exc:
             logger.exception(
                 f"[TenantModelAdapter] Unexpected error creating stream for {self.litellm_model}"
@@ -2779,6 +2789,8 @@ class TenantModelAdapter(CompletionModelAdapter):
                 f"[TenantModelAdapter] {self.litellm_model}: Stream iteration completed"
             )
 
+        except TypedIOValidationException:
+            raise
         except Exception as exc:
             # Mid-stream errors: yield error event instead of raising
             if isinstance(exc, ContextWindowExceededError):

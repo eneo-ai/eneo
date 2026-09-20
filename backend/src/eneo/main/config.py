@@ -362,7 +362,6 @@ class Settings(BaseSettings):
     flow_transcription_service_api_key: Optional[str] = None
     flow_transcription_service_submit_timeout_seconds: int = 600
     flow_transcription_service_poll_interval_seconds: float = 5.0
-    flow_transcription_service_poll_timeout_seconds: int = 3300
     flow_transcription_service_result_timeout_seconds: int = 120
     # full: the service transcribes and diarizes. diarize: the flow's registry
     # model transcribes (with word timestamps) and the service only adds speaker
@@ -954,7 +953,6 @@ class Settings(BaseSettings):
         for name in (
             "flow_transcription_service_submit_timeout_seconds",
             "flow_transcription_service_poll_interval_seconds",
-            "flow_transcription_service_poll_timeout_seconds",
             "flow_transcription_service_result_timeout_seconds",
         ):
             value = getattr(self, name)
@@ -965,19 +963,6 @@ class Settings(BaseSettings):
                     value,
                 )
                 sys.exit(1)
-
-        if (
-            self.flow_transcription_service_poll_timeout_seconds
-            >= self.task_execution_timeout_seconds
-        ):
-            logging.error(
-                "FLOW_TRANSCRIPTION_SERVICE_POLL_TIMEOUT_SECONDS (%s) must be "
-                "below TASK_EXECUTION_TIMEOUT_SECONDS (%s) so a waiting "
-                "transcription fails before the whole run is reaped.",
-                self.flow_transcription_service_poll_timeout_seconds,
-                self.task_execution_timeout_seconds,
-            )
-            sys.exit(1)
 
         return self
 

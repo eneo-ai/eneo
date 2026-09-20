@@ -20,7 +20,8 @@ from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import 
     _build_tool_result_with_references,
     _ToolResultBudget,
 )
-from eneo.main.exceptions import OpenAIException
+from eneo.flows.runtime.step_deadline import StepDeadline, step_deadline_scope
+from eneo.main.exceptions import OpenAIException, TypedIOValidationException
 from eneo.mcp_servers.infrastructure.tool_approval import (
     ToolApprovalDecision,
     ToolApprovalWaitResult,
@@ -365,6 +366,55 @@ async def _collect(adapter: TenantModelAdapter, stream, **kwargs):
     ):
         output.append(chunk)
     return output
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method_name", ["get_response", "prepare_streaming"])
+async def test_completion_preserves_typed_validation_error(method_name):
+    adapter = _make_completion_adapter()
+    error = TypedIOValidationException("Invalid input")
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(side_effect=error),
+    ):
+        with pytest.raises(TypedIOValidationException) as exc_info:
+            await getattr(adapter, method_name)(
+                context=SimpleNamespace(), model_kwargs={}
+            )
+    assert exc_info.value is error
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("follow_up", [False, True])
+async def test_streaming_budget_refusal_does_not_send_or_become_an_error_event(
+    follow_up,
+):
+    adapter = _make_completion_adapter()
+    stream = _AsyncChunkStream(
+        [_tool_call_chunk()],
+        eneo_context={
+            "mcp_proxy": _FakeMCPProxy(),
+            "messages": [],
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+    with (
+        patch(
+            "eneo.model_providers.infrastructure.litellm_transport.litellm.acompletion",
+            AsyncMock(),
+        ) as request,
+        step_deadline_scope(StepDeadline.start(0), step_order=1),
+    ):
+        with pytest.raises(TypedIOValidationException) as exc_info:
+            if follow_up:
+                await _collect(adapter, stream, require_tool_approval=False)
+            else:
+                await adapter.prepare_streaming(
+                    context=SimpleNamespace(), model_kwargs={}
+                )
+    assert exc_info.value.code == "flow_step_timeout"
+    request.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -8,6 +8,7 @@ from uuid import UUID
 from eneo.files.file_models import FileInfo, FileType
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.domain.runtime import StepDiagnostic
+from eneo.flows.enums import FlowStepPhase
 from eneo.flows.output_processing import StructuredOutputValue
 from eneo.flows.runtime.document_rendering.limits import (
     DEFAULT_DOCUMENT_RENDER_LIMITS,
@@ -23,6 +24,7 @@ from eneo.flows.runtime.output_formats.base import (
     RenderStructuredDocumentFn,
     ValidateAgainstContractFn,
 )
+from eneo.flows.runtime.step_deadline import record_step_phase
 
 
 class RuntimeOutputStep(Protocol):
@@ -77,6 +79,7 @@ async def process_typed_output(
     run: RuntimeOutputRun,
     deps: OutputRuntimeDeps,
 ) -> TypedOutputProcessingResult:
+    record_step_phase(FlowStepPhase.FINALIZATION)
     artifacts: list[dict[str, Any]] | None = None
 
     compiled = deps.compile_validators([step])

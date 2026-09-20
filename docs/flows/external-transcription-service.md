@@ -65,9 +65,12 @@ Set both variables on the backend API **and** the flow execution worker
 | `FLOW_TRANSCRIPTION_SERVICE_API_KEY` | yes when URL is set | unset | Static bearer token. Startup fails if the URL is set without it. |
 | `FLOW_TRANSCRIPTION_SERVICE_SUBMIT_TIMEOUT_SECONDS` | no | 600 | HTTP timeout for the multipart job submission (uploads can be large). |
 | `FLOW_TRANSCRIPTION_SERVICE_POLL_INTERVAL_SECONDS` | no | 5.0 | Delay between job-status polls. |
-| `FLOW_TRANSCRIPTION_SERVICE_POLL_TIMEOUT_SECONDS` | no | 3300 | Deadline for a job to finish. Must stay below `TASK_EXECUTION_TIMEOUT_SECONDS` (3600) so a waiting step fails before the whole run is reaped; startup enforces this. |
 | `FLOW_TRANSCRIPTION_SERVICE_RESULT_TIMEOUT_SECONDS` | no | 120 | HTTP timeout for status and result requests. |
 | `FLOW_TRANSCRIPTION_SERVICE_MODE` | no | `full` | `full` or `diarize`; see Modes above. |
+
+Polling uses the step attempt's remaining execution budget. The default step
+budget is `FLOW_STEP_BUDGET_SECONDS` (3600); a step's `timeout_seconds` can raise
+it within the deployment ceiling.
 
 ### Service-side requirements (Tolka)
 
@@ -129,7 +132,7 @@ service's canned speaker-labeled output.
 | --- | --- |
 | Startup exits with `FLOW_TRANSCRIPTION_SERVICE_API_KEY is required` | URL set without a key. |
 | Step fails immediately, logs show invalid credentials | Key does not match a token in `TOLKA_API_TOKENS`. |
-| Step fails after ~55 minutes | Poll deadline reached; the service is overloaded or the job is stuck. Check the service's queue depth and worker health. |
+| Step fails with `flow_step_timeout` | The step's execution budget is exhausted. Check the service's queue depth and worker health, or raise the step's `timeout_seconds` within the deployment ceiling. |
 | Steps fail with rate-limit errors | The service's per-client queue cap is full; raise `TOLKA_MAX_QUEUED_JOBS_PER_CLIENT` or add service workers. |
 | Transcript has no speaker labels | Speaker identification is off for the flow (wizard step 2), or the service ran without diarization support; check its engine tier and extras. In `diarize` mode also check the step for an `audio_diarization_skipped` diagnostic: the transcription model returned no word timestamps. |
 | `diarize` mode: service rejects jobs with 422 | The service does not accept `task=diarize` (older Tolka); upgrade it or use `full` mode. |
