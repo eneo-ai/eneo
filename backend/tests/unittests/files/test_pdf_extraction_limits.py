@@ -2,13 +2,24 @@ import multiprocessing
 import os
 import signal
 import time
+from contextlib import suppress
+from dataclasses import replace
+from functools import partial
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 import pytest
 
-from eneo.files.text import ExtractionError, PdfExtractionLimitExceeded, TextExtractor
+from eneo.files.text import (
+    ExtractionError,
+    PdfExtractionLimitExceeded,
+    PdfExtractionLimits,
+    TextExtractor,
+)
 from eneo.main.config import get_settings
+
+_LIMITS = PdfExtractionLimits(max_pages=10, max_extracted_bytes=1024, timeout_seconds=2)
 
 
 def _write_pdf(path, page_count):
@@ -48,6 +59,16 @@ def _write_pdf(path, page_count):
     return path
 
 
+def test_knowledge_pdf_extraction_ignores_flow_ceilings(tmp_path, monkeypatch):
+    monkeypatch.setattr(get_settings(), "flow_pdf_max_pages", 1)
+    monkeypatch.setattr(get_settings(), "flow_pdf_max_extracted_bytes", 1)
+    path = _write_pdf(tmp_path / "knowledge.pdf", 2)
+
+    assert (
+        TextExtractor().extract(path, "application/pdf") == "[PAGE 1]\nå\n\n[PAGE 2]\nå"
+    )
+
+
 class _ObservedExtractor(TextExtractor):
     @classmethod
     def _extract_pdf_page(cls, page):
@@ -79,12 +100,59 @@ def _crashed_child(*args):
     os._exit(17)
 
 
-def test_pdf_page_limit_refuses_before_reading_any_page(tmp_path, monkeypatch):
-    monkeypatch.setattr(get_settings(), "flow_pdf_max_pages", 2)
+def _hung_supervisor(path):
+    with (
+        patch.object(TextExtractor, "_extract_pdf_in_child", _hanging_child),
+        patch(
+            "eneo.files.text.TemporaryDirectory",
+            partial(TemporaryDirectory, dir=path.parent),
+        ),
+    ):
+        TextExtractor.extract_from_pdf(path, limits=_LIMITS)
+
+
+def test_pdf_child_deadline_survives_killed_supervisor(tmp_path):
+    path = _write_pdf(tmp_path / "orphan.pdf", 1)
+    pid_path = path.with_suffix(".pid")
+    supervisor = multiprocessing.get_context("spawn").Process(
+        target=_hung_supervisor, args=(path,)
+    )
+    child_pid = None
+    try:
+        supervisor.start()
+        deadline = time.monotonic() + 2
+        while not pid_path.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert pid_path.exists(), "parser did not start"
+        child_pid = int(pid_path.read_text())
+        supervisor.kill()
+        supervisor.join(1)
+        assert not supervisor.is_alive()
+
+        deadline = time.monotonic() + 2.5
+        while time.monotonic() < deadline:
+            try:
+                os.kill(child_pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.02)
+        else:
+            pytest.fail("PDF parser survived its deadline after supervisor death")
+    finally:
+        if supervisor.is_alive():
+            supervisor.kill()
+            supervisor.join()
+        supervisor.close()
+        if child_pid is not None:
+            with suppress(ProcessLookupError):
+                os.kill(child_pid, signal.SIGKILL)
+
+
+def test_pdf_page_limit_refuses_before_reading_any_page(tmp_path):
     path = _write_pdf(tmp_path / "many.pdf", 3)
 
     with pytest.raises(PdfExtractionLimitExceeded) as caught:
-        _ObservedExtractor.extract_from_pdf(path)
+        _ObservedExtractor.extract_from_pdf(path, limits=replace(_LIMITS, max_pages=2))
 
     assert (caught.value.limit, caught.value.measured, caught.value.ceiling) == (
         "pages",
@@ -94,14 +162,13 @@ def test_pdf_page_limit_refuses_before_reading_any_page(tmp_path, monkeypatch):
     assert not path.with_suffix(".pages").exists()
 
 
-def test_pdf_byte_limit_includes_utf8_markers_and_page_separators(
-    tmp_path, monkeypatch
-):
-    monkeypatch.setattr(get_settings(), "flow_pdf_max_extracted_bytes", 23)
+def test_pdf_byte_limit_includes_utf8_markers_and_page_separators(tmp_path):
     path = _write_pdf(tmp_path / "many.pdf", 3)
 
     with pytest.raises(PdfExtractionLimitExceeded) as caught:
-        _ObservedExtractor.extract_from_pdf(path)
+        _ObservedExtractor.extract_from_pdf(
+            path, limits=replace(_LIMITS, max_extracted_bytes=23)
+        )
 
     assert (caught.value.limit, caught.value.measured, caught.value.ceiling) == (
         "extracted_bytes",
@@ -111,16 +178,18 @@ def test_pdf_byte_limit_includes_utf8_markers_and_page_separators(
     assert path.with_suffix(".pages").read_text() == "1\n2\n"
 
 
-def test_pdf_at_page_and_byte_limits_is_accepted(tmp_path, monkeypatch):
-    monkeypatch.setattr(get_settings(), "flow_pdf_max_pages", 2)
-    monkeypatch.setattr(get_settings(), "flow_pdf_max_extracted_bytes", 24)
+def test_pdf_at_page_and_byte_limits_is_accepted(tmp_path):
     path = _write_pdf(tmp_path / "exact.pdf", 2)
 
-    assert _ObservedExtractor.extract_from_pdf(path) == "[PAGE 1]\nå\n\n[PAGE 2]\nå"
+    assert (
+        _ObservedExtractor.extract_from_pdf(
+            path, limits=replace(_LIMITS, max_pages=2, max_extracted_bytes=24)
+        )
+        == "[PAGE 1]\nå\n\n[PAGE 2]\nå"
+    )
 
 
 def test_hanging_pdf_parser_is_killed_and_reaped(tmp_path, monkeypatch):
-    monkeypatch.setattr(get_settings(), "flow_pdf_extraction_timeout_seconds", 2)
     monkeypatch.setattr(
         TextExtractor, "_extract_pdf_in_child", staticmethod(_hanging_child)
     )
@@ -128,7 +197,7 @@ def test_hanging_pdf_parser_is_killed_and_reaped(tmp_path, monkeypatch):
     started = time.monotonic()
 
     with pytest.raises(PdfExtractionLimitExceeded) as caught:
-        TextExtractor.extract_from_pdf(path)
+        TextExtractor.extract_from_pdf(path, limits=_LIMITS)
 
     elapsed = time.monotonic() - started
     assert caught.value.limit == "seconds"
@@ -144,7 +213,7 @@ def test_pdf_refusal_bypasses_plain_text_fallback(tmp_path):
     path = _write_pdf(tmp_path / "refusal.pdf", 1)
 
     with pytest.raises(PdfExtractionLimitExceeded) as caught:
-        _RefusingExtractor.extract_from_pdf(path)
+        _RefusingExtractor.extract_from_pdf(path, limits=_LIMITS)
 
     assert (caught.value.limit, caught.value.measured, caught.value.ceiling) == (
         "extracted_bytes",
@@ -160,7 +229,7 @@ def test_pdf_child_crash_is_an_extraction_error_and_is_reaped(tmp_path, monkeypa
     path = _write_pdf(tmp_path / "crash.pdf", 1)
 
     with pytest.raises(ExtractionError, match="exited with code 17"):
-        TextExtractor.extract_from_pdf(path)
+        TextExtractor.extract_from_pdf(path, limits=_LIMITS)
 
     pid = int(path.with_suffix(".pid").read_text())
     assert all(child.pid != pid for child in multiprocessing.active_children())
@@ -168,12 +237,19 @@ def test_pdf_child_crash_is_an_extraction_error_and_is_reaped(tmp_path, monkeypa
         os.kill(pid, 0)
 
 
-def test_pdf_fixture_preserves_golden_text():
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bounded", [False, True])
+async def test_pdf_fixture_preserves_golden_text(bounded):
     fixture = (
         Path(__file__).resolve().parents[3]
         / "scripts/fixtures/ai_builder_battle/06_tidigare_beslut.pdf"
     )
-    assert TextExtractor.extract_from_pdf(fixture) == (
+    result = (
+        await TextExtractor.extract_from_pdf_async(fixture, limits=_LIMITS)
+        if bounded
+        else TextExtractor.extract_from_pdf(fixture, limits=None)
+    )
+    assert result == (
         "[PAGE 1]\nProtokollsutdrag - Barn- och utbildningsnamndens arbetsutskott\n"
         "Diarienummer: BUN-2026-00037-1\nSammantradesdatum: 2026-02-11\n"
         "Paragraf 11: Ny forskolestruktur i Njurunda\n"

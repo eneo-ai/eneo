@@ -1,8 +1,14 @@
+import asyncio
 import logging
 import multiprocessing
+import signal
 import time
 import zipfile
+from collections.abc import Generator
+from contextlib import contextmanager
+from dataclasses import dataclass
 from enum import Enum
+from multiprocessing.process import BaseProcess
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Final, Literal
@@ -34,6 +40,13 @@ class ExtractionError(Exception):
 
 
 PdfExtractionLimit = Literal["pages", "extracted_bytes", "seconds"]
+
+
+@dataclass(frozen=True, slots=True)
+class PdfExtractionLimits:
+    max_pages: int
+    max_extracted_bytes: int
+    timeout_seconds: int
 
 
 class PdfExtractionLimitExceeded(ExtractionError):
@@ -328,55 +341,116 @@ class TextExtractor:
         return "\n\n".join(parts)
 
     @classmethod
-    def extract_from_pdf(cls, filepath: Path, filename: str | None = None) -> str:
-        from eneo.main.config import get_settings
-
-        settings = get_settings()
+    def extract_from_pdf(
+        cls,
+        filepath: Path,
+        filename: str | None = None,
+        *,
+        limits: PdfExtractionLimits | None = None,
+    ) -> str:
         display_name = filename or filepath.name
-        try:
-            # A file avoids a full result pipe blocking child exit before join().
-            with TemporaryDirectory(prefix="eneo-pdf-") as directory:
-                result_path = Path(directory) / "result.json"
-                process = multiprocessing.get_context("spawn").Process(
-                    target=cls._extract_pdf_in_child,
-                    args=(
-                        filepath,
-                        display_name,
-                        settings.flow_pdf_max_pages,
-                        settings.flow_pdf_max_extracted_bytes,
-                        result_path,
-                    ),
+        with cls._pdf_errors(display_name):
+            if limits is None:
+                return cls._extract_pdf_text(filepath, display_name, limits=None)
+            with cls._pdf_process(filepath, display_name, limits) as (
+                process,
+                result_path,
+                started,
+            ):
+                process.join(
+                    max(0, limits.timeout_seconds - (time.monotonic() - started))
                 )
-                started = time.monotonic()
-                timeout = settings.flow_pdf_extraction_timeout_seconds
-                try:
-                    process.start()
-                    process.join(max(0, timeout - (time.monotonic() - started)))
-                    elapsed = time.monotonic() - started
-                    if process.is_alive() or elapsed > timeout:
-                        raise PdfExtractionLimitExceeded("seconds", elapsed, timeout)
-                    if process.exitcode != 0:
-                        raise ExtractionError(
-                            f"PDF extraction process exited with code {process.exitcode}"
-                        )
-                    result = _PDF_RESULT.validate_json(result_path.read_bytes())
-                finally:
-                    if process.is_alive():
-                        process.kill()
-                        process.join()
-                    process.close()
+                return cls._pdf_process_result(process, result_path, started, limits)
 
-            if isinstance(result, str):
-                return result
-            if isinstance(result, _PdfLimitResult):
-                raise PdfExtractionLimitExceeded(
-                    result.limit, result.measured, result.ceiling
-                )
-            if result.kind == "encrypted":
-                raise PDFPasswordIncorrect(result.details)
-            if result.kind == "corrupt":
-                raise PDFSyntaxError(result.details)
-            raise ExtractionError(result.details)
+    @classmethod
+    async def extract_from_pdf_async(
+        cls,
+        filepath: Path,
+        filename: str | None = None,
+        *,
+        limits: PdfExtractionLimits,
+    ) -> str:
+        display_name = filename or filepath.name
+        with cls._pdf_errors(display_name):
+            with cls._pdf_process(filepath, display_name, limits) as (
+                process,
+                result_path,
+                started,
+            ):
+                while process.is_alive():
+                    remaining = limits.timeout_seconds - (time.monotonic() - started)
+                    if remaining <= 0:
+                        break
+                    await asyncio.sleep(min(0.05, remaining))
+                return cls._pdf_process_result(process, result_path, started, limits)
+
+    @classmethod
+    @contextmanager
+    def _pdf_process(
+        cls, filepath: Path, display_name: str, limits: PdfExtractionLimits
+    ) -> Generator[tuple[BaseProcess, Path, float]]:
+        # A file avoids a full result pipe blocking child exit before join().
+        with TemporaryDirectory(prefix="eneo-pdf-") as directory:
+            result_path = Path(directory) / "result.json"
+            started = time.monotonic()
+            process = multiprocessing.get_context("spawn").Process(
+                target=cls._extract_pdf_in_child,
+                args=(
+                    filepath,
+                    display_name,
+                    limits,
+                    started + limits.timeout_seconds,
+                    result_path,
+                ),
+            )
+            try:
+                process.start()
+                yield process, result_path, started
+            finally:
+                if process.is_alive():
+                    process.kill()
+                if process.pid is not None:
+                    process.join()
+                process.close()
+
+    @staticmethod
+    def _pdf_process_result(
+        process: BaseProcess,
+        result_path: Path,
+        started: float,
+        limits: PdfExtractionLimits,
+    ) -> str:
+        elapsed = time.monotonic() - started
+        if (
+            process.is_alive()
+            or elapsed >= limits.timeout_seconds
+            or process.exitcode == -signal.SIGALRM
+        ):
+            raise PdfExtractionLimitExceeded(
+                "seconds", max(elapsed, limits.timeout_seconds), limits.timeout_seconds
+            )
+        if process.exitcode != 0:
+            raise ExtractionError(
+                f"PDF extraction process exited with code {process.exitcode}"
+            )
+        result = _PDF_RESULT.validate_json(result_path.read_bytes())
+        if isinstance(result, str):
+            return result
+        if isinstance(result, _PdfLimitResult):
+            raise PdfExtractionLimitExceeded(
+                result.limit, result.measured, result.ceiling
+            )
+        if result.kind == "encrypted":
+            raise PDFPasswordIncorrect(result.details)
+        if result.kind == "corrupt":
+            raise PDFSyntaxError(result.details)
+        raise ExtractionError(result.details)
+
+    @staticmethod
+    @contextmanager
+    def _pdf_errors(display_name: str) -> Generator[None]:
+        try:
+            yield
         except ExtractionError:
             raise
         except PDFPasswordIncorrect as e:
@@ -396,13 +470,20 @@ class TextExtractor:
         cls,
         filepath: Path,
         display_name: str,
-        max_pages: int,
-        max_bytes: int,
+        limits: PdfExtractionLimits,
+        deadline: float,
         result_path: Path,
     ) -> None:
+        # The OS deadline survives supervisor death and does not require the
+        # parser to release the GIL or execute a Python signal handler.
+        signal.signal(signal.SIGALRM, signal.SIG_DFL)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            signal.raise_signal(signal.SIGALRM)
+        signal.setitimer(signal.ITIMER_REAL, remaining)
         result: str | _PdfLimitResult | _PdfErrorResult
         try:
-            result = cls._extract_pdf_text(filepath, display_name, max_pages, max_bytes)
+            result = cls._extract_pdf_text(filepath, display_name, limits)
         except PdfExtractionLimitExceeded as exc:
             result = _PdfLimitResult(
                 limit=exc.limit, measured=exc.measured, ceiling=exc.ceiling
@@ -420,12 +501,13 @@ class TextExtractor:
 
     @classmethod
     def _extract_pdf_text(
-        cls, filepath: Path, display_name: str, max_pages: int, max_bytes: int
+        cls, filepath: Path, display_name: str, limits: PdfExtractionLimits | None
     ) -> str:
         with pdfplumber.open(filepath) as pdf:
-            page_count = len(pdf.pages)
-            if page_count > max_pages:
-                raise PdfExtractionLimitExceeded("pages", page_count, max_pages)
+            if limits is not None and len(pdf.pages) > limits.max_pages:
+                raise PdfExtractionLimitExceeded(
+                    "pages", len(pdf.pages), limits.max_pages
+                )
             page_texts: list[str] = []
             extracted_bytes = 0
             has_content = False
@@ -442,13 +524,16 @@ class TextExtractor:
                     )
                     page_text = page.extract_text() or ""
                 framed_text = f"[PAGE {page.page_number}]\n{page_text}"
-                extracted_bytes += len(framed_text.encode("utf-8"))
-                if page_texts:
-                    extracted_bytes += 2
-                if extracted_bytes > max_bytes:
-                    raise PdfExtractionLimitExceeded(
-                        "extracted_bytes", extracted_bytes, max_bytes
-                    )
+                if limits is not None:
+                    extracted_bytes += len(framed_text.encode("utf-8"))
+                    if page_texts:
+                        extracted_bytes += 2
+                    if extracted_bytes > limits.max_extracted_bytes:
+                        raise PdfExtractionLimitExceeded(
+                            "extracted_bytes",
+                            extracted_bytes,
+                            limits.max_extracted_bytes,
+                        )
                 has_content = has_content or bool(page_text.strip())
                 page_texts.append(framed_text)
 
@@ -594,7 +679,12 @@ class TextExtractor:
             )
 
     def extract(
-        self, filepath: Path, mimetype: str | None = None, filename: str | None = None
+        self,
+        filepath: Path,
+        mimetype: str | None = None,
+        filename: str | None = None,
+        *,
+        pdf_limits: PdfExtractionLimits | None = None,
     ) -> str:
         mimetype = mimetype or magic.from_file(filepath, mime=True)  # pyright: ignore[reportUnknownMemberType]  # python-magic stubs are incomplete
         # Use original filename for error messages, fallback to temp filepath
@@ -624,7 +714,9 @@ class TextExtractor:
             ):
                 extracted_text = self.extract_from_plain_text(filepath, display_name)
             case TextMimeTypes.PDF:
-                extracted_text = self.extract_from_pdf(filepath, display_name)
+                extracted_text = self.extract_from_pdf(
+                    filepath, display_name, limits=pdf_limits
+                )
             case TextMimeTypes.DOCX:
                 extracted_text = self.extract_from_docx(filepath, display_name)
             case TextMimeTypes.PPTX:

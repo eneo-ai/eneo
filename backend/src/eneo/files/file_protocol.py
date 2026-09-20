@@ -19,7 +19,7 @@ from eneo.files.image_processing import (
     extract_images_from_office,
     extract_images_from_pdf,
 )
-from eneo.files.text import TextExtractor, TextMimeTypes
+from eneo.files.text import PdfExtractionLimits, TextExtractor, TextMimeTypes
 from eneo.main.config import get_settings
 from eneo.main.exceptions import FileTooLargeException
 from eneo.object_content.deployment_policy import (
@@ -145,6 +145,7 @@ class FileProtocol:
         upload_admission_snapshot: UploadAdmissionSnapshot | None = None,
         max_size: int | None = None,
         limit_name: str | None = None,
+        pdf_limits: PdfExtractionLimits | None = None,
     ) -> AsyncGenerator[PreparedFileUpload]:
         """Classify one upload into exact and derived content variants.
 
@@ -230,11 +231,22 @@ class FileProtocol:
                 )
                 return
 
-            extracted_text = self.text_extractor.extract(
-                filepath,
-                media_type,
-                upload_file.filename,
-            ).encode("utf-8")
+            if media_type == TextMimeTypes.PDF.value and pdf_limits is not None:
+                extracted_text = (
+                    (
+                        await self.text_extractor.extract_from_pdf_async(
+                            filepath, upload_file.filename, limits=pdf_limits
+                        )
+                    )
+                    .strip()
+                    .encode("utf-8")
+                )
+            else:
+                extracted_text = self.text_extractor.extract(
+                    filepath,
+                    media_type,
+                    upload_file.filename,
+                ).encode("utf-8")
             extracted = PendingFileContent(
                 variant=FileContentVariant.EXTRACTED_TEXT,
                 chunks=_bytes_chunks(extracted_text),

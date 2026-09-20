@@ -28,22 +28,6 @@ from eneo.files.text import (
 )
 
 
-@pytest.fixture
-def pdf_child_in_process(monkeypatch):
-    # Parser mocks stay in this process; process lifecycle has real-child tests.
-    def make_process(*, target, args):
-        process = MagicMock(exitcode=0)
-        process.is_alive.return_value = False
-        process.start.side_effect = lambda: target(*args)
-        return process
-
-    context = MagicMock()
-    context.Process.side_effect = make_process
-    monkeypatch.setattr(
-        "eneo.files.text.multiprocessing.get_context", lambda _: context
-    )
-
-
 class TestTextSanitizer:
     """Tests for TextSanitizer class."""
 
@@ -145,7 +129,6 @@ class TestTextExtractorPlainText:
         assert result == ""
 
 
-@pytest.mark.usefixtures("pdf_child_in_process")
 class TestTextExtractorPDF:
     """Tests for PDF text extraction."""
 
@@ -630,9 +613,7 @@ class TestTextExtractorExtractMethod:
 class TestTextExtractorErrorHandling:
     """Tests for error handling scenarios."""
 
-    def test_extract_from_pdf_raises_corrupt_error_on_syntax_error(
-        self, pdf_child_in_process
-    ):
+    def test_extract_from_pdf_raises_corrupt_error_on_syntax_error(self):
         """Should raise CorruptFileError when pdfplumber encounters a corrupt PDF."""
         from pdfminer.pdfparser import PDFSyntaxError
 
@@ -645,9 +626,7 @@ class TestTextExtractorErrorHandling:
             assert exc_info.value.code == "CORRUPT"
             assert "corrupt" in exc_info.value.message.lower()
 
-    def test_extract_from_pdf_raises_encrypted_error_on_password_failure(
-        self, pdf_child_in_process
-    ):
+    def test_extract_from_pdf_raises_encrypted_error_on_password_failure(self):
         with patch(
             "eneo.files.text.pdfplumber.open",
             side_effect=PDFPasswordIncorrect,

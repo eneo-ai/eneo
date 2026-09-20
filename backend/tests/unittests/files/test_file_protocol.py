@@ -1,5 +1,8 @@
 """Tests for FileProtocol limits from the immutable upload-admission snapshot."""
 
+import asyncio
+import os
+import time
 from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
@@ -12,9 +15,16 @@ from fastapi import UploadFile
 from eneo.files import file_protocol as file_protocol_module
 from eneo.files.file_models import FileContentVariant
 from eneo.files.file_protocol import FileProtocol
+from eneo.files.text import (
+    PdfExtractionLimitExceeded,
+    PdfExtractionLimits,
+    TextExtractor,
+)
+from eneo.main.config import get_settings
 from eneo.main.exceptions import FileTooLargeException
 from eneo.object_content.content import StorageKind
 from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
+from tests.unittests.files.test_pdf_extraction_limits import _hanging_child, _write_pdf
 
 # ── Fake settings ────────────────────────────────────────────────────────
 
@@ -100,12 +110,116 @@ async def _content_bytes(content) -> bytes:
     return b"".join([chunk async for chunk in content.chunks])
 
 
-async def _prepare(protocol: FileProtocol, upload: UploadFile):
+async def _prepare(protocol: FileProtocol, upload: UploadFile, *, pdf_limits=None):
     async with protocol.prepare_upload(
         upload,
         upload_admission_snapshot=_UPLOAD_ADMISSION,
+        pdf_limits=pdf_limits,
     ) as prepared:
         return prepared
+
+
+@pytest.mark.asyncio
+async def test_non_flow_pdf_upload_ignores_flow_ceilings(
+    protocol, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(get_settings(), "flow_pdf_max_pages", 1)
+    monkeypatch.setattr(get_settings(), "flow_pdf_max_extracted_bytes", 1)
+    protocol.text_extractor = TextExtractor()
+    payload = _write_pdf(tmp_path / "source.pdf", 2).read_bytes()
+    upload = UploadFile(
+        file=BytesIO(payload),
+        filename="source.pdf",
+        headers={"content-type": "application/pdf"},
+    )
+    protocol.file_size_service.get_file_size.return_value = len(payload)
+
+    prepared = await _prepare(protocol, upload)
+
+    assert (
+        await _content_bytes(prepared.contents[1])
+        == "[PAGE 1]\nå\n\n[PAGE 2]\nå".encode()
+    )
+
+
+@pytest.mark.asyncio
+async def test_pdf_wait_keeps_request_loop_responsive(protocol, tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        TextExtractor, "_extract_pdf_in_child", staticmethod(_hanging_child)
+    )
+    protocol.text_extractor = TextExtractor()
+    pdf = _write_pdf(tmp_path / "source.pdf", 1)
+    payload = pdf.read_bytes()
+    upload = UploadFile(
+        file=BytesIO(payload),
+        filename="source.pdf",
+        headers={"content-type": "application/pdf"},
+    )
+    protocol.file_size_service.get_file_size.return_value = len(payload)
+    ticks = 0
+    finished = asyncio.Event()
+
+    async def heartbeat():
+        nonlocal ticks
+        while not finished.is_set():
+            ticks += 1
+            await asyncio.sleep(0.02)
+
+    pulse = asyncio.create_task(heartbeat())
+    await asyncio.sleep(0)
+    started = time.monotonic()
+    try:
+        with pytest.raises(PdfExtractionLimitExceeded) as caught:
+            await _prepare(
+                protocol, upload, pdf_limits=PdfExtractionLimits(10, 1024, 2)
+            )
+    finally:
+        finished.set()
+        await pulse
+
+    assert caught.value.limit == "seconds"
+    assert caught.value.ceiling == 2
+    assert 2 <= time.monotonic() - started < 3.5
+    assert ticks >= 20
+    assert not (tmp_path / "uploaded").exists()
+    with pytest.raises(ProcessLookupError):
+        os.kill(int((tmp_path / "uploaded.pid").read_text()), 0)
+
+
+@pytest.mark.asyncio
+async def test_cancelled_pdf_upload_kills_child_and_cleans_up(
+    protocol, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        TextExtractor, "_extract_pdf_in_child", staticmethod(_hanging_child)
+    )
+    protocol.text_extractor = TextExtractor()
+    payload = _write_pdf(tmp_path / "source.pdf", 1).read_bytes()
+    upload = UploadFile(
+        file=BytesIO(payload),
+        filename="source.pdf",
+        headers={"content-type": "application/pdf"},
+    )
+    protocol.file_size_service.get_file_size.return_value = len(payload)
+    task = asyncio.create_task(
+        _prepare(protocol, upload, pdf_limits=PdfExtractionLimits(10, 1024, 2))
+    )
+    pid_path = tmp_path / "uploaded.pid"
+    try:
+        async with asyncio.timeout(3):
+            while not pid_path.exists():
+                await asyncio.sleep(0.01)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    assert not (tmp_path / "uploaded").exists()
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(pid_path.read_text()), 0)
 
 
 @pytest.mark.asyncio

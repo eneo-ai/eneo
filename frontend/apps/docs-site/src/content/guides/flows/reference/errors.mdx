@@ -27,7 +27,7 @@ Every `4xx` and `5xx` response from the Flow runtime API has the same JSON body:
 
 Fields that carry no value are omitted rather than sent as `null`, so treat every field except `message` and `code` as optional.
 
-For `flow_run_upload_pdf_exceeds_limit`, context contains `limit` (`pages`, `extracted_bytes`, or `seconds`), `measured`, and `ceiling`. The deployment settings `FLOW_PDF_MAX_PAGES`, `FLOW_PDF_MAX_EXTRACTED_BYTES`, and `FLOW_PDF_EXTRACTION_TIMEOUT_SECONDS` default to 500 pages, 33554432 extracted UTF-8 bytes (including page markers and separators), and 120 seconds. These defaults are provisional pending measurement and have no tenant overrides. The byte ceiling applies to extracted text, not the uploaded file. A timeout kills the extraction process.
+For `flow_run_upload_pdf_exceeds_limit`, context contains `limit` (`pages`, `extracted_bytes`, or `seconds`), `measured`, and `ceiling`. The deployment settings `FLOW_PDF_MAX_PAGES`, `FLOW_PDF_MAX_EXTRACTED_BYTES`, and `FLOW_PDF_EXTRACTION_TIMEOUT_SECONDS` default to 500 pages, 33554432 extracted UTF-8 bytes (including page markers and separators), and 120 seconds. These defaults are provisional pending measurement and have no tenant overrides. They apply only to flow runtime uploads; other PDF uploads keep their existing extraction behavior. The byte ceiling applies to extracted text, not the uploaded file. A timeout kills the extraction process, whose own deadline remains active if the request worker exits.
 
 ## Codes that are not `FlowApiErrorCode`
 

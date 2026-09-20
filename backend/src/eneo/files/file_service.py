@@ -45,6 +45,7 @@ from eneo.files.file_repo import (
     select_primary_file_content,
 )
 from eneo.files.file_usage import FileUsageRepository
+from eneo.files.text import PdfExtractionLimits
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -193,6 +194,7 @@ class FileService:
         *,
         max_size: int | None = None,
         before_commit: Callable[[FileInfo], Awaitable[None]] | None = None,
+        pdf_limits: PdfExtractionLimits | None = None,
     ) -> FileInfo:
         """Persist one file family and optionally join a dependent SQL write.
 
@@ -217,6 +219,7 @@ class FileService:
             upload_file,
             upload_admission_snapshot=snapshot,
             max_size=max_size,
+            pdf_limits=pdf_limits,
         ) as prepared:
             async with AsyncExitStack() as capture_stack:
                 family = tuple(

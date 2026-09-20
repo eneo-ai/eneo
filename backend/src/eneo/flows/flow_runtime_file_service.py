@@ -17,7 +17,7 @@ from eneo.database.database import AsyncSession
 from eneo.files.file_models import FileInfo
 from eneo.files.file_service import FileService
 from eneo.files.mime_support import canonicalize_mime, canonicalize_sniffed_mime
-from eneo.files.text import PdfExtractionLimitExceeded
+from eneo.files.text import PdfExtractionLimitExceeded, PdfExtractionLimits
 from eneo.flows.enums import FlowRuntimeInputFormat
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
@@ -37,6 +37,7 @@ from eneo.flows.published_runtime import (
     load_published_flow_runtime,
     load_published_runtime_inputs,
 )
+from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     ConflictException,
     FileNotSupportedException,
@@ -318,10 +319,16 @@ class FlowRuntimeFileService:
             )
 
         try:
+            settings = get_settings()
             return await self.file_service.save_file(
                 upload_file,
                 max_size=max_size,
                 before_commit=bind_and_audit,
+                pdf_limits=PdfExtractionLimits(
+                    max_pages=settings.flow_pdf_max_pages,
+                    max_extracted_bytes=settings.flow_pdf_max_extracted_bytes,
+                    timeout_seconds=settings.flow_pdf_extraction_timeout_seconds,
+                ),
             )
         except PdfExtractionLimitExceeded as exc:
             raise FlowBadRequestException(
