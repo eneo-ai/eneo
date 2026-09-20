@@ -27,6 +27,31 @@ class _Diagnostic:
         self.constraint_name = constraint_name
 
 
+@pytest.mark.asyncio
+async def test_retained_input_snapshot_selects_only_file_identities():
+    session = AsyncMock()
+    rows = MagicMock()
+    file_ids = [uuid4(), uuid4()]
+    rows.scalars.return_value.all.return_value = file_ids
+    session.execute.return_value = rows
+    repo = FlowRunRepository(session=session)
+    run_id, tenant_id = uuid4(), uuid4()
+
+    result = await repo.list_retained_input_file_ids(run_id=run_id, tenant_id=tenant_id)
+
+    assert result == file_ids
+    statement = session.execute.await_args.args[0]
+    assert list(statement.selected_columns.keys()) == ["file_id"]
+    compiled = statement.compile(dialect=postgresql.dialect())
+    sql = str(compiled)
+    assert "flow_step_results.current_attempt_no" in sql
+    assert "coalesce(" in sql
+    assert "input_payload_json" not in sql
+    assert "output_payload_json" not in sql
+    assert run_id in compiled.params.values()
+    assert tenant_id in compiled.params.values()
+
+
 class _ConstraintOrigin(Exception):
     def __init__(self, constraint_name: str):
         super().__init__(constraint_name)

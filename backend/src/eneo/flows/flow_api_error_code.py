@@ -209,6 +209,7 @@ class FlowApiErrorCode(str, Enum):
 FLOW_API_ERROR_CODES: tuple[FlowApiErrorCode, ...] = tuple(FlowApiErrorCode)
 FLOW_TYPED_IO_ERROR_CODES: frozenset[FlowApiErrorCode] = frozenset(
     {
+        FlowApiErrorCode.RUN_INPUT_EXCEEDS_LIMIT,
         FlowApiErrorCode.TYPED_IO_STRUCTURED_OUTPUT_EXCEEDS_LIMIT,
         FlowApiErrorCode.MODEL_CAPACITY_UNDECLARED,
         FlowApiErrorCode.LLM_OUTPUT_TRUNCATED,
@@ -263,7 +264,6 @@ FLOW_TYPED_IO_ERROR_CODES: frozenset[FlowApiErrorCode] = frozenset(
 )
 FLOW_RUN_TERMINAL_ERROR_CODES: frozenset[FlowApiErrorCode] = frozenset(
     {
-        FlowApiErrorCode.RUN_INPUT_EXCEEDS_LIMIT,
         FlowApiErrorCode.FLOW_DELETED,
         FlowApiErrorCode.RUN_CANCELLED,
         FlowApiErrorCode.RUN_USER_CANCELLED,

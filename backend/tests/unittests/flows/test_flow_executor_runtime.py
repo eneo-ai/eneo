@@ -65,7 +65,11 @@ from eneo.flows.enums import (
     FlowRunLifecycleSource,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.flow_run_error import FlowRunError
+from eneo.flows.flow_run_error import (
+    FlowRunError,
+    dump_flow_run_error,
+    parse_flow_run_error,
+)
 from eneo.flows.flow_run_provenance import (
     FlowResolvedInputEdges,
     FlowResolvedInputFlowInputSource,
@@ -411,7 +415,6 @@ def _build_executor(user, *, runtime_actor: FlowRunActor | None = None):
     session.rollback = AsyncMock()
     flow_run_repo = AsyncMock()
     flow_run_repo.list_step_results.return_value = []
-    flow_run_repo.list_current_step_input_file_ids_by_step_result_id.return_value = {}
     flow_version_repo = AsyncMock()
     flow_run_review_checkpoint_repo = AsyncMock()
     space_repo = AsyncMock()
@@ -440,6 +443,11 @@ def _build_executor(user, *, runtime_actor: FlowRunActor | None = None):
 
     flow_run_repo.allocate_next_attempt_no = AsyncMock(return_value=1)
     flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[])
+    flow_run_repo.list_retained_input_file_ids = AsyncMock(
+        side_effect=lambda **kwargs: list(
+            flow_run_repo.list_step_input_file_ids.return_value
+        )
+    )
     flow_run_repo.create_or_get_attempt_started = AsyncMock(
         side_effect=_create_or_get_attempt_started
     )
@@ -1464,6 +1472,103 @@ async def test_step_execution_failure_marks_attempt_and_run_failed(user):
     saved_result = flow_run_repo.save_step_result.await_args.args[1]
     assert saved_result.status == FlowStepResultStatus.FAILED
     assert saved_result.error_message == public_error
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "code,context,expected_details",
+    [
+        (
+            FlowApiErrorCode.RUN_INPUT_EXCEEDS_LIMIT,
+            {"kind": "binary", "measured": 120, "ceiling": 100},
+            {"measured_bytes": 120, "ceiling_bytes": 100},
+        ),
+        (
+            FlowApiErrorCode.TYPED_IO_STRUCTURED_OUTPUT_EXCEEDS_LIMIT,
+            {
+                "completed_items": 2,
+                "total_items": 3,
+                "measured_bytes": 120,
+                "ceiling_bytes": 100,
+            },
+            {
+                "completed_items": 2,
+                "total_items": 3,
+                "measured_bytes": 120,
+                "ceiling_bytes": 100,
+            },
+        ),
+    ],
+)
+async def test_budget_failure_persists_attempt_code_and_public_run_details(
+    user, code, context, expected_details
+):
+    executor, flow_repo, flow_run_repo, flow_version_repo = _build_executor(user)
+    queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
+    running_run = queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
+    step_id = uuid4()
+    assistant_id = uuid4()
+    claimed = _claimed_step_result(
+        run_id=queued_run.id,
+        flow_id=queued_run.flow_id,
+        tenant_id=user.tenant_id,
+        step_id=step_id,
+        assistant_id=assistant_id,
+    )
+
+    flow_run_repo.get = _run_get_mock(running_run, running_run)
+    flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
+    flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
+    flow_run_repo.finish_attempt = AsyncMock()
+    flow_version_repo.get = AsyncMock(
+        return_value=_published_flow_version(
+            flow_id=queued_run.flow_id,
+            version=queued_run.flow_version,
+            tenant_id=user.tenant_id,
+            definition_checksum=None,
+            definition_json={
+                "steps": [
+                    {
+                        "step_id": str(step_id),
+                        "step_order": 1,
+                        "assistant_id": str(assistant_id),
+                        "input_source": "flow_input",
+                        "output_mode": "pass_through",
+                    }
+                ]
+            },
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+    )
+    executor._flow_is_active = AsyncMock(return_value=True)
+    executor._execute_step = AsyncMock(
+        side_effect=TypedIOValidationException(
+            "Input or output budget exceeded", code=code.value, context=context
+        )
+    )
+    result = await executor.execute(
+        run_id=queued_run.id,
+        flow_id=queued_run.flow_id,
+        tenant_id=user.tenant_id,
+        run_revision=queued_run.revision,
+        dispatch_task_id="task-1",
+        retry_count=0,
+    )
+    assert result["status"] == "failed"
+    attempt = flow_run_repo.finish_attempt.await_args.kwargs
+    assert attempt["error_code"] == code.value
+    assert attempt["status"] == FlowStepAttemptStatus.FAILED
+    assert attempt["output_payload_json"] is None
+    saved_result = flow_run_repo.save_step_result.await_args.args[1]
+    assert saved_result.error_code == code.value
+    assert saved_result.output_payload_json is None
+    error = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs["error"]
+    persisted = dump_flow_run_error(error)
+    public = parse_flow_run_error(persisted).model_dump(mode="json", exclude_none=True)
+    assert public["code"] == code.value
+    assert public["retryable"] is False
+    assert public["details"] == expected_details
 
 
 @pytest.mark.parametrize(

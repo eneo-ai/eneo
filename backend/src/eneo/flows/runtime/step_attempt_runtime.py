@@ -122,6 +122,7 @@ def build_typed_failure_plan(
     completed_items: int | None = None,
     total_items: int | None = None,
     provider_work_may_have_completed: bool | None = None,
+    run_error_details: FlowRunErrorDetails | None = None,
 ) -> StepFailurePlan:
     public_error = run_error_message or error_message
     details = (
@@ -142,6 +143,15 @@ def build_typed_failure_plan(
         )
         else None
     )
+    # Budget facts (bytes/items from a refusal's context) and observed
+    # step-timeout facts share one details owner; observed facts win where both
+    # name the same field.
+    if run_error_details is not None:
+        details = (
+            run_error_details.model_copy(update=details.model_dump(exclude_none=True))
+            if details is not None
+            else run_error_details
+        )
     return StepFailurePlan(
         attempt_status=FlowStepAttemptStatus.FAILED,
         error_code=error_code,

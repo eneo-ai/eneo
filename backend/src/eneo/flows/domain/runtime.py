@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
@@ -24,7 +25,7 @@ from eneo.flows.flow_run_provenance import (
 
 if TYPE_CHECKING:
     from eneo.collections.domain.collection import Collection
-    from eneo.files.file_models import File
+    from eneo.files.file_models import File, FileInfo
     from eneo.integration.domain.entities.integration_knowledge import (
         IntegrationKnowledge,
     )
@@ -158,6 +159,20 @@ class StepInputValue:
     edges: tuple[FlowResolvedInputEdge, ...] = ()
 
 
+@dataclass(frozen=True)
+class InputFileSize:
+    inline_bytes: int
+    binary_bytes: int
+    upload_bytes: int
+    audio: bool
+
+
+@dataclass(frozen=True)
+class InputFileAdmission:
+    files: Mapping[UUID, FileInfo]
+    sizes: Mapping[UUID, InputFileSize]
+
+
 @dataclass
 class RunExecutionState:
     completed_by_order: dict[int, FlowStepResult]
@@ -165,6 +180,7 @@ class RunExecutionState:
     assistant_cache: dict[tuple[UUID, str], Any]
     json_mode_supported: dict[str, bool]
     file_cache: dict[frozenset[UUID], list[File]]
+    input_file_admission: InputFileAdmission | None = None
     json_schema_rejected_models: set[str] = field(default_factory=set[str])
     flow_id: UUID | None = None
     flow_space: Space | None = None

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, TypeVar
+from typing import TYPE_CHECKING, TypeVar
 from uuid import UUID
 
 from eneo.files.file_models import FileContentVariant, FileInfo, FileType
-from eneo.files.file_repo import FileContentReferenceRecord
+from eneo.files.file_repo import (
+    FileContentReferenceRecord,
+    select_binary_file_reference,
+)
 from eneo.flows.domain.canonical_json_hash import canonical_json_bytes
+from eneo.flows.domain.runtime import InputFileSize
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_input_limits import effective_upload_ceiling_bytes
@@ -19,28 +22,13 @@ if TYPE_CHECKING:
 _RuntimeFile = TypeVar("_RuntimeFile", "File", "FileInfo")
 
 
-class InputFileMetadataRepository(Protocol):
-    async def get_content_references(
-        self, file_ids: list[UUID]
-    ) -> list[FileContentReferenceRecord]: ...
-
-
-@dataclass(frozen=True)
-class InputFileSize:
-    inline_bytes: int
-    binary_bytes: int
-    upload_bytes: int
-    audio: bool
-
-
-async def measure_input_files(
-    *, files: Sequence[FileInfo], file_repo: InputFileMetadataRepository
+def measure_input_files(
+    *, files: Sequence[FileInfo], references: list[FileContentReferenceRecord]
 ) -> dict[UUID, InputFileSize]:
-    references = await file_repo.get_content_references(
-        list(dict.fromkeys(file.id for file in files))
-    )
     sizes_by_file: dict[UUID, dict[FileContentVariant, int]] = {}
+    references_by_file: dict[UUID, list[FileContentReferenceRecord]] = {}
     for reference in references:
+        references_by_file.setdefault(reference.file_id, []).append(reference)
         variants = sizes_by_file.setdefault(reference.file_id, {})
         variants[reference.variant] = (
             variants.get(reference.variant, 0) + reference.size_bytes
@@ -49,6 +37,10 @@ async def measure_input_files(
     for file in files:
         variants = sizes_by_file.get(file.id, {})
         original_size = variants.get(FileContentVariant.ORIGINAL, file.size)
+        selected_binary = select_binary_file_reference(
+            file.file_type, references_by_file.get(file.id, [])
+        )
+        binary_size = selected_binary.size_bytes if selected_binary else file.size
         inline_size = variants.get(
             FileContentVariant.EXTRACTED_TEXT,
             file.size if file.file_type == FileType.TEXT else 0,
@@ -60,7 +52,7 @@ async def measure_input_files(
         }
         sizes[file.id] = InputFileSize(
             inline_bytes=inline_size,
-            binary_bytes=0 if plain_text else original_size,
+            binary_bytes=0 if plain_text else binary_size,
             upload_bytes=original_size,
             audio=file.file_type == FileType.AUDIO,
         )

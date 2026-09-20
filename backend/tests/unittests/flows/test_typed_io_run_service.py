@@ -57,7 +57,7 @@ _FILE_REPO_UNSET = object()
 def _file_repo() -> AsyncMock:
     repo = AsyncMock()
     repo.get_list_by_id_and_owner.return_value = []
-    repo.get_infos_by_ids.return_value = []
+    repo.get_infos_with_references_by_ids.return_value = ([], [])
     return repo
 
 
@@ -251,15 +251,18 @@ async def test_create_run_stores_step_inputs_as_execution_file_rows(user):
     file_repo.get_list_by_id_and_owner.return_value = [
         SimpleNamespace(id=file_id) for file_id in (file_id_2, file_id_1)
     ]
-    file_repo.get_infos_by_ids.return_value = [
-        SimpleNamespace(
-            id=file_id,
-            mimetype="application/pdf",
-            size=1024,
-            file_type=FileType.DOCUMENT,
-        )
-        for file_id in (file_id_2, file_id_1)
-    ]
+    file_repo.get_infos_with_references_by_ids.return_value = (
+        [
+            SimpleNamespace(
+                id=file_id,
+                mimetype="application/pdf",
+                size=1024,
+                file_type=FileType.DOCUMENT,
+            )
+            for file_id in (file_id_2, file_id_1)
+        ],
+        [],
+    )
     await service.create_run(
         flow_id=flow.id,
         input_payload_json={"text": "hello"},

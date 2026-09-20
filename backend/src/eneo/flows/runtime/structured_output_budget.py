@@ -13,15 +13,15 @@ def structured_output_json(value: object) -> str:
 
 
 def _ensure_size_allowed(
-    *, measured_bytes: int, ceiling_bytes: int, items_completed: int, items_total: int
+    *, measured_bytes: int, ceiling_bytes: int, completed_items: int, total_items: int
 ) -> None:
     if measured_bytes > ceiling_bytes:
         raise TypedIOValidationException(
             "Structured step output exceeds the inline output ceiling.",
             code=FlowApiErrorCode.TYPED_IO_STRUCTURED_OUTPUT_EXCEEDS_LIMIT.value,
             context={
-                "items_completed": items_completed,
-                "items_total": items_total,
+                "completed_items": completed_items,
+                "total_items": total_items,
                 "measured_bytes": measured_bytes,
                 "ceiling_bytes": ceiling_bytes,
             },
@@ -32,30 +32,30 @@ def ensure_structured_output_allowed(
     value: object,
     *,
     ceiling_bytes: int,
-    items_completed: int = 1,
-    items_total: int = 1,
+    completed_items: int = 1,
+    total_items: int = 1,
 ) -> None:
     if value is not None:
         _ensure_size_allowed(
             measured_bytes=len(structured_output_json(value).encode("utf-8")),
             ceiling_bytes=ceiling_bytes,
-            items_completed=items_completed,
-            items_total=items_total,
+            completed_items=completed_items,
+            total_items=total_items,
         )
 
 
 class StructuredOutputBudget:
     """Count enriched items using the final JSON encoding, including framing."""
 
-    def __init__(self, *, array_key: str, ceiling_bytes: int, items_total: int) -> None:
+    def __init__(self, *, array_key: str, ceiling_bytes: int, total_items: int) -> None:
         self._measured_bytes = len(
             structured_output_json({array_key: []}).encode("utf-8")
         )
         self._item_count = 0
         self._ceiling_bytes = ceiling_bytes
-        self._items_total = items_total
+        self._total_items = total_items
 
-    def admit(self, items: Sequence[dict[str, Any]], *, items_completed: int) -> None:
+    def admit(self, items: Sequence[dict[str, Any]], *, completed_items: int) -> None:
         for item in items:
             self._measured_bytes += len(structured_output_json(item).encode("utf-8"))
             if self._item_count:
@@ -64,11 +64,11 @@ class StructuredOutputBudget:
         _ensure_size_allowed(
             measured_bytes=self._measured_bytes,
             ceiling_bytes=self._ceiling_bytes,
-            items_completed=items_completed,
-            items_total=self._items_total,
+            completed_items=completed_items,
+            total_items=self._total_items,
         )
 
-    def set_failure_progress(self, exc: BaseException, *, items_completed: int) -> None:
+    def set_failure_progress(self, exc: BaseException, *, completed_items: int) -> None:
         if (
             isinstance(exc, TypedIOValidationException)
             and exc.code
@@ -76,6 +76,6 @@ class StructuredOutputBudget:
         ):
             exc.context = {
                 **(exc.context or {}),
-                "items_completed": min(items_completed, self._items_total),
-                "items_total": self._items_total,
+                "completed_items": min(completed_items, self._total_items),
+                "total_items": self._total_items,
             }

@@ -218,7 +218,7 @@ async def execute_per_item_map(
     output_budget = StructuredOutputBudget(
         array_key=output_array_key,
         ceiling_bytes=prepared_items[0][2].deps.max_inline_text_bytes,
-        items_total=len(prepared_items),
+        total_items=len(prepared_items),
     )
     identity_fields = runtime_source_identity_fields_for_array_items(
         step.output_contract, output_array_key
@@ -252,7 +252,7 @@ async def execute_per_item_map(
                     output_array_key=output_array_key,
                     identity_fields=identity_fields,
                 ),
-                items_completed=item_number,
+                completed_items=item_number,
             )
             item_calls.append(item_call)
             record_step_progress(
@@ -273,7 +273,7 @@ async def execute_per_item_map(
             )
         )
     except BaseException as exc:
-        output_budget.set_failure_progress(exc, items_completed=len(item_calls) + 1)
+        output_budget.set_failure_progress(exc, completed_items=len(item_calls) + 1)
         # The calls that completed really did retrieve; publish them as a
         # partial envelope so the failed attempt records what it read. Also
         # for the executor's backstop cancellation, which carries the
@@ -381,8 +381,8 @@ async def _assemble_per_item_output(
         ensure_structured_output_allowed(
             typed_output.structured_output,
             ceiling_bytes=first_deps.max_inline_text_bytes,
-            items_completed=len(item_calls),
-            items_total=len(item_calls),
+            completed_items=len(item_calls),
+            total_items=len(item_calls),
         )
     except TypedIOValidationException as exc:
         raise attach_typed_failure_context(

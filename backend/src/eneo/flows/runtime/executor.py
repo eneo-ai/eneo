@@ -189,6 +189,7 @@ from eneo.flows.runtime.step_handlers.template_fill import TemplateFillStepHandl
 from eneo.flows.runtime.step_handlers.transcribe_only import TranscribeOnlyStepHandler
 from eneo.flows.runtime.step_input_resolution import (
     StepInputResolutionDeps,
+    admit_runtime_files,
 )
 from eneo.flows.runtime.step_input_resolution import (
     resolve_step_input as resolve_step_input_runtime,
@@ -1633,6 +1634,13 @@ class FlowRunExecutor:
             if requested_file_ids_override is None
             else list(requested_file_ids_override)
         )
+        if requested_file_ids:
+            await admit_runtime_files(
+                run=run,
+                requested_ids=list(requested_file_ids),
+                state=state,
+                deps=self._build_step_input_resolution_deps(),
+            )
         prepared = await prepare_step_execution(
             step=step,
             run=run,
@@ -1876,6 +1884,9 @@ class FlowRunExecutor:
             total_items=getattr(typed_exc, "total_items", None),
             provider_work_may_have_completed=getattr(
                 typed_exc, "provider_work_may_have_completed", None
+            ),
+            run_error_details=FlowRunErrorDetails.from_budget_context(
+                typed_exc.context
             ),
         )
         await self._rollback()
@@ -2277,19 +2288,10 @@ class FlowRunExecutor:
             if step.step_order > reviewed_step.step_order
         )
 
-    async def _resolve_step_input(
-        self,
-        *,
-        step: RuntimeStep,
-        context: dict[str, Any],
-        run: FlowRun,
-        prior_results: list[FlowStepResult],
-        state: RunExecutionState | None = None,
-        version_metadata: dict[str, Any] | None = None,
-        requested_file_ids: Sequence[UUID] = (),
-        transcription_call_observer: "ProviderCallObserver | None" = None,
-    ) -> StepInputValue:
-        deps = StepInputResolutionDeps(
+    def _build_step_input_resolution_deps(
+        self, transcription_call_observer: "ProviderCallObserver | None" = None
+    ) -> StepInputResolutionDeps:
+        return StepInputResolutionDeps(
             variable_resolver=self.variable_resolver,
             resolve_http_input_source_text=self._resolve_http_input_source_text,
             file_service=self.file_service,
@@ -2307,6 +2309,20 @@ class FlowRunExecutor:
             max_speakers_hint=self.max_speakers_hint,
             transcript_words_repo=self.transcript_words_repo,
         )
+
+    async def _resolve_step_input(
+        self,
+        *,
+        step: RuntimeStep,
+        context: dict[str, Any],
+        run: FlowRun,
+        prior_results: list[FlowStepResult],
+        state: RunExecutionState | None = None,
+        version_metadata: dict[str, Any] | None = None,
+        requested_file_ids: Sequence[UUID] = (),
+        transcription_call_observer: "ProviderCallObserver | None" = None,
+    ) -> StepInputValue:
+        deps = self._build_step_input_resolution_deps(transcription_call_observer)
         return await resolve_step_input_runtime(
             step=step,
             context=context,

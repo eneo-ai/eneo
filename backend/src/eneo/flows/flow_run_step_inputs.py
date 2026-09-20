@@ -6,6 +6,7 @@ from typing import Protocol, TypedDict
 from uuid import UUID
 
 from eneo.files.file_models import FileInfo, FileMetadata, FileOwner
+from eneo.files.file_repo import FileContentReferenceRecord
 from eneo.flows.domain.flow import FlowRuntimeInputConfig
 from eneo.flows.domain.mapped_execution_policy import (
     FlowMappedExecutionPolicy,
@@ -29,21 +30,22 @@ from eneo.flows.flow_input_limits import (
 )
 from eneo.flows.principal import FlowPrincipal
 from eneo.flows.runtime.input_files import (
-    InputFileMetadataRepository,
     ensure_input_file_budget,
     measure_input_files,
 )
 from eneo.main.config import get_settings
 
 
-class _FileRepositoryProtocol(InputFileMetadataRepository, Protocol):
+class _FileRepositoryProtocol(Protocol):
     async def get_list_by_id_and_owner(
         self,
         ids: list[UUID],
         owner: FileOwner,
     ) -> list[FileMetadata]: ...
 
-    async def get_infos_by_ids(self, file_ids: list[UUID]) -> list[FileInfo]: ...
+    async def get_infos_with_references_by_ids(
+        self, file_ids: list[UUID]
+    ) -> tuple[list[FileInfo], list[FileContentReferenceRecord]]: ...
 
 
 class _RuntimeUploadRepositoryProtocol(Protocol):
@@ -246,7 +248,7 @@ async def validate_submitted_step_inputs(
             owner=principal.file_owner(tenant_id=tenant_id),
         )
         owned_file_ids = {file.id for file in owned_files}
-        files = await file_repo.get_infos_by_ids(
+        files, references = await file_repo.get_infos_with_references_by_ids(
             [file_id for file_id in all_requested_file_ids if file_id in owned_file_ids]
         )
         file_by_id = {file.id: file for file in files}
@@ -272,7 +274,7 @@ async def validate_submitted_step_inputs(
             principal=principal,
             lock_for_binding=True,
         )
-        sizes = await measure_input_files(files=files, file_repo=file_repo)
+        sizes = measure_input_files(files=files, references=references)
 
         for step_id, requested_file_ids in requested_ids_by_step.items():
             spec = specs[step_id]

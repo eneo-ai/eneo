@@ -2927,8 +2927,8 @@ def test_build_output_payload_refuses_oversized_structured_output(monkeypatch):
         build_output_payload(output)
     assert error.value.code == "typed_io_structured_output_exceeds_limit"
     assert error.value.context == {
-        "items_completed": 1,
-        "items_total": 1,
+        "completed_items": 1,
+        "total_items": 1,
         "measured_bytes": 32,
         "ceiling_bytes": 20,
     }

@@ -2025,6 +2025,29 @@ class FlowRunRepository:
         )
         return list(rows)
 
+    async def list_retained_input_file_ids(
+        self, *, run_id: UUID, tenant_id: UUID
+    ) -> list[UUID]:
+        rows = await self.session.execute(
+            sa.select(FlowRunStepInputFiles.file_id)
+            .join(
+                FlowStepResults,
+                sa.and_(
+                    FlowStepResults.flow_run_id == FlowRunStepInputFiles.flow_run_id,
+                    FlowStepResults.tenant_id == FlowRunStepInputFiles.tenant_id,
+                    FlowStepResults.step_id == FlowRunStepInputFiles.step_id,
+                    FlowRunStepInputFiles.attempt_no
+                    == sa.func.coalesce(FlowStepResults.current_attempt_no, 1),
+                ),
+            )
+            .where(
+                FlowRunStepInputFiles.flow_run_id == run_id,
+                FlowRunStepInputFiles.tenant_id == tenant_id,
+            )
+            .order_by(FlowRunStepInputFiles.step_order, FlowRunStepInputFiles.ordinal)
+        )
+        return list(rows.scalars().all())
+
     async def list_current_step_input_file_ids_by_step_result_id(
         self,
         *,

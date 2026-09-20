@@ -909,6 +909,12 @@ class FileRepository:
         )
 
     async def get_infos_by_ids(self, file_ids: list[UUID]) -> list[FileInfo]:
+        infos, _ = await self.get_infos_with_references_by_ids(file_ids)
+        return infos
+
+    async def get_infos_with_references_by_ids(
+        self, file_ids: list[UUID]
+    ) -> tuple[list[FileInfo], list[FileContentReferenceRecord]]:
         metadata = await self.get_by_ids(file_ids)
         references = await self.get_content_references([file.id for file in metadata])
         legacy_infos = await self.get_legacy_infos([file.id for file in metadata])
@@ -922,10 +928,11 @@ class FileRepository:
             by_file[reference.file_id].append(reference)
         for content in legacy_infos:
             legacy_by_file[content.file_id].append(content)
-        return [
+        infos = [
             project_file_info(file, by_file[file.id], legacy_by_file[file.id])
             for file in metadata
         ]
+        return infos, references
 
     async def delete_by_owner_for_lifecycle(
         self,

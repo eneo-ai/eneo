@@ -198,7 +198,7 @@ _FILE_REPO_UNSET = object()
 def _file_repo() -> AsyncMock:
     repo = AsyncMock()
     repo.get_list_by_id_and_owner.return_value = []
-    repo.get_infos_by_ids.return_value = []
+    repo.get_infos_with_references_by_ids.return_value = ([], [])
     return repo
 
 
@@ -1759,14 +1759,17 @@ async def test_create_run_persists_expected_version_and_step_inputs(user):
     file_id = uuid4()
     runtime_upload_repo.list_bound_file_ids_for_owner.return_value = {file_id}
     file_repo.get_list_by_id_and_owner.return_value = [SimpleNamespace(id=file_id)]
-    file_repo.get_infos_by_ids.return_value = [
-        SimpleNamespace(
-            id=file_id,
-            mimetype="application/pdf",
-            size=1024,
-            file_type=FileType.DOCUMENT,
-        )
-    ]
+    file_repo.get_infos_with_references_by_ids.return_value = (
+        [
+            SimpleNamespace(
+                id=file_id,
+                mimetype="application/pdf",
+                size=1024,
+                file_type=FileType.DOCUMENT,
+            )
+        ],
+        [],
+    )
     flow_version_repo.get.return_value = _published_flow_version(
         flow_id=flow.id,
         version=2,
@@ -1876,14 +1879,17 @@ async def test_create_run_validates_service_key_step_inputs_by_principal_owner(u
     file_id = uuid4()
     runtime_upload_repo.list_bound_file_ids_for_owner.return_value = {file_id}
     file_repo.get_list_by_id_and_owner.return_value = [SimpleNamespace(id=file_id)]
-    file_repo.get_infos_by_ids.return_value = [
-        SimpleNamespace(
-            id=file_id,
-            mimetype="application/pdf",
-            size=1024,
-            file_type=FileType.DOCUMENT,
-        )
-    ]
+    file_repo.get_infos_with_references_by_ids.return_value = (
+        [
+            SimpleNamespace(
+                id=file_id,
+                mimetype="application/pdf",
+                size=1024,
+                file_type=FileType.DOCUMENT,
+            )
+        ],
+        [],
+    )
     flow_version_repo.get.return_value = _published_flow_version(
         flow_id=flow.id,
         version=2,
@@ -1922,7 +1928,7 @@ async def test_create_run_validates_service_key_step_inputs_by_principal_owner(u
             tenant_id=service_user.tenant_id
         ),
     )
-    file_repo.get_infos_by_ids.assert_awaited_once_with([file_id])
+    file_repo.get_infos_with_references_by_ids.assert_awaited_once_with([file_id])
     runtime_upload_repo.list_bound_file_ids_for_owner.assert_awaited_once()
 
 
@@ -1986,14 +1992,17 @@ async def test_create_run_rejects_runtime_step_input_mimetype(user):
     file_id = uuid4()
     runtime_upload_repo.list_bound_file_ids_for_owner.return_value = {file_id}
     file_repo.get_list_by_id_and_owner.return_value = [SimpleNamespace(id=file_id)]
-    file_repo.get_infos_by_ids.return_value = [
-        SimpleNamespace(
-            id=file_id,
-            mimetype="application/pdf",
-            size=1024,
-            file_type=FileType.DOCUMENT,
-        )
-    ]
+    file_repo.get_infos_with_references_by_ids.return_value = (
+        [
+            SimpleNamespace(
+                id=file_id,
+                mimetype="application/pdf",
+                size=1024,
+                file_type=FileType.DOCUMENT,
+            )
+        ],
+        [],
+    )
 
     with pytest.raises(BadRequestException) as exc_info:
         await service.create_run(

@@ -158,7 +158,7 @@ def _build_executor(
     flow_run_repo = AsyncMock()
     flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[])
     flow_run_repo.list_step_results.return_value = []
-    flow_run_repo.list_current_step_input_file_ids_by_step_result_id.return_value = {}
+    flow_run_repo.list_retained_input_file_ids.return_value = []
     flow_version_repo = AsyncMock()
     flow_run_review_checkpoint_repo = AsyncMock()
     space_repo = AsyncMock()

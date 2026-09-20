@@ -118,8 +118,12 @@ def _build_executor(user, *, max_inline_text_bytes: int = 1024 * 1024):
     session.rollback = AsyncMock()
     flow_run_repo = AsyncMock()
     flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[])
+    flow_run_repo.list_retained_input_file_ids = AsyncMock(
+        side_effect=lambda **kwargs: list(
+            flow_run_repo.list_step_input_file_ids.return_value
+        )
+    )
     flow_run_repo.list_step_results.return_value = []
-    flow_run_repo.list_current_step_input_file_ids_by_step_result_id.return_value = {}
 
     async def _activate_step_attempt(**kwargs):
         attempt_input = kwargs["attempt_input"]
@@ -310,24 +314,8 @@ async def test_runtime_admits_all_retained_files_before_first_hydration(
         )
         for _ in range(2)
     ]
-    results = [
-        _completed_step_result(
-            run_id=run.id,
-            flow_id=run.flow_id,
-            tenant_id=run.tenant_id,
-            step_order=order,
-            text="",
-        ).model_copy(update={"current_attempt_no": None})
-        for order in (1, 2)
-    ]
-    results[0] = results[0].model_copy(update={"step_id": step.step_id})
-    run_repo.list_step_results.return_value = results
     run_repo.list_step_input_file_ids.return_value = [file.id for file in files]
-    run_repo.list_current_step_input_file_ids_by_step_result_id.return_value = (
-        {results[0].id: [file.id for file in files]}
-        if mapped_preview
-        else {result.id: [file.id] for result, file in zip(results, files)}
-    )
+    run_repo.list_retained_input_file_ids.return_value = [file.id for file in files]
     executor.file_service.get_owned_file_infos.side_effect = None
     executor.file_service.get_owned_file_infos.return_value = files
     executor.file_service.get_files_by_ids.return_value = [files[0]]
@@ -480,8 +468,8 @@ async def test_mapped_structured_budget_refuses_enriched_output_with_evidence(
         await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
 
     assert error.value.code == "typed_io_structured_output_exceeds_limit"
-    assert error.value.context["items_completed"] == completed
-    assert error.value.context["items_total"] == 3
+    assert error.value.context["completed_items"] == completed
+    assert error.value.context["total_items"] == 3
     assert error.value.context["measured_bytes"] > 6000
     assert error.value.context["ceiling_bytes"] == 6000
     assert assistant.get_response.await_count == completed
@@ -489,6 +477,9 @@ async def test_mapped_structured_budget_refuses_enriched_output_with_evidence(
     assert len(evidence["items" if mode == "per_item" else "sources"]) == completed
     run_repo.update_step_result.assert_not_awaited()
     assert run.output_payload_json is None
+    if mode == "per_source":
+        executor.file_service.repo.get_content_references.assert_awaited_once()
+        run_repo.list_step_results.assert_not_awaited()
 
 
 def _prompt_for_output_format(

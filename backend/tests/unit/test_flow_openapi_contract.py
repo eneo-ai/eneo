@@ -2379,6 +2379,9 @@ def test_openapi_flow_run_public_exposes_structured_error(openapi_spec: dict) ->
         "completed_items",
         "total_items",
         "provider_work_may_have_completed",
+        # Budget facts from an admission or structured-output refusal.
+        "measured_bytes",
+        "ceiling_bytes",
     }
     phase_property = details_schema["properties"]["phase"]
     phase_options = phase_property.get("anyOf") or phase_property.get("oneOf") or []
@@ -2398,6 +2401,12 @@ def test_openapi_flow_run_public_exposes_structured_error(openapi_spec: dict) ->
         "finalization",
         "step_execution",
     }
+    for field in ("measured_bytes", "ceiling_bytes", "completed_items", "total_items"):
+        assert field not in details_schema.get("required", [])
+        assert details_schema["properties"][field]["anyOf"] == [
+            {"minimum": 0, "type": "integer"},
+            {"type": "null"},
+        ]
 
     gap_property = details_schema["properties"]["provider_call_evidence_gap"]
     gap_options = gap_property.get("anyOf") or gap_property.get("oneOf") or []

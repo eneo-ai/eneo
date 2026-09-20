@@ -125,7 +125,7 @@ def _resolution_deps(
     file_service.repo.get_content_references.return_value = []
     run_repo = AsyncMock()
     run_repo.list_step_results.return_value = []
-    run_repo.list_current_step_input_file_ids_by_step_result_id.return_value = {}
+    run_repo.list_retained_input_file_ids.return_value = []
     return StepInputResolutionDeps(
         variable_resolver=FlowVariableResolver(),
         resolve_http_input_source_text=AsyncMock(

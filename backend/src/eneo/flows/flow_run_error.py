@@ -181,6 +181,8 @@ NullablePublicTerminalErrorCode: TypeAlias = Annotated[
 class FlowRunErrorDetails(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    measured_bytes: int | None = Field(default=None, ge=0, strict=True)
+    ceiling_bytes: int | None = Field(default=None, ge=0, strict=True)
     step_description: str | None = Field(
         default=None,
         min_length=1,
@@ -224,6 +226,25 @@ class FlowRunErrorDetails(BaseModel):
         ):
             raise ValueError("completed_items must not exceed total_items.")
         return self
+
+    @classmethod
+    def from_budget_context(
+        cls, context: dict[str, object] | None
+    ) -> FlowRunErrorDetails | None:
+        if not context:
+            return None
+
+        def count(key: str, fallback: str | None = None) -> int | None:
+            value = context.get(key, context.get(fallback) if fallback else None)
+            return value if type(value) is int and value >= 0 else None
+
+        details = cls(
+            measured_bytes=count("measured_bytes", "measured"),
+            ceiling_bytes=count("ceiling_bytes", "ceiling"),
+            completed_items=count("completed_items"),
+            total_items=count("total_items"),
+        )
+        return details if details.model_dump(exclude_none=True) else None
 
     @classmethod
     def from_bad_request_context(

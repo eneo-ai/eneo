@@ -22,6 +22,7 @@ from eneo.files.text import (
 )
 from eneo.flows.domain.flow import FlowRun, FlowStepResult
 from eneo.flows.domain.runtime import (
+    InputFileAdmission,
     RunExecutionState,
     RuntimeStep,
     StepDiagnostic,
@@ -206,7 +207,7 @@ async def resolve_step_input(
     requested_ids = list(requested_file_ids) if runtime_input_config.enabled else []
 
     if requested_ids:
-        await _admit_runtime_files(
+        await admit_runtime_files(
             run=run, requested_ids=requested_ids, state=state, deps=deps
         )
         if runtime_input_config.input_format == "audio":
@@ -1124,7 +1125,7 @@ def _source_ref_value_to_text(value: Any) -> str:
     return str(value)
 
 
-async def _admit_runtime_files(
+async def admit_runtime_files(
     *,
     run: FlowRun,
     requested_ids: list[UUID],
@@ -1135,22 +1136,19 @@ async def _admit_runtime_files(
         raise RuntimeError(
             "Resolved Flow input limits are required before loading files"
         )
-    results: list[FlowStepResult] = await deps.flow_run_repo.list_step_results(
+    if state is not None and state.input_file_admission is not None:
+        _require_every_requested_file(
+            [
+                state.input_file_admission.files[file_id]
+                for file_id in requested_ids
+                if file_id in state.input_file_admission.files
+            ],
+            requested_ids=requested_ids,
+        )
+        return
+    retained_ids = await deps.flow_run_repo.list_retained_input_file_ids(
         run_id=run.id, tenant_id=run.tenant_id
     )
-    # Run creation binds pending input files to attempt 1 before the step starts.
-    input_results = [
-        result
-        if result.current_attempt_no is not None
-        else result.model_copy(update={"current_attempt_no": 1})
-        for result in results
-    ]
-    retained_by_result: dict[
-        UUID, Sequence[UUID]
-    ] = await deps.flow_run_repo.list_current_step_input_file_ids_by_step_result_id(
-        run_id=run.id, tenant_id=run.tenant_id, step_results=input_results
-    )
-    retained_ids = [file_id for ids in retained_by_result.values() for file_id in ids]
     retained_set = set(retained_ids)
     for file_id in requested_ids:
         if file_id not in retained_set:
@@ -1170,7 +1168,10 @@ async def _admit_runtime_files(
     described = await _describe_runtime_files(
         requested_ids=list(dict.fromkeys(retained_ids)), deps=deps
     )
-    sizes = await measure_input_files(files=described, file_repo=deps.file_service.repo)
+    references = await deps.file_service.repo.get_content_references(
+        [file.id for file in described]
+    )
+    sizes = measure_input_files(files=described, references=references)
     try:
         ensure_input_file_budget(
             file_ids=retained_ids,
@@ -1184,6 +1185,10 @@ async def _admit_runtime_files(
         raise TypedIOValidationException(
             str(exc), code=exc.code.value, context=exc.context
         ) from exc
+    if state is not None:
+        state.input_file_admission = InputFileAdmission(
+            files={file.id: file for file in described}, sizes=sizes
+        )
 
 
 async def _load_runtime_files(

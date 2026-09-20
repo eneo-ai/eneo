@@ -8,7 +8,8 @@ from uuid import uuid4
 import pytest
 
 from eneo.authentication.principal_types import PrincipalType
-from eneo.files.file_models import FileContentVariant, FileType
+from eneo.files.file_models import FileContentVariant, FileMetadata, FileType
+from eneo.files.file_repo import FileRepository
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.enums import FlowRuntimeInputFormat
@@ -67,7 +68,7 @@ async def test_admission_measures_all_steps_from_metadata(
     ]
     file_repo = AsyncMock()
     file_repo.get_list_by_id_and_owner.return_value = files
-    file_repo.get_infos_by_ids.return_value = files
+    file_repo.get_infos_with_references_by_ids.return_value = (files, [])
     file_repo.get_content_references.return_value = [
         SimpleNamespace(file_id=file_id, variant=variant, size_bytes=size)
         for file_id in file_ids
@@ -80,6 +81,10 @@ async def test_admission_measures_all_steps_from_metadata(
             ]
         )
     ]
+    file_repo.get_infos_with_references_by_ids.return_value = (
+        file_repo.get_infos_with_references_by_ids.return_value[0],
+        file_repo.get_content_references.return_value,
+    )
     upload_repo = AsyncMock()
     upload_repo.list_bound_file_ids_for_owner.return_value = set(file_ids)
     kwargs = dict(
@@ -137,6 +142,117 @@ def _runtime_step() -> RuntimeStep:
     )
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "original_bytes,selected_bytes,error_code",
+    [
+        (40, 120, "flow_run_input_exceeds_limit"),
+        (120, 40, "flow_run_step_input_file_too_large"),
+    ],
+)
+async def test_admission_bounds_selected_image_and_original_upload_separately(
+    original_bytes, selected_bytes, error_code
+):
+    step = _runtime_step()
+    file_id = uuid4()
+    file = SimpleNamespace(
+        id=file_id,
+        size=selected_bytes,
+        mimetype="image/png",
+        file_type=FileType.IMAGE,
+    )
+    file_repo = AsyncMock()
+    file_repo.get_list_by_id_and_owner.return_value = [file]
+    file_repo.get_infos_with_references_by_ids.return_value = ([file], [])
+    file_repo.get_content_references.return_value = [
+        SimpleNamespace(file_id=file_id, variant=variant, size_bytes=size)
+        for variant, size in (
+            (FileContentVariant.ORIGINAL, original_bytes),
+            (FileContentVariant.MODEL_INPUT, selected_bytes),
+        )
+    ]
+    file_repo.get_infos_with_references_by_ids.return_value = (
+        file_repo.get_infos_with_references_by_ids.return_value[0],
+        file_repo.get_content_references.return_value,
+    )
+    upload_repo = AsyncMock()
+    upload_repo.list_bound_file_ids_for_owner.return_value = {file_id}
+    specs = build_runtime_step_input_specs(
+        steps=[step],
+        limits=FlowInputLimits(file_max_size_bytes=100, audio_max_size_bytes=100),
+    )
+    specs[step.step_id] = replace(specs[step.step_id], accepted_mimetypes=["image/png"])
+    with pytest.raises(BadRequestException) as error:
+        await validate_submitted_step_inputs(
+            flow_id=uuid4(),
+            steps=[step],
+            specs=specs,
+            normalized_step_inputs={step.step_id: [file_id]},
+            file_repo=file_repo,
+            runtime_upload_repo=upload_repo,
+            principal=_principal(uuid4()),
+            tenant_id=uuid4(),
+        )
+    assert error.value.code == error_code
+    if original_bytes < 100:
+        assert error.value.context == {
+            "kind": "binary",
+            "measured": 120,
+            "ceiling": 100,
+        }
+    file_repo.get_legacy_content.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_admission_reuses_projected_content_references():
+    owner_id, tenant_id, file_id = uuid4(), uuid4(), uuid4()
+    metadata = FileMetadata(
+        id=file_id,
+        name="source.pdf",
+        file_type=FileType.TEXT,
+        mimetype="application/pdf",
+        owner_type=PrincipalType.USER,
+        owner_user_id=owner_id,
+        tenant_id=tenant_id,
+    )
+    repo = FileRepository(session=AsyncMock())
+    repo.get_by_ids = AsyncMock(return_value=[metadata])
+    repo.get_list_by_id_and_owner = AsyncMock(return_value=[metadata])
+    repo.get_legacy_infos = AsyncMock(return_value=[])
+    repo.get_content_references = AsyncMock(
+        return_value=[
+            SimpleNamespace(
+                file_id=file_id,
+                variant=variant,
+                size_bytes=size,
+                sha256=b"x" * 32,
+                media_type=media_type,
+            )
+            for variant, size, media_type in (
+                (FileContentVariant.ORIGINAL, 80, "application/pdf"),
+                (FileContentVariant.EXTRACTED_TEXT, 6, "text/plain"),
+            )
+        ]
+    )
+    upload_repo = AsyncMock()
+    upload_repo.list_bound_file_ids_for_owner.return_value = {file_id}
+    step = _runtime_step()
+    await validate_submitted_step_inputs(
+        flow_id=uuid4(),
+        steps=[step],
+        specs=build_runtime_step_input_specs(
+            steps=[step],
+            limits=FlowInputLimits(file_max_size_bytes=100, audio_max_size_bytes=100),
+        ),
+        normalized_step_inputs={step.step_id: [file_id]},
+        file_repo=repo,
+        runtime_upload_repo=upload_repo,
+        principal=_principal(owner_id),
+        tenant_id=tenant_id,
+    )
+    repo.get_content_references.assert_awaited_once_with([file_id])
+
+
 def _runtime_step_with_order(step_order: int) -> RuntimeStep:
     return replace(_runtime_step(), step_id=uuid4(), step_order=step_order)
 
@@ -180,14 +296,17 @@ async def test_validate_step_inputs_runs_owner_lookup_for_any_submitted_file_id(
     file_repo = AsyncMock()
     runtime_upload_repo = AsyncMock()
     file_repo.get_list_by_id_and_owner.return_value = [SimpleNamespace(id=file_id)]
-    file_repo.get_infos_by_ids.return_value = [
-        SimpleNamespace(
-            id=file_id,
-            file_type=FileType.DOCUMENT,
-            mimetype="application/pdf",
-            size=1024,
-        )
-    ]
+    file_repo.get_infos_with_references_by_ids.return_value = (
+        [
+            SimpleNamespace(
+                id=file_id,
+                file_type=FileType.DOCUMENT,
+                mimetype="application/pdf",
+                size=1024,
+            )
+        ],
+        [],
+    )
     runtime_upload_repo.list_bound_file_ids_for_owner.return_value = {file_id}
 
     await validate_submitted_step_inputs(
@@ -207,7 +326,7 @@ async def test_validate_step_inputs_runs_owner_lookup_for_any_submitted_file_id(
         ids=[file_id],
         owner=_principal(user_id).file_owner(tenant_id=tenant_id),
     )
-    file_repo.get_infos_by_ids.assert_awaited_once_with([file_id])
+    file_repo.get_infos_with_references_by_ids.assert_awaited_once_with([file_id])
 
 
 @pytest.mark.asyncio
@@ -227,7 +346,7 @@ async def test_validate_step_inputs_rejects_file_without_durable_content() -> No
     file_repo = AsyncMock()
     runtime_upload_repo = AsyncMock()
     file_repo.get_list_by_id_and_owner.return_value = [SimpleNamespace(id=file_id)]
-    file_repo.get_infos_by_ids.return_value = []
+    file_repo.get_infos_with_references_by_ids.return_value = ([], [])
 
     with pytest.raises(BadRequestException) as exc_info:
         await validate_submitted_step_inputs(
@@ -268,14 +387,17 @@ async def test_validate_step_inputs_rejects_owner_file_not_bound_to_flow() -> No
     file_repo = AsyncMock()
     runtime_upload_repo = AsyncMock()
     file_repo.get_list_by_id_and_owner.return_value = [SimpleNamespace(id=file_id)]
-    file_repo.get_infos_by_ids.return_value = [
-        SimpleNamespace(
-            id=file_id,
-            file_type=FileType.DOCUMENT,
-            mimetype="application/pdf",
-            size=1024,
-        )
-    ]
+    file_repo.get_infos_with_references_by_ids.return_value = (
+        [
+            SimpleNamespace(
+                id=file_id,
+                file_type=FileType.DOCUMENT,
+                mimetype="application/pdf",
+                size=1024,
+            )
+        ],
+        [],
+    )
     runtime_upload_repo.list_bound_file_ids_for_owner.return_value = set()
 
     with pytest.raises(BadRequestException) as exc_info:
@@ -348,14 +470,17 @@ async def test_validate_step_inputs_rejects_file_above_current_limit() -> None:
     file_repo = AsyncMock()
     runtime_upload_repo = AsyncMock()
     file_repo.get_list_by_id_and_owner.return_value = [SimpleNamespace(id=file_id)]
-    file_repo.get_infos_by_ids.return_value = [
-        SimpleNamespace(
-            id=file_id,
-            file_type=FileType.DOCUMENT,
-            mimetype="application/pdf",
-            size=101,
-        )
-    ]
+    file_repo.get_infos_with_references_by_ids.return_value = (
+        [
+            SimpleNamespace(
+                id=file_id,
+                file_type=FileType.DOCUMENT,
+                mimetype="application/pdf",
+                size=101,
+            )
+        ],
+        [],
+    )
     runtime_upload_repo.list_bound_file_ids_for_owner.return_value = {file_id}
 
     with pytest.raises(BadRequestException) as exc_info:
@@ -400,14 +525,17 @@ async def test_validate_step_inputs_allows_same_flow_file_for_multiple_steps() -
     file_repo = AsyncMock()
     runtime_upload_repo = AsyncMock()
     file_repo.get_list_by_id_and_owner.return_value = [SimpleNamespace(id=file_id)]
-    file_repo.get_infos_by_ids.return_value = [
-        SimpleNamespace(
-            id=file_id,
-            file_type=FileType.DOCUMENT,
-            mimetype="application/pdf",
-            size=1024,
-        )
-    ]
+    file_repo.get_infos_with_references_by_ids.return_value = (
+        [
+            SimpleNamespace(
+                id=file_id,
+                file_type=FileType.DOCUMENT,
+                mimetype="application/pdf",
+                size=1024,
+            )
+        ],
+        [],
+    )
     runtime_upload_repo.list_bound_file_ids_for_owner.return_value = {file_id}
 
     await validate_submitted_step_inputs(
@@ -428,7 +556,7 @@ async def test_validate_step_inputs_allows_same_flow_file_for_multiple_steps() -
 
     file_repo.get_list_by_id_and_owner.assert_awaited_once()
     assert file_repo.get_list_by_id_and_owner.await_args.kwargs["ids"] == [file_id]
-    file_repo.get_infos_by_ids.assert_awaited_once_with([file_id])
+    file_repo.get_infos_with_references_by_ids.assert_awaited_once_with([file_id])
     runtime_upload_repo.list_bound_file_ids_for_owner.assert_awaited_once()
 
 

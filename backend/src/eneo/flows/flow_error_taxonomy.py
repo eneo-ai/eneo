@@ -279,7 +279,7 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         user_action="Submit less text or fewer fields.",
     ),
     FlowApiErrorCode.RUN_INPUT_EXCEEDS_LIMIT: _entry(
-        category="Run input",
+        category="Typed input/output",
         surfaced_through="API response and run error payload",
         cause="The combined inline text or binary inputs exceed the input byte ceiling before file content is loaded.",
         consumer_action="Reduce the combined input size across all steps before retrying.",

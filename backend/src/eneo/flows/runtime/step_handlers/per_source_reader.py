@@ -214,7 +214,7 @@ async def execute_per_source_reader(
     output_budget = StructuredOutputBudget(
         array_key="documents",
         ceiling_bytes=prepared_sources[0][1].deps.max_inline_text_bytes,
-        items_total=len(prepared_sources),
+        total_items=len(prepared_sources),
     )
     try:
         for source_number, (file_id, prepared_step) in enumerate(
@@ -249,7 +249,7 @@ async def execute_per_source_reader(
                     source_label=f"{source_call.source_label} ({label_count})",
                 )
             output_budget.admit(
-                [_source_document_items(source_call)], items_completed=source_number
+                [_source_document_items(source_call)], completed_items=source_number
             )
             per_source_calls.append(source_call)
             record_step_progress(
@@ -268,7 +268,7 @@ async def execute_per_source_reader(
         )
     except BaseException as exc:
         output_budget.set_failure_progress(
-            exc, items_completed=len(per_source_calls) + 1
+            exc, completed_items=len(per_source_calls) + 1
         )
         # The calls that completed really did retrieve; publish them as a
         # partial envelope so the failed attempt records what it read, also
@@ -363,8 +363,8 @@ async def _assemble_per_source_output(
         ensure_structured_output_allowed(
             typed_output.structured_output,
             ceiling_bytes=first_deps.max_inline_text_bytes,
-            items_completed=len(per_source_calls),
-            items_total=len(per_source_calls),
+            completed_items=len(per_source_calls),
+            total_items=len(per_source_calls),
         )
     except TypedIOValidationException as exc:
         raise attach_typed_failure_context(

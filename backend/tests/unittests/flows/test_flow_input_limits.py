@@ -1,3 +1,5 @@
+import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -312,3 +314,27 @@ def test_effective_runtime_upload_policy_exposes_client_timeout_formula() -> Non
     assert policy.seconds_per_mebibyte == 8
     assert policy.max_timeout_seconds == 600
     assert policy.idle_timeout_seconds == 120
+
+
+@pytest.mark.parametrize(
+    "locale,ceiling_word,unlimited_word",
+    [
+        ("en", "deployment ceiling", "unlimited"),
+        ("sv", "driftsättningens gräns", "obegränsat"),
+    ],
+)
+def test_admin_empty_file_limit_copy_names_deployment_ceiling(
+    locale, ceiling_word, unlimited_word
+):
+    messages_path = (
+        Path(__file__).resolve().parents[4]
+        / "frontend/apps/web/messages"
+        / f"{locale}.json"
+    )
+    messages = json.loads(messages_path.read_text())
+    for key in (
+        "flow_input_limits_max_files_description",
+        "flow_input_limits_unlimited_hint",
+    ):
+        assert ceiling_word in messages[key].lower()
+        assert unlimited_word not in messages[key].lower()
