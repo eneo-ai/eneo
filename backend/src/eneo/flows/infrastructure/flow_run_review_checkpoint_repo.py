@@ -77,6 +77,7 @@ from eneo.flows.flow_review_policy import FlowStepReviewMode
 from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
     FlowRunAuditOutboxRepository,
 )
+from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from eneo.flows.principal import FlowAuditActorFields, FlowPrincipal
 
 
@@ -685,6 +686,9 @@ class FlowRunReviewCheckpointRepository:
         The repository persists downstream step IDs for resume decisions, but it
         does not infer graph topology while holding run locks.
         """
+        await FlowRunRepository(session=self.session).lock_execution_ownership(
+            run_id=flow_run_id, tenant_id=tenant_id
+        )
         run_row = await self.session.scalar(
             sa.select(FlowRuns)
             .where(FlowRuns.id == flow_run_id)

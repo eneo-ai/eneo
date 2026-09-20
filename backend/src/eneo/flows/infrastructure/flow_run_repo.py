@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Sequence, TypedDict, cast
@@ -41,6 +42,7 @@ from eneo.flows.domain.flow import (
     FlowStepResultStatus,
 )
 from eneo.flows.domain.flow_run_exceptions import (
+    FlowExecutionOwnershipLost,
     FlowRunNotFoundError,
     FlowRunPersistenceInvariantError,
 )
@@ -124,6 +126,11 @@ class FlowRunExecutionOwner:
     run_id: UUID
     tenant_id: UUID
     revision: int
+
+
+flow_run_execution_owner: ContextVar[FlowRunExecutionOwner | None] = ContextVar(
+    "flow_run_execution_owner", default=None
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -780,12 +787,24 @@ class FlowRunRepository:
         rows = (await self.session.execute(stmt)).scalars().all()
         return [FlowRun.model_validate(row) for row in rows]
 
+    async def stale_running_sweep_boundary(self) -> tuple[datetime, UUID] | None:
+        row = (
+            await self.session.execute(
+                sa.select(FlowRuns.execution_heartbeat_at, FlowRuns.id)
+                .where(stale_running_flow_run_predicate())
+                .order_by(FlowRuns.execution_heartbeat_at.desc(), FlowRuns.id.desc())
+                .limit(1)
+            )
+        ).first()
+        return (row[0], row[1]) if row is not None else None
+
     async def list_stale_running_runs(
         self,
         *,
         tenant_id: UUID | None = None,
         limit: int = 25,
         after: tuple[datetime, UUID] | None = None,
+        through: tuple[datetime, UUID] | None = None,
     ) -> list[FlowRunRecoveryCandidate]:
         if limit < 1:
             return []
@@ -805,6 +824,10 @@ class FlowRunRepository:
         if after is not None:
             stmt = stmt.where(
                 sa.tuple_(FlowRuns.execution_heartbeat_at, FlowRuns.id) > after
+            )
+        if through is not None:
+            stmt = stmt.where(
+                sa.tuple_(FlowRuns.execution_heartbeat_at, FlowRuns.id) <= through
             )
         rows = (await self.session.execute(stmt)).all()
         return [FlowRunRecoveryCandidate(*row) for row in rows]
@@ -853,6 +876,31 @@ class FlowRunRepository:
             )
             is not None
         )
+
+    async def lock_execution_ownership(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        session: AsyncSession | None = None,
+    ) -> None:
+        owner = flow_run_execution_owner.get()
+        if owner is None:
+            return
+        db_session = session or self.session
+        if owner.run_id == run_id and owner.tenant_id == tenant_id:
+            locked_id = await db_session.scalar(
+                sa.select(FlowRuns.id)
+                .where(FlowRuns.id == run_id, FlowRuns.tenant_id == tenant_id)
+                .with_for_update()
+            )
+            # Evaluate the lease after acquiring the lock, including any lock wait.
+            if locked_id is not None and await FlowRunRepository(
+                session=db_session
+            ).has_execution_ownership(owner=owner):
+                return
+        await db_session.rollback()
+        raise FlowExecutionOwnershipLost()
 
     async def claim_queued_run_for_dispatch(
         self,
@@ -1114,6 +1162,7 @@ class FlowRunRepository:
         cancelled_at: datetime | None = None,
         stale_running_revision: int | None = None,
     ) -> FlowRun | None:
+        await self.lock_execution_ownership(run_id=run_id, tenant_id=tenant_id)
         if target_status not in TERMINAL_FLOW_RUN_STATUSES:
             raise ValueError("target_status must be terminal")
 
@@ -1216,6 +1265,7 @@ class FlowRunRepository:
     async def record_evidence_classification_level(
         self, *, run_id: UUID, tenant_id: UUID, level: int
     ) -> None:
+        await self.lock_execution_ownership(run_id=run_id, tenant_id=tenant_id)
         await self.session.execute(
             sa.update(FlowRuns)
             .where(FlowRuns.id == run_id)
@@ -1230,6 +1280,7 @@ class FlowRunRepository:
         tenant_id: UUID,
         input_payload_patch: FlowRunInputEnvelopePatch,
     ) -> FlowPersistedJsonObject:
+        await self.lock_execution_ownership(run_id=run_id, tenant_id=tenant_id)
         current_payload = await self.session.scalar(
             sa.select(FlowRuns.input_payload_json)
             .where(FlowRuns.id == run_id)
@@ -2623,6 +2674,9 @@ class FlowRunRepository:
         non-success updates; an empty sequence intentionally clears them.
         """
         db_session = session or self.session
+        await self.lock_execution_ownership(
+            run_id=flow_run_id, tenant_id=tenant_id, session=db_session
+        )
 
         if result.status == FlowStepResultStatus.COMPLETED and attempt_no is None:
             raise ValueError("attempt_no is required for completed Flow step results.")
@@ -2746,6 +2800,7 @@ class FlowRunRepository:
         step_id: UUID,
         tenant_id: UUID,
     ) -> FlowStepResult | None:
+        await self.lock_execution_ownership(run_id=run_id, tenant_id=tenant_id)
         run_status = await self.session.scalar(
             sa.select(FlowRuns.status)
             .where(FlowRuns.id == run_id)
@@ -2807,6 +2862,7 @@ class FlowRunRepository:
         attempt_no: int,
         dispatch_task_id: str | None,
     ) -> FlowStepAttempt:
+        await self.lock_execution_ownership(run_id=run_id, tenant_id=tenant_id)
         run_status = await self.session.scalar(
             sa.select(FlowRuns.status)
             .where(FlowRuns.id == run_id)
@@ -2869,6 +2925,7 @@ class FlowRunRepository:
         resolved_input_edges: FlowResolvedInputEdges,
         attempt_input: FlowStepAttemptInput | None,
     ) -> FlowStepAttempt | None:
+        await self.lock_execution_ownership(run_id=run_id, tenant_id=tenant_id)
         row = await self.session.scalar(
             sa.select(FlowStepAttempts)
             .where(FlowStepAttempts.flow_run_id == run_id)
@@ -3025,6 +3082,7 @@ class FlowRunRepository:
         attempt_input: FlowStepAttemptInput | None = None,
         output_payload_json: FlowPersistedJsonObject | None = None,
     ) -> FlowStepAttempt | None:
+        await self.lock_execution_ownership(run_id=run_id, tenant_id=tenant_id)
         if rejected_completion is not None and status != FlowStepAttemptStatus.FAILED:
             raise ValueError("Rejected completions can only finish a failed attempt.")
         if rejected_completion is not None and any(

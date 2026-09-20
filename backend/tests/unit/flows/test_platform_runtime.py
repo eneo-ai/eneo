@@ -359,6 +359,10 @@ async def test_reconciler_uses_one_global_budget_and_advances_after_failure(
     repo = AsyncMock()
 
     repo.list_stale_running_runs.side_effect = [[run], []]
+    repo.stale_running_sweep_boundary.return_value = (
+        run.execution_heartbeat_at,
+        run.id,
+    )
     terminalizer = AsyncMock()
     terminalizer.terminalize_stale_running_run.side_effect = RuntimeError("unavailable")
     tenant_repo = AsyncMock()
@@ -386,9 +390,14 @@ async def test_reconciler_uses_one_global_budget_and_advances_after_failure(
         lambda: SimpleNamespace(task_execution_timeout_seconds=14400),
     )
     monkeypatch.setattr(tasks, "_stale_running_cursor", None, raising=False)
+    monkeypatch.setattr(tasks, "_stale_running_window_end", None)
     with pytest.raises(tasks.FlowTenantSweepPartialFailure):
         await tasks._reconcile_stale_running_runs_all_tenants(limit=1)
-    assert repo.list_stale_running_runs.await_args.kwargs == {"limit": 1, "after": None}
+    assert repo.list_stale_running_runs.await_args.kwargs == {
+        "limit": 1,
+        "after": None,
+        "through": (run.execution_heartbeat_at, run.id),
+    }
     assert tasks._stale_running_cursor == (run.execution_heartbeat_at, run.id)
     assert (
         terminalizer.terminalize_stale_running_run.await_args.kwargs[
@@ -397,3 +406,80 @@ async def test_reconciler_uses_one_global_budget_and_advances_after_failure(
         == 3
     )
     tenant_repo.get_all_tenant_ids.assert_not_awaited()
+
+
+async def test_reconciler_wraps_finite_window_despite_newer_arrivals(monkeypatch):
+    from contextlib import asynccontextmanager
+    from datetime import datetime, timedelta, timezone
+    from uuid import UUID
+
+    from eneo.flows.runtime import tasks
+
+    anchor = datetime.now(timezone.utc) - timedelta(minutes=10)
+    rows = []
+
+    def append_run(number):
+        rows.append(
+            SimpleNamespace(
+                id=UUID(int=number),
+                tenant_id=uuid4(),
+                revision=1,
+                execution_heartbeat_at=anchor + timedelta(seconds=number),
+            )
+        )
+
+    def key(row):
+        return row.execution_heartbeat_at, row.id
+
+    append_run(1)
+    append_run(2)
+    discovered = []
+
+    async def discover(*, limit, after=None, through=None):
+        candidates = [
+            row
+            for row in rows
+            if (after is None or key(row) > after)
+            and (through is None or key(row) <= through)
+        ][:limit]
+        discovered.append(len(candidates))
+        return candidates
+
+    repo = AsyncMock()
+    repo.list_stale_running_runs.side_effect = discover
+    repo.stale_running_sweep_boundary.side_effect = lambda: max(map(key, rows))
+    attempts = []
+
+    async def terminalize(**kwargs):
+        run_id = kwargs["run_id"]
+        attempts.append(run_id.int)
+        if attempts == [1]:
+            raise RuntimeError("transient")
+        rows[:] = [row for row in rows if row.id != run_id]
+        return SimpleNamespace(did_transition=True)
+
+    terminalizer = AsyncMock()
+    terminalizer.terminalize_stale_running_run.side_effect = terminalize
+    container = SimpleNamespace(
+        flow_run_repo=lambda: repo,
+        flow_provider_call_repo=lambda: AsyncMock(),
+        flow_run_terminalizer=lambda: terminalizer,
+    )
+
+    @asynccontextmanager
+    async def session_context():
+        yield MagicMock()
+
+    monkeypatch.setattr(tasks.sessionmanager, "session", session_context)
+    monkeypatch.setattr(tasks, "enable_autobegin_for_flow_task_session", lambda _: None)
+    monkeypatch.setattr(tasks, "Container", lambda **_: container)
+    monkeypatch.setattr(tasks, "_stale_running_cursor", None)
+    monkeypatch.setattr(tasks, "_stale_running_window_end", None, raising=False)
+    for number in range(3, 9):
+        try:
+            await tasks._reconcile_stale_running_runs_all_tenants(limit=1)
+        except tasks.FlowTenantSweepPartialFailure:
+            pass
+        append_run(number)
+    assert attempts[:3] == [1, 2, 1]
+    assert max(discovered) == 1

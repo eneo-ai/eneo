@@ -8,7 +8,11 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from eneo.flows.infrastructure.flow_run_repo import FlowRunExecutionOwner
+from eneo.flows.flow_run_input_envelope import FlowRunInputEnvelopePatch
+from eneo.flows.infrastructure.flow_run_repo import (
+    FlowRunExecutionOwner,
+    FlowRunRepository,
+)
 from eneo.flows.runtime import execution_heartbeat as heartbeat
 
 
@@ -191,3 +195,36 @@ def test_worker_stalled_error_retains_typed_recovery_facts():
     error = parse_flow_run_error(payload)
     assert error.code == "flow_worker_stalled"
     assert dump_flow_run_error(error)["details"] == payload["details"]
+
+
+@pytest.mark.asyncio
+async def test_paused_execution_cannot_publish_transcript_after_recovery():
+    manager = heartbeat.FlowExecutionHeartbeats(max_active=1)
+    owner = FlowRunExecutionOwner(uuid4(), uuid4(), 1)
+    session = AsyncMock(spec=AsyncSession)
+    session.scalar.side_effect = [owner.run_id, None]
+    repo = FlowRunRepository(session=session)
+    try:
+        with pytest.raises(heartbeat.FlowExecutionOwnershipLost):
+            async with manager.track(owner):
+                await repo.update_input_payload(
+                    run_id=owner.run_id,
+                    tenant_id=owner.tenant_id,
+                    input_payload_patch=FlowRunInputEnvelopePatch.transcription(
+                        transcript="Late provider result"
+                    ),
+                )
+                await session.commit()
+        from sqlalchemy.dialects import postgresql
+
+        lock, eligibility = [call.args[0] for call in session.scalar.await_args_list]
+        assert "FOR UPDATE" in str(lock)
+        sql = str(eligibility.compile(dialect=postgresql.dialect()))
+        assert "flow_runs.revision =" in sql
+        assert "flow_runs.status =" in sql
+        assert "flow_runs.execution_heartbeat_at > clock_timestamp()" in sql
+        session.rollback.assert_awaited_once()
+        session.execute.assert_not_awaited()
+        session.commit.assert_not_awaited()
+    finally:
+        await manager.stop()

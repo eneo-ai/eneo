@@ -20,33 +20,57 @@ def upgrade() -> None:
         "flow_runs",
         sa.Column("execution_heartbeat_at", sa.DateTime(timezone=True), nullable=True),
     )
-    op.execute(
-        "UPDATE flow_runs SET execution_heartbeat_at = updated_at WHERE status = 'running'"
-    )
     op.create_check_constraint(
         "ck_flow_runs_running_execution_heartbeat",
         "flow_runs",
         "status <> 'running' OR execution_heartbeat_at IS NOT NULL",
+        postgresql_not_valid=True,
     )
-    op.drop_index("ix_flow_runs_running_updated_at", table_name="flow_runs")
-    op.create_index(
-        "ix_flow_runs_running_execution_heartbeat",
-        "flow_runs",
-        ["execution_heartbeat_at", "id"],
-        postgresql_include=["tenant_id", "revision"],
-        postgresql_where=sa.text("status = 'running'"),
-    )
+    with op.get_context().autocommit_block():
+        op.execute("SET lock_timeout = '5s'")
+        try:
+            op.execute(
+                "UPDATE flow_runs SET execution_heartbeat_at = updated_at WHERE status = 'running'"
+            )
+            op.execute(
+                "ALTER TABLE flow_runs VALIDATE CONSTRAINT ck_flow_runs_running_execution_heartbeat"
+            )
+            op.create_index(
+                "ix_flow_runs_running_execution_heartbeat",
+                "flow_runs",
+                ["execution_heartbeat_at", "id"],
+                postgresql_include=["tenant_id", "revision"],
+                postgresql_where=sa.text("status = 'running'"),
+                postgresql_concurrently=True,
+            )
+            op.drop_index(
+                "ix_flow_runs_running_updated_at",
+                table_name="flow_runs",
+                postgresql_concurrently=True,
+            )
+        finally:
+            op.execute("RESET lock_timeout")
 
 
 def downgrade() -> None:
+    with op.get_context().autocommit_block():
+        op.execute("SET lock_timeout = '5s'")
+        try:
+            op.create_index(
+                "ix_flow_runs_running_updated_at",
+                "flow_runs",
+                ["status", "updated_at"],
+                postgresql_where=sa.text("status = 'running'"),
+                postgresql_concurrently=True,
+            )
+            op.drop_index(
+                "ix_flow_runs_running_execution_heartbeat",
+                table_name="flow_runs",
+                postgresql_concurrently=True,
+            )
+        finally:
+            op.execute("RESET lock_timeout")
     op.execute("SET LOCAL lock_timeout = '5s'")
-    op.drop_index("ix_flow_runs_running_execution_heartbeat", table_name="flow_runs")
-    op.create_index(
-        "ix_flow_runs_running_updated_at",
-        "flow_runs",
-        ["status", "updated_at"],
-        postgresql_where=sa.text("status = 'running'"),
-    )
     op.drop_constraint(
         "ck_flow_runs_running_execution_heartbeat", "flow_runs", type_="check"
     )

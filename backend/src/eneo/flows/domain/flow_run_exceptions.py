@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -22,3 +23,7 @@ class FlowRunPersistenceInvariantError(RuntimeError):
     run_id: UUID | None = None
     tenant_id: UUID | None = None
     flow_id: UUID | None = None
+
+
+class FlowExecutionOwnershipLost(asyncio.CancelledError):
+    pass

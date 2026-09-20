@@ -13,6 +13,7 @@ from eneo.database.tables.flow_tables import (
     FlowOutboxDeliveryStatus,
     FlowRunWebhookDeliveries,
 )
+from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from eneo.flows.runtime.step_execution_result import WebhookDeliveryIntent
 
 
@@ -105,6 +106,9 @@ class FlowRunWebhookDeliveryRepository:
         tenant_id: UUID,
         intent: WebhookDeliveryIntent,
     ) -> UUID:
+        await FlowRunRepository(session=self.session).lock_execution_ownership(
+            run_id=intent.flow_run_id, tenant_id=tenant_id
+        )
         row_id = await self.session.scalar(
             pg_insert(FlowRunWebhookDeliveries)
             .values(

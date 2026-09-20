@@ -174,14 +174,27 @@ def test_heartbeat_migration_backfills_running_rows_and_reverses_schema() -> Non
     assert "execution_heartbeat_at = updated_at WHERE status = 'running'" in sql
     assert "status <> 'running' OR execution_heartbeat_at IS NOT NULL" in sql
     assert "ix_flow_runs_running_execution_heartbeat" in sql
-    assert "DROP INDEX ix_flow_runs_running_updated_at" in sql
+    assert "DROP INDEX CONCURRENTLY ix_flow_runs_running_updated_at" in sql
+    column = sql.index("ADD COLUMN execution_heartbeat_at")
+    backfill = sql.index("UPDATE flow_runs SET execution_heartbeat_at")
+    constraint = sql.index("ADD CONSTRAINT ck_flow_runs_running_execution_heartbeat")
+    validate = sql.index("VALIDATE CONSTRAINT ck_flow_runs_running_execution_heartbeat")
+    index = sql.index(
+        "CREATE INDEX CONCURRENTLY ix_flow_runs_running_execution_heartbeat"
+    )
+    assert "COMMIT;" in sql[column:backfill]
+    assert "NOT VALID" in sql[constraint:validate]
+    assert "COMMIT;" in sql[constraint:validate]
+    assert "SET lock_timeout = '5s'" in sql[constraint:validate]
+    assert "RESET lock_timeout" in sql[validate:]
+    assert backfill < validate < index
     output.truncate(0)
     output.seek(0)
     with Operations.context(context):
         migration.downgrade()
     sql = output.getvalue()
     assert "DROP COLUMN execution_heartbeat_at" in sql
-    assert "CREATE INDEX ix_flow_runs_running_updated_at" in sql
+    assert "CREATE INDEX CONCURRENTLY ix_flow_runs_running_updated_at" in sql
 
 
 def test_alembic_revision_ids_fit_default_version_table() -> None:

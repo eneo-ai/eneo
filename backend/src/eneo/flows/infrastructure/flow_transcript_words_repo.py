@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.tables.flow_tables import FlowStepTranscriptWords as WordsTable
 from eneo.flows.domain.transcript_words import FlowStepTranscriptWords
+from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 
 
 class FlowTranscriptWordsRepository:
@@ -49,6 +50,9 @@ class FlowTranscriptWordsRepository:
         alignment: str | None,
         words_json: list[dict[str, Any]],
     ) -> FlowStepTranscriptWords:
+        await FlowRunRepository(session=self.session).lock_execution_ownership(
+            run_id=run_id, tenant_id=tenant_id
+        )
         stmt = pg_insert(WordsTable).values(
             tenant_id=tenant_id,
             flow_id=flow_id,
@@ -78,6 +82,9 @@ class FlowTranscriptWordsRepository:
         step_id: UUID,
         tenant_id: UUID,
     ) -> None:
+        await FlowRunRepository(session=self.session).lock_execution_ownership(
+            run_id=run_id, tenant_id=tenant_id
+        )
         await self.session.execute(
             sa.delete(WordsTable)
             .where(WordsTable.flow_run_id == run_id)

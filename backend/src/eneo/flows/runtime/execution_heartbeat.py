@@ -8,6 +8,9 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 
 from eneo.database.database import sessionmanager
+from eneo.flows.domain.flow_run_exceptions import (
+    FlowExecutionOwnershipLost as FlowExecutionOwnershipLost,
+)
 from eneo.flows.domain.flow_run_recovery_policy import (
     FLOW_EXECUTION_HEARTBEAT_INTERVAL_SECONDS,
     FLOW_EXECUTION_HEARTBEAT_MAX_FAILURES,
@@ -16,14 +19,11 @@ from eneo.flows.domain.flow_run_recovery_policy import (
 from eneo.flows.infrastructure.flow_run_repo import (
     FlowRunExecutionOwner,
     FlowRunRepository,
+    flow_run_execution_owner,
 )
 from eneo.main.config import get_settings
 
 logger = logging.getLogger(__name__)
-
-
-class FlowExecutionOwnershipLost(asyncio.CancelledError):
-    pass
 
 
 @dataclass(slots=True)
@@ -99,6 +99,7 @@ class FlowExecutionHeartbeats:
         self._active[owner] = invocation
         self.start()
         token = _current_invocation.set(invocation)
+        owner_token = flow_run_execution_owner.set(owner)
         try:
             yield
             if invocation.lost:
@@ -110,6 +111,7 @@ class FlowExecutionHeartbeats:
                 raise FlowExecutionOwnershipLost() from None
             raise
         finally:
+            flow_run_execution_owner.reset(owner_token)
             _current_invocation.reset(token)
             del self._active[owner]
 

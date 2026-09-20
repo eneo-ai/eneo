@@ -1140,27 +1140,193 @@ async def test_heartbeat_migration_cutover_preserves_existing_running_history(
             start_attempt=False,
         )
         existing = await repo.get(run_id=run.id, tenant_id=run.tenant_id)
-        path = (
-            Path(__file__).parents[3]
-            / "alembic/versions/202609202000_flow_execution_heartbeat.py"
+        engine = session.bind
+    assert engine is not None
+    path = (
+        Path(__file__).parents[3]
+        / "alembic/versions/202609202000_flow_execution_heartbeat.py"
+    )
+    spec = importlib.util.spec_from_file_location("heartbeat_migration", path)
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    def cycle(connection):
+        context = MigrationContext.configure(connection)
+        with context.begin_transaction(), Operations.context(context):
+            migration.downgrade()
+            assert "execution_heartbeat_at" not in {
+                column["name"]
+                for column in sa.inspect(connection).get_columns("flow_runs")
+            }
+            migration.upgrade()
+
+    async with engine.connect() as connection:
+        await connection.run_sync(cycle)
+    async with sessionmanager.session() as session, session.begin():
+        restored = await FlowRunRepository(session=session).get(
+            run_id=run.id, tenant_id=run.tenant_id
         )
-        spec = importlib.util.spec_from_file_location("heartbeat_migration", path)
-        migration = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(migration)
-
-        def cycle(connection):
-            with Operations.context(MigrationContext.configure(connection)):
-                migration.downgrade()
-                assert "execution_heartbeat_at" not in {
-                    column["name"]
-                    for column in sa.inspect(connection).get_columns("flow_runs")
-                }
-                migration.upgrade()
-
-        await (await session.connection()).run_sync(cycle)
-        session.expire_all()
-        restored = await repo.get(run_id=run.id, tenant_id=run.tenant_id)
         assert restored.execution_heartbeat_at == existing.updated_at
         assert restored.updated_at == existing.updated_at
         assert restored.revision == existing.revision
         assert restored.status == existing.status == FlowRunStatus.RUNNING
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "publication", ["transcript", "result", "delivery", "attempt_input"]
+)
+async def test_paused_provider_publication_cannot_change_recovered_run(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    monkeypatch,
+    publication,
+):
+    from eneo.database.tables.flow_tables import FlowRunWebhookDeliveries
+    from eneo.flows.domain.flow_step_attempt_input import FlowStepAttemptInput
+    from eneo.flows.flow_run_input_envelope import FlowRunInputEnvelopePatch
+    from eneo.flows.infrastructure.flow_run_repo import FlowRunExecutionOwner
+    from eneo.flows.runtime.execution_heartbeat import (
+        FlowExecutionHeartbeats,
+        FlowExecutionOwnershipLost,
+    )
+
+    async with sessionmanager.session() as session, session.begin():
+        run, flow, repo = await _create_running_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        result = await repo.get_step_result(
+            run_id=run.id, tenant_id=run.tenant_id, step_id=flow.steps[0].id
+        )
+        assert result is not None
+    completed = asyncio.Event()
+    resume = asyncio.Event()
+    provider = AsyncMock(return_value="Late provider result")
+    manager = FlowExecutionHeartbeats(max_active=1)
+    # Resume publication before the paused worker's next heartbeat/probe.
+    monkeypatch.setattr(manager, "start", lambda: None)
+
+    async def invoke():
+        async with manager.track(
+            FlowRunExecutionOwner(run.id, run.tenant_id, run.revision)
+        ):
+            output = await provider()
+            completed.set()
+            await resume.wait()
+            async with sessionmanager.session() as session, session.begin():
+                repo = FlowRunRepository(session=session)
+                if publication == "transcript":
+                    await repo.update_input_payload(
+                        run_id=run.id,
+                        tenant_id=run.tenant_id,
+                        input_payload_patch=FlowRunInputEnvelopePatch.transcription(
+                            transcript=output
+                        ),
+                    )
+                elif publication == "result":
+                    await repo.save_step_result(
+                        flow_run_id=run.id,
+                        tenant_id=run.tenant_id,
+                        result=result.model_copy(
+                            update={
+                                "status": FlowStepResultStatus.COMPLETED,
+                                "output_payload_json": {"text": output},
+                            }
+                        ),
+                        attempt_no=1,
+                    )
+                elif publication == "delivery":
+                    await FlowRunWebhookDeliveryRepository(
+                        session=session
+                    ).insert_pending_delivery(
+                        flow_id=flow.id,
+                        tenant_id=run.tenant_id,
+                        intent=WebhookDeliveryIntent(
+                            flow_run_id=run.id,
+                            step_id=flow.steps[0].id,
+                            step_order=1,
+                            attempt_no=1,
+                            idempotency_key=str(uuid4()),
+                            payload=WebhookPayloadRef("output"),
+                        ),
+                    )
+                else:
+                    await repo.finish_attempt(
+                        run_id=run.id,
+                        tenant_id=run.tenant_id,
+                        step_id=flow.steps[0].id,
+                        attempt_no=1,
+                        status=FlowStepAttemptStatus.COMPLETED,
+                        attempt_input=FlowStepAttemptInput(
+                            resolved_input={"text": output}
+                        ),
+                    )
+
+    async def snapshot():
+        async with sessionmanager.session() as session, session.begin():
+            return [
+                (
+                    await session.execute(
+                        sa.select(table)
+                        .where(
+                            table.c.id == run.id
+                            if table is FlowRuns.__table__
+                            else table.c.flow_run_id == run.id
+                        )
+                        .order_by(table.c.id)
+                    )
+                )
+                .mappings()
+                .all()
+                for table in (
+                    FlowRuns.__table__,
+                    FlowStepResults.__table__,
+                    FlowStepAttempts.__table__,
+                    FlowRunWebhookDeliveries.__table__,
+                )
+            ]
+
+    invocation = asyncio.create_task(invoke())
+    try:
+        await asyncio.wait_for(completed.wait(), timeout=2)
+        async with sessionmanager.session() as session, session.begin():
+            await session.execute(
+                sa.update(FlowRuns)
+                .where(FlowRuns.id == run.id)
+                .values(
+                    execution_heartbeat_at=sa.func.clock_timestamp()
+                    - timedelta(seconds=181)
+                )
+            )
+            recovered = await _flow_run_terminalizer(
+                FlowRunRepository(session=session)
+            ).terminalize_stale_running_run(
+                run_id=run.id,
+                tenant_id=run.tenant_id,
+                expected_revision=run.revision,
+                error=FlowRunError.from_source(
+                    FlowRunLifecycleSource.STALE_RUNNING_RECONCILER,
+                    code=FlowApiErrorCode.RUN_WORKER_STALLED,
+                    message="Execution heartbeat expired.",
+                ),
+            )
+            assert recovered.did_transition
+        before = await snapshot()
+        resume.set()
+        with pytest.raises(FlowExecutionOwnershipLost):
+            await asyncio.wait_for(invocation, timeout=2)
+        assert await snapshot() == before
+        provider.assert_awaited_once()
+    finally:
+        await manager.stop()
+        if not invocation.done():
+            invocation.cancel()
+        await asyncio.gather(invocation, return_exceptions=True)

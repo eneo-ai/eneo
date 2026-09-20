@@ -600,12 +600,13 @@ def _fail_task_if_tenants_were_skipped(
 
 
 _stale_running_cursor: tuple[datetime, UUID] | None = None
+_stale_running_window_end: tuple[datetime, UUID] | None = None
 
 
 async def _reconcile_stale_running_runs_all_tenants(
     *, limit: int = 100
 ) -> dict[str, int | str]:
-    global _stale_running_cursor
+    global _stale_running_cursor, _stale_running_window_end
     reconciled = 0
     skipped_tenant_ids: list[UUID] = []
     async with sessionmanager.session() as session:
@@ -615,14 +616,28 @@ async def _reconcile_stale_running_runs_all_tenants(
         provider_call_repo = container.flow_provider_call_repo()
         terminalizer = container.flow_run_terminalizer()
         async with session.begin():
-            stale_runs = await run_repo.list_stale_running_runs(
-                limit=limit, after=_stale_running_cursor
-            )
-            if not stale_runs and _stale_running_cursor is not None:
+            if _stale_running_cursor is None or (
+                _stale_running_window_end is not None
+                and _stale_running_cursor >= _stale_running_window_end
+            ):
                 _stale_running_cursor = None
-                stale_runs = await run_repo.list_stale_running_runs(
-                    limit=limit, after=None
+                _stale_running_window_end = None
+            if _stale_running_window_end is None:
+                _stale_running_window_end = (
+                    await run_repo.stale_running_sweep_boundary()
                 )
+            stale_runs = (
+                await run_repo.list_stale_running_runs(
+                    limit=limit,
+                    after=_stale_running_cursor,
+                    through=_stale_running_window_end,
+                )
+                if _stale_running_window_end is not None
+                else []
+            )
+            if not stale_runs:
+                _stale_running_cursor = None
+                _stale_running_window_end = None
         for run in stale_runs:
             try:
                 async with session.begin():

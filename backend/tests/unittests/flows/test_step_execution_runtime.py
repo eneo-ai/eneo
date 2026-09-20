@@ -2324,6 +2324,106 @@ async def test_complete_step_execution_cancels_llm_request_when_run_is_cancelled
 
 
 @pytest.mark.asyncio
+async def test_heartbeat_loss_cancels_an_already_running_provider_child(monkeypatch):
+    from contextlib import asynccontextmanager
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    import eneo.flows.runtime.step_execution_runtime as runtime
+    from eneo.flows.infrastructure.flow_run_repo import FlowRunExecutionOwner
+    from eneo.flows.runtime import execution_heartbeat as heartbeat
+
+    manager = heartbeat.FlowExecutionHeartbeats(max_active=1)
+    repo = AsyncMock()
+    repo.renew_execution_heartbeats.return_value = set()
+
+    @asynccontextmanager
+    async def session_scope():
+        yield AsyncMock(spec=AsyncSession)
+
+    monkeypatch.setattr(heartbeat.sessionmanager, "session", session_scope)
+    monkeypatch.setattr(heartbeat, "FlowRunRepository", lambda **_: repo)
+
+    monkeypatch.setattr(
+        runtime,
+        "execution_ownership_is_lost",
+        AsyncMock(return_value=False),
+        raising=False,
+    )
+    run = _run()
+    state = _state()
+    step = _step(output_type="text")
+    cancelled = asyncio.Event()
+    started = asyncio.Event()
+
+    async def blocked_response(**_kwargs: object) -> object:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+        return SimpleNamespace(total_token_count=4, completion="too late")
+
+    assistant = MagicMock()
+    assistant.get_prompt_text.return_value = ""
+    assistant.completion_model_kwargs = MagicMock(name="model_kwargs")
+    assistant.get_response = AsyncMock(side_effect=blocked_response)
+    prepared = PreparedStepExecution(
+        assistant=assistant,
+        step_input=StepInputValue(
+            text="hello",
+            source_text="hello",
+            input_source="flow_input",
+        ),
+        effective_prompt="Prompt",
+        input_payload_for_result={
+            "text": "hello",
+            "source_text": "hello",
+            "input_source": "flow_input",
+        },
+        contract_validation=None,
+        diagnostics=[],
+        llm_files=[],
+    )
+    deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1_000_000,
+        variable_resolver=FlowVariableResolver(),
+        completion_service=object(),
+        load_assistant=AsyncMock(),
+        resolve_step_input=AsyncMock(),
+        retrieve_rag_chunks=AsyncMock(
+            return_value=([], {"status": "skipped_no_service"}, [])
+        ),
+        process_typed_output=AsyncMock(return_value=_typed_output_result()),
+        apply_output_cap=AsyncMock(return_value=("too late", [])),
+        llm_request_timeout_seconds=10,
+        run_cancelled=AsyncMock(return_value=False),
+        run_cancel_poll_interval_seconds=0.001,
+    )
+
+    async def invoke():
+        async with manager.track(
+            FlowRunExecutionOwner(run.id, run.tenant_id, run.revision)
+        ):
+            await complete_step_execution(
+                step=step, run=run, state=state, prepared=prepared, deps=deps
+            )
+
+    invocation = asyncio.create_task(invoke())
+    try:
+        await asyncio.wait_for(started.wait(), timeout=2)
+        await manager.renew()
+        with pytest.raises(heartbeat.FlowExecutionOwnershipLost):
+            await asyncio.wait_for(invocation, timeout=2)
+        assert cancelled.is_set()
+        assert state.in_flight_llm_task is None
+        assistant.get_response.assert_awaited_once()
+    finally:
+        await manager.stop()
+
+
+@pytest.mark.asyncio
 async def test_cancellation_survives_a_failing_cancel_probe():
     """A blip on the cancel probe must not disarm cancellation for the step.
 
