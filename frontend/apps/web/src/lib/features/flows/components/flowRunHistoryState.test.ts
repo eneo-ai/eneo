@@ -650,6 +650,35 @@ describe("syncFlowRunHistoryPolling", () => {
     expect(state.pollTimeout).toBeNull();
   });
 
+  it("skips a poll tick while a read is in flight instead of queueing a refresh", async () => {
+    const state = createFlowRunHistoryState();
+    state.inFlightGeneration = state.requestGeneration;
+    const scheduled: { callback: (() => void | Promise<void>) | null } = { callback: null };
+    let loadCount = 0;
+
+    syncFlowRunHistoryPolling(state, {
+      visible: () => true,
+      hasRunsToPoll: () => true,
+      loadRuns: async () => {
+        loadCount += 1;
+      },
+      setTimeoutFn: (callback) => {
+        scheduled.callback = callback;
+        return 1;
+      }
+    });
+    const callback = scheduled.callback;
+    if (!callback) {
+      throw new Error("Expected polling to schedule a callback");
+    }
+    await callback();
+
+    expect(loadCount).toBe(0);
+    expect(state.refreshQueued).toBe(false);
+    // The next tick is still scheduled: polling continues once the read ends.
+    expect(state.pollTimeout).not.toBeNull();
+  });
+
   it("resets polling timeout even when a future load implementation rejects", async () => {
     const state = createFlowRunHistoryState();
     const scheduled: { callback: (() => void | Promise<void>) | null } = { callback: null };

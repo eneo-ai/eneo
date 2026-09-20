@@ -379,7 +379,12 @@ export function syncFlowRunHistoryPolling(
     const scheduleNextPoll = () => {
       state.pollTimeout = setTimeoutFn(async () => {
         try {
-          await loadRuns();
+          // A poll is periodic: when a read is already running it has
+          // nothing to add and must not queue a refresh behind it (that
+          // queue is for mutations), or slow reads would never settle.
+          if (state.inFlightGeneration !== state.requestGeneration) {
+            await loadRuns();
+          }
         } finally {
           state.pollTimeout = null;
         }
