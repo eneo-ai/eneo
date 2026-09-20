@@ -303,9 +303,14 @@ endpoint URL, command line, image, repository, logs, or backup manifest.
 Inline capacity and common reconciliation tuning live in `env_backend.env`.
 `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` is an operator admission ceiling that
 bounds PostgreSQL row, WAL, backup, and process memory exposure; it is not a
-business limit. It defaults to 200 MiB, which holds about one hour of 16 kHz
-mono PCM audio, or several hours of the same recording as 128 kbit/s MP3. What a
-given recorder produces varies, so size a deployment against real files.
+business limit. It defaults to 384 MiB, admitting a five-hour recording at
+128 kbit/s (about 275 MiB) while leaving room for `bytea` hex output and Bind
+message framing. The datatype maximum is a hard bound, not a safe operating
+default: hex conversion allocates twice the payload plus three bytes, including
+on the `pg_dump -Fc` backup path. Recordings above the inline default require the
+existing object-store path and a matching upload policy in **Admin > File storage**.
+See the [Flow limits table](../../frontend/apps/docs-site/src/content/guides/flows/integrating-flows.mdx#execution-pdf-extraction-and-builder)
+for the current upload and processing defaults.
 Lowering it affects new inline writes, not reads of existing rows. For
 PostgreSQL-inline session uploads, the effective limit is the smaller of the
 admin policy and this ceiling. **Admin > File storage** shows the configured
@@ -694,13 +699,17 @@ reopening traffic.
 The deployment-policy migration creates revision 1 with `postgres_inline`
 selected. It reads the four former upload-limit environment values once as
 migration seeds. A present positive integer is preserved exactly; an absent
-value uses the fresh-install default (10 MiB for session File, session image,
+value uses the historical seed (10 MiB for session File, session image,
 and knowledge File; 200 MiB for transcription audio). Blank, non-integer, zero,
 or negative values stop the migration with a named remediation error. After the
 migration, environment changes and restarts never overwrite the database
 policy. During an upgrade, keep the old release's values available until
 `db-init` succeeds, then remove them from active backend and worker
-configuration. Fresh installations do not need them.
+configuration. Fresh installations do not need them. Migration `202609202000`
+then raises values still at the historical seeds to 256 MiB for session and
+knowledge files and 384 MiB for audio. Other policy values remain unchanged.
+Its downgrade preserves all policy values because values matching the new
+defaults may have been chosen by an administrator.
 
 If a restore predates this migration, keep backend and worker stopped and run:
 

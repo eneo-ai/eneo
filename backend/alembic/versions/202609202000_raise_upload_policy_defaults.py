@@ -16,11 +16,11 @@ depends_on = None
 _LIMITS = {
     "session_file_limit_bytes": (10485760, 268435456),
     "knowledge_file_limit_bytes": (10485760, 268435456),
-    "transcription_audio_limit_bytes": (209715200, 1073741819),
+    "transcription_audio_limit_bytes": (209715200, 402653184),
 }
 
 
-def _replace_defaults(*, reverse: bool) -> None:
+def upgrade() -> None:
     policy = sa.table(
         "object_content_deployment_policy",
         sa.column("id", sa.SmallInteger),
@@ -30,20 +30,16 @@ def _replace_defaults(*, reverse: bool) -> None:
         sa.column("updated_by_user_id", sa.Uuid),
         *(sa.column(name, sa.BigInteger) for name in _LIMITS),
     )
-    replacements = {
-        name: (new, old) if reverse else (old, new)
-        for name, (old, new) in _LIMITS.items()
-    }
     op.execute(
         policy.update()
         .where(
             policy.c.id == 1,
-            sa.or_(*(policy.c[name] == old for name, (old, _) in replacements.items())),
+            sa.or_(*(policy.c[name] == old for name, (old, _) in _LIMITS.items())),
         )
         .values(
             **{
                 name: sa.case((policy.c[name] == old, new), else_=policy.c[name])
-                for name, (old, new) in replacements.items()
+                for name, (old, new) in _LIMITS.items()
             },
             revision=policy.c.revision + 1,
             updated_at=sa.func.now(),
@@ -53,9 +49,9 @@ def _replace_defaults(*, reverse: bool) -> None:
     )
 
 
-def upgrade() -> None:
-    _replace_defaults(reverse=False)
-
-
 def downgrade() -> None:
-    _replace_defaults(reverse=True)
+    """Preserve policy values and metadata in this data-only migration.
+
+    Values matching the new defaults may be administrator choices; there is no
+    provenance that safely distinguishes them from seeds raised by upgrade.
+    """

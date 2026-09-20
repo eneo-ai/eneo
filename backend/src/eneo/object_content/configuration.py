@@ -48,6 +48,8 @@ _MAXIMUM_S3_PAGE_SIZE = 1_000
 # that then fail at materialization; reject it at startup instead.
 _VARLENA_HEADER_BYTES = 4
 MAXIMUM_INLINE_BYTES = 1024 * _MEBIBYTE - 1 - _VARLENA_HEADER_BYTES
+# Leave room for bytea hex output and protocol framing during reads and dumps.
+DEFAULT_INLINE_MAXIMUM_BYTES = 384 * _MEBIBYTE
 DEFAULT_FILE_UPLOAD_LIMIT_BYTES = 256 * _MEBIBYTE
 
 
@@ -65,7 +67,7 @@ class ObjectContentCoreSettings(BaseSettings):
     # memory of whichever process reads it; operators move it in either
     # direction after measuring their own PostgreSQL capacity.
     inline_maximum_bytes: int = Field(
-        default=MAXIMUM_INLINE_BYTES,
+        default=DEFAULT_INLINE_MAXIMUM_BYTES,
         ge=1,
         le=MAXIMUM_INLINE_BYTES,
     )

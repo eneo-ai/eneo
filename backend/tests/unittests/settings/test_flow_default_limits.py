@@ -52,7 +52,9 @@ def test_flow_defaults(defaults, name, expected):
 
 def test_inline_storage_default(monkeypatch):
     monkeypatch.delenv("OBJECT_CONTENT_INLINE_MAXIMUM_BYTES", raising=False)
-    assert ObjectContentCoreSettings().inline_maximum_bytes == 1073741819
+    maximum = ObjectContentCoreSettings().inline_maximum_bytes
+    assert maximum == 402653184
+    assert 2 * maximum + 3 < 1024**3
 
 
 def test_invocation_budget_preserves_finalization_reserve(defaults):
@@ -98,7 +100,7 @@ def test_migrated_upload_defaults_admit_large_workloads(monkeypatch):
     assert limits_after_migration == {
         "session_file_limit_bytes": 268435456,
         "knowledge_file_limit_bytes": 268435456,
-        "transcription_audio_limit_bytes": 1073741819,
+        "transcription_audio_limit_bytes": 402653184,
     }
     monkeypatch.delenv("OBJECT_CONTENT_INLINE_MAXIMUM_BYTES", raising=False)
     policy = DeploymentPolicy(
@@ -121,7 +123,7 @@ def test_migrated_upload_defaults_admit_large_workloads(monkeypatch):
         )
     }
     for use_case in ("session_audio", "knowledge_audio"):
-        assert projections[use_case] == 1073741819
+        assert projections[use_case] == 402653184
         assert projections[use_case] >= 18000 * 128000 // 8
     for use_case in ("session_file", "knowledge_file"):
         assert projections[use_case] == 268435456
@@ -133,7 +135,7 @@ def test_migrated_upload_defaults_admit_large_workloads(monkeypatch):
         ),
     )
     assert limits.file_max_size_bytes == 268435456
-    assert limits.audio_max_size_bytes == 1073741819
+    assert limits.audio_max_size_bytes == 402653184
     assert limits.max_files_per_run == 1000
     assert limits.audio_max_files_per_run == 10
     assert FLOW_INPUT_MAX_LIMIT_BYTES == 2147483648

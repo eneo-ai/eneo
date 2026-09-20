@@ -16,7 +16,7 @@ from alembic.operations import Operations
 from eneo.database.tables.flow_tables import FlowProviderCalls
 from eneo.object_content.configuration import (
     DEFAULT_FILE_UPLOAD_LIMIT_BYTES,
-    MAXIMUM_INLINE_BYTES,
+    ObjectContentCoreSettings,
 )
 
 _ALEMBIC_VERSION_NUM_LIMIT = 32
@@ -261,7 +261,10 @@ def test_upload_default_migration_literals_match_runtime_defaults() -> None:
     assert ast.literal_eval(limits) == {
         "session_file_limit_bytes": (10485760, DEFAULT_FILE_UPLOAD_LIMIT_BYTES),
         "knowledge_file_limit_bytes": (10485760, DEFAULT_FILE_UPLOAD_LIMIT_BYTES),
-        "transcription_audio_limit_bytes": (209715200, MAXIMUM_INLINE_BYTES),
+        "transcription_audio_limit_bytes": (
+            209715200,
+            ObjectContentCoreSettings.model_fields["inline_maximum_bytes"].default,
+        ),
     }
     for filename in ("202607251700_add_object_content_deployment_policy.py", path.name):
         tree = ast.parse((versions / filename).read_text())
@@ -281,13 +284,14 @@ def test_upload_default_migration_literals_match_runtime_defaults() -> None:
 @pytest.mark.parametrize(
     ("stored", "raised"),
     [
-        (None, (268435456, 268435456, 1073741819)),
+        (None, (268435456, 268435456, 402653184)),
+        ((268435456, 268435456, 402653184), (268435456, 268435456, 402653184)),
         ((1024, 2048, 4096), (1024, 2048, 4096)),
         ((536870912, 536870912, 2147483648), (536870912, 536870912, 2147483648)),
-        ((10485760, 2048, 209715200), (268435456, 2048, 1073741819)),
+        ((10485760, 2048, 209715200), (268435456, 2048, 402653184)),
     ],
 )
-def test_upload_default_migration_preserves_overrides_and_reverses(
+def test_upload_default_migration_preserves_policy_on_downgrade(
     monkeypatch, stored, raised
 ):
     path = (
@@ -347,8 +351,11 @@ def test_upload_default_migration_preserves_overrides_and_reverses(
                 )
             )
             monkeypatch.setattr(migration.op, "execute", connection.execute)
+            original = dict(connection.execute(sa.select(table)).mappings().one())
             migration.upgrade()
             row = connection.execute(sa.select(table)).mappings().one()
+            if stored == raised:
+                assert dict(row) == original
             assert tuple(row[name] for name in columns) == raised
             assert row["session_image_limit_bytes"] == 1234
             assert row["revision"] == 7 + (stored != raised)
@@ -357,9 +364,9 @@ def test_upload_default_migration_preserves_overrides_and_reverses(
                 connection.execute(sa.select(table.c.revision)).scalar_one()
                 == row["revision"]
             )
+            upgraded = dict(row)
             migration.downgrade()
             row = connection.execute(sa.select(table)).mappings().one()
-            assert tuple(row[name] for name in columns) == stored
-            assert row["revision"] == 7 + 2 * (stored != raised)
+            assert dict(row) == upgraded
     finally:
         engine.dispose()

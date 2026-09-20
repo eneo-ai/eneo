@@ -18,7 +18,7 @@ from eneo.database.tables.object_store_binding_table import (
     ObjectStoreBindings,
 )
 from eneo.object_content.configuration import (
-    MAXIMUM_INLINE_BYTES,
+    DEFAULT_INLINE_MAXIMUM_BYTES,
     ObjectContentCoreSettings,
     ObjectContentSettings,
 )
@@ -274,7 +274,7 @@ async def test_absent_object_store_is_a_healthy_inline_capability(
     assert runtime.object_store_configured is False
     assert readiness.ready is True
     assert readiness.code is ObjectContentReadinessCode.OBJECT_STORE_NOT_CONFIGURED
-    assert runtime.inline_maximum_bytes == MAXIMUM_INLINE_BYTES
+    assert runtime.inline_maximum_bytes == DEFAULT_INLINE_MAXIMUM_BYTES
     assert runtime.object_store_maximum_bytes is None
     assert capabilities[0].configured is True
     assert capabilities[0].selectable is True
