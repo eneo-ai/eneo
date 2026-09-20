@@ -30,6 +30,7 @@ from eneo.flows.ai_builder.ai_builder_create_compile_context import (
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     ConversationMessage,
+    LintSeverity,
     TargetKind,
 )
 from eneo.flows.ai_builder.ai_builder_error_contract import (
@@ -53,6 +54,7 @@ from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
     extract_requested_output_sections,
 )
+from eneo.flows.ai_builder.ai_builder_plan_store import build_flow_builder_proposal
 from eneo.flows.ai_builder.ai_builder_proposal_capture import (
     REJECTED_PROPOSAL_CAPTURE_DIR_ENV,
 )
@@ -116,6 +118,14 @@ from tests.unittests.flows.ai_builder.proposal_turn_test_doubles import (
     _make_usage,
     _store_compiled_plan,
 )
+from tests.unittests.flows.ai_builder.test_ai_builder_reference_flow_preservation import (
+    _bytes,
+    _catalog,
+    _flow,
+    _plan_step_context,
+    _saved_spec,
+    _saved_step_context,
+)
 
 
 def _proposal_tool_schema_double() -> ProposalToolSchema:
@@ -129,6 +139,149 @@ def _proposal_tool_schema_double() -> ProposalToolSchema:
             },
         },
     )
+
+
+@pytest.mark.parametrize("context_kind", ["saved", "plan"])
+async def test_scoped_instruction_edit_keeps_unrelated_saved_quality_warning(
+    context_kind,
+):
+    prior = _saved_spec()
+    original = _bytes(prior)
+    flow = _flow(prior)
+    context = (
+        _saved_step_context(flow, 3)
+        if context_kind == "saved"
+        else _plan_step_context(uuid4(), 3)
+    )
+    instructions = (
+        prior.steps[2].assistant_spec.instructions
+        + " Ange källhänvisning per uppgift i fältet kallstod."
+    )
+    arguments = {
+        "plan_rationale": "I am adding the requested sentence to the end of the instructions for step_c to clarify where source references should be placed.",
+        "steps": [
+            {
+                "kind": "modify",
+                "existing_step_ref": "existing_step_3",
+                "assistant_spec": {"instructions": instructions},
+            }
+        ],
+    }
+    submission = _make_submission(
+        quality_retry_warning_codes=frozenset({"json_output_no_contract"})
+    )
+    config = submission._proposal_retry_config(
+        target_kind=TargetKind.EDIT,
+        assistant_snapshots=None,
+        request_id="scoped-instructions",
+        planning_state=None,
+        plan_edit_context=context,
+        prior_spec_for_revision=prior,
+        usage_tracker=None,
+        proposal_tool_schema=_proposal_tool_schema_double(),
+        compile_context=create_compile_context_from_planning_state(
+            None, ui_language="sv"
+        ),
+    )
+
+    async def store_candidate(**kwargs):
+        return SimpleNamespace(
+            plan=SimpleNamespace(id=uuid4()),
+            proposal=build_flow_builder_proposal(
+                kwargs["compiled"],
+                informational_warning_keys=kwargs["informational_warning_keys"],
+            ),
+        )
+
+    store = AsyncMock(side_effect=store_candidate)
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
+        new=store,
+    ):
+        result = await config.process_tool_invocation(
+            _make_retry_invocation(
+                arguments=arguments,
+                flow=flow,
+                resource_catalog=_catalog(prior),
+            )
+        )
+
+    assert isinstance(result, ProposalCompleted), result
+    store.assert_awaited_once()
+    compiled = store.await_args.kwargs["compiled"]
+    assert any(
+        warning.step_ref == "step_b" and warning.code == "json_output_no_contract"
+        for warning in compiled.validation.warnings
+    )
+    expected = prior.model_copy(deep=True)
+    expected.steps[2].assistant_spec.instructions = instructions
+    assert _bytes(compiled.content.spec) == _bytes(expected)
+    assert _bytes(prior) == original
+    event = result.events[0]
+    assert event.event == "plan"
+    warning = next(
+        warning
+        for warning in event.data.proposal.lint_warnings
+        if warning.step_ref == "step_b" and warning.code == "json_output_no_contract"
+    )
+    assert warning.severity == LintSeverity.INFO
+
+
+@pytest.mark.parametrize("already_present", [False, True])
+async def test_scoped_edit_still_rejects_quality_warnings_on_the_selected_step(
+    already_present,
+):
+    prior = _saved_spec()
+    if already_present:
+        prior.steps[2].name = "steg"
+    flow = _flow(prior)
+    submission = _make_submission(
+        quality_retry_warning_codes=frozenset({"vague_step_name"})
+    )
+    config = submission._proposal_retry_config(
+        target_kind=TargetKind.EDIT,
+        assistant_snapshots=None,
+        request_id="scoped-quality-regression",
+        planning_state=None,
+        plan_edit_context=_saved_step_context(flow, 3),
+        prior_spec_for_revision=prior,
+        usage_tracker=None,
+        proposal_tool_schema=_proposal_tool_schema_double(),
+        compile_context=create_compile_context_from_planning_state(
+            None, ui_language="sv"
+        ),
+    )
+    store = AsyncMock(side_effect=_store_compiled_plan)
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
+        new=store,
+    ):
+        result = await config.process_tool_invocation(
+            _make_retry_invocation(
+                arguments={
+                    "plan_rationale": "Update the selected step.",
+                    "steps": [
+                        {
+                            "kind": "modify",
+                            "existing_step_ref": "existing_step_3",
+                            "name": "steg",
+                            "assistant_spec": {
+                                "instructions": prior.steps[
+                                    2
+                                ].assistant_spec.instructions
+                                + " Ange källhänvisning per uppgift i fältet kallstod."
+                            },
+                        }
+                    ],
+                },
+                flow=flow,
+                resource_catalog=_catalog(prior),
+            )
+        )
+
+    assert isinstance(result, CorrectableFailure), result
+    assert result.codes == frozenset({"vague_step_name"})
+    store.assert_not_awaited()
 
 
 def _route() -> ResolvedCompletionModelRoute:

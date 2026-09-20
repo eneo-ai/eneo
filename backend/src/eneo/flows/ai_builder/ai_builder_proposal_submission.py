@@ -120,6 +120,8 @@ from eneo.flows.ai_builder.ai_builder_tools import (
     ProposalToolSchema,
     admit_propose_flow_tool_arguments,
 )
+from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
+from eneo.flows.ai_builder.ai_builder_validator import validate_spec
 from eneo.flows.ai_builder.planning_state import (
     PlanningState,
     PlanningStatePayloadTooLargeError,
@@ -531,6 +533,14 @@ class ProposalSubmissionOwner:
             metadata_tool_call=metadata_tool_call,
             planning_state=planning_state,
             compile_context=compile_context,
+            plan_edit_context=plan_edit_context,
+            baseline_validation=(
+                validate_spec(prior_spec_for_revision)
+                if prior_spec_for_revision is not None
+                and plan_edit_context is not None
+                and plan_edit_context.scope == "step"
+                else None
+            ),
         )
 
     async def _persist_invocation_answer(
@@ -577,6 +587,8 @@ class ProposalSubmissionOwner:
         metadata_tool_call: RuntimeToolCall | None,
         planning_state: PlanningState,
         compile_context: "CreateCompileContext | None",
+        plan_edit_context: ResolvedAIBuilderEditContext | None,
+        baseline_validation: SpecValidationResult | None,
     ) -> SubmissionOutcome:
         return await self._compiled_proposal_finalizer.finalize_compiled_proposal(
             CompiledProposalFinalizationRequest(
@@ -597,6 +609,8 @@ class ProposalSubmissionOwner:
                 usage_tracker=usage_tracker,
                 planning_state=planning_state,
                 compile_context=compile_context,
+                plan_edit_context=plan_edit_context,
+                baseline_validation=baseline_validation,
             )
         )
 

@@ -4552,7 +4552,7 @@ def _saved_step_consumer_fixture(consumer_kind):
                     }
                 ]
             },
-            "report.summary",
+            "saved nested",
         ),
         (
             "projection",
@@ -4585,7 +4585,7 @@ def _saved_step_consumer_fixture(consumer_kind):
                     }
                 ]
             },
-            "object",
+            "saved nested",
         ),
         (
             "array",
@@ -4621,7 +4621,7 @@ def _saved_step_consumer_fixture(consumer_kind):
                     }
                 ]
             },
-            "report",
+            "saved nested",
         ),
         (
             "output_config",
@@ -4634,7 +4634,7 @@ def _saved_step_consumer_fixture(consumer_kind):
                     }
                 ]
             },
-            "report",
+            "saved nested",
         ),
     ],
 )

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -13,6 +13,9 @@ from eneo.flows.ai_builder.ai_builder_domain_models import (
     TargetKind,
 )
 from eneo.flows.ai_builder.ai_builder_events import build_plan_event
+from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
+    ResolvedAIBuilderEditContext,
+)
 from eneo.flows.ai_builder.ai_builder_plan_store import (
     store_plan_and_update_conversation,
 )
@@ -42,6 +45,7 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderResourceCatalog,
 )
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
+from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
 from eneo.main.logging import get_logger
 
 if TYPE_CHECKING:
@@ -73,6 +77,8 @@ class CompiledProposalFinalizationRequest:
     usage_tracker: ProposalTurnTelemetry | None
     planning_state: PlanningState
     compile_context: "CreateCompileContext | None"
+    plan_edit_context: ResolvedAIBuilderEditContext | None = None
+    baseline_validation: SpecValidationResult | None = None
 
     @property
     def session_id(self) -> UUID:
@@ -118,17 +124,28 @@ class CompiledProposalFinalizer:
             return assistant_metadata
 
         compiled = request.compiled
+        informational_warning_keys = _preexisting_scoped_warning_keys(request)
+        quality_candidate = compiled
+        if informational_warning_keys:
+            validation = SpecValidationResult()
+            validation.errors = list(compiled.validation.errors)
+            validation.warnings = [
+                warning
+                for warning in compiled.validation.warnings
+                if (warning.step_ref, warning.code) not in informational_warning_keys
+            ]
+            quality_candidate = replace(compiled, validation=validation)
         if request.target_kind == TargetKind.CREATE:
             create_result = self._create_quality_result(
                 request=request,
-                compiled=compiled,
+                compiled=quality_candidate,
             )
             if create_result is not None:
                 return create_result
         elif request.target_kind == TargetKind.EDIT:
             edit_result = self._edit_quality_result(
                 request=request,
-                compiled=compiled,
+                compiled=quality_candidate,
             )
             if edit_result is not None:
                 return edit_result
@@ -146,6 +163,7 @@ class CompiledProposalFinalizer:
             compiled=compiled,
             flow=request.flow,
             planning_state=request.planning_state,
+            informational_warning_keys=informational_warning_keys,
         )
         return ProposalCompleted(
             events=(
@@ -302,3 +320,40 @@ class CompiledProposalFinalizer:
             kind="quality",
             codes=quality_failure_codes,
         )
+
+
+def _preexisting_scoped_warning_keys(
+    request: CompiledProposalFinalizationRequest,
+) -> frozenset[tuple[str, str]]:
+    context = request.plan_edit_context
+    baseline = request.baseline_validation
+    if context is None or context.scope != "step" or baseline is None:
+        return frozenset()
+
+    steps = request.compiled.content.spec.steps
+    target_ref = context.target_plan_step_ref
+    if target_ref is None and context.target_existing_step_ref is not None:
+        target_ref = next(
+            (
+                step.plan_step_ref
+                for step in steps
+                if step.existing_step_ref == context.target_existing_step_ref
+            ),
+            None,
+        )
+    if target_ref not in {step.plan_step_ref for step in steps}:
+        return frozenset()
+    outside_scope = {
+        step.plan_step_ref for step in steps if step.plan_step_ref != target_ref
+    }
+    baseline_keys = {
+        (warning.step_ref, warning.code)
+        for warning in baseline.warnings
+        if warning.step_ref is not None and warning.step_ref in outside_scope
+    }
+    return frozenset(
+        (warning.step_ref, warning.code)
+        for warning in request.compiled.validation.warnings
+        if warning.step_ref is not None
+        and (warning.step_ref, warning.code) in baseline_keys
+    )

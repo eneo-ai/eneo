@@ -24,6 +24,10 @@ from eneo.flows.ai_builder.ai_builder_edit_preview_models import (
 from eneo.flows.ai_builder.ai_builder_output_sections_signals import (
     RequestedOutputSections,
 )
+from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
+    AIBuilderPlanEditContext,
+    ResolvedAIBuilderEditContext,
+)
 from eneo.flows.ai_builder.ai_builder_proposal_finalization import (
     CompiledProposalFinalizationRequest,
     CompiledProposalFinalizer,
@@ -354,6 +358,74 @@ async def test_finalize_compiled_proposal_does_not_record_success_on_quality_rej
     assert result.codes == frozenset({"json_output_no_contract"})
     assert tracker.proposal_first_attempt_success is None
     store_plan.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("baseline_step", "baseline_code", "target_ref", "scope", "accepted"),
+    [
+        ("step_b", "quality_note", "step_c", "step", True),
+        ("step_a", "quality_note", "step_c", "step", False),
+        ("step_b", "different_note", "step_c", "step", False),
+        ("step_b", "quality_note", "step_b", "step", False),
+        ("step_b", "quality_note", "step_c", "whole_plan", False),
+    ],
+)
+async def test_scoped_quality_gate_compares_step_and_code(
+    baseline_step, baseline_code, target_ref, scope, accepted
+):
+    baseline = SpecValidationResult()
+    baseline.add_warning(
+        step_ref=baseline_step, code=baseline_code, message="Prior wording."
+    )
+    candidate = SpecValidationResult()
+    candidate.add_warning(
+        step_ref="step_b", code="quality_note", message="Current wording."
+    )
+    spec = _make_flow_spec()
+    spec.steps.extend(
+        spec.steps[0].model_copy(
+            update={
+                "plan_step_ref": ref,
+                "name": name,
+                "input_source": InputSource.PREVIOUS_STEP,
+            }
+        )
+        for ref, name in (("step_b", "Follow up"), ("step_c", "Finish"))
+    )
+    compiled = CompiledProposal(
+        content=FlowBuilderProposalContent(spec=spec), validation=candidate
+    )
+    context = ResolvedAIBuilderEditContext(
+        request=AIBuilderPlanEditContext(
+            scope=scope, plan_id=uuid4(), target_plan_step_ref=target_ref
+        ),
+        scope=scope,
+        target_plan_step_ref=target_ref,
+    )
+    store_plan = AsyncMock(side_effect=_store_compiled_plan)
+    with patch(
+        "eneo.flows.ai_builder.ai_builder_proposal_finalization.store_plan_and_update_conversation",
+        new=store_plan,
+    ):
+        result = await _make_finalizer(
+            quality_retry_warning_codes={"quality_note"}
+        ).finalize_compiled_proposal(
+            _make_request(
+                target_kind=TargetKind.EDIT,
+                compiled=compiled,
+                baseline_validation=baseline,
+                plan_edit_context=context,
+            )
+        )
+
+    if accepted:
+        assert isinstance(result, ProposalCompleted), result
+        store_plan.assert_awaited_once()
+        assert store_plan.await_args.kwargs["compiled"].validation is candidate
+    else:
+        assert isinstance(result, CorrectableFailure), result
+        assert result.codes == frozenset({"quality_note"})
+        store_plan.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -36,16 +36,25 @@ class StoredPlanResult:
     new_planning_state_version: int
 
 
-def build_lint_warnings(validation: SpecValidationResult) -> list[LintWarning]:
+def build_lint_warnings(
+    validation: SpecValidationResult,
+    *,
+    informational_warning_keys: frozenset[tuple[str, str]] = frozenset(),
+) -> list[LintWarning]:
     return [
         LintWarning(
             step_ref=warning.step_ref,
             code=warning.code,
             message=warning.message,
-            severity=warning.severity,
+            severity=(
+                LintSeverity.INFO
+                if (warning.step_ref, warning.code) in informational_warning_keys
+                else warning.severity
+            ),
         )
         for warning in validation.warnings
         if _is_user_visible_lint_warning(warning)
+        or (warning.step_ref, warning.code) in informational_warning_keys
     ]
 
 
@@ -61,6 +70,8 @@ def _is_user_visible_lint_warning(warning: LintWarning) -> bool:
 
 def build_flow_builder_proposal(
     compiled: CompiledProposal,
+    *,
+    informational_warning_keys: frozenset[tuple[str, str]] = frozenset(),
 ) -> FlowBuilderProposal:
     if compiled.content.lint_warnings:
         raise ValueError(
@@ -68,7 +79,12 @@ def build_flow_builder_proposal(
             "derived from compiled.validation at the storage boundary."
         )
     content = compiled.content.model_copy(
-        update={"lint_warnings": build_lint_warnings(compiled.validation)}
+        update={
+            "lint_warnings": build_lint_warnings(
+                compiled.validation,
+                informational_warning_keys=informational_warning_keys,
+            )
+        }
     )
     return FlowBuilderProposal(
         content=content,
@@ -90,8 +106,11 @@ async def store_plan_and_update_conversation(
     compiled: CompiledProposal,
     planning_state: PlanningState,
     flow: "Flow | None" = None,
+    informational_warning_keys: frozenset[tuple[str, str]] = frozenset(),
 ) -> StoredPlanResult:
-    proposal = build_flow_builder_proposal(compiled)
+    proposal = build_flow_builder_proposal(
+        compiled, informational_warning_keys=informational_warning_keys
+    )
     append_plan_messages(
         conversation=conversation,
         assistant_content=assistant_content,

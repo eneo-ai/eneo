@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import ValidationError
 
@@ -41,6 +41,9 @@ from eneo.flows.ai_builder.ai_builder_flow_review import (
     review_edit_changes_of_the_model,
     validate_review_edit_effect,
     validate_review_edit_proposal,
+)
+from eneo.flows.ai_builder.ai_builder_json_schema_paths import (
+    resolve_schema_properties,
 )
 from eneo.flows.ai_builder.ai_builder_plan_edit_context import (
     ResolvedAIBuilderEditContext,
@@ -561,6 +564,36 @@ def _validate_saved_step_consumers(
     )
     if proposed_target is None:
         return None
+    prior_target = next(
+        step for step in prior_spec.steps if step.existing_step_ref == target_ref
+    )
+    if (
+        prior_target.output_contract is not None
+        and proposed_target.output_contract != prior_target.output_contract
+        and any(
+            step.kind == "modify"
+            and step.existing_step_ref == target_ref
+            and step.output_fields
+            and all(
+                not field.fields and not field.item_fields
+                for field in step.output_fields
+            )
+            for step in proposal.steps
+        )
+        and any(
+            _contains_object_properties(child)
+            for child in resolve_schema_properties(
+                prior_target.output_contract
+            ).values()
+        )
+    ):
+        return CorrectableFailure(
+            feedback=f"Step `{target_ref}` ({prior_target.name}) has a saved nested "
+            "output contract that these output_fields do not preserve. Omit "
+            "output_fields to keep the saved contract.",
+            kind="validation",
+            codes=frozenset({"output_contract_changed"}),
+        )
     # Keep entries carry no model contribution. Validate the target against the
     # prior consumers without attributing compiler housekeeping to the model.
     target_effect = prior_spec.model_copy(
@@ -584,9 +617,6 @@ def _validate_saved_step_consumers(
             kind="validation",
             codes=frozenset(error.code for error in errors),
         )
-    prior_target = next(
-        step for step in prior_spec.steps if step.existing_step_ref == target_ref
-    )
     if (
         prior_target.output_contract is None
         or proposed_target.output_contract is not None
@@ -622,3 +652,12 @@ def _validate_saved_step_consumers(
                 codes=frozenset({"consumer_requires_output_contract"}),
             )
     return None
+
+
+def _contains_object_properties(schema: object) -> bool:
+    if not isinstance(schema, dict):
+        return False
+    node = cast(dict[str, Any], schema)
+    return bool(resolve_schema_properties(node)) or _contains_object_properties(
+        node.get("items")
+    )
