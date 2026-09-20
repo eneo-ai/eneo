@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import json
+from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, create_autospec
@@ -22,12 +23,11 @@ from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.outcome import Outcome
 from eneo.authentication.principal_types import PrincipalType
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.domain.model_kwargs_capabilities import SupportedModelKwargs
-from eneo.completion_models.infrastructure.completion_service import (
-    CompletionContextPreview,
-)
-from eneo.completion_models.infrastructure.context_builder import (
-    ContextWindowExceededError,
+from eneo.completion_models.domain.request_preflight import (
+    CompletionRequestPackage,
+    CompletionRequestPreflight,
 )
 from eneo.files.file_models import FileType
 from eneo.files.file_service import FileService
@@ -532,6 +532,26 @@ def _completed_step_result(
     )
 
 
+def _context_preflight(token_count: int) -> CompletionRequestPreflight:
+    from eneo.tokens.token_utils import TokenCount, TokenCountSource
+
+    package = CompletionRequestPackage(
+        messages=[],
+        tools=[],
+        response_format=None,
+        input_reserve=TokenCount(tokens=token_count, source=TokenCountSource.LITELLM),
+        useful_output_reserve_tokens=256,
+        output_cap_tokens=4000,
+    )
+    return CompletionRequestPreflight(
+        model_route="test/model",
+        capacity=ModelCapacity(100_000, 4000),
+        retrieval_included=False,
+        preferred=package,
+        fallback=package,
+    )
+
+
 def _mock_assistant_for_execute_step(*, response_text: str = "ok") -> MagicMock:
     assistant = MagicMock()
     assistant.mcp_servers = []
@@ -550,13 +570,7 @@ def _mock_assistant_for_execute_step(*, response_text: str = "ok") -> MagicMock:
             total_token_count=3,
         )
     )
-    assistant.preview_response_context = AsyncMock(
-        return_value=CompletionContextPreview(
-            token_count=1,
-            max_input_tokens=100_000,
-            model_route="test/model",
-        )
-    )
+    assistant.preflight_response_context = AsyncMock(return_value=_context_preflight(1))
     return assistant
 
 
@@ -3414,7 +3428,7 @@ async def test_per_source_reader_rejects_textless_file_before_provider_dispatch(
         await executor._execute_step(step=step, run=run, attempt_no=1)
 
     assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_EMPTY_EXTRACTION.value
-    assistant.preview_response_context.assert_not_awaited()
+    assistant.preflight_response_context.assert_not_awaited()
     assistant.get_response.assert_not_awaited()
 
 
@@ -3470,7 +3484,7 @@ async def test_per_source_reader_rejects_zero_sources_before_provider_dispatch(u
         await executor._execute_step(step=step, run=run, attempt_no=1)
 
     assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_EMPTY_EXTRACTION.value
-    assistant.preview_response_context.assert_not_awaited()
+    assistant.preflight_response_context.assert_not_awaited()
     assistant.get_response.assert_not_awaited()
 
 
@@ -3503,7 +3517,7 @@ async def test_per_source_reader_validates_contract_before_zero_sources(user):
         await executor._execute_step(step=step, run=run, attempt_no=1)
 
     assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value
-    assistant.preview_response_context.assert_not_awaited()
+    assistant.preflight_response_context.assert_not_awaited()
     assistant.get_response.assert_not_awaited()
 
 
@@ -3558,7 +3572,7 @@ async def test_per_source_reader_rejects_missing_extraction_warnings_before_prev
 
     assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value
     assert "extraction_warnings" in str(exc_info.value)
-    assistant.preview_response_context.assert_not_awaited()
+    assistant.preflight_response_context.assert_not_awaited()
     assistant.get_response.assert_not_awaited()
 
 
@@ -3640,7 +3654,7 @@ async def test_per_source_reader_rejects_open_extraction_warning_enum_before_pre
 
     assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value
     assert "extraction_warnings" in str(exc_info.value)
-    assistant.preview_response_context.assert_not_awaited()
+    assistant.preflight_response_context.assert_not_awaited()
     assistant.get_response.assert_not_awaited()
 
 
@@ -4223,13 +4237,7 @@ async def test_per_item_map_rejects_many_small_packages_before_provider_dispatch
         max_estimated_input_tokens_per_mapped_step=10,
     )
     assistant = _mock_assistant_for_execute_step()
-    assistant.preview_response_context = AsyncMock(
-        return_value=CompletionContextPreview(
-            token_count=6,
-            max_input_tokens=100_000,
-            model_route="test/model",
-        )
-    )
+    assistant.preflight_response_context = AsyncMock(return_value=_context_preflight(6))
     executor._load_assistant = AsyncMock(return_value=assistant)
     run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
     previous = _completed_step_result(
@@ -4274,7 +4282,7 @@ async def test_per_item_map_rejects_many_small_packages_before_provider_dispatch
         await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
 
     assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value
-    assert assistant.preview_response_context.await_count == 2
+    assert assistant.preflight_response_context.await_count == 2
     assistant.get_response.assert_not_awaited()
 
 
@@ -4402,8 +4410,16 @@ async def test_per_item_map_rejects_over_window_package_before_provider_dispatch
         max_estimated_input_tokens_per_mapped_step=100,
     )
     assistant = _mock_assistant_for_execute_step()
-    assistant.preview_response_context = AsyncMock(
-        side_effect=ContextWindowExceededError(estimated_tokens=101, max_tokens=100)
+    preflight = _context_preflight(101)
+    refused_package = replace(preflight.preferred, output_cap_tokens=255)
+    assistant.preflight_response_context = AsyncMock(
+        return_value=replace(
+            preflight,
+            capacity=ModelCapacity(356, 4000),
+            preferred=refused_package,
+            fallback=refused_package,
+            refusal="smallest_admissible_input_cannot_fit",
+        )
     )
     executor._load_assistant = AsyncMock(return_value=assistant)
     run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})

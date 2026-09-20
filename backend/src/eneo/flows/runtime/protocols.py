@@ -18,6 +18,10 @@ from eneo.ai_models.completion_models.completion_model import (
     ModelKwargs,
 )
 from eneo.completion_models.domain.model_kwargs_capabilities import SupportedModelKwargs
+from eneo.completion_models.domain.request_preflight import (
+    DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS,
+    CompletionRequestPreflight,
+)
 from eneo.completion_models.infrastructure.completion_service import (
     CompletionContextPreview,
     CompletionService,
@@ -91,6 +95,20 @@ class RuntimeAssistantProtocol(Protocol):
         prompt_override: str | None = None,
         version: int = 1,
     ) -> CompletionContextPreview: ...
+
+    async def preflight_response_context(
+        self,
+        question: str,
+        completion_service: CompletionService,
+        files: list[File] | None = None,
+        prompt_override: str | None = None,
+        version: int = 1,
+        *,
+        model_kwargs: ModelKwargs | None = None,
+        info_blob_chunks: list[InfoBlobChunkInDBWithScore] | None = None,
+        capability_fallback_prompt: str | None = None,
+        useful_output_reserve_tokens: int = DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS,
+    ) -> CompletionRequestPreflight: ...
 
     async def get_response(
         self,

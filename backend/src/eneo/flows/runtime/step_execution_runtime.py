@@ -11,6 +11,9 @@ from uuid import UUID
 
 from eneo.ai_models.completion_models.completion_model import Completion, ModelKwargs
 from eneo.completion_models.domain.model_capacity import UnknownModelCapacityError
+from eneo.completion_models.domain.request_preflight import (
+    DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS,
+)
 from eneo.completion_models.infrastructure.completion_service import CompletionService
 from eneo.completion_models.infrastructure.context_builder import (
     ContextWindowExceededError,
@@ -1426,7 +1429,7 @@ async def preview_step_execution_context(
     prepared: PreparedStepExecution,
     deps: StepExecutionRuntimeDeps,
 ) -> int:
-    """Count the exact base package without RAG or provider/tool side effects."""
+    """Preflight provider packages without retrieval or provider/tool side effects."""
     if any(
         diagnostic.code == RUNTIME_INPUT_SOURCE_EMPTY_TEXT_DIAGNOSTIC_CODE
         for diagnostic in prepared.diagnostics
@@ -1442,20 +1445,41 @@ async def preview_step_execution_context(
             "external MCP tools; remove them from the published Flow assistant.",
             code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
         )
-    citation_mode = citation_mode_for_step(step)
-    prompt_override = effective_completion_prompt(
+    completion_call = prepared.completion_call or build_prepared_completion_call(
         step=step,
         state=state,
         prepared=prepared,
     )
+    prompt_override = completion_call.effective_prompt
+    # Structured replies reserve at least the serialized contract's token size.
+    useful_output_reserve_tokens = max(
+        DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS,
+        count_tokens(json.dumps(step.output_contract, ensure_ascii=False))
+        if step.output_contract is not None
+        else 0,
+    )
     try:
-        preview = await prepared.assistant.preview_response_context(
-            question=prepared.step_input.text,
+        preview = await prepared.assistant.preflight_response_context(
+            question=completion_call.question,
             completion_service=deps.completion_service,
             files=prepared.llm_files,
             prompt_override=prompt_override,
-            version=2 if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR else 1,
+            version=completion_call.assistant_context_version,
+            model_kwargs=completion_call.preferred_model_kwargs,
+            capability_fallback_prompt=completion_call.capability_fallback_prompt,
+            useful_output_reserve_tokens=useful_output_reserve_tokens,
         )
+        if preview.refusal is not None:
+            raise ContextWindowExceededError(
+                estimated_tokens=min(
+                    preview.preferred.input_reserve.tokens,
+                    preview.fallback.input_reserve.tokens,
+                ),
+                max_tokens=preview.capacity.input_allowance(
+                    output_reserve_tokens=useful_output_reserve_tokens,
+                    safety_tokens=0,
+                ),
+            )
     except UnknownModelCapacityError as exc:
         raise _typed_missing_capacity_error(
             exc, step=step, prepared=prepared, effective_prompt=prompt_override
@@ -1468,7 +1492,11 @@ async def preview_step_execution_context(
             deps=deps,
             effective_prompt=prompt_override,
         ) from exc
-    return preview.token_count
+    return max(
+        package.input_reserve.tokens
+        for package in (preview.preferred, preview.fallback)
+        if package.fits
+    )
 
 
 async def complete_step_execution(

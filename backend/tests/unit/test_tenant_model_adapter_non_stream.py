@@ -1,3 +1,5 @@
+import json
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
@@ -746,3 +748,409 @@ def declared_capabilities(monkeypatch):
         "litellm.get_supported_openai_params",
         lambda **kwargs: ["max_tokens", "max_completion_tokens"],
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("remaining_output", [31, 32])
+@pytest.mark.usefixtures("declared_capabilities")
+async def test_dispatch_requires_the_callers_useful_output_reserve(remaining_output):
+    from eneo.completion_models.infrastructure.context_builder import (
+        ContextWindowExceededError,
+    )
+    from eneo.tokens.token_utils import TokenCount, TokenCountSource
+
+    adapter = _make_adapter()
+    with (
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter.measure_provider_input_reserve",
+            return_value=TokenCount(
+                tokens=8000 - remaining_output, source=TokenCountSource.LITELLM
+            ),
+        ),
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+            AsyncMock(return_value=_response(response_id="fit", content="done")),
+        ) as transport,
+    ):
+        if remaining_output < 32:
+            with pytest.raises(ContextWindowExceededError):
+                await adapter.get_response(
+                    context=SimpleNamespace(),
+                    model_kwargs={},
+                    useful_output_reserve_tokens=32,
+                )
+            transport.assert_not_awaited()
+        else:
+            await adapter.get_response(
+                context=SimpleNamespace(),
+                model_kwargs={},
+                useful_output_reserve_tokens=32,
+            )
+            transport.assert_awaited_once()
+            assert transport.await_args.kwargs["max_tokens"] == 32
+            assert "useful_output_reserve_tokens" not in transport.await_args.kwargs
+
+
+def _preflight_service():
+    from eneo.ai_models.completion_models.completion_model import CompletionModel
+    from eneo.completion_models.infrastructure.completion_service import (
+        CompletionService,
+    )
+    from eneo.completion_models.infrastructure.context_builder import ContextBuilder
+
+    now = datetime.now(timezone.utc)
+    model = CompletionModel(
+        id=uuid4(),
+        created_at=now,
+        updated_at=now,
+        name="gpt-4o-mini",
+        nickname="test",
+        family="openai",
+        max_input_tokens=8000,
+        max_output_tokens=4000,
+        is_deprecated=False,
+        stability="stable",
+        hosting="eu",
+        vision=False,
+        reasoning=False,
+        supports_tool_calling=True,
+        is_org_enabled=True,
+        is_org_default=False,
+        tenant_id=uuid4(),
+        provider_id=uuid4(),
+    )
+    adapter = _make_adapter()
+    adapter.model = model
+    adapter.litellm_model = "openai/gpt-4o-mini"
+    for method in (
+        "_create_messages_from_context",
+        "_build_tools_from_context",
+        "_merge_mcp_tools",
+    ):
+        delattr(adapter, method)
+    adapter._prepare_kwargs = lambda model_kwargs, **kwargs: {
+        **(model_kwargs.model_dump(exclude_none=True) if model_kwargs else {}),
+        **kwargs,
+    }
+    service = CompletionService(context_builder=ContextBuilder())
+    service._get_adapter = AsyncMock(return_value=adapter)
+    return service, adapter, model
+
+
+def _wire_payload(messages, tools, response_format):
+    return json.dumps(
+        {"messages": messages, "tools": tools, "response_format": response_format},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "package_case", ["plain", "attachments", "retrieved", "tools", "native", "fallback"]
+)
+@pytest.mark.usefixtures("declared_capabilities")
+async def test_service_preflight_measures_the_outgoing_package(package_case):
+    from eneo.ai_models.completion_models.completion_model import ModelKwargs
+    from eneo.authentication.principal_types import PrincipalType
+    from eneo.files.file_models import File, FileType
+    from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
+    from eneo.tokens.token_utils import measure_provider_input_reserve
+
+    service, _, model = _preflight_service()
+    now = datetime.now(timezone.utc)
+    request = {
+        "model": model,
+        "text_input": "Summarize the source.",
+        "prompt": "Be concise.",
+        "version": 2,
+    }
+    if package_case == "attachments":
+        request["prompt_files"] = [
+            File(
+                id=uuid4(),
+                created_at=now,
+                updated_at=now,
+                name="guide.txt",
+                checksum="test",
+                size=20,
+                file_type=FileType.TEXT,
+                text="Attachment marker.",
+                owner_type=PrincipalType.USER,
+                tenant_id=uuid4(),
+            )
+        ]
+    if package_case == "retrieved":
+        request["info_blob_chunks"] = [
+            InfoBlobChunkInDBWithScore(
+                id=uuid4(),
+                created_at=now,
+                updated_at=now,
+                text="Retrieved marker.",
+                chunk_no=0,
+                info_blob_id=uuid4(),
+                tenant_id=uuid4(),
+                info_blob_title="Retrieved source",
+                score=0.9,
+            )
+        ]
+    proxy = None
+    if package_case == "tools":
+        tool = {
+            "type": "function",
+            "function": {
+                "name": "server__lookup",
+                "description": "Find source",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"q": {"type": "string"}},
+                },
+            },
+        }
+        proxy = SimpleNamespace(
+            get_tools_for_llm=lambda: [tool],
+            get_tool_count=lambda: 1,
+            get_allowed_tool_names=lambda: {"server__lookup"},
+            prepare_tools_for_context=AsyncMock(),
+            close=AsyncMock(),
+        )
+        service._mcp_proxy_factory = SimpleNamespace(
+            create=lambda *args, **kwargs: proxy
+        )
+    fallback_prompt = None
+    if package_case in {"native", "fallback"}:
+        request["model_kwargs"] = ModelKwargs(
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "answer",
+                    "schema": {
+                        "type": "object",
+                        "properties": {"answer": {"type": "string"}},
+                        "required": ["answer"],
+                        "additionalProperties": False,
+                    },
+                },
+            }
+        )
+        fallback_prompt = 'Be concise.\nReturn JSON matching {"answer": "string"}.'
+    measured = []
+
+    def measure(messages, tools, route, *, response_format=None):
+        measured.append(_wire_payload(messages, tools, response_format))
+        return measure_provider_input_reserve(
+            messages, tools, route, response_format=response_format
+        )
+
+    with (
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter.measure_provider_input_reserve",
+            side_effect=measure,
+        ),
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+            AsyncMock(return_value=_response(response_id="measured", content="done")),
+        ) as transport,
+    ):
+        result = await service.preflight_request(
+            **request,
+            mcp_proxy=proxy,
+            capability_fallback_prompt=fallback_prompt,
+            useful_output_reserve_tokens=32,
+        )
+        transport.assert_not_awaited()
+        package = result.fallback if package_case == "fallback" else result.preferred
+        assert package.fits
+        assert result.refusal is None
+        assert result.retrieval_included is (package_case == "retrieved")
+        expected = _wire_payload(
+            package.messages, package.tools, package.response_format
+        )
+        assert expected in measured
+        if package_case == "fallback":
+            request["prompt"] = fallback_prompt
+            request["model_kwargs"] = ModelKwargs()
+        if proxy is not None:
+            request["mcp_servers"] = [SimpleNamespace(is_enabled=True)]
+        await service.get_response(**request, useful_output_reserve_tokens=32)
+    transport.assert_awaited_once()
+    sent = transport.await_args.kwargs
+    assert (
+        _wire_payload(
+            sent["messages"], sent.get("tools", []), sent.get("response_format")
+        )
+        == expected
+    )
+    assert measured[-1] == expected
+    assert sent["max_tokens"] == package.output_cap_tokens
+    if package_case == "attachments":
+        assert b"Attachment marker." in expected
+    if package_case == "retrieved":
+        assert b"Retrieved marker." in expected
+        assert b"source_title: Retrieved source" in expected
+    if proxy is not None:
+        assert proxy.prepare_tools_for_context.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_preflight_requires_the_dispatch_fallback_prompt_for_native_schema():
+    from eneo.ai_models.completion_models.completion_model import ModelKwargs
+
+    service, _, model = _preflight_service()
+    with pytest.raises(ValueError, match="fallback prompt"):
+        await service.preflight_request(
+            model=model,
+            text_input="hi",
+            model_kwargs=ModelKwargs(
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {"schema": {"type": "object"}},
+                }
+            ),
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "preferred_tokens,fallback_tokens,output_limit,refusal",
+    [
+        (7969, 7968, 4000, None),
+        (7968, 7969, 4000, None),
+        (7969, 7969, 4000, "smallest_admissible_input_cannot_fit"),
+        (100, 100, 31, "fixed_overhead_too_large"),
+    ],
+)
+@pytest.mark.usefixtures("declared_capabilities")
+async def test_preflight_fit_matches_dispatch_for_each_package(
+    preferred_tokens, fallback_tokens, output_limit, refusal
+):
+    from eneo.ai_models.completion_models.completion_model import ModelKwargs
+    from eneo.completion_models.infrastructure.context_builder import (
+        ContextWindowExceededError,
+    )
+    from eneo.tokens.token_utils import TokenCount, TokenCountSource
+
+    service, _, model = _preflight_service()
+    model.max_output_tokens = output_limit
+    kwargs = ModelKwargs(response_format={"type": "json_object"})
+
+    def measure(messages, tools, route, *, response_format=None):
+        return TokenCount(
+            tokens=preferred_tokens if response_format else fallback_tokens,
+            source=TokenCountSource.LITELLM,
+        )
+
+    with (
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter.measure_provider_input_reserve",
+            side_effect=measure,
+        ),
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+            AsyncMock(return_value=_response(response_id="fit", content="done")),
+        ) as transport,
+    ):
+        result = await service.preflight_request(
+            model=model,
+            text_input="Source",
+            prompt="Return JSON",
+            model_kwargs=kwargs,
+            capability_fallback_prompt="Return JSON",
+            useful_output_reserve_tokens=32,
+        )
+        transport.assert_not_awaited()
+        assert result.refusal == refusal
+        assert result.model_route == "openai/gpt-4o-mini"
+        assert result.capacity.max_input_tokens == 8000
+        for package, model_kwargs in [
+            (result.preferred, kwargs),
+            (result.fallback, ModelKwargs()),
+        ]:
+            assert package.fits is (
+                min(8000 - package.input_reserve.tokens, output_limit) >= 32
+            )
+            if package.fits:
+                await service.get_response(
+                    model=model,
+                    text_input="Source",
+                    prompt="Return JSON",
+                    model_kwargs=model_kwargs,
+                    useful_output_reserve_tokens=32,
+                )
+                assert transport.await_args.kwargs["max_tokens"] == 32
+            else:
+                prior_calls = transport.await_count
+                with pytest.raises(ContextWindowExceededError):
+                    await service.get_response(
+                        model=model,
+                        text_input="Source",
+                        prompt="Return JSON",
+                        model_kwargs=model_kwargs,
+                        useful_output_reserve_tokens=32,
+                    )
+                assert transport.await_count == prior_calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("counter_available", [True, False])
+async def test_preflight_reports_counter_provenance_and_admits_a_fitting_byte_bound(
+    counter_available, monkeypatch
+):
+    from eneo.tokens.token_utils import TokenCountSource
+
+    service, adapter, model = _preflight_service()
+    if not counter_available:
+        adapter.litellm_model = "unknown/no-tokenizer"
+
+        def unavailable(**kwargs):
+            raise ValueError("No tokenizer for this route")
+
+        monkeypatch.setattr("litellm.token_counter", unavailable)
+    result = await service.preflight_request(
+        model=model, text_input="Source", useful_output_reserve_tokens=32
+    )
+    assert result.preferred.fits
+    assert result.refusal is None
+    assert result.preferred.input_reserve.source is (
+        TokenCountSource.LITELLM
+        if counter_available
+        else TokenCountSource.FALLBACK_ESTIMATE
+    )
+    assert result.preferred.input_reserve.tokens > 0
+    assert result.retrieval_included is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("declared_capabilities")
+async def test_stream_preparation_sends_the_measured_package_and_useful_cap():
+    service, adapter, model = _preflight_service()
+    evidence = await service.preflight_request(
+        model=model,
+        text_input="Source",
+        prompt="Explain.",
+        useful_output_reserve_tokens=32,
+    )
+    context = service.context_builder.build_context(
+        input_str="Source",
+        prompt="Explain.",
+        max_tokens=8000,
+        model_name=adapter.litellm_model,
+        vision=False,
+    )
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(return_value=SimpleNamespace()),
+    ) as transport:
+        await adapter.prepare_streaming(
+            context=context, useful_output_reserve_tokens=32
+        )
+    sent = transport.await_args.kwargs
+    assert _wire_payload(
+        sent["messages"], sent.get("tools", []), sent.get("response_format")
+    ) == _wire_payload(
+        evidence.preferred.messages,
+        evidence.preferred.tools,
+        evidence.preferred.response_format,
+    )
+    assert sent["max_tokens"] == evidence.preferred.output_cap_tokens
+    assert "useful_output_reserve_tokens" not in sent

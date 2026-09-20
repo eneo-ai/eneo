@@ -41,6 +41,10 @@ from eneo.completion_models.domain.model_capacity import (
     ModelCapacityNoFit,
     UnknownModelCapacityError,
 )
+from eneo.completion_models.domain.request_preflight import (
+    DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS,
+    CompletionRequestPackage,
+)
 from eneo.completion_models.domain.skill_activation import (
     SKILL_ACTIVATION_TOOL_NAME,
     InvalidSkillToolCallError,
@@ -1182,11 +1186,34 @@ class TenantModelAdapter(CompletionModelAdapter):
             )
         return kwargs
 
-    def _prepare_dispatch_kwargs(
+    @override
+    def package_request(
+        self,
+        provider_input: ProviderInput,
+        *,
+        model_kwargs: ModelKwargs | dict[str, Any] | None = None,
+        useful_output_reserve_tokens: int = DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS,
+    ) -> CompletionRequestPackage:
+        kwargs = self._prepare_kwargs(model_kwargs=model_kwargs)
+        kwargs["useful_output_reserve_tokens"] = useful_output_reserve_tokens
+        if provider_input.tools:
+            kwargs["tools"] = provider_input.tools
+        package, _ = self._package_request(provider_input.messages, kwargs)
+        return package
+
+    def _package_request(
         self, messages: list[dict[str, Any]], kwargs: dict[str, Any]
-    ) -> dict[str, Any]:
+    ) -> tuple[CompletionRequestPackage, dict[str, Any]]:
         capacity = ModelCapacity(self.model.token_limit, self.model.max_output_tokens)
         prepared = dict(kwargs)
+        useful_output_reserve_tokens = prepared.pop(
+            "useful_output_reserve_tokens", DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS
+        )
+        if (
+            type(useful_output_reserve_tokens) is not int
+            or useful_output_reserve_tokens < 1
+        ):
+            raise ValueError("The useful output reserve must be a positive integer.")
         caller_caps: list[int] = []
         for name in ("max_tokens", "max_completion_tokens"):
             value = prepared.pop(name, None)
@@ -1209,11 +1236,28 @@ class TenantModelAdapter(CompletionModelAdapter):
             safety_tokens=0,
             caller_cap=min(caller_caps) if caller_caps else None,
         )
-        if isinstance(cap, ModelCapacityNoFit):
+        return CompletionRequestPackage(
+            messages=messages,
+            tools=prepared.get("tools") or [],
+            response_format=prepared.get("response_format"),
+            input_reserve=reserve,
+            useful_output_reserve_tokens=useful_output_reserve_tokens,
+            output_cap_tokens=None if isinstance(cap, ModelCapacityNoFit) else cap,
+        ), prepared
+
+    def _prepare_dispatch_kwargs(
+        self, messages: list[dict[str, Any]], kwargs: dict[str, Any]
+    ) -> dict[str, Any]:
+        package, prepared = self._package_request(messages, kwargs)
+        if not package.fits:
+            capacity = ModelCapacity(
+                self.model.token_limit, self.model.max_output_tokens
+            )
             raise ContextWindowExceededError(
-                estimated_tokens=reserve.tokens,
+                estimated_tokens=package.input_reserve.tokens,
                 max_tokens=capacity.input_allowance(
-                    output_reserve_tokens=1, safety_tokens=0
+                    output_reserve_tokens=package.useful_output_reserve_tokens,
+                    safety_tokens=0,
                 ),
             )
         supported = _get_supported_openai_params(self.litellm_model) or []
@@ -1231,7 +1275,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 code="provider_rejected_request",
                 details={"reason": "output_cap_unsupported", "retryable": False},
             )
-        prepared[cap_parameter] = cap
+        prepared[cap_parameter] = package.output_cap_tokens
         return prepared
 
     @override
@@ -1243,6 +1287,7 @@ class TenantModelAdapter(CompletionModelAdapter):
         skill_runtime: SkillActivationRuntime | None = None,
         provider_call_observer: ProviderCallObserver | None = None,
         provider_call_reason: ProviderCallReason = "initial",
+        useful_output_reserve_tokens: int = DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS,
         **kwargs: Any,
     ) -> Completion:
         """
@@ -1282,6 +1327,7 @@ class TenantModelAdapter(CompletionModelAdapter):
             f"with {len(messages)} messages, params: {self._get_effective_params(litellm_kwargs, dropped)}"
         )
 
+        litellm_kwargs["useful_output_reserve_tokens"] = useful_output_reserve_tokens
         completed_provider_calls = 0
         try:
             cumulative_input_tokens = 0
@@ -1763,6 +1809,7 @@ class TenantModelAdapter(CompletionModelAdapter):
         model_kwargs: ModelKwargs | dict[str, Any] | None = None,
         mcp_proxy: "MCPProxySession | None" = None,
         skill_runtime: SkillActivationRuntime | None = None,
+        useful_output_reserve_tokens: int = DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS,
         **kwargs: Any,
     ) -> PreparedModelStream:
         """
@@ -1803,6 +1850,7 @@ class TenantModelAdapter(CompletionModelAdapter):
             f"with {len(messages)} messages, params: {self._get_effective_params(litellm_kwargs, dropped)}"
         )
 
+        litellm_kwargs["useful_output_reserve_tokens"] = useful_output_reserve_tokens
         try:
             # Request usage info on the final chunk when the provider returns it.
             stream = cast(

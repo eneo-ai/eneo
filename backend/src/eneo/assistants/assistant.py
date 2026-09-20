@@ -10,6 +10,10 @@ from eneo.assistants.api.assistant_models import AssistantType, KnowledgeMode
 from eneo.base.base_entity import Entity
 from eneo.completion_models.domain.completion_model import CompletionModel
 from eneo.completion_models.domain.model_capacity import ModelCapacity
+from eneo.completion_models.domain.request_preflight import (
+    DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS,
+    CompletionRequestPreflight,
+)
 from eneo.completion_models.infrastructure.completion_service import (
     CompletionContextPreview,
     CompletionService,
@@ -497,6 +501,40 @@ class Assistant(Entity):
             ),
             prompt_files=self.attachments,
             version=version,
+        )
+
+    async def preflight_response_context(
+        self,
+        question: str,
+        completion_service: "CompletionService",
+        files: list[File] | None = None,
+        prompt_override: str | None = None,
+        version: int = 1,
+        *,
+        model_kwargs: ModelKwargs | None = None,
+        info_blob_chunks: list[InfoBlobChunkInDBWithScore] | None = None,
+        capability_fallback_prompt: str | None = None,
+        useful_output_reserve_tokens: int = DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS,
+    ) -> CompletionRequestPreflight:
+        if self.completion_model is None:
+            raise NoModelSelectedException()
+        completion_model = cast("AICompletionModel", self.completion_model)
+        return await completion_service.preflight_request(
+            model=completion_model,
+            text_input=question,
+            files=files or [],
+            prompt=(
+                prompt_override
+                if prompt_override is not None
+                else self.get_prompt_text()
+            ),
+            prompt_files=self.attachments,
+            version=version,
+            model_kwargs=model_kwargs,
+            info_blob_chunks=info_blob_chunks,
+            capability_fallback_prompt=capability_fallback_prompt,
+            useful_output_reserve_tokens=useful_output_reserve_tokens,
+            inline_file_text=self.inline_file_text,
         )
 
     async def get_response(

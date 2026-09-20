@@ -78,6 +78,7 @@ from eneo.flows.runtime.step_execution_runtime import (
     execution_hash,
     json_mode_cache_key,
     prepare_step_execution,
+    preview_step_execution_context,
 )
 from eneo.flows.runtime.step_result_builder import build_completed_step_result
 from eneo.flows.variable_resolver import FlowVariableResolver
@@ -201,6 +202,79 @@ def _prompt_for_output_format(
     return append_output_format_instructions(
         prompt, spec.prompt_instructions(output_contract)
     )
+
+
+@pytest.mark.asyncio
+async def test_preview_preflights_both_dispatch_prompts_without_retrieval():
+    from eneo.completion_models.domain.model_capacity import ModelCapacity
+    from eneo.completion_models.domain.request_preflight import (
+        DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS,
+        CompletionRequestPackage,
+        CompletionRequestPreflight,
+    )
+    from eneo.tokens.token_utils import TokenCount, TokenCountSource
+
+    schema = {
+        "type": "object",
+        "properties": {"answer": {"type": "string", "description": "answer " * 600}},
+    }
+    assistant = MagicMock()
+    assistant.mcp_servers = []
+    assistant.get_prompt_text.return_value = "Explain."
+    assistant.completion_model = _completion_model(
+        supported_model_kwargs=SupportedModelKwargs()
+    )
+    assistant.completion_model.litellm_model_name = "openai/gpt-4o-mini"
+    assistant.completion_model_kwargs = ModelKwargs()
+    package = CompletionRequestPackage(
+        messages=[],
+        tools=[],
+        response_format=None,
+        input_reserve=TokenCount(tokens=444, source=TokenCountSource.LITELLM),
+        useful_output_reserve_tokens=256,
+        output_cap_tokens=4000,
+    )
+    evidence = CompletionRequestPreflight(
+        model_route="openai/gpt-4o-mini",
+        capacity=ModelCapacity(8000, 4000),
+        retrieval_included=False,
+        preferred=package,
+        fallback=package,
+    )
+    assistant.preflight_response_context = AsyncMock(return_value=evidence)
+    assistant.preview_response_context = AsyncMock(
+        side_effect=AssertionError("old preview")
+    )
+    prepared = PreparedStepExecution(
+        assistant=assistant,
+        step_input=StepInputValue(text="Source"),
+        effective_prompt=_prompt_for_output_format(
+            output_type="json", output_contract=schema, prompt="Explain."
+        ),
+        input_payload_for_result={},
+        contract_validation=None,
+        diagnostics=[],
+        llm_files=[],
+    )
+    deps = SimpleNamespace(completion_service=object(), retrieve_rag_chunks=AsyncMock())
+    step = _step(output_type="json", output_contract=schema)
+    state = _state()
+    expected = build_prepared_completion_call(step=step, state=state, prepared=prepared)
+
+    tokens = await preview_step_execution_context(
+        step=step, state=state, prepared=prepared, deps=deps
+    )
+
+    assert tokens == 444
+    passed = assistant.preflight_response_context.await_args.kwargs
+    assert passed["prompt_override"] == expected.effective_prompt
+    assert passed["capability_fallback_prompt"] == expected.capability_fallback_prompt
+    assert passed["model_kwargs"] == expected.preferred_model_kwargs
+    assert passed.get("info_blob_chunks") is None
+    assert passed["useful_output_reserve_tokens"] > DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS
+    assert evidence.retrieval_included is False
+    deps.retrieve_rag_chunks.assert_not_awaited()
+    assistant.preview_response_context.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -3360,7 +3434,7 @@ async def test_reduced_cap_terminal_reason_controls_flow_consumption(
     adapter.provider_type = TRANSPORT
     messages = [{"role": "user", "content": "hello"}]
     reserve = measure_provider_input_reserve(messages, [], adapter.litellm_model).tokens
-    adapter.model = SimpleNamespace(token_limit=reserve + 1, max_output_tokens=64)
+    adapter.model = SimpleNamespace(token_limit=reserve + 256, max_output_tokens=512)
     adapter.credential_resolver = SimpleNamespace(
         provider_type=TRANSPORT,
         get_api_key=lambda **kwargs: "test-key",
@@ -3504,7 +3578,7 @@ async def test_reduced_cap_terminal_reason_controls_flow_consumption(
         )
         assert result.status == FlowStepResultStatus.COMPLETED
     assert len(requests) == 1
-    assert requests[0]["max_tokens"] == 1
+    assert requests[0]["max_tokens"] == 256
     observer.started.assert_awaited_once()
     observer.completed.assert_awaited_once()
     observer.rejected.assert_not_awaited()

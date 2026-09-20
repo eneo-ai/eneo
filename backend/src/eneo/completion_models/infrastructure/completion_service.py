@@ -19,9 +19,15 @@ from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.signed_urls import build_signed_original_download_url
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
     SupportedModelKwargs,
+)
+from eneo.completion_models.domain.request_preflight import (
+    DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS,
+    CompletionRequestPackage,
+    CompletionRequestPreflight,
 )
 from eneo.completion_models.domain.skill_activation import SkillActivationRuntime
 from eneo.completion_models.infrastructure.adapters.base_adapter import ProviderInput
@@ -696,6 +702,120 @@ class CompletionService:
             model_route=model_route,
         )
 
+    async def preflight_request(
+        self,
+        *,
+        model: CompletionModel,
+        text_input: str,
+        model_kwargs: ModelKwargs | None = None,
+        files: list[File] | None = None,
+        prompt: str = "",
+        prompt_files: list[File] | None = None,
+        transcription_inputs: list[str] | None = None,
+        info_blob_chunks: list[InfoBlobChunkInDBWithScore] | None = None,
+        session: SessionInDB | None = None,
+        version: int = 1,
+        mcp_proxy: MCPProxySession | None = None,
+        skill_runtime: SkillActivationRuntime | None = None,
+        inline_file_text: bool = True,
+        knowledge_catalog: str = "",
+        capability_fallback_prompt: str | None = None,
+        useful_output_reserve_tokens: int = DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS,
+    ) -> CompletionRequestPreflight:
+        """Measure both dispatch forms using caller-supplied retrieval and tools.
+
+        The caller owns capability fallback instructions and any frozen MCP
+        catalogue. This method neither retrieves knowledge nor discovers tools.
+        """
+        if (
+            model_kwargs is not None
+            and model_kwargs.response_format is not None
+            and capability_fallback_prompt is None
+        ):
+            raise ValueError("A response format requires the dispatch fallback prompt.")
+        adapter = await self._get_adapter(model)
+        model_route = adapter.get_model_route()
+        capacity = ModelCapacity(model.max_input_tokens, model.max_output_tokens)
+        max_tokens = capacity.require_input_tokens()
+        if model_kwargs is not None:
+            model_kwargs = filter_request_model_kwargs(
+                model_kwargs, model.supported_model_kwargs
+            )
+        history_files = [
+            file
+            for question in (session.questions if session else [])
+            for file in [*question.files, *question.generated_files]
+        ]
+        file_reference_urls = self._build_file_reference_urls(
+            (files or []) + history_files
+        )
+
+        def package(
+            package_prompt: str, kwargs: ModelKwargs | None
+        ) -> CompletionRequestPackage:
+            context = self.context_builder.build_context(
+                input_str=text_input,
+                max_tokens=max_tokens,
+                model_name=model_route,
+                files=files or [],
+                prompt=package_prompt,
+                session=session,
+                info_blob_chunks=info_blob_chunks or [],
+                prompt_files=prompt_files or [],
+                transcription_inputs=transcription_inputs or [],
+                version=version,
+                mcp_tools=(
+                    [skill_runtime.tool_definition]
+                    if skill_runtime is not None
+                    and skill_runtime.tool_definition is not None
+                    else None
+                ),
+                knowledge_catalog=knowledge_catalog,
+                vision=model.vision,
+                extra_tool_dicts=(
+                    mcp_proxy.get_tools_for_llm()
+                    if mcp_proxy is not None and model.supports_tool_calling
+                    else None
+                ),
+                file_reference_urls=file_reference_urls,
+                inline_file_text=inline_file_text,
+            )
+            provider_input = adapter.prepare_provider_input(
+                context, mcp_proxy=mcp_proxy, skill_runtime=skill_runtime
+            )
+            return adapter.package_request(
+                provider_input,
+                model_kwargs=kwargs,
+                useful_output_reserve_tokens=useful_output_reserve_tokens,
+            )
+
+        preferred = package(prompt, model_kwargs)
+        fallback = preferred
+        if model_kwargs is not None and model_kwargs.response_format is not None:
+            fallback = package(
+                capability_fallback_prompt
+                if capability_fallback_prompt is not None
+                else prompt,
+                model_kwargs.model_copy(update={"response_format": None}),
+            )
+        refusal = None
+        if not preferred.fits and not fallback.fits:
+            refusal = (
+                "fixed_overhead_too_large"
+                if not capacity.output_reserve_fits(useful_output_reserve_tokens)
+                or max_tokens <= useful_output_reserve_tokens
+                or not (text_input or files or info_blob_chunks or transcription_inputs)
+                else "smallest_admissible_input_cannot_fit"
+            )
+        return CompletionRequestPreflight(
+            model_route=model_route,
+            capacity=capacity,
+            retrieval_included=info_blob_chunks is not None,
+            preferred=preferred,
+            fallback=fallback,
+            refusal=refusal,
+        )
+
     async def get_response(
         self,
         model: CompletionModel,
@@ -718,6 +838,7 @@ class CompletionService:
         skill_runtime: SkillActivationRuntime | None = None,
         inline_file_text: bool = True,
         knowledge_catalog: str = "",
+        useful_output_reserve_tokens: int | None = None,
     ) -> CompletionModelResponse:
         if files is None:
             files = []
@@ -850,6 +971,11 @@ class CompletionService:
                 await mcp_proxy.close()
             raise
 
+        dispatch_options: dict[str, Any] = {}
+        if useful_output_reserve_tokens is not None:
+            dispatch_options["useful_output_reserve_tokens"] = (
+                useful_output_reserve_tokens
+            )
         if not stream:
             try:
                 completion = await model_adapter.get_response(
@@ -859,6 +985,7 @@ class CompletionService:
                     provider_call_observer=provider_call_observer,
                     provider_call_reason=provider_call_reason,
                     skill_runtime=skill_runtime,
+                    **dispatch_options,
                 )
                 adapter_input_estimate = completion.input_token_estimate
                 usage = completion.usage
@@ -876,6 +1003,7 @@ class CompletionService:
                     model_kwargs=model_kwargs,
                     mcp_proxy=mcp_proxy,
                     skill_runtime=skill_runtime,
+                    **dispatch_options,
                 )
             except BaseException:
                 # If stream prep fails, close the proxy here — the streaming_wrapper's
