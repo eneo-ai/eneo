@@ -1094,8 +1094,10 @@ async def test_resolve_step_input_json_previous_step_structured_only_emits_under
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("section_processing", [False, True])
 async def test_resolve_step_input_json_source_refs_build_exact_structured_projection(
     user,
+    section_processing,
 ):
     executor, _, _, _ = _build_executor(user)
     run = _run(status=FlowRunStatus.RUNNING, user=user)
@@ -1233,6 +1235,52 @@ async def test_resolve_step_input_json_source_refs_build_exact_structured_projec
         "parse_succeeded": True,
         "candidate_type": "dict",
     }
+
+    if section_processing:
+        from eneo.flows.domain.text_processing import SectionManifest
+        from tests.unittests.flows.test_text_sections import _case
+
+        executor, _, assistant, run, material_state, section_step, text, _, _, _ = (
+            _case(user, prompt="Material:\n{{step_3.output.text}}\nDone.")
+        )
+        material = material_state.prior_results[0].model_copy(update={"step_order": 3})
+        state.prior_results = [*prior, material]
+        state.completed_by_order[3] = material
+        section_step = replace(
+            section_step,
+            step_order=4,
+            input_type="json",
+            input_bindings={
+                "source_refs": [
+                    {
+                        **ref,
+                        "step_ref": f"step_{state.step_ref_mapping[ref['step_ref']]}",
+                    }
+                    for ref in input_bindings["source_refs"]
+                ]
+            },
+            input_contract=input_contract,
+        )
+
+        result = await executor._execute_step(
+            step=section_step, run=run, state=state, attempt_no=1
+        )
+
+        manifest = SectionManifest.model_validate(
+            result.output.output_payload_extensions["section_manifest"]
+        )
+        sections = manifest.resplit(text)
+        assert len(sections) > 1
+        for section, call in zip(
+            sections, assistant.get_response.await_args_list, strict=True
+        ):
+            assert json.loads(call.kwargs["question"]) == {
+                "meeting": {"summary": "Grounded summary"},
+                "decisions": ["Approve"],
+            }
+            assert call.kwargs["prompt_override"].split("\nDone.")[0] == (
+                "Material:\n" + section
+            )
 
 
 @pytest.mark.asyncio

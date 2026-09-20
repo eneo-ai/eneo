@@ -12,7 +12,6 @@ from eneo.flows.domain.step_output import (
 )
 from eneo.flows.domain.text_processing import SectionManifest, SectionRange, TextSection
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.input_binding_contract_rules import effective_question_binding
 from eneo.flows.runtime.output_formats import resolve_format_spec
 from eneo.flows.runtime.output_formats.base import append_output_format_instructions
 from eneo.flows.runtime.step_deadline import require_step_budget
@@ -22,7 +21,10 @@ from eneo.flows.runtime.step_execution_runtime import (
 )
 from eneo.flows.runtime.step_handlers.base import PreparedAssistantStep
 from eneo.flows.runtime.step_handlers.mapped_outputs import mapped_admission_payload
-from eneo.flows.runtime.step_input_resolution import resolve_default_step_input_text
+from eneo.flows.runtime.step_input_resolution import (
+    resolve_default_step_input_text,
+    resolve_step_input_binding,
+)
 from eneo.main.exceptions import TypedIOValidationException
 
 
@@ -74,7 +76,6 @@ async def prepare_text_sections(
     completion = base.prepared.completion_call
     if completion is None:
         raise RuntimeError("Section processing requires a packaged completion call.")
-    question_template = effective_question_binding(step.input_bindings)
 
     async def measure(start: int, end: int) -> tuple[PreparedAssistantStep, int]:
         require_step_budget(
@@ -114,10 +115,21 @@ async def prepare_text_sections(
                 step.output_contract
             ),
         )
-        if question_template is not None:
-            question = base.deps.variable_resolver.interpolate_with_evidence(
-                question_template, context, binding_ref="input_bindings.question"
-            ).text
+        binding = resolve_step_input_binding(
+            step=step,
+            run=run,
+            prior_results=state.prior_results,
+            state=state,
+            runtime_input_metadata=runtime_metadata,
+            variable_resolver=base.deps.variable_resolver,
+            resolved_step_text=(
+                {material.source_step_id: section_text}
+                if material is not None
+                else None
+            ),
+        )
+        if binding is not None:
+            question = binding.text
         else:
             _, question = resolve_default_step_input_text(
                 step=step,
@@ -139,6 +151,9 @@ async def prepare_text_sections(
             step_input=replace(
                 base.prepared.step_input,
                 text=question,
+                structured=binding.structured
+                if binding is not None and binding.structured is not None
+                else step_input.structured,
                 source_text=section_text,
                 raw_extracted_text=section_text,
             ),

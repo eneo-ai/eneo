@@ -143,6 +143,14 @@ class ResolvedStructuredSourceRefsInput:
     edges: tuple[FlowResolvedInputEdge, ...]
 
 
+@dataclass(frozen=True)
+class ResolvedStepInputBinding:
+    text: str
+    edges: tuple[FlowResolvedInputEdge, ...]
+    diagnostic: StepDiagnostic
+    structured: dict[str, Any] | None = None
+
+
 async def resolve_step_input(
     *,
     step: RuntimeStep,
@@ -352,122 +360,27 @@ async def resolve_step_input(
             },
         )
 
-    bindings = step.input_bindings if isinstance(step.input_bindings, dict) else None
     explicit_binding_edges: tuple[FlowResolvedInputEdge, ...] = ()
     used_structured_source_refs = False
-    if bindings is not None:
-        structured_source_refs_input = (
-            _resolve_structured_source_refs_input(
-                step=step,
-                bindings=bindings,
-                prior_results=prior_results,
-                state=state,
-            )
-            if step.input_type == "json"
-            else None
-        )
-        source_refs_input = (
-            _resolve_compose_source_refs_input(
-                step=step,
-                bindings=bindings,
-                run=run,
-                prior_results=prior_results,
-                state=state,
-                runtime_input_metadata=runtime_input_metadata,
-                deps=deps,
-            )
-            if step.output_mode == "compose_text"
-            else None
-        )
-        if structured_source_refs_input is not None:
-            structured = structured_source_refs_input.structured
-            input_text = json.dumps(structured, ensure_ascii=False)
-            # Existing execution metadata names all explicit Underlag paths as
-            # question bindings. Keep that compatibility signal until the
-            # broader attempt-input contract can rename it atomically.
-            used_question_binding = True
+    binding = resolve_step_input_binding(
+        step=step,
+        run=run,
+        prior_results=prior_results,
+        state=state,
+        runtime_input_metadata=runtime_input_metadata,
+        variable_resolver=deps.variable_resolver,
+    )
+    if binding is not None:
+        input_text = binding.text
+        # Existing execution metadata names all explicit Underlag paths as
+        # question bindings. Keep that compatibility signal until the
+        # broader attempt-input contract can rename it atomically.
+        used_question_binding = True
+        if binding.structured is not None:
+            structured = binding.structured
             used_structured_source_refs = True
-            explicit_binding_edges = structured_source_refs_input.edges
-            diagnostics.append(
-                StepDiagnostic(
-                    code="flow_underlag_summary",
-                    message=(
-                        "Resolved structured underlag from "
-                        f"{structured_source_refs_input.reference_count} source refs "
-                        f"({len(input_text.encode('utf-8'))} bytes)."
-                    ),
-                    severity="info",
-                )
-            )
-        elif source_refs_input is not None:
-            input_text = source_refs_input.text
-            used_question_binding = True
-            explicit_binding_edges = source_refs_input.edges
-            diagnostics.append(
-                StepDiagnostic(
-                    code="flow_underlag_summary",
-                    message=(
-                        f"Resolved underlag from {source_refs_input.reference_count} "
-                        f"source refs ({len(input_text.encode('utf-8'))} bytes)."
-                    ),
-                    severity="info",
-                )
-            )
-        else:
-            question_template = effective_question_binding(bindings)
-            if question_template is not None:
-                references = analyze_template(
-                    question_template,
-                    step_refs=state.step_ref_mapping if state is not None else {},
-                    form_field_names=set(),
-                )
-                _raise_if_text_template_references_overflowed_output(
-                    references=references,
-                    prior_results=state.completed_by_order.values()
-                    if state is not None
-                    else prior_results,
-                    consuming_step_order=step.step_order,
-                    input_source="input_bindings.question",
-                )
-                interpolation_context = (
-                    deps.variable_resolver.build_context_with_evidence(
-                        run.input_payload_json,
-                        prior_results,
-                        current_step_order=step.step_order,
-                        step_names_by_order=state.step_names_by_order
-                        if state
-                        else None,
-                        step_ref_mapping=state.step_ref_mapping if state else None,
-                        current_step_input=runtime_input_metadata,
-                    )
-                )
-                interpolated_question = (
-                    deps.variable_resolver.interpolate_with_evidence(
-                        question_template,
-                        interpolation_context,
-                        binding_ref="input_bindings.question",
-                    )
-                )
-                input_text = interpolated_question.text
-                explicit_binding_edges = interpolated_question.edges
-                used_question_binding = True
-                diagnostics.append(
-                    StepDiagnostic(
-                        code="flow_underlag_summary",
-                        message=(
-                            f"Resolved underlag from {len(references)} template sources "
-                            f"({len(interpolated_question.text.encode('utf-8'))} bytes)."
-                        ),
-                        severity="info",
-                    )
-                )
-                if runtime_input_metadata is not None and not consumes_runtime_input(
-                    references
-                ):
-                    raise TypedIOValidationException(
-                        f"Step {step.step_order}: explicit runtime-input bindings must reference step_input.*",
-                        code=FlowApiErrorCode.RUNTIME_INPUT_NOT_CONSUMED.value,
-                    )
+        explicit_binding_edges = binding.edges
+        diagnostics.append(binding.diagnostic)
 
     if not used_question_binding:
         source_text, input_text = resolve_default_step_input_text(
@@ -798,6 +711,125 @@ def _runtime_file_edges(files: list[Any]) -> tuple[FlowResolvedInputEdge, ...]:
     return tuple(edges)
 
 
+def resolve_step_input_binding(
+    *,
+    step: RuntimeStep,
+    run: FlowRun,
+    prior_results: list[FlowStepResult],
+    state: RunExecutionState | None,
+    runtime_input_metadata: dict[str, Any] | None,
+    variable_resolver: Any,
+    resolved_step_text: Mapping[UUID, str] | None = None,
+) -> ResolvedStepInputBinding | None:
+    bindings = step.input_bindings if isinstance(step.input_bindings, dict) else None
+    if bindings is None:
+        return None
+    if resolved_step_text:
+        prior_results, state = _substitute_step_text(
+            prior_results=prior_results,
+            state=state,
+            resolved_step_text=resolved_step_text,
+        )
+    structured_source_refs_input = (
+        _resolve_structured_source_refs_input(
+            step=step,
+            bindings=bindings,
+            prior_results=prior_results,
+            state=state,
+        )
+        if step.input_type == "json"
+        else None
+    )
+    source_refs_input = (
+        _resolve_compose_source_refs_input(
+            step=step,
+            bindings=bindings,
+            run=run,
+            prior_results=prior_results,
+            state=state,
+            runtime_input_metadata=runtime_input_metadata,
+            variable_resolver=variable_resolver,
+        )
+        if step.output_mode == "compose_text"
+        else None
+    )
+    if structured_source_refs_input is not None:
+        text = json.dumps(structured_source_refs_input.structured, ensure_ascii=False)
+        return ResolvedStepInputBinding(
+            text=text,
+            structured=structured_source_refs_input.structured,
+            edges=structured_source_refs_input.edges,
+            diagnostic=StepDiagnostic(
+                code="flow_underlag_summary",
+                message=(
+                    "Resolved structured underlag from "
+                    f"{structured_source_refs_input.reference_count} source refs "
+                    f"({len(text.encode('utf-8'))} bytes)."
+                ),
+                severity="info",
+            ),
+        )
+    if source_refs_input is not None:
+        return ResolvedStepInputBinding(
+            text=source_refs_input.text,
+            edges=source_refs_input.edges,
+            diagnostic=StepDiagnostic(
+                code="flow_underlag_summary",
+                message=(
+                    f"Resolved underlag from {source_refs_input.reference_count} "
+                    f"source refs ({len(source_refs_input.text.encode('utf-8'))} bytes)."
+                ),
+                severity="info",
+            ),
+        )
+    question_template = effective_question_binding(bindings)
+    if question_template is None:
+        return None
+    references = analyze_template(
+        question_template,
+        step_refs=state.step_ref_mapping if state is not None else {},
+        form_field_names=set(),
+    )
+    _raise_if_text_template_references_overflowed_output(
+        references=references,
+        prior_results=state.completed_by_order.values()
+        if state is not None
+        else prior_results,
+        consuming_step_order=step.step_order,
+        input_source="input_bindings.question",
+    )
+    interpolation_context = variable_resolver.build_context_with_evidence(
+        run.input_payload_json,
+        prior_results,
+        current_step_order=step.step_order,
+        step_names_by_order=state.step_names_by_order if state else None,
+        step_ref_mapping=state.step_ref_mapping if state else None,
+        current_step_input=runtime_input_metadata,
+    )
+    interpolated_question = variable_resolver.interpolate_with_evidence(
+        question_template,
+        interpolation_context,
+        binding_ref="input_bindings.question",
+    )
+    if runtime_input_metadata is not None and not consumes_runtime_input(references):
+        raise TypedIOValidationException(
+            f"Step {step.step_order}: explicit runtime-input bindings must reference step_input.*",
+            code=FlowApiErrorCode.RUNTIME_INPUT_NOT_CONSUMED.value,
+        )
+    return ResolvedStepInputBinding(
+        text=interpolated_question.text,
+        edges=interpolated_question.edges,
+        diagnostic=StepDiagnostic(
+            code="flow_underlag_summary",
+            message=(
+                f"Resolved underlag from {len(references)} template sources "
+                f"({len(interpolated_question.text.encode('utf-8'))} bytes)."
+            ),
+            severity="info",
+        ),
+    )
+
+
 def _resolve_compose_source_refs_input(
     *,
     step: RuntimeStep,
@@ -806,7 +838,7 @@ def _resolve_compose_source_refs_input(
     prior_results: list[FlowStepResult],
     state: RunExecutionState | None,
     runtime_input_metadata: dict[str, Any] | None,
-    deps: StepInputResolutionDeps,
+    variable_resolver: Any,
 ) -> ResolvedSourceRefsInput | None:
     try:
         source_refs = source_ref_bindings(bindings)
@@ -837,7 +869,7 @@ def _resolve_compose_source_refs_input(
             consuming_step_order=step.step_order,
             input_source="input_bindings.question",
         )
-        interpolation_context = deps.variable_resolver.build_context_with_evidence(
+        interpolation_context = variable_resolver.build_context_with_evidence(
             run.input_payload_json,
             prior_results,
             current_step_order=step.step_order,
@@ -845,7 +877,7 @@ def _resolve_compose_source_refs_input(
             step_ref_mapping=state.step_ref_mapping if state else None,
             current_step_input=runtime_input_metadata,
         )
-        rendered_question = deps.variable_resolver.interpolate_with_evidence(
+        rendered_question = variable_resolver.interpolate_with_evidence(
             question_template,
             interpolation_context,
             binding_ref="input_bindings.question",
