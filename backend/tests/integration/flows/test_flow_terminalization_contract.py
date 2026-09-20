@@ -32,6 +32,9 @@ from eneo.flows.domain.flow import (
     FlowStepAttemptStatus,
     FlowStepResultStatus,
 )
+from eneo.flows.domain.flow_run_recovery_policy import (
+    flow_stale_running_reconcile_after_seconds,
+)
 from eneo.flows.enums import FlowRunLifecycleSource
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_error import FlowRunError
@@ -49,7 +52,23 @@ from eneo.flows.runtime.step_execution_result import (
     WebhookDeliveryIntent,
     WebhookPayloadRef,
 )
+from eneo.main.config import get_settings
 from tests.flow_snapshot_fixtures import assistant_snapshot
+
+
+def _stale_run_age() -> timedelta:
+    """Older than the reconciler's threshold, derived from the same owner it reads.
+
+    The threshold follows TASK_EXECUTION_TIMEOUT_SECONDS (one worker invocation,
+    4 h by default), so a fixed age would silently stop being stale.
+    """
+    return timedelta(
+        seconds=flow_stale_running_reconcile_after_seconds(
+            task_timeout_seconds=get_settings().task_execution_timeout_seconds
+        )
+        + 60
+    )
+
 
 LIFECYCLE_LOGGER = "eneo.flows.application.flow_run_lifecycle_events"
 
@@ -442,7 +461,7 @@ async def test_stale_running_reconcile_task_commits_failure_for_fresh_sessions(
             sa.update(FlowRuns)
             .where(FlowRuns.id == run_id)
             .where(FlowRuns.tenant_id == tenant_id)
-            .values(updated_at=datetime.now(timezone.utc) - timedelta(hours=3))
+            .values(updated_at=datetime.now(timezone.utc) - _stale_run_age())
         )
 
     result = await flow_runtime_tasks._reconcile_stale_running_runs_all_tenants(
@@ -884,7 +903,7 @@ async def test_tenant_sweeps_survive_a_tenant_row_the_model_refuses(
             sa.update(FlowRuns)
             .where(FlowRuns.id == run_id)
             .where(FlowRuns.tenant_id == tenant_id)
-            .values(updated_at=datetime.now(timezone.utc) - timedelta(hours=3))
+            .values(updated_at=datetime.now(timezone.utc) - _stale_run_age())
         )
         await setup_session.execute(
             sa.insert(Tenants).values(
