@@ -431,6 +431,30 @@ def test_evidence_bundle_projects_exact_resolved_input_lineage_per_attempt() -> 
     }
 
 
+def test_redaction_leaves_business_json_that_looks_like_an_alias_alone():
+    """A "kind" discriminator inside structured output is user data, not an alias."""
+    from eneo.flows.api.flow_models import FlowRunEvidenceResponse, FlowRunPublic
+
+    run, version = _evidence_run_and_version()
+    decoy = {"kind": "file_backed_step_text", "description": "Ordinary user JSON"}
+    result = _step_result_for_run(run, step_id=uuid4()).model_copy(
+        update={"output_payload_json": {"structured": decoy}}
+    )
+    bundle = build_evidence_bundle(
+        run=run, version=version, step_results=[result], step_attempts=[]
+    )
+
+    evidence = redact_evidence_bundle(bundle).to_dict()
+
+    assert evidence["step_results"][0]["output_payload_json"]["structured"] == decoy
+    evidence["run"] = {
+        key: value
+        for key, value in evidence["run"].items()
+        if key in FlowRunPublic.model_fields
+    }
+    FlowRunEvidenceResponse.model_validate(evidence)
+
+
 @pytest.mark.parametrize(
     "redacted,text",
     [

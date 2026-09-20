@@ -506,35 +506,66 @@ def _redact_record_payloads(
     )
 
 
+# The only places a persisted record carries material aliases. Redaction is
+# re-cohered there and nowhere else: a "kind" key inside user-authored structured
+# output is business data, never an internal alias contract.
+_MATERIAL_ALIAS_PATHS: tuple[tuple[str, ...], ...] = (
+    ("input_payload_json", "material_aliases"),
+    ("input_payload_json", "resolved_input", "material_aliases"),
+    ("input_payload_json", "execution_inputs", "*", "material_aliases"),
+)
+
+
 def _cohere_redacted_material_aliases(
     original: JsonValue, redacted: JsonValue
 ) -> JsonValue:
-    if isinstance(original, dict) and isinstance(redacted, dict):
-        if original.get("kind") == "file_backed_step_text":
-            alias = FileBackedStepText.model_validate(original)
-            redacted_preview = redacted["preview"]
-            if not isinstance(redacted_preview, str):
-                raise ValueError("Redacted material preview must remain text.")
-            # Redaction can expand a preview; its byte count describes the public
-            # preview, while the size and checksum still identify the stored artifact.
-            preview = utf8_prefix(redacted_preview, max_bytes=alias.full_text_bytes - 1)
-            return FileBackedStepText.model_validate(
-                {
-                    **redacted,
-                    "preview": preview,
-                    "inline_text_bytes": len(preview.encode("utf-8")),
-                }
-            ).model_dump(mode="json")
-        return {
-            key: _cohere_redacted_material_aliases(original[key], value)
-            for key, value in redacted.items()
-        }
-    if isinstance(original, list) and isinstance(redacted, list):
-        return [
-            _cohere_redacted_material_aliases(before, after)
-            for before, after in zip(original, redacted, strict=True)
-        ]
+    for path in _MATERIAL_ALIAS_PATHS:
+        _cohere_aliases_at(original, redacted, path)
     return redacted
+
+
+def _cohere_aliases_at(
+    original: JsonValue, redacted: JsonValue, path: tuple[str, ...]
+) -> None:
+    if not path:
+        return
+    key, rest = path[0], path[1:]
+    if key == "*":
+        if isinstance(original, list) and isinstance(redacted, list):
+            for before, after in zip(original, redacted, strict=True):
+                _cohere_aliases_at(before, after, rest)
+        return
+    if not (isinstance(original, dict) and isinstance(redacted, dict)):
+        return
+    if rest:
+        _cohere_aliases_at(original.get(key), redacted.get(key), rest)
+        return
+    before_list = original.get(key)
+    after_list = redacted.get(key)
+    if isinstance(before_list, list) and isinstance(after_list, list):
+        redacted[key] = [
+            _cohere_redacted_alias(before, after)
+            for before, after in zip(before_list, after_list, strict=True)
+        ]
+
+
+def _cohere_redacted_alias(original: JsonValue, redacted: JsonValue) -> JsonValue:
+    if not (isinstance(original, dict) and isinstance(redacted, dict)):
+        return redacted
+    alias = FileBackedStepText.model_validate(original)
+    redacted_preview = redacted["preview"]
+    if not isinstance(redacted_preview, str):
+        raise ValueError("Redacted material preview must remain text.")
+    # Redaction can expand a preview; its byte count describes the public
+    # preview, while the size and checksum still identify the stored artifact.
+    preview = utf8_prefix(redacted_preview, max_bytes=alias.full_text_bytes - 1)
+    return FileBackedStepText.model_validate(
+        {
+            **redacted,
+            "preview": preview,
+            "inline_text_bytes": len(preview.encode("utf-8")),
+        }
+    ).model_dump(mode="json")
 
 
 def _runtime_input_file_ids_for_result(
