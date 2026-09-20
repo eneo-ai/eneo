@@ -2352,6 +2352,29 @@ def test_openapi_flow_run_public_exposes_structured_error(openapi_spec: dict) ->
     assert set(details_schema.get("properties", {})) == {
         "step_description",
         "provider_call_evidence_gap",
+        # Step-timeout facts: where the budget ran out and what had finished.
+        "phase",
+        "completed_items",
+        "total_items",
+        "provider_work_may_have_completed",
+    }
+    phase_property = details_schema["properties"]["phase"]
+    phase_options = phase_property.get("anyOf") or phase_property.get("oneOf") or []
+    phase_ref = next(
+        option
+        for option in phase_options
+        if isinstance(option, dict) and option.get("type") != "null"
+    )
+    phase_schema = _resolve_component_ref(openapi_spec, phase_ref)
+    assert phase_schema.get("title") == "FlowStepPhase"
+    assert set(phase_schema.get("enum", [])) == {
+        "input_resolution",
+        "transcription",
+        "retrieval",
+        "provider_request",
+        "mapped_item",
+        "finalization",
+        "step_execution",
     }
 
     gap_property = details_schema["properties"]["provider_call_evidence_gap"]
