@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import io
-from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
@@ -168,11 +167,9 @@ def audio_file(blob: bytes = b"fake-mp3-bytes") -> SimpleNamespace:
 
 @pytest.fixture(autouse=True)
 def fixed_duration(monkeypatch: pytest.MonkeyPatch) -> None:
-    @asynccontextmanager
-    async def decoded(_path):
-        yield SimpleNamespace(duration=42.0)
-
-    monkeypatch.setattr(remote_transcription, "to_wav", decoded)
+    monkeypatch.setattr(
+        remote_transcription, "measure_duration", AsyncMock(return_value=42.0)
+    )
 
 
 async def test_submit_sends_multipart_job_contract() -> None:

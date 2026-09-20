@@ -1,5 +1,6 @@
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 
 from eneo.files import audio
@@ -17,9 +18,12 @@ from eneo.main.config import get_settings
 from eneo.main.exceptions import TypedIOValidationException
 from tests.unit.files import test_audio
 from tests.unit.flows.runtime.test_remote_transcription import (
+    RESULT_BODY,
     RecordingObserver,
     ScriptedService,
+    accepted,
     make_client,
+    status,
 )
 from tests.unit.transcription_models.infrastructure.adapters.test_litellm_transcription import (
     TRANSPORT,
@@ -28,6 +32,7 @@ from tests.unit.transcription_models.infrastructure.adapters.test_litellm_transc
 from tests.unittests.flows.test_flow_transcription import _audio_file
 
 recording = test_audio.recording
+ffmpeg = test_audio.ffmpeg
 
 
 @pytest.mark.parametrize("engine", ["registry", "remote"])
@@ -36,13 +41,13 @@ recording = test_audio.recording
     [("duration_seconds", 1), ("decoded_bytes", 6000)],
 )
 async def test_oversized_audio_is_a_final_typed_refusal_before_provider_work(
-    recording, monkeypatch, engine, limit, ceiling
+    recording, ffmpeg, monkeypatch, engine, limit, ceiling
 ):
     source, _, temp_dir = recording
     settings = get_settings().model_copy(update={f"flow_audio_max_{limit}": ceiling})
     monkeypatch.setattr(audio, "get_settings", lambda: settings)
-    decode = Mock(wraps=audio._to_wav)
-    monkeypatch.setattr(audio, "_to_wav", decode)
+    decode = AsyncMock(wraps=audio._decode_audio)
+    monkeypatch.setattr(audio, "_decode_audio", decode)
     provider = AsyncMock()
     monkeypatch.setattr(TRANSPORT, provider)
     observer = RecordingObserver()
@@ -96,6 +101,37 @@ async def test_oversized_audio_is_a_final_typed_refusal_before_provider_work(
     assert observer.rejected_calls == []
     assert observer.unknown_calls == []
     assert file.blob == source.read_bytes()
+    assert list(temp_dir.iterdir()) == []
+
+
+async def test_remote_counts_duration_without_materialising_decoded_audio(
+    recording, ffmpeg, monkeypatch
+):
+    source, _, temp_dir = recording
+    temporary_files = []
+    named_temp_file = audio.tempfile.NamedTemporaryFile
+
+    def record_temp_file(*args, **kwargs):
+        handle = named_temp_file(*args, **kwargs)
+        temporary_files.append(handle.name)
+        return handle
+
+    monkeypatch.setattr(audio.tempfile, "NamedTemporaryFile", record_temp_file)
+    service = ScriptedService(
+        submit_responses=[accepted()],
+        status_responses=[status("completed")],
+        result_responses=[httpx.Response(200, json=RESULT_BODY)],
+    )
+    observer = RecordingObserver()
+    file = _audio_file(name="recording.wav")
+    file.blob = source.read_bytes()
+    await RemoteFlowTranscriber(make_client(service)).transcribe(
+        file, _adapter().model, observer=observer
+    )
+
+    assert len(temporary_files) == 1
+    assert observer.started_facts[0].audio_seconds == 10
+    assert file.blob in service.requests[0].read()
     assert list(temp_dir.iterdir()) == []
 
 

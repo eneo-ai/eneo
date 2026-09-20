@@ -9,7 +9,7 @@ def test_audio_decode_limit_defaults():
     values.pop("flow_audio_max_decoded_bytes", None)
     settings = Settings.model_validate(values)
 
-    assert settings.flow_audio_max_duration_seconds == 3 * 60 * 60
+    assert settings.flow_audio_max_duration_seconds == 4 * 60 * 60
     assert settings.flow_audio_max_decoded_bytes == 2 * 1024 * 1024 * 1024
 
 

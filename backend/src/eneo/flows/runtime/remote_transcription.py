@@ -37,7 +37,7 @@ from tenacity import (
     wait_random_exponential,
 )
 
-from eneo.files.audio import AudioMimeTypes, to_wav
+from eneo.files.audio import AudioMimeTypes, measure_duration
 from eneo.files.transcriber import TranscribedAudio
 from eneo.flows.enums import FlowStepPhase
 from eneo.flows.runtime.run_cancellation import (
@@ -718,8 +718,7 @@ class RemoteFlowTranscriber:
                 temp_file_path = Path(temp_file.name)
                 temp_file.write(file.blob)
 
-            async with to_wav(str(temp_file_path)) as decoded:
-                audio_seconds = decoded.duration
+            audio_seconds = await measure_duration(str(temp_file_path))
             audio_digest = await asyncio.to_thread(_digest_file, temp_file_path)
 
             job_id, call_id = await self._submit_job(

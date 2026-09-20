@@ -2,6 +2,7 @@
 
 import asyncio
 import math
+import subprocess
 import tempfile
 import threading
 import wave
@@ -15,10 +16,10 @@ from contextlib import (
 )
 from dataclasses import dataclass
 from functools import partial
+from io import FileIO
 from pathlib import Path
 from typing import IO, Literal, TypeVar, cast
 
-import audioread
 import numpy as np
 import soundfile as sf
 from soundfile import SoundFile
@@ -31,6 +32,13 @@ from eneo.main.logging import get_logger
 logger = get_logger(__name__)
 
 FRAMES = 32768  # Number of frames in one mebibyte
+
+_DECODE_SAMPLE_RATE = 16000
+_DECODE_CHANNELS = 1
+_DECODE_SAMPLE_WIDTH = 2
+_DECODE_BYTES_PER_SECOND = _DECODE_SAMPLE_RATE * _DECODE_CHANNELS * _DECODE_SAMPLE_WIDTH
+_DECODE_BLOCK_BYTES = 64 * 1024
+_DECODER_TERMINATE_GRACE_SECONDS = 0.5
 
 # Concrete numpy array type used throughout this module.
 # soundfile.blocks() yields float64 arrays; we use this alias for clarity.
@@ -106,67 +114,154 @@ async def _run_audio_worker(work: Callable[[], _T], stop: threading.Event) -> _T
         raise
 
 
-def _to_wav(
-    filepath: str,
-    target: IO[bytes],
+def _read_decoded_audio(
+    process: subprocess.Popen[bytes],
     *,
     limits: AudioDecodeLimits,
-    stop: threading.Event,
+    writer: wave.Wave_write | None,
+) -> float:
+    # bufsize=0 makes stdout a FileIO: readinto fills this buffer directly,
+    # without a second reader, queue, or user-space read-ahead buffer.
+    stdout = cast(FileIO, process.stdout)
+    buffer = bytearray(_DECODE_BLOCK_BYTES)
+    view = memoryview(buffer)
+    pending = 0
+    decoded_bytes = 0
+    duration_bytes = limits.max_duration_seconds * _DECODE_BYTES_PER_SECOND
+    while count := stdout.readinto(view[pending:]):
+        next_bytes = decoded_bytes + count
+        if next_bytes > min(duration_bytes, limits.max_decoded_bytes):
+            if duration_bytes <= limits.max_decoded_bytes:
+                raise AudioDecodeLimitExceeded(
+                    limit="duration_seconds",
+                    measured=next_bytes / _DECODE_BYTES_PER_SECOND,
+                    ceiling=limits.max_duration_seconds,
+                )
+            raise AudioDecodeLimitExceeded(
+                limit="decoded_bytes",
+                measured=next_bytes,
+                ceiling=limits.max_decoded_bytes,
+            )
+        filled = pending + count
+        complete = filled - filled % _DECODE_SAMPLE_WIDTH
+        if writer is not None:
+            writer.writeframesraw(view[:complete])
+        pending = filled - complete
+        if pending:
+            buffer[0] = buffer[complete]
+        decoded_bytes = next_bytes
+    returncode = process.wait()
+    if returncode != 0:
+        raise ValueError(f"Audio decoder exited with status {returncode}")
+    if pending:
+        raise ValueError("Audio decoder returned an incomplete PCM frame")
+    return decoded_bytes / _DECODE_BYTES_PER_SECOND
+
+
+async def _terminate_decoder(process: subprocess.Popen[bytes]) -> None:
+    if process.poll() is None:
+        with suppress(ProcessLookupError):
+            process.terminate()
+        deadline = asyncio.get_running_loop().time() + _DECODER_TERMINATE_GRACE_SECONDS
+        while process.poll() is None and asyncio.get_running_loop().time() < deadline:
+            await asyncio.sleep(0.01)
+        if process.poll() is None:
+            with suppress(ProcessLookupError):
+                process.kill()
+            while process.poll() is None:
+                await asyncio.sleep(0.01)
+
+
+async def _close_decoder(
+    process: subprocess.Popen[bytes], worker: asyncio.Task[float]
+) -> None:
+    # Termination cannot queue behind stalled readers in the thread pool.
+    await _terminate_decoder(process)
+    # Killing the child releases a read blocked on its stdout. Only then can
+    # the reader and the WAV owner safely close their files.
+    with suppress(Exception):
+        await worker
+    if process.stdout is not None:
+        process.stdout.close()
+
+
+async def _decode_audio(
+    filepath: str,
+    *,
+    limits: AudioDecodeLimits,
+    writer: wave.Wave_write | None = None,
+) -> float:
+    process = subprocess.Popen(
+        [
+            "ffmpeg",
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            filepath,
+            "-f",
+            "s16le",
+            "-ac",
+            str(_DECODE_CHANNELS),
+            "-ar",
+            str(_DECODE_SAMPLE_RATE),
+            "pipe:1",
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        bufsize=0,
+    )
+    worker = asyncio.create_task(
+        asyncio.to_thread(_read_decoded_audio, process, limits=limits, writer=writer)
+    )
+    try:
+        return await asyncio.shield(worker)
+    finally:
+        cleanup = asyncio.create_task(_close_decoder(process, worker))
+        cancelled = False
+        while not cleanup.done():
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError:
+                cancelled = True
+        cleanup.result()
+        if cancelled:
+            raise asyncio.CancelledError
+
+
+async def _to_wav(
+    filepath: str, target: IO[bytes], *, limits: AudioDecodeLimits
 ) -> None:
     logger.debug(f"Converting {filepath} to wav")
+    with wave.open(target, "w") as writer:
+        writer.setframerate(_DECODE_SAMPLE_RATE)
+        writer.setnchannels(_DECODE_CHANNELS)
+        writer.setsampwidth(_DECODE_SAMPLE_WIDTH)
+        await _decode_audio(filepath, limits=limits, writer=writer)
 
-    with audioread.audio_open(filepath) as f:
-        samplerate = f.samplerate
-        channels = f.channels
-        bytes_per_second = samplerate * channels * 2
-        duration_bytes = limits.max_duration_seconds * bytes_per_second
-        decoded_bytes = 0
-        with wave.open(target, "w") as of:
-            of.setframerate(samplerate)
-            of.setnchannels(channels)
-            of.setsampwidth(2)
 
-            for buf in f:
-                if stop.is_set():
-                    return
-                next_bytes = decoded_bytes + len(buf)
-                if next_bytes > min(duration_bytes, limits.max_decoded_bytes):
-                    if duration_bytes <= limits.max_decoded_bytes:
-                        raise AudioDecodeLimitExceeded(
-                            limit="duration_seconds",
-                            measured=next_bytes / bytes_per_second,
-                            ceiling=limits.max_duration_seconds,
-                        )
-                    raise AudioDecodeLimitExceeded(
-                        limit="decoded_bytes",
-                        measured=next_bytes,
-                        ceiling=limits.max_decoded_bytes,
-                    )
-                of.writeframes(buf)
-                decoded_bytes = next_bytes
+async def measure_duration(
+    filepath: str, *, limits: AudioDecodeLimits | None = None
+) -> float:
+    return await _decode_audio(
+        filepath, limits=limits or AudioDecodeLimits.from_settings()
+    )
 
 
 @asynccontextmanager
 async def to_wav(
     filepath: str, *, limits: AudioDecodeLimits | None = None
 ) -> AsyncGenerator["AudioFile", None]:
-    stop = threading.Event()
     tmp_file = tempfile.NamedTemporaryFile(suffix=".wav")
     try:
-        await _run_audio_worker(
-            partial(
-                _to_wav,
-                filepath,
-                tmp_file,
-                limits=limits or AudioDecodeLimits.from_settings(),
-                stop=stop,
-            ),
-            stop,
+        await _to_wav(
+            filepath, tmp_file, limits=limits or AudioDecodeLimits.from_settings()
         )
         tmp_file.flush()
         yield AudioFile(tmp_file.name)
     finally:
-        stop.set()
         tmp_file.close()
 
 

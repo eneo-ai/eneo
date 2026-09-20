@@ -352,7 +352,7 @@ class Settings(BaseSettings):
     flow_http_request_timeout_seconds: int = 30
     flow_http_max_timeout_seconds: int = 120
     flow_http_allow_private_networks: bool = False
-    flow_audio_max_duration_seconds: int = 3 * 60 * 60
+    flow_audio_max_duration_seconds: int = 4 * 60 * 60
     flow_audio_max_decoded_bytes: int = 2 * 1024 * 1024 * 1024
     # External transcription service: when set, flow transcribe-only steps
     # delegate transcription to it (async job API: submit multipart, poll,
