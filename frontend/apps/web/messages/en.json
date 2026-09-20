@@ -5384,6 +5384,7 @@
   "flow_error_flow_runtime_file_attached": "This file is already attached to persisted flow run state and cannot be deleted.",
   "flow_error_flow_runtime_file_empty": "The uploaded file is empty. Choose a file with content and upload it again.",
   "flow_error_flow_run_upload_pdf_exceeds_limit": "The PDF exceeds an extraction limit. Split the PDF or ask an administrator to review the PDF ceilings.",
+  "flow_error_flow_run_upload_pdf_extraction_capacity": "PDF extraction is busy with other uploads. Wait a moment and try the upload again.",
   "flow_error_flow_template_control_duplicate": "Several content controls have the same tag. Give each control a unique tag in Word.",
   "flow_error_flow_template_control_mapped": "A content control is linked to XML data. Remove the data mapping in Word before uploading the template.",
   "flow_error_flow_template_control_nested": "Content controls cannot contain other content controls. Move the inner control outside its parent in Word.",

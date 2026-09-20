@@ -331,9 +331,17 @@ class FlowRuntimeFileService:
                 ),
             )
         except PdfExtractionLimitExceeded as exc:
+            # Saturation is not a defect of the file: the guidance is to wait,
+            # never to split a PDF that no parser has read.
+            message = (
+                "PDF extraction is busy with other uploads; wait a moment and try "
+                "the upload again."
+                if exc.reason == "extraction_capacity"
+                else "The PDF exceeds an extraction limit. Split the PDF or ask an "
+                "administrator to review the PDF ceilings."
+            )
             raise FlowBadRequestException(
-                "The PDF exceeds an extraction limit. Split the PDF or ask an "
-                "administrator to review the PDF ceilings.",
+                message,
                 code=FlowApiErrorCode.RUN_UPLOAD_PDF_EXCEEDS_LIMIT,
                 context={
                     "limit": exc.limit,

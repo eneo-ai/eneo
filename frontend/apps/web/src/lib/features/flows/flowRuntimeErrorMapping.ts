@@ -22,6 +22,8 @@ export type FlowApiErrorContext = {
   expired_at?: string;
   /** Which boundary an oversized evidence export exceeded. */
   limit?: string;
+  /** Why a limit refused, when the code alone is ambiguous (e.g. extraction_capacity). */
+  reason?: string;
   /** Server-provided recovery guidance for the exceeded limit. */
   hint?: string;
 };
@@ -112,6 +114,9 @@ function extractFlowApiErrorContext(value: unknown): FlowApiErrorContext {
 
   const limit = readOptionalString(value.limit);
   if (limit) context.limit = limit;
+
+  const reason = readOptionalString(value.reason);
+  if (reason) context.reason = reason;
 
   const hint = readOptionalString(value.hint);
   if (hint) context.hint = hint;
@@ -283,6 +288,14 @@ export function describeFlowRunError(error: unknown): FlowApiErrorDescriptor | n
 }
 
 function resolveFlowApiErrorMessage(descriptor: FlowApiErrorDescriptor): string {
+  // A PDF refused because the server's extraction capacity was busy is a
+  // valid file: the guidance is to wait and retry, not to split it.
+  if (
+    descriptor.code === FLOW_API_ERROR_CODE.RUN_UPLOAD_PDF_EXCEEDS_LIMIT &&
+    descriptor.context.reason === "extraction_capacity"
+  ) {
+    return m.flow_error_flow_run_upload_pdf_extraction_capacity();
+  }
   return m[descriptor.messageKey]();
 }
 

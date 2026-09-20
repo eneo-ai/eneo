@@ -1712,6 +1712,7 @@ def test_runtime_pdf_upload_error_response(tmp_path, monkeypatch, failure):
         assert body["context"]["ceiling"] == 1
         assert body["context"]["measured"] >= 1
         assert body["context"]["reason"] == "extraction_capacity"
+        assert "busy" in body["message"] and "Split" not in body["message"]
     else:
         assert body["code"] == "flow_run_upload_pdf_exceeds_limit"
         assert body["context"] == {"limit": "pages", "measured": 2, "ceiling": 1}

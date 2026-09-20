@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { EneoError } from "@eneo/eneo-js";
 import { getLocale, setLocale } from "$lib/paraglide/runtime";
+import { m } from "$lib/paraglide/messages";
 
 import {
   describeFlowRunError,
@@ -22,6 +23,39 @@ import {
 } from "./flowRuntimeErrorMapping";
 
 describe("flowRuntimeErrorMapping", () => {
+  it("keeps the capacity reason and gives wait-and-retry guidance for a busy PDF extractor", () => {
+    const error = new EneoError(
+      "PDF extraction is busy.",
+      "RESPONSE",
+      400,
+      0,
+      {
+        code: "flow_run_upload_pdf_exceeds_limit",
+        context: { limit: "seconds", measured: 120, ceiling: 120, reason: "extraction_capacity" }
+      },
+      { endpoint: "POST@test" }
+    );
+
+    expect(describeFlowApiError(error)?.context.reason).toBe("extraction_capacity");
+    expect(getFlowRuntimeErrorMessage(error, "fallback")).toBe(
+      m.flow_error_flow_run_upload_pdf_extraction_capacity()
+    );
+    const oversized = new EneoError(
+      "Too many pages.",
+      "RESPONSE",
+      400,
+      0,
+      {
+        code: "flow_run_upload_pdf_exceeds_limit",
+        context: { limit: "pages", measured: 900, ceiling: 500 }
+      },
+      { endpoint: "POST@test" }
+    );
+    expect(getFlowRuntimeErrorMessage(oversized, "fallback")).toBe(
+      m.flow_error_flow_run_upload_pdf_exceeds_limit()
+    );
+  });
+
   it("describes required runtime input errors with step context", () => {
     const error = new EneoError(
       "Required runtime input files are missing.",
