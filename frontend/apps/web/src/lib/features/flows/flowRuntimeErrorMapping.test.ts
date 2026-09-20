@@ -37,9 +37,7 @@ describe("flowRuntimeErrorMapping", () => {
     );
 
     expect(describeFlowApiError(error)?.context.reason).toBe("extraction_capacity");
-    expect(getFlowRuntimeErrorMessage(error, "fallback")).toBe(
-      m.flow_error_flow_run_upload_pdf_extraction_capacity()
-    );
+    expect(getFlowRuntimeErrorMessage(error, "fallback")).toBe(m.flow_upload_pdf_extraction_busy());
     const oversized = new EneoError(
       "Too many pages.",
       "RESPONSE",

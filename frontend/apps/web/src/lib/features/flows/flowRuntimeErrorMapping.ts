@@ -294,7 +294,7 @@ function resolveFlowApiErrorMessage(descriptor: FlowApiErrorDescriptor): string 
     descriptor.code === FLOW_API_ERROR_CODE.RUN_UPLOAD_PDF_EXCEEDS_LIMIT &&
     descriptor.context.reason === "extraction_capacity"
   ) {
-    return m.flow_error_flow_run_upload_pdf_extraction_capacity();
+    return m.flow_upload_pdf_extraction_busy();
   }
   return m[descriptor.messageKey]();
 }
