@@ -23,6 +23,7 @@ describe("flowRunProgress helpers", () => {
       },
       [
         {
+          input_text_aliases: [],
           flow_run_id: "run-1",
           flow_id: "flow-1",
           tenant_id: "tenant-1",
@@ -56,6 +57,7 @@ describe("flowRunProgress helpers", () => {
       },
       [
         {
+          input_text_aliases: [],
           flow_run_id: "run-1",
           flow_id: "flow-1",
           tenant_id: "tenant-1",
@@ -101,6 +103,7 @@ describe("flowRunProgress helpers", () => {
       },
       [
         {
+          input_text_aliases: [],
           flow_run_id: "run-1",
           flow_id: "flow-1",
           tenant_id: "tenant-1",
@@ -149,6 +152,7 @@ describe("flowRunProgress helpers", () => {
       },
       [
         {
+          input_text_aliases: [],
           flow_run_id: "run-1",
           flow_id: "flow-1",
           tenant_id: "tenant-1",
@@ -182,6 +186,7 @@ describe("flowRunProgress helpers", () => {
           updated_at: "2026-01-01T00:00:01Z"
         },
         {
+          input_text_aliases: [],
           flow_run_id: "run-1",
           flow_id: "flow-1",
           tenant_id: "tenant-1",
@@ -259,6 +264,7 @@ describe("flowRunProgress helpers", () => {
   test("falls back to generic step labels when graph data is missing", () => {
     const snapshot = buildFlowRunProgressSnapshot(null, [
       {
+        input_text_aliases: [],
         flow_run_id: "run-1",
         flow_id: "flow-1",
         tenant_id: "tenant-1",
@@ -307,6 +313,7 @@ describe("flowRunProgress helpers", () => {
       },
       [
         {
+          input_text_aliases: [],
           flow_run_id: "run-1",
           flow_id: "flow-1",
           tenant_id: "tenant-1",

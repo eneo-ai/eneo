@@ -210,6 +210,7 @@ describe("FlowRunsTable search and pagination", () => {
           }),
           steps: () => [
             {
+              input_text_aliases: [],
               flow_run_id: "aaa",
               flow_id: "flow-1",
               tenant_id: "tenant-1",

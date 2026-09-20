@@ -14,6 +14,7 @@ function graphWith(status: string): FlowGraph {
 function stepsWith(status: FlowRunStep["status"], text?: string): FlowRunStep[] {
   return [
     {
+      input_text_aliases: [],
       flow_run_id: "run-1",
       flow_id: "flow-1",
       tenant_id: "tenant-1",
