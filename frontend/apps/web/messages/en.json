@@ -5666,7 +5666,7 @@
   "flow_run_retrying": "Starting a new run...",
   "flow_run_retry_started": "New run started from step {step}. Completed steps are reused.",
   "flow_run_retry_failed": "Could not retry the run.",
-  "flow_run_retry_replayed": "This run was already retried. The new run is in the list.",
+  "flow_run_retry_replayed": "This run was already retried.",
   "flow_run_redispatching": "Re-running...",
   "flow_run_required_hint": "Fields marked with * are required.",
   "flow_run_contract_load_failed_desc": "We cannot read which input this flow needs. Try again before starting a new run.",

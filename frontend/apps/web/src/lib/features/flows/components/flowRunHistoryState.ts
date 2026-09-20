@@ -141,14 +141,17 @@ export async function loadFlowRunHistory(
   options: LoadFlowRunHistoryOptions
 ): Promise<FlowRunHistoryLoadResult> {
   const generation = state.requestGeneration;
-  const result = await loadFlowRunHistoryOnce(state, options);
-  if (
+  let result = await loadFlowRunHistoryOnce(state, options);
+  // Drain: a refresh asked for during the follow-up refresh queues again, so
+  // the loop runs until nothing is pending. One request in flight, at most
+  // one coalesced refresh pending.
+  while (
     state.refreshQueued &&
     state.inFlightGeneration === null &&
     generation === state.requestGeneration
   ) {
     state.refreshQueued = false;
-    return loadFlowRunHistoryOnce(state, { ...options, mode: "refresh" });
+    result = await loadFlowRunHistoryOnce(state, { ...options, mode: "refresh" });
   }
   return result;
 }
@@ -326,6 +329,8 @@ export function syncFlowRunHistoryFlow(
     state.refreshWarning = null;
     state.loadMoreError = null;
     state.pollRotation = 0;
+    // Pending work belongs to the generation that asked for it.
+    state.refreshQueued = false;
     state.requestGeneration += 1;
     return true;
   }
@@ -340,6 +345,7 @@ export function syncFlowRunHistoryFlow(
     state.loadMoreError = null;
     state.pollRotation = 0;
     state.loading = false;
+    state.refreshQueued = false;
     state.requestGeneration += 1;
   }
 

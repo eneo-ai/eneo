@@ -159,6 +159,59 @@ describe("loadFlowRunHistory", () => {
     expect(state.runs.map((item) => item.id)).toEqual(["child", "old", "older"]);
     expect(state.refreshQueued).toBe(false);
   });
+
+  it("drains a refresh asked for during the queued follow-up refresh", async () => {
+    const state = createFlowRunHistoryState();
+    state.runs = [run("old")];
+    state.nextOffset = 1;
+    state.hasMore = true;
+    const releases: Array<() => void> = [];
+    const pages: number[] = [];
+    let refreshCount = 0;
+    const listRuns = async (_flowId: string, pageArgs: { offset: number }) => {
+      pages.push(pageArgs.offset);
+      if (pageArgs.offset > 0) {
+        await new Promise<void>((resolve) => releases.push(resolve));
+        return page([run("older")], false);
+      }
+      refreshCount += 1;
+      if (refreshCount === 1) {
+        // Refresh A is in flight: a second mutation asks for refresh B.
+        const blocked = await loadFlowRunHistory(state, {
+          flowId: "flow-1",
+          listRuns,
+          getErrorMessage: () => "failed"
+        });
+        expect(blocked).toEqual({ kind: "already_loading" });
+        return page([run("child-a"), run("old")], true);
+      }
+      return page([run("child-b"), run("child-a"), run("old")], true);
+    };
+    const more = loadFlowRunHistory(state, {
+      flowId: "flow-1",
+      mode: "more",
+      listRuns,
+      getErrorMessage: () => "failed"
+    });
+    await loadFlowRunHistory(state, {
+      flowId: "flow-1",
+      listRuns,
+      getErrorMessage: () => "failed"
+    });
+    releases[0]!();
+    await more;
+    expect(pages).toEqual([1, 0, 0]);
+    expect(state.runs.map((item) => item.id)).toEqual(["child-b", "child-a", "old", "older"]);
+    expect(state.refreshQueued).toBe(false);
+  });
+
+  it("drops a queued refresh when the flow changes", async () => {
+    const state = createFlowRunHistoryState();
+    state.lastLoadedFlowId = "flow-1";
+    state.refreshQueued = true;
+    expect(syncFlowRunHistoryFlow(state, "flow-2")).toBe(true);
+    expect(state.refreshQueued).toBe(false);
+  });
 });
 
 describe("refresh merge", () => {
