@@ -2739,10 +2739,11 @@ async def test_cohort_readers_return_step_metrics_and_current_attempt_lineage(
         metrics = await run_repo.list_step_result_metrics(
             tenant_id=context.tenant_id, run_ids=[context.run_id]
         )
-        assert [
-            (m.step_id, m.status, m.num_tokens_input, m.num_tokens_output)
-            for m in metrics
-        ] == [(context.step_id, "completed", 40, 2)]
+        # Token facts live on provider-call receipts since the step-token
+        # receipts slice; a result saved without a completion call has none.
+        assert [(m.step_id, m.status, m.usage_receipt) for m in metrics] == [
+            (context.step_id, "completed", None)
+        ]
         assert metrics[0].finished_at is not None
         lineage = await run_repo.list_current_attempt_lineage(
             tenant_id=context.tenant_id, run_ids=[context.run_id]
