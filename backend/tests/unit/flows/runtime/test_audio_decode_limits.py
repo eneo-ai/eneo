@@ -61,7 +61,6 @@ async def test_oversized_audio_is_a_final_typed_refusal_before_provider_work(
     label_speakers = AsyncMock()
     monkeypatch.setattr(remote, "label_speakers", label_speakers)
     retry_sleep = AsyncMock()
-    monkeypatch.setattr(remote._submit_job.retry, "sleep", retry_sleep)
     monkeypatch.setattr(adapter._transcribe_chunk.retry, "sleep", retry_sleep)
     transcriber = (
         DiarizingFlowTranscriber(registry, remote) if engine == "registry" else remote

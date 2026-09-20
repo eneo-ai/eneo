@@ -21,37 +21,45 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import math
+import random
 import tempfile
 from contextlib import suppress
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, BinaryIO, Literal, NoReturn, cast
 from urllib.parse import urlsplit
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
-from tenacity import (
-    retry,
-    retry_if_not_exception_type,
-    stop_after_attempt,
-    wait_random_exponential,
-)
 
 from eneo.files.audio import AudioMimeTypes, measure_duration
 from eneo.files.transcriber import TranscribedAudio
 from eneo.flows.enums import FlowStepPhase
+from eneo.flows.flow_run_error import (
+    TRANSCRIPTION_SERVICE_REASON_MAX_LENGTH,
+    TranscriptionFailureKind,
+)
 from eneo.flows.runtime.run_cancellation import (
     FlowStepCancelledError,
     RunCancelProbe,
     current_run_cancel_probe,
 )
 from eneo.flows.runtime.step_deadline import (
+    StepDeadline,
     budget_refusal,
     current_step_deadline_scope,
     mark_provider_request_in_flight,
     record_step_phase,
+    record_step_progress,
     require_step_budget,
     settle_provider_request,
+)
+from eneo.flows.runtime.transcription import (
+    TranscriptionProviderError,
+    TranscriptionProviderRejectedError,
 )
 from eneo.main.exceptions import (
     APIKeyNotConfiguredException,
@@ -107,8 +115,26 @@ _CANCEL_TIMEOUT_SECONDS = 10.0
 JobTask = Literal["transcribe", "diarize"]
 
 
-class RemoteTranscriptionCancelledException(OpenAIException):
+class RemoteTranscriptionCancelledException(TranscriptionProviderError):
     """The service reported the job cancelled before it produced a result."""
+
+
+class RemoteSubmissionRefused(TranscriptionProviderError):
+    def __init__(
+        self, retry_after: float | None, service_reason: str | None = None
+    ) -> None:
+        super().__init__(
+            litellm_transport.RATE_LIMIT_MESSAGE,
+            code="provider_rate_limited",
+            details={"reason": "provider_rate_limited", "retryable": True},
+            failure_kind=TranscriptionFailureKind.CAPACITY,
+            service_reason=service_reason,
+        )
+        self.retry_after = retry_after
+
+
+class RemoteSubmissionUnknown(TranscriptionProviderError):
+    """A submission lost its response and may already have been accepted."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +144,8 @@ class RemoteJobStatus:
     status: str
     stage: str | None = None
     queue_position: int | None = None
+    failure_kind: TranscriptionFailureKind | None = None
+    service_reason: str | None = None
 
     def describe(self) -> str:
         if self.queue_position is not None:
@@ -200,6 +228,7 @@ class RemoteTranscriptionClient:
         segments: "Sequence[TranscriptSegment] | None" = None,
         model: str | None = None,
         max_speakers: int | None = None,
+        idempotency_key: str | None = None,
     ) -> str:
         """Submit one audio file as a job and return its job id.
 
@@ -207,9 +236,7 @@ class RemoteTranscriptionClient:
         JSON part; the service then only adds speaker labels. ``model`` is
         echoed back by the service in its result and names what transcribed.
 
-        The service admits or rejects before reading the body (queue-full is a
-        pre-body 429), so a connection torn down mid-upload is treated as the
-        rate limiting it usually is rather than as an unknown outcome.
+        Admission is known only when the service returns an HTTP response.
         """
         data: dict[str, str] = {
             "language": language or "auto",
@@ -259,18 +286,24 @@ class RemoteTranscriptionClient:
                 mark_provider_request_in_flight(True)
                 response = await client.post(
                     f"{self.base_url}/v1/jobs",
-                    headers=self._headers,
+                    headers={
+                        **self._headers,
+                        "Idempotency-Key": idempotency_key or str(uuid4()),
+                    },
                     files={"file": (filename, payload, mimetype)},
                     data=data,
                 )
-        except httpx.WriteError as exc:
-            # The service hangs up mid-upload when it refuses admission; the
-            # refusal status is unreadable, so classify by the only admission
-            # rule that closes connections early.
-            raise OpenAIException(
-                litellm_transport.RATE_LIMIT_MESSAGE,
-                code="provider_rate_limited",
-                details={"reason": "provider_rate_limited", "retryable": True},
+        except (
+            httpx.WriteError,
+            httpx.ReadError,
+            httpx.WriteTimeout,
+            httpx.ReadTimeout,
+            httpx.RemoteProtocolError,
+        ) as exc:
+            raise RemoteSubmissionUnknown(
+                litellm_transport.PROVIDER_ERROR_MESSAGE,
+                code="provider_error",
+                details={"reason": "provider_error", "retryable": True},
             ) from exc
         except Exception as exc:
             self._raise_transport_error(exc)
@@ -352,7 +385,7 @@ class RemoteTranscriptionClient:
                 except Exception:
                     consecutive_failures += 1
                     if consecutive_failures >= _MAX_CONSECUTIVE_POLL_FAILURES:
-                        raise OpenAIException(
+                        raise TranscriptionProviderError(
                             litellm_transport.PROVIDER_ERROR_MESSAGE,
                             code="provider_error",
                             details={
@@ -364,6 +397,11 @@ class RemoteTranscriptionClient:
                     continue
 
                 consecutive_failures = 0
+                record_step_progress(
+                    seen.describe(),
+                    transcription_stage=seen.stage,
+                    transcription_queue_position=seen.queue_position,
+                )
                 if seen != last_seen:
                     logger.info(
                         "remote_transcription.progress job_id=%s state=%s",
@@ -378,8 +416,11 @@ class RemoteTranscriptionClient:
                         return result
                     # A raced 409: the status flapped; keep polling.
                 elif seen.status == _TERMINAL_FAILED:
-                    raise ProviderRejectedRequestException(
+                    raise TranscriptionProviderRejectedError(
                         litellm_transport.INVALID_REQUEST_MESSAGE,
+                        failure_kind=seen.failure_kind
+                        or TranscriptionFailureKind.PROVIDER,
+                        service_reason=seen.service_reason,
                         code="provider_rejected_request",
                         details={
                             "reason": "provider_rejected_request",
@@ -392,6 +433,9 @@ class RemoteTranscriptionClient:
                     # audio was not transcribed, so a re-run is reasonable.
                     raise RemoteTranscriptionCancelledException(
                         litellm_transport.PROVIDER_ERROR_MESSAGE,
+                        failure_kind=seen.failure_kind
+                        or TranscriptionFailureKind.CANCELLED,
+                        service_reason=seen.service_reason,
                         code="provider_error",
                         details={"reason": "provider_cancelled", "retryable": True},
                     )
@@ -480,7 +524,7 @@ class RemoteTranscriptionClient:
             body = _json_object(response)
             status = body.get("status")
             if not isinstance(status, str):
-                raise OpenAIException(
+                raise TranscriptionProviderError(
                     litellm_transport.PROVIDER_ERROR_MESSAGE,
                     code="provider_error",
                     details={"reason": "provider_error", "retryable": True},
@@ -489,11 +533,14 @@ class RemoteTranscriptionClient:
             queue_position = body.get("queue_position")
             return RemoteJobStatus(
                 status=status,
-                stage=stage if isinstance(stage, str) else None,
+                stage=stage[:128] if isinstance(stage, str) else None,
+                failure_kind=_vemsa_failure_kind(body),
+                service_reason=_service_reason(body),
                 queue_position=(
                     queue_position
                     if isinstance(queue_position, int)
                     and not isinstance(queue_position, bool)
+                    and queue_position >= 0
                     else None
                 ),
             )
@@ -502,7 +549,7 @@ class RemoteTranscriptionClient:
         if response.status_code == 404:
             # The job vanished (purged, or the service lost it). The audio may
             # already have been transcribed and billed.
-            raise OpenAIException(
+            raise TranscriptionProviderError(
                 litellm_transport.PROVIDER_ERROR_MESSAGE,
                 code="provider_error",
                 details={"reason": "provider_error", "retryable": True},
@@ -521,7 +568,7 @@ class RemoteTranscriptionClient:
         if response.status_code == 401:
             self._raise_bad_credentials()
         if response.status_code != 200:
-            raise OpenAIException(
+            raise TranscriptionProviderError(
                 litellm_transport.PROVIDER_ERROR_MESSAGE,
                 code="provider_error",
                 details={"reason": "provider_error", "retryable": True},
@@ -529,7 +576,7 @@ class RemoteTranscriptionClient:
         body = _json_object(response)
         text = body.get("text")
         if not isinstance(text, str):
-            raise OpenAIException(
+            raise TranscriptionProviderError(
                 litellm_transport.PROVIDER_ERROR_MESSAGE,
                 code="provider_error",
                 details={"reason": "provider_error", "retryable": True},
@@ -556,7 +603,7 @@ class RemoteTranscriptionClient:
     def _parse_job_id(self, response: httpx.Response) -> str:
         job_id = _json_object(response).get("job_id")
         if not isinstance(job_id, str) or not job_id:
-            raise OpenAIException(
+            raise TranscriptionProviderError(
                 litellm_transport.PROVIDER_ERROR_MESSAGE,
                 code="provider_error",
                 details={"reason": "provider_error", "retryable": True},
@@ -566,22 +613,24 @@ class RemoteTranscriptionClient:
     def _raise_for_submit_status(self, response: httpx.Response) -> NoReturn:
         if response.status_code == 401:
             self._raise_bad_credentials()
-        if response.status_code == 429:
-            raise OpenAIException(
-                litellm_transport.RATE_LIMIT_MESSAGE,
-                code="provider_rate_limited",
-                details={"reason": "provider_rate_limited", "retryable": True},
+        if response.status_code == 429 or (
+            response.status_code == 503 and "Retry-After" in response.headers
+        ):
+            raise RemoteSubmissionRefused(
+                _retry_after_seconds(response), _response_service_reason(response)
             )
         if response.status_code in (413, 422):
-            raise ProviderRejectedRequestException(
+            raise TranscriptionProviderRejectedError(
                 litellm_transport.INVALID_REQUEST_MESSAGE,
+                failure_kind=TranscriptionFailureKind.INPUT,
+                service_reason=_response_service_reason(response),
                 code="provider_rejected_request",
                 details={
                     "reason": "provider_rejected_request",
                     "retryable": False,
                 },
             )
-        raise OpenAIException(
+        raise TranscriptionProviderError(
             litellm_transport.PROVIDER_ERROR_MESSAGE,
             code="provider_error",
             details={"reason": "provider_error", "retryable": True},
@@ -596,7 +645,7 @@ class RemoteTranscriptionClient:
     def _raise_transport_error(self, exc: Exception) -> NoReturn:
         if litellm_transport.is_provider_unavailable_error(exc):
             litellm_transport.raise_provider_unavailable(exc)
-        raise OpenAIException(
+        raise TranscriptionProviderError(
             litellm_transport.PROVIDER_ERROR_MESSAGE,
             code="provider_error",
             details={"reason": "provider_error", "retryable": True},
@@ -684,7 +733,7 @@ class RemoteFlowTranscriber:
                 model_name,
                 result.model,
             )
-            raise OpenAIException(
+            raise TranscriptionProviderError(
                 litellm_transport.PROVIDER_ERROR_MESSAGE,
                 code="provider_error",
                 details={"reason": "diarize_task_unsupported", "retryable": False},
@@ -722,6 +771,7 @@ class RemoteFlowTranscriber:
             audio_digest = await asyncio.to_thread(_digest_file, temp_file_path)
 
             job_id, call_id = await self._submit_job(
+                file_id=file.id,
                 file_path=temp_file_path,
                 filename=str(file.name or temp_file_path.name),
                 mimetype=mimetype,
@@ -744,6 +794,8 @@ class RemoteFlowTranscriber:
         # The job is provider work in flight until the service answers.
         mark_provider_request_in_flight(True)
         try:
+            if observer is not None and call_id is not None:
+                await observer.accepted(call_id, job_id)
             result = await self.client.wait_for_result(
                 job_id, run_cancelled=current_run_cancel_probe()
             )
@@ -756,6 +808,10 @@ class RemoteFlowTranscriber:
             await asyncio.shield(self.client.cancel(job_id))
             if observer is not None and call_id is not None:
                 await observer.outcome_unknown(call_id, "request_cancelled")
+            raise
+        except ProviderCallObserverError:
+            settle_provider_request(known=False)
+            await self.client.cancel(job_id)
             raise
         except (FlowStepCancelledError, RemoteTranscriptionCancelledException):
             settle_provider_request(known=False)
@@ -784,25 +840,10 @@ class RemoteFlowTranscriber:
             )
         return result, audio_seconds
 
-    @retry(
-        wait=wait_random_exponential(min=1, max=20),
-        stop=stop_after_attempt(3),
-        retry=retry_if_not_exception_type(
-            # A failure to record what a request did must never send that
-            # request again: the provider already did the work and may already
-            # have charged for it.
-            litellm_transport.NON_RETRYABLE_PROVIDER_ERRORS
-            + (
-                ProviderCallObserverError,
-                asyncio.CancelledError,
-                TypedIOValidationException,
-            )
-        ),
-        reraise=True,
-    )
     async def _submit_job(
         self,
         *,
+        file_id: UUID,
         file_path: Path,
         filename: str,
         mimetype: str,
@@ -817,14 +858,7 @@ class RemoteFlowTranscriber:
         audio_digest: str,
         observer: "ProviderCallObserver | None",
     ) -> tuple[str, UUID | None]:
-        """Submit one job; each network attempt is its own recorded request.
-
-        Once a job id exists, nothing resubmits: later failures surface as
-        the unknown outcomes they are rather than duplicating the job. The
-        returned call id stays open for the poll phase to close.
-        """
-        # Also guards every retry: no job is submitted after the step's
-        # budget ran out.
+        """Own admission retries for one logical job and one provider receipt."""
         record_step_phase(FlowStepPhase.TRANSCRIPTION)
         require_step_budget(phase="transcription job submission")
         call_id: UUID | None = None
@@ -854,38 +888,162 @@ class RemoteFlowTranscriber:
             if observer is not None and call_id is not None:
                 await observer.rejected(call_id, "budget_exhausted")
             raise refusal
+        scope = current_step_deadline_scope()
+        deadline = (
+            scope.deadline
+            if scope is not None
+            else StepDeadline.start(self.client.submit_timeout_seconds)
+        )
+        operation_scope = (
+            observer.operation_scope if observer is not None else str(uuid4())
+        )
+        idempotency_key = hashlib.sha256(
+            json.dumps(
+                [operation_scope, str(file_id), audio_digest, task],
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        uncertain = False
+        known_refusal = False
+        last_refusal: RemoteSubmissionRefused | None = None
         try:
-            with open(file_path, "rb") as payload:
-                job_id = await self.client.submit(
-                    filename=filename,
-                    mimetype=mimetype,
-                    payload=payload,
-                    language=language,
-                    diarize=diarize,
-                    task=task,
-                    words=words,
-                    segments=segments,
-                    model=model,
-                    max_speakers=max_speakers,
-                )
-                return job_id, call_id
-        except asyncio.CancelledError:
-            settle_provider_request(known=False)
+            while True:
+                if deadline.expired():
+                    error = deadline.timeout_error(
+                        step_order=scope.step_order if scope is not None else 0,
+                        phase="transcription job admission",
+                        provider_request_in_flight=uncertain,
+                    )
+                    if last_refusal is not None:
+                        error.context = {
+                            **(error.context or {}),
+                            "transcription_failure_kind": last_refusal.failure_kind,
+                            "transcription_service_reason": last_refusal.service_reason,
+                        }
+                    raise error
+                probe = current_run_cancel_probe()
+                if probe is not None and await probe():
+                    raise FlowStepCancelledError(
+                        "Run was cancelled during transcription admission."
+                    )
+                timeout = asyncio.timeout(deadline.remaining())
+                known_refusal = False
+                try:
+                    async with timeout:
+                        with open(file_path, "rb") as payload:
+                            job_id = await self.client.submit(
+                                filename=filename,
+                                mimetype=mimetype,
+                                payload=payload,
+                                language=language,
+                                diarize=diarize,
+                                task=task,
+                                words=words,
+                                segments=segments,
+                                model=model,
+                                max_speakers=max_speakers,
+                                idempotency_key=idempotency_key,
+                            )
+                    return job_id, call_id
+                except RemoteSubmissionRefused as exc:
+                    last_refusal = exc
+                    known_refusal = not uncertain
+                    if known_refusal:
+                        settle_provider_request(known=True)
+                    delay = exc.retry_after
+                    if delay is None:
+                        delay = self.client.poll_interval_seconds * random.uniform(
+                            0.8, 1.2
+                        )
+                    while delay > 0 and not deadline.expired():
+                        if probe is not None and await probe():
+                            raise FlowStepCancelledError(
+                                "Run was cancelled during transcription admission."
+                            )
+                        interval = min(
+                            delay,
+                            self.client.poll_interval_seconds,
+                            deadline.remaining(),
+                        )
+                        await asyncio.sleep(interval)
+                        delay -= interval
+                except RemoteSubmissionUnknown:
+                    known_refusal = False
+                    if uncertain:
+                        raise
+                    uncertain = True
+                except ProviderRejectedRequestException:
+                    known_refusal = not uncertain
+                    raise
+                except TimeoutError:
+                    if not timeout.expired():
+                        raise
+                    raise deadline.timeout_error(
+                        step_order=scope.step_order if scope is not None else 0,
+                        phase="transcription job submission",
+                        provider_request_in_flight=True,
+                    ) from None
+        except (asyncio.CancelledError, FlowStepCancelledError):
+            settle_provider_request(known=known_refusal)
             if observer is not None and call_id is not None:
-                await observer.outcome_unknown(call_id, "request_cancelled")
-            raise
-        except ProviderRejectedRequestException:
-            # The service answered and refused. That is a known outcome, so it
-            # must not leave the run's audio total marked incomplete.
-            settle_provider_request(known=True)
-            if observer is not None and call_id is not None:
-                await observer.rejected(call_id, "provider_rejected")
+                if known_refusal:
+                    await observer.rejected(call_id, "provider_rejected")
+                else:
+                    await observer.outcome_unknown(call_id, "request_cancelled")
             raise
         except Exception:
-            settle_provider_request(known=False)
+            settle_provider_request(known=known_refusal)
             if observer is not None and call_id is not None:
-                await observer.outcome_unknown(call_id, "provider_error")
+                if known_refusal:
+                    await observer.rejected(call_id, "provider_rejected")
+                else:
+                    await observer.outcome_unknown(call_id, "provider_error")
             raise
+
+
+def _vemsa_failure_kind(body: dict[str, Any]) -> TranscriptionFailureKind | None:
+    """Prefer Vemsa's failure_kind when the service supports typed failures."""
+    raw = body.get("failure_kind")
+    try:
+        return TranscriptionFailureKind(raw)
+    except (ValueError, TypeError):
+        return None
+
+
+def _service_reason(body: dict[str, Any]) -> str | None:
+    reason = body.get("error")
+    return (
+        reason[:TRANSCRIPTION_SERVICE_REASON_MAX_LENGTH]
+        if isinstance(reason, str)
+        else None
+    )
+
+
+def _response_service_reason(response: httpx.Response) -> str | None:
+    try:
+        body = response.json()
+    except ValueError:
+        return None
+    return (
+        _service_reason(cast(dict[str, Any], body)) if isinstance(body, dict) else None
+    )
+
+
+def _retry_after_seconds(response: httpx.Response) -> float | None:
+    value = response.headers.get("Retry-After")
+    if value is None:
+        return None
+    delay: float
+    try:
+        delay = float(value)
+    except ValueError:
+        try:
+            # email.utils ships without a typed return; the value is a datetime.
+            retry_at = cast(datetime, parsedate_to_datetime(value))
+            delay = (retry_at - datetime.now(timezone.utc)).total_seconds()
+        except (TypeError, ValueError, OverflowError):
+            return None
+    return max(0.0, delay) if math.isfinite(delay) else None
 
 
 def build_remote_flow_transcriber(settings: "Settings") -> RemoteFlowTranscriber:

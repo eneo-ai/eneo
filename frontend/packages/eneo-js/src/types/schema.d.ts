@@ -19890,6 +19890,20 @@ export interface components {
     /**
      * FlowRunError
      * @description Structured terminal run error. Clients should branch on `code`, not on the human-readable message.
+     * @example {
+     *       "code": "typed_io_transcription_failed",
+     *       "details": {
+     *         "phase": "transcription",
+     *         "transcription_failure_kind": "capacity",
+     *         "transcription_service_reason": "Transcription capacity is unavailable.",
+     *         "transcription_stage": "transcribing"
+     *       },
+     *       "message": "Step 1: transcription failed for 'meeting.wav'.",
+     *       "retryable": false,
+     *       "schema_version": 1,
+     *       "source": "executor_failed",
+     *       "step_order": 1
+     *     }
      */
     FlowRunError: {
       /**
@@ -20026,7 +20040,7 @@ export interface components {
       completed_items?: number | null;
       /** Measured Bytes */
       measured_bytes?: number | null;
-      /** @description Observed execution phase when the budget expired. */
+      /** @description Observed execution phase when the step failed or its budget expired. */
       phase?: components["schemas"]["FlowStepPhase"] | null;
       /** @description Secret-free provider-call facts retained when the local evidence transaction failed after bounded retries. This describes a local persistence gap, not an unknown remote outcome. */
       provider_call_evidence_gap?: components["schemas"]["ProviderCallEvidenceGap"] | null;
@@ -20045,6 +20059,23 @@ export interface components {
        * @description Total mapped items in this step attempt.
        */
       total_items?: number | null;
+      /** @description Transcription failure category from upstream protocol facts. Does not imply that a new run is safe to retry. */
+      transcription_failure_kind?: components["schemas"]["TranscriptionFailureKind"] | null;
+      /**
+       * Transcription Queue Position
+       * @description Last observed transcription queue position, when reported by the service.
+       */
+      transcription_queue_position?: number | null;
+      /**
+       * Transcription Service Reason
+       * @description Bounded human-readable transcription service reason. Never parse this text to classify a failure.
+       */
+      transcription_service_reason?: string | null;
+      /**
+       * Transcription Stage
+       * @description Last observed transcription service stage before the interruption.
+       */
+      transcription_stage?: string | null;
     };
     /**
      * FlowRunEvidenceExportResponse
@@ -34624,6 +34655,11 @@ export interface components {
       /** Word */
       word: string;
     };
+    /**
+     * TranscriptionFailureKind
+     * @enum {string}
+     */
+    TranscriptionFailureKind: "input" | "capacity" | "provider" | "internal" | "cancelled";
     /** TranscriptionModelPublic */
     TranscriptionModelPublic: {
       /**

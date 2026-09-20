@@ -128,6 +128,10 @@ class FlowProviderCallRecorder:
         )
         return started.id
 
+    @property
+    def operation_scope(self) -> str:
+        return f"{self.tenant_id}/{self.run_id}/{self.step_id}/{self.attempt_no}"
+
     def _to_call_request(
         self, request: ProviderCallRequestFacts
     ) -> ProviderCallRequest:
@@ -151,6 +155,20 @@ class FlowProviderCallRecorder:
             ),
             call_reason=_flow_call_reason(request.reason),
             mapped_call=self.mapped_call,
+        )
+
+    async def accepted(self, call_id: UUID, provider_response_id: str) -> None:
+        async def persist() -> None:
+            async with sessionmanager.session() as session, session.begin():
+                await FlowProviderCallRepository(session).accept_call(
+                    call_id=call_id, provider_response_id=provider_response_id
+                )
+
+        await self._persist_with_retry(
+            operation=persist,
+            facts=self._evidence_gap(
+                call_id, provider_response_id=provider_response_id, outcome="started"
+            ),
         )
 
     async def completed(

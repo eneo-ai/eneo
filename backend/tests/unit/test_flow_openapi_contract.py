@@ -2394,11 +2394,22 @@ def test_openapi_flow_run_public_exposes_structured_error(openapi_spec: dict) ->
         "completed_items",
         "total_items",
         "provider_work_may_have_completed",
+        "transcription_failure_kind",
+        "transcription_service_reason",
+        "transcription_stage",
+        "transcription_queue_position",
         # Budget facts from an admission or structured-output refusal.
         "measured_bytes",
         "ceiling_bytes",
     }
     phase_property = details_schema["properties"]["phase"]
+    assert openapi_spec["components"]["schemas"]["TranscriptionFailureKind"][
+        "enum"
+    ] == ["input", "capacity", "provider", "internal", "cancelled"]
+    for example in error_schema["examples"]:
+        from eneo.flows.flow_run_error import FlowRunError
+
+        assert FlowRunError.model_validate(example).retryable is False
     phase_options = phase_property.get("anyOf") or phase_property.get("oneOf") or []
     phase_ref = next(
         option

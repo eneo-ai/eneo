@@ -39,8 +39,17 @@ class StepDeadlineExceeded(TypedIOValidationException):
         completed_items: int | None,
         total_items: int | None,
         provider_work_may_have_completed: bool | None,
+        transcription_stage: str | None = None,
+        transcription_queue_position: int | None = None,
     ) -> None:
-        super().__init__(message, code=FlowApiErrorCode.STEP_TIMEOUT.value)
+        super().__init__(
+            message,
+            code=FlowApiErrorCode.STEP_TIMEOUT.value,
+            context={
+                "transcription_stage": transcription_stage,
+                "transcription_queue_position": transcription_queue_position,
+            },
+        )
         self.step_phase = step_phase
         self.completed_items = completed_items
         self.total_items = total_items
@@ -132,6 +141,12 @@ class StepDeadline:
             completed_items=scope.completed_items if scope is not None else None,
             total_items=scope.total_items if scope is not None else None,
             provider_work_may_have_completed=provider_work_may_have_completed,
+            transcription_stage=scope.transcription_stage
+            if scope is not None
+            else None,
+            transcription_queue_position=scope.transcription_queue_position
+            if scope is not None
+            else None,
         )
 
 
@@ -154,6 +169,8 @@ class StepDeadlineScope:
     total_items: int | None = None
     provider_request_in_flight: bool = False
     provider_outcome_unresolved: bool = False
+    transcription_stage: str | None = None
+    transcription_queue_position: int | None = None
 
 
 _scope: ContextVar[StepDeadlineScope | None] = ContextVar(
@@ -178,14 +195,21 @@ def step_deadline_scope(
 
 
 def record_step_progress(
-    progress: str, *, completed_items: int | None = None, total_items: int | None = None
+    progress: str,
+    *,
+    completed_items: int | None = None,
+    total_items: int | None = None,
+    transcription_stage: str | None = None,
+    transcription_queue_position: int | None = None,
 ) -> None:
-    """What a mapped step has completed so far, for the timeout message."""
+    """Last observed step progress, retained when execution is interrupted."""
     scope = _scope.get()
     if scope is not None:
         scope.progress = progress
         scope.completed_items = completed_items
         scope.total_items = total_items
+        scope.transcription_stage = transcription_stage
+        scope.transcription_queue_position = transcription_queue_position
 
 
 def record_step_phase(phase: FlowStepPhase) -> None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
@@ -142,11 +143,17 @@ def make_client(
 
 
 class RecordingObserver:
+    operation_scope = "tenant/run/step/attempt-1"
+
     def __init__(self) -> None:
         self.started_facts: list[object] = []
         self.completed_calls: list[tuple[UUID, object]] = []
         self.rejected_calls: list[tuple[UUID, str]] = []
         self.unknown_calls: list[tuple[UUID, str]] = []
+        self.accepted_calls: list[tuple[UUID, str]] = []
+
+    async def accepted(self, call_id: UUID, provider_response_id: str) -> None:
+        self.accepted_calls.append((call_id, provider_response_id))
 
     async def started(self, request: object) -> UUID:
         self.started_facts.append(request)
@@ -163,7 +170,9 @@ class RecordingObserver:
 
 
 def audio_file(blob: bytes = b"fake-mp3-bytes") -> SimpleNamespace:
-    return SimpleNamespace(name="meeting.mp3", mimetype="audio/mpeg", blob=blob)
+    return SimpleNamespace(
+        id=UUID(int=1), name="meeting.mp3", mimetype="audio/mpeg", blob=blob
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -192,6 +201,312 @@ async def test_submit_sends_multipart_job_contract() -> None:
     assert b"fake" in body
     assert b'name="language"' in body and b"sv" in body
     assert b'name="diarize"' in body and b"true" in body
+
+
+async def test_accepted_job_is_recorded_before_the_first_poll() -> None:
+    observer = RecordingObserver()
+
+    class Service(ScriptedService):
+        def handler(self, request: httpx.Request) -> httpx.Response:
+            if request.method == "GET":
+                assert len(observer.accepted_calls) == 1
+                assert observer.accepted_calls[0][1] == JOB_ID
+            return super().handler(request)
+
+    service = Service(
+        submit_responses=[accepted()],
+        status_responses=[status("completed")],
+        result_responses=[httpx.Response(200, json=RESULT_BODY)],
+    )
+    await RemoteFlowTranscriber(make_client(service)).transcribe(
+        audio_file(), SimpleNamespace(), observer=observer
+    )
+    assert observer.completed_calls[0][0] == observer.accepted_calls[0][0]
+
+
+@pytest.mark.parametrize("error", [httpx.WriteError, httpx.ReadTimeout])
+async def test_lost_submission_response_resubmits_once_with_same_key(error):
+    class Service(ScriptedService):
+        def handler(self, request):
+            if request.method == "POST" and self.submit_count == 0:
+                self.requests.append(request)
+                request.read()
+                raise error("response lost", request=request)
+            return super().handler(request)
+
+    service = Service(
+        submit_responses=[accepted(), accepted()],
+        status_responses=[status("completed")],
+        result_responses=[httpx.Response(200, json=RESULT_BODY)],
+    )
+    observer = RecordingObserver()
+    await RemoteFlowTranscriber(make_client(service)).transcribe(
+        audio_file(), SimpleNamespace(), observer=observer
+    )
+    submits = [request for request in service.requests if request.method == "POST"]
+    assert len(submits) == 2
+    assert (
+        submits[0].headers["Idempotency-Key"] == submits[1].headers["Idempotency-Key"]
+    )
+    assert len(service.submit_responses) == 1
+    assert len(observer.started_facts) == 1
+    assert len(observer.accepted_calls) == 1
+    assert observer.unknown_calls == []
+
+
+@pytest.mark.parametrize("refusal", [429, 503])
+@pytest.mark.parametrize("retry_after", ["2", "Sun, 20 Sep 2026 10:00:02 GMT"])
+async def test_admission_wait_honours_retry_after(refusal, retry_after, monkeypatch):
+    clock = {"now": 0.0}
+    waits = []
+
+    async def sleep(delay):
+        waits.append(delay)
+        clock["now"] += delay
+
+    monkeypatch.setattr(step_deadline_module, "_now", lambda: clock["now"])
+    monkeypatch.setattr(remote_transcription.asyncio, "sleep", sleep)
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 9, 20, 10, 0, 0, tzinfo=timezone.utc)
+
+    monkeypatch.setattr(remote_transcription, "datetime", Clock)
+    service = ScriptedService(
+        submit_responses=[
+            httpx.Response(refusal, headers={"Retry-After": retry_after}),
+            accepted(),
+        ],
+        status_responses=[status("completed")],
+        result_responses=[httpx.Response(200, json=RESULT_BODY)],
+    )
+    observer = RecordingObserver()
+    with step_deadline_scope(StepDeadline.start(10), step_order=1):
+        await RemoteFlowTranscriber(
+            make_client(service, poll_interval_seconds=1)
+        ).transcribe(audio_file(), SimpleNamespace(), observer=observer)
+    assert sum(waits) == 2
+    assert service.submit_count == 2
+    assert len(observer.started_facts) == 1
+    assert observer.unknown_calls == []
+
+
+async def test_admission_deadline_records_known_refusal(monkeypatch):
+    clock = {"now": 0.0}
+
+    async def sleep(delay):
+        clock["now"] += delay
+
+    monkeypatch.setattr(step_deadline_module, "_now", lambda: clock["now"])
+    monkeypatch.setattr(remote_transcription.asyncio, "sleep", sleep)
+    service = ScriptedService(
+        submit_responses=[
+            httpx.Response(
+                429, headers={"Retry-After": "5"}, json={"error": "queue full"}
+            )
+        ]
+    )
+    observer = RecordingObserver()
+    with step_deadline_scope(StepDeadline.start(2), step_order=1):
+        with pytest.raises(TypedIOValidationException) as exc_info:
+            await RemoteFlowTranscriber(
+                make_client(service, poll_interval_seconds=1)
+            ).transcribe(audio_file(), SimpleNamespace(), observer=observer)
+    assert exc_info.value.provider_work_may_have_completed is False
+    assert clock["now"] == 2
+    assert service.submit_count == 1
+    assert observer.accepted_calls == []
+    assert observer.unknown_calls == []
+    assert [reason for _, reason in observer.rejected_calls] == ["provider_rejected"]
+    from eneo.flows.flow_run_error import FlowRunErrorDetails
+
+    details = FlowRunErrorDetails.from_budget_context(exc_info.value.context)
+    assert details.transcription_failure_kind.value == "capacity"
+    assert details.transcription_service_reason == "queue full"
+
+
+async def test_poll_ticks_publish_transcription_progress():
+    observed = []
+
+    class Service(ScriptedService):
+        def handler(self, request):
+            if self.requests:
+                observed.append(
+                    (scope.transcription_stage, scope.transcription_queue_position)
+                )
+            return super().handler(request)
+
+    service = Service(
+        status_responses=[
+            status("queued", queue_position=3),
+            status("running"),
+            status("completed"),
+        ],
+        result_responses=[httpx.Response(200, json=RESULT_BODY)],
+    )
+    with step_deadline_scope(StepDeadline.start(10), step_order=1) as scope:
+        await make_client(service).wait_for_result(JOB_ID)
+    assert observed == [("queued", 3), ("transcribing", None), ("completed", None)]
+
+
+async def test_poll_timeout_retains_last_progress_in_error_details(monkeypatch):
+    from eneo.flows.flow_run_error import FlowRunErrorDetails
+
+    clock = {"now": 0.0}
+
+    async def sleep(delay):
+        clock["now"] += delay
+
+    monkeypatch.setattr(step_deadline_module, "_now", lambda: clock["now"])
+    monkeypatch.setattr(remote_transcription.asyncio, "sleep", sleep)
+    service = ScriptedService(status_responses=[status("queued", queue_position=3)])
+    with step_deadline_scope(StepDeadline.start(1), step_order=1):
+        with pytest.raises(TypedIOValidationException) as exc_info:
+            await make_client(service, poll_interval_seconds=1).wait_for_result(JOB_ID)
+    details = FlowRunErrorDetails.from_budget_context(exc_info.value.context)
+    assert details.transcription_stage == "queued"
+    assert details.transcription_queue_position == 3
+    assert exc_info.value.step_phase.value == "transcription"
+    assert service.cancel_count == 1
+
+
+async def test_unknown_submission_is_repeated_only_once():
+    requests = []
+
+    def handle(request):
+        requests.append(request)
+        raise httpx.ReadTimeout("response lost", request=request)
+
+    client = make_client(ScriptedService())
+    client._transport = httpx.MockTransport(handle)
+    observer = RecordingObserver()
+    with pytest.raises(OpenAIException):
+        await RemoteFlowTranscriber(client).transcribe(
+            audio_file(), SimpleNamespace(), observer=observer
+        )
+    assert len(requests) == 2
+    assert all(request.method == "POST" for request in requests)
+    assert (
+        requests[0].headers["Idempotency-Key"] == requests[1].headers["Idempotency-Key"]
+    )
+    assert [reason for _, reason in observer.unknown_calls] == ["provider_error"]
+    assert observer.accepted_calls == []
+
+
+@pytest.mark.parametrize("change", ["scope", "file_id", "digest", "task"])
+async def test_submission_key_is_stable_and_scoped_to_operation(change):
+    service = ScriptedService(
+        submit_responses=[accepted(), accepted(), accepted()],
+        status_responses=[
+            status("completed"),
+            status("completed"),
+            status("completed"),
+        ],
+        result_responses=[httpx.Response(200, json=RESULT_BODY) for _ in range(3)],
+    )
+    observer = RecordingObserver()
+    transcriber = RemoteFlowTranscriber(make_client(service))
+    file = audio_file()
+    await transcriber.transcribe(file, SimpleNamespace(), observer=observer)
+    await transcriber.transcribe(file, SimpleNamespace(), observer=observer)
+    if change == "scope":
+        observer.operation_scope = "other-tenant/run/step/attempt-2"
+    elif change == "file_id":
+        file.id = uuid4()
+    elif change == "digest":
+        file.blob = b"different audio"
+    if change == "task":
+        await transcriber.label_speakers(
+            file,
+            words=[TranscriptWord(word="Hej", start=0, end=1)],
+            model_name=RESULT_BODY["model"],
+            observer=observer,
+        )
+    else:
+        await transcriber.transcribe(file, SimpleNamespace(), observer=observer)
+    keys = [
+        request.headers["Idempotency-Key"]
+        for request in service.requests
+        if request.method == "POST"
+    ]
+    assert keys[0] == keys[1]
+    assert keys[2] != keys[0]
+
+
+async def test_run_cancellation_interrupts_admission_wait(monkeypatch):
+    cancelled = False
+
+    async def sleep(delay):
+        nonlocal cancelled
+        cancelled = True
+
+    async def probe():
+        return cancelled
+
+    monkeypatch.setattr(remote_transcription.asyncio, "sleep", sleep)
+    service = ScriptedService(
+        submit_responses=[httpx.Response(429, headers={"Retry-After": "10"})]
+    )
+    observer = RecordingObserver()
+    with (
+        run_cancel_probe_scope(probe),
+        step_deadline_scope(StepDeadline.start(20), step_order=1),
+    ):
+        with pytest.raises(FlowStepCancelledError):
+            await RemoteFlowTranscriber(make_client(service)).transcribe(
+                audio_file(), SimpleNamespace(), observer=observer
+            )
+    assert service.submit_count == 1
+    assert observer.unknown_calls == []
+    assert observer.accepted_calls == []
+    assert [reason for _, reason in observer.rejected_calls] == ["provider_rejected"]
+
+
+@pytest.mark.parametrize(
+    "kind, expected",
+    [
+        (None, "provider"),
+        ("new-kind", "provider"),
+        ("capacity", "capacity"),
+        ("input", "input"),
+        ("internal", "internal"),
+    ],
+)
+async def test_terminal_failure_kind_never_parses_reason(kind, expected):
+    service = ScriptedService(
+        status_responses=[
+            httpx.Response(
+                200,
+                json={
+                    "status": "failed",
+                    "failure_kind": kind,
+                    "error": "capacity input cancelled",
+                },
+            )
+        ]
+    )
+    with pytest.raises(ProviderRejectedRequestException) as exc_info:
+        await make_client(service).wait_for_result(JOB_ID)
+    assert exc_info.value.failure_kind.value == expected
+    assert exc_info.value.service_reason == "capacity input cancelled"
+
+
+async def test_acceptance_persistence_failure_cancels_without_polling():
+    from eneo.model_providers.domain.provider_call_observer import (
+        ProviderCallObserverError,
+    )
+
+    observer = RecordingObserver()
+    observer.accepted = AsyncMock(side_effect=ProviderCallObserverError("write failed"))
+    service = ScriptedService(submit_responses=[accepted()])
+    with pytest.raises(ProviderCallObserverError):
+        await RemoteFlowTranscriber(make_client(service)).transcribe(
+            audio_file(), SimpleNamespace(), observer=observer
+        )
+    assert service.submit_count == 1
+    assert service.cancel_count == 1
+    assert not any(request.method == "GET" for request in service.requests)
 
 
 async def test_submit_sends_diarize_false_when_speaker_identification_is_off() -> None:
@@ -434,6 +749,10 @@ async def test_successful_job_does_not_resolve_an_unknown_submission(monkeypatch
     transcriber = RemoteFlowTranscriber(make_client(service))
     observer = RecordingObserver()
     with step_deadline_scope(StepDeadline.start(30), step_order=1):
+        with pytest.raises(OpenAIException):
+            await transcriber.transcribe(
+                audio_file(), SimpleNamespace(), observer=observer
+            )
         await transcriber.transcribe(audio_file(), SimpleNamespace(), observer=observer)
         clock["now"] = 30.0
         with pytest.raises(TypedIOValidationException) as exc_info:
@@ -747,7 +1066,7 @@ async def test_submit_retries_rate_limit_then_succeeds(
     async def no_sleep(_: float) -> None:
         return None
 
-    monkeypatch.setattr(RemoteFlowTranscriber._submit_job.retry, "sleep", no_sleep)
+    monkeypatch.setattr(remote_transcription.asyncio, "sleep", no_sleep)
     service = ScriptedService(
         submit_responses=[httpx.Response(429), accepted()],
         status_responses=[status("completed")],
@@ -762,10 +1081,8 @@ async def test_submit_retries_rate_limit_then_succeeds(
 
     assert result.text == RESULT_BODY["text"]
     assert service.submit_count == 2
-    # Each network attempt is its own recorded request: the refused attempt
-    # closed as unknown, the successful one completed.
-    assert len(observer.started_facts) == 2
-    assert len(observer.unknown_calls) == 1
+    assert len(observer.started_facts) == 1
+    assert observer.unknown_calls == []
     assert len(observer.completed_calls) == 1
 
 

@@ -92,7 +92,14 @@ class ProviderCallObserverError(RuntimeError):
 
 
 class ProviderCallObserver(Protocol):
+    @property
+    def operation_scope(self) -> str:
+        """Opaque identity of the execution attempt that owns these calls."""
+        ...
+
     async def started(self, request: ProviderCallRequestFacts) -> UUID: ...
+
+    async def accepted(self, call_id: UUID, provider_response_id: str) -> None: ...
 
     async def completed(
         self, call_id: UUID, result: ProviderCallResultFacts

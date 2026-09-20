@@ -19,21 +19,91 @@ from eneo.flows.domain.speaker_labels import (
     renumber_speaker_labels,
 )
 from eneo.flows.domain.transcript_corrections import segments_content_hash
+from eneo.flows.enums import FlowStepPhase
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_error import (
+    TRANSCRIPTION_SERVICE_REASON_MAX_LENGTH,
+    FlowRunErrorDetails,
+    TranscriptionFailureKind,
+)
 from eneo.flows.runtime.run_cancellation import FlowStepCancelledError
+from eneo.flows.runtime.step_deadline import current_step_deadline_scope
 from eneo.flows.transcription_config import (
     FlowTranscriptionConfig,
     FlowTranscriptionConfigError,
     parse_transcription_config,
     to_provider_language,
 )
-from eneo.main.exceptions import NotFoundException, TypedIOValidationException
+from eneo.main.exceptions import (
+    NotFoundException,
+    OpenAIException,
+    ProviderRejectedRequestException,
+    TypedIOValidationException,
+)
 from eneo.model_providers.domain.provider_call_observer import (
     ProviderCallObserverError,
 )
 
 # Reads one authorized audio file's bytes, immediately before transcription.
 LoadAudioPayload: TypeAlias = Callable[[UUID], Awaitable["File"]]
+
+
+class TranscriptionProviderError(OpenAIException):
+    def __init__(
+        self,
+        message: str,
+        *,
+        failure_kind: TranscriptionFailureKind = TranscriptionFailureKind.PROVIDER,
+        service_reason: str | None = None,
+        code: str | None = None,
+        details: dict[str, object] | None = None,
+    ) -> None:
+        super().__init__(message, code=code, details=details)
+        self.failure_kind = failure_kind
+        self.service_reason = (
+            service_reason[:TRANSCRIPTION_SERVICE_REASON_MAX_LENGTH]
+            if service_reason
+            else None
+        )
+
+
+class TranscriptionProviderRejectedError(
+    TranscriptionProviderError, ProviderRejectedRequestException
+):
+    pass
+
+
+class TranscriptionFailure(TypedIOValidationException):
+    def __init__(self, message: str, *, cause: Exception) -> None:
+        super().__init__(
+            message, code=FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_FAILED.value
+        )
+        service_reason = None
+        if isinstance(cause, TranscriptionProviderError):
+            kind = cause.failure_kind
+            service_reason = cause.service_reason
+        elif isinstance(cause, ProviderRejectedRequestException):
+            kind = TranscriptionFailureKind.INPUT
+        elif isinstance(cause, OpenAIException):
+            kind = (
+                TranscriptionFailureKind.CAPACITY
+                if cause.code == "provider_rate_limited"
+                else TranscriptionFailureKind.PROVIDER
+            )
+        else:
+            kind = TranscriptionFailureKind.INTERNAL
+        scope = current_step_deadline_scope()
+        self.run_error_details = FlowRunErrorDetails(
+            phase=FlowStepPhase.TRANSCRIPTION,
+            transcription_failure_kind=kind,
+            transcription_service_reason=service_reason,
+            transcription_stage=scope.transcription_stage
+            if scope is not None
+            else None,
+            transcription_queue_position=scope.transcription_queue_position
+            if scope is not None
+            else None,
+        )
 
 
 class FlowStepTranscriber(Protocol):
@@ -461,12 +531,12 @@ async def transcribe_audio_input(
                 context=exc.context,
             ) from exc
         except Exception as exc:
-            raise TypedIOValidationException(
+            raise TranscriptionFailure(
                 (
                     f"Step {step_order}: transcription failed for "
                     f"'{getattr(file, 'name', 'unknown')}'."
                 ),
-                code=FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_FAILED.value,
+                cause=exc,
             ) from exc
 
         if transcribed.duration_seconds is None:

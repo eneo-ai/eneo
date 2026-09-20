@@ -31,6 +31,7 @@ FlowRunDispatchErrorJson: TypeAlias = dict[str, object]
 
 _MAX_STEP_DESCRIPTION_LENGTH = 256
 _MAX_MESSAGE_LENGTH = 4096
+TRANSCRIPTION_SERVICE_REASON_MAX_LENGTH = 512
 _MESSAGE_TRUNCATION_SUFFIX = "... [truncated]"
 _INVALID_PERSISTED_ERROR_MESSAGE = "Persisted flow run error payload is invalid."
 _INVALID_PERSISTED_DISPATCH_ERROR_MESSAGE = (
@@ -178,6 +179,14 @@ NullablePublicTerminalErrorCode: TypeAlias = Annotated[
 ]
 
 
+class TranscriptionFailureKind(StrEnum):
+    INPUT = "input"
+    CAPACITY = "capacity"
+    PROVIDER = "provider"
+    INTERNAL = "internal"
+    CANCELLED = "cancelled"
+
+
 class FlowRunErrorDetails(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -202,7 +211,28 @@ class FlowRunErrorDetails(BaseModel):
     )
 
     phase: FlowStepPhase | None = Field(
-        default=None, description="Observed execution phase when the budget expired."
+        default=None,
+        description="Observed execution phase when the step failed or its budget expired.",
+    )
+    transcription_failure_kind: TranscriptionFailureKind | None = Field(
+        default=None,
+        description="Transcription failure category from upstream protocol facts. Does not imply that a new run is safe to retry.",
+    )
+    transcription_service_reason: str | None = Field(
+        default=None,
+        max_length=TRANSCRIPTION_SERVICE_REASON_MAX_LENGTH,
+        description="Bounded human-readable transcription service reason. Never parse this text to classify a failure.",
+    )
+    transcription_stage: str | None = Field(
+        default=None,
+        max_length=128,
+        description="Last observed transcription service stage before the interruption.",
+    )
+    transcription_queue_position: int | None = Field(
+        default=None,
+        ge=0,
+        strict=True,
+        description="Last observed transcription queue position, when reported by the service.",
     )
     completed_items: int | None = Field(
         default=None,
@@ -238,11 +268,28 @@ class FlowRunErrorDetails(BaseModel):
             value = context.get(key, context.get(fallback) if fallback else None)
             return value if type(value) is int and value >= 0 else None
 
+        kind = context.get("transcription_failure_kind")
+        reason = context.get("transcription_service_reason")
+
         details = cls(
+            transcription_failure_kind=kind
+            if isinstance(kind, TranscriptionFailureKind)
+            else None,
+            transcription_service_reason=reason[
+                :TRANSCRIPTION_SERVICE_REASON_MAX_LENGTH
+            ]
+            if isinstance(reason, str)
+            else None,
             measured_bytes=count("measured_bytes", "measured"),
             ceiling_bytes=count("ceiling_bytes", "ceiling"),
             completed_items=count("completed_items"),
             total_items=count("total_items"),
+            transcription_stage=(
+                str(context["transcription_stage"])[:128]
+                if isinstance(context.get("transcription_stage"), str)
+                else None
+            ),
+            transcription_queue_position=count("transcription_queue_position"),
         )
         return details if details.model_dump(exclude_none=True) else None
 
@@ -270,7 +317,23 @@ class FlowRunError(BaseModel):
             "description": (
                 "Structured terminal run error. Clients should branch on `code`, "
                 "not on the human-readable message."
-            )
+            ),
+            "examples": [
+                {
+                    "schema_version": 1,
+                    "code": FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_FAILED.value,
+                    "message": "Step 1: transcription failed for 'meeting.wav'.",
+                    "source": "executor_failed",
+                    "step_order": 1,
+                    "retryable": False,
+                    "details": {
+                        "phase": "transcription",
+                        "transcription_failure_kind": "capacity",
+                        "transcription_service_reason": "Transcription capacity is unavailable.",
+                        "transcription_stage": "transcribing",
+                    },
+                }
+            ],
         },
     )
 

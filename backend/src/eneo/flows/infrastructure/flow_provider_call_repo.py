@@ -902,6 +902,35 @@ class FlowProviderCallRepository:
             raise RuntimeError("Provider call insert returned no row.")
         return ProviderCall.model_validate(row)
 
+    async def accept_call(self, *, call_id: UUID, provider_response_id: str) -> None:
+        if not provider_response_id or len(provider_response_id) > 512:
+            raise ValueError("Provider response id must contain 1 to 512 characters.")
+        row = await self.session.scalar(
+            sa.select(FlowProviderCalls)
+            .where(FlowProviderCalls.id == call_id)
+            .execution_options(populate_existing=True)
+            .with_for_update()
+        )
+        if row is None:
+            raise FlowProviderCallNotFoundError(
+                f"Flow provider call {call_id} was not found."
+            )
+        if row.call_kind != ProviderCallKind.TRANSCRIPTION.value:
+            raise FlowProviderCallStateConflictError(
+                "Only transcription calls have asynchronous job acceptance."
+            )
+        if row.provider_response_id == provider_response_id:
+            return
+        if (
+            row.provider_response_id is not None
+            or row.status != ProviderCallStatus.STARTED.value
+        ):
+            raise FlowProviderCallStateConflictError(
+                f"Flow provider call {call_id} cannot accept a different job."
+            )
+        row.provider_response_id = provider_response_id
+        await self.session.flush()
+
     async def complete_call(
         self,
         *,
@@ -929,6 +958,13 @@ class FlowProviderCallRepository:
                 f"Flow provider call {call_id} is already terminal as {row.status}."
             )
 
+        if (
+            row.provider_response_id is not None
+            and row.provider_response_id != receipt.provider_response_id
+        ):
+            raise FlowProviderCallStateConflictError(
+                f"Flow provider call {call_id} has a different accepted job identity."
+            )
         row.status = ProviderCallStatus.COMPLETED.value
         row.response_model = receipt.response_model
         row.provider_response_id = receipt.provider_response_id

@@ -838,6 +838,40 @@ read `error.details.phase` and
 had an unknown outcome. Missing facts are unknown; `error.retryable` remains the
 authoritative retry signal.
 
+For a transcription failure, use the typed diagnosis in `error.details`:
+
+```json
+{
+  "schema_version": 1,
+  "code": "typed_io_transcription_failed",
+  "message": "Step 1: transcription failed for 'meeting.wav'.",
+  "source": "executor_failed",
+  "step_order": 1,
+  "retryable": false,
+  "details": {
+    "phase": "transcription",
+    "transcription_failure_kind": "capacity",
+    "transcription_service_reason": "Transcription capacity is unavailable.",
+    "transcription_stage": "transcribing"
+  }
+}
+```
+
+The [transcription failure kinds](/guides/flows/reference/errors#transcription-failures)
+are the machine-readable contract. The bounded service reason is human text.
+Stage and queue position describe the last observed poll when a failure or
+timeout interrupts transcription.
+
+External transcription submissions use one idempotency key for the tenant, run,
+step attempt, audio file and digest, and task. A confirmed admission refusal
+waits within the step budget, honours `Retry-After`, and checks cancellation.
+If the budget expires while admission is refused, the provider-call evidence
+records a known refusal. A lost submission response permits one resubmission
+with the same key. Preventing a second job requires the transcription service
+to support that header; the bounded resubmission alone cannot guarantee deduplication.
+Once a job ID is known, it is persisted before polling and retained through later
+failure, cancellation, or recovery. Eneo never resubmits because polling failed.
+
 #### What the two `retryable` fields mean
 
 `dispatch_last_error.retryable` is an internal recovery signal for the current

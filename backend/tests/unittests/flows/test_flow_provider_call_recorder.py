@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import pytest
 from sqlalchemy.exc import OperationalError
@@ -10,6 +13,102 @@ from eneo.flows.infrastructure.flow_provider_call_recorder import (
     FlowProviderCallRecorder,
     ProviderCallEvidencePersistenceError,
 )
+
+
+@pytest.fixture
+def accepted_call_recorder(monkeypatch):
+    from eneo.database.tables.flow_tables import FlowProviderCalls
+    from eneo.flows.infrastructure import flow_provider_call_recorder as module
+
+    now = datetime.now(timezone.utc)
+    row = FlowProviderCalls(
+        id=uuid4(),
+        flow_step_attempt_id=uuid4(),
+        ordinal=1,
+        call_kind="transcription",
+        status="started",
+        request_schema_version=2,
+        provider_request_hash="a" * 64,
+        requested_model="external/test",
+        provider="external",
+        response_format="none",
+        requested_capabilities=[],
+        resolved_input_edge_indexes=[],
+        call_reason="initial",
+        audio_seconds=42,
+        requested_at=now,
+        created_at=now,
+        updated_at=now,
+    )
+    session = AsyncMock()
+    session.scalar.return_value = row
+    commits = []
+
+    @asynccontextmanager
+    async def transaction():
+        yield
+        commits.append(row.provider_response_id)
+
+    @asynccontextmanager
+    async def connection():
+        yield session
+
+    session.begin = MagicMock(side_effect=transaction)
+    monkeypatch.setattr(module.sessionmanager, "session", connection)
+    recorder = FlowProviderCallRecorder(
+        run_id=uuid4(),
+        step_id=uuid4(),
+        attempt_no=1,
+        tenant_id=uuid4(),
+        principal_user_id=uuid4(),
+        principal_service_id=None,
+        completion_model_id=None,
+        mapped_call=None,
+        resolved_input_edge_indexes=(),
+    )
+    return recorder, row, session, commits
+
+
+@pytest.mark.parametrize("terminal", ["rejected", "outcome_unknown"])
+async def test_accepted_receipt_commits_and_retains_identity(
+    accepted_call_recorder, terminal
+):
+    from eneo.flows.infrastructure.flow_provider_call_repo import (
+        FlowProviderCallRepository,
+    )
+
+    recorder, row, session, commits = accepted_call_recorder
+    await recorder.accepted(row.id, "job-1")
+    assert commits == ["job-1"]
+    assert row.status == "started"
+    await recorder.accepted(row.id, "job-1")
+    if terminal == "rejected":
+        await recorder.rejected(row.id, "provider_rejected")
+    else:
+        await recorder.outcome_unknown(row.id, "provider_error")
+    evidence = await FlowProviderCallRepository(session).get_call(call_id=row.id)
+    assert evidence.status.value == terminal
+    assert evidence.provider_response_id == "job-1"
+
+
+async def test_completed_receipt_cannot_replace_accepted_identity(
+    accepted_call_recorder,
+):
+    from eneo.model_providers.domain.provider_call_observer import (
+        TranscriptionCallResultFacts,
+    )
+
+    recorder, row, _, _ = accepted_call_recorder
+    await recorder.accepted(row.id, "job-1")
+    with pytest.raises(ProviderCallEvidencePersistenceError):
+        await recorder.completed(
+            row.id,
+            TranscriptionCallResultFacts(
+                response_model="whisper", provider_response_id="other-job"
+            ),
+        )
+    assert row.provider_response_id == "job-1"
+    assert row.status == "started"
 
 
 def _facts() -> ProviderCallEvidenceGap:

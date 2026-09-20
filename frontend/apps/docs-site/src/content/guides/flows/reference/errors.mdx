@@ -56,6 +56,32 @@ The catalog below covers Flow-specific failures. A Flow client will also meet th
 - Do not automatically retry an LLM request timeout or ambiguous step execution failure: provider work may or may not have started, and a rerun can duplicate provider work and spend.
 - A failed `per_source` or `per_item` step has no partial continuation: rerunning the step repeats every source or item provider call, including calls that may already have completed.
 
+## Transcription failures
+
+For `typed_io_transcription_failed`, branch on
+`error.details.transcription_failure_kind`. An admission refusal that exhausts
+the step budget reports `flow_step_timeout` with kind `capacity`. The phase is
+`transcription`.
+`transcription_service_reason` contains at most 512 characters of service text
+for display or support; do not parse it to decide how to recover.
+
+| Kind | Meaning | Recovery |
+| --- | --- | --- |
+| `input` | The service rejected the audio or request, including HTTP 413 or 422. | Correct the input before trying again. |
+| `capacity` | The service reported a capacity failure or refused admission with HTTP 429, or HTTP 503 with `Retry-After`. | Wait for capacity to recover and inspect earlier run effects. |
+| `provider` | The service failed, became unreachable, or supplied no more specific failure kind. | Check service health and the retained provider-call evidence. |
+| `internal` | Local transcription preparation failed, or the service reported an internal failure. | Ask an operator to investigate. |
+| `cancelled` | The service reported that the accepted job was cancelled. | Check why it was cancelled before starting more work. |
+
+These kinds describe the failure, not whether repeating the flow is safe.
+`typed_io_transcription_failed` still has `retryable: false`: earlier steps may
+have produced effects. Eneo does not classify failures by searching service text.
+Until the service supplies `failure_kind`, a failed job is classified as `provider`.
+
+The last observed stage and queue position, when available, are retained in
+`error.details.transcription_stage` and `transcription_queue_position` on
+transcription failures and step timeouts. A missing queue position is unknown.
+
 ## Catalog
 
 Run admission measures file metadata across all steps before loading file content, including files retained by per-source previews. Extracted text and inline input share the inline text ceiling; binary documents and audio use their respective upload ceilings. A null file-count policy resolves to `FLOW_INPUT_MAX_FILES_COUNT` (1,000). The aggregate count cannot exceed that ceiling or the sum of the step limits.
@@ -184,7 +210,7 @@ Structured output uses the inline byte ceiling for both single calls and mapped 
 | Typed input/output     | `typed_io_transcript_too_large`                          | Run execution                 | Use shorter audio or split the task into smaller runs.                                                                                           |
 | Typed input/output     | `typed_io_transcription_config_invalid`                  | Run execution                 | Fix transcription settings and republish before rerunning.                                                                                       |
 | Typed input/output     | `typed_io_transcription_empty`                           | Run execution                 | Ask for audio with clear speech before rerunning.                                                                                                |
-| Typed input/output     | `typed_io_transcription_failed`                          | Run execution                 | Retry after checking audio quality and provider availability.                                                                                    |
+| Typed input/output     | `typed_io_transcription_failed`                          | Run execution                 | Use `details.transcription_failure_kind` to diagnose the failure; check `retryable` before starting another run. |
 | Typed input/output     | `typed_io_transcription_model_missing`                   | Run execution                 | Choose an available transcription model and republish.                                                                                           |
 | Typed input/output     | `typed_io_transcription_model_unavailable`               | Run execution                 | Choose another model or retry after provider recovery.                                                                                           |
 | Typed input/output     | `typed_io_transcription_not_enabled`                     | Run execution                 | Enable transcription or change the step input type before republish.                                                                             |

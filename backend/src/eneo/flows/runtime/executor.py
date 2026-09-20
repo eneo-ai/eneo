@@ -211,6 +211,7 @@ from eneo.flows.runtime.step_result_builder import (
 from eneo.flows.runtime.template_fill_runtime import (
     TemplateFillRuntimeDeps,
 )
+from eneo.flows.runtime.transcription import TranscriptionFailure
 from eneo.flows.runtime.transcription_runtime import (
     persist_transcription_on_run_input,
 )
@@ -1944,8 +1945,10 @@ class FlowRunExecutor:
             provider_work_may_have_completed=getattr(
                 typed_exc, "provider_work_may_have_completed", None
             ),
-            run_error_details=FlowRunErrorDetails.from_budget_context(
-                typed_exc.context
+            run_error_details=(
+                typed_exc.run_error_details
+                if isinstance(typed_exc, TranscriptionFailure)
+                else FlowRunErrorDetails.from_budget_context(typed_exc.context)
             ),
         )
         await self._rollback()

@@ -1332,7 +1332,7 @@ class FlowProviderCalls(BasePublic):
         ),
         CheckConstraint(
             "(status = 'started' AND finished_at IS NULL AND outcome_reason IS NULL "
-            "AND response_model IS NULL AND provider_response_id IS NULL "
+            "AND response_model IS NULL "
             "AND num_tokens_input IS NULL AND num_tokens_output IS NULL "
             "AND input_source IS NULL AND output_source IS NULL) OR "
             "(status = 'completed' AND outcome_reason IS NULL "
@@ -1340,12 +1340,12 @@ class FlowProviderCalls(BasePublic):
             "AND finished_at IS NOT NULL) OR "
             "(status = 'rejected' AND finished_at IS NOT NULL "
             f"AND outcome_reason IN ({_check_values(PROVIDER_CALL_REJECTION_REASON_VALUES)}) "
-            "AND response_model IS NULL AND provider_response_id IS NULL "
+            "AND response_model IS NULL "
             "AND num_tokens_input IS NULL AND num_tokens_output IS NULL "
             "AND input_source IS NULL AND output_source IS NULL) OR "
             "(status = 'outcome_unknown' AND finished_at IS NOT NULL "
             f"AND outcome_reason IN ({_check_values(PROVIDER_CALL_UNKNOWN_REASON_VALUES)}) "
-            "AND response_model IS NULL AND provider_response_id IS NULL "
+            "AND response_model IS NULL "
             "AND num_tokens_input IS NULL AND num_tokens_output IS NULL "
             "AND input_source IS NULL AND output_source IS NULL)",
             name="ck_flow_provider_calls_lifecycle_shape",

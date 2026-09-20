@@ -1093,8 +1093,8 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         category="Typed input/output",
         surfaced_through="Run error payload",
         cause="The transcription provider failed while processing audio.",
-        consumer_action="Retry after checking audio quality and provider availability.",
-        user_action="Check the audio quality and try again.",
+        consumer_action="Use transcription_failure_kind in error details to diagnose the failure; check retryable before starting another run.",
+        user_action="Check the reported transcription failure and earlier run effects before trying again.",
     ),
     FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_MODEL_MISSING: _entry(
         category="Typed input/output",

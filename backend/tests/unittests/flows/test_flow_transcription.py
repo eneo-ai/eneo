@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, create_autospec
 from uuid import UUID, uuid4
 
+import httpx
 import pytest
 
 from eneo.audit.domain.action_types import ActionType
@@ -34,6 +35,95 @@ from eneo.flows.runtime.transcription_runtime import (
     resolve_transcribe_and_attach_audio_input,
 )
 from eneo.main.exceptions import NotFoundException, TypedIOValidationException
+
+
+@pytest.mark.asyncio
+async def test_remote_failure_facts_survive_executor_terminalization(user, monkeypatch):
+    from eneo.flows.api.flow_models import FlowRunPublic
+    from eneo.flows.domain.flow import FlowStepResult
+    from eneo.flows.flow_run_error import dump_flow_run_error, parse_flow_run_error
+    from eneo.flows.runtime import remote_transcription
+    from eneo.flows.runtime.transcription import transcribe_audio_input
+
+    monkeypatch.setattr(
+        remote_transcription, "measure_duration", AsyncMock(return_value=42.0)
+    )
+    reason = "No GPU capacity. " * 100
+
+    def handle(request):
+        if request.method == "POST":
+            return httpx.Response(202, json={"job_id": "job-1"})
+        return httpx.Response(
+            200,
+            json={
+                "status": "failed",
+                "stage": "transcribing",
+                "failure_kind": "capacity",
+                "error": reason,
+            },
+        )
+
+    remote = remote_transcription.RemoteFlowTranscriber(
+        remote_transcription.RemoteTranscriptionClient(
+            base_url="http://transcription.test",
+            api_key="test",
+            submit_timeout_seconds=10,
+            poll_interval_seconds=0.001,
+            result_timeout_seconds=10,
+            transport=httpx.MockTransport(handle),
+        )
+    )
+    file = _audio_file(name="audio.wav")
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await transcribe_audio_input(
+            files=[FileInfo.model_validate(file, from_attributes=True)],
+            transcriber=remote,
+            transcription_model=SimpleNamespace(),
+            language="sv",
+            step_order=1,
+            max_files=1,
+            max_inline_text_bytes=1024,
+            load_audio_payload=AsyncMock(return_value=file),
+        )
+    executor, _, _, _, _ = _build_executor(user)
+    executor._terminalize_run = AsyncMock()
+    run = _run(user=user)
+    step = _runtime_step()
+    now = datetime.now(timezone.utc)
+    claimed = FlowStepResult(
+        flow_run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_id=step.step_id,
+        step_order=1,
+        status="running",
+        created_at=now,
+        updated_at=now,
+    )
+    await executor._handle_typed_step_failure(
+        run_id=run.id,
+        tenant_id=run.tenant_id,
+        step=step,
+        attempt_no=1,
+        claimed=claimed,
+        typed_exc=exc_info.value,
+        failed_input_payload=None,
+    )
+    error = executor._terminalize_run.await_args.kwargs["error"]
+    public = FlowRunPublic.model_validate(
+        run.model_copy(
+            update={
+                "status": FlowRunStatus.FAILED,
+                "error": parse_flow_run_error(dump_flow_run_error(error)),
+            }
+        ),
+        from_attributes=True,
+    )
+    assert public.error.code.value == "typed_io_transcription_failed"
+    assert public.error.retryable is False
+    assert public.error.details.phase.value == "transcription"
+    assert public.error.details.transcription_failure_kind.value == "capacity"
+    assert public.error.details.transcription_service_reason == reason[:512]
 
 
 def _transcribed(text: str, *, duration_seconds: float = 30.0) -> TranscribedAudio:
