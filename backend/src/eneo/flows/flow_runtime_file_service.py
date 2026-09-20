@@ -17,6 +17,7 @@ from eneo.database.database import AsyncSession
 from eneo.files.file_models import FileInfo
 from eneo.files.file_service import FileService
 from eneo.files.mime_support import canonicalize_mime, canonicalize_sniffed_mime
+from eneo.files.text import PdfExtractionLimitExceeded
 from eneo.flows.enums import FlowRuntimeInputFormat
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
@@ -322,6 +323,17 @@ class FlowRuntimeFileService:
                 max_size=max_size,
                 before_commit=bind_and_audit,
             )
+        except PdfExtractionLimitExceeded as exc:
+            raise FlowBadRequestException(
+                "The PDF exceeds an extraction limit. Split the PDF or ask an "
+                "administrator to review the PDF ceilings.",
+                code=FlowApiErrorCode.RUN_UPLOAD_PDF_EXCEEDS_LIMIT,
+                context={
+                    "limit": exc.limit,
+                    "measured": exc.measured,
+                    "ceiling": exc.ceiling,
+                },
+            ) from exc
         except FileTooLargeException as exc:
             raise FileTooLargeException(
                 f"Uploaded file exceeds effective flow limit of {max_size} bytes.",

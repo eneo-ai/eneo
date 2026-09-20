@@ -27,6 +27,8 @@ Every `4xx` and `5xx` response from the Flow runtime API has the same JSON body:
 
 Fields that carry no value are omitted rather than sent as `null`, so treat every field except `message` and `code` as optional.
 
+For `flow_run_upload_pdf_exceeds_limit`, context contains `limit` (`pages`, `extracted_bytes`, or `seconds`), `measured`, and `ceiling`. The deployment settings `FLOW_PDF_MAX_PAGES`, `FLOW_PDF_MAX_EXTRACTED_BYTES`, and `FLOW_PDF_EXTRACTION_TIMEOUT_SECONDS` default to 500 pages, 33554432 extracted UTF-8 bytes (including page markers and separators), and 120 seconds. These defaults are provisional pending measurement and have no tenant overrides. The byte ceiling applies to extracted text, not the uploaded file. A timeout kills the extraction process.
+
 ## Codes that are not `FlowApiErrorCode`
 
 The catalog below covers Flow-specific failures. A Flow client will also meet these platform-level codes, most of them on the authentication and upload paths, and they are not in the `FlowApiErrorCode` enum:
@@ -92,6 +94,7 @@ Structured output uses the inline byte ceiling for both single calls and mapped 
 | Run input              | `flow_run_step_input_mimetype_rejected`                  | Request path                  | Check accepted MIME types in the run contract before upload or binding.                                                                          |
 | Run input              | `flow_run_top_level_file_ids_not_supported`              | Request path                  | Send files through step_inputs keyed by runtime step id.                                                                                         |
 | Run input              | `flow_run_unknown_step_input`                            | Request path                  | Refetch the runtime contract and remove stale step ids.                                                                                          |
+| Run input              | `flow_run_upload_pdf_exceeds_limit`                       | Request path                  | Split the PDF or ask an administrator to review the PDF ceilings.                                                                                |
 | Run input              | `flow_runtime_file_attached`                             | Request path                  | Do not delete files that are bound to run history.                                                                                               |
 | Run input              | `flow_runtime_file_empty`                                | Request path                  | Reject empty files client-side before uploading when possible.                                                                                   |
 | Run lifecycle          | `flow_dispatch_failed`                                   | Request path or run execution | Retry with backoff and alert an operator if dispatch keeps failing.                                                                              |

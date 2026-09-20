@@ -16697,6 +16697,7 @@ export interface components {
       | "flow_run_file_not_bound_to_flow"
       | "flow_run_file_access_audit_unavailable"
       | "flow_run_step_input_file_too_large"
+      | "flow_run_upload_pdf_exceeds_limit"
       | "flow_run_step_input_mimetype_rejected"
       | "flow_run_aggregate_max_files_exceeded"
       | "flow_run_reserved_input_payload_key"

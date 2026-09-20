@@ -545,3 +545,11 @@ def test_republish_refusal_is_terminal_but_not_typed_io() -> None:
     code = FlowApiErrorCode("flow_assistant_snapshot_republish_required")
     assert code in FLOW_RUN_TERMINAL_ERROR_CODES
     assert code not in FLOW_TYPED_IO_ERROR_CODES
+
+
+def test_pdf_upload_refusal_is_request_path_only() -> None:
+    code = FlowApiErrorCode("flow_run_upload_pdf_exceeds_limit")
+
+    assert code in FLOW_API_ERROR_CODES
+    assert code not in FLOW_RUN_TERMINAL_ERROR_CODES
+    assert code not in FLOW_TYPED_IO_ERROR_CODES

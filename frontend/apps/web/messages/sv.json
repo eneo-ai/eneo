@@ -5383,6 +5383,7 @@
   "flow_error_flow_run_user_cancelled": "Körningen avbröts av en användare. Starta en ny körning om du fortfarande behöver resultatet.",
   "flow_error_flow_runtime_file_attached": "Filen är redan kopplad till sparad körningshistorik och kan inte tas bort.",
   "flow_error_flow_runtime_file_empty": "Den uppladdade filen är tom. Välj en fil med innehåll och ladda upp den igen.",
+  "flow_error_flow_run_upload_pdf_exceeds_limit": "PDF-filen överskrider en gräns för textextrahering. Dela upp filen eller be en administratör se över PDF-gränserna.",
   "flow_error_flow_template_control_duplicate": "Flera innehållskontroller har samma tagg. Ge varje kontroll en unik tagg i Word.",
   "flow_error_flow_template_control_mapped": "En innehållskontroll är kopplad till XML-data. Ta bort datakopplingen i Word innan du laddar upp mallen.",
   "flow_error_flow_template_control_nested": "Innehållskontroller får inte ligga inuti andra innehållskontroller. Flytta ut den inre kontrollen i Word.",

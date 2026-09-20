@@ -26,6 +26,7 @@ export declare const FLOW_API_ERROR_CODE: Readonly<{
   RUN_FILE_NOT_BOUND_TO_FLOW: "flow_run_file_not_bound_to_flow";
   RUN_FILE_ACCESS_AUDIT_UNAVAILABLE: "flow_run_file_access_audit_unavailable";
   RUN_STEP_INPUT_FILE_TOO_LARGE: "flow_run_step_input_file_too_large";
+  RUN_UPLOAD_PDF_EXCEEDS_LIMIT: "flow_run_upload_pdf_exceeds_limit";
   RUN_STEP_INPUT_MIMETYPE_REJECTED: "flow_run_step_input_mimetype_rejected";
   RUN_AGGREGATE_MAX_FILES_EXCEEDED: "flow_run_aggregate_max_files_exceeded";
   RUN_RESERVED_INPUT_PAYLOAD_KEY: "flow_run_reserved_input_payload_key";
@@ -204,6 +205,7 @@ export type FlowApiErrorCode =
   | "flow_run_file_not_bound_to_flow"
   | "flow_run_file_access_audit_unavailable"
   | "flow_run_step_input_file_too_large"
+  | "flow_run_upload_pdf_exceeds_limit"
   | "flow_run_step_input_mimetype_rejected"
   | "flow_run_aggregate_max_files_exceeded"
   | "flow_run_reserved_input_payload_key"

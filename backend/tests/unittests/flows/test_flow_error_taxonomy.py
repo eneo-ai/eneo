@@ -22,3 +22,13 @@ def test_republish_refusal_taxonomy() -> None:
     assert entry.category == "Published definition"
     assert entry.handling_phase == "Request path or run execution"
     assert "republish" in entry.consumer_action.lower()
+
+
+def test_pdf_upload_refusal_taxonomy():
+    code = FlowApiErrorCode("flow_run_upload_pdf_exceeds_limit")
+    entry = FLOW_ERROR_TAXONOMY[code]
+
+    assert entry.category == "Run input"
+    assert entry.handling_phase == "Request path"
+    assert "split" in entry.consumer_action.lower()
+    assert "administrator" in entry.consumer_action.lower()

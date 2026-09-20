@@ -3,13 +3,20 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from io import BytesIO
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
-from fastapi import UploadFile
+from fastapi import FastAPI, UploadFile
+from fastapi.routing import APIRoute
+from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
 
+from eneo.files.file_protocol import FileProtocol
+from eneo.files.file_service import FileService
+from eneo.files.file_size_service import FileSizeService
+from eneo.files.text import TextExtractor
+from eneo.flows.api import flow_upload_router
 from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
 from eneo.flows.domain.runtime_invariant_exceptions import (
@@ -24,6 +31,7 @@ from eneo.flows.published_definition import (
     FLOW_DEFINITION_SCHEMA_VERSION,
     published_definition_checksum,
 )
+from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     BadRequestException,
     ConflictException,
@@ -31,7 +39,11 @@ from eneo.main.exceptions import (
     FileTooLargeException,
     NotFoundException,
 )
+from eneo.server.exception_handlers import add_exception_handlers
 from tests.flow_snapshot_fixtures import assistant_snapshot
+from tests.unit.api_key_test_utils import flatten_routes
+from tests.unittests.files.test_file_protocol import _UPLOAD_ADMISSION
+from tests.unittests.files.test_pdf_extraction_limits import _write_pdf
 
 RUNTIME_ATTACHMENT_CONSTRAINTS = (
     "flow_run_step_input_files_file_id_fkey",
@@ -1618,3 +1630,80 @@ async def test_delete_runtime_file_reraises_unrelated_integrity_error() -> None:
         await service.delete_runtime_file(flow_id=flow.id, file_id=uuid4())
 
     assert exc_info.value is error
+
+
+@pytest.mark.parametrize("corrupt", [False, True])
+def test_runtime_pdf_upload_error_response(tmp_path, monkeypatch, corrupt):
+    settings = get_settings()
+    upload_directory = tmp_path / "uploads"
+    upload_directory.mkdir()
+    monkeypatch.setattr(settings, "upload_tmp_dir", upload_directory)
+    monkeypatch.setattr(settings, "flow_pdf_max_pages", 1)
+    pdf = _write_pdf(tmp_path / "source.pdf", 2)
+    payload = b"%PDF-1.4\ncorrupt" if corrupt else pdf.read_bytes()
+    flow = _flow(step=_step(step_order=1, input_type="document"))
+    step = flow.steps[0]
+    user = _user(tenant_id=flow.tenant_id)
+    session = _Session()
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = flow
+    settings_service = AsyncMock()
+    settings_service.get_flow_input_limits_resolved.return_value = FlowInputLimits(
+        file_max_size_bytes=10_000_000,
+        audio_max_size_bytes=25_000_000,
+    )
+    object_content = AsyncMock()
+    protocol = FileProtocol(
+        file_size_service=FileSizeService(),
+        text_extractor=TextExtractor(),
+        image_extractor=MagicMock(),
+    )
+    file_service = FileService(
+        user=user,
+        repo=SimpleNamespace(session=session),
+        protocol=protocol,
+        object_content=object_content,
+        upload_admission=_UPLOAD_ADMISSION,
+    )
+    service = _service(
+        user=user,
+        session=session,
+        flow_service=flow_service,
+        file_service=file_service,
+        settings_service=settings_service,
+        flow_version_repo=_version_repo(flow),
+    )
+    container = MagicMock()
+    container.session.return_value = session
+    container.flow_runtime_file_service.return_value = service
+    monkeypatch.setattr(
+        flow_upload_router.flow_access_context, "enforce_flow_scope", AsyncMock()
+    )
+    app = FastAPI()
+    app.include_router(flow_upload_router.router)
+    add_exception_handlers(app)
+    for route in flatten_routes(list(app.routes)):
+        if isinstance(route.route, APIRoute):
+            for dependency in route.dependant.dependencies:
+                app.dependency_overrides[dependency.call] = lambda: container
+
+    with TestClient(app) as client:
+        response = client.post(
+            f"/{flow.id}/steps/{step.id}/runtime-files/",
+            files={"upload_file": ("source.pdf", payload, "application/pdf")},
+        )
+
+    assert response.status_code == 400
+    body = response.json()
+    if corrupt:
+        assert body["code"] == "EXTRACTION_FAILED"
+        assert body["message"] == (
+            "PDF extraction failed for 'source.pdf': No /Root object! - Is this really a PDF?"
+        )
+        assert "context" not in body
+    else:
+        assert body["code"] == "flow_run_upload_pdf_exceeds_limit"
+        assert body["context"] == {"limit": "pages", "measured": 2, "ceiling": 1}
+    assert list(upload_directory.iterdir()) == []
+    service.runtime_upload_repo.create.assert_not_awaited()
+    service.audit_service.log.assert_not_awaited()

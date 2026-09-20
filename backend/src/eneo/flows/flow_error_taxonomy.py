@@ -250,6 +250,13 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Check max file size in the run contract before upload or binding.",
         user_action="Choose a smaller file.",
     ),
+    FlowApiErrorCode.RUN_UPLOAD_PDF_EXCEEDS_LIMIT: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="PDF text extraction exceeds a deployment page, extracted-byte, or time ceiling.",
+        consumer_action="Split the PDF or ask an administrator to review the PDF ceilings.",
+        user_action="Split the PDF or ask an administrator to review the PDF ceilings.",
+    ),
     FlowApiErrorCode.RUN_STEP_INPUT_MIMETYPE_REJECTED: _entry(
         category="Run input",
         surfaced_through="API error response",

@@ -1,7 +1,10 @@
 import logging
+import multiprocessing
+import time
 import zipfile
 from enum import Enum
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any, Final, Literal
 
 import magic
@@ -11,6 +14,7 @@ from docx2python import docx2python
 from pdfminer.pdfdocument import PDFPasswordIncorrect
 from pdfminer.pdfparser import PDFSyntaxError
 from pptx.exc import PackageNotFoundError
+from pydantic import BaseModel, TypeAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +31,37 @@ class ExtractionError(Exception):
         self.message = message
         self.code = code
         super().__init__(self.message)
+
+
+PdfExtractionLimit = Literal["pages", "extracted_bytes", "seconds"]
+
+
+class PdfExtractionLimitExceeded(ExtractionError):
+    """Raised when PDF text extraction exceeds a deployment ceiling."""
+
+    def __init__(self, limit: PdfExtractionLimit, measured: int | float, ceiling: int):
+        self.limit: PdfExtractionLimit = limit
+        self.measured = measured
+        self.ceiling = ceiling
+        super().__init__(
+            f"PDF extraction exceeds {limit} limit ({measured} > {ceiling})"
+        )
+
+
+class _PdfLimitResult(BaseModel):
+    limit: PdfExtractionLimit
+    measured: int | float
+    ceiling: int
+
+
+class _PdfErrorResult(BaseModel):
+    kind: Literal["encrypted", "corrupt", "error"]
+    details: str
+
+
+_PDF_RESULT: TypeAdapter[str | _PdfLimitResult | _PdfErrorResult] = TypeAdapter(
+    str | _PdfLimitResult | _PdfErrorResult
+)
 
 
 class NoExtractableTextError(ExtractionError):
@@ -294,38 +329,56 @@ class TextExtractor:
 
     @classmethod
     def extract_from_pdf(cls, filepath: Path, filename: str | None = None) -> str:
+        from eneo.main.config import get_settings
+
+        settings = get_settings()
         display_name = filename or filepath.name
         try:
-            with pdfplumber.open(filepath) as pdf:
-                page_texts: list[str] = []
-                has_content = False
-                for page in pdf.pages:
-                    try:
-                        page_text = cls._extract_pdf_page(page)
-                    except Exception as e:
-                        logger.warning(
-                            f"Table-aware extraction failed on page "
-                            f"{page.page_number} of '{display_name}', "
-                            f"falling back to plain text: {e}"
-                        )
-                        page_text = page.extract_text() or ""
-                    has_content = has_content or bool(page_text.strip())
-                    page_texts.append(f"[PAGE {page.page_number}]\n{page_text}")
-
-                extracted_text = "\n\n".join(page_texts)
-
-            # Warn if no text extracted (likely image-only/scanned PDF)
-            if not has_content:
-                logger.warning(
-                    f"No text extracted from PDF '{display_name}' - "
-                    "file may be image-only or scanned"
+            # A file avoids a full result pipe blocking child exit before join().
+            with TemporaryDirectory(prefix="eneo-pdf-") as directory:
+                result_path = Path(directory) / "result.json"
+                process = multiprocessing.get_context("spawn").Process(
+                    target=cls._extract_pdf_in_child,
+                    args=(
+                        filepath,
+                        display_name,
+                        settings.flow_pdf_max_pages,
+                        settings.flow_pdf_max_extracted_bytes,
+                        result_path,
+                    ),
                 )
-                # Return empty rather than bare page markers, so downstream
-                # empty-content handling keeps working.
-                return ""
+                started = time.monotonic()
+                timeout = settings.flow_pdf_extraction_timeout_seconds
+                try:
+                    process.start()
+                    process.join(max(0, timeout - (time.monotonic() - started)))
+                    elapsed = time.monotonic() - started
+                    if process.is_alive() or elapsed > timeout:
+                        raise PdfExtractionLimitExceeded("seconds", elapsed, timeout)
+                    if process.exitcode != 0:
+                        raise ExtractionError(
+                            f"PDF extraction process exited with code {process.exitcode}"
+                        )
+                    result = _PDF_RESULT.validate_json(result_path.read_bytes())
+                finally:
+                    if process.is_alive():
+                        process.kill()
+                        process.join()
+                    process.close()
 
-            return TextSanitizer.sanitize(extracted_text)
-
+            if isinstance(result, str):
+                return result
+            if isinstance(result, _PdfLimitResult):
+                raise PdfExtractionLimitExceeded(
+                    result.limit, result.measured, result.ceiling
+                )
+            if result.kind == "encrypted":
+                raise PDFPasswordIncorrect(result.details)
+            if result.kind == "corrupt":
+                raise PDFSyntaxError(result.details)
+            raise ExtractionError(result.details)
+        except ExtractionError:
+            raise
         except PDFPasswordIncorrect as e:
             logger.warning(f"Password-protected PDF rejected: {display_name}")
             raise EncryptedFileError(display_name) from e
@@ -337,6 +390,79 @@ class TextExtractor:
             raise ExtractionError(
                 f"PDF extraction failed for '{display_name}': {str(e)}"
             )
+
+    @classmethod
+    def _extract_pdf_in_child(
+        cls,
+        filepath: Path,
+        display_name: str,
+        max_pages: int,
+        max_bytes: int,
+        result_path: Path,
+    ) -> None:
+        result: str | _PdfLimitResult | _PdfErrorResult
+        try:
+            result = cls._extract_pdf_text(filepath, display_name, max_pages, max_bytes)
+        except PdfExtractionLimitExceeded as exc:
+            result = _PdfLimitResult(
+                limit=exc.limit, measured=exc.measured, ceiling=exc.ceiling
+            )
+        except PDFPasswordIncorrect as exc:
+            result = _PdfErrorResult(kind="encrypted", details=str(exc))
+        except PDFSyntaxError as exc:
+            result = _PdfErrorResult(kind="corrupt", details=str(exc))
+        except Exception as exc:
+            result = _PdfErrorResult(
+                kind="error",
+                details=f"PDF extraction failed for '{display_name}': {exc}",
+            )
+        result_path.write_bytes(_PDF_RESULT.dump_json(result))
+
+    @classmethod
+    def _extract_pdf_text(
+        cls, filepath: Path, display_name: str, max_pages: int, max_bytes: int
+    ) -> str:
+        with pdfplumber.open(filepath) as pdf:
+            page_count = len(pdf.pages)
+            if page_count > max_pages:
+                raise PdfExtractionLimitExceeded("pages", page_count, max_pages)
+            page_texts: list[str] = []
+            extracted_bytes = 0
+            has_content = False
+            for page in pdf.pages:
+                try:
+                    page_text = cls._extract_pdf_page(page)
+                except PdfExtractionLimitExceeded:
+                    raise
+                except Exception as e:
+                    logger.warning(
+                        f"Table-aware extraction failed on page "
+                        f"{page.page_number} of '{display_name}', "
+                        f"falling back to plain text: {e}"
+                    )
+                    page_text = page.extract_text() or ""
+                framed_text = f"[PAGE {page.page_number}]\n{page_text}"
+                extracted_bytes += len(framed_text.encode("utf-8"))
+                if page_texts:
+                    extracted_bytes += 2
+                if extracted_bytes > max_bytes:
+                    raise PdfExtractionLimitExceeded(
+                        "extracted_bytes", extracted_bytes, max_bytes
+                    )
+                has_content = has_content or bool(page_text.strip())
+                page_texts.append(framed_text)
+
+            extracted_text = "\n\n".join(page_texts)
+
+        if not has_content:
+            logger.warning(
+                f"No text extracted from PDF '{display_name}' - "
+                "file may be image-only or scanned"
+            )
+            # Bare page markers must not bypass downstream empty-content handling.
+            return ""
+
+        return TextSanitizer.sanitize(extracted_text)
 
     @staticmethod
     def extract_from_docx(filepath: Path, filename: str | None = None) -> str:
