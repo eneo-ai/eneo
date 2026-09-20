@@ -52,12 +52,20 @@ class StepDeadline:
     budget_seconds: float
     started_at: float
     expires_at: float
+    invocation_limited: bool = False
 
     @classmethod
-    def start(cls, budget_seconds: float) -> StepDeadline:
+    def start(
+        cls, budget_seconds: float, *, invocation_limited: bool = False
+    ) -> StepDeadline:
         now = _now()
         budget = float(budget_seconds)
-        return cls(budget_seconds=budget, started_at=now, expires_at=now + budget)
+        return cls(
+            budget_seconds=budget,
+            started_at=now,
+            expires_at=now + budget,
+            invocation_limited=invocation_limited,
+        )
 
     def remaining(self) -> float:
         return max(0.0, self.expires_at - _now())
@@ -94,17 +102,32 @@ class StepDeadline:
             else provider_request_in_flight
         )
         completed_detail = f" ({completed})" if completed else ""
-        disclosure = (
-            " A provider request was in flight; the provider may still complete "
-            "and bill it, so check the run before retrying."
-            if provider_work_may_have_completed
-            else ""
+        if provider_work_may_have_completed is True:
+            disclosure = (
+                " A provider request has an unknown outcome; the provider may still "
+                "complete and bill it, so check the run before retrying."
+            )
+        elif provider_work_may_have_completed is False:
+            disclosure = (
+                " No provider request was sent."
+                if scope is not None and scope.phase is FlowStepPhase.STEP_EXECUTION
+                else " No provider request was in flight when the budget ran out."
+            )
+        else:
+            disclosure = (
+                " Provider work may have started; check the run before retrying."
+            )
+        recovery = (
+            " The run's total budget was exhausted. Reduce the input or increase "
+            "the worker invocation timeout."
+            if self.invocation_limited
+            else " Raise the step's timeout_seconds in the flow definition "
+            "(up to the deployment ceiling) or reduce the input."
         )
         return StepDeadlineExceeded(
             f"Step {step_order}: execution budget of {self.budget_seconds:g}s "
             f"exhausted during {phase} after {self.elapsed():.0f}s"
-            f"{completed_detail}.{disclosure} Raise the step's timeout_seconds in "
-            "the flow definition (up to the deployment ceiling) or reduce the input.",
+            f"{completed_detail}.{disclosure}{recovery}",
             step_phase=scope.phase if scope is not None else None,
             completed_items=scope.completed_items if scope is not None else None,
             total_items=scope.total_items if scope is not None else None,

@@ -1303,6 +1303,17 @@ async def test_get_flow_runtime_policy_reads_tenant_override(monkeypatch):
     assert policy.hard_ceiling_seconds == 3540
 
 
+def test_task_timeout_below_reserve_and_work_margin_fails_settings_load(caplog):
+    from eneo.main.config import Settings
+
+    with pytest.raises(SystemExit):
+        Settings.model_validate(
+            {**get_app_settings().model_dump(), "task_execution_timeout_seconds": 64}
+        )
+
+    assert "TASK_EXECUTION_TIMEOUT_SECONDS must be at least 65" in caplog.text
+
+
 async def test_update_flow_runtime_policy_persists_and_audits(monkeypatch):
     repo = MockRepo()
     tenant_repo = MockTenantRepo()

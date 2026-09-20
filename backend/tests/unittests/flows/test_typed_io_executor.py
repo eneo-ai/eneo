@@ -4083,6 +4083,8 @@ async def test_per_item_map_timeout_inside_a_request_reports_completed_items(
     public = FlowRunPublic.model_validate(reread, from_attributes=True)
     assert public.error.details == error.details
     assert public.error.retryable is False
+    assert "provider may still complete" in public.error.message
+    assert "may or may not have started" not in public.error.message
 
 
 @pytest.mark.asyncio
@@ -5173,10 +5175,35 @@ async def test_later_step_uses_remaining_invocation_budget(user, monkeypatch, ov
 
 
 @pytest.mark.asyncio
+async def test_smallest_task_timeout_funds_a_step(user, monkeypatch):
+    from eneo.main.config import Settings, get_settings
+
+    settings = Settings.model_validate(
+        {**get_settings().model_dump(), "task_execution_timeout_seconds": 65}
+    )
+    monkeypatch.setattr(
+        get_settings(),
+        "task_execution_timeout_seconds",
+        settings.task_execution_timeout_seconds,
+    )
+    monkeypatch.setattr(asyncio.get_running_loop(), "time", lambda: 1000.0)
+    executor, _, _, _ = _build_executor(user, invocation_deadline=1065.0)
+    assistant = _mock_assistant_for_execute_step()
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+
+    await executor._execute_step(step=_runtime_step(), run=run, attempt_no=1)
+
+    assert executor.runtime_policy.default_step_timeout_seconds == 5
+    assistant.get_response.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("remaining", [59.0, 60.0, -1.0])
 async def test_step_refuses_before_handler_when_invocation_buffer_is_reached(
     user, monkeypatch, remaining
 ):
+    from eneo.flows.api.flow_models import FlowRunPublic
     from eneo.flows.enums import FlowStepPhase
     from eneo.flows.runtime.step_deadline import StepDeadlineExceeded
 
@@ -5185,9 +5212,10 @@ async def test_step_refuses_before_handler_when_invocation_buffer_is_reached(
     handler = SimpleNamespace(execute=AsyncMock())
     executor._build_step_handler = MagicMock(return_value=handler)
     run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = _runtime_step()
 
     with pytest.raises(StepDeadlineExceeded) as exc_info:
-        await executor._execute_step(step=_runtime_step(), run=run, attempt_no=1)
+        await executor._execute_step(step=step, run=run, attempt_no=1)
 
     assert exc_info.value.code == FlowApiErrorCode.STEP_TIMEOUT.value
     assert exc_info.value.step_phase is FlowStepPhase.STEP_EXECUTION
@@ -5195,6 +5223,37 @@ async def test_step_refuses_before_handler_when_invocation_buffer_is_reached(
     assert exc_info.value.completed_items is None
     assert exc_info.value.total_items is None
     handler.execute.assert_not_awaited()
+
+    executor._terminalize_run = AsyncMock()
+    claimed = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=1,
+        text="",
+    )
+    await executor._handle_typed_step_failure(
+        run_id=run.id,
+        tenant_id=run.tenant_id,
+        step=step,
+        attempt_no=1,
+        claimed=claimed,
+        typed_exc=exc_info.value,
+        failed_input_payload=None,
+    )
+    error = executor._terminalize_run.await_args.kwargs["error"]
+    public = FlowRunPublic.model_validate(
+        run.model_copy(update={"status": FlowRunStatus.FAILED, "error": error}),
+        from_attributes=True,
+    )
+    assert public.error.code == FlowApiErrorCode.STEP_TIMEOUT
+    assert public.error.details.phase is FlowStepPhase.STEP_EXECUTION
+    assert public.error.details.provider_work_may_have_completed is False
+    assert public.error.retryable is False
+    assert "No provider request was sent." in public.error.message
+    assert "run's total budget was exhausted" in public.error.message
+    assert "Raise the step's timeout_seconds" not in public.error.message
+    assert "may or may not have started" not in public.error.message
 
 
 @pytest.mark.asyncio
@@ -5241,8 +5300,9 @@ async def test_backstop_preserves_the_observed_phase_and_provider_outcome(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("invocation_limited", [False, True])
 async def test_receipt_exhausting_budget_has_no_provider_work_in_terminal_error(
-    user, monkeypatch
+    user, monkeypatch, invocation_limited
 ):
     import litellm
 
@@ -5250,16 +5310,17 @@ async def test_receipt_exhausting_budget_has_no_provider_work_in_terminal_error(
         TenantModelAdapter,
     )
     from eneo.flows.api.flow_models import FlowRunPublic
-    from eneo.flows.runtime import step_deadline
 
     clock = {"now": 0.0}
-    monkeypatch.setattr(step_deadline, "_now", lambda: clock["now"])
-    executor, _, flow_run_repo, _ = _build_executor(user)
-    executor._step_deadline_seconds = lambda step: 1.0
+    monkeypatch.setattr(asyncio.get_running_loop(), "time", lambda: clock["now"])
+    executor, _, flow_run_repo, _ = _build_executor(
+        user, invocation_deadline=61.0 if invocation_limited else None
+    )
+    executor._step_deadline_seconds = lambda step: 2.0
     call_id = uuid4()
 
     async def prepare_receipt(request):
-        clock["now"] = 1.0
+        clock["now"] = 2.0
         return call_id
 
     observer = SimpleNamespace(
@@ -5336,3 +5397,11 @@ async def test_receipt_exhausting_budget_has_no_provider_work_in_terminal_error(
     )
     assert error.details.provider_work_may_have_completed is False
     assert public.error.details.provider_work_may_have_completed is False
+    assert "may or may not have started" not in public.error.message
+    assert "No provider request was in flight" in public.error.message
+    if invocation_limited:
+        assert "run's total budget was exhausted" in public.error.message
+        assert "Raise the step's timeout_seconds" not in public.error.message
+    else:
+        assert "Raise the step's timeout_seconds" in public.error.message
+        assert "run's total budget was exhausted" not in public.error.message

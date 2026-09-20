@@ -165,6 +165,7 @@ from eneo.flows.runtime.step_attempt_runtime import (
 )
 from eneo.flows.runtime.step_deadline import (
     StepDeadline,
+    StepDeadlineExceeded,
     record_step_phase,
     require_step_budget,
     step_deadline_scope,
@@ -1261,14 +1262,16 @@ class FlowRunExecutor:
                 code=exc.code,
                 context=exc.context,
             ) from exc
+        invocation_limited = False
         if self.invocation_deadline is not None:
             remaining = (
                 self.invocation_deadline
                 - asyncio.get_running_loop().time()
                 - STEP_TIMEOUT_TASK_BUFFER_SECONDS
             )
+            invocation_limited = remaining <= budget_seconds
             budget_seconds = min(budget_seconds, max(0.0, remaining))
-        return StepDeadline.start(budget_seconds)
+        return StepDeadline.start(budget_seconds, invocation_limited=invocation_limited)
 
     def _build_step_handler(self, mode: FlowOutputMode) -> StepHandler:
         match mode:
@@ -1867,21 +1870,25 @@ class FlowRunExecutor:
             if isinstance(typed_exc, StepOutputValidationException)
             else None
         )
-        error_message = _with_provider_work_disclosure(
-            str(typed_exc),
-            step=step,
-            completion_received=rejected_completion is not None,
-        )
-        run_error_message = _with_provider_work_disclosure(
-            build_typed_failure_run_error_message(
-                step_order=step.step_order,
-                error_code=error_code,
-                error_message=str(typed_exc),
-                contract_validation=getattr(typed_exc, "contract_validation", None),
-            ),
-            step=step,
-            completion_received=rejected_completion is not None,
-        )
+        if isinstance(typed_exc, StepDeadlineExceeded):
+            error_message = str(typed_exc)
+            run_error_message = error_message
+        else:
+            error_message = _with_provider_work_disclosure(
+                str(typed_exc),
+                step=step,
+                completion_received=rejected_completion is not None,
+            )
+            run_error_message = _with_provider_work_disclosure(
+                build_typed_failure_run_error_message(
+                    step_order=step.step_order,
+                    error_code=error_code,
+                    error_message=str(typed_exc),
+                    contract_validation=getattr(typed_exc, "contract_validation", None),
+                ),
+                step=step,
+                completion_received=rejected_completion is not None,
+            )
         failure_plan = build_typed_failure_plan(
             claimed=claimed,
             error_code=error_code,

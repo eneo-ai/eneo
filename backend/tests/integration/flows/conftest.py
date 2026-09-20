@@ -24,6 +24,7 @@ from testcontainers.community.redis import RedisContainer
 
 from eneo.database.tables.roles_table import Roles
 from eneo.database.tables.users_table import users_roles_table
+from eneo.flows.flow_runtime_policy import MIN_TASK_EXECUTION_TIMEOUT_SECONDS
 from eneo.flows.runtime.executor import (
     _PROCESS_TEST_CRASH_AFTER_ATTEMPT_START_RUN_ID_ENV,
     _PROCESS_TEST_CRASH_EXIT_CODE,
@@ -44,7 +45,8 @@ from tests.integration.conftest import (
     _host_resolves,
 )
 
-_FLOW_TASK_TIMEOUT_SECONDS = 5
+# 65 seconds funds the 60-second finalization reserve and five seconds of step work.
+_FLOW_TASK_TIMEOUT_SECONDS = MIN_TASK_EXECUTION_TIMEOUT_SECONDS
 _WORKER_PARENT_ENV_ALLOWLIST = (
     "HOME",
     "LANG",

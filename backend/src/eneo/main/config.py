@@ -758,6 +758,8 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_worker_settings(self):
         """Ensure worker-related configuration values are sane."""
+        from eneo.flows.flow_runtime_policy import MIN_TASK_EXECUTION_TIMEOUT_SECONDS
+
         if self.worker_max_jobs <= 0:
             logging.error(
                 "ENEO_WORKER_MAX_JOBS must be greater than zero. Current value: %s",
@@ -857,9 +859,11 @@ class Settings(BaseSettings):
             )
             sys.exit(1)
 
-        if self.task_execution_timeout_seconds <= 0:
+        if self.task_execution_timeout_seconds < MIN_TASK_EXECUTION_TIMEOUT_SECONDS:
             logging.error(
-                "TASK_EXECUTION_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
+                "TASK_EXECUTION_TIMEOUT_SECONDS must be at least %s to fund "
+                "step execution and finalization. Current value: %s",
+                MIN_TASK_EXECUTION_TIMEOUT_SECONDS,
                 self.task_execution_timeout_seconds,
             )
             sys.exit(1)

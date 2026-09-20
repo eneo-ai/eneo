@@ -3,7 +3,7 @@
 ## Execution deadlines and long flows
 
 `TASK_EXECUTION_TIMEOUT_SECONDS` bounds one worker invocation, including all
-steps executed before completion or a review pause. Its default is 3600 seconds.
+steps executed before completion or a review pause. Its default is 14400 seconds.
 Completing a step does not restart that clock. Resuming an approved review
 checkpoint dispatches a new invocation with a new execution budget; time spent
 awaiting review does not consume worker execution time. Review expiry is governed
@@ -16,23 +16,24 @@ task's bounded failure handler time to commit. Do not configure both deadlines
 to the same value: ARQ can otherwise cancel the task before its timeout handler
 runs, leaving recovery to report `flow_worker_stalled` later.
 
-LLM-backed steps have a separate deadline. An explicit step `timeout_seconds`
-overrides the tenant's default step timeout, subject to the tenant maximum and
-deployment hard ceiling. The deployment defaults are 600 seconds per completion
-and a step ceiling capped at the task budget minus 60 seconds. A JSON capability
-fallback shares the original completion deadline. Input preparation, knowledge
-retrieval, transcription, document rendering, and persistence also consume the
-worker invocation's budget; a completion deadline is not a deadline for all of
-that work.
+The default step budget and deployment hard ceiling both equal the invocation
+timeout minus the 60-second finalization reserve. Each step receives at most the
+invocation's remaining time minus that reserve. Tenant policy and an explicit
+step `timeout_seconds` can only lower this available budget. One attempt budget
+covers input preparation, knowledge retrieval, transcription, provider calls,
+retries and JSON capability fallbacks, mapped items, document rendering, and
+finalization. Persistence also consumes the invocation budget. LiteLLM's process
+default request timeout follows the same deployment step budget; requests within
+a flow attempt use its remaining time. Configuration requires at least 65 seconds
+per invocation to fund the reserve and five seconds of step work.
 
 For a long flow, inspect each uninterrupted group of steps between review pauses.
-Ten completions with a 600-second limit can exceed the default one-hour task
-budget even if every completion respects its own limit. Size the existing
-deployment task budget for the supported workload, including non-model work;
+Earlier steps leave less time for later steps. Size the existing deployment task
+budget for the supported workload, including non-model work;
 increasing only a step limit does not extend the task. Keep execution and
-maintenance workers on the same effective configuration, and restart them after
-changing it. Review checkpoints should serve an actual review need, not act as
-artificial timeout resets.
+maintenance workers on the same effective configuration. When upgrading, update
+the environment file and restart the workers. Review checkpoints should serve an
+actual review need, not act as artificial timeout resets.
 
 `flow_worker_stalled` means the stale-run reconciler terminalized a running row
 after its recovery threshold. It does not identify whether the process exited,

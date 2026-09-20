@@ -104,3 +104,19 @@ def test_timeout_does_not_infer_structured_phase_from_prose(clock):
     assert error.completed_items is None
     assert error.total_items is None
     assert error.provider_work_may_have_completed is None
+
+
+def test_settled_provider_work_is_not_reported_as_unsent(clock):
+    from eneo.flows.enums import FlowStepPhase
+
+    deadline = StepDeadline.start(30)
+    with step_deadline_scope(deadline, step_order=1):
+        mark_provider_request_in_flight(True)
+        module.settle_provider_request(known=True)
+        module.record_step_phase(FlowStepPhase.FINALIZATION)
+        clock["now"] = 131.0
+        error = deadline.timeout_error(step_order=1, phase="finalization")
+
+    assert error.provider_work_may_have_completed is False
+    assert "No provider request was sent" not in str(error)
+    assert "provider may still complete" not in str(error)
