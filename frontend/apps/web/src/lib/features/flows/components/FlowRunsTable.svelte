@@ -304,6 +304,9 @@
   // prefix; the key is stable per source revision, so a double click returns
   // the same child run instead of a second one.
   async function retryRun(run: FlowRunSummary) {
+    // One request slot: every retry action is disabled while it is taken,
+    // so a second click cannot re-enable or clear another row's pending state.
+    if (retryingRunId !== null) return;
     retryingRunId = run.id;
     try {
       const result = await eneo.flows.runs.retryFromFailedStep({
@@ -311,7 +314,13 @@
         runId: run.id,
         idempotencyKey: `flow-run-retry:${run.id}:${run.revision}`
       });
-      toast.success(m.flow_run_retry_started({ step: String(result.first_executed_step_order) }));
+      if (result.created) {
+        toast.success(m.flow_run_retry_started({ step: String(result.first_executed_step_order) }));
+      } else {
+        // The same key returned the child created earlier; nothing was
+        // dispatched now, and that child may already have finished.
+        toast.info(m.flow_run_retry_replayed());
+      }
       await loadRuns();
     } catch (error) {
       console.error("Failed to retry run", error);
@@ -666,6 +675,10 @@
                 tabindex={0}
                 onclick={() => toggleRunDetails(run.id)}
                 onkeydown={(e) => {
+                  // Buttons inside the row (retry, re-run, cancel) own their
+                  // own Enter and Space; the row reacts only when it is the
+                  // focused element itself.
+                  if (e.target !== e.currentTarget) return;
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
                     toggleRunDetails(run.id);
@@ -735,7 +748,7 @@
                         variant="outline"
                         size="sm"
                         data-testid={`flow-run-retry-${run.id}`}
-                        disabled={retryingRunId === run.id}
+                        disabled={retryingRunId !== null}
                         onclick={() => void retryRun(run)}
                       >
                         {retryingRunId === run.id ? m.flow_run_retrying() : m.flow_run_retry()}
@@ -819,6 +832,20 @@
                 </div>
               </div>
             </button>
+            {#if run.status === "failed"}
+              <div class="border-default flex items-center gap-2 border-t px-4 py-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  class="flex-1"
+                  data-testid={`flow-run-retry-mobile-${run.id}`}
+                  disabled={retryingRunId !== null}
+                  onclick={() => void retryRun(run)}
+                >
+                  {retryingRunId === run.id ? m.flow_run_retrying() : m.flow_run_retry()}
+                </Button>
+              </div>
+            {/if}
             {#if isFlowRunCancellable(run.status)}
               <div class="border-default flex items-center gap-2 border-t px-4 py-2">
                 {#if canRedispatchFlowRun(run.status)}

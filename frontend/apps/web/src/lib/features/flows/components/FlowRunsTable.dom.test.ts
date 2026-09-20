@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/svelte";
 import type { Eneo, FlowRun } from "@eneo/eneo-js";
 import { readable } from "svelte/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -86,6 +86,61 @@ describe("FlowRunsTable retry from the failed step", () => {
     expect(retryCalls[0].idempotencyKey).toBe("flow-run-retry:aaa:4");
     await waitFor(() => expect(listCalls).toBeGreaterThanOrEqual(2));
     expect(toast.success).toHaveBeenCalledWith(m.flow_run_retry_started({ step: "2" }));
+  });
+
+  it("offers the retry in the mobile card as well", async () => {
+    const { eneo, retryCalls } = makeRunsListEneo(() => ({
+      items: [makeFlowRun({ id: "aaa", status: "failed", revision: 2 })],
+      has_more: false
+    }));
+    renderTable(eneo);
+    const list = await screen.findByRole("list", { name: m.flow_history() });
+    const mobileButton = await within(list).findByTestId("flow-run-retry-mobile-aaa");
+    await fireEvent.click(mobileButton);
+    await waitFor(() => expect(retryCalls).toHaveLength(1));
+    expect(retryCalls[0].idempotencyKey).toBe("flow-run-retry:aaa:2");
+  });
+
+  it("lets Enter on the retry button retry without expanding the row", async () => {
+    const { eneo, retryCalls, graphCalls } = makeRunsListEneo(() => ({
+      items: [makeFlowRun({ id: "aaa", status: "failed", revision: 1 })],
+      has_more: false
+    }));
+    renderTable(eneo);
+    const retryButton = await screen.findByTestId("flow-run-retry-aaa");
+    retryButton.focus();
+    await fireEvent.keyDown(retryButton, { key: "Enter" });
+    // A native button activates on Enter; jsdom does not synthesise that
+    // click, so the assertion is that the row did NOT swallow the key.
+    await fireEvent.click(retryButton);
+    await waitFor(() => expect(retryCalls).toHaveLength(1));
+    expect(graphCalls).toHaveLength(0);
+    expect(retryButton.closest("tr")?.getAttribute("class")).not.toContain("bg-muted/50");
+  });
+
+  it("tells the user when the same key replays an earlier child", async () => {
+    vi.mocked(toast.success).mockClear();
+    vi.mocked(toast.info).mockClear();
+    const { eneo, retryCalls } = makeRunsListEneo(
+      () => ({
+        items: [makeFlowRun({ id: "aaa", status: "failed", revision: 1 })],
+        has_more: false
+      }),
+      {
+        retry: () => ({
+          run: makeFlowRun({ id: "retry-child", status: "completed" }),
+          created: false,
+          source_run_id: "aaa",
+          first_executed_step_order: 2,
+          reused_step_orders: [1]
+        })
+      }
+    );
+    renderTable(eneo);
+    await fireEvent.click(await screen.findByTestId("flow-run-retry-aaa"));
+    await waitFor(() => expect(retryCalls).toHaveLength(1));
+    await waitFor(() => expect(toast.info).toHaveBeenCalledWith(m.flow_run_retry_replayed()));
+    expect(toast.success).not.toHaveBeenCalledWith(m.flow_run_retry_started({ step: "2" }));
   });
 });
 

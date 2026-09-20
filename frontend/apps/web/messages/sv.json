@@ -5666,6 +5666,7 @@
   "flow_run_retrying": "Startar ny körning…",
   "flow_run_retry_started": "Ny körning startad från steg {step}. Slutförda steg återanvänds.",
   "flow_run_retry_failed": "Kunde inte starta om körningen.",
+  "flow_run_retry_replayed": "Den här körningen har redan startats om. Den nya körningen finns i listan.",
   "flow_run_redispatching": "Kör om…",
   "flow_run_required_hint": "Fält markerade med * är obligatoriska.",
   "flow_run_contract_load_failed_desc": "Det går inte att läsa vilka indata flödet behöver. Försök igen innan du startar en ny körning.",

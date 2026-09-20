@@ -118,6 +118,47 @@ describe("loadFlowRunHistory", () => {
 
     expect(result).toEqual({ kind: "already_loading" });
   });
+
+  it("runs a refresh asked for during load-more once that load has ended", async () => {
+    // A retry lands while "load more" is in flight: the new child must not
+    // stay hidden until the next poll (terminal rows are never polled).
+    const state = createFlowRunHistoryState();
+    state.runs = [run("old")];
+    state.nextOffset = 1;
+    state.hasMore = true;
+    let releaseMore: (() => void) | null = null;
+    const pages: number[] = [];
+    const listRuns = async (_flowId: string, pageArgs: { offset: number }) => {
+      pages.push(pageArgs.offset);
+      if (pageArgs.offset > 0) {
+        await new Promise<void>((resolve) => {
+          releaseMore = resolve;
+        });
+        return page([run("older")], false);
+      }
+      return page([run("child"), run("old")], true);
+    };
+    const more = loadFlowRunHistory(state, {
+      flowId: "flow-1",
+      mode: "more",
+      listRuns,
+      getErrorMessage: () => "failed"
+    });
+    const blocked = await loadFlowRunHistory(state, {
+      flowId: "flow-1",
+      listRuns,
+      getErrorMessage: () => "failed"
+    });
+    expect(blocked).toEqual({ kind: "already_loading" });
+    expect(pages).toEqual([1]);
+
+    releaseMore!();
+    const settled = await more;
+    expect(settled.kind).toBe("loaded");
+    expect(pages).toEqual([1, 0]);
+    expect(state.runs.map((item) => item.id)).toEqual(["child", "old", "older"]);
+    expect(state.refreshQueued).toBe(false);
+  });
 });
 
 describe("refresh merge", () => {

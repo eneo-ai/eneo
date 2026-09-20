@@ -34,6 +34,12 @@ export interface FlowRunHistoryState {
    * overwrite the new flow's window.
    */
   requestGeneration: number;
+  /**
+   * A refresh asked for while another load was running (a mutation such as
+   * a retry landing during load-more). It runs once the current load ends,
+   * so the mutation's row cannot stay hidden behind an in-flight request.
+   */
+  refreshQueued: boolean;
 }
 
 export type FlowRunHistoryPollTimeout = number | ReturnType<typeof setTimeout>;
@@ -111,7 +117,8 @@ export function createFlowRunHistoryState(): FlowRunHistoryState {
     nextOffset: 0,
     loadMoreError: null,
     pollRotation: 0,
-    requestGeneration: 0
+    requestGeneration: 0,
+    refreshQueued: false
   };
 }
 
@@ -134,7 +141,27 @@ export async function loadFlowRunHistory(
   options: LoadFlowRunHistoryOptions
 ): Promise<FlowRunHistoryLoadResult> {
   const generation = state.requestGeneration;
-  if (state.inFlightGeneration === generation) return { kind: "already_loading" };
+  const result = await loadFlowRunHistoryOnce(state, options);
+  if (
+    state.refreshQueued &&
+    state.inFlightGeneration === null &&
+    generation === state.requestGeneration
+  ) {
+    state.refreshQueued = false;
+    return loadFlowRunHistoryOnce(state, { ...options, mode: "refresh" });
+  }
+  return result;
+}
+
+async function loadFlowRunHistoryOnce(
+  state: FlowRunHistoryState,
+  options: LoadFlowRunHistoryOptions
+): Promise<FlowRunHistoryLoadResult> {
+  const generation = state.requestGeneration;
+  if (state.inFlightGeneration === generation) {
+    if ((options.mode ?? "refresh") === "refresh") state.refreshQueued = true;
+    return { kind: "already_loading" };
+  }
 
   state.inFlightGeneration = generation;
   if (!options.flowId) {
