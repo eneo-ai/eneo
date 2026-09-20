@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import time
 from collections.abc import Mapping
@@ -53,6 +52,11 @@ from eneo.flows.runtime.step_handlers.mapped_outputs import (
     carry_call_evidence,
     mapped_admission_payload,
     mapped_output_diagnostics,
+)
+from eneo.flows.runtime.structured_output_budget import (
+    StructuredOutputBudget,
+    ensure_structured_output_allowed,
+    structured_output_json,
 )
 from eneo.flows.source_identity import (
     RUNTIME_SOURCE_EXTRACTION_WARNINGS_FIELD,
@@ -206,6 +210,12 @@ async def execute_per_source_reader(
         collection_key="sources",
     )
     per_source_calls: list[PerSourceReaderCall] = []
+    source_label_counts: dict[str, int] = {}
+    output_budget = StructuredOutputBudget(
+        array_key="documents",
+        ceiling_bytes=prepared_sources[0][1].deps.max_inline_text_bytes,
+        items_total=len(prepared_sources),
+    )
     try:
         for source_number, (file_id, prepared_step) in enumerate(
             prepared_sources, start=1
@@ -231,13 +241,22 @@ async def execute_per_source_reader(
             # Bound this call before the next one runs, so the step never holds
             # more passage text than its budget allows.
             mapped_evidence.admit(source_call.output.rag_metadata)
+            label_count = source_label_counts.get(source_call.source_label, 0) + 1
+            source_label_counts[source_call.source_label] = label_count
+            if label_count > 1:
+                source_call = replace(
+                    source_call,
+                    source_label=f"{source_call.source_label} ({label_count})",
+                )
+            output_budget.admit(
+                [_source_document_items(source_call)], items_completed=source_number
+            )
             per_source_calls.append(source_call)
             record_step_progress(
                 f"{len(per_source_calls)} of {len(prepared_sources)} sources completed",
                 completed_items=len(per_source_calls),
                 total_items=len(prepared_sources),
             )
-        per_source_calls = _with_deduped_source_labels(per_source_calls)
         record_step_phase(FlowStepPhase.FINALIZATION)
         return StepExecutionResult(
             output=await _assemble_per_source_output(
@@ -248,6 +267,9 @@ async def execute_per_source_reader(
             )
         )
     except BaseException as exc:
+        output_budget.set_failure_progress(
+            exc, items_completed=len(per_source_calls) + 1
+        )
         # The calls that completed really did retrieve; publish them as a
         # partial envelope so the failed attempt records what it read, also
         # under the executor's backstop cancellation.
@@ -321,7 +343,7 @@ async def _assemble_per_source_output(
         for call in sorted(per_source_calls, key=lambda item: item.source_number)
     ]
     assembled_structured = {"documents": documents}
-    full_text = json.dumps(assembled_structured, ensure_ascii=False)
+    full_text = structured_output_json(assembled_structured)
     runtime_metadata = _per_source_runtime_metadata(per_source_calls)
     input_text = _per_source_input_text_summary(per_source_calls)
     first_deps = per_source_calls[0].deps
@@ -337,6 +359,12 @@ async def _assemble_per_source_output(
             full_text=full_text,
             step=step,
             run=run,
+        )
+        ensure_structured_output_allowed(
+            typed_output.structured_output,
+            ceiling_bytes=first_deps.max_inline_text_bytes,
+            items_completed=len(per_source_calls),
+            items_total=len(per_source_calls),
         )
     except TypedIOValidationException as exc:
         raise attach_typed_failure_context(
@@ -566,21 +594,6 @@ def _cap_source_label(label: str, *, source_number: int) -> str:
         },
     )
     return f"{label[: PER_SOURCE_SOURCE_LABEL_MAX_CHARS - 3].rstrip()}..."
-
-
-def _with_deduped_source_labels(
-    per_source_calls: list[PerSourceReaderCall],
-) -> list[PerSourceReaderCall]:
-    counts: dict[str, int] = {}
-    deduped_calls: list[PerSourceReaderCall] = []
-    for call in per_source_calls:
-        count = counts.get(call.source_label, 0) + 1
-        counts[call.source_label] = count
-        source_label = (
-            call.source_label if count == 1 else f"{call.source_label} ({count})"
-        )
-        deduped_calls.append(replace(call, source_label=source_label))
-    return deduped_calls
 
 
 def _first_runtime_file_metadata(

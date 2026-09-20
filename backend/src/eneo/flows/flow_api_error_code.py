@@ -37,6 +37,7 @@ class FlowApiErrorCode(str, Enum):
     RUN_AGGREGATE_MAX_FILES_EXCEEDED = "flow_run_aggregate_max_files_exceeded"
     RUN_RESERVED_INPUT_PAYLOAD_KEY = "flow_run_reserved_input_payload_key"
     RUN_INPUT_PAYLOAD_TOO_LARGE = "flow_run_input_payload_too_large"
+    RUN_INPUT_EXCEEDS_LIMIT = "flow_run_input_exceeds_limit"
     INPUT_REQUIRED_FIELD_MISSING = "flow_input_required_field_missing"
     INPUT_REQUIRED_FIELD_EMPTY = "flow_input_required_field_empty"
     INPUT_TYPE_MISMATCH = "flow_input_type_mismatch"
@@ -121,6 +122,9 @@ class FlowApiErrorCode(str, Enum):
     TYPED_IO_HTTP_TIMEOUT = "typed_io_http_timeout"
     TYPED_IO_INPUT_EXCEEDS_MODEL_WINDOW = "typed_io_input_exceeds_model_window"
     TYPED_IO_INPUT_TOO_LARGE = "typed_io_input_too_large"
+    TYPED_IO_STRUCTURED_OUTPUT_EXCEEDS_LIMIT = (
+        "typed_io_structured_output_exceeds_limit"
+    )
     TYPED_IO_INVALID_FILE_TYPE = "typed_io_invalid_file_type"
     TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION = (
         "typed_io_invalid_input_source_combination"
@@ -205,6 +209,7 @@ class FlowApiErrorCode(str, Enum):
 FLOW_API_ERROR_CODES: tuple[FlowApiErrorCode, ...] = tuple(FlowApiErrorCode)
 FLOW_TYPED_IO_ERROR_CODES: frozenset[FlowApiErrorCode] = frozenset(
     {
+        FlowApiErrorCode.TYPED_IO_STRUCTURED_OUTPUT_EXCEEDS_LIMIT,
         FlowApiErrorCode.MODEL_CAPACITY_UNDECLARED,
         FlowApiErrorCode.LLM_OUTPUT_TRUNCATED,
         FlowApiErrorCode.LLM_REQUEST_TIMEOUT,
@@ -258,6 +263,7 @@ FLOW_TYPED_IO_ERROR_CODES: frozenset[FlowApiErrorCode] = frozenset(
 )
 FLOW_RUN_TERMINAL_ERROR_CODES: frozenset[FlowApiErrorCode] = frozenset(
     {
+        FlowApiErrorCode.RUN_INPUT_EXCEEDS_LIMIT,
         FlowApiErrorCode.FLOW_DELETED,
         FlowApiErrorCode.RUN_CANCELLED,
         FlowApiErrorCode.RUN_USER_CANCELLED,

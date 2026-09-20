@@ -403,11 +403,15 @@ def _service_run(user, service_principal: ServicePrincipalInDB, *, api_key_id: U
 
 
 def _build_executor(user, *, runtime_actor: FlowRunActor | None = None):
+    from eneo.flows.flow_input_limits import FlowInputLimits
+
     flow_repo = AsyncMock()
     session = AsyncMock()
     session.commit = AsyncMock()
     session.rollback = AsyncMock()
     flow_run_repo = AsyncMock()
+    flow_run_repo.list_step_results.return_value = []
+    flow_run_repo.list_current_step_input_file_ids_by_step_result_id.return_value = {}
     flow_version_repo = AsyncMock()
     flow_run_review_checkpoint_repo = AsyncMock()
     space_repo = AsyncMock()
@@ -456,6 +460,23 @@ def _build_executor(user, *, runtime_actor: FlowRunActor | None = None):
     file_repo = AsyncMock()
     file_content_loader = AsyncMock()
     file_service = create_autospec(FileService, instance=True)
+    file_service.repo = file_repo
+    file_repo.get_content_references.return_value = []
+
+    async def owned_infos(*, file_ids):
+        return [
+            SimpleNamespace(
+                id=file.id,
+                size=file.size,
+                name=getattr(file, "name", "source"),
+                file_type=getattr(file, "file_type", "text"),
+                mimetype=getattr(file, "mimetype", "text/plain"),
+            )
+            for file in file_service.get_files_by_ids.return_value
+            if file.id in file_ids
+        ]
+
+    file_service.get_owned_file_infos.side_effect = owned_infos
     template_asset_repo = AsyncMock()
     encryption_service = AsyncMock()
     flow_run_terminalizer = SimpleNamespace()
@@ -486,6 +507,9 @@ def _build_executor(user, *, runtime_actor: FlowRunActor | None = None):
         encryption_service=encryption_service,
         flow_run_terminalizer=flow_run_terminalizer,
         max_inline_text_bytes=1024 * 1024,
+        input_limits=FlowInputLimits(
+            file_max_size_bytes=100_000_000, audio_max_size_bytes=100_000_000
+        ),
     )
     return executor, flow_repo, flow_run_repo, flow_version_repo
 

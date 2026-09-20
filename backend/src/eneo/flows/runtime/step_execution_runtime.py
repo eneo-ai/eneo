@@ -84,11 +84,13 @@ from eneo.flows.runtime.step_input_validation import (
     validate_input_contract,
     validate_runtime_input_policy,
 )
+from eneo.flows.runtime.structured_output_budget import ensure_structured_output_allowed
 from eneo.flows.variable_resolver import (
     FlowVariableContext,
     FlowVariableInterpolation,
 )
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
+from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     ProviderCapabilityRejectedException,
     TypedIOValidationException,
@@ -819,6 +821,15 @@ async def call_assistant_with_timeout(
 
 
 def build_output_payload(output: StepExecutionOutput) -> dict[str, Any]:
+    try:
+        ensure_structured_output_allowed(
+            output.structured_output,
+            ceiling_bytes=get_settings().flow_max_inline_text_bytes,
+        )
+    except TypedIOValidationException as exc:
+        if output.rag_metadata is not None:
+            setattr(exc, "rag_metadata", output.rag_metadata)
+        raise
     payload: dict[str, Any] = {
         "text": output.persisted_text,
     }
@@ -1805,6 +1816,10 @@ async def _complete_step_execution(
             full_text=full_text,
             step=step,
             run=run,
+        )
+        ensure_structured_output_allowed(
+            typed_output.structured_output,
+            ceiling_bytes=deps.max_inline_text_bytes,
         )
     except TypedIOValidationException as exc:
         raise attach_typed_failure_context(

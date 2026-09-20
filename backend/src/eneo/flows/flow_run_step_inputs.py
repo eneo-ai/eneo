@@ -21,15 +21,22 @@ from eneo.flows.enums import FlowRuntimeInputFormat
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_input_limits import (
+    FLOW_INPUT_MAX_FILES_COUNT,
     FlowInputLimits,
     effective_flow_input_limit,
     effective_max_files_per_run,
     effective_runtime_max_files,
 )
 from eneo.flows.principal import FlowPrincipal
+from eneo.flows.runtime.input_files import (
+    InputFileMetadataRepository,
+    ensure_input_file_budget,
+    measure_input_files,
+)
+from eneo.main.config import get_settings
 
 
-class _FileRepositoryProtocol(Protocol):
+class _FileRepositoryProtocol(InputFileMetadataRepository, Protocol):
     async def get_list_by_id_and_owner(
         self,
         ids: list[UUID],
@@ -178,6 +185,7 @@ async def validate_submitted_step_inputs(
     runtime_upload_repo: _RuntimeUploadRepositoryProtocol,
     principal: FlowPrincipal,
     tenant_id: UUID,
+    inline_payload: object = None,
 ) -> None:
     step_by_id = {step.step_id: step for step in steps}
     aggregate_count = 0
@@ -202,7 +210,7 @@ async def validate_submitted_step_inputs(
 
         if spec.max_files is not None and len(requested_file_ids) > spec.max_files:
             raise FlowBadRequestException(
-                "Too many files were submitted for this step.",
+                f"Too many files were submitted for this step; the ceiling is {spec.max_files}.",
                 code=FlowApiErrorCode.RUN_STEP_INPUT_MAX_FILES_EXCEEDED,
                 context={
                     "step_id": str(step_id),
@@ -213,6 +221,17 @@ async def validate_submitted_step_inputs(
         aggregate_count += len(requested_file_ids)
         if requested_file_ids:
             requested_ids_by_step[step_id] = requested_file_ids
+
+    aggregate_limit = aggregate_runtime_file_limit(specs=specs)
+    if aggregate_count > aggregate_limit:
+        raise FlowBadRequestException(
+            f"Submitted runtime files exceed the aggregate ceiling of {aggregate_limit} files for this flow.",
+            code=FlowApiErrorCode.RUN_AGGREGATE_MAX_FILES_EXCEEDED,
+            context={
+                "aggregate_max_files": aggregate_limit,
+                "file_count": aggregate_count,
+            },
+        )
 
     if requested_ids_by_step:
         all_requested_file_ids = list(
@@ -253,6 +272,7 @@ async def validate_submitted_step_inputs(
             principal=principal,
             lock_for_binding=True,
         )
+        sizes = await measure_input_files(files=files, file_repo=file_repo)
 
         for step_id, requested_file_ids in requested_ids_by_step.items():
             spec = specs[step_id]
@@ -268,7 +288,8 @@ async def validate_submitted_step_inputs(
                 )
 
             for file in step_files:
-                if file.size <= spec.max_file_size_bytes:
+                file_size = sizes[file.id].upload_bytes
+                if file_size <= spec.max_file_size_bytes:
                     continue
                 raise FlowBadRequestException(
                     "One or more submitted runtime files exceed the current flow input size limit.",
@@ -276,7 +297,7 @@ async def validate_submitted_step_inputs(
                     context={
                         "step_id": str(step_id),
                         "file_id": str(file.id),
-                        "size_bytes": file.size,
+                        "size_bytes": file_size,
                         "max_file_size_bytes": spec.max_file_size_bytes,
                     },
                 )
@@ -299,6 +320,31 @@ async def validate_submitted_step_inputs(
                     },
                 )
 
+        ensure_input_file_budget(
+            file_ids=[
+                file_id for ids in requested_ids_by_step.values() for file_id in ids
+            ],
+            sizes=sizes,
+            max_inline_text_bytes=get_settings().flow_max_inline_text_bytes,
+            file_max_size_bytes=max(
+                (
+                    spec.max_file_size_bytes
+                    for spec in specs.values()
+                    if spec.runtime_input.input_format != "audio"
+                ),
+                default=0,
+            ),
+            audio_max_size_bytes=max(
+                (
+                    spec.max_file_size_bytes
+                    for spec in specs.values()
+                    if spec.runtime_input.input_format == "audio"
+                ),
+                default=0,
+            ),
+            inline_payload=inline_payload,
+        )
+
     required_missing = [
         str(step_id)
         for step_id, spec in specs.items()
@@ -312,24 +358,11 @@ async def validate_submitted_step_inputs(
             context={"step_ids": required_missing},
         )
 
-    aggregate_limit = aggregate_runtime_file_limit(specs=specs)
-    if aggregate_limit is not None and aggregate_count > aggregate_limit:
-        raise FlowBadRequestException(
-            "Submitted runtime files exceed the aggregate file limit for this flow.",
-            code=FlowApiErrorCode.RUN_AGGREGATE_MAX_FILES_EXCEEDED,
-            context={
-                "aggregate_max_files": aggregate_limit,
-                "file_count": aggregate_count,
-            },
-        )
 
-
-def aggregate_runtime_file_limit(
-    *, specs: dict[UUID, RuntimeStepInputSpec]
-) -> int | None:
+def aggregate_runtime_file_limit(*, specs: dict[UUID, RuntimeStepInputSpec]) -> int:
     aggregate = 0
     for spec in specs.values():
         if spec.max_files is None:
-            return None
+            return FLOW_INPUT_MAX_FILES_COUNT
         aggregate += spec.max_files
-    return aggregate
+    return min(aggregate, FLOW_INPUT_MAX_FILES_COUNT)

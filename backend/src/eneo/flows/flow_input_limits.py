@@ -17,7 +17,7 @@ DEFAULT_MAX_AUDIO_FILES_PER_RUN = 10
 class FlowInputLimits:
     file_max_size_bytes: int
     audio_max_size_bytes: int
-    max_files_per_run: int | None = None  # None = unlimited
+    max_files_per_run: int | None = FLOW_INPUT_MAX_FILES_COUNT
     audio_max_files_per_run: int = DEFAULT_MAX_AUDIO_FILES_PER_RUN
 
 
@@ -71,7 +71,7 @@ def _default_limits(defaults: FlowInputLimitDefaults | None) -> FlowInputLimits:
         audio_max_size_bytes=effective_upload_ceiling_bytes(
             defaults.session_audio_maximum_bytes
         ),
-        max_files_per_run=None,
+        max_files_per_run=FLOW_INPUT_MAX_FILES_COUNT,
         audio_max_files_per_run=DEFAULT_MAX_AUDIO_FILES_PER_RUN,
     )
 
@@ -172,7 +172,7 @@ def resolve_flow_input_limits(
     if "max_files_per_run" in input_limits:
         raw = input_limits["max_files_per_run"]
         if raw is None:
-            max_files = None  # explicit null means unlimited
+            max_files = FLOW_INPUT_MAX_FILES_COUNT
         else:
             max_files = _parse_optional_file_count(
                 raw, "max_files_per_run", FLOW_INPUT_MAX_FILES_COUNT
@@ -250,12 +250,15 @@ def effective_runtime_upload_policy() -> FlowRuntimeUploadPolicy:
     return FlowRuntimeUploadPolicy()
 
 
-def effective_max_files_per_run(
-    *, input_type: str, limits: FlowInputLimits
-) -> int | None:
+def effective_max_files_per_run(*, input_type: str, limits: FlowInputLimits) -> int:
     if input_type == "audio":
         return limits.audio_max_files_per_run
-    return limits.max_files_per_run
+    return min(
+        limits.max_files_per_run
+        if limits.max_files_per_run is not None
+        else FLOW_INPUT_MAX_FILES_COUNT,
+        FLOW_INPUT_MAX_FILES_COUNT,
+    )
 
 
 def effective_runtime_max_files(
@@ -263,12 +266,10 @@ def effective_runtime_max_files(
     input_type: str,
     step_max_files: int | None,
     limits: FlowInputLimits,
-) -> int | None:
+) -> int:
     """Apply the stricter of a step limit and the tenant flow-input ceiling."""
 
     tenant_limit = effective_max_files_per_run(input_type=input_type, limits=limits)
     if step_max_files is None:
         return tenant_limit
-    if tenant_limit is None:
-        return step_max_files
     return min(step_max_files, tenant_limit)

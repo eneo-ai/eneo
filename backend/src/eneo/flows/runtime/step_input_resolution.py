@@ -36,6 +36,8 @@ from eneo.flows.domain.step_output import (
 )
 from eneo.flows.enums import FlowStepPhase
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import FlowBadRequestException
+from eneo.flows.flow_input_limits import FLOW_INPUT_MAX_FILES_COUNT, FlowInputLimits
 from eneo.flows.flow_run_input_envelope import read_semantic_flow_input_payload
 from eneo.flows.flow_run_provenance import (
     FlowResolvedInputEdge,
@@ -58,7 +60,9 @@ from eneo.flows.input_binding_contract_rules import (
 from eneo.flows.runtime.http_orchestration import FlowHttpInputResolution
 from eneo.flows.runtime.input_files import (
     describe_files_by_requested_ids,
+    ensure_input_file_budget,
     load_files_by_requested_ids,
+    measure_input_files,
 )
 from eneo.flows.runtime.step_deadline import record_step_phase
 from eneo.flows.runtime.transcription_runtime import (
@@ -107,6 +111,7 @@ class StepInputResolutionDeps:
     max_audio_files: int
     max_inline_text_bytes: int
     logger: Any
+    input_limits: FlowInputLimits | None = None
     transcription_call_observer: "ProviderCallObserver | None" = None
     max_speakers_hint: int | None = None
     transcript_words_repo: Any | None = None
@@ -201,6 +206,9 @@ async def resolve_step_input(
     requested_ids = list(requested_file_ids) if runtime_input_config.enabled else []
 
     if requested_ids:
+        await _admit_runtime_files(
+            run=run, requested_ids=requested_ids, state=state, deps=deps
+        )
         if runtime_input_config.input_format == "audio":
             if deps.transcriber is None:
                 raise TypedIOValidationException(
@@ -1114,6 +1122,68 @@ def _source_ref_value_to_text(value: Any) -> str:
     if isinstance(value, (dict, list)):
         return json.dumps(value, ensure_ascii=False)
     return str(value)
+
+
+async def _admit_runtime_files(
+    *,
+    run: FlowRun,
+    requested_ids: list[UUID],
+    state: RunExecutionState | None,
+    deps: StepInputResolutionDeps,
+) -> None:
+    if deps.input_limits is None:
+        raise RuntimeError(
+            "Resolved Flow input limits are required before loading files"
+        )
+    results: list[FlowStepResult] = await deps.flow_run_repo.list_step_results(
+        run_id=run.id, tenant_id=run.tenant_id
+    )
+    # Run creation binds pending input files to attempt 1 before the step starts.
+    input_results = [
+        result
+        if result.current_attempt_no is not None
+        else result.model_copy(update={"current_attempt_no": 1})
+        for result in results
+    ]
+    retained_by_result: dict[
+        UUID, Sequence[UUID]
+    ] = await deps.flow_run_repo.list_current_step_input_file_ids_by_step_result_id(
+        run_id=run.id, tenant_id=run.tenant_id, step_results=input_results
+    )
+    retained_ids = [file_id for ids in retained_by_result.values() for file_id in ids]
+    retained_set = set(retained_ids)
+    for file_id in requested_ids:
+        if file_id not in retained_set:
+            retained_ids.append(file_id)
+            retained_set.add(file_id)
+    if state is not None:
+        for files in state.file_cache.values():
+            for file in files:
+                if file.id not in retained_set:
+                    retained_ids.append(file.id)
+                    retained_set.add(file.id)
+    if len(retained_ids) > FLOW_INPUT_MAX_FILES_COUNT:
+        raise TypedIOValidationException(
+            f"Run input exceeds the ceiling of {FLOW_INPUT_MAX_FILES_COUNT} files.",
+            code=FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value,
+        )
+    described = await _describe_runtime_files(
+        requested_ids=list(dict.fromkeys(retained_ids)), deps=deps
+    )
+    sizes = await measure_input_files(files=described, file_repo=deps.file_service.repo)
+    try:
+        ensure_input_file_budget(
+            file_ids=retained_ids,
+            sizes=sizes,
+            max_inline_text_bytes=deps.max_inline_text_bytes,
+            file_max_size_bytes=deps.input_limits.file_max_size_bytes,
+            audio_max_size_bytes=deps.input_limits.audio_max_size_bytes,
+            inline_payload=read_semantic_flow_input_payload(run.input_payload_json),
+        )
+    except FlowBadRequestException as exc:
+        raise TypedIOValidationException(
+            str(exc), code=exc.code.value, context=exc.context
+        ) from exc
 
 
 async def _load_runtime_files(

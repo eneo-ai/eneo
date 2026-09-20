@@ -1286,6 +1286,10 @@ async def test_upload_runtime_file_for_step_rejects_unknown_step_id() -> None:
     flow_service = AsyncMock()
     file_service = AsyncMock()
     settings_service = AsyncMock()
+    settings_service.get_flow_input_limits_resolved.return_value = FlowInputLimits(
+        file_max_size_bytes=12_000_000,
+        audio_max_size_bytes=25_000_000,
+    )
     flow_version_repo = AsyncMock()
 
     runtime_step = _step(step_order=1, input_type="text").model_copy(

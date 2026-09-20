@@ -503,6 +503,7 @@ class FlowRunService:
                 steps=runtime_steps,
                 specs=runtime_specs,
                 normalized_step_inputs=normalized_step_inputs,
+                inline_payload=normalized_inline_payload,
                 file_repo=self.file_repo,
                 runtime_upload_repo=self.runtime_upload_repo,
                 principal=principal,

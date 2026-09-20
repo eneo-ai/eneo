@@ -2903,6 +2903,38 @@ def test_attach_typed_failure_context_preserves_existing_payload_and_prompt():
     assert updated.effective_prompt == "Keep prompt"
 
 
+def test_build_output_payload_refuses_oversized_structured_output(monkeypatch):
+    from eneo.main.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "flow_max_inline_text_bytes", 20)
+    output = StepExecutionOutput(
+        input_text="",
+        source_text="",
+        input_source="flow_input",
+        used_question_binding=False,
+        full_text="",
+        persisted_text="",
+        generated_file_ids=[],
+        tool_calls_metadata=None,
+        num_tokens_input=None,
+        num_tokens_output=None,
+        effective_prompt="",
+        model_parameters_json={},
+        structured_output={"text": "å" * 10},
+        rag_metadata={"status": "success"},
+    )
+    with pytest.raises(TypedIOValidationException) as error:
+        build_output_payload(output)
+    assert error.value.code == "typed_io_structured_output_exceeds_limit"
+    assert error.value.context == {
+        "items_completed": 1,
+        "items_total": 1,
+        "measured_bytes": 32,
+        "ceiling_bytes": 20,
+    }
+    assert error.value.rag_metadata == {"status": "success"}
+
+
 def test_build_output_payload_excludes_artifact_display_keys():
     payload = build_output_payload(
         StepExecutionOutput(

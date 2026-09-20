@@ -168,7 +168,7 @@ def test_resolve_defaults_includes_file_count_fields() -> None:
         defaults=_app_settings(upload=10_000_000, transcription=25_000_000),
     )
 
-    assert limits.max_files_per_run is None
+    assert limits.max_files_per_run == 1000
     assert limits.audio_max_files_per_run == DEFAULT_MAX_AUDIO_FILES_PER_RUN
 
 
@@ -187,9 +187,7 @@ def test_resolve_uses_tenant_file_count_overrides() -> None:
     assert limits.audio_max_files_per_run == 20
 
 
-def test_resolve_treats_null_audio_count_as_default_and_generic_count_as_unlimited() -> (
-    None
-):
+def test_resolve_treats_null_counts_as_finite_defaults() -> None:
     limits = resolve_flow_input_limits(
         {
             "input_limits": {
@@ -200,7 +198,7 @@ def test_resolve_treats_null_audio_count_as_default_and_generic_count_as_unlimit
         defaults=_app_settings(upload=10_000_000, transcription=25_000_000),
     )
 
-    assert limits.max_files_per_run is None
+    assert limits.max_files_per_run == 1000
     assert limits.audio_max_files_per_run == DEFAULT_MAX_AUDIO_FILES_PER_RUN
 
 

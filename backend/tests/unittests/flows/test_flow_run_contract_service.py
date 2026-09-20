@@ -635,7 +635,7 @@ async def test_get_run_contract_returns_zero_aggregate_when_no_runtime_inputs() 
 
 
 @pytest.mark.asyncio
-async def test_get_run_contract_returns_unbounded_aggregate_when_step_is_unbounded() -> (
+async def test_get_run_contract_returns_deployment_ceiling_when_step_is_unbounded() -> (
     None
 ):
     flow_service = AsyncMock()
@@ -689,8 +689,8 @@ async def test_get_run_contract_returns_unbounded_aggregate_when_step_is_unbound
         flow_version_repo=flow_version_repo,
     ).get_run_contract(flow_id=flow.id)
 
-    assert contract.aggregate_max_files is None
-    assert contract.steps_requiring_input[0].max_files is None
+    assert contract.aggregate_max_files == 1000
+    assert contract.steps_requiring_input[0].max_files == 1000
 
 
 @pytest.mark.asyncio

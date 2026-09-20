@@ -16,7 +16,7 @@ from eneo.files.file_models import File, FileInfo, FileType
 from eneo.files.file_service import FileService
 from eneo.files.transcriber import TranscribedAudio
 from eneo.flows.domain.flow import FlowRun, FlowRunStatus
-from eneo.flows.flow_input_limits import resolve_flow_input_limits
+from eneo.flows.flow_input_limits import FlowInputLimits, resolve_flow_input_limits
 from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
     FlowRunInputEnvelopePatch,
@@ -157,13 +157,17 @@ def _build_executor(
     session.rollback = AsyncMock()
     flow_run_repo = AsyncMock()
     flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[])
+    flow_run_repo.list_step_results.return_value = []
+    flow_run_repo.list_current_step_input_file_ids_by_step_result_id.return_value = {}
     flow_version_repo = AsyncMock()
     flow_run_review_checkpoint_repo = AsyncMock()
     space_repo = AsyncMock()
     completion_service = AsyncMock()
     file_repo = AsyncMock()
+    file_repo.get_content_references.return_value = []
     file_content_loader = AsyncMock()
     file_service = create_autospec(FileService, instance=True)
+    file_service.repo = file_repo
 
     def _staged_files() -> list[File]:
         return list(file_service.get_files_by_ids.return_value or [])
@@ -220,6 +224,10 @@ def _build_executor(
         flow_run_terminalizer=AsyncMock(),
         max_inline_text_bytes=max_inline_text_bytes,
         max_audio_files=max_audio_files,
+        input_limits=FlowInputLimits(
+            file_max_size_bytes=12_000_000,
+            audio_max_size_bytes=25_000_000,
+        ),
         transcriber=transcriber,
     )
     return executor, flow_run_repo, space_repo, file_service, transcriber
@@ -783,7 +791,7 @@ async def test_audio_step_reads_one_payload_at_a_time(user):
 
     # The step never asks for content-bearing files at all...
     file_service.get_files_by_ids.assert_not_awaited()
-    file_service.get_owned_file_infos.assert_awaited_once()
+    assert file_service.get_owned_file_infos.await_count == 2
     # ...and each payload is read immediately before its own transcription, so
     # a prefetching implementation ("load a, load b, transcribe a, ...") fails.
     assert events == [

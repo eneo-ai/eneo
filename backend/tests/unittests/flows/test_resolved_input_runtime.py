@@ -24,7 +24,10 @@ from eneo.flows.domain.flow import (
 )
 from eneo.flows.domain.runtime import RunExecutionState, RuntimeStep, StepInputValue
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.flow_input_limits import DEFAULT_MAX_AUDIO_FILES_PER_RUN
+from eneo.flows.flow_input_limits import (
+    DEFAULT_MAX_AUDIO_FILES_PER_RUN,
+    FlowInputLimits,
+)
 from eneo.flows.flow_validators import validate_steps
 from eneo.flows.runtime.http_orchestration import FlowHttpInputResolution
 from eneo.flows.runtime.step_definition_parser import parse_runtime_steps
@@ -117,6 +120,12 @@ def _resolution_deps(
 ) -> StepInputResolutionDeps:
     file_service = create_autospec(FileService, instance=True)
     file_service.get_files_by_ids.return_value = files or []
+    file_service.get_owned_file_infos.return_value = files or []
+    file_service.repo = AsyncMock()
+    file_service.repo.get_content_references.return_value = []
+    run_repo = AsyncMock()
+    run_repo.list_step_results.return_value = []
+    run_repo.list_current_step_input_file_ids_by_step_result_id.return_value = {}
     return StepInputResolutionDeps(
         variable_resolver=FlowVariableResolver(),
         resolve_http_input_source_text=AsyncMock(
@@ -129,12 +138,15 @@ def _resolution_deps(
         file_service=file_service,
         transcriber=None,
         space_repo=object(),
-        flow_run_repo=object(),
+        flow_run_repo=run_repo,
         audit_service=None,
         actor=None,
         max_generic_files=None,
         max_audio_files=DEFAULT_MAX_AUDIO_FILES_PER_RUN,
         max_inline_text_bytes=1024 * 1024,
+        input_limits=FlowInputLimits(
+            file_max_size_bytes=100_000_000, audio_max_size_bytes=100_000_000
+        ),
         logger=MagicMock(),
     )
 

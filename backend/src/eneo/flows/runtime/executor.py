@@ -80,6 +80,7 @@ from eneo.flows.flow_api_error_code import (
     FLOW_TYPED_IO_ERROR_CODES,
     FlowApiErrorCode,
 )
+from eneo.flows.flow_input_limits import FlowInputLimits
 from eneo.flows.flow_review_policy import FlowStepReviewPolicy
 from eneo.flows.flow_run_error import FlowRunError, FlowRunErrorDetails
 from eneo.flows.flow_run_provenance import (
@@ -334,6 +335,7 @@ def _flow_api_error_code_or_default(
 @dataclass(frozen=True)
 class FlowRunExecutorConfig:
     max_inline_text_bytes: int
+    input_limits: FlowInputLimits | None = None
     max_audio_files: int = 10
     max_generic_files: int | None = None
     http_request_timeout_seconds: float = 30.0
@@ -358,6 +360,7 @@ class FlowRunExecutorConfig:
         cls,
         *,
         max_inline_text_bytes: int,
+        input_limits: FlowInputLimits | None = None,
         max_audio_files: int = 10,
         max_generic_files: int | None = None,
         document_render_limits: DocumentRenderLimits = DEFAULT_DOCUMENT_RENDER_LIMITS,
@@ -371,6 +374,7 @@ class FlowRunExecutorConfig:
         )
         return cls(
             max_inline_text_bytes=max_inline_text_bytes,
+            input_limits=input_limits,
             max_audio_files=max_audio_files,
             max_generic_files=max_generic_files,
             http_request_timeout_seconds=float(
@@ -509,6 +513,7 @@ class FlowRunExecutor:
         encryption_service: EncryptionService,
         flow_run_terminalizer: FlowRunTerminalizer,
         max_inline_text_bytes: int | None = None,
+        input_limits: FlowInputLimits | None = None,
         audit_service: AuditService | None = None,
         webhook_delivery_repo: FlowRunWebhookDeliveryRepository | None = None,
         references_service: ReferencesService | None = None,
@@ -526,6 +531,7 @@ class FlowRunExecutor:
                 )
             resolved_config = FlowRunExecutorConfig.from_settings(
                 max_inline_text_bytes=max_inline_text_bytes,
+                input_limits=input_limits,
                 max_audio_files=max_audio_files,
                 max_generic_files=max_generic_files,
             )
@@ -585,6 +591,7 @@ class FlowRunExecutor:
         self.rag_evidence_policy = resolved_config.rag_evidence_policy
         self.max_audio_files = resolved_config.max_audio_files
         self.max_generic_files = resolved_config.max_generic_files
+        self.input_limits = resolved_config.input_limits
 
     async def execute(
         self,
@@ -2292,6 +2299,7 @@ class FlowRunExecutor:
             audit_service=self.audit_service,
             actor=self.runtime_actor,
             max_generic_files=self.max_generic_files,
+            input_limits=self.input_limits,
             max_audio_files=self.max_audio_files,
             max_inline_text_bytes=self.max_inline_text_bytes,
             logger=logger,

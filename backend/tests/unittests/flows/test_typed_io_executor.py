@@ -58,6 +58,7 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
+from eneo.flows.flow_input_limits import FlowInputLimits
 from eneo.flows.runtime.document_rendering.limits import DocumentRenderLimits
 from eneo.flows.runtime.executor import (
     FlowRunExecutor,
@@ -117,6 +118,8 @@ def _build_executor(user, *, max_inline_text_bytes: int = 1024 * 1024):
     session.rollback = AsyncMock()
     flow_run_repo = AsyncMock()
     flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[])
+    flow_run_repo.list_step_results.return_value = []
+    flow_run_repo.list_current_step_input_file_ids_by_step_result_id.return_value = {}
 
     async def _activate_step_attempt(**kwargs):
         attempt_input = kwargs["attempt_input"]
@@ -132,8 +135,31 @@ def _build_executor(user, *, max_inline_text_bytes: int = 1024 * 1024):
     space_repo = AsyncMock()
     completion_service = AsyncMock()
     file_repo = AsyncMock()
+    file_repo.get_content_references.return_value = []
     file_content_loader = AsyncMock()
     file_service = create_autospec(FileService, instance=True)
+    file_service.repo = file_repo
+
+    async def owned_infos(*, file_ids):
+        content = file_service.get_files_by_ids
+        if callable(content.side_effect):
+            files = await content.side_effect(file_ids=file_ids)
+        elif isinstance(content.side_effect, BaseException):
+            files = [SimpleNamespace(id=file_id) for file_id in file_ids]
+        else:
+            files = content.return_value
+        return [
+            SimpleNamespace(
+                id=file.id,
+                name=getattr(file, "name", "source"),
+                mimetype=getattr(file, "mimetype", "text/plain"),
+                file_type=getattr(file, "file_type", FileType.TEXT),
+                size=getattr(file, "size", 0),
+            )
+            for file in files
+        ]
+
+    file_service.get_owned_file_infos.side_effect = owned_infos
     template_asset_repo = AsyncMock()
     encryption_service = AsyncMock()
     flow_run_terminalizer = SimpleNamespace()
@@ -164,6 +190,9 @@ def _build_executor(user, *, max_inline_text_bytes: int = 1024 * 1024):
         encryption_service=encryption_service,
         flow_run_terminalizer=flow_run_terminalizer,
         max_inline_text_bytes=max_inline_text_bytes,
+        input_limits=FlowInputLimits(
+            file_max_size_bytes=100_000_000, audio_max_size_bytes=100_000_000
+        ),
     )
     return executor, flow_repo, flow_run_repo, flow_version_repo
 
@@ -210,6 +239,256 @@ def _runtime_file(*, file_id, text: str, name: str | None = None) -> SimpleNames
         checksum=f"checksum-{file_id}",
         size=len(text.encode("utf-8")),
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mapped_preview", [False, True])
+async def test_runtime_admits_all_retained_files_before_first_hydration(
+    user, mapped_preview
+):
+    from eneo.files.file_models import FileContentVariant
+
+    executor, _, run_repo, _ = _build_executor(user, max_inline_text_bytes=1000)
+    executor.input_limits = FlowInputLimits(
+        file_max_size_bytes=10_000, audio_max_size_bytes=10_000
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    step = _runtime_step(input_type="document")
+    if mapped_preview:
+        source_fields = {
+            "source_label": {"type": "string"},
+            "source_file_id": {"type": "string"},
+            "extraction_warnings": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "enum": sorted(TEXT_EXTRACTION_WARNINGS),
+                },
+            },
+        }
+        step = _runtime_step(
+            input_type="document",
+            output_type="json",
+            input_config={
+                "runtime_input": {
+                    "enabled": True,
+                    "input_format": "document",
+                    "execution_mode": "per_source",
+                    "max_files": 2,
+                }
+            },
+            output_contract={
+                "type": "object",
+                "properties": {
+                    "documents": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": source_fields,
+                            "required": list(source_fields),
+                            "additionalProperties": False,
+                        },
+                    }
+                },
+                "required": ["documents"],
+                "additionalProperties": False,
+            },
+        )
+        executor._load_assistant = AsyncMock(
+            return_value=_mock_assistant_for_execute_step()
+        )
+    files = [
+        SimpleNamespace(
+            id=uuid4(),
+            name="source.pdf",
+            file_type=FileType.DOCUMENT,
+            size=40,
+            mimetype="application/pdf",
+            text="short",
+            checksum="x",
+            transcription=None,
+        )
+        for _ in range(2)
+    ]
+    results = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=order,
+            text="",
+        ).model_copy(update={"current_attempt_no": None})
+        for order in (1, 2)
+    ]
+    results[0] = results[0].model_copy(update={"step_id": step.step_id})
+    run_repo.list_step_results.return_value = results
+    run_repo.list_step_input_file_ids.return_value = [file.id for file in files]
+    run_repo.list_current_step_input_file_ids_by_step_result_id.return_value = (
+        {results[0].id: [file.id for file in files]}
+        if mapped_preview
+        else {result.id: [file.id] for result, file in zip(results, files)}
+    )
+    executor.file_service.get_owned_file_infos.side_effect = None
+    executor.file_service.get_owned_file_infos.return_value = files
+    executor.file_service.get_files_by_ids.return_value = [files[0]]
+    executor.file_service.repo = AsyncMock()
+    executor.file_service.repo.get_content_references.return_value = [
+        SimpleNamespace(file_id=file.id, variant=variant, size_bytes=size)
+        for file in files
+        for variant, size in (
+            (FileContentVariant.ORIGINAL, 40),
+            (FileContentVariant.EXTRACTED_TEXT, 600),
+        )
+    ]
+    with pytest.raises(TypedIOValidationException) as error:
+        if mapped_preview:
+            await executor._execute_step(
+                step=step,
+                run=run,
+                state=RunExecutionState({}, [], {}, {}, {}),
+                attempt_no=1,
+            )
+        else:
+            await executor._resolve_step_input(
+                step=step,
+                context={},
+                run=run,
+                prior_results=[],
+                state=RunExecutionState({}, [], {}, {}, {}),
+                requested_file_ids=[files[0].id],
+            )
+    assert error.value.code == "flow_run_input_exceeds_limit"
+    assert error.value.context["kind"] == "inline_text"
+    assert error.value.context["measured"] >= 1200
+    assert error.value.context["ceiling"] == 1000
+    executor.file_service.get_files_by_ids.assert_not_awaited()
+    executor.file_service.get_file_content.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["per_item", "per_source"])
+@pytest.mark.parametrize("title_chars,completed", [(1500, 2), (4000, 1)])
+async def test_mapped_structured_budget_refuses_enriched_output_with_evidence(
+    user, mode, title_chars, completed
+):
+    executor, _, run_repo, _ = _build_executor(user, max_inline_text_bytes=6000)
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    file_ids = [uuid4() for _ in range(3)]
+    source_label = "a" * 80 + ".pdf"
+    files = {
+        file_id: SimpleNamespace(
+            id=file_id,
+            text="source",
+            name=source_label,
+            checksum="x",
+            size=6,
+            mimetype="application/pdf",
+            file_type=FileType.TEXT,
+            transcription=None,
+        )
+        for file_id in file_ids
+    }
+
+    async def get_files(*, file_ids, **kwargs):
+        return [files[file_id] for file_id in file_ids]
+
+    executor.file_service.get_files_by_ids.side_effect = get_files
+    executor.file_service.get_owned_file_infos.side_effect = get_files
+    run_repo.list_step_input_file_ids.return_value = file_ids
+    assistant = _mock_assistant_for_execute_step(
+        response_text=json.dumps(
+            {"documents": [{"title": "å" * title_chars}]}, ensure_ascii=False
+        ),
+    )
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    executor._retrieve_rag_chunks = AsyncMock(
+        side_effect=lambda **kwargs: ([], {"status": "success", "references": []}, []),
+    )
+    properties = {
+        "title": {"type": "string"},
+        "source_label": {"type": "string"},
+        "source_file_id": {"type": "string"},
+    }
+    if mode == "per_source":
+        properties["extraction_warnings"] = {
+            "type": "array",
+            "items": {"type": "string", "enum": sorted(TEXT_EXTRACTION_WARNINGS)},
+        }
+    contract = {
+        "type": "object",
+        "properties": {
+            "documents": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": list(properties),
+                    "additionalProperties": False,
+                },
+            }
+        },
+        "required": ["documents"],
+        "additionalProperties": False,
+    }
+    state = RunExecutionState({}, [], {}, {}, {})
+    if mode == "per_item":
+        previous = _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text="",
+            structured={
+                "documents": [
+                    {"source_label": source_label, "source_file_id": str(file_id)}
+                    for file_id in file_ids
+                ]
+            },
+        )
+        state.append_completed(previous)
+    step = _runtime_step(
+        step_order=2 if mode == "per_item" else 1,
+        input_source="previous_step" if mode == "per_item" else "flow_input",
+        input_type="json" if mode == "per_item" else "document",
+        input_contract={
+            "type": "object",
+            "properties": {
+                "documents": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                }
+            },
+            "required": ["documents"],
+        }
+        if mode == "per_item"
+        else None,
+        output_type="json",
+        output_contract=contract,
+        input_config={"item_map": {"enabled": True, "max_items": 3}}
+        if mode == "per_item"
+        else {
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "document",
+                "execution_mode": "per_source",
+                "max_files": 3,
+            }
+        },
+    )
+
+    with pytest.raises(TypedIOValidationException) as error:
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+
+    assert error.value.code == "typed_io_structured_output_exceeds_limit"
+    assert error.value.context["items_completed"] == completed
+    assert error.value.context["items_total"] == 3
+    assert error.value.context["measured_bytes"] > 6000
+    assert error.value.context["ceiling_bytes"] == 6000
+    assert assistant.get_response.await_count == completed
+    evidence = error.value.rag_metadata
+    assert len(evidence["items" if mode == "per_item" else "sources"]) == completed
+    run_repo.update_step_result.assert_not_awaited()
+    assert run.output_payload_json is None
 
 
 def _prompt_for_output_format(
@@ -1375,7 +1654,8 @@ async def test_resolve_step_input_document_rejects_extracted_text_over_inline_ca
             requested_file_ids=[file_id],
         )
 
-    assert exc.value.code == "typed_io_input_too_large"
+    assert exc.value.code == "flow_run_input_exceeds_limit"
+    executor.file_service.get_files_by_ids.assert_not_awaited()
 
 
 @pytest.mark.asyncio

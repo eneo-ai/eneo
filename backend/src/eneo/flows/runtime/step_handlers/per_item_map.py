@@ -55,6 +55,11 @@ from eneo.flows.runtime.step_handlers.mapped_outputs import (
     mapped_admission_payload,
     mapped_output_diagnostics,
 )
+from eneo.flows.runtime.structured_output_budget import (
+    StructuredOutputBudget,
+    ensure_structured_output_allowed,
+    structured_output_json,
+)
 from eneo.flows.source_identity import (
     runtime_source_identity_fields_for_array_items,
     without_runtime_source_identity_json_fields,
@@ -210,6 +215,14 @@ async def execute_per_item_map(
         collection_key="items",
     )
     item_calls: list[PerItemMapCall] = []
+    output_budget = StructuredOutputBudget(
+        array_key=output_array_key,
+        ceiling_bytes=prepared_items[0][2].deps.max_inline_text_bytes,
+        items_total=len(prepared_items),
+    )
+    identity_fields = runtime_source_identity_fields_for_array_items(
+        step.output_contract, output_array_key
+    )
     try:
         for item_number, input_item, prepared_step in prepared_items:
             # The next item is external work: refuse it, with what completed,
@@ -233,6 +246,14 @@ async def execute_per_item_map(
             # Bound this call before the next one runs, so the step never holds
             # more passage text than its budget allows.
             mapped_evidence.admit(item_call.output.rag_metadata)
+            output_budget.admit(
+                _call_output_items(
+                    item_call,
+                    output_array_key=output_array_key,
+                    identity_fields=identity_fields,
+                ),
+                items_completed=item_number,
+            )
             item_calls.append(item_call)
             record_step_progress(
                 f"{len(item_calls)} of {len(prepared_items)} items completed",
@@ -252,6 +273,7 @@ async def execute_per_item_map(
             )
         )
     except BaseException as exc:
+        output_budget.set_failure_progress(exc, items_completed=len(item_calls) + 1)
         # The calls that completed really did retrieve; publish them as a
         # partial envelope so the failed attempt records what it read. Also
         # for the executor's backstop cancellation, which carries the
@@ -335,7 +357,7 @@ async def _assemble_per_item_output(
         )
     ]
     assembled_structured = {output_array_key: output_items}
-    full_text = json.dumps(assembled_structured, ensure_ascii=False)
+    full_text = structured_output_json(assembled_structured)
     item_map_metadata = _item_map_metadata(
         item_calls=item_calls,
         input_array_key=input_array_key,
@@ -355,6 +377,12 @@ async def _assemble_per_item_output(
             full_text=full_text,
             step=step,
             run=run,
+        )
+        ensure_structured_output_allowed(
+            typed_output.structured_output,
+            ceiling_bytes=first_deps.max_inline_text_bytes,
+            items_completed=len(item_calls),
+            items_total=len(item_calls),
         )
     except TypedIOValidationException as exc:
         raise attach_typed_failure_context(

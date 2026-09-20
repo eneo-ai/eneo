@@ -8,6 +8,7 @@ from uuid import uuid4
 import pytest
 
 from eneo.authentication.principal_types import PrincipalType
+from eneo.files.file_models import FileContentVariant, FileType
 from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
 from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.enums import FlowRuntimeInputFormat
@@ -21,7 +22,98 @@ from eneo.flows.flow_run_step_inputs import (
     validate_submitted_step_inputs,
 )
 from eneo.flows.principal import FlowPrincipal
+from eneo.main.config import get_settings
 from eneo.main.exceptions import BadRequestException
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "input_format,inline_ceiling,binary_ceiling,expected_kind",
+    [
+        ("document", 10, 1000, "inline_text"),
+        ("document", 1000, 100, "binary"),
+        ("document", 20, 1000, None),
+        ("audio", 10, 100, "binary"),
+    ],
+)
+async def test_admission_measures_all_steps_from_metadata(
+    monkeypatch, input_format, inline_ceiling, binary_ceiling, expected_kind
+):
+    monkeypatch.setattr(get_settings(), "flow_max_inline_text_bytes", inline_ceiling)
+    steps = [
+        replace(
+            _runtime_step_with_order(order),
+            input_config={
+                "runtime_input": {
+                    "enabled": True,
+                    "input_format": input_format,
+                    "max_files": 2,
+                }
+            },
+        )
+        for order in (1, 2)
+    ]
+    file_ids = [uuid4(), uuid4()]
+    audio = input_format == "audio"
+    files = [
+        SimpleNamespace(
+            id=file_id,
+            size=80,
+            name="source",
+            file_type=FileType.AUDIO if audio else FileType.DOCUMENT,
+            mimetype="audio/mpeg" if audio else "application/pdf",
+        )
+        for file_id in file_ids
+    ]
+    file_repo = AsyncMock()
+    file_repo.get_list_by_id_and_owner.return_value = files
+    file_repo.get_infos_by_ids.return_value = files
+    file_repo.get_content_references.return_value = [
+        SimpleNamespace(file_id=file_id, variant=variant, size_bytes=size)
+        for file_id in file_ids
+        for variant, size in (
+            [(FileContentVariant.ORIGINAL, 80)]
+            if audio
+            else [
+                (FileContentVariant.ORIGINAL, 80),
+                (FileContentVariant.EXTRACTED_TEXT, 6),
+            ]
+        )
+    ]
+    upload_repo = AsyncMock()
+    upload_repo.list_bound_file_ids_for_owner.return_value = set(file_ids)
+    kwargs = dict(
+        flow_id=uuid4(),
+        steps=steps,
+        specs=build_runtime_step_input_specs(
+            steps=steps,
+            limits=FlowInputLimits(
+                file_max_size_bytes=binary_ceiling,
+                audio_max_size_bytes=binary_ceiling,
+            ),
+        ),
+        normalized_step_inputs={
+            step.step_id: [file_id] for step, file_id in zip(steps, file_ids)
+        },
+        file_repo=file_repo,
+        runtime_upload_repo=upload_repo,
+        principal=_principal(uuid4()),
+        tenant_id=uuid4(),
+    )
+    if expected_kind is None:
+        await validate_submitted_step_inputs(**kwargs)
+    else:
+        with pytest.raises(BadRequestException) as error:
+            await validate_submitted_step_inputs(**kwargs)
+        assert error.value.code == "flow_run_input_exceeds_limit"
+        assert error.value.context == {
+            "kind": expected_kind,
+            "measured": 12 if expected_kind == "inline_text" else 160,
+            "ceiling": inline_ceiling
+            if expected_kind == "inline_text"
+            else binary_ceiling,
+        }
+    file_repo.get_legacy_content.assert_not_awaited()
 
 
 def _runtime_step() -> RuntimeStep:
@@ -89,7 +181,12 @@ async def test_validate_step_inputs_runs_owner_lookup_for_any_submitted_file_id(
     runtime_upload_repo = AsyncMock()
     file_repo.get_list_by_id_and_owner.return_value = [SimpleNamespace(id=file_id)]
     file_repo.get_infos_by_ids.return_value = [
-        SimpleNamespace(id=file_id, mimetype="application/pdf", size=1024)
+        SimpleNamespace(
+            id=file_id,
+            file_type=FileType.DOCUMENT,
+            mimetype="application/pdf",
+            size=1024,
+        )
     ]
     runtime_upload_repo.list_bound_file_ids_for_owner.return_value = {file_id}
 
@@ -172,7 +269,12 @@ async def test_validate_step_inputs_rejects_owner_file_not_bound_to_flow() -> No
     runtime_upload_repo = AsyncMock()
     file_repo.get_list_by_id_and_owner.return_value = [SimpleNamespace(id=file_id)]
     file_repo.get_infos_by_ids.return_value = [
-        SimpleNamespace(id=file_id, mimetype="application/pdf", size=1024)
+        SimpleNamespace(
+            id=file_id,
+            file_type=FileType.DOCUMENT,
+            mimetype="application/pdf",
+            size=1024,
+        )
     ]
     runtime_upload_repo.list_bound_file_ids_for_owner.return_value = set()
 
@@ -247,7 +349,12 @@ async def test_validate_step_inputs_rejects_file_above_current_limit() -> None:
     runtime_upload_repo = AsyncMock()
     file_repo.get_list_by_id_and_owner.return_value = [SimpleNamespace(id=file_id)]
     file_repo.get_infos_by_ids.return_value = [
-        SimpleNamespace(id=file_id, mimetype="application/pdf", size=101)
+        SimpleNamespace(
+            id=file_id,
+            file_type=FileType.DOCUMENT,
+            mimetype="application/pdf",
+            size=101,
+        )
     ]
     runtime_upload_repo.list_bound_file_ids_for_owner.return_value = {file_id}
 
@@ -294,7 +401,12 @@ async def test_validate_step_inputs_allows_same_flow_file_for_multiple_steps() -
     runtime_upload_repo = AsyncMock()
     file_repo.get_list_by_id_and_owner.return_value = [SimpleNamespace(id=file_id)]
     file_repo.get_infos_by_ids.return_value = [
-        SimpleNamespace(id=file_id, mimetype="application/pdf", size=1024)
+        SimpleNamespace(
+            id=file_id,
+            file_type=FileType.DOCUMENT,
+            mimetype="application/pdf",
+            size=1024,
+        )
     ]
     runtime_upload_repo.list_bound_file_ids_for_owner.return_value = {file_id}
 
@@ -339,7 +451,63 @@ def test_aggregate_runtime_file_limit_uses_runtime_step_specs() -> None:
 
     assert aggregate_runtime_file_limit(specs={}) == 0
     assert aggregate_runtime_file_limit(specs=bounded_specs) == 4
-    assert aggregate_runtime_file_limit(specs=unbounded_specs) is None
+    assert aggregate_runtime_file_limit(specs=unbounded_specs) == 1000
+
+
+@pytest.mark.asyncio
+async def test_null_file_policy_refuses_above_deployment_ceiling_before_lookup():
+    step = _unbounded_runtime_step()
+    specs = build_runtime_step_input_specs(
+        steps=[step],
+        limits=FlowInputLimits(
+            file_max_size_bytes=10_000,
+            audio_max_size_bytes=10_000,
+            max_files_per_run=None,
+        ),
+    )
+    file_repo = AsyncMock()
+    with pytest.raises(BadRequestException) as error:
+        await validate_submitted_step_inputs(
+            flow_id=uuid4(),
+            steps=[step],
+            specs=specs,
+            normalized_step_inputs={step.step_id: [uuid4() for _ in range(1001)]},
+            file_repo=file_repo,
+            runtime_upload_repo=AsyncMock(),
+            principal=_principal(uuid4()),
+            tenant_id=uuid4(),
+        )
+    assert error.value.code == "flow_run_step_input_max_files_exceeded"
+    assert error.value.context["max_files"] == 1000
+    assert "1000" in str(error.value)
+    file_repo.get_list_by_id_and_owner.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sum_of_step_limits_is_capped_before_metadata_lookup():
+    steps = [_unbounded_runtime_step(), _unbounded_runtime_step()]
+    specs = build_runtime_step_input_specs(
+        steps=steps,
+        limits=FlowInputLimits(file_max_size_bytes=10_000, audio_max_size_bytes=10_000),
+    )
+    file_repo = AsyncMock()
+    with pytest.raises(BadRequestException) as error:
+        await validate_submitted_step_inputs(
+            flow_id=uuid4(),
+            steps=steps,
+            specs=specs,
+            normalized_step_inputs={
+                step.step_id: [uuid4() for _ in range(501)] for step in steps
+            },
+            file_repo=file_repo,
+            runtime_upload_repo=AsyncMock(),
+            principal=_principal(uuid4()),
+            tenant_id=uuid4(),
+        )
+    assert error.value.code == "flow_run_aggregate_max_files_exceeded"
+    assert error.value.context["aggregate_max_files"] == 1000
+    assert "1000" in str(error.value)
+    file_repo.get_list_by_id_and_owner.assert_not_awaited()
 
 
 def test_runtime_step_specs_clamp_per_source_to_published_policy_and_input_minimum() -> (

@@ -278,6 +278,13 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Reduce text, JSON fields, or file-derived payload before retrying.",
         user_action="Submit less text or fewer fields.",
     ),
+    FlowApiErrorCode.RUN_INPUT_EXCEEDS_LIMIT: _entry(
+        category="Run input",
+        surfaced_through="API response and run error payload",
+        cause="The combined inline text or binary inputs exceed the input byte ceiling before file content is loaded.",
+        consumer_action="Reduce the combined input size across all steps before retrying.",
+        user_action="Submit less text or fewer or smaller files.",
+    ),
     FlowApiErrorCode.INPUT_REQUIRED_FIELD_MISSING: _entry(
         category="Run input",
         surfaced_through="API error response",
@@ -969,6 +976,13 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         cause="The step input exceeds the runtime processing limit.",
         consumer_action="Reduce text, files, extracted content, or prompt context before rerun.",
         user_action="Submit smaller input and try again.",
+    ),
+    FlowApiErrorCode.TYPED_IO_STRUCTURED_OUTPUT_EXCEEDS_LIMIT: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The enriched structured output exceeds the inline byte ceiling.",
+        consumer_action="Reduce the output or mapped item count before rerun; completed provider calls will repeat.",
+        user_action="Request shorter output or process fewer items.",
     ),
     FlowApiErrorCode.TYPED_IO_INVALID_FILE_TYPE: _entry(
         category="Typed input/output",

@@ -10,6 +10,7 @@ from uuid import uuid4
 import pytest
 
 from eneo.authentication.principal_types import PrincipalType
+from eneo.files.file_models import FileType
 from eneo.flows.application.flow_run_access_policy import FlowRunAccessPolicy
 from eneo.flows.application.flow_run_service import FlowRunService
 from eneo.flows.domain.flow import (
@@ -251,7 +252,12 @@ async def test_create_run_stores_step_inputs_as_execution_file_rows(user):
         SimpleNamespace(id=file_id) for file_id in (file_id_2, file_id_1)
     ]
     file_repo.get_infos_by_ids.return_value = [
-        SimpleNamespace(id=file_id, mimetype="application/pdf", size=1024)
+        SimpleNamespace(
+            id=file_id,
+            mimetype="application/pdf",
+            size=1024,
+            file_type=FileType.DOCUMENT,
+        )
         for file_id in (file_id_2, file_id_1)
     ]
     await service.create_run(
