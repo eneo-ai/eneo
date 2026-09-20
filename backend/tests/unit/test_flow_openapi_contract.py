@@ -4117,7 +4117,8 @@ def test_openapi_admin_history_purge_defaults_to_preview_and_is_bounded(
         "undelivered_audit",
         "unresolved_webhook",
         "review_required",
-        "not_terminal",
+        "counted_runs",
+        "complete",
     }
     root = "/api/v1/settings/flow-run-retention-policy"
     for suffix in ("", "/spaces/{space_id}", "/flows/{flow_id}"):

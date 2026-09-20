@@ -21028,8 +21028,16 @@ export interface components {
     };
     /** FlowRunHistoryPurgeBlockedPublic */
     FlowRunHistoryPurgeBlockedPublic: {
-      /** Not Terminal */
-      not_terminal: number;
+      /**
+       * Complete
+       * @description Whether the diagnostic window covers all due terminal runs in scope.
+       */
+      complete: boolean;
+      /**
+       * Counted Runs
+       * @description Number of due terminal runs examined in the diagnostic window.
+       */
+      counted_runs: number;
       /** Review Required */
       review_required: number;
       /** Undelivered Audit */
@@ -21041,7 +21049,8 @@ export interface components {
      * FlowRunHistoryPurgePublic
      * @example {
      *       "blocked": {
-     *         "not_terminal": 0,
+     *         "complete": true,
+     *         "counted_runs": 3,
      *         "review_required": 1,
      *         "undelivered_audit": 0,
      *         "unresolved_webhook": 0

@@ -68,7 +68,8 @@ async def test_admin_explicit_purge_defaults_to_preview_and_audits_deletion(
             "undelivered_audit": 0,
             "unresolved_webhook": 0,
             "review_required": 0,
-            "not_terminal": 0,
+            "counted_runs": 1,
+            "complete": True,
         },
     }
     async with db_container() as container:
@@ -892,7 +893,8 @@ async def test_purge_is_scoped_bounded_and_reports_blocked_runs(
         "undelivered_audit": 1,
         "unresolved_webhook": 1,
         "review_required": 0 if scope == "flow" else 1,
-        "not_terminal": 1,
+        "counted_runs": {"organization": 7, "space": 6, "flow": 4}[scope],
+        "complete": True,
     }
     assert preview.json()["candidate_count"] == 1
     assert preview.json()["blocked"] == blocked
@@ -902,7 +904,7 @@ async def test_purge_is_scoped_bounded_and_reports_blocked_runs(
         stored = set((await container.session().scalars(sa.select(FlowRuns.id))).all())
         assert all_run_ids <= stored
     purged = set()
-    for _ in range(len(expected)):
+    for index in range(len(expected)):
         response = await client.post(
             path, json={"dry_run": False, "limit": 1}, headers=headers
         )
@@ -910,12 +912,19 @@ async def test_purge_is_scoped_bounded_and_reports_blocked_runs(
         result = response.json()
         assert result["scope"] == scope
         assert result["candidate_count"] == result["purged_count"] == 1
-        assert result["blocked"] == blocked
+        assert result["blocked"] == {
+            **blocked,
+            "counted_runs": blocked["counted_runs"] - index,
+        }
         purged.update(result["purged_run_ids"])
     assert purged == {str(run_id) for run_id in expected}
     empty = await client.post(path, json={"dry_run": False}, headers=headers)
     assert empty.status_code == 200, empty.text
     assert empty.json()["candidate_count"] == empty.json()["purged_count"] == 0
+    assert empty.json()["blocked"] == {
+        **blocked,
+        "counted_runs": blocked["counted_runs"] - len(expected),
+    }
     async with db_container() as container:
         stored = set((await container.session().scalars(sa.select(FlowRuns.id))).all())
         assert stored == all_run_ids - expected
@@ -932,7 +941,16 @@ async def test_purge_is_scoped_bounded_and_reports_blocked_runs(
                 if scope == "organization"
                 else purge_history[f"{scope}_id"]
             )
-            assert audit.log_metadata["blocked"] == blocked
+            assert {
+                key: value
+                for key, value in audit.log_metadata["blocked"].items()
+                if key != "counted_runs"
+            } == {key: value for key, value in blocked.items() if key != "counted_runs"}
+        assert {
+            audit.log_metadata["blocked"]["counted_runs"] for audit in audits
+        } == set(
+            range(blocked["counted_runs"] - len(expected), blocked["counted_runs"] + 1)
+        )
 
 
 async def test_purge_requires_admin_and_hides_foreign_scopes(
@@ -1030,3 +1048,68 @@ async def test_concurrent_purges_audit_only_their_own_deleted_runs(
         assert not expected & set(
             (await container.session().scalars(sa.select(FlowRuns.id))).all()
         )
+
+
+@pytest.mark.parametrize("extra_review_run", [False, True])
+async def test_purge_diagnostics_count_only_the_window_and_report_completeness(
+    client, admin_token, admin_user, db_container, purge_history, extra_review_run
+):
+    old = datetime.now(timezone.utc) - timedelta(days=4)
+    async with db_container() as container:
+        session = container.session()
+        session.add_all(
+            [
+                FlowRuns(
+                    flow_id=purge_history["flow_id"],
+                    flow_version=1,
+                    tenant_id=admin_user.tenant_id,
+                    principal_type="user",
+                    principal_user_id=admin_user.id,
+                    trace_id=uuid4(),
+                    status="completed",
+                    started_at=old,
+                    finished_at=old,
+                    created_at=old,
+                    updated_at=old,
+                )
+                for _ in range(493)
+            ]
+        )
+        if extra_review_run:
+            review_flow_id = await session.scalar(
+                sa.select(Flows.id).where(
+                    Flows.tenant_id == admin_user.tenant_id,
+                    Flows.flow_run_history_retention_mode == "review_required",
+                )
+            )
+            newest = datetime.now(timezone.utc) - timedelta(days=2)
+            session.add(
+                FlowRuns(
+                    flow_id=review_flow_id,
+                    flow_version=1,
+                    tenant_id=admin_user.tenant_id,
+                    principal_type="user",
+                    principal_user_id=admin_user.id,
+                    trace_id=uuid4(),
+                    status="completed",
+                    started_at=newest,
+                    finished_at=newest,
+                    created_at=newest,
+                    updated_at=newest,
+                )
+            )
+
+    response = await client.post(
+        "/api/v1/settings/flow-run-retention-policy/purge",
+        json={"limit": 1},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["candidate_count"] == 1
+    assert response.json()["blocked"] == {
+        "undelivered_audit": 1,
+        "unresolved_webhook": 1,
+        "review_required": 1,
+        "counted_runs": 500,
+        "complete": not extra_review_run,
+    }

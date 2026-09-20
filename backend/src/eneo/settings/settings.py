@@ -815,7 +815,12 @@ class FlowRunHistoryPurgeBlockedPublic(BaseModel):
     undelivered_audit: int
     unresolved_webhook: int
     review_required: int
-    not_terminal: int
+    counted_runs: int = Field(
+        description="Number of due terminal runs examined in the diagnostic window."
+    )
+    complete: bool = Field(
+        description="Whether the diagnostic window covers all due terminal runs in scope."
+    )
 
 
 class FlowRunHistoryPurgePublic(BaseModel):
@@ -831,7 +836,8 @@ class FlowRunHistoryPurgePublic(BaseModel):
                     "undelivered_audit": 0,
                     "unresolved_webhook": 0,
                     "review_required": 1,
-                    "not_terminal": 0,
+                    "counted_runs": 3,
+                    "complete": True,
                 },
             }
         }

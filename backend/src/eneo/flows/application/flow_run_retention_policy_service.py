@@ -227,7 +227,8 @@ class FlowRunRetentionPolicyService:
                 undelivered_audit=result.blocked.skipped_undelivered_audit,
                 unresolved_webhook=result.blocked.skipped_unresolved_webhook,
                 review_required=result.blocked.skipped_review_required,
-                not_terminal=result.blocked.skipped_not_terminal,
+                counted_runs=result.blocked.counted_runs,
+                complete=result.blocked.complete,
             ),
         )
         if not dry_run:

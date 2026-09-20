@@ -50,6 +50,7 @@ logger = logging.getLogger(__name__)
 
 # Statement batch size for retention deletes; worker transaction loops decide commit scope.
 RETENTION_BATCH_SIZE = 5000
+FLOW_RUN_HISTORY_PURGE_DIAGNOSTIC_WINDOW = 500
 
 
 @dataclass(frozen=True)
@@ -67,7 +68,8 @@ class FlowRunHistoryPurgeBlockedCounts:
     skipped_undelivered_audit: int = 0
     skipped_unresolved_webhook: int = 0
     skipped_review_required: int = 0
-    skipped_not_terminal: int = 0
+    counted_runs: int = 0
+    complete: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -464,7 +466,8 @@ class DataRetentionService:
         space_id: UUID | None = None,
         flow_id: UUID | None = None,
     ) -> FlowRunHistoryPurgeBlockedCounts:
-        terminal, preserve = self._flow_run_history_purge_eligibility_predicates()
+        _, preserve = self._flow_run_history_purge_eligibility_predicates()
+        anchor = self._flow_run_history_retention_anchor()
         due_runs = (
             self._build_due_flow_run_history_purge_query(
                 now=now,
@@ -473,35 +476,41 @@ class DataRetentionService:
                 flow_id=flow_id,
                 include_blocked=True,
             )
-            .add_columns(terminal.label("terminal"), preserve.label("preserve"))
+            .add_columns(preserve.label("preserve"), anchor.label("anchor"))
+            .order_by(anchor, FlowRuns.id)
+            .limit(FLOW_RUN_HISTORY_PURGE_DIAGNOSTIC_WINDOW + 1)
             .subquery()
         )
         run_id_col = due_runs.c.run_id
-        eligible = sa.and_(due_runs.c.terminal, due_runs.c.preserve)
         undelivered_audit_exists = flow_run_undelivered_audit_exists(run_id_col)
         unresolved_webhook_exists = flow_run_unresolved_webhook_exists(run_id_col)
-        audit_count, webhook_count, review_count, nonterminal_count = (
+        rows = (
             await self.session.execute(
                 sa.select(
-                    sa.func.count().filter(eligible, undelivered_audit_exists),
-                    sa.func.count().filter(
-                        eligible,
-                        sa.not_(undelivered_audit_exists),
-                        unresolved_webhook_exists,
-                    ),
-                    sa.func.count().filter(
-                        due_runs.c.terminal, sa.not_(due_runs.c.preserve)
-                    ),
-                    sa.func.count().filter(sa.not_(due_runs.c.terminal)),
-                ).select_from(due_runs)
+                    due_runs.c.preserve,
+                    undelivered_audit_exists,
+                    unresolved_webhook_exists,
+                )
+                .select_from(due_runs)
+                .order_by(due_runs.c.anchor, due_runs.c.run_id)
             )
-        ).one()
+        ).all()
+        window = rows[:FLOW_RUN_HISTORY_PURGE_DIAGNOSTIC_WINDOW]
+        audit_count = webhook_count = review_count = 0
+        for preserves_history, undelivered_audit, unresolved_webhook in window:
+            if not preserves_history:
+                review_count += 1
+            elif undelivered_audit:
+                audit_count += 1
+            elif unresolved_webhook:
+                webhook_count += 1
 
         return FlowRunHistoryPurgeBlockedCounts(
             skipped_undelivered_audit=audit_count,
             skipped_unresolved_webhook=webhook_count,
             skipped_review_required=review_count,
-            skipped_not_terminal=nonterminal_count,
+            counted_runs=len(window),
+            complete=len(rows) <= FLOW_RUN_HISTORY_PURGE_DIAGNOSTIC_WINDOW,
         )
 
     async def purge_due_flow_run_history_for_tenant(
@@ -593,6 +602,7 @@ class DataRetentionService:
     ) -> sa.Select[tuple[UUID]]:
         anchor = self._flow_run_history_retention_anchor()
         effective_policy = self._effective_flow_run_history_policy_sql()
+        terminal, preserve = self._flow_run_history_purge_eligibility_predicates()
         stmt = (
             sa.select(FlowRuns.id.label("run_id"))
             .join(
@@ -609,13 +619,14 @@ class DataRetentionService:
             )
             .join(Tenants, FlowRuns.tenant_id == Tenants.id)
             .where(
+                terminal,
                 *flow_run_history_due_predicates(
                     now=now, anchor=anchor, effective_days=effective_policy.days
-                )
+                ),
             )
         )
         if not include_blocked:
-            stmt = stmt.where(*self._flow_run_history_purge_eligibility_predicates())
+            stmt = stmt.where(preserve)
         if tenant_id is not None:
             stmt = stmt.where(FlowRuns.tenant_id == tenant_id)
         if space_id is not None:
