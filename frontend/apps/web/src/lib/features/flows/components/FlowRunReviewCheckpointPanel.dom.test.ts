@@ -230,11 +230,11 @@ describe("FlowRunReviewCheckpointPanel", () => {
     const edit = vi.fn(async () => {
       throw new Error("Save unavailable");
     });
-    const approve = vi.fn();
+    const approveAndContinue = vi.fn();
     const eneo = buildEneo({
       activeCheckpoint: buildCheckpoint("awaiting_review", 1),
       edit,
-      approve
+      approveAndContinue
     });
     render(FlowRunReviewCheckpointPanel, {
       props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
@@ -245,7 +245,10 @@ describe("FlowRunReviewCheckpointPanel", () => {
       screen.getByRole("button", { name: m.flow_transcript_editor_approve_continue() })
     );
     await waitFor(() => expect(edit).toHaveBeenCalledTimes(1));
-    expect(approve).not.toHaveBeenCalled();
+    // The failed save surfaces before any continuation is attempted: an
+    // unsaved correction must never reach the run.
+    await screen.findByText(m.flow_run_review_approve_failed());
+    expect(approveAndContinue).not.toHaveBeenCalled();
     expect((field as HTMLTextAreaElement).value).toBe("Keep my correction");
   });
 
@@ -629,7 +632,7 @@ describe("FlowRunReviewCheckpointPanel", () => {
     await fireEvent.click(
       screen.getByRole("button", { name: m.flow_transcript_editor_approve_continue() })
     );
-    expect(eneo.flows.runs.reviewCheckpoints.approve).not.toHaveBeenCalled();
+    expect(eneo.flows.runs.reviewCheckpoints.approveAndContinue).not.toHaveBeenCalled();
     expect(edit).not.toHaveBeenCalled();
 
     await fireEvent.input(valueEditor, {
@@ -788,9 +791,14 @@ describe("FlowRunReviewCheckpointPanel", () => {
       expires_at: "2000-01-01T10:00:00Z"
     };
     const edit = vi.fn();
-    const approve = vi.fn();
+    const approveAndContinue = vi.fn();
     const reject = vi.fn();
-    const eneo = buildEneo({ activeCheckpoint: expiredCheckpoint, edit, approve, reject });
+    const eneo = buildEneo({
+      activeCheckpoint: expiredCheckpoint,
+      edit,
+      approveAndContinue,
+      reject
+    });
 
     render(FlowRunReviewCheckpointPanel, {
       props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
@@ -814,7 +822,7 @@ describe("FlowRunReviewCheckpointPanel", () => {
     );
 
     expect(edit).not.toHaveBeenCalled();
-    expect(approve).not.toHaveBeenCalled();
+    expect(approveAndContinue).not.toHaveBeenCalled();
     expect(reject).not.toHaveBeenCalled();
   });
 
