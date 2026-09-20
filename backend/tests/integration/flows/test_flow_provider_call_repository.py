@@ -725,6 +725,51 @@ async def test_rejected_completion_persists_receipts_without_recounting_usage(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_budget_exhausted_rejection_persists_on_the_migrated_schema(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    """A receipt written while the step's budget ran out is settled as a known
+    refusal; the migrated lifecycle constraint (202609201000) must admit it."""
+    async with db_container() as container:
+        session = container.session()
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        calls = FlowProviderCallRepository(session)
+        started = await _start_provider_call(
+            repo=calls,
+            context=context,
+            request=CompletionProviderCallRequest(
+                provider_request_hash="b" * 64,
+                requested_model="configured-model",
+                provider="hosted_vllm",
+                requested_capabilities=(),
+            ),
+        )
+        settled = await calls.reject_call(
+            call_id=started.id,
+            reason=ProviderCallRejectionReason.BUDGET_EXHAUSTED,
+        )
+        await session.flush()
+        row = await session.scalar(
+            sa.select(FlowProviderCalls).where(FlowProviderCalls.id == started.id)
+        )
+        persisted = (row.status, row.outcome_reason, row.finished_at is not None)
+
+    assert settled.id == started.id
+    assert persisted == ("rejected", "budget_exhausted", True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 @pytest.mark.parametrize("unresolved", [False, True])
 async def test_rejected_completion_does_not_invent_missing_receipts(
     db_container,

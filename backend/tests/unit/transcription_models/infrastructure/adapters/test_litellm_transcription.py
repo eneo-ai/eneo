@@ -195,6 +195,36 @@ async def test_receipt_written_as_the_budget_runs_out_is_settled_not_sent(
     assert observer.rejected_reasons == ["budget_exhausted"]
 
 
+async def test_cancelled_request_keeps_the_in_flight_fact_for_the_timeout_message(
+    monkeypatch, tmp_path
+) -> None:
+    """When the executor's backstop cancels a request mid-flight, the provider
+    may still complete it; the published fact must survive the adapter's
+    cleanup so the step's timeout message carries the disclosure."""
+
+    async def hang(**kwargs):
+        await asyncio.sleep(10)
+
+    monkeypatch.setattr(TRANSPORT, AsyncMock(side_effect=hang))
+    audio = _audio(tmp_path, [300.0], monkeypatch)
+    observer = _Observer()
+
+    with step_deadline_scope(StepDeadline.start(30.0), step_order=1) as scope:
+        with pytest.raises(TimeoutError):
+            async with asyncio.timeout(0.05):
+                await _adapter().get_text_from_file(audio, observer=observer)  # type: ignore[arg-type]
+        assert scope.provider_request_in_flight is True
+
+
+async def test_settled_request_clears_the_in_flight_fact(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(TRANSPORT, AsyncMock(return_value=SimpleNamespace(text="ord")))
+    audio = _audio(tmp_path, [300.0], monkeypatch)
+
+    with step_deadline_scope(StepDeadline.start(30.0), step_order=1) as scope:
+        await _adapter().get_text_from_file(audio)  # type: ignore[arg-type]
+        assert scope.provider_request_in_flight is False
+
+
 async def test_cancelled_chunk_request_is_not_retried(monkeypatch, tmp_path) -> None:
     """A cancellation (the step's budget ran out) must propagate without the
     retry policy sending another request."""

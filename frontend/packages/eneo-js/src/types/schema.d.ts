@@ -29277,6 +29277,7 @@ export interface components {
         | "completed"
         | "response_format_rejected"
         | "provider_rejected"
+        | "budget_exhausted"
         | "request_timeout"
         | "run_cancelled"
         | "worker_interrupted"
@@ -29360,7 +29361,8 @@ export interface components {
      * ProviderCallRejectionReason
      * @enum {string}
      */
-    ProviderCallRejectionReason: "response_format_rejected" | "provider_rejected";
+    ProviderCallRejectionReason:
+      "response_format_rejected" | "provider_rejected" | "budget_exhausted";
     /**
      * ProviderCallRequestedCapability
      * @enum {string}

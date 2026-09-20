@@ -289,10 +289,13 @@ class LiteLLMTranscriptionAdapter:
                     **kwargs,
                 )
         except asyncio.CancelledError:
+            # The request may have reached the provider: the in-flight fact
+            # stays published so the step's timeout message can say so.
             if observer is not None and call_id is not None:
                 await observer.outcome_unknown(call_id, "request_cancelled")
             raise
         except Exception as e:
+            mark_provider_request_in_flight(False)
             logger.exception(f"[LiteLLM] {self.litellm_model}: Unknown exception:")
             try:
                 litellm_transport.raise_public_litellm_error(
@@ -312,9 +315,8 @@ class LiteLLMTranscriptionAdapter:
                     await observer.outcome_unknown(call_id, "provider_error")
                 raise
             raise AssertionError("Provider error mapping unexpectedly returned.")
-        finally:
-            mark_provider_request_in_flight(False)
 
+        mark_provider_request_in_flight(False)
         logger.debug(f"[LiteLLM] {self.litellm_model}: Transcription successful")
         if observer is not None and call_id is not None:
             await observer.completed(

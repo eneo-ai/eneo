@@ -726,7 +726,8 @@ class RemoteFlowTranscriber:
         except asyncio.CancelledError:
             # The worker is going away; tell the service to stop the job so it
             # does not finish work nobody will collect. Shielded so the cancel
-            # already delivered to this task cannot interrupt the request.
+            # already delivered to this task cannot interrupt the request. The
+            # stop is best effort, so the in-flight fact stays published.
             await asyncio.shield(self.client.cancel(job_id))
             if observer is not None and call_id is not None:
                 await observer.outcome_unknown(call_id, "request_cancelled")
@@ -734,20 +735,22 @@ class RemoteFlowTranscriber:
         except (FlowStepCancelledError, RemoteTranscriptionCancelledException):
             # The job was stopped, by eneo or by the service; the audio was not
             # transcribed and nothing was billed.
+            mark_provider_request_in_flight(False)
             if observer is not None and call_id is not None:
                 await observer.outcome_unknown(call_id, "request_cancelled")
             raise
         except ProviderRejectedRequestException:
+            mark_provider_request_in_flight(False)
             if observer is not None and call_id is not None:
                 await observer.rejected(call_id, "provider_rejected")
             raise
         except Exception:
+            mark_provider_request_in_flight(False)
             if observer is not None and call_id is not None:
                 await observer.outcome_unknown(call_id, "provider_error")
             raise
-        finally:
-            mark_provider_request_in_flight(False)
 
+        mark_provider_request_in_flight(False)
         if observer is not None and call_id is not None:
             await observer.completed(
                 call_id,
@@ -844,21 +847,23 @@ class RemoteFlowTranscriber:
                 )
                 return job_id, call_id
         except asyncio.CancelledError:
+            # The job may have been accepted: the in-flight fact stays
+            # published so the step's timeout message can say so.
             if observer is not None and call_id is not None:
                 await observer.outcome_unknown(call_id, "request_cancelled")
             raise
         except ProviderRejectedRequestException:
             # The service answered and refused. That is a known outcome, so it
             # must not leave the run's audio total marked incomplete.
+            mark_provider_request_in_flight(False)
             if observer is not None and call_id is not None:
                 await observer.rejected(call_id, "provider_rejected")
             raise
         except Exception:
+            mark_provider_request_in_flight(False)
             if observer is not None and call_id is not None:
                 await observer.outcome_unknown(call_id, "provider_error")
             raise
-        finally:
-            mark_provider_request_in_flight(False)
 
 
 def build_remote_flow_transcriber(settings: "Settings") -> RemoteFlowTranscriber:
