@@ -12,6 +12,7 @@ from eneo.ai_models.embedding_models.embedding_model import EmbeddingModelPublic
 from eneo.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
 from eneo.flows.domain.flow_run_retention_policy import (
     FlowRunRetentionPolicy,
+    FlowRunRetentionScope,
 )
 from eneo.flows.domain.rag_evidence_policy import (
     RAG_EVIDENCE_CEILINGS,
@@ -798,6 +799,50 @@ class FlowRetentionPolicyUpdate(BaseModel):
         description=FLOW_RUNTIME_UPLOAD_ELIGIBILITY_DESCRIPTION,
         json_schema_extra=_strip_json_schema_default,
     )
+
+
+class FlowRunHistoryPurgeRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"example": {"dry_run": True, "limit": 100}},
+    )
+
+    dry_run: bool = Field(default=True, strict=True)
+    limit: int = Field(default=100, ge=1, le=500, strict=True)
+
+
+class FlowRunHistoryPurgeBlockedPublic(BaseModel):
+    undelivered_audit: int
+    unresolved_webhook: int
+    review_required: int
+    not_terminal: int
+
+
+class FlowRunHistoryPurgePublic(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "dry_run": True,
+                "scope": "organization",
+                "candidate_count": 2,
+                "purged_count": 0,
+                "purged_run_ids": [],
+                "blocked": {
+                    "undelivered_audit": 0,
+                    "unresolved_webhook": 0,
+                    "review_required": 1,
+                    "not_terminal": 0,
+                },
+            }
+        }
+    )
+
+    dry_run: bool
+    scope: FlowRunRetentionScope
+    candidate_count: int
+    purged_count: int
+    purged_run_ids: list[UUID]
+    blocked: FlowRunHistoryPurgeBlockedPublic
 
 
 class FlowRunRetentionPolicyReplaceRequest(BaseModel):

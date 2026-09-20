@@ -226,6 +226,47 @@ export function initFlows(client) {
   };
 
   return {
+    retention: {
+      /**
+       * Preview or explicitly purge a bounded batch of due Flow run history.
+       * Requires tenant-admin permission. Review-required runs remain stored.
+       * @param {(import('../types/schema').components['schemas']['FlowRunHistoryPurgeRequest'] & ({scope?: 'organization'} | {scope: 'space', spaceId: string} | {scope: 'flow', flowId: string}))} [options]
+       * @throws {EneoError}
+      */
+      purge: async (options = {}) => {
+        if (
+          (options.scope !== undefined && !["organization", "space", "flow"].includes(options.scope)) ||
+          (options.scope !== "space" && "spaceId" in options) ||
+          (options.scope !== "flow" && "flowId" in options)
+        ) {
+          throw new Error("Flow history purge requires a valid scope and matching scope ID.");
+        }
+        const requestBody = {
+          "application/json": {
+            dry_run: options.dry_run ?? true,
+            limit: options.limit ?? 100
+          }
+        };
+        if (options.scope === "space") {
+          return _fetch("/api/v1/settings/flow-run-retention-policy/spaces/{space_id}/purge", {
+            method: "post",
+            params: { path: { space_id: options.spaceId } },
+            requestBody
+          });
+        }
+        if (options.scope === "flow") {
+          return _fetch("/api/v1/settings/flow-run-retention-policy/flows/{flow_id}/purge", {
+            method: "post",
+            params: { path: { flow_id: options.flowId } },
+            requestBody
+          });
+        }
+        return _fetch("/api/v1/settings/flow-run-retention-policy/purge", {
+          method: "post",
+          requestBody
+        });
+      }
+    },
     /**
      * Create a new Flow
      * @param {{spaceId: string, name: string, description?: string, steps?: any[], metadata_json?: any}} flow

@@ -39,6 +39,8 @@ from eneo.settings.settings import (
     FlowRagEvidencePolicyUpdate,
     FlowRetentionPolicyPublic,
     FlowRetentionPolicyUpdate,
+    FlowRunHistoryPurgePublic,
+    FlowRunHistoryPurgeRequest,
     FlowRunRetentionPolicyReplaceRequest,
     FlowRuntimePolicyPublic,
     FlowRuntimePolicyUpdate,
@@ -917,6 +919,80 @@ async def replace_flow_run_retention_policy(
     return await container.flow_run_retention_policy_service().replace_flow(
         flow_id=flow_id,
         policy=payload.policy,
+    )
+
+
+@settings_admin_router.post(
+    "/flow-run-retention-policy/purge",
+    response_model=FlowRunHistoryPurgePublic,
+    operation_id="purge_organization_flow_run_history",
+    summary="Preview or purge due Organization Flow run history",
+    description=(
+        "Administrators can preview or explicitly purge one bounded batch of due "
+        "terminal runs under the effective preserve policy. Dry runs delete nothing "
+        "and emit no audit event. Real purges require an audit row in the same "
+        "transaction. Review-required runs and unresolved deliveries are excluded."
+    ),
+    responses={403: _flow_settings_admin_forbidden_response()},
+)
+async def purge_organization_flow_run_history(
+    payload: FlowRunHistoryPurgeRequest,
+    container: FlowRetentionMutationContainer,
+) -> FlowRunHistoryPurgePublic:
+    return await container.flow_run_retention_policy_service().purge_due_history(
+        dry_run=payload.dry_run, limit=payload.limit
+    )
+
+
+@settings_admin_router.post(
+    "/flow-run-retention-policy/spaces/{space_id}/purge",
+    response_model=FlowRunHistoryPurgePublic,
+    operation_id="purge_space_flow_run_history",
+    summary="Preview or purge due Space Flow run history",
+    description=(
+        "Apply the administrator purge to one Space in the authenticated tenant. "
+        "Dry-run is the default. Each real bounded batch deletes only due terminal "
+        "runs under the effective preserve policy and requires a transaction audit. "
+        "Review-required runs and unresolved deliveries remain stored."
+    ),
+    responses={
+        403: _flow_settings_admin_forbidden_response(),
+        404: _flow_retention_not_found_response("Space"),
+    },
+)
+async def purge_space_flow_run_history(
+    space_id: UUID,
+    payload: FlowRunHistoryPurgeRequest,
+    container: FlowRetentionMutationContainer,
+) -> FlowRunHistoryPurgePublic:
+    return await container.flow_run_retention_policy_service().purge_due_history(
+        space_id=space_id, dry_run=payload.dry_run, limit=payload.limit
+    )
+
+
+@settings_admin_router.post(
+    "/flow-run-retention-policy/flows/{flow_id}/purge",
+    response_model=FlowRunHistoryPurgePublic,
+    operation_id="purge_flow_run_history",
+    summary="Preview or purge due Flow run history",
+    description=(
+        "Apply the administrator purge to one Flow in the authenticated tenant. "
+        "Dry-run is the default. Each real bounded batch deletes only due terminal "
+        "runs under the effective preserve policy and requires a transaction audit. "
+        "Review-required runs and unresolved deliveries remain stored."
+    ),
+    responses={
+        403: _flow_settings_admin_forbidden_response(),
+        404: _flow_retention_not_found_response("Flow"),
+    },
+)
+async def purge_flow_run_history(
+    flow_id: UUID,
+    payload: FlowRunHistoryPurgeRequest,
+    container: FlowRetentionMutationContainer,
+) -> FlowRunHistoryPurgePublic:
+    return await container.flow_run_retention_policy_service().purge_due_history(
+        flow_id=flow_id, dry_run=payload.dry_run, limit=payload.limit
     )
 
 

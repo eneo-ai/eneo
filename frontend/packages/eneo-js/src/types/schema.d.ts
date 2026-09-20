@@ -7538,6 +7538,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/settings/flow-run-retention-policy/flows/{flow_id}/purge": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Preview or purge due Flow run history
+     * @description Apply the administrator purge to one Flow in the authenticated tenant. Dry-run is the default. Each real bounded batch deletes only due terminal runs under the effective preserve policy and requires a transaction audit. Review-required runs and unresolved deliveries remain stored.
+     */
+    post: operations["purge_flow_run_history"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/settings/flow-run-retention-policy/flows/{flow_id}/review-queue": {
     parameters: {
       query?: never;
@@ -7552,6 +7572,26 @@ export interface paths {
     get: operations["list_flow_run_retention_review_queue"];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/settings/flow-run-retention-policy/purge": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Preview or purge due Organization Flow run history
+     * @description Administrators can preview or explicitly purge one bounded batch of due terminal runs under the effective preserve policy. Dry runs delete nothing and emit no audit event. Real purges require an audit row in the same transaction. Review-required runs and unresolved deliveries are excluded.
+     */
+    post: operations["purge_organization_flow_run_history"];
     delete?: never;
     options?: never;
     head?: never;
@@ -7596,6 +7636,26 @@ export interface paths {
      */
     put: operations["replace_space_flow_run_retention_policy"];
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/settings/flow-run-retention-policy/spaces/{space_id}/purge": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Preview or purge due Space Flow run history
+     * @description Apply the administrator purge to one Space in the authenticated tenant. Dry-run is the default. Each real bounded batch deletes only due terminal runs under the effective preserve policy and requires a transaction audit. Review-required runs and unresolved deliveries remain stored.
+     */
+    post: operations["purge_space_flow_run_history"];
     delete?: never;
     options?: never;
     head?: never;
@@ -20965,6 +21025,64 @@ export interface components {
        * @description Bounded, incomplete, non-authoritative prefix of the terminal text. When `file.availability` is `content_purged`, this incomplete preview is the only remaining text and must not be treated as the full result.
        */
       preview: string;
+    };
+    /** FlowRunHistoryPurgeBlockedPublic */
+    FlowRunHistoryPurgeBlockedPublic: {
+      /** Not Terminal */
+      not_terminal: number;
+      /** Review Required */
+      review_required: number;
+      /** Undelivered Audit */
+      undelivered_audit: number;
+      /** Unresolved Webhook */
+      unresolved_webhook: number;
+    };
+    /**
+     * FlowRunHistoryPurgePublic
+     * @example {
+     *       "blocked": {
+     *         "not_terminal": 0,
+     *         "review_required": 1,
+     *         "undelivered_audit": 0,
+     *         "unresolved_webhook": 0
+     *       },
+     *       "candidate_count": 2,
+     *       "dry_run": true,
+     *       "purged_count": 0,
+     *       "purged_run_ids": [],
+     *       "scope": "organization"
+     *     }
+     */
+    FlowRunHistoryPurgePublic: {
+      blocked: components["schemas"]["FlowRunHistoryPurgeBlockedPublic"];
+      /** Candidate Count */
+      candidate_count: number;
+      /** Dry Run */
+      dry_run: boolean;
+      /** Purged Count */
+      purged_count: number;
+      /** Purged Run Ids */
+      purged_run_ids: string[];
+      scope: components["schemas"]["FlowRunRetentionScope"];
+    };
+    /**
+     * FlowRunHistoryPurgeRequest
+     * @example {
+     *       "dry_run": true,
+     *       "limit": 100
+     *     }
+     */
+    FlowRunHistoryPurgeRequest: {
+      /**
+       * Dry Run
+       * @default true
+       */
+      dry_run?: boolean;
+      /**
+       * Limit
+       * @default 100
+       */
+      limit?: number;
     };
     /** FlowRunInlineTextResultPublic */
     FlowRunInlineTextResultPublic: {
@@ -63330,6 +63448,73 @@ export interface operations {
       };
     };
   };
+  purge_flow_run_history: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        flow_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowRunHistoryPurgeRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunHistoryPurgePublic"];
+        };
+      };
+      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_tenant_permission",
+           *       "eneo_error_code": 9001,
+           *       "message": "Insufficient permissions."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in the administrator's Organization. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "Flow not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   list_flow_run_retention_review_queue: {
     parameters: {
       query?: {
@@ -63397,6 +63582,55 @@ export interface operations {
            *       "code": "not_found",
            *       "eneo_error_code": 9000,
            *       "message": "Flow not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  purge_organization_flow_run_history: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowRunHistoryPurgeRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunHistoryPurgePublic"];
+        };
+      };
+      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_tenant_permission",
+           *       "eneo_error_code": 9001,
+           *       "message": "Insufficient permissions."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
@@ -63563,6 +63797,73 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["FlowRunRetentionPolicySettings"];
+        };
+      };
+      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_tenant_permission",
+           *       "eneo_error_code": 9001,
+           *       "message": "Insufficient permissions."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Space not found in the administrator's Organization. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "Space not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  purge_space_flow_run_history: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        space_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowRunHistoryPurgeRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunHistoryPurgePublic"];
         };
       };
       /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */

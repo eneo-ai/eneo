@@ -8,11 +8,107 @@ import sqlalchemy as sa
 
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 from eneo.database.tables.audit_log_table import AuditLog
-from eneo.database.tables.flow_tables import FlowRuns, Flows, FlowVersions
+from eneo.database.tables.flow_tables import (
+    FlowRunAuditOutbox,
+    FlowRuns,
+    FlowRunWebhookDeliveries,
+    Flows,
+    FlowStepAttempts,
+    FlowVersions,
+)
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+
+
+async def test_admin_explicit_purge_defaults_to_preview_and_audits_deletion(
+    client, admin_token, admin_user, published_flow_ids, db_container
+) -> None:
+    _, flow_id = published_flow_ids
+    old = datetime.now(timezone.utc) - timedelta(days=3)
+    async with db_container() as container:
+        session = container.session()
+        await session.execute(
+            sa.update(Flows)
+            .where(Flows.id == flow_id)
+            .values(
+                flow_run_history_retention_mode="preserve",
+                flow_run_history_retention_days=1,
+            )
+        )
+        run = FlowRuns(
+            flow_id=flow_id,
+            flow_version=1,
+            principal_type="user",
+            principal_user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            trace_id=uuid4(),
+            status="completed",
+            started_at=old,
+            finished_at=old,
+            created_at=old,
+            updated_at=old,
+        )
+        session.add(run)
+        await session.flush()
+        run_id = run.id
+
+    path = "/api/v1/settings/flow-run-retention-policy/purge"
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    preview = await client.post(path, json={}, headers=headers)
+    assert preview.status_code == 200, preview.text
+    assert preview.json() == {
+        "dry_run": True,
+        "scope": "organization",
+        "candidate_count": 1,
+        "purged_count": 0,
+        "purged_run_ids": [],
+        "blocked": {
+            "undelivered_audit": 0,
+            "unresolved_webhook": 0,
+            "review_required": 0,
+            "not_terminal": 0,
+        },
+    }
+    async with db_container() as container:
+        assert await container.session().get(FlowRuns, run_id) is not None
+        assert (
+            await container.session().scalar(
+                sa.select(sa.func.count(AuditLog.id)).where(
+                    AuditLog.action == "flow_run_history_purged"
+                )
+            )
+            == 0
+        )
+
+    response = await client.post(path, json={"dry_run": False}, headers=headers)
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        **preview.json(),
+        "dry_run": False,
+        "purged_count": 1,
+        "purged_run_ids": [str(run_id)],
+    }
+    async with db_container() as container:
+        assert await container.session().get(FlowRuns, run_id) is None
+        audit = (
+            await container.session().scalars(
+                sa.select(AuditLog).where(AuditLog.action == "flow_run_history_purged")
+            )
+        ).one()
+        assert audit.tenant_id == admin_user.tenant_id
+        assert audit.log_metadata == {
+            "scope": "organization",
+            "scope_id": str(admin_user.tenant_id),
+            "tenant_id": str(admin_user.tenant_id),
+            "space_id": None,
+            "flow_id": None,
+            "limit": 100,
+            "purged_count": 1,
+            "purged_run_ids": [str(run_id)],
+            "blocked": preview.json()["blocked"],
+        }
 
 
 @pytest.fixture
@@ -610,3 +706,327 @@ async def test_foreign_tenant_targets_are_not_visible_or_mutable(
         )
     assert foreign_policy == (None, None)
     assert new_audits == 0
+
+
+@pytest.fixture
+async def purge_history(db_container, admin_user, published_flow_ids, user_factory):
+    space_id, flow_id = published_flow_ids
+    old = datetime.now(timezone.utc) - timedelta(days=3)
+    async with db_container() as container:
+        session = container.session()
+        await session.execute(
+            sa.update(Tenants)
+            .where(Tenants.id == admin_user.tenant_id)
+            .values(
+                flow_run_history_retention_mode="preserve",
+                flow_run_history_retention_days=1,
+            )
+        )
+
+        async def add_flow(tenant_id, target_space_id, mode=None):
+            flow = Flows(
+                name=f"Purge scope {uuid4()}",
+                tenant_id=tenant_id,
+                space_id=target_space_id,
+                flow_run_history_retention_mode=mode,
+                flow_run_history_retention_days=1 if mode else None,
+            )
+            session.add(flow)
+            await session.flush()
+            session.add(
+                FlowVersions(
+                    flow_id=flow.id,
+                    version=1,
+                    tenant_id=tenant_id,
+                    definition_checksum=str(uuid4()),
+                    definition_json={"schema_version": 1, "steps": []},
+                )
+            )
+            await session.flush()
+            return flow.id
+
+        async def add_run(
+            target_flow_id,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            status="completed",
+        ):
+            run = FlowRuns(
+                flow_id=target_flow_id,
+                flow_version=1,
+                tenant_id=tenant_id,
+                principal_type="user",
+                principal_user_id=user_id,
+                trace_id=uuid4(),
+                status=status,
+                started_at=old,
+                finished_at=old if status == "completed" else None,
+                created_at=old,
+                updated_at=old,
+            )
+            session.add(run)
+            await session.flush()
+            return run
+
+        first = await add_run(flow_id)
+        second = await add_run(flow_id)
+        sibling_flow_id = await add_flow(admin_user.tenant_id, space_id)
+        sibling = await add_run(sibling_flow_id)
+        parent_space_id = await session.scalar(
+            sa.select(Spaces.tenant_space_id).where(Spaces.id == space_id)
+        )
+        other_space = Spaces(
+            name="Other purge scope",
+            tenant_id=admin_user.tenant_id,
+            tenant_space_id=parent_space_id,
+        )
+        session.add(other_space)
+        await session.flush()
+        outside_flow_id = await add_flow(admin_user.tenant_id, other_space.id)
+        outside = await add_run(outside_flow_id)
+        review_flow_id = await add_flow(
+            admin_user.tenant_id, space_id, "review_required"
+        )
+        review = await add_run(review_flow_id)
+        running = await add_run(flow_id, status="running")
+        audit_run = await add_run(flow_id)
+        session.add(
+            FlowRunAuditOutbox(
+                tenant_id=admin_user.tenant_id,
+                flow_id=flow_id,
+                flow_run_id=audit_run.id,
+                run_revision=1,
+                description="flow_run_completed:executor_completed",
+                action="flow_run_completed",
+                entity_type="flow_run",
+                entity_id=audit_run.id,
+                actor_id=admin_user.id,
+                actor_type="user",
+                source="executor_completed",
+                target_status="completed",
+                delivery_status="pending",
+            )
+        )
+        webhook_run = await add_run(flow_id)
+        step_id = uuid4()
+        session.add(
+            FlowStepAttempts(
+                flow_run_id=webhook_run.id,
+                flow_id=flow_id,
+                tenant_id=admin_user.tenant_id,
+                step_id=step_id,
+                step_order=1,
+                attempt_no=1,
+                status="completed",
+                started_at=old,
+                finished_at=old,
+            )
+        )
+        await session.flush()
+        session.add(
+            FlowRunWebhookDeliveries(
+                tenant_id=admin_user.tenant_id,
+                flow_id=flow_id,
+                flow_run_id=webhook_run.id,
+                step_id=step_id,
+                step_order=1,
+                attempt_no=1,
+                idempotency_key=str(uuid4()),
+                payload_ref="payload",
+                delivery_status="pending",
+            )
+        )
+        foreign_tenant = Tenants(
+            name=f"Purge isolation {uuid4()}",
+            state="active",
+            quota_limit=1_000_000,
+            flow_run_history_retention_mode="preserve",
+            flow_run_history_retention_days=1,
+        )
+        session.add(foreign_tenant)
+        await session.flush()
+        foreign_user = await user_factory(session, tenant_id=foreign_tenant.id)
+        foreign_space = Spaces(name="Foreign purge scope", tenant_id=foreign_tenant.id)
+        session.add(foreign_space)
+        await session.flush()
+        foreign_flow_id = await add_flow(foreign_tenant.id, foreign_space.id)
+        foreign = await add_run(foreign_flow_id, foreign_tenant.id, foreign_user.id)
+        foreign_running = await add_run(
+            foreign_flow_id, foreign_tenant.id, foreign_user.id, status="running"
+        )
+        await session.flush()
+        return {
+            "space_id": space_id,
+            "flow_id": flow_id,
+            "foreign_space_id": foreign_space.id,
+            "foreign_flow_id": foreign_flow_id,
+            "eligible": {
+                "organization": {first.id, second.id, sibling.id, outside.id},
+                "space": {first.id, second.id, sibling.id},
+                "flow": {first.id, second.id},
+            },
+            "retained": {
+                review.id,
+                running.id,
+                audit_run.id,
+                webhook_run.id,
+                foreign.id,
+                foreign_running.id,
+            },
+        }
+
+
+@pytest.mark.parametrize("scope", ["organization", "space", "flow"])
+async def test_purge_is_scoped_bounded_and_reports_blocked_runs(
+    client, admin_token, db_container, purge_history, scope
+):
+    root = "/api/v1/settings/flow-run-retention-policy"
+    suffix = (
+        "" if scope == "organization" else f"/{scope}s/{purge_history[f'{scope}_id']}"
+    )
+    path = f"{root}{suffix}/purge"
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    preview = await client.post(path, json={"limit": 1}, headers=headers)
+    assert preview.status_code == 200, preview.text
+    blocked = {
+        "undelivered_audit": 1,
+        "unresolved_webhook": 1,
+        "review_required": 0 if scope == "flow" else 1,
+        "not_terminal": 1,
+    }
+    assert preview.json()["candidate_count"] == 1
+    assert preview.json()["blocked"] == blocked
+    expected = purge_history["eligible"][scope]
+    all_run_ids = purge_history["eligible"]["organization"] | purge_history["retained"]
+    async with db_container() as container:
+        stored = set((await container.session().scalars(sa.select(FlowRuns.id))).all())
+        assert all_run_ids <= stored
+    purged = set()
+    for _ in range(len(expected)):
+        response = await client.post(
+            path, json={"dry_run": False, "limit": 1}, headers=headers
+        )
+        assert response.status_code == 200, response.text
+        result = response.json()
+        assert result["scope"] == scope
+        assert result["candidate_count"] == result["purged_count"] == 1
+        assert result["blocked"] == blocked
+        purged.update(result["purged_run_ids"])
+    assert purged == {str(run_id) for run_id in expected}
+    empty = await client.post(path, json={"dry_run": False}, headers=headers)
+    assert empty.status_code == 200, empty.text
+    assert empty.json()["candidate_count"] == empty.json()["purged_count"] == 0
+    async with db_container() as container:
+        stored = set((await container.session().scalars(sa.select(FlowRuns.id))).all())
+        assert stored == all_run_ids - expected
+        audits = (
+            await container.session().scalars(
+                sa.select(AuditLog).where(AuditLog.action == "flow_run_history_purged")
+            )
+        ).all()
+        assert len(audits) == len(expected) + 1
+        for audit in audits:
+            assert audit.log_metadata["scope"] == scope
+            assert audit.log_metadata["scope_id"] == str(
+                audit.tenant_id
+                if scope == "organization"
+                else purge_history[f"{scope}_id"]
+            )
+            assert audit.log_metadata["blocked"] == blocked
+
+
+async def test_purge_requires_admin_and_hides_foreign_scopes(
+    client, regular_token, admin_token, db_container, purge_history
+):
+    root = "/api/v1/settings/flow-run-retention-policy"
+    for suffix in (
+        "",
+        f"/spaces/{purge_history['space_id']}",
+        f"/flows/{purge_history['flow_id']}",
+    ):
+        response = await client.post(
+            f"{root}{suffix}/purge",
+            json={"dry_run": False},
+            headers={"Authorization": f"Bearer {regular_token}"},
+        )
+        assert response.status_code == 403, response.text
+    for scope in ("space", "flow"):
+        response = await client.post(
+            f"{root}/{scope}s/{purge_history[f'foreign_{scope}_id']}/purge",
+            json={"dry_run": False},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert response.status_code == 404, response.text
+    async with db_container() as container:
+        assert (
+            await container.session().scalar(
+                sa.select(sa.func.count(AuditLog.id)).where(
+                    AuditLog.action == "flow_run_history_purged"
+                )
+            )
+            == 0
+        )
+        assert set(
+            (await container.session().scalars(sa.select(FlowRuns.id))).all()
+        ) == (purge_history["eligible"]["organization"] | purge_history["retained"])
+
+
+async def test_purge_audit_failure_rolls_back_deleted_history(
+    client, admin_token, db_container, purge_history, monkeypatch
+):
+    async def fail_audit_insert(_repository, _audit_log):
+        raise RuntimeError("forced purge audit failure")
+
+    monkeypatch.setattr(AuditLogRepositoryImpl, "create", fail_audit_insert)
+    with pytest.raises(RuntimeError, match="forced purge audit failure"):
+        await client.post(
+            "/api/v1/settings/flow-run-retention-policy/purge",
+            json={"dry_run": False},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+    async with db_container() as container:
+        assert set(
+            (await container.session().scalars(sa.select(FlowRuns.id))).all()
+        ) == (purge_history["eligible"]["organization"] | purge_history["retained"])
+        assert (
+            await container.session().scalar(
+                sa.select(sa.func.count(AuditLog.id)).where(
+                    AuditLog.action == "flow_run_history_purged"
+                )
+            )
+            == 0
+        )
+
+
+async def test_concurrent_purges_audit_only_their_own_deleted_runs(
+    db_container, purge_history
+):
+    async with db_container() as first_container:
+        first = (
+            await first_container.flow_run_retention_policy_service().purge_due_history(
+                dry_run=False, limit=1
+            )
+        )
+        async with db_container() as second_container:
+            second = await second_container.flow_run_retention_policy_service().purge_due_history(
+                dry_run=False, limit=1
+            )
+    assert first.purged_count == second.purged_count == 1
+    assert set(first.purged_run_ids).isdisjoint(second.purged_run_ids)
+    expected = set(first.purged_run_ids) | set(second.purged_run_ids)
+    assert expected <= purge_history["eligible"]["organization"]
+    async with db_container() as container:
+        audits = (
+            await container.session().scalars(
+                sa.select(AuditLog).where(AuditLog.action == "flow_run_history_purged")
+            )
+        ).all()
+        assert len(audits) == 2
+        assert {
+            run_id
+            for audit in audits
+            for run_id in audit.log_metadata["purged_run_ids"]
+        } == {str(run_id) for run_id in expected}
+        assert not expected & set(
+            (await container.session().scalars(sa.select(FlowRuns.id))).all()
+        )

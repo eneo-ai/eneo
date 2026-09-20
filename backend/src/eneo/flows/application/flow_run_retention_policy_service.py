@@ -6,6 +6,9 @@ from uuid import UUID
 from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.data_retention.infrastructure.data_retention_service import (
+    DataRetentionService,
+)
 from eneo.flows.domain.flow_run_retention_policy import (
     FlowRunRetentionFlowTargetPage,
     FlowRunRetentionPolicy,
@@ -21,6 +24,10 @@ from eneo.flows.infrastructure.flow_run_retention_policy_repo import (
     FlowRunRetentionPolicyRepository,
 )
 from eneo.roles.permissions import Permission, validate_permissions
+from eneo.settings.settings import (
+    FlowRunHistoryPurgeBlockedPublic,
+    FlowRunHistoryPurgePublic,
+)
 from eneo.users.user import UserInDB
 
 
@@ -178,6 +185,73 @@ class FlowRunRetentionPolicyService:
             cursor=cursor,
             flow_id=flow_id,
         )
+
+    @validate_permissions(Permission.ADMIN)
+    async def purge_due_history(
+        self,
+        *,
+        dry_run: bool,
+        limit: int,
+        space_id: UUID | None = None,
+        flow_id: UUID | None = None,
+    ) -> FlowRunHistoryPurgePublic:
+        if flow_id is not None:
+            settings = await self.repository.get_flow(
+                tenant_id=self.user.tenant_id, flow_id=flow_id
+            )
+        elif space_id is not None:
+            settings = await self.repository.get_space(
+                tenant_id=self.user.tenant_id, space_id=space_id
+            )
+        else:
+            settings = await self.repository.get_organization(
+                tenant_id=self.user.tenant_id
+            )
+        result = await DataRetentionService(
+            self.repository.session
+        ).purge_due_flow_run_history_for_tenant(
+            tenant_id=self.user.tenant_id,
+            now=datetime.now(timezone.utc),
+            limit=limit,
+            dry_run=dry_run,
+            space_id=space_id,
+            flow_id=flow_id,
+        )
+        response = FlowRunHistoryPurgePublic(
+            dry_run=dry_run,
+            scope=settings.scope,
+            candidate_count=result.candidate_count,
+            purged_count=len(result.purged_run_ids),
+            purged_run_ids=list(result.purged_run_ids),
+            blocked=FlowRunHistoryPurgeBlockedPublic(
+                undelivered_audit=result.blocked.skipped_undelivered_audit,
+                unresolved_webhook=result.blocked.skipped_unresolved_webhook,
+                review_required=result.blocked.skipped_review_required,
+                not_terminal=result.blocked.skipped_not_terminal,
+            ),
+        )
+        if not dry_run:
+            await self.audit_service.log(
+                tenant_id=self.user.tenant_id,
+                user=self.user,
+                action=ActionType.FLOW_RUN_HISTORY_PURGED,
+                entity_type=self._entity_type(settings.scope),
+                entity_id=settings.scope_id,
+                description="Purged due Flow run history.",
+                metadata={
+                    "scope": settings.scope.value,
+                    "scope_id": str(settings.scope_id),
+                    "tenant_id": str(self.user.tenant_id),
+                    "space_id": str(space_id) if space_id is not None else None,
+                    "flow_id": str(flow_id) if flow_id is not None else None,
+                    "limit": limit,
+                    "purged_count": response.purged_count,
+                    "purged_run_ids": [str(run_id) for run_id in result.purged_run_ids],
+                    "blocked": response.blocked.model_dump(),
+                },
+                required=True,
+            )
+        return response
 
     async def _audit_change(self, change: FlowRunRetentionPolicyChange) -> None:
         if not change.changed:

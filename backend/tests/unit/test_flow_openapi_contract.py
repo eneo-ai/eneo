@@ -389,6 +389,9 @@ REQUIRED_PATHS: dict[str, set[str]] = {
     },
     "/api/v1/settings/flow-run-retention-policy/flows/{flow_id}": {"get", "put"},
     "/api/v1/settings/flow-run-retention-policy/flows/{flow_id}/review-queue": {"get"},
+    "/api/v1/settings/flow-run-retention-policy/purge": {"post"},
+    "/api/v1/settings/flow-run-retention-policy/spaces/{space_id}/purge": {"post"},
+    "/api/v1/settings/flow-run-retention-policy/flows/{flow_id}/purge": {"post"},
 }
 
 RUNTIME_PATH_FIELD_OPERATIONS = flow_runtime_path_field_operations()
@@ -554,6 +557,18 @@ NON_RUNTIME_REQUIRED_OPERATION_IDS: dict[tuple[str, str], str] = {
 REQUIRED_OPERATION_IDS: dict[tuple[str, str], str] = {
     **NON_RUNTIME_REQUIRED_OPERATION_IDS,
     **RUNTIME_REQUIRED_OPERATION_IDS,
+    (
+        "/api/v1/settings/flow-run-retention-policy/purge",
+        "post",
+    ): "purge_organization_flow_run_history",
+    (
+        "/api/v1/settings/flow-run-retention-policy/spaces/{space_id}/purge",
+        "post",
+    ): "purge_space_flow_run_history",
+    (
+        "/api/v1/settings/flow-run-retention-policy/flows/{flow_id}/purge",
+        "post",
+    ): "purge_flow_run_history",
 }
 
 
@@ -4078,3 +4093,41 @@ def test_openapi_flow_authoring_docs_explain_owner_override_semantics(
     assert "space owner" in update_description.lower()
     assert "tenant admin" in update_description.lower()
     assert "flow_owner_required" in forbidden_description
+
+
+def test_openapi_admin_history_purge_defaults_to_preview_and_is_bounded(
+    openapi_spec: dict,
+) -> None:
+    schemas = openapi_spec["components"]["schemas"]
+    request = schemas["FlowRunHistoryPurgeRequest"]
+    assert request["additionalProperties"] is False
+    assert request["properties"]["dry_run"]["default"] is True
+    assert request["properties"]["limit"]["default"] == 100
+    assert request["properties"]["limit"]["minimum"] == 1
+    assert request["properties"]["limit"]["maximum"] == 500
+    assert set(schemas["FlowRunHistoryPurgePublic"]["properties"]) == {
+        "dry_run",
+        "scope",
+        "candidate_count",
+        "purged_count",
+        "purged_run_ids",
+        "blocked",
+    }
+    assert set(schemas["FlowRunHistoryPurgeBlockedPublic"]["properties"]) == {
+        "undelivered_audit",
+        "unresolved_webhook",
+        "review_required",
+        "not_terminal",
+    }
+    root = "/api/v1/settings/flow-run-retention-policy"
+    for suffix in ("", "/spaces/{space_id}", "/flows/{flow_id}"):
+        operation = _get_operation(openapi_spec, f"{root}{suffix}/purge", "post")
+        assert {"200", "403", "422"} <= set(operation["responses"])
+        if suffix:
+            assert "404" in operation["responses"]
+        assert operation["responses"]["200"]["content"]["application/json"][
+            "schema"
+        ] == {"$ref": "#/components/schemas/FlowRunHistoryPurgePublic"}
+        assert operation["requestBody"]["content"]["application/json"]["schema"] == {
+            "$ref": "#/components/schemas/FlowRunHistoryPurgeRequest"
+        }

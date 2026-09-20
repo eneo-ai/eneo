@@ -242,6 +242,29 @@ FLOW_ROUTE_AUDIT_CONTRACTS: dict[str, FlowAuditContract] = {
             "replace_flow_run_retention_policy",
         )
     },
+    **{
+        operation_id: _required_transaction(
+            ActionType.FLOW_RUN_HISTORY_PURGED,
+            owner="FlowRunRetentionPolicyService",
+            metadata_keys=(
+                "scope",
+                "scope_id",
+                "tenant_id",
+                "space_id",
+                "flow_id",
+                "limit",
+                "purged_count",
+                "purged_run_ids",
+                "blocked",
+            ),
+            idempotency="one event per real bounded purge; dry runs emit no event",
+        )
+        for operation_id in (
+            "purge_organization_flow_run_history",
+            "purge_space_flow_run_history",
+            "purge_flow_run_history",
+        )
+    },
     "create_flow": _configurable(
         ActionType.FLOW_CREATED,
         owner="flow_authoring_router.create_flow",
@@ -682,3 +705,28 @@ def test_future_purge_receipt_contract_is_ready_for_the_purge_workflow() -> None
         "receipt_id",
         "outcome",
     }.issubset(purge.metadata_keys)
+
+
+def test_explicit_history_purge_requires_a_transaction_and_preview_emits_no_audit() -> (
+    None
+):
+    for operation_id in (
+        "purge_organization_flow_run_history",
+        "purge_space_flow_run_history",
+        "purge_flow_run_history",
+    ):
+        contract = FLOW_ROUTE_AUDIT_CONTRACTS[operation_id]
+        assert contract.assurance is AuditAssurance.REQUIRED_TRANSACTION
+        assert contract.actions == (ActionType.FLOW_RUN_HISTORY_PURGED,)
+        assert {
+            "scope",
+            "scope_id",
+            "tenant_id",
+            "space_id",
+            "flow_id",
+            "limit",
+            "purged_count",
+            "purged_run_ids",
+            "blocked",
+        } <= set(contract.metadata_keys)
+        assert "dry runs emit no event" in contract.idempotency
