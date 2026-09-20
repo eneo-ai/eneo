@@ -20059,7 +20059,7 @@ export interface components {
        * @description Total mapped items in this step attempt.
        */
       total_items?: number | null;
-      /** @description Transcription failure category from upstream protocol facts. Does not imply that a new run is safe to retry. */
+      /** @description Transcription failure category from local preparation or upstream protocol facts. Does not imply that a new run is safe to retry. */
       transcription_failure_kind?: components["schemas"]["TranscriptionFailureKind"] | null;
       /**
        * Transcription Queue Position

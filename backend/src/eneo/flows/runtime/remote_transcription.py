@@ -37,10 +37,17 @@ import httpx
 
 from eneo.files.audio import AudioMimeTypes, measure_duration
 from eneo.files.transcriber import TranscribedAudio
+from eneo.flows.domain.provider_call_evidence_gap import (
+    ProviderCallEvidenceGap,
+    ProviderCallPersistenceOutcome,
+)
 from eneo.flows.enums import FlowStepPhase
 from eneo.flows.flow_run_error import (
     TRANSCRIPTION_SERVICE_REASON_MAX_LENGTH,
     TranscriptionFailureKind,
+)
+from eneo.flows.infrastructure.flow_provider_call_recorder import (
+    ProviderCallEvidencePersistenceError,
 )
 from eneo.flows.runtime.run_cancellation import (
     FlowStepCancelledError,
@@ -789,10 +796,11 @@ class RemoteFlowTranscriber:
                 audio_digest=audio_digest,
                 observer=observer,
             )
-        finally:
+        except BaseException:
             if temp_file_path is not None:
                 with suppress(FileNotFoundError):
                     temp_file_path.unlink()
+            raise
 
         # The job is provider work in flight until the service answers.
         mark_provider_request_in_flight(True)
@@ -800,7 +808,16 @@ class RemoteFlowTranscriber:
         try:
             if observer is not None and call_id is not None:
                 acceptance = asyncio.create_task(observer.accepted(call_id, job_id))
-                await asyncio.shield(acceptance)
+                await self._await_job_receipt(
+                    acceptance,
+                    call_id=call_id,
+                    job_id=job_id,
+                    outcome="started",
+                    deadline=asyncio.get_running_loop().time()
+                    + self.client.result_timeout_seconds,
+                )
+            temp_file_path.unlink(missing_ok=True)
+            temp_file_path = None
             result = await self.client.wait_for_result(
                 job_id, run_cancelled=current_run_cancel_probe()
             )
@@ -810,14 +827,29 @@ class RemoteFlowTranscriber:
             # already delivered to this task cannot interrupt the request. The
             # stop is best effort, so the provider outcome remains unresolved.
             settle_provider_request(known=False)
-            try:
-                # Retain the known job id before terminalizing its receipt.
-                if acceptance is not None:
-                    await asyncio.shield(acceptance)
-            finally:
-                await asyncio.shield(self.client.cancel(job_id))
+            await asyncio.shield(self.client.cancel(job_id))
             if observer is not None and call_id is not None:
-                await observer.outcome_unknown(call_id, "request_cancelled")
+                cleanup_deadline = (
+                    asyncio.get_running_loop().time()
+                    + self.client.result_timeout_seconds
+                )
+                if acceptance is not None:
+                    await self._await_job_receipt(
+                        acceptance,
+                        call_id=call_id,
+                        job_id=job_id,
+                        outcome="started",
+                        deadline=cleanup_deadline,
+                    )
+                await self._await_job_receipt(
+                    asyncio.create_task(
+                        observer.outcome_unknown(call_id, "request_cancelled")
+                    ),
+                    call_id=call_id,
+                    job_id=job_id,
+                    outcome="request_cancelled",
+                    deadline=cleanup_deadline,
+                )
             raise
         except ProviderCallObserverError:
             settle_provider_request(known=False)
@@ -835,9 +867,16 @@ class RemoteFlowTranscriber:
             raise
         except Exception:
             settle_provider_request(known=False)
+            if temp_file_path is not None:
+                await self.client.cancel(job_id)
             if observer is not None and call_id is not None:
                 await observer.outcome_unknown(call_id, "provider_error")
             raise
+        finally:
+            if temp_file_path is not None:
+                # Preserve the accepted-job failure if local cleanup also fails.
+                with suppress(OSError):
+                    temp_file_path.unlink(missing_ok=True)
 
         settle_provider_request(known=True)
         if observer is not None and call_id is not None:
@@ -849,6 +888,38 @@ class RemoteFlowTranscriber:
                 ),
             )
         return result, audio_seconds
+
+    @staticmethod
+    async def _await_job_receipt(
+        receipt: asyncio.Task[None],
+        *,
+        call_id: UUID,
+        job_id: str,
+        outcome: ProviderCallPersistenceOutcome,
+        deadline: float,
+    ) -> None:
+        # Cancellation of the caller leaves the transaction alive for bounded
+        # cleanup; cancellation of a stalled transaction must not extend the wait.
+        done, _ = await asyncio.wait(
+            {receipt}, timeout=max(0, deadline - asyncio.get_running_loop().time())
+        )
+        if not done:
+            receipt.cancel()
+            receipt.add_done_callback(
+                lambda task: None if task.cancelled() else task.exception()
+            )
+            raise ProviderCallEvidencePersistenceError(
+                facts=ProviderCallEvidenceGap(
+                    call_id=call_id,
+                    provider_response_id=job_id,
+                    outcome=outcome,
+                )
+            )
+        try:
+            receipt.result()
+        except ProviderCallEvidencePersistenceError as exc:
+            exc.facts = exc.facts.model_copy(update={"provider_response_id": job_id})
+            raise
 
     async def _submit_job(
         self,

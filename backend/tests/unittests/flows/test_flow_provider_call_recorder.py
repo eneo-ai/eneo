@@ -77,25 +77,13 @@ def accepted_call_recorder(monkeypatch):
     return recorder, row, session, commits
 
 
-async def test_cancellation_during_acceptance_commits_job_identity(
-    accepted_call_recorder, monkeypatch
-):
+def _accepted_transcriber(recorder, row, monkeypatch, *, result_timeout=10):
     from eneo.flows.runtime import remote_transcription
 
-    recorder, row, session, commits = accepted_call_recorder
     monkeypatch.setattr(recorder, "started", AsyncMock(return_value=row.id))
     monkeypatch.setattr(
         remote_transcription, "measure_duration", AsyncMock(return_value=42.0)
     )
-    accepting = asyncio.Event()
-    release = asyncio.Event()
-
-    async def flush():
-        if row.status == "started":
-            accepting.set()
-            await release.wait()
-
-    session.flush.side_effect = flush
     requests = []
 
     def handle(request):
@@ -109,18 +97,108 @@ async def test_cancellation_during_acceptance_commits_job_identity(
             api_key="test",
             submit_timeout_seconds=10,
             poll_interval_seconds=0.001,
-            result_timeout_seconds=10,
+            result_timeout_seconds=result_timeout,
             transport=httpx.MockTransport(handle),
         )
     )
+    file = SimpleNamespace(
+        id=uuid4(), name="audio.mp3", mimetype="audio/mpeg", blob=b"audio"
+    )
+    return transcriber, file, requests
+
+
+@pytest.mark.parametrize("cancelled", [False, True])
+async def test_stalled_acceptance_is_bounded_and_preserves_gap_identity(
+    accepted_call_recorder, monkeypatch, cancelled
+):
+    from eneo.flows.flow_run_error import FlowRunErrorDetails
+
+    recorder, row, session, commits = accepted_call_recorder
+    transcriber, file, requests = _accepted_transcriber(
+        recorder, row, monkeypatch, result_timeout=0.02
+    )
+    accepting = asyncio.Event()
+    release = asyncio.Event()
+
+    async def flush():
+        if row.status == "started":
+            accepting.set()
+            await release.wait()
+
+    session.flush.side_effect = flush
     task = asyncio.create_task(
-        transcriber.transcribe(
-            SimpleNamespace(
-                id=uuid4(), name="audio.mp3", mimetype="audio/mpeg", blob=b"audio"
-            ),
-            SimpleNamespace(),
-            observer=recorder,
-        )
+        transcriber.transcribe(file, SimpleNamespace(), observer=recorder)
+    )
+    try:
+        await asyncio.wait_for(accepting.wait(), timeout=1)
+        if cancelled:
+            task.cancel()
+        done, _ = await asyncio.wait({task}, timeout=0.3)
+        assert task in done, "acceptance bookkeeping exceeded its cleanup deadline"
+        assert requests == ["POST", "DELETE"]
+        assert not release.is_set()
+        with pytest.raises(ProviderCallEvidencePersistenceError) as exc_info:
+            task.result()
+        details = FlowRunErrorDetails(provider_call_evidence_gap=exc_info.value.facts)
+        gap = details.model_dump(mode="json")["provider_call_evidence_gap"]
+        assert gap["call_id"] == str(row.id)
+        assert gap["provider_response_id"] == "job-1"
+        assert gap["outcome"] == "started"
+        assert commits == []
+    finally:
+        if not task.done():
+            task.cancel()
+        release.set()
+        try:
+            await task
+        except (asyncio.CancelledError, ProviderCallEvidencePersistenceError):
+            pass
+
+
+async def test_unlink_failure_after_acceptance_keeps_receipt_and_cancels_job(
+    accepted_call_recorder, monkeypatch
+):
+    from eneo.flows.runtime import remote_transcription
+
+    recorder, row, _, commits = accepted_call_recorder
+    transcriber, file, requests = _accepted_transcriber(recorder, row, monkeypatch)
+    paths = []
+    unlink = remote_transcription.Path.unlink
+
+    def fail_unlink(path, *args, **kwargs):
+        paths.append(path)
+        raise PermissionError("cannot remove temporary audio")
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(remote_transcription.Path, "unlink", fail_unlink)
+            with pytest.raises(PermissionError):
+                await transcriber.transcribe(file, SimpleNamespace(), observer=recorder)
+        assert row.provider_response_id == "job-1"
+        assert row.status == "outcome_unknown"
+        assert commits == ["job-1", "job-1"]
+        assert requests == ["POST", "DELETE"]
+    finally:
+        for path in set(paths):
+            unlink(path, missing_ok=True)
+
+
+async def test_cancellation_during_acceptance_commits_job_identity(
+    accepted_call_recorder, monkeypatch
+):
+    recorder, row, session, commits = accepted_call_recorder
+    transcriber, file, requests = _accepted_transcriber(recorder, row, monkeypatch)
+    accepting = asyncio.Event()
+    release = asyncio.Event()
+
+    async def flush():
+        if row.status == "started":
+            accepting.set()
+            await release.wait()
+
+    session.flush.side_effect = flush
+    task = asyncio.create_task(
+        transcriber.transcribe(file, SimpleNamespace(), observer=recorder)
     )
     try:
         await asyncio.wait_for(accepting.wait(), timeout=2)
