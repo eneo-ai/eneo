@@ -564,12 +564,7 @@ def _flow_worker_environment(*, settings: Settings, queue_name: str) -> dict[str
                 _FLOW_TASK_TIMEOUT_SECONDS - 1
             ),
             "FLOW_MAX_INLINE_TEXT_BYTES": str(settings.flow_max_inline_text_bytes),
-            "FLOW_LLM_REQUEST_TIMEOUT_SECONDS": str(
-                settings.flow_llm_request_timeout_seconds
-            ),
-            "FLOW_RUNTIME_STEP_TIMEOUT_HARD_CEILING_SECONDS": str(
-                settings.flow_runtime_step_timeout_hard_ceiling_seconds
-            ),
+            "FLOW_STEP_BUDGET_SECONDS": str(settings.flow_step_budget_seconds),
             "API_PREFIX": settings.api_prefix,
             "API_KEY_LENGTH": str(settings.api_key_length),
             "API_KEY_HEADER_NAME": settings.api_key_header_name,

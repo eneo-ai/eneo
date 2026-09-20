@@ -23,12 +23,14 @@ from eneo.flows.domain.runtime import (
     StepExecutionOutput,
 )
 from eneo.flows.domain.runtime_input import build_runtime_input_config
+from eneo.flows.enums import FlowStepPhase
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_provenance import (
     MappedProviderCallProvenance,
     sum_complete_token_counts,
 )
 from eneo.flows.runtime.step_deadline import (
+    record_step_phase,
     record_step_progress,
     require_step_budget,
 )
@@ -144,6 +146,11 @@ async def execute_per_source_reader(
         per_call_step,
         output_contract=_provider_prompt_output_contract(per_call_output_contract),
     )
+    record_step_progress(
+        f"0 of {len(file_ids)} sources completed",
+        completed_items=0,
+        total_items=len(file_ids),
+    )
     estimates: list[int] = []
     native_json_fallback_possible = False
     prepared_sources: list[tuple[UUID, PreparedAssistantStep]] = []
@@ -203,6 +210,7 @@ async def execute_per_source_reader(
         for source_number, (file_id, prepared_step) in enumerate(
             prepared_sources, start=1
         ):
+            record_step_phase(FlowStepPhase.MAPPED_ITEM)
             require_step_budget(
                 prepared_step.deps.deadline,
                 step_order=step.step_order,
@@ -225,9 +233,12 @@ async def execute_per_source_reader(
             mapped_evidence.admit(source_call.output.rag_metadata)
             per_source_calls.append(source_call)
             record_step_progress(
-                f"{len(per_source_calls)} of {len(prepared_sources)} sources completed"
+                f"{len(per_source_calls)} of {len(prepared_sources)} sources completed",
+                completed_items=len(per_source_calls),
+                total_items=len(prepared_sources),
             )
         per_source_calls = _with_deduped_source_labels(per_source_calls)
+        record_step_phase(FlowStepPhase.FINALIZATION)
         return StepExecutionResult(
             output=await _assemble_per_source_output(
                 step=step,

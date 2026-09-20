@@ -72,6 +72,7 @@ from eneo.flows.enums import (
     FlowOutputMode,
     FlowOutputType,
     FlowRunLifecycleSource,
+    FlowStepPhase,
     flow_output_mode_uses_completion_model,
 )
 from eneo.flows.flow_api_error_code import (
@@ -160,7 +161,11 @@ from eneo.flows.runtime.step_attempt_runtime import (
     build_typed_failure_plan,
     build_typed_failure_run_error_message,
 )
-from eneo.flows.runtime.step_deadline import StepDeadline, step_deadline_scope
+from eneo.flows.runtime.step_deadline import (
+    StepDeadline,
+    record_step_phase,
+    step_deadline_scope,
+)
 from eneo.flows.runtime.step_execution_result import StepExecutionResult
 from eneo.flows.runtime.step_execution_runtime import (
     FlowStepCancelledError,
@@ -1178,6 +1183,7 @@ class FlowRunExecutor:
                 # message can read the progress and in-flight facts the phases
                 # recorded in it.
                 with step_deadline_scope(deadline, step_order=step.step_order):
+                    record_step_phase(FlowStepPhase.STEP_EXECUTION)
                     try:
                         # Backstop for phases that cannot check the budget
                         # themselves (decoding, extraction, a stalled
@@ -1215,6 +1221,7 @@ class FlowRunExecutor:
                         if partial_evidence is not None:
                             setattr(typed, "rag_metadata", partial_evidence)
                         raise typed from exc
+                    record_step_phase(FlowStepPhase.FINALIZATION)
                     if deadline.expired():
                         # Finished inside the grace, after the budget: the
                         # budget is the contract, so the result is not accepted
@@ -1857,6 +1864,12 @@ class FlowRunExecutor:
             run_error_message=run_error_message,
             rejected_output=getattr(typed_exc, "rejected_output", None),
             max_inline_text_bytes=self.max_inline_text_bytes,
+            step_phase=getattr(typed_exc, "step_phase", None),
+            completed_items=getattr(typed_exc, "completed_items", None),
+            total_items=getattr(typed_exc, "total_items", None),
+            provider_work_may_have_completed=getattr(
+                typed_exc, "provider_work_may_have_completed", None
+            ),
         )
         await self._rollback()
         attempt_start = _attempt_start_for_step(state=state, step=step)
@@ -1926,6 +1939,7 @@ class FlowRunExecutor:
                 code=failure_plan.error_code,
                 message=failure_plan.run_error_message,
                 step_order=step.step_order,
+                details=failure_plan.run_error_details,
             ),
         )
         await self._commit()

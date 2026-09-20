@@ -77,3 +77,30 @@ async def test_timeout_message_reports_the_in_flight_request_from_scope(
 
     assert "provider may still complete" in str(error)
     assert "provider may still complete" not in str(quiet)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("completed", [0, 1])
+async def test_timeout_carries_observed_phase_and_mapped_progress(clock, completed):
+    from eneo.flows.enums import FlowStepPhase
+
+    deadline = StepDeadline.start(30)
+    with step_deadline_scope(deadline, step_order=2) as scope:
+        scope.phase = FlowStepPhase.PROVIDER_REQUEST
+        scope.completed_items = completed
+        scope.total_items = 3
+        mark_provider_request_in_flight(True)
+        clock["now"] = 131.0
+        error = deadline.timeout_error(step_order=2, phase="step execution")
+    assert error.step_phase is FlowStepPhase.PROVIDER_REQUEST
+    assert error.completed_items == completed
+    assert error.total_items == 3
+    assert error.provider_work_may_have_completed is True
+
+
+def test_timeout_does_not_infer_structured_phase_from_prose(clock):
+    error = StepDeadline.start(30).timeout_error(step_order=1, phase="provider request")
+    assert error.step_phase is None
+    assert error.completed_items is None
+    assert error.total_items is None
+    assert error.provider_work_may_have_completed is None

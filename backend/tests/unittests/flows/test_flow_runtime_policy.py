@@ -16,19 +16,17 @@ def _settings(
     *,
     llm_timeout: int = 600,
     task_timeout: int = 3600,
-    hard_ceiling: int = 3600,
 ) -> SimpleNamespace:
     return SimpleNamespace(
-        flow_llm_request_timeout_seconds=llm_timeout,
+        flow_step_budget_seconds=llm_timeout,
         task_execution_timeout_seconds=task_timeout,
-        flow_runtime_step_timeout_hard_ceiling_seconds=hard_ceiling,
     )
 
 
 def test_resolve_runtime_policy_uses_deployment_defaults() -> None:
     policy = resolve_flow_runtime_policy(
         None,
-        defaults=_settings(llm_timeout=900, task_timeout=2000, hard_ceiling=3000),
+        defaults=_settings(llm_timeout=900, task_timeout=2000),
     )
 
     assert policy.default_step_timeout_seconds == 900
@@ -116,7 +114,7 @@ def test_resolve_runtime_policy_ignores_unsupported_storage_version() -> None:
                 "max_step_timeout_seconds": 2400,
             }
         },
-        defaults=_settings(llm_timeout=700, task_timeout=1800, hard_ceiling=3600),
+        defaults=_settings(llm_timeout=700, task_timeout=1800),
     )
 
     assert policy.default_step_timeout_seconds == 700
@@ -126,7 +124,7 @@ def test_resolve_runtime_policy_ignores_unsupported_storage_version() -> None:
 def test_resolve_runtime_policy_ignores_version_only_storage_envelope() -> None:
     policy = resolve_flow_runtime_policy(
         {"runtime_policy": {"version": 1}},
-        defaults=_settings(llm_timeout=700, task_timeout=1800, hard_ceiling=3600),
+        defaults=_settings(llm_timeout=700, task_timeout=1800),
     )
 
     assert policy.default_step_timeout_seconds == 700
@@ -168,7 +166,7 @@ def test_apply_patch_rejects_max_above_hard_ceiling() -> None:
         apply_flow_runtime_policy_patch(
             {},
             max_step_timeout_seconds=4000,
-            defaults=_settings(task_timeout=3600, hard_ceiling=3600),
+            defaults=_settings(task_timeout=3600),
         )
 
     assert exc_info.value.code == "tenant_max_exceeds_env_hard_ceiling"
@@ -191,3 +189,30 @@ def test_step_timeout_uses_policy_default_and_rejects_override_above_max() -> No
         resolve_step_timeout_seconds(step_timeout_seconds=1500, policy=policy)
 
     assert exc_info.value.code == "flow_step_timeout_exceeds_tenant_max"
+
+
+def test_two_deployment_limits_define_the_effective_policy() -> None:
+    from eneo.main.config import Settings
+
+    assert Settings.model_fields["flow_step_budget_seconds"].default == 3600
+    assert Settings.model_fields["task_execution_timeout_seconds"].default == 14400
+    defaults = SimpleNamespace(
+        flow_step_budget_seconds=3600, task_execution_timeout_seconds=14400
+    )
+    policy = resolve_flow_runtime_policy(None, defaults=defaults)
+    assert policy.default_step_timeout_seconds == 3600
+    assert policy.hard_ceiling_seconds == 14340
+    assert (
+        resolve_step_timeout_seconds(step_timeout_seconds=7200, policy=policy) == 7200
+    )
+    with pytest.raises(BadRequestException, match="deployment hard ceiling"):
+        validate_flow_runtime_policy_object(
+            {"max_step_timeout_seconds": 14400}, defaults=defaults
+        )
+    defaults.flow_step_budget_seconds = 20000
+    assert (
+        resolve_flow_runtime_policy(
+            None, defaults=defaults
+        ).default_step_timeout_seconds
+        == 14340
+    )

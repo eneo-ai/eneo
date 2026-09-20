@@ -16,6 +16,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 
+from eneo.flows.enums import FlowStepPhase
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.main.exceptions import TypedIOValidationException
 
@@ -27,6 +28,23 @@ STEP_DEADLINE_BACKSTOP_GRACE_SECONDS = 3.0
 
 def _now() -> float:
     return asyncio.get_running_loop().time()
+
+
+class StepDeadlineExceeded(TypedIOValidationException):
+    def __init__(
+        self,
+        message: str,
+        *,
+        step_phase: FlowStepPhase | None,
+        completed_items: int | None,
+        total_items: int | None,
+        provider_work_may_have_completed: bool | None,
+    ) -> None:
+        super().__init__(message, code=FlowApiErrorCode.STEP_TIMEOUT.value)
+        self.step_phase = step_phase
+        self.completed_items = completed_items
+        self.total_items = total_items
+        self.provider_work_may_have_completed = provider_work_may_have_completed
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,7 +75,7 @@ class StepDeadline:
         phase: str,
         completed: str | None = None,
         provider_request_in_flight: bool | None = None,
-    ) -> TypedIOValidationException:
+    ) -> StepDeadlineExceeded:
         """The typed refusal for an exhausted budget, naming where it ran out.
 
         Facts the caller does not know (mapped progress, whether a provider
@@ -66,23 +84,27 @@ class StepDeadline:
         scope = _scope.get()
         if completed is None and scope is not None:
             completed = scope.progress
-        if provider_request_in_flight is None:
-            provider_request_in_flight = (
-                scope.provider_request_in_flight if scope is not None else False
-            )
+        provider_work_may_have_completed = (
+            bool(provider_request_in_flight or scope.provider_request_in_flight)
+            if scope is not None
+            else provider_request_in_flight
+        )
         completed_detail = f" ({completed})" if completed else ""
         disclosure = (
             " A provider request was in flight; the provider may still complete "
             "and bill it, so check the run before retrying."
-            if provider_request_in_flight
+            if provider_work_may_have_completed
             else ""
         )
-        return TypedIOValidationException(
+        return StepDeadlineExceeded(
             f"Step {step_order}: execution budget of {self.budget_seconds:g}s "
             f"exhausted during {phase} after {self.elapsed():.0f}s"
             f"{completed_detail}.{disclosure} Raise the step's timeout_seconds in "
             "the flow definition (up to the deployment ceiling) or reduce the input.",
-            code=FlowApiErrorCode.STEP_TIMEOUT.value,
+            step_phase=scope.phase if scope is not None else None,
+            completed_items=scope.completed_items if scope is not None else None,
+            total_items=scope.total_items if scope is not None else None,
+            provider_work_may_have_completed=provider_work_may_have_completed,
         )
 
 
@@ -100,6 +122,9 @@ class StepDeadlineScope:
     deadline: StepDeadline
     step_order: int
     progress: str | None = None
+    phase: FlowStepPhase | None = None
+    completed_items: int | None = None
+    total_items: int | None = None
     provider_request_in_flight: bool = False
 
 
@@ -124,11 +149,21 @@ def step_deadline_scope(
         _scope.reset(token)
 
 
-def record_step_progress(progress: str) -> None:
+def record_step_progress(
+    progress: str, *, completed_items: int | None = None, total_items: int | None = None
+) -> None:
     """What a mapped step has completed so far, for the timeout message."""
     scope = _scope.get()
     if scope is not None:
         scope.progress = progress
+        scope.completed_items = completed_items
+        scope.total_items = total_items
+
+
+def record_step_phase(phase: FlowStepPhase) -> None:
+    scope = _scope.get()
+    if scope is not None:
+        scope.phase = phase
 
 
 def mark_provider_request_in_flight(in_flight: bool) -> None:

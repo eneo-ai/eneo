@@ -20,6 +20,10 @@ from litellm.exceptions import (
     UnsupportedParamsError,
 )
 
+from eneo.flows.runtime.step_deadline import (
+    current_step_deadline_scope,
+    require_step_budget,
+)
 from eneo.main.exceptions import (
     APIKeyNotConfiguredException,
     BadRequestException,
@@ -88,6 +92,10 @@ def get_model_info(model: str) -> dict[str, object]:
 
 
 async def acompletion(**kwargs: Any) -> Any:
+    scope = current_step_deadline_scope()
+    if scope is not None:
+        require_step_budget(phase="provider request (not sent)")
+        kwargs["timeout"] = scope.deadline.remaining()
     call = cast(Callable[..., Any], getattr(litellm, "acompletion"))
     return await call(**kwargs)
 

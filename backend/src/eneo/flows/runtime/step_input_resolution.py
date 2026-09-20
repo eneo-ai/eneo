@@ -34,6 +34,7 @@ from eneo.flows.domain.step_output import (
     StepOutputMetadataError,
     interpret_step_text,
 )
+from eneo.flows.enums import FlowStepPhase
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_input_envelope import read_semantic_flow_input_payload
 from eneo.flows.flow_run_provenance import (
@@ -59,6 +60,7 @@ from eneo.flows.runtime.input_files import (
     describe_files_by_requested_ids,
     load_files_by_requested_ids,
 )
+from eneo.flows.runtime.step_deadline import record_step_phase
 from eneo.flows.runtime.transcription_runtime import (
     AudioRuntimeDeps,
     AudioRuntimeRequest,
@@ -230,10 +232,12 @@ async def resolve_step_input(
                 transcription_call_observer=deps.transcription_call_observer,
                 transcript_words_repo=deps.transcript_words_repo,
             )
+            record_step_phase(FlowStepPhase.TRANSCRIPTION)
             audio_resolution = await resolve_transcribe_and_attach_audio_input(
                 request=audio_request,
                 deps=audio_deps,
             )
+            record_step_phase(FlowStepPhase.INPUT_RESOLUTION)
             runtime_input_text = audio_resolution.text
             transcription_metadata = audio_resolution.transcription_metadata
             if audio_resolution.near_inline_limit_message is not None:

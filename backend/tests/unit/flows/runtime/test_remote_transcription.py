@@ -917,3 +917,63 @@ async def test_invalid_speaker_count_does_not_submit(bound):
             max_speakers=bound,
         )
     assert service.requests == []
+
+
+@pytest.mark.parametrize(
+    "duration,budget,succeeds",
+    [(2700, 3600, True), (5400, 3600, False), (5400, 7200, True)],
+)
+async def test_remote_poll_spends_the_attempt_budget(
+    monkeypatch, duration, budget, succeeds
+):
+    clock = {"now": 0.0}
+    monkeypatch.setattr(step_deadline_module, "_now", lambda: clock["now"])
+
+    async def advance(_seconds):
+        clock["now"] += duration
+
+    monkeypatch.setattr(remote_transcription.asyncio, "sleep", advance)
+    service = ScriptedService(
+        status_responses=[
+            status("running"),
+            status("completed"),
+            status("running"),
+            status("completed"),
+        ],
+        result_responses=[
+            httpx.Response(200, json=RESULT_BODY),
+            httpx.Response(200, json=RESULT_BODY),
+        ],
+    )
+    client = make_client(service, poll_timeout_seconds=10000)
+    for _ in range(2 if succeeds else 1):
+        with step_deadline_scope(StepDeadline.start(budget), step_order=1):
+            if succeeds:
+                result = await client.wait_for_result(JOB_ID)
+                assert result.text == RESULT_BODY["text"]
+            else:
+                with pytest.raises(TypedIOValidationException) as exc_info:
+                    await client.wait_for_result(JOB_ID)
+                assert exc_info.value.code == "flow_step_timeout"
+                assert exc_info.value.step_phase.value == "transcription"
+
+
+@pytest.mark.parametrize("configured,budget", [(1.0, 0.02), (0.02, 1.0)])
+async def test_remote_poll_bounds_a_stalled_request_by_the_smaller_budget(
+    monkeypatch, configured, budget
+):
+    service = ScriptedService()
+    client = make_client(service, poll_timeout_seconds=configured)
+
+    async def stalled(*args):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(client, "_poll_once", stalled)
+    with step_deadline_scope(StepDeadline.start(budget), step_order=1):
+        expected = (
+            TypedIOValidationException if budget < configured else OpenAIException
+        )
+        async with asyncio.timeout(0.3):
+            with pytest.raises(expected):
+                await client.wait_for_result(JOB_ID)
+    assert service.cancel_count == 1

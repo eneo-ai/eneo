@@ -11,9 +11,10 @@ from eneo.flows.domain.flow import (
     FlowStepResult,
 )
 from eneo.flows.domain.runtime import RuntimeStep
-from eneo.flows.enums import is_terminal_flow_run_status
+from eneo.flows.enums import FlowStepPhase, is_terminal_flow_run_status
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_error_taxonomy import FLOW_ERROR_TAXONOMY
+from eneo.flows.flow_run_error import FlowRunErrorDetails
 from eneo.flows.runtime.claim_resolution import StepClaimResolution
 from eneo.flows.runtime.step_execution_result import (
     StepExecutionResult,
@@ -50,6 +51,7 @@ class StepFailurePlan:
     failed_result: FlowStepResult
     run_error_message: str
     return_result: dict[str, Any]
+    run_error_details: FlowRunErrorDetails | None = None
 
 
 @dataclass(frozen=True)
@@ -116,8 +118,30 @@ def build_typed_failure_plan(
     rejected_output: str | None = None,
     max_inline_text_bytes: int | None = None,
     run_error_message: str | None = None,
+    step_phase: FlowStepPhase | None = None,
+    completed_items: int | None = None,
+    total_items: int | None = None,
+    provider_work_may_have_completed: bool | None = None,
 ) -> StepFailurePlan:
     public_error = run_error_message or error_message
+    details = (
+        FlowRunErrorDetails(
+            phase=step_phase,
+            completed_items=completed_items,
+            total_items=total_items,
+            provider_work_may_have_completed=provider_work_may_have_completed,
+        )
+        if any(
+            value is not None
+            for value in (
+                step_phase,
+                completed_items,
+                total_items,
+                provider_work_may_have_completed,
+            )
+        )
+        else None
+    )
     return StepFailurePlan(
         attempt_status=FlowStepAttemptStatus.FAILED,
         error_code=error_code,
@@ -132,6 +156,7 @@ def build_typed_failure_plan(
             max_inline_text_bytes=max_inline_text_bytes,
         ),
         run_error_message=public_error,
+        run_error_details=details,
         return_result={"status": "failed", "error": public_error},
     )
 

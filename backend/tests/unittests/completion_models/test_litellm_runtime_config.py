@@ -27,16 +27,7 @@ def test_config_suppresses_litellm_provider_list_stdout(
 def test_config_sets_request_timeout_and_disables_retries(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """LiteLLM-internal retries must not blow the asyncio.wait_for budget.
-
-    The flow runtime wraps `assistant.get_response` in asyncio.wait_for at
-    `flow_llm_request_timeout_seconds` (default 600s). LiteLLM's default
-    `num_retries` is 0 today but is not part of its public contract; we
-    pin it to 0 so a future bump cannot silently turn one slow call into
-    several. We also surface `request_timeout` so the underlying HTTP
-    layer aborts in line with the asyncio budget rather than relying on
-    LiteLLM's internal default.
-    """
+    """Process defaults must not add retries or leave requests unbounded."""
     monkeypatch.setattr(litellm, "num_retries", 5, raising=False)
     monkeypatch.setattr(litellm, "request_timeout", None, raising=False)
 
@@ -47,25 +38,40 @@ def test_config_sets_request_timeout_and_disables_retries(
     assert litellm.request_timeout > 0
 
 
-def test_config_default_request_timeout_tracks_flow_llm_setting(
+def test_config_default_request_timeout_tracks_step_budget_setting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Default request_timeout must follow the flow runtime setting.
-
-    Two timeouts that should always agree (the LiteLLM HTTP timeout and
-    the asyncio.wait_for budget) drifted in earlier versions because the
-    LiteLLM side was a hardcoded 600s while the flow side was
-    `settings.flow_llm_request_timeout_seconds`. The default arm of
-    `configure_litellm_runtime` must read the setting so an operator
-    bumping `FLOW_LLM_REQUEST_TIMEOUT_SECONDS` to e.g. 900 propagates
-    to LiteLLM without code changes.
-    """
+    """Requests outside an attempt inherit the deployment step budget."""
     from eneo.main.config import get_settings
 
     settings = get_settings()
-    monkeypatch.setattr(settings, "flow_llm_request_timeout_seconds", 777)
+    monkeypatch.setattr(settings, "flow_step_budget_seconds", 777)
     monkeypatch.setattr(litellm, "request_timeout", None, raising=False)
 
     configure_litellm_runtime(litellm)
 
     assert litellm.request_timeout == 777
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("remaining", [12.0, 7200.0])
+async def test_completion_request_uses_remaining_attempt_budget(monkeypatch, remaining):
+    from unittest.mock import AsyncMock
+
+    from eneo.flows.runtime import step_deadline
+    from eneo.model_providers.infrastructure import litellm_transport
+
+    monkeypatch.setattr(step_deadline, "_now", lambda: 100.0)
+    monkeypatch.setattr(litellm, "request_timeout", 3600.0)
+    request = AsyncMock(return_value=object())
+    monkeypatch.setattr(litellm, "acompletion", request)
+    deadline = step_deadline.StepDeadline.start(remaining)
+    with step_deadline.step_deadline_scope(deadline, step_order=1):
+        await litellm_transport.acompletion(model="test", messages=[])
+    assert request.await_args.kwargs["timeout"] == remaining
+    assert litellm.request_timeout == 3600.0
+
+    request.reset_mock()
+    await litellm_transport.acompletion(model="test", messages=[])
+    assert "timeout" not in request.await_args.kwargs
+    assert litellm.request_timeout == 3600.0

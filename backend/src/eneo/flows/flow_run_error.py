@@ -19,7 +19,7 @@ from pydantic import (
 )
 
 from eneo.flows.domain.provider_call_evidence_gap import ProviderCallEvidenceGap
-from eneo.flows.enums import FlowRunLifecycleSource
+from eneo.flows.enums import FlowRunLifecycleSource, FlowStepPhase
 from eneo.flows.flow_api_error_code import (
     FLOW_RUN_TERMINAL_ERROR_CODES,
     FLOW_RUN_TERMINAL_ERROR_RETRYABILITY,
@@ -198,6 +198,32 @@ class FlowRunErrorDetails(BaseModel):
             "persistence gap, not an unknown remote outcome."
         ),
     )
+
+    phase: FlowStepPhase | None = Field(
+        default=None, description="Observed execution phase when the budget expired."
+    )
+    completed_items: int | None = Field(
+        default=None,
+        ge=0,
+        description="Mapped items completed before the interruption.",
+    )
+    total_items: int | None = Field(
+        default=None, ge=0, description="Total mapped items in this step attempt."
+    )
+    provider_work_may_have_completed: bool | None = Field(
+        default=None,
+        description="Whether an interrupted provider request had an unknown outcome. This does not replace retryable.",
+    )
+
+    @model_validator(mode="after")
+    def _validate_progress(self) -> FlowRunErrorDetails:
+        if (
+            self.completed_items is not None
+            and self.total_items is not None
+            and self.completed_items > self.total_items
+        ):
+            raise ValueError("completed_items must not exceed total_items.")
+        return self
 
     @classmethod
     def from_bad_request_context(

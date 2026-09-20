@@ -380,3 +380,44 @@ def test_flow_run_error_from_source_truncates_unbounded_messages() -> None:
 def test_republish_refusal_is_not_retryable() -> None:
     code = FlowApiErrorCode("flow_assistant_snapshot_republish_required")
     assert not FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[code]
+
+
+@pytest.mark.parametrize("completed,total", [(0, 3), (1, 3), (3, 3)])
+def test_timeout_details_round_trip_with_observed_facts(completed, total):
+    details = FlowRunErrorDetails.model_validate(
+        {
+            "phase": "provider_request",
+            "completed_items": completed,
+            "total_items": total,
+            "provider_work_may_have_completed": True,
+        }
+    )
+    error = FlowRunError.from_source(
+        FlowRunLifecycleSource.EXECUTOR_FAILED,
+        code=FlowApiErrorCode.STEP_TIMEOUT,
+        message="Step budget exhausted.",
+        details=details,
+    )
+    persisted = dump_flow_run_error(error)
+    assert persisted["details"] == {
+        "phase": "provider_request",
+        "completed_items": completed,
+        "total_items": total,
+        "provider_work_may_have_completed": True,
+    }
+    assert parse_flow_run_error(persisted) == error
+    assert not error.retryable
+
+
+@pytest.mark.parametrize("completed,total", [(-1, 3), (4, 3), (0, -1)])
+def test_timeout_details_reject_invalid_progress(completed, total):
+    with pytest.raises(ValidationError):
+        FlowRunErrorDetails.model_validate(
+            {"completed_items": completed, "total_items": total}
+        )
+
+
+def test_old_timeout_error_has_no_unobserved_facts():
+    payload = {"code": "flow_step_timeout", "message": "Budget exhausted."}
+    assert parse_flow_run_error(payload).details is None
+    assert "details" not in dump_flow_run_error(parse_flow_run_error(payload))

@@ -3641,12 +3641,11 @@ async def test_per_item_map_refuses_the_next_item_once_the_step_budget_is_spent(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("timeout_item", [1, 2])
 async def test_per_item_map_timeout_inside_a_request_reports_completed_items(
-    user, monkeypatch
+    user, monkeypatch, timeout_item
 ):
-    """When the budget runs out while the second item's request is in
-    flight, the refusal still says one item completed and that a provider
-    request may still complete."""
+    """Interrupted mapped calls retain progress and unknown provider outcome."""
     from eneo.flows.runtime import step_deadline as step_deadline_module
 
     clock = {"now": 0.0}
@@ -3654,7 +3653,7 @@ async def test_per_item_map_timeout_inside_a_request_reports_completed_items(
     monkeypatch.setattr(
         step_deadline_module, "STEP_DEADLINE_BACKSTOP_GRACE_SECONDS", 30.0
     )
-    executor, _, _, _ = _build_executor(user)
+    executor, _, flow_run_repo, _ = _build_executor(user)
     executor._step_deadline_seconds = lambda step: 1.5
     documents = [
         {
@@ -3671,10 +3670,10 @@ async def test_per_item_map_timeout_inside_a_request_reports_completed_items(
     async def _respond(**_kwargs):
         calls["n"] += 1
         clock["now"] += 1.0
-        if calls["n"] == 2:
-            # The budget (fake clock) ran out while this request is pending;
-            # the wait loop's real timer expires before the sleep ends.
-            await asyncio.sleep(1.5)
+        if calls["n"] == timeout_item:
+            clock["now"] = 2.0
+            # Keep the request pending until the real wait timer cancels it.
+            await asyncio.Event().wait()
         return SimpleNamespace(
             completion='{"sections":[{"heading":"h","body":"b"}]}',
             total_token_count=3,
@@ -3736,9 +3735,57 @@ async def test_per_item_map_timeout_inside_a_request_reports_completed_items(
     assert exc_info.value.code == "flow_step_timeout"
     message = str(exc_info.value)
     assert "during provider request" in message
-    assert "1 of 3 items completed" in message
+    assert f"{timeout_item - 1} of 3 items completed" in message
     assert "may still complete" in message
-    assert assistant.get_response.await_count == 2
+    assert assistant.get_response.await_count == timeout_item
+    assert exc_info.value.step_phase.value == "provider_request"
+    assert exc_info.value.completed_items == timeout_item - 1
+    assert exc_info.value.total_items == 3
+    assert exc_info.value.provider_work_may_have_completed is True
+
+    from eneo.flows.api.flow_models import FlowRunPublic
+    from eneo.flows.flow_run_error import dump_flow_run_error
+    from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
+
+    executor._terminalize_run = AsyncMock()
+    claimed = previous.model_copy(update={"step_id": step.step_id, "step_order": 2})
+    await executor._handle_typed_step_failure(
+        run_id=run.id,
+        tenant_id=run.tenant_id,
+        step=step,
+        attempt_no=1,
+        claimed=claimed,
+        typed_exc=exc_info.value,
+        failed_input_payload=None,
+        state=state,
+    )
+    assert (
+        flow_run_repo.finish_attempt.await_args.kwargs["error_code"]
+        == "flow_step_timeout"
+    )
+    error = executor._terminalize_run.await_args.kwargs["error"]
+    persisted = dump_flow_run_error(error)
+    assert persisted["details"] == {
+        "phase": "provider_request",
+        "completed_items": timeout_item - 1,
+        "total_items": 3,
+        "provider_work_may_have_completed": True,
+    }
+    row = SimpleNamespace(
+        **{
+            **run.model_dump(exclude={"error"}),
+            "status": FlowRunStatus.FAILED,
+            "error_json": persisted,
+        }
+    )
+    session = AsyncMock()
+    session.scalar.return_value = row
+    reread = await FlowRunRepository(session=session).get(
+        run_id=run.id, tenant_id=run.tenant_id
+    )
+    public = FlowRunPublic.model_validate(reread, from_attributes=True)
+    assert public.error.details == error.details
+    assert public.error.retryable is False
 
 
 @pytest.mark.asyncio
@@ -4705,3 +4752,98 @@ def test_document_output_prompt_with_contract_requests_validated_json() -> None:
     assert "Return ONLY valid JSON" in prompt
     assert "Use plain text for JSON string values" in prompt
     assert "Follow this JSON Schema exactly" in prompt
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "duration,override,succeeds",
+    [(2700, None, True), (5400, None, False), (5400, 7200, True)],
+)
+async def test_each_step_spends_its_effective_budget_at_the_provider_boundary(
+    user, monkeypatch, duration, override, succeeds
+):
+    from dataclasses import replace
+
+    import litellm
+
+    from eneo.flows.runtime import step_deadline
+    from eneo.model_providers.infrastructure import litellm_transport
+
+    clock = {"now": 0.0}
+    monkeypatch.setattr(step_deadline, "_now", lambda: clock["now"])
+    executor, _, _, _ = _build_executor(user)
+    from eneo.flows.flow_runtime_policy import default_flow_runtime_policy
+
+    executor.runtime_policy = default_flow_runtime_policy(
+        defaults=SimpleNamespace(
+            flow_step_budget_seconds=3600,
+            task_execution_timeout_seconds=14400,
+        )
+    )
+    assistant = _mock_assistant_for_execute_step()
+    timeouts = []
+
+    async def provider(**kwargs):
+        timeouts.append(kwargs["timeout"])
+        clock["now"] += duration
+        return SimpleNamespace(completion="done", total_token_count=3)
+
+    async def respond(**kwargs):
+        return await litellm_transport.acompletion(model="test", messages=[])
+
+    monkeypatch.setattr(litellm, "acompletion", provider)
+    assistant.get_response = AsyncMock(side_effect=respond)
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={"text": "hello"})
+    state = RunExecutionState(
+        completed_by_order={},
+        prior_results=[],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    for order in range(1, 3 if succeeds else 2):
+        step = replace(_runtime_step(step_order=order), timeout_seconds=override)
+        if succeeds:
+            await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+        else:
+            with pytest.raises(TypedIOValidationException, match="execution budget"):
+                await executor._execute_step(
+                    step=step, run=run, state=state, attempt_no=1
+                )
+    assert timeouts == [float(override or 3600)] * (2 if succeeds else 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "phase", ["input_resolution", "retrieval", "provider_request", "finalization"]
+)
+async def test_backstop_preserves_the_observed_phase_and_provider_outcome(
+    user, monkeypatch, phase
+):
+    from eneo.flows.runtime import step_deadline
+
+    monkeypatch.setattr(step_deadline, "STEP_DEADLINE_BACKSTOP_GRACE_SECONDS", 0)
+    executor, _, _, _ = _build_executor(user)
+    executor._step_deadline_seconds = lambda step: 1.0
+    assistant = _mock_assistant_for_execute_step()
+    executor._load_assistant = AsyncMock(return_value=assistant)
+
+    async def stalled(*args, **kwargs):
+        await asyncio.Event().wait()
+
+    if phase == "input_resolution":
+        executor._load_assistant = AsyncMock(side_effect=stalled)
+    elif phase == "retrieval":
+        executor._retrieve_rag_chunks = AsyncMock(side_effect=stalled)
+    elif phase == "provider_request":
+        assistant.get_response = AsyncMock(side_effect=stalled)
+    else:
+        executor._process_typed_output = AsyncMock(side_effect=stalled)
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={"text": "hello"})
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=_runtime_step(), run=run, attempt_no=1)
+    assert exc_info.value.step_phase.value == phase
+    assert exc_info.value.provider_work_may_have_completed is (
+        phase == "provider_request"
+    )

@@ -21,6 +21,7 @@ from eneo.flows.domain.runtime import (
     StepInputValue,
 )
 from eneo.flows.domain.step_item_map import build_step_item_map_config
+from eneo.flows.enums import FlowStepPhase
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_provenance import (
     FlowResolvedInputJsonPath,
@@ -31,6 +32,7 @@ from eneo.flows.flow_run_provenance import (
 )
 from eneo.flows.input_binding_contract_rules import has_explicit_underlag
 from eneo.flows.runtime.step_deadline import (
+    record_step_phase,
     record_step_progress,
     require_step_budget,
 )
@@ -140,6 +142,11 @@ async def execute_per_item_map(
             code=FlowApiErrorCode.TYPED_IO_EMPTY_EXTRACTION.value,
         )
 
+    record_step_progress(
+        f"0 of {len(input_items)} items completed",
+        completed_items=0,
+        total_items=len(input_items),
+    )
     estimates: list[int] = []
     prepared_items: list[tuple[int, dict[str, Any], PreparedAssistantStep]] = []
     native_json_fallback_possible = False
@@ -207,6 +214,7 @@ async def execute_per_item_map(
         for item_number, input_item, prepared_step in prepared_items:
             # The next item is external work: refuse it, with what completed,
             # once the attempt's budget is spent.
+            record_step_phase(FlowStepPhase.MAPPED_ITEM)
             require_step_budget(
                 prepared_step.deps.deadline,
                 step_order=step.step_order,
@@ -227,9 +235,12 @@ async def execute_per_item_map(
             mapped_evidence.admit(item_call.output.rag_metadata)
             item_calls.append(item_call)
             record_step_progress(
-                f"{len(item_calls)} of {len(prepared_items)} items completed"
+                f"{len(item_calls)} of {len(prepared_items)} items completed",
+                completed_items=len(item_calls),
+                total_items=len(prepared_items),
             )
 
+        record_step_phase(FlowStepPhase.FINALIZATION)
         return StepExecutionResult(
             output=await _assemble_per_item_output(
                 step=step,

@@ -40,6 +40,7 @@ from tenacity import (
 
 from eneo.files.audio import AudioMimeTypes
 from eneo.files.transcriber import TranscribedAudio
+from eneo.flows.enums import FlowStepPhase
 from eneo.flows.runtime.run_cancellation import (
     FlowStepCancelledError,
     RunCancelProbe,
@@ -47,7 +48,9 @@ from eneo.flows.runtime.run_cancellation import (
 )
 from eneo.flows.runtime.step_deadline import (
     budget_refusal,
+    current_step_deadline_scope,
     mark_provider_request_in_flight,
+    record_step_phase,
     require_step_budget,
 )
 from eneo.main.exceptions import (
@@ -295,19 +298,57 @@ class RemoteTranscriptionClient:
         job is cancelled service-side and ``FlowStepCancelledError`` is raised
         so the executor records the step as cancelled rather than failed.
         """
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + self.poll_timeout_seconds
+        record_step_phase(FlowStepPhase.TRANSCRIPTION)
+        scope = current_step_deadline_scope()
+        remaining = scope.deadline.remaining() if scope is not None else None
+        poll_timeout = (
+            min(self.poll_timeout_seconds, remaining)
+            if remaining is not None
+            else self.poll_timeout_seconds
+        )
+        timeout = asyncio.timeout(poll_timeout)
+        try:
+            async with timeout:
+                return await self._poll_until_result(
+                    job_id, run_cancelled=run_cancelled
+                )
+        except TypedIOValidationException:
+            await self.cancel(job_id)
+            raise
+        except TimeoutError:
+            if not timeout.expired():
+                raise
+            await self.cancel(job_id)
+            if (
+                scope is not None
+                and remaining is not None
+                and remaining <= self.poll_timeout_seconds
+            ):
+                raise scope.deadline.timeout_error(
+                    step_order=scope.step_order,
+                    phase="transcription",
+                    provider_request_in_flight=True,
+                ) from None
+            raise OpenAIException(
+                litellm_transport.PROVIDER_ERROR_MESSAGE,
+                code="provider_error",
+                details={"reason": "provider_error", "retryable": True},
+            ) from None
+
+    async def _poll_until_result(
+        self, job_id: str, *, run_cancelled: RunCancelProbe | None
+    ) -> RemoteTranscriptionResult:
+        scope = current_step_deadline_scope()
         consecutive_failures = 0
         last_seen: RemoteJobStatus | None = None
 
         async with self._http_client(timeout=self.result_timeout_seconds) as client:
             while True:
-                if loop.time() >= deadline:
-                    await self.cancel(job_id, client=client)
-                    raise OpenAIException(
-                        litellm_transport.PROVIDER_ERROR_MESSAGE,
-                        code="provider_error",
-                        details={"reason": "provider_error", "retryable": True},
+                if scope is not None and scope.deadline.expired():
+                    raise scope.deadline.timeout_error(
+                        step_order=scope.step_order,
+                        phase="transcription",
+                        provider_request_in_flight=True,
                     )
                 if run_cancelled is not None and await _probe_quietly(
                     run_cancelled, job_id=job_id
@@ -349,6 +390,7 @@ class RemoteTranscriptionClient:
                 if seen.status == _TERMINAL_COMPLETED:
                     result = await self._fetch_result(client, job_id)
                     if result is not None:
+                        require_step_budget(phase="transcription result")
                         return result
                     # A raced 409: the status flapped; keep polling.
                 elif seen.status == _TERMINAL_FAILED:
@@ -678,6 +720,7 @@ class RemoteFlowTranscriber:
         observer: "ProviderCallObserver | None",
         max_speakers: int | None = None,
     ) -> tuple[RemoteTranscriptionResult, float]:
+        record_step_phase(FlowStepPhase.TRANSCRIPTION)
         mimetype: str = file.mimetype or ""
         if file.blob is None or not AudioMimeTypes.has_value(mimetype):
             raise ValueError("File needs to be an audio file")
@@ -802,6 +845,7 @@ class RemoteFlowTranscriber:
         """
         # Also guards every retry: no job is submitted after the step's
         # budget ran out.
+        record_step_phase(FlowStepPhase.TRANSCRIPTION)
         require_step_budget(phase="transcription job submission")
         call_id: UUID | None = None
         if observer is not None:

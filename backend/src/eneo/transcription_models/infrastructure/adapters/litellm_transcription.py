@@ -18,9 +18,12 @@ from eneo.files.audio import AudioFile
 
 # The flow attempt's budget, when a flow step is what runs this adapter; the
 # scope is ambient (like the run-cancel probe) so no caller threads it.
+from eneo.flows.enums import FlowStepPhase
 from eneo.flows.runtime.step_deadline import (
     budget_refusal,
+    current_step_deadline_scope,
     mark_provider_request_in_flight,
+    record_step_phase,
     require_step_budget,
 )
 from eneo.main.exceptions import (
@@ -164,6 +167,7 @@ class LiteLLMTranscriptionAdapter:
         absolute window of the whole file: the splitter emits whole blocks, so
         a chunk can be longer than its nominal five minutes.
         """
+        record_step_phase(FlowStepPhase.TRANSCRIPTION)
         text = ""
         five_minutes = 60 * 5
         segments: list[TranscriptSegment] = []
@@ -254,6 +258,7 @@ class LiteLLMTranscriptionAdapter:
 
         # Guards every retry: no receipt and no request once the step's
         # budget ran out.
+        record_step_phase(FlowStepPhase.TRANSCRIPTION)
         require_step_budget(phase="transcription request")
         call_id: UUID | None = None
         if observer is not None:
@@ -280,6 +285,9 @@ class LiteLLMTranscriptionAdapter:
             if observer is not None and call_id is not None:
                 await observer.rejected(call_id, "budget_exhausted")
             raise refusal
+        scope = current_step_deadline_scope()
+        if scope is not None:
+            kwargs["timeout"] = scope.deadline.remaining()
         mark_provider_request_in_flight(True)
         try:
             with open(file_path, "rb") as audio_file:

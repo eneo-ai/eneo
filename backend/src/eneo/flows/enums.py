@@ -7,6 +7,16 @@ from types import MappingProxyType
 from typing import Mapping
 
 
+class FlowStepPhase(StrEnum):
+    INPUT_RESOLUTION = "input_resolution"
+    TRANSCRIPTION = "transcription"
+    RETRIEVAL = "retrieval"
+    PROVIDER_REQUEST = "provider_request"
+    MAPPED_ITEM = "mapped_item"
+    FINALIZATION = "finalization"
+    STEP_EXECUTION = "step_execution"
+
+
 class FlowInputSource(str, Enum):
     FLOW_INPUT = "flow_input"
     PREVIOUS_STEP = "previous_step"

@@ -161,6 +161,7 @@ async def test_no_chunk_is_sent_after_the_step_budget_expires(
             await _adapter().get_text_from_file(audio)  # type: ignore[arg-type]
 
     assert exc_info.value.code == "flow_step_timeout"
+    assert exc_info.value.step_phase.value == "transcription"
     assert "Step 2: " in str(exc_info.value)
     assert "transcription chunk 3" in str(exc_info.value)
     assert transport.await_count == 2
@@ -189,6 +190,7 @@ async def test_receipt_written_as_the_budget_runs_out_is_settled_not_sent(
             await _adapter().get_text_from_file(audio, observer=observer)  # type: ignore[arg-type]
 
     assert exc_info.value.code == "flow_step_timeout"
+    assert exc_info.value.step_phase.value == "transcription"
     assert "(not sent)" in str(exc_info.value)
     assert transport.await_count == 0
     assert len(observer.started_requests) == 1
@@ -264,3 +266,17 @@ async def test_transcript_with_no_text_has_no_segments(monkeypatch, tmp_path) ->
     result = await _adapter().get_text_from_file(audio)  # type: ignore[arg-type]
 
     assert result.segments == ()
+
+
+async def test_transcription_request_uses_remaining_attempt_budget(
+    monkeypatch, tmp_path
+):
+    clock = {"now": 0.0}
+    monkeypatch.setattr(step_deadline_module, "_now", lambda: clock["now"])
+    transport = AsyncMock(return_value=SimpleNamespace(text="ord"))
+    monkeypatch.setattr(TRANSPORT, transport)
+    audio = _audio(tmp_path, [300.0], monkeypatch)
+    with step_deadline_scope(StepDeadline.start(7200), step_order=1):
+        clock["now"] = 100.0
+        await _adapter().get_text_from_file(audio)
+    assert transport.await_args.kwargs["timeout"] == 7100

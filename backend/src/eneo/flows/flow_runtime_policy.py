@@ -44,11 +44,10 @@ def flow_runtime_step_timeout_hard_ceiling_seconds(
     defaults: Any | None = None,
 ) -> int:
     settings = defaults or get_settings()
-    configured_ceiling = int(settings.flow_runtime_step_timeout_hard_ceiling_seconds)
     task_ceiling = (
         int(settings.task_execution_timeout_seconds) - STEP_TIMEOUT_TASK_BUFFER_SECONDS
     )
-    return max(1, min(configured_ceiling, task_ceiling))
+    return max(1, task_ceiling)
 
 
 def default_flow_runtime_policy(*, defaults: Any | None = None) -> FlowRuntimePolicy:
@@ -56,7 +55,7 @@ def default_flow_runtime_policy(*, defaults: Any | None = None) -> FlowRuntimePo
     hard_ceiling = flow_runtime_step_timeout_hard_ceiling_seconds(defaults=settings)
     return FlowRuntimePolicy(
         default_step_timeout_seconds=min(
-            int(settings.flow_llm_request_timeout_seconds),
+            int(settings.flow_step_budget_seconds),
             hard_ceiling,
         ),
         max_step_timeout_seconds=hard_ceiling,

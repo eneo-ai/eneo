@@ -254,6 +254,7 @@ async def test_registered_worker_leaves_time_to_persist_execution_timeout(
         worker_timeout
         - PlatformExecutionWorkerSettings.settings.task_execution_timeout_seconds
     )
+    assert terminalization_margin == 60
     # Shorten execution, preserving the registered outer/inner deadline gap.
     execution_timeout = 0.01
     monkeypatch.setattr(
@@ -309,3 +310,56 @@ async def test_execute_task_rejects_malformed_payload_without_terminalizing(
     assert result == {"status": "failed", "reason": "invalid_dispatch_payload"}
     terminalize.assert_not_awaited()
     execute.assert_not_awaited()
+
+
+async def test_reconciler_leaves_a_ninety_minute_run_within_four_hour_ceiling(
+    monkeypatch,
+):
+    from contextlib import asynccontextmanager
+    from datetime import datetime, timedelta, timezone
+
+    from eneo.flows.runtime import tasks
+
+    now = datetime.now(timezone.utc)
+    tenant_id = uuid4()
+    run = SimpleNamespace(
+        id=uuid4(), tenant_id=tenant_id, updated_at=now - timedelta(minutes=90)
+    )
+    repo = AsyncMock()
+
+    async def stale_runs(*, stale_before, **kwargs):
+        assert stale_before < now - timedelta(hours=4)
+        return [run] if run.updated_at < stale_before else []
+
+    repo.list_stale_running_runs.side_effect = stale_runs
+    terminalizer = AsyncMock()
+    tenant_repo = AsyncMock()
+    tenant_repo.get_all_tenant_ids.return_value = [tenant_id]
+    container = SimpleNamespace(
+        flow_run_repo=lambda: repo,
+        flow_provider_call_repo=lambda: AsyncMock(),
+        flow_run_terminalizer=lambda: terminalizer,
+        tenant_repo=lambda: tenant_repo,
+    )
+    session = MagicMock()
+
+    @asynccontextmanager
+    async def session_context():
+        yield session
+
+    monkeypatch.setattr(tasks.sessionmanager, "session", session_context)
+    monkeypatch.setattr(
+        tasks, "enable_autobegin_for_flow_task_session", lambda session: None
+    )
+    monkeypatch.setattr(tasks, "Container", lambda **kwargs: container)
+    monkeypatch.setattr(
+        tasks,
+        "get_settings",
+        lambda: SimpleNamespace(task_execution_timeout_seconds=14400),
+    )
+    assert await tasks._reconcile_stale_running_runs_all_tenants() == {
+        "status": "ok",
+        "reconciled": 0,
+    }
+    repo.list_stale_running_runs.assert_awaited_once()
+    terminalizer.terminalize_stale_running_run.assert_not_awaited()

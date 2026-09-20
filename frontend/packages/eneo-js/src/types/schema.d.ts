@@ -19887,13 +19887,30 @@ export interface components {
     };
     /** FlowRunErrorDetails */
     FlowRunErrorDetails: {
+      /**
+       * Completed Items
+       * @description Mapped items completed before the interruption.
+       */
+      completed_items?: number | null;
+      /** @description Observed execution phase when the budget expired. */
+      phase?: components["schemas"]["FlowStepPhase"] | null;
       /** @description Secret-free provider-call facts retained when the local evidence transaction failed after bounded retries. This describes a local persistence gap, not an unknown remote outcome. */
       provider_call_evidence_gap?: components["schemas"]["ProviderCallEvidenceGap"] | null;
+      /**
+       * Provider Work May Have Completed
+       * @description Whether an interrupted provider request had an unknown outcome. This does not replace retryable.
+       */
+      provider_work_may_have_completed?: boolean | null;
       /**
        * Step Description
        * @description Human label for the affected step, truncated to a small public diagnostic budget.
        */
       step_description?: string | null;
+      /**
+       * Total Items
+       * @description Total mapped items in this step attempt.
+       */
+      total_items?: number | null;
     };
     /**
      * FlowRunEvidenceExportResponse
@@ -23608,6 +23625,18 @@ export interface components {
        */
       severity?: "info" | "warning" | "error";
     };
+    /**
+     * FlowStepPhase
+     * @enum {string}
+     */
+    FlowStepPhase:
+      | "input_resolution"
+      | "transcription"
+      | "retrieval"
+      | "provider_request"
+      | "mapped_item"
+      | "finalization"
+      | "step_execution";
     /**
      * FlowStepPublic
      * @example {

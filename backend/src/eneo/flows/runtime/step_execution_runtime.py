@@ -44,7 +44,7 @@ from eneo.flows.domain.step_output import (
     StepOutputValidationException,
     build_text_overflow_metadata,
 )
-from eneo.flows.enums import FlowOutputMode, FlowOutputType
+from eneo.flows.enums import FlowOutputMode, FlowOutputType, FlowStepPhase
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_capability_manifest import is_citation_capable_step
 from eneo.flows.flow_run_provenance import (
@@ -74,6 +74,7 @@ from eneo.flows.runtime.run_cancellation import (
 from eneo.flows.runtime.step_deadline import (
     StepDeadline,
     mark_provider_request_in_flight,
+    record_step_phase,
 )
 from eneo.flows.runtime.step_input_resolution import (
     RUNTIME_INPUT_SOURCE_EMPTY_TEXT_DIAGNOSTIC_CODE,
@@ -577,6 +578,7 @@ async def call_assistant_with_timeout(
     if deadline is None:
         deadline = StepDeadline.start(deps.llm_request_timeout_seconds)
 
+    record_step_phase(FlowStepPhase.PROVIDER_REQUEST)
     if deadline.expired():
         if deps.logger is not None:
             deps.logger.warning(
@@ -644,9 +646,14 @@ async def call_assistant_with_timeout(
                     exc_info=True,
                 )
 
+    provider_outcome_unknown = False
+
     async def _cancel_llm_task_with_grace() -> None:
+        nonlocal provider_outcome_unknown
         if llm_task.done():
+            provider_outcome_unknown = provider_outcome_unknown or llm_task.cancelled()
             return
+        provider_outcome_unknown = True
         llm_task.cancel()
         grace_seconds = max(0.0, deps.llm_task_cancellation_grace_seconds)
         if grace_seconds <= 0:
@@ -815,7 +822,8 @@ async def call_assistant_with_timeout(
                 await cancel_watcher
         if state.in_flight_llm_task is llm_task:
             state.in_flight_llm_task = None
-            mark_provider_request_in_flight(False)
+            if not provider_outcome_unknown:
+                mark_provider_request_in_flight(False)
 
 
 def build_output_payload(output: StepExecutionOutput) -> dict[str, Any]:
@@ -1108,6 +1116,7 @@ async def prepare_step_execution(
     deps: StepExecutionRuntimeDeps,
     step_input_override: StepInputValue | None = None,
 ) -> PreparedStepExecution:
+    record_step_phase(FlowStepPhase.INPUT_RESOLUTION)
     context_results = [
         item
         for item in state.prior_results
@@ -1168,6 +1177,7 @@ async def prepare_step_execution(
     else:
         step_input = step_input_override
 
+    record_step_phase(FlowStepPhase.INPUT_RESOLUTION)
     input_payload_for_result.update(
         {
             "text": step_input.text,
@@ -1524,6 +1534,7 @@ async def _complete_step_execution(
         step=step,
         input_text=prepared.step_input.text,
     )
+    record_step_phase(FlowStepPhase.RETRIEVAL)
     info_blob_chunks, rag_metadata, rag_diagnostics = await deps.retrieve_rag_chunks(
         assistant=prepared.assistant,
         question=rag_query_derivation.query,
@@ -1716,6 +1727,7 @@ async def _complete_step_execution(
             response.total_token_count,
         )
 
+    record_step_phase(FlowStepPhase.FINALIZATION)
     completion = response.completion
     rejected_completion = RejectedCompletion(
         finish_reason=completion.finish_reason
