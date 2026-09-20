@@ -12,10 +12,10 @@ from eneo.completion_models.domain.completion_model import CompletionModel
 from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.domain.request_preflight import (
     DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS,
+    CompletionRequestPackage,
     CompletionRequestPreflight,
 )
 from eneo.completion_models.infrastructure.completion_service import (
-    CompletionContextPreview,
     CompletionService,
 )
 from eneo.files.file_models import File, FileType
@@ -479,30 +479,6 @@ class Assistant(Entity):
 
         return ""
 
-    async def preview_response_context(
-        self,
-        question: str,
-        completion_service: "CompletionService",
-        files: list[File] | None = None,
-        prompt_override: str | None = None,
-        version: int = 1,
-    ) -> CompletionContextPreview:
-        if self.completion_model is None:
-            raise NoModelSelectedException()
-        completion_model = cast("AICompletionModel", self.completion_model)
-        return await completion_service.preview_context(
-            model=completion_model,
-            text_input=question,
-            files=files or [],
-            prompt=(
-                prompt_override
-                if prompt_override is not None
-                else self.get_prompt_text()
-            ),
-            prompt_files=self.attachments,
-            version=version,
-        )
-
     async def preflight_response_context(
         self,
         question: str,
@@ -553,6 +529,9 @@ class Assistant(Entity):
         reject_context_over_limit: bool = False,
         provider_call_observer: "ProviderCallObserver | None" = None,
         provider_call_reason: "ProviderCallReason" = "initial",
+        useful_output_reserve_tokens: int | None = None,
+        prepared_request: CompletionRequestPackage | None = None,
+        file_reference_urls: dict[UUID, str] | None = None,
     ) -> "CompletionModelResponse":
         if self.completion_model is None:
             raise NoModelSelectedException()
@@ -579,6 +558,9 @@ class Assistant(Entity):
             reject_context_over_limit=reject_context_over_limit,
             provider_call_observer=provider_call_observer,
             provider_call_reason=provider_call_reason,
+            useful_output_reserve_tokens=useful_output_reserve_tokens,
+            prepared_request=prepared_request,
+            file_reference_urls=file_reference_urls,
             inline_file_text=self.inline_file_text,
         )
 

@@ -548,7 +548,7 @@ def _context_preflight(token_count: int) -> CompletionRequestPreflight:
         capacity=ModelCapacity(100_000, 4000),
         retrieval_included=False,
         preferred=package,
-        fallback=package,
+        fallback=replace(package),
     )
 
 
@@ -4418,7 +4418,7 @@ async def test_per_item_map_rejects_over_window_package_before_provider_dispatch
             capacity=ModelCapacity(356, 4000),
             preferred=refused_package,
             fallback=refused_package,
-            refusal="smallest_admissible_input_cannot_fit",
+            refusal="current_request_input_does_not_fit",
         )
     )
     executor._load_assistant = AsyncMock(return_value=assistant)

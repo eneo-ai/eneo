@@ -850,7 +850,8 @@ def _wire_payload(messages, tools, response_format):
     "package_case", ["plain", "attachments", "retrieved", "tools", "native", "fallback"]
 )
 @pytest.mark.usefixtures("declared_capabilities")
-async def test_service_preflight_measures_the_outgoing_package(package_case):
+@pytest.mark.parametrize("stream", [False, True])
+async def test_service_preflight_measures_the_outgoing_package(package_case, stream):
     from eneo.ai_models.completion_models.completion_model import ModelKwargs
     from eneo.authentication.principal_types import PrincipalType
     from eneo.files.file_models import File, FileType
@@ -972,7 +973,14 @@ async def test_service_preflight_measures_the_outgoing_package(package_case):
             request["model_kwargs"] = ModelKwargs()
         if proxy is not None:
             request["mcp_servers"] = [SimpleNamespace(is_enabled=True)]
-        await service.get_response(**request, useful_output_reserve_tokens=32)
+        request["prompt"] = "This later change must not replace the admitted package."
+        await service.get_response(
+            **request,
+            useful_output_reserve_tokens=32,
+            stream=stream,
+            prepared_request=package,
+            file_reference_urls=result.file_reference_urls,
+        )
     transport.assert_awaited_once()
     sent = transport.await_args.kwargs
     assert (
@@ -983,6 +991,7 @@ async def test_service_preflight_measures_the_outgoing_package(package_case):
     )
     assert measured[-1] == expected
     assert sent["max_tokens"] == package.output_cap_tokens
+    assert "prepared_request" not in sent
     if package_case == "attachments":
         assert b"Attachment marker." in expected
     if package_case == "retrieved":
@@ -993,21 +1002,24 @@ async def test_service_preflight_measures_the_outgoing_package(package_case):
 
 
 @pytest.mark.asyncio
-async def test_preflight_requires_the_dispatch_fallback_prompt_for_native_schema():
+@pytest.mark.usefixtures("declared_capabilities")
+async def test_preflight_preserves_response_format_without_a_fallback():
     from eneo.ai_models.completion_models.completion_model import ModelKwargs
 
     service, _, model = _preflight_service()
-    with pytest.raises(ValueError, match="fallback prompt"):
-        await service.preflight_request(
-            model=model,
-            text_input="hi",
-            model_kwargs=ModelKwargs(
-                response_format={
-                    "type": "json_schema",
-                    "json_schema": {"schema": {"type": "object"}},
-                }
-            ),
-        )
+    kwargs = ModelKwargs(response_format={"type": "json_object"})
+    result = await service.preflight_request(
+        model=model, text_input="hi", model_kwargs=kwargs
+    )
+    assert result.fallback is None
+    assert result.preferred.fits
+    assert result.preferred.response_format == {"type": "json_object"}
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(return_value=_response(response_id="stored-format", content="{}")),
+    ) as transport:
+        await service.get_response(model=model, text_input="hi", model_kwargs=kwargs)
+    assert transport.await_args.kwargs["response_format"] == {"type": "json_object"}
 
 
 @pytest.mark.asyncio
@@ -1016,8 +1028,8 @@ async def test_preflight_requires_the_dispatch_fallback_prompt_for_native_schema
     [
         (7969, 7968, 4000, None),
         (7968, 7969, 4000, None),
-        (7969, 7969, 4000, "smallest_admissible_input_cannot_fit"),
-        (100, 100, 31, "fixed_overhead_too_large"),
+        (7969, 7969, 4000, "current_request_input_does_not_fit"),
+        (100, 100, 31, "current_request_output_capacity_insufficient"),
     ],
 )
 @pytest.mark.usefixtures("declared_capabilities")
@@ -1028,6 +1040,7 @@ async def test_preflight_fit_matches_dispatch_for_each_package(
     from eneo.completion_models.infrastructure.context_builder import (
         ContextWindowExceededError,
     )
+    from eneo.main.exceptions import ProviderRejectedRequestException
     from eneo.tokens.token_utils import TokenCount, TokenCountSource
 
     service, _, model = _preflight_service()
@@ -1080,7 +1093,12 @@ async def test_preflight_fit_matches_dispatch_for_each_package(
                 assert transport.await_args.kwargs["max_tokens"] == 32
             else:
                 prior_calls = transport.await_count
-                with pytest.raises(ContextWindowExceededError):
+                expected_error = (
+                    ProviderRejectedRequestException
+                    if output_limit < 32
+                    else ContextWindowExceededError
+                )
+                with pytest.raises(expected_error) as error:
                     await service.get_response(
                         model=model,
                         text_input="Source",
@@ -1089,6 +1107,76 @@ async def test_preflight_fit_matches_dispatch_for_each_package(
                         useful_output_reserve_tokens=32,
                     )
                 assert transport.await_count == prior_calls
+                if output_limit < 32:
+                    assert "output capacity" in str(error.value)
+                    assert error.value.details == {
+                        "reason": "current_request_output_capacity_insufficient",
+                        "input_reserve_tokens": 100,
+                        "useful_output_reserve_tokens": 32,
+                        "max_input_tokens": 8000,
+                        "max_output_tokens": 31,
+                        "retryable": False,
+                    }
+
+
+@pytest.mark.asyncio
+async def test_dispatch_reports_an_insufficient_caller_output_cap():
+    from eneo.completion_models.domain.request_preflight import (
+        CompletionOutputCapacityError,
+    )
+    from eneo.tokens.token_utils import TokenCount, TokenCountSource
+
+    adapter = _make_adapter()
+    adapter._prepare_kwargs = lambda model_kwargs, **kwargs: kwargs
+    with (
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter.measure_provider_input_reserve",
+            return_value=TokenCount(tokens=100, source=TokenCountSource.LITELLM),
+        ),
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+            AsyncMock(),
+        ) as transport,
+        pytest.raises(CompletionOutputCapacityError) as error,
+    ):
+        await adapter.get_response(
+            context=SimpleNamespace(),
+            model_kwargs=None,
+            max_tokens=31,
+            useful_output_reserve_tokens=32,
+        )
+    transport.assert_not_awaited()
+    assert error.value.details["input_reserve_tokens"] == 100
+    assert error.value.details["max_output_tokens"] == 31
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("declared_capabilities")
+async def test_prepared_package_carries_its_explicit_output_requirement():
+    from eneo.tokens.token_utils import TokenCount, TokenCountSource
+
+    service, _, model = _preflight_service()
+    model.max_input_tokens = 132
+    with (
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter.measure_provider_input_reserve",
+            return_value=TokenCount(tokens=100, source=TokenCountSource.LITELLM),
+        ),
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+            AsyncMock(return_value=_response(response_id="reserve", content="done")),
+        ) as transport,
+    ):
+        result = await service.preflight_request(
+            model=model,
+            text_input="Source",
+            useful_output_reserve_tokens=32,
+        )
+        assert result.selected_package is not None
+        await service.get_response(
+            model=model, text_input="Source", prepared_request=result.selected_package
+        )
+    assert transport.await_args.kwargs["max_tokens"] == 32
 
 
 @pytest.mark.asyncio

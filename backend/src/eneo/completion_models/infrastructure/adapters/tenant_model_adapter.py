@@ -6,6 +6,7 @@ import binascii
 import json
 import re
 import uuid
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import (
     TYPE_CHECKING,
@@ -43,6 +44,7 @@ from eneo.completion_models.domain.model_capacity import (
 )
 from eneo.completion_models.domain.request_preflight import (
     DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS,
+    CompletionOutputCapacityError,
     CompletionRequestPackage,
 )
 from eneo.completion_models.domain.skill_activation import (
@@ -1253,6 +1255,23 @@ class TenantModelAdapter(CompletionModelAdapter):
             capacity = ModelCapacity(
                 self.model.token_limit, self.model.max_output_tokens
             )
+            input_fits = capacity.admits_input(
+                package.input_reserve.tokens + package.useful_output_reserve_tokens,
+                safety_tokens=0,
+            )
+            if input_fits or not capacity.output_reserve_fits(
+                package.useful_output_reserve_tokens
+            ):
+                raise CompletionOutputCapacityError(
+                    input_reserve_tokens=package.input_reserve.tokens,
+                    useful_output_reserve_tokens=package.useful_output_reserve_tokens,
+                    max_input_tokens=capacity.require_input_tokens(),
+                    max_output_tokens=(
+                        package.output_cap_tokens
+                        if input_fits and package.output_cap_tokens is not None
+                        else capacity.require_output_tokens()
+                    ),
+                )
             raise ContextWindowExceededError(
                 estimated_tokens=package.input_reserve.tokens,
                 max_tokens=capacity.input_allowance(
@@ -1278,6 +1297,27 @@ class TenantModelAdapter(CompletionModelAdapter):
         prepared[cap_parameter] = package.output_cap_tokens
         return prepared
 
+    def _use_prepared_request(
+        self,
+        provider_input: ProviderInput,
+        kwargs: dict[str, Any],
+        prepared_request: CompletionRequestPackage | None,
+    ) -> ProviderInput:
+        if prepared_request is not None:
+            # Tool rounds may append messages and replace the tool catalogue.
+            provider_input = ProviderInput(
+                messages=deepcopy(prepared_request.messages),
+                tools=deepcopy(prepared_request.tools),
+                built_in_tools=provider_input.built_in_tools,
+            )
+            kwargs.pop("response_format", None)
+            if prepared_request.response_format is not None:
+                kwargs["response_format"] = deepcopy(prepared_request.response_format)
+            kwargs.pop("tools", None)
+        if provider_input.tools:
+            kwargs["tools"] = provider_input.tools
+        return provider_input
+
     @override
     async def get_response(
         self,
@@ -1287,7 +1327,8 @@ class TenantModelAdapter(CompletionModelAdapter):
         skill_runtime: SkillActivationRuntime | None = None,
         provider_call_observer: ProviderCallObserver | None = None,
         provider_call_reason: ProviderCallReason = "initial",
-        useful_output_reserve_tokens: int = DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS,
+        useful_output_reserve_tokens: int | None = None,
+        prepared_request: CompletionRequestPackage | None = None,
         **kwargs: Any,
     ) -> Completion:
         """
@@ -1315,9 +1356,10 @@ class TenantModelAdapter(CompletionModelAdapter):
             mcp_proxy=mcp_proxy,
             skill_runtime=skill_runtime,
         )
+        provider_input = self._use_prepared_request(
+            provider_input, litellm_kwargs, prepared_request
+        )
         messages = provider_input.messages
-        if provider_input.tools:
-            litellm_kwargs["tools"] = provider_input.tools
 
         # Check which params will be dropped and log effective params
         dropped = self._get_dropped_params(litellm_kwargs)
@@ -1327,6 +1369,17 @@ class TenantModelAdapter(CompletionModelAdapter):
             f"with {len(messages)} messages, params: {self._get_effective_params(litellm_kwargs, dropped)}"
         )
 
+        if useful_output_reserve_tokens is None:
+            useful_output_reserve_tokens = (
+                prepared_request.useful_output_reserve_tokens
+                if prepared_request is not None
+                else DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS
+            )
+        elif prepared_request is not None:
+            useful_output_reserve_tokens = max(
+                useful_output_reserve_tokens,
+                prepared_request.useful_output_reserve_tokens,
+            )
         litellm_kwargs["useful_output_reserve_tokens"] = useful_output_reserve_tokens
         completed_provider_calls = 0
         try:
@@ -1809,7 +1862,8 @@ class TenantModelAdapter(CompletionModelAdapter):
         model_kwargs: ModelKwargs | dict[str, Any] | None = None,
         mcp_proxy: "MCPProxySession | None" = None,
         skill_runtime: SkillActivationRuntime | None = None,
-        useful_output_reserve_tokens: int = DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS,
+        useful_output_reserve_tokens: int | None = None,
+        prepared_request: CompletionRequestPackage | None = None,
         **kwargs: Any,
     ) -> PreparedModelStream:
         """
@@ -1838,9 +1892,10 @@ class TenantModelAdapter(CompletionModelAdapter):
             mcp_proxy=mcp_proxy,
             skill_runtime=skill_runtime,
         )
+        provider_input = self._use_prepared_request(
+            provider_input, litellm_kwargs, prepared_request
+        )
         messages = provider_input.messages
-        if provider_input.tools:
-            litellm_kwargs["tools"] = provider_input.tools
 
         # Check which params will be dropped and log effective params
         dropped = self._get_dropped_params(litellm_kwargs)
@@ -1850,6 +1905,17 @@ class TenantModelAdapter(CompletionModelAdapter):
             f"with {len(messages)} messages, params: {self._get_effective_params(litellm_kwargs, dropped)}"
         )
 
+        if useful_output_reserve_tokens is None:
+            useful_output_reserve_tokens = (
+                prepared_request.useful_output_reserve_tokens
+                if prepared_request is not None
+                else DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS
+            )
+        elif prepared_request is not None:
+            useful_output_reserve_tokens = max(
+                useful_output_reserve_tokens,
+                prepared_request.useful_output_reserve_tokens,
+            )
         litellm_kwargs["useful_output_reserve_tokens"] = useful_output_reserve_tokens
         try:
             # Request usage info on the final chunk when the provider returns it.

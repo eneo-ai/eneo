@@ -303,13 +303,6 @@ def completion_evidence_field_domain(
     return None
 
 
-@dataclass(frozen=True, slots=True)
-class CompletionContextPreview:
-    token_count: int
-    max_input_tokens: int
-    model_route: str
-
-
 @dataclass(frozen=True)
 class SkillActivationPreflightAdapterLoad:
     adapters: dict[UUID, "CompletionModelAdapter"]
@@ -667,41 +660,6 @@ class CompletionService:
 
                 yield chunk
 
-    async def preview_context(
-        self,
-        *,
-        model: CompletionModel,
-        text_input: str,
-        files: list[File] | None = None,
-        prompt: str = "",
-        prompt_files: list[File] | None = None,
-        version: int = 1,
-    ) -> CompletionContextPreview:
-        """Package and count one request without provider, embedding, or MCP I/O."""
-        model_adapter = await self._get_adapter(model)
-        model_route = model_adapter.get_model_route()
-        max_tokens = model_adapter.get_token_limit_of_model()
-        context = self.context_builder.build_context(
-            input_str=text_input,
-            max_tokens=max_tokens,
-            model_name=model_route,
-            files=files or [],
-            prompt=prompt,
-            session=None,
-            info_blob_chunks=[],
-            prompt_files=prompt_files or [],
-            transcription_inputs=[],
-            version=version,
-            vision=model.vision,
-            extra_tool_dicts=None,
-            reject_over_limit=True,
-        )
-        return CompletionContextPreview(
-            token_count=context.token_count,
-            max_input_tokens=max_tokens,
-            model_route=model_route,
-        )
-
     async def preflight_request(
         self,
         *,
@@ -727,12 +685,6 @@ class CompletionService:
         The caller owns capability fallback instructions and any frozen MCP
         catalogue. This method neither retrieves knowledge nor discovers tools.
         """
-        if (
-            model_kwargs is not None
-            and model_kwargs.response_format is not None
-            and capability_fallback_prompt is None
-        ):
-            raise ValueError("A response format requires the dispatch fallback prompt.")
         adapter = await self._get_adapter(model)
         model_route = adapter.get_model_route()
         capacity = ModelCapacity(model.max_input_tokens, model.max_output_tokens)
@@ -790,22 +742,20 @@ class CompletionService:
             )
 
         preferred = package(prompt, model_kwargs)
-        fallback = preferred
-        if model_kwargs is not None and model_kwargs.response_format is not None:
+        fallback = None
+        if capability_fallback_prompt is not None:
             fallback = package(
-                capability_fallback_prompt
-                if capability_fallback_prompt is not None
-                else prompt,
-                model_kwargs.model_copy(update={"response_format": None}),
+                capability_fallback_prompt,
+                model_kwargs.model_copy(update={"response_format": None})
+                if model_kwargs is not None
+                else None,
             )
         refusal = None
-        if not preferred.fits and not fallback.fits:
+        if not preferred.fits and (fallback is None or not fallback.fits):
             refusal = (
-                "fixed_overhead_too_large"
+                "current_request_output_capacity_insufficient"
                 if not capacity.output_reserve_fits(useful_output_reserve_tokens)
-                or max_tokens <= useful_output_reserve_tokens
-                or not (text_input or files or info_blob_chunks or transcription_inputs)
-                else "smallest_admissible_input_cannot_fit"
+                else "current_request_input_does_not_fit"
             )
         return CompletionRequestPreflight(
             model_route=model_route,
@@ -813,6 +763,7 @@ class CompletionService:
             retrieval_included=info_blob_chunks is not None,
             preferred=preferred,
             fallback=fallback,
+            file_reference_urls=file_reference_urls,
             refusal=refusal,
         )
 
@@ -839,6 +790,8 @@ class CompletionService:
         inline_file_text: bool = True,
         knowledge_catalog: str = "",
         useful_output_reserve_tokens: int | None = None,
+        prepared_request: CompletionRequestPackage | None = None,
+        file_reference_urls: dict[UUID, str] | None = None,
     ) -> CompletionModelResponse:
         if files is None:
             files = []
@@ -892,7 +845,8 @@ class CompletionService:
             for question in (session.questions if session else [])
             for file in [*question.files, *question.generated_files]
         ]
-        file_reference_urls = self._build_file_reference_urls(files + history_files)
+        if file_reference_urls is None:
+            file_reference_urls = self._build_file_reference_urls(files + history_files)
         # The previous turn's generated files are minted for the first time on
         # this turn, so they are "new" exactly once, here.
         newly_referenced = [
@@ -972,6 +926,8 @@ class CompletionService:
             raise
 
         dispatch_options: dict[str, Any] = {}
+        if prepared_request is not None:
+            dispatch_options["prepared_request"] = prepared_request
         if useful_output_reserve_tokens is not None:
             dispatch_options["useful_output_reserve_tokens"] = (
                 useful_output_reserve_tokens

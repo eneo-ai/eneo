@@ -242,9 +242,6 @@ async def test_preview_preflights_both_dispatch_prompts_without_retrieval():
         fallback=package,
     )
     assistant.preflight_response_context = AsyncMock(return_value=evidence)
-    assistant.preview_response_context = AsyncMock(
-        side_effect=AssertionError("old preview")
-    )
     prepared = PreparedStepExecution(
         assistant=assistant,
         step_input=StepInputValue(text="Source"),
@@ -271,10 +268,269 @@ async def test_preview_preflights_both_dispatch_prompts_without_retrieval():
     assert passed["capability_fallback_prompt"] == expected.capability_fallback_prompt
     assert passed["model_kwargs"] == expected.preferred_model_kwargs
     assert passed.get("info_blob_chunks") is None
-    assert passed["useful_output_reserve_tokens"] > DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS
+    assert (
+        passed["useful_output_reserve_tokens"] == DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS
+    )
     assert evidence.retrieval_included is False
     deps.retrieve_rag_chunks.assert_not_awaited()
-    assistant.preview_response_context.assert_not_awaited()
+
+
+@pytest.fixture
+def preflight_dispatch(monkeypatch):
+    from eneo.assistants.assistant import Assistant
+    from eneo.completion_models.infrastructure.context_builder import ContextBuilder
+
+    model = _completion_model(supported_model_kwargs=SupportedModelKwargs())
+    model.name = "gpt-4o-mini"
+    model.litellm_model_name = "openai/gpt-4o-mini"
+    adapter = object.__new__(TenantModelAdapter)
+    adapter.model = model
+    adapter.provider_type = "openai"
+    adapter.litellm_model = model.litellm_model_name
+    adapter.credential_resolver = SimpleNamespace(
+        provider_type="openai",
+        get_api_key=lambda **kwargs: "test-key",
+        get_credential_field=lambda **kwargs: None,
+    )
+    service = CompletionService(context_builder=ContextBuilder())
+    service._get_adapter = AsyncMock(return_value=adapter)
+    assistant = Assistant(
+        id=None,
+        user=MagicMock(),
+        name="preflight",
+        space_id=uuid4(),
+        prompt=None,
+        completion_model=model,
+        completion_model_kwargs=ModelKwargs(),
+        logging_enabled=False,
+        websites=[],
+        collections=[],
+        attachments=[],
+        published=False,
+    )
+    schema = {
+        "type": "object",
+        "properties": {"answer": {"type": "boolean"}},
+        "required": ["answer"],
+        "additionalProperties": False,
+    }
+    step = _step(output_type="json", output_contract=schema)
+    prepared = PreparedStepExecution(
+        assistant=assistant,
+        step_input=StepInputValue(text="Source"),
+        effective_prompt=_prompt_for_output_format(
+            output_type="json", output_contract=schema, prompt="Explain."
+        ),
+        input_payload_for_result={},
+        contract_validation=None,
+        diagnostics=[],
+        llm_files=[],
+    )
+    deps = StepExecutionRuntimeDeps(
+        max_inline_text_bytes=1_000_000,
+        variable_resolver=FlowVariableResolver(),
+        completion_service=service,
+        load_assistant=AsyncMock(),
+        resolve_step_input=AsyncMock(),
+        retrieve_rag_chunks=AsyncMock(return_value=([], None, [])),
+        process_typed_output=AsyncMock(return_value=_typed_output_result()),
+        apply_output_cap=AsyncMock(return_value=('{"answer":true}', [])),
+    )
+    transport = AsyncMock(
+        return_value=SimpleNamespace(
+            id="preflight",
+            usage=None,
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content='{"answer":true}', tool_calls=None),
+                    finish_reason="stop",
+                )
+            ],
+        )
+    )
+    monkeypatch.setattr(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        transport,
+    )
+    return SimpleNamespace(
+        model=model,
+        adapter=adapter,
+        service=service,
+        assistant=assistant,
+        prepared=prepared,
+        deps=deps,
+        step=step,
+        state=_state(),
+        transport=transport,
+    )
+
+
+@pytest.mark.asyncio
+async def test_preview_selected_fallback_is_the_package_dispatched(
+    preflight_dispatch, monkeypatch
+):
+    from eneo.tokens.token_utils import TokenCount, TokenCountSource
+
+    h = preflight_dispatch
+    h.model.max_input_tokens = 351
+    h.model.max_output_tokens = 512
+
+    def measure(messages, tools, route, *, response_format=None):
+        return TokenCount(
+            tokens=96 if response_format else 83, source=TokenCountSource.LITELLM
+        )
+
+    monkeypatch.setattr(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter.measure_provider_input_reserve",
+        measure,
+    )
+    await preview_step_execution_context(
+        step=h.step, state=h.state, prepared=h.prepared, deps=h.deps
+    )
+    await complete_step_execution(
+        step=h.step, run=_run(), state=h.state, prepared=h.prepared, deps=h.deps
+    )
+
+    h.transport.assert_awaited_once()
+    sent = h.transport.await_args.kwargs
+    assert sent.get("response_format") is None
+    assert sent["max_tokens"] == 268
+    selected = h.prepared.completion_call.selected_package
+    assert json.dumps(sent["messages"]) == json.dumps(selected.messages)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cached_rejection", [False, True])
+async def test_preview_reuses_measured_fallback_after_capability_rejection(
+    preflight_dispatch, cached_rejection
+):
+    h = preflight_dispatch
+    await preview_step_execution_context(
+        step=h.step, state=h.state, prepared=h.prepared, deps=h.deps
+    )
+    fallback = h.prepared.completion_call.preflight.fallback
+    if cached_rejection:
+        h.state.json_mode_supported[json_mode_cache_key(h.assistant)] = False
+    else:
+        h.transport.side_effect = [
+            ProviderCapabilityRejectedException(
+                "Response format unsupported",
+                capability="response_format",
+                retry_without_capability_safe=True,
+                code="provider_capability_rejected",
+            ),
+            h.transport.return_value,
+        ]
+    await complete_step_execution(
+        step=h.step, run=_run(), state=h.state, prepared=h.prepared, deps=h.deps
+    )
+    sent = h.transport.await_args.kwargs
+    assert sent.get("response_format") is None
+    assert json.dumps(sent["messages"]) == json.dumps(fallback.messages)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("retrieved", [False, True])
+async def test_preview_reuses_signed_file_references_at_dispatch(
+    preflight_dispatch, retrieved
+):
+    from eneo.files.file_models import File, FileType
+    from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
+
+    h = preflight_dispatch
+    now = datetime.now(timezone.utc)
+    file = File(
+        id=uuid4(),
+        created_at=now,
+        updated_at=now,
+        name="source.txt",
+        checksum="test",
+        size=20,
+        file_type=FileType.TEXT,
+        text="Attachment marker.",
+        owner_type=PrincipalType.USER,
+        tenant_id=uuid4(),
+    )
+    h.prepared.llm_files = [file]
+    original = f"https://files.example/{file.id}?signature=first"
+    changed = f"https://files.example/{file.id}?signature=later-and-longer"
+    h.service._build_file_reference_urls = MagicMock(
+        side_effect=[{file.id: original}, {file.id: changed}]
+    )
+    await preview_step_execution_context(
+        step=h.step, state=h.state, prepared=h.prepared, deps=h.deps
+    )
+    if retrieved:
+        h.deps.retrieve_rag_chunks.return_value = (
+            [
+                InfoBlobChunkInDBWithScore(
+                    id=uuid4(),
+                    created_at=now,
+                    updated_at=now,
+                    text="Late retrieval marker.",
+                    chunk_no=0,
+                    info_blob_id=uuid4(),
+                    tenant_id=uuid4(),
+                    info_blob_title="Retrieved source",
+                    score=0.9,
+                )
+            ],
+            None,
+            [],
+        )
+    await complete_step_execution(
+        step=h.step, run=_run(), state=h.state, prepared=h.prepared, deps=h.deps
+    )
+
+    h.service._build_file_reference_urls.assert_called_once()
+    sent = h.transport.await_args.kwargs
+    assert original in json.dumps(sent["messages"])
+    if retrieved:
+        assert "Late retrieval marker." in json.dumps(sent["messages"])
+        assert h.prepared.completion_call.preflight.retrieval_included is False
+    else:
+        assert json.dumps(sent["messages"]) == json.dumps(
+            h.prepared.completion_call.selected_package.messages
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("preview", [False, True])
+@pytest.mark.parametrize("capacity", [398, 399])
+async def test_flow_explicit_output_reserve_reaches_dispatch(
+    preflight_dispatch, monkeypatch, preview, capacity
+):
+    from eneo.tokens.token_utils import TokenCount, TokenCountSource
+
+    h = preflight_dispatch
+    h.model.max_input_tokens = 399
+    monkeypatch.setattr(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter.measure_provider_input_reserve",
+        lambda *args, **kwargs: TokenCount(tokens=100, source=TokenCountSource.LITELLM),
+    )
+    h.prepared.completion_call = build_prepared_completion_call(
+        step=h.step,
+        state=h.state,
+        prepared=h.prepared,
+        useful_output_reserve_tokens=299,
+    )
+    if preview:
+        await preview_step_execution_context(
+            step=h.step, state=h.state, prepared=h.prepared, deps=h.deps
+        )
+    h.model.max_input_tokens = capacity
+    if capacity == 399:
+        await complete_step_execution(
+            step=h.step, run=_run(), state=h.state, prepared=h.prepared, deps=h.deps
+        )
+        assert h.transport.await_args.kwargs["max_tokens"] == 299
+    else:
+        with pytest.raises(TypedIOValidationException) as exc:
+            await complete_step_execution(
+                step=h.step, run=_run(), state=h.state, prepared=h.prepared, deps=h.deps
+            )
+        assert exc.value.code == "typed_io_input_exceeds_model_window"
+        h.transport.assert_not_awaited()
 
 
 @pytest.mark.asyncio

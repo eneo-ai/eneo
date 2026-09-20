@@ -20,10 +20,10 @@ from eneo.ai_models.completion_models.completion_model import (
 from eneo.completion_models.domain.model_kwargs_capabilities import SupportedModelKwargs
 from eneo.completion_models.domain.request_preflight import (
     DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS,
+    CompletionRequestPackage,
     CompletionRequestPreflight,
 )
 from eneo.completion_models.infrastructure.completion_service import (
-    CompletionContextPreview,
     CompletionService,
 )
 from eneo.files.file_models import File
@@ -87,15 +87,6 @@ class RuntimeAssistantProtocol(Protocol):
     def has_knowledge(self) -> bool: ...
     def get_prompt_text(self) -> str: ...
 
-    async def preview_response_context(
-        self,
-        question: str,
-        completion_service: CompletionService,
-        files: list[File] | None = None,
-        prompt_override: str | None = None,
-        version: int = 1,
-    ) -> CompletionContextPreview: ...
-
     async def preflight_response_context(
         self,
         question: str,
@@ -126,4 +117,7 @@ class RuntimeAssistantProtocol(Protocol):
         reject_context_over_limit: bool = False,
         provider_call_observer: ProviderCallObserver | None = None,
         provider_call_reason: ProviderCallReason = "initial",
+        useful_output_reserve_tokens: int | None = None,
+        prepared_request: CompletionRequestPackage | None = None,
+        file_reference_urls: dict[UUID, str] | None = None,
     ) -> CompletionModelResponse: ...

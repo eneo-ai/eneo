@@ -5,7 +5,7 @@ import contextlib
 import hashlib
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Awaitable, Final, Literal, Protocol, Sequence, cast
 from uuid import UUID
 
@@ -13,6 +13,9 @@ from eneo.ai_models.completion_models.completion_model import Completion, ModelK
 from eneo.completion_models.domain.model_capacity import UnknownModelCapacityError
 from eneo.completion_models.domain.request_preflight import (
     DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS,
+    CompletionOutputCapacityError,
+    CompletionRequestPackage,
+    CompletionRequestPreflight,
 )
 from eneo.completion_models.infrastructure.completion_service import CompletionService
 from eneo.completion_models.infrastructure.context_builder import (
@@ -328,6 +331,9 @@ class PreparedCompletionCall:
     assistant_context_version: int
     preferred_native_json_format: bool
     capability_fallback_prompt: str | None = None
+    useful_output_reserve_tokens: int = DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS
+    preflight: CompletionRequestPreflight | None = None
+    selected_package: CompletionRequestPackage | None = None
 
 
 @dataclass(frozen=True)
@@ -575,6 +581,9 @@ async def call_assistant_with_timeout(
     version: int,
     provider_call_reason: ProviderCallReason,
     deadline: StepDeadline | None = None,
+    useful_output_reserve_tokens: int = DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS,
+    prepared_request: CompletionRequestPackage | None = None,
+    file_reference_urls: dict[UUID, str] | None = None,
 ) -> Any:
     # The request spends from the attempt's shared budget: the json-mode
     # fallback retry, every mapped item and the phases before and after the
@@ -632,6 +641,9 @@ async def call_assistant_with_timeout(
             reject_context_over_limit=True,
             provider_call_observer=provider_call_observer,
             provider_call_reason=provider_call_reason,
+            useful_output_reserve_tokens=useful_output_reserve_tokens,
+            prepared_request=prepared_request,
+            file_reference_urls=file_reference_urls,
         )
     )
     state.in_flight_llm_task = llm_task
@@ -1345,6 +1357,7 @@ def build_prepared_completion_call(
     step: RuntimeStep,
     state: RunExecutionState,
     prepared: PreparedStepExecution,
+    useful_output_reserve_tokens: int = DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS,
 ) -> PreparedCompletionCall:
     """Freeze the provider-call inputs that activation persists and dispatch uses."""
 
@@ -1419,6 +1432,7 @@ def build_prepared_completion_call(
             2 if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR else 1
         ),
         preferred_native_json_format=native_json_format_attempted,
+        useful_output_reserve_tokens=useful_output_reserve_tokens,
     )
 
 
@@ -1451,13 +1465,7 @@ async def preview_step_execution_context(
         prepared=prepared,
     )
     prompt_override = completion_call.effective_prompt
-    # Structured replies reserve at least the serialized contract's token size.
-    useful_output_reserve_tokens = max(
-        DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS,
-        count_tokens(json.dumps(step.output_contract, ensure_ascii=False))
-        if step.output_contract is not None
-        else 0,
-    )
+    useful_output_reserve_tokens = completion_call.useful_output_reserve_tokens
     try:
         preview = await prepared.assistant.preflight_response_context(
             question=completion_call.question,
@@ -1470,10 +1478,18 @@ async def preview_step_execution_context(
             useful_output_reserve_tokens=useful_output_reserve_tokens,
         )
         if preview.refusal is not None:
+            if preview.refusal == "current_request_output_capacity_insufficient":
+                raise CompletionOutputCapacityError(
+                    input_reserve_tokens=min(
+                        package.input_reserve.tokens for package in preview.packages
+                    ),
+                    useful_output_reserve_tokens=useful_output_reserve_tokens,
+                    max_input_tokens=preview.capacity.require_input_tokens(),
+                    max_output_tokens=preview.capacity.require_output_tokens(),
+                )
             raise ContextWindowExceededError(
                 estimated_tokens=min(
-                    preview.preferred.input_reserve.tokens,
-                    preview.fallback.input_reserve.tokens,
+                    package.input_reserve.tokens for package in preview.packages
                 ),
                 max_tokens=preview.capacity.input_allowance(
                     output_reserve_tokens=useful_output_reserve_tokens,
@@ -1492,11 +1508,12 @@ async def preview_step_execution_context(
             deps=deps,
             effective_prompt=prompt_override,
         ) from exc
-    return max(
-        package.input_reserve.tokens
-        for package in (preview.preferred, preview.fallback)
-        if package.fits
+    selected_package = preview.selected_package
+    assert selected_package is not None
+    prepared.completion_call = replace(
+        completion_call, preflight=preview, selected_package=selected_package
     )
+    return selected_package.input_reserve.tokens
 
 
 async def complete_step_execution(
@@ -1659,6 +1676,17 @@ async def _complete_step_execution(
             )
         )
     )
+    if completion_call.preflight is not None:
+        use_capability_fallback = use_capability_fallback or (
+            completion_call.selected_package is completion_call.preflight.fallback
+            and completion_call.selected_package
+            is not completion_call.preflight.preferred
+        )
+        if use_capability_fallback:
+            completion_call = replace(
+                completion_call, selected_package=completion_call.preflight.fallback
+            )
+            prepared.completion_call = completion_call
     if use_capability_fallback:
         selected_model_kwargs = completion_call.capability_fallback_model_kwargs
         selected_model_parameters = completion_call.capability_fallback_model_parameters
@@ -1707,6 +1735,16 @@ async def _complete_step_execution(
                 "capability_fallback" if use_capability_fallback else "initial"
             ),
             deadline=step_deadline,
+            useful_output_reserve_tokens=completion_call.useful_output_reserve_tokens,
+            # Retrieval arrives after preview until the runtime freezes it.
+            prepared_request=completion_call.selected_package
+            if not info_blob_chunks
+            else None,
+            file_reference_urls=(
+                completion_call.preflight.file_reference_urls
+                if completion_call.preflight is not None
+                else None
+            ),
         )
     except ProviderCapabilityRejectedException as model_exc:
         if (
@@ -1733,6 +1771,11 @@ async def _complete_step_execution(
                 completion_call.capability_fallback_prompt
                 or completion_call.effective_prompt
             )
+            if completion_call.preflight is not None:
+                completion_call = replace(
+                    completion_call, selected_package=completion_call.preflight.fallback
+                )
+                prepared.completion_call = completion_call
             response = await call_assistant_with_timeout(
                 step=step,
                 run=run,
@@ -1746,6 +1789,17 @@ async def _complete_step_execution(
                 version=completion_call.assistant_context_version,
                 provider_call_reason="capability_fallback",
                 deadline=step_deadline,
+                useful_output_reserve_tokens=completion_call.useful_output_reserve_tokens,
+                prepared_request=(
+                    completion_call.preflight.fallback
+                    if completion_call.preflight is not None and not info_blob_chunks
+                    else None
+                ),
+                file_reference_urls=(
+                    completion_call.preflight.file_reference_urls
+                    if completion_call.preflight is not None
+                    else None
+                ),
             )
         else:
             raise
