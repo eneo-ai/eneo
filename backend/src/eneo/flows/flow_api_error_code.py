@@ -69,6 +69,7 @@ class FlowApiErrorCode(str, Enum):
     DEFINITION_FLOW_ID_INVALID = "flow_definition_flow_id_invalid"
     DEFINITION_STEPS_INVALID = "flow_definition_steps_invalid"
     DEFINITION_NO_EXECUTABLE_STEPS = "flow_definition_no_executable_steps"
+    ASSISTANT_SNAPSHOT_REPUBLISH_REQUIRED = "flow_assistant_snapshot_republish_required"
     ASSISTANT_SNAPSHOT_DRIFT = "flow_assistant_snapshot_drift"
     INPUT_CONTRACT_INAPPLICABLE = "flow_input_contract_inapplicable"
     STEP_MISSING = "flow_step_missing"
@@ -268,6 +269,7 @@ FLOW_RUN_TERMINAL_ERROR_CODES: frozenset[FlowApiErrorCode] = frozenset(
         FlowApiErrorCode.DEFINITION_FLOW_ID_INVALID,
         FlowApiErrorCode.DEFINITION_STEPS_INVALID,
         FlowApiErrorCode.DEFINITION_NO_EXECUTABLE_STEPS,
+        FlowApiErrorCode.ASSISTANT_SNAPSHOT_REPUBLISH_REQUIRED,
         FlowApiErrorCode.ASSISTANT_SNAPSHOT_DRIFT,
         FlowApiErrorCode.ASSISTANT_SNAPSHOT_RESOURCE_INVALID,
         FlowApiErrorCode.INPUT_CONTRACT_INAPPLICABLE,

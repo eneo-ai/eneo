@@ -165,6 +165,7 @@ async def _create_scenario(
         from types import SimpleNamespace
 
         from eneo.ai_models.completion_models.completion_model import ModelKwargs
+        from eneo.assistants.assistant import AssistantOrigin
         from eneo.completion_models.domain.model_kwargs_capabilities import (
             SupportedModelKwargs,
         )
@@ -174,7 +175,7 @@ async def _create_scenario(
 
         runtime_assistant = SimpleNamespace(
             id=assistant.id,
-            origin="flow_managed",
+            origin=AssistantOrigin.FLOW_MANAGED,
             get_prompt_text=lambda: "Summarize the reviewed text.",
             has_knowledge=lambda: False,
             completion_model=SimpleNamespace(
@@ -183,6 +184,8 @@ async def _create_scenario(
                 nickname="gpt-4o-mini",
                 litellm_model_name="gpt-4o-mini",
                 provider_type="openai",
+                provider_id=model.provider_id,
+                get_model_route=lambda: "openai/gpt-4o-mini",
                 supported_model_kwargs=SupportedModelKwargs(),
             ),
             completion_model_kwargs=ModelKwargs(temperature=0.2),
@@ -190,6 +193,8 @@ async def _create_scenario(
             websites=[],
             integration_knowledge_list=[],
             mcp_servers=[],
+            attachments=[],
+            inline_file_text=False,
         )
         assistant_snapshot = build_assistant_execution_snapshot(
             assistant=runtime_assistant
@@ -1511,7 +1516,18 @@ async def test_regeneration_snapshots_saved_review_and_keeps_original_output(
             transcriber=transcriber,
             max_inline_text_bytes=1024 * 1024,
         )
-        executor._load_assistant = AsyncMock(return_value=scenario.runtime_assistant)
+
+        async def _load_assistant(assistant_id, state, *, snapshot=None):
+            if state.flow_space is None:
+                flow = await executor.flow_repo.get(
+                    flow_id=scenario.flow_id, tenant_id=admin_user.tenant_id
+                )
+                state.flow_space = await executor.space_repo.get_execution_space(
+                    flow.space_id
+                )
+            return scenario.runtime_assistant
+
+        executor._load_assistant = AsyncMock(side_effect=_load_assistant)
         outcome = await executor.execute(
             run_id=child_id,
             flow_id=scenario.flow_id,

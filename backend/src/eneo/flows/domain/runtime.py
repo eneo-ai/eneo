@@ -60,10 +60,6 @@ def _empty_integration_knowledge_cache() -> dict[UUID, IntegrationKnowledge]:
     return {}
 
 
-def _empty_space_cache() -> dict[UUID, Space]:
-    return {}
-
-
 def _empty_mapped_admission_by_step() -> dict[UUID, FlowStepAttemptMappedAdmission]:
     return {}
 
@@ -73,11 +69,9 @@ def _empty_activated_attempts() -> set[tuple[UUID, int]]:
 
 
 def assistant_cache_key(
-    assistant_id: UUID, snapshot: dict[str, Any] | None
-) -> UUID | tuple[UUID, str]:
-    if snapshot is not None and snapshot.get("schema_version") == 2:
-        return assistant_id, str(snapshot["execution_surface_hash"])
-    return assistant_id
+    assistant_id: UUID, snapshot: dict[str, Any]
+) -> tuple[UUID, str]:
+    return assistant_id, str(snapshot["execution_surface_hash"])
 
 
 @dataclass(frozen=True)
@@ -168,7 +162,7 @@ class StepInputValue:
 class RunExecutionState:
     completed_by_order: dict[int, FlowStepResult]
     prior_results: list[FlowStepResult]
-    assistant_cache: dict[UUID | tuple[UUID, str], Any]
+    assistant_cache: dict[tuple[UUID, str], Any]
     json_mode_supported: dict[str, bool]
     file_cache: dict[frozenset[UUID], list[File]]
     json_schema_rejected_models: set[str] = field(default_factory=set[str])
@@ -181,7 +175,6 @@ class RunExecutionState:
     integration_knowledge_cache: dict[UUID, IntegrationKnowledge] = field(
         default_factory=_empty_integration_knowledge_cache
     )
-    space_cache: dict[UUID, Space] = field(default_factory=_empty_space_cache)
     attempt_start_by_step: dict[UUID, FlowStepAttemptStart] = field(
         default_factory=_empty_attempt_start_by_step
     )

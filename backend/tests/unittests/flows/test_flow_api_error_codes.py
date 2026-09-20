@@ -539,3 +539,9 @@ def test_checked_in_sdk_flow_api_error_codes_match_backend_source(
     assert generated_dts.read_text(encoding="utf-8") == SDK_ERROR_CODES_DTS.read_text(
         encoding="utf-8"
     )
+
+
+def test_republish_refusal_is_terminal_but_not_typed_io() -> None:
+    code = FlowApiErrorCode("flow_assistant_snapshot_republish_required")
+    assert code in FLOW_RUN_TERMINAL_ERROR_CODES
+    assert code not in FLOW_TYPED_IO_ERROR_CODES

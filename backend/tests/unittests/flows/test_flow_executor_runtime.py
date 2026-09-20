@@ -14,6 +14,7 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 import eneo.flows.runtime.flow_runtime_trace as flow_runtime_trace
+from eneo.assistants.assistant import AssistantOrigin
 from eneo.authentication.auth_models import (
     ApiKeyPermission,
     ApiKeyScopeType,
@@ -53,6 +54,7 @@ from eneo.flows.domain.review_checkpoint_exceptions import (
     FlowReviewMultipleActiveCheckpointsError,
     FlowReviewOpenBlockedByActiveCheckpointError,
 )
+from eneo.flows.domain.runtime import assistant_cache_key
 from eneo.flows.domain.runtime_invariant_exceptions import FlowRuntimeInvariantError
 from eneo.flows.domain.step_output import (
     OUTPUT_TEXT_OVERFLOW_KEY,
@@ -115,6 +117,15 @@ _DEFAULT_SNAPSHOT_MODEL_ID = UUID("00000000-0000-0000-0000-000000000001")
 _DEFAULT_SNAPSHOT_PROMPT = "Execute this flow step."
 
 
+@pytest.fixture(autouse=True)
+def active_snapshot_provider(monkeypatch):
+    monkeypatch.setattr(
+        executor_module,
+        "load_active_litellm_provider",
+        AsyncMock(return_value=SimpleNamespace(id=UUID(int=2), provider_type="openai")),
+    )
+
+
 @pytest.fixture
 def captured_flow_spans(monkeypatch):
     exporter = InMemorySpanExporter()
@@ -150,20 +161,29 @@ def _run(*, status: FlowRunStatus, user) -> FlowRun:
 def _default_snapshot_assistant(assistant_id: UUID | str) -> SimpleNamespace:
     return SimpleNamespace(
         id=UUID(str(assistant_id)),
-        origin="flow_managed",
-        prompt=SimpleNamespace(text=_DEFAULT_SNAPSHOT_PROMPT),
+        origin=AssistantOrigin.FLOW_MANAGED,
+        prompt=SimpleNamespace(text=_DEFAULT_SNAPSHOT_PROMPT, user_id=None),
         get_prompt_text=lambda: _DEFAULT_SNAPSHOT_PROMPT,
         completion_model=SimpleNamespace(
             id=_DEFAULT_SNAPSHOT_MODEL_ID,
             name="gpt-5.4-nano",
             nickname="Nano",
             litellm_model_name="openai/gpt-5.4-nano",
+            provider_id=UUID(int=2),
+            provider_type="openai",
+            get_model_route=lambda **_: "openai/gpt-5.4-nano",
+            security_classification=None,
         ),
         completion_model_kwargs={"temperature": 0.2},
         collections=[],
         websites=[],
         integration_knowledge_list=[],
         mcp_servers=[],
+        attachments=[],
+        inline_file_text=False,
+        user=None,
+        name="Assistant",
+        logging_enabled=False,
     )
 
 
@@ -402,14 +422,17 @@ def _build_executor(user, *, runtime_actor: FlowRunActor | None = None):
             attempt_no=kwargs["attempt_no"],
         )
 
-    async def _get_space_by_assistant(*, assistant_id):
-        assistant = _default_snapshot_assistant(assistant_id)
-        return SimpleNamespace(
-            id=uuid4(),
-            default_assistant=None,
-            assistants=[assistant],
-            get_assistant=lambda assistant_id: assistant,
-        )
+    space = SimpleNamespace(
+        id=uuid4(), tenant_id=user.tenant_id, security_classification=None
+    )
+    flow_repo.get.return_value = SimpleNamespace(space_id=space.id)
+    space_repo.get_execution_space.return_value = space
+    space_repo.get_execution_assistant.side_effect = (
+        lambda *, space_id, assistant_id: _default_snapshot_assistant(assistant_id)
+    )
+    model = _default_snapshot_assistant(uuid4()).completion_model
+    model.tenant_id = user.tenant_id
+    space_repo.completion_model_repo.one.return_value = model
 
     flow_run_repo.allocate_next_attempt_no = AsyncMock(return_value=1)
     flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[])
@@ -429,7 +452,6 @@ def _build_executor(user, *, runtime_actor: FlowRunActor | None = None):
         )
 
     flow_run_repo.activate_step_attempt = AsyncMock(side_effect=_activate_step_attempt)
-    space_repo.get_space_by_assistant = AsyncMock(side_effect=_get_space_by_assistant)
     completion_service = AsyncMock()
     file_repo = AsyncMock()
     file_content_loader = AsyncMock()
@@ -1063,13 +1085,7 @@ def _execute_setup_for_security(
     space = _security_space(
         space_id=uuid4(), assistants=assistants, security_level=space_level
     )
-    by_id = {candidate.id: candidate for candidate in assistants}
-    executor.space_repo.get_space_by_assistant = AsyncMock(return_value=space)
-    executor._load_assistant = AsyncMock(
-        side_effect=lambda assistant_id, state=None, *, snapshot=None: by_id[
-            assistant_id
-        ]
-    )
+    _stub_security_assistants(executor, space)
     flow_run_repo.get = _run_get_mock(running_run, running_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(return_value=None)
@@ -1760,17 +1776,6 @@ async def test_terminal_run_attempt_start_rejection_uses_failure_path_without_pr
         step_id=step_id,
         assistant_id=assistant_id,
     )
-    assistant = _default_snapshot_assistant(assistant_id)
-    assistant.get_response = AsyncMock()
-    executor.space_repo.get_space_by_assistant = AsyncMock(
-        return_value=SimpleNamespace(
-            id=uuid4(),
-            default_assistant=None,
-            assistants=[assistant],
-            get_assistant=lambda *, assistant_id: assistant,
-        )
-    )
-
     flow_run_repo.get = _run_get_mock(running_run, running_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(return_value=claimed)
@@ -1830,7 +1835,7 @@ async def test_terminal_run_attempt_start_rejection_uses_failure_path_without_pr
         terminalization["error"].code
         == FlowApiErrorCode.STEP_ATTEMPT_START_FAILED.value
     )
-    assistant.get_response.assert_not_awaited()
+    executor.completion_service.get_response.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2089,11 +2094,17 @@ async def test_typed_validation_failure_partial_typed_exc_falls_back_field_indep
     )
 
     state = _empty_execution_state()
-    state.assistant_cache[assistant_id] = SimpleNamespace(
-        completion_model=SimpleNamespace(
-            litellm_model_name="openai/gpt-5.4-nano",
-            name="gpt-5.4-nano",
-            provider_type="openai",
+    snapshot = build_assistant_execution_snapshot(
+        assistant=_default_snapshot_assistant(assistant_id)
+    )
+    step = replace(step, assistant_snapshot=snapshot)
+    state.assistant_cache[assistant_cache_key(assistant_id, snapshot)] = (
+        SimpleNamespace(
+            completion_model=SimpleNamespace(
+                litellm_model_name="openai/gpt-5.4-nano",
+                name="gpt-5.4-nano",
+                provider_type="openai",
+            )
         )
     )
 
@@ -4099,31 +4110,18 @@ def test_run_execution_state_preserves_structured_only_prior_output_as_empty_tex
 
 @pytest.mark.asyncio
 async def test_assistant_cache_hit(user):
-    """Same assistant ID loaded twice — get_space_by_assistant called once."""
     executor, _, _, _ = _build_executor(user)
-    assistant_id = uuid4()
-    mock_assistant = SimpleNamespace(id=assistant_id, mcp_servers=[])
-    mock_space = SimpleNamespace(
-        id=uuid4(),
-        default_assistant=None,
-        assistants=[mock_assistant],
-        get_assistant=lambda assistant_id: mock_assistant,
-    )
-    executor.space_repo.get_space_by_assistant = AsyncMock(return_value=mock_space)
+    assistant = _default_snapshot_assistant(uuid4())
+    snapshot = build_assistant_execution_snapshot(assistant=assistant)
+    state = _empty_execution_state()
+    state.flow_id = uuid4()
 
-    state = RunExecutionState(
-        completed_by_order={},
-        prior_results=[],
-        assistant_cache={},
-        json_mode_supported={},
-        file_cache={},
-    )
-
-    result1 = await executor._load_assistant(assistant_id, state)
-    result2 = await executor._load_assistant(assistant_id, state)
+    result1 = await executor._load_assistant(assistant.id, state, snapshot=snapshot)
+    result2 = await executor._load_assistant(assistant.id, state, snapshot=snapshot)
 
     assert result1 is result2
-    assert executor.space_repo.get_space_by_assistant.call_count == 1
+    executor.space_repo.get_execution_assistant.assert_awaited_once()
+    executor.space_repo.completion_model_repo.one.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -4142,13 +4140,9 @@ async def test_execute_rejects_later_mcp_assistant_before_any_step_effect(user):
         first_assistant.id: first_assistant,
         second_assistant.id: second_assistant,
     }
-    space = SimpleNamespace(
-        id=uuid4(),
-        default_assistant=None,
-        assistants=list(assistants.values()),
-        get_assistant=lambda assistant_id: assistants[assistant_id],
+    executor.space_repo.get_execution_assistant.side_effect = (
+        lambda *, space_id, assistant_id: assistants[assistant_id]
     )
-    executor.space_repo.get_space_by_assistant = AsyncMock(return_value=space)
     flow_run_repo.get = AsyncMock(
         return_value=queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
     )
@@ -4248,6 +4242,14 @@ def _security_space(
     )
 
 
+def _stub_security_assistants(executor, space):
+    async def load_assistant(assistant_id, state, *, snapshot=None):
+        state.flow_space = space
+        return space.get_assistant(assistant_id)
+
+    executor._load_assistant = AsyncMock(side_effect=load_assistant)
+
+
 def _security_step(
     *,
     step_order: int,
@@ -4294,7 +4296,7 @@ async def test_runtime_preflight_classifies_bound_steps_before_anything_complete
     space = _security_space(
         space_id=uuid4(), assistants=[strong, weak], security_level=1
     )
-    executor.space_repo.get_space_by_assistant = AsyncMock(return_value=space)
+    _stub_security_assistants(executor, space)
     first = replace(
         _security_step(step_order=1, assistant_id=strong.id),
         output_classification_override=3,
@@ -4326,7 +4328,7 @@ async def test_runtime_preflight_reads_prompt_references_when_underlag_is_litera
     space = _security_space(
         space_id=uuid4(), assistants=[strong, weak], security_level=1
     )
-    executor.space_repo.get_space_by_assistant = AsyncMock(return_value=space)
+    _stub_security_assistants(executor, space)
     first = replace(
         _security_step(step_order=1, assistant_id=strong.id),
         output_classification_override=3,
@@ -4359,7 +4361,7 @@ async def test_runtime_preflight_ignores_prompts_of_deterministic_steps(user):
     space = _security_space(
         space_id=uuid4(), assistants=[strong, weak], security_level=1
     )
-    executor.space_repo.get_space_by_assistant = AsyncMock(return_value=space)
+    _stub_security_assistants(executor, space)
     first = replace(
         _security_step(step_order=1, assistant_id=strong.id),
         output_classification_override=3,
@@ -4380,77 +4382,33 @@ async def test_runtime_preflight_ignores_prompts_of_deterministic_steps(user):
 
 
 @pytest.mark.asyncio
-async def test_runtime_step_security_reuses_space_for_same_space_assistants(user):
+async def test_runtime_step_security_reuses_flow_space_for_all_assistants(user):
     executor, _, _, _ = _build_executor(user)
-    assistant_one = _security_assistant(uuid4())
-    assistant_two = _security_assistant(uuid4())
-    space = _security_space(
-        space_id=uuid4(),
-        assistants=[assistant_one, assistant_two],
-        security_level=1,
-    )
-    executor.space_repo.get_space_by_assistant = AsyncMock(return_value=space)
+    assistant_one = _default_snapshot_assistant(uuid4())
+    assistant_two = _default_snapshot_assistant(uuid4())
+    space = executor.space_repo.get_execution_space.return_value
+    space.security_classification = SimpleNamespace(security_level=1)
+    model = executor.space_repo.completion_model_repo.one.return_value
+    model.security_classification = SimpleNamespace(security_level=3)
     state = _empty_execution_state()
+    state.flow_id = uuid4()
+    steps = [
+        replace(
+            _security_step(step_order=order, assistant_id=assistant.id),
+            assistant_snapshot=build_assistant_execution_snapshot(assistant=assistant),
+        )
+        for order, assistant in enumerate(
+            [assistant_one, assistant_two, assistant_one], start=1
+        )
+    ]
 
-    levels = await _validate_security_steps(
-        executor=executor,
-        state=state,
-        steps=[
-            _security_step(step_order=1, assistant_id=assistant_one.id),
-            _security_step(step_order=2, assistant_id=assistant_two.id),
-            _security_step(
-                step_order=3,
-                assistant_id=assistant_one.id,
-                input_source="previous_step",
-            ),
-        ],
-    )
+    levels = await _validate_security_steps(executor=executor, state=state, steps=steps)
 
     assert levels == {1: 1, 2: 1, 3: 1}
-    assert state.assistant_cache[assistant_one.id] is assistant_one
-    assert state.assistant_cache[assistant_two.id] is assistant_two
-    assert executor.space_repo.get_space_by_assistant.await_count == 1
-
-
-@pytest.mark.asyncio
-async def test_runtime_step_security_keeps_distinct_space_hydration(user):
-    executor, _, _, _ = _build_executor(user)
-    assistant_one = _security_assistant(uuid4())
-    assistant_two = _security_assistant(uuid4())
-    space_by_assistant_id = {
-        assistant_one.id: _security_space(
-            space_id=uuid4(),
-            assistants=[assistant_one],
-            security_level=1,
-        ),
-        assistant_two.id: _security_space(
-            space_id=uuid4(),
-            assistants=[assistant_two],
-            security_level=2,
-        ),
-    }
-
-    async def _get_space_by_assistant(*, assistant_id: UUID):
-        return space_by_assistant_id[assistant_id]
-
-    executor.space_repo.get_space_by_assistant = AsyncMock(
-        side_effect=_get_space_by_assistant
-    )
-    state = _empty_execution_state()
-
-    levels = await _validate_security_steps(
-        executor=executor,
-        state=state,
-        steps=[
-            _security_step(step_order=1, assistant_id=assistant_one.id),
-            _security_step(step_order=2, assistant_id=assistant_two.id),
-        ],
-    )
-
-    assert levels == {1: 1, 2: 2}
-    assert state.assistant_cache[assistant_one.id] is assistant_one
-    assert state.assistant_cache[assistant_two.id] is assistant_two
-    assert executor.space_repo.get_space_by_assistant.await_count == 2
+    assert len(state.assistant_cache) == 2
+    assert state.flow_space is space
+    executor.space_repo.get_execution_space.assert_awaited_once()
+    assert executor.space_repo.get_execution_assistant.await_count == 2
 
 
 def _step_for_execute_step(*, step_order: int = 1) -> RuntimeStep:
@@ -4547,20 +4505,29 @@ def _assistant_for_snapshot(
 ) -> SimpleNamespace:
     return SimpleNamespace(
         id=assistant_id,
-        origin="flow_managed",
-        prompt=SimpleNamespace(text=prompt),
+        origin=AssistantOrigin.FLOW_MANAGED,
+        prompt=SimpleNamespace(text=prompt, user_id=None),
         get_prompt_text=lambda: prompt,
         completion_model=SimpleNamespace(
             id=model_id,
             name="gpt-5.4-nano",
             nickname="Nano",
             litellm_model_name="openai/gpt-5.4-nano",
+            provider_id=UUID(int=2),
+            provider_type="openai",
+            get_model_route=lambda **_: "openai/gpt-5.4-nano",
+            security_classification=None,
         ),
         completion_model_kwargs={"temperature": 0.2},
         collections=[],
         websites=[],
         integration_knowledge_list=[],
         mcp_servers=[],
+        attachments=[],
+        inline_file_text=False,
+        user=None,
+        name="Assistant",
+        logging_enabled=False,
     )
 
 
@@ -4886,55 +4853,9 @@ async def test_validate_assistant_snapshots_accepts_matching_execution_surface(u
         run_id=uuid4(),
     )
 
-    executor._load_assistant.assert_awaited_once_with(assistant_id, state)
-
-
-@pytest.mark.asyncio
-async def test_validate_assistant_snapshots_rejects_prompt_drift(user):
-    executor, _, _, _ = _build_executor(user)
-    assistant_id = uuid4()
-    model_id = uuid4()
-    published_assistant = _assistant_for_snapshot(
-        assistant_id=assistant_id,
-        model_id=model_id,
-        prompt="Summarize the case.",
+    executor._load_assistant.assert_awaited_once_with(
+        assistant_id, state, snapshot=snapshot
     )
-    current_assistant = _assistant_for_snapshot(
-        assistant_id=assistant_id,
-        model_id=model_id,
-        prompt="Summarize the case and make recommendations.",
-    )
-    snapshot = build_assistant_execution_snapshot(
-        assistant=published_assistant,
-    )
-    assert snapshot is not None
-    step = replace(
-        _step_for_execute_step(),
-        assistant_id=assistant_id,
-        assistant_snapshot=snapshot,
-    )
-    executor._load_assistant = AsyncMock(return_value=current_assistant)
-
-    with pytest.raises(BadRequestException, match="changed after publish"):
-        await executor._validate_assistant_snapshots(
-            steps=[step],
-            state=_empty_execution_state(),
-            run_id=uuid4(),
-        )
-
-
-@pytest.mark.asyncio
-async def test_validate_assistant_snapshots_skips_legacy_steps_without_snapshot(user):
-    executor, _, _, _ = _build_executor(user)
-    executor._load_assistant = AsyncMock()
-
-    await executor._validate_assistant_snapshots(
-        steps=[_step_for_execute_step()],
-        state=_empty_execution_state(),
-        run_id=uuid4(),
-    )
-
-    executor._load_assistant.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -4947,7 +4868,6 @@ async def test_validate_assistant_snapshots_requires_schema_versioned_snapshots(
             steps=[_step_for_execute_step()],
             state=_empty_execution_state(),
             run_id=uuid4(),
-            require_snapshots=True,
         )
 
     executor._load_assistant.assert_not_awaited()
@@ -5074,7 +4994,11 @@ async def test_assistant_prompt_file_backed_reference_persists_typed_failure_wit
     state.prior_results.append(prior)
     assistant = _assistant_for_execute_step(has_knowledge=False)
     assistant.get_prompt_text.return_value = "Use {{ step_1.output.text }}"
-    state.assistant_cache[step.assistant_id] = assistant
+    snapshot = build_assistant_execution_snapshot(
+        assistant=_default_snapshot_assistant(step.assistant_id)
+    )
+    step = replace(step, assistant_snapshot=snapshot)
+    state.assistant_cache[assistant_cache_key(step.assistant_id, snapshot)] = assistant
     executor._load_assistant = AsyncMock(return_value=assistant)
     executor._resolve_step_input = AsyncMock(
         return_value=StepInputValue(
@@ -5913,83 +5837,6 @@ async def test_prior_results_bootstrap_once(user):
 
 
 @pytest.mark.asyncio
-async def test_execute_fails_before_claim_when_assistant_snapshot_drifted(user):
-    executor, _, flow_run_repo, flow_version_repo = _build_executor(user)
-    queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
-    assistant_id = uuid4()
-    model_id = uuid4()
-    published_assistant = _assistant_for_snapshot(
-        assistant_id=assistant_id,
-        model_id=model_id,
-        prompt="Summarize the case.",
-    )
-    current_assistant = _assistant_for_snapshot(
-        assistant_id=assistant_id,
-        model_id=model_id,
-        prompt="Summarize the case and include recommendations.",
-    )
-    snapshot = build_assistant_execution_snapshot(
-        assistant=published_assistant,
-    )
-    assert snapshot is not None
-    step_id = uuid4()
-
-    flow_run_repo.get = AsyncMock(
-        return_value=queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
-    )
-    flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
-    flow_run_repo.list_step_results = AsyncMock(return_value=[])
-    flow_run_repo.claim_step_result = AsyncMock()
-    flow_version_repo.get = AsyncMock(
-        return_value=_published_flow_version(
-            flow_id=queued_run.flow_id,
-            version=queued_run.flow_version,
-            tenant_id=user.tenant_id,
-            definition_checksum=None,
-            definition_json={
-                "steps": [
-                    {
-                        "step_id": str(step_id),
-                        "step_order": 1,
-                        "assistant_id": str(assistant_id),
-                        "input_source": "flow_input",
-                        "output_mode": "pass_through",
-                        "assistant_snapshot": snapshot,
-                    }
-                ]
-            },
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
-        )
-    )
-    executor._flow_is_active = AsyncMock(return_value=True)
-    executor._load_assistant = AsyncMock(return_value=current_assistant)
-
-    result = await executor.execute(
-        run_id=queued_run.id,
-        flow_id=queued_run.flow_id,
-        tenant_id=user.tenant_id,
-        run_revision=queued_run.revision,
-        dispatch_task_id="task-1",
-        retry_count=0,
-    )
-
-    assert result == {
-        "status": "failed",
-        "error": FlowApiErrorCode.ASSISTANT_SNAPSHOT_DRIFT.value,
-    }
-    assert type(result["error"]) is str
-    flow_run_repo.claim_step_result.assert_not_awaited()
-    executor.flow_run_terminalizer.terminalize_run.assert_awaited_once()
-    assert (
-        executor.flow_run_terminalizer.terminalize_run.await_args.kwargs[
-            "target_status"
-        ]
-        == FlowRunStatus.FAILED
-    )
-
-
-@pytest.mark.asyncio
 async def test_execute_terminalizes_checksum_drift_before_step_claim(user):
     executor, _, flow_run_repo, flow_version_repo = _build_executor(user)
     queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
@@ -6151,7 +5998,7 @@ async def test_execute_fails_before_claim_when_schema_versioned_snapshot_missing
 
     assert result == {
         "status": "failed",
-        "error": FlowApiErrorCode.ASSISTANT_SNAPSHOT_DRIFT.value,
+        "error": FlowApiErrorCode.ASSISTANT_SNAPSHOT_REPUBLISH_REQUIRED.value,
     }
     executor._load_assistant.assert_not_awaited()
     flow_run_repo.claim_step_result.assert_not_awaited()
@@ -6400,7 +6247,6 @@ async def test_validate_runtime_step_security_rejects_write_down(user):
         integration_knowledge_list=[],
         mcp_servers=[],
     )
-    executor.space_repo.get_space_by_assistant = AsyncMock(return_value=space)
     executor._load_assistant = AsyncMock(return_value=assistant)
     state = RunExecutionState(
         completed_by_order={},
@@ -6409,6 +6255,7 @@ async def test_validate_runtime_step_security_rejects_write_down(user):
         json_mode_supported={},
         file_cache={},
     )
+    state.flow_space = space
     step = RuntimeStep(
         step_id=uuid4(),
         step_order=2,
@@ -6602,13 +6449,104 @@ async def test_v2_route_rename_refused_before_provider_io(user, change):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("snapshot_kind", ["v1", "missing"])
+async def test_published_snapshot_requires_republication_before_provider_io(
+    user, snapshot_kind
+):
+    model = _v2_model(user)
+    executor, run, live = _v2_executor_run(user, _v2_snapshot(uuid4(), model), model)
+    surface = {
+        "schema_version": 1,
+        "assistant_id": str(live.id),
+        "instructions": live.get_prompt_text(),
+        "completion_model": {"id": str(model.id), "litellm_model_name": None},
+        "completion_model_kwargs": {"temperature": 0.7},
+        "knowledge_refs": [],
+    }
+    snapshot = {
+        **surface,
+        "origin": live.origin.value,
+        "completion_model": {
+            **surface["completion_model"],
+            "name": model.name,
+            "nickname": model.nickname,
+        },
+        "execution_surface_hash": canonical_json_hash(surface),
+    }
+    version = executor.flow_version_repo.get.return_value
+    version.definition_json["steps"][0]["assistant_snapshot"] = (
+        snapshot if snapshot_kind == "v1" else None
+    )
+    version.definition_checksum = canonical_json_hash(version.definition_json)
+    executor.flow_run_repo.claim_step_result.return_value = _claimed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=user.tenant_id,
+        step_id=UUID(version.definition_json["steps"][0]["step_id"]),
+        assistant_id=live.id,
+    )
+
+    result = await executor.execute(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=user.tenant_id,
+        run_revision=run.revision,
+        dispatch_task_id="task-1",
+        retry_count=0,
+    )
+
+    assert result == {
+        "status": "failed",
+        "error": "flow_assistant_snapshot_republish_required",
+    }
+    executor.flow_run_repo.claim_step_result.assert_not_awaited()
+    executor.completion_service.get_response.assert_not_awaited()
+    executor.references_service.get_references.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_published_snapshot_builder_freezes_tenant_model_route(user):
+    model = _v2_model(user)
+    executor, run, live = _v2_executor_run(user, _v2_snapshot(uuid4(), model), model)
+    snapshot = build_assistant_execution_snapshot(assistant=live)
+    version = executor.flow_version_repo.get.return_value
+    version.definition_json["steps"][0]["assistant_snapshot"] = snapshot
+    version.definition_checksum = canonical_json_hash(version.definition_json)
+    executor.flow_run_repo.claim_step_result.return_value = _claimed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=user.tenant_id,
+        step_id=UUID(version.definition_json["steps"][0]["step_id"]),
+        assistant_id=live.id,
+    )
+    model.name = "model-b"
+    assert (
+        snapshot["execution_surface_hash"]
+        != build_assistant_execution_snapshot(assistant=live)["execution_surface_hash"]
+    )
+
+    result = await executor.execute(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=user.tenant_id,
+        run_revision=run.revision,
+        dispatch_task_id="task-1",
+        retry_count=0,
+    )
+
+    assert result == {"status": "failed", "error": "flow_assistant_snapshot_drift"}
+    executor.flow_run_repo.claim_step_result.assert_not_awaited()
+    executor.completion_service.get_response.assert_not_awaited()
+    executor.references_service.get_references.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "scenario",
     [
         "nickname",
         "rename_after_preflight",
         "two_snapshots",
-        "mixed",
         "removed_prompt",
         "removed_assistant",
         "resources",
@@ -6630,7 +6568,7 @@ async def test_v2_frozen_prompt_and_nickname_reach_completion(
         )
         from eneo.files.file_models import File, FileMetadata
         from eneo.flows.assistant_execution_snapshot import (
-            build_assistant_execution_snapshot_v2,
+            build_assistant_execution_snapshot,
         )
 
         resources = [
@@ -6666,7 +6604,7 @@ async def test_v2_frozen_prompt_and_nickname_reach_completion(
         live.prompt.text = "Frozen instructions"
         live.completion_model_kwargs.temperature = 0.2
         live.inline_file_text = False
-        snapshot = build_assistant_execution_snapshot_v2(assistant=live)
+        snapshot = build_assistant_execution_snapshot(assistant=live)
         live._collections, live._websites, live._integration_knowledge_list = [], [], []
         live._attachments = []
         live.prompt.text = _DEFAULT_SNAPSHOT_PROMPT
@@ -6744,7 +6682,7 @@ async def test_v2_frozen_prompt_and_nickname_reach_completion(
     )
 
     steps = [step]
-    if scenario in {"two_snapshots", "mixed", "resources"}:
+    if scenario in {"two_snapshots", "resources"}:
         other_snapshot = (
             _v2_snapshot(assistant_id, model, prompt="Second frozen instructions")
             if scenario == "two_snapshots"
@@ -6792,12 +6730,8 @@ async def test_v2_frozen_prompt_and_nickname_reach_completion(
         )
 
     calls = executor.completion_service.get_response.await_args_list
-    if scenario in {"two_snapshots", "mixed"}:
-        assert calls[1].kwargs["prompt"] == (
-            "Second frozen instructions"
-            if scenario == "two_snapshots"
-            else _DEFAULT_SNAPSHOT_PROMPT
-        )
+    if scenario == "two_snapshots":
+        assert calls[1].kwargs["prompt"] == "Second frozen instructions"
     if scenario == "resources":
         executor.space_repo.one.assert_not_awaited()
         for method in ("get_collection", "get_website", "get_integration_knowledge"):
@@ -6944,22 +6878,13 @@ async def test_v2_preserves_preflight_refusals(user, monkeypatch, failure):
 
 
 @pytest.mark.asyncio
-async def test_v2_space_cache_does_not_change_v1_classification(user, monkeypatch):
+async def test_v2_snapshots_share_flow_space_classification(user, monkeypatch):
     model = _v2_model(user)
     model.security_classification = SimpleNamespace(security_level=10)
     snapshot = _v2_snapshot(uuid4(), model)
     executor, run, live = _v2_executor_run(user, snapshot, model)
     flow_space = executor.space_repo.one.return_value
     flow_space.security_classification = SimpleNamespace(security_level=2)
-    legacy_space = SimpleNamespace(
-        id=uuid4(),
-        tenant_id=user.tenant_id,
-        default_assistant=None,
-        assistants=[live],
-        get_assistant=lambda assistant_id: live,
-        security_classification=SimpleNamespace(security_level=5),
-    )
-    executor.space_repo.get_space_by_assistant.return_value = legacy_space
     monkeypatch.setattr(
         executor_module,
         "load_active_litellm_provider",
@@ -6969,7 +6894,7 @@ async def test_v2_space_cache_does_not_change_v1_classification(user, monkeypatc
             )
         ),
     )
-    legacy_step = replace(
+    published_step = replace(
         _step_for_execute_step(),
         assistant_id=live.id,
         assistant_snapshot=build_assistant_execution_snapshot(assistant=live),
@@ -6981,14 +6906,14 @@ async def test_v2_space_cache_does_not_change_v1_classification(user, monkeypatc
     )
     state = _empty_execution_state()
     state.flow_id = run.flow_id
-    steps = [legacy_step, frozen_step]
+    steps = [published_step, frozen_step]
 
     await executor._validate_assistant_snapshots(
         steps=steps, state=state, run_id=run.id
     )
     levels = await executor._resolve_step_output_levels(steps=steps, state=state)
 
-    assert levels == {1: 5, 2: 2}
+    assert levels == {1: 2, 2: 2}
 
 
 @pytest.mark.asyncio

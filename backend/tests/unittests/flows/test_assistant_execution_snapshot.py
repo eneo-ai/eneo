@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from eneo.assistants.assistant import AssistantOrigin
 from eneo.flows.assistant_execution_snapshot import (
     assistant_execution_surface_hash,
     build_assistant_execution_snapshot,
@@ -21,20 +22,26 @@ def _assistant(
 ) -> SimpleNamespace:
     return SimpleNamespace(
         id=uuid4(),
-        origin="flow_managed",
+        origin=AssistantOrigin.FLOW_MANAGED,
         prompt=SimpleNamespace(text=prompt),
+        get_prompt_text=lambda: prompt,
+        attachments=[],
+        inline_file_text=False,
         completion_model=SimpleNamespace(
             id=uuid4(),
             name=model_name,
             nickname="Nano",
             litellm_model_name="openai/gpt-5.4-nano",
+            provider_id=UUID(int=3),
+            provider_type="openai",
+            get_model_route=lambda: "openai/gpt-5.4-nano",
         ),
         completion_model_kwargs={"temperature": 0.2},
         collections=[]
         if knowledge_name is None
         else [
             SimpleNamespace(
-                id="collection-1",
+                id=UUID(int=4),
                 name=knowledge_name,
             )
         ],
@@ -54,6 +61,35 @@ def _snapshot() -> tuple[dict[str, object], SimpleNamespace]:
     snapshot = build_assistant_execution_snapshot(assistant=assistant)
     assert snapshot is not None
     return snapshot, assistant
+
+
+def test_published_snapshot_builder_writes_v2():
+    assistant = _assistant()
+    snapshot = build_assistant_execution_snapshot(assistant=assistant)
+
+    assert snapshot["schema_version"] == 2
+    assert snapshot["completion_model"]["resolved_route"] == "openai/gpt-5.4-nano"
+    assert snapshot["execution_surface_hash"] == assistant_execution_surface_hash(
+        snapshot
+    )
+
+
+@pytest.mark.parametrize("version", [1, 3, None, True])
+@pytest.mark.parametrize("operation", ["validate", "hash"])
+def test_snapshot_requires_republication_for_unsupported_version(version, operation):
+    snapshot, assistant = _snapshot()
+    snapshot["schema_version"] = version
+
+    with pytest.raises(BadRequestException) as caught:
+        if operation == "validate":
+            validate_assistant_execution_snapshot(
+                snapshot=snapshot, assistant_id=assistant.id
+            )
+        else:
+            assistant_execution_surface_hash(snapshot)
+
+    assert caught.value.code == "flow_assistant_snapshot_republish_required"
+    assert "Republish" in str(caught.value)
 
 
 def test_assistant_execution_hash_changes_when_prompt_changes():
@@ -115,7 +151,12 @@ def test_validate_assistant_execution_snapshot_requires_exact_fields(
     snapshot, assistant = _snapshot()
     snapshot.pop(missing_field)
 
-    with pytest.raises(BadRequestException, match="required fields"):
+    with pytest.raises(
+        BadRequestException,
+        match="schema_version"
+        if missing_field == "schema_version"
+        else "v2 is invalid",
+    ):
         validate_assistant_execution_snapshot(
             snapshot=snapshot,
             assistant_id=assistant.id,
@@ -126,7 +167,7 @@ def test_validate_assistant_execution_snapshot_rejects_unknown_fields() -> None:
     snapshot, assistant = _snapshot()
     snapshot["future_execution_setting"] = True
 
-    with pytest.raises(BadRequestException, match="unsupported fields"):
+    with pytest.raises(BadRequestException, match="v2 is invalid"):
         validate_assistant_execution_snapshot(
             snapshot=snapshot,
             assistant_id=assistant.id,
@@ -171,7 +212,7 @@ def test_validate_assistant_execution_snapshot_rejects_invalid_nested_shape(
     snapshot, assistant = _snapshot()
     snapshot[field] = value
 
-    with pytest.raises(BadRequestException, match=field):
+    with pytest.raises(BadRequestException, match="v2 is invalid"):
         validate_assistant_execution_snapshot(
             snapshot=snapshot,
             assistant_id=assistant.id,
@@ -192,7 +233,7 @@ def test_validate_assistant_execution_snapshot_rejects_invalid_hash_format(
     snapshot, assistant = _snapshot()
     snapshot["execution_surface_hash"] = stored_hash
 
-    with pytest.raises(BadRequestException, match="lowercase SHA-256"):
+    with pytest.raises(BadRequestException, match="v2 is invalid"):
         validate_assistant_execution_snapshot(
             snapshot=snapshot,
             assistant_id=assistant.id,
@@ -212,7 +253,7 @@ def test_validate_assistant_execution_snapshot_rejects_stale_hash() -> None:
         )
 
 
-def test_v1_fixed_historical_hash_and_writer_are_unchanged():
+def test_v1_historical_snapshot_requires_republication():
     assistant_id = UUID("00000000-0000-0000-0000-000000000001")
     snapshot = {
         "schema_version": 1,
@@ -229,17 +270,11 @@ def test_v1_fixed_historical_hash_and_writer_are_unchanged():
         "knowledge_refs": [],
         "execution_surface_hash": "9bafa9cede765e142c9c991fd8d48c22316dea4b06208786269634eeb07e8433",
     }
-    assert (
+    with pytest.raises(BadRequestException) as caught:
         validate_assistant_execution_snapshot(
             snapshot=snapshot, assistant_id=assistant_id
         )
-        == snapshot
-    )
-    assert (
-        assistant_execution_surface_hash(snapshot) == snapshot["execution_surface_hash"]
-    )
-    written = build_assistant_execution_snapshot(assistant=_assistant())
-    assert written["schema_version"] == 1
+    assert caught.value.code == "flow_assistant_snapshot_republish_required"
 
 
 def _v2_snapshot_payload():

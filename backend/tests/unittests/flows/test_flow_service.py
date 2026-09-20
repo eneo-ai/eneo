@@ -189,8 +189,21 @@ def _service(
     )
     if stub_assistant_scope:
         service._validate_assistant_scope_for_steps = AsyncMock()  # type: ignore[method-assign]
-    service.assistant_service.get_assistant.return_value = (
-        SimpleNamespace(mcp_servers=[]),
+    service.assistant_service.get_assistant.side_effect = lambda assistant_id: (
+        Assistant(
+            id=assistant_id,
+            user=None,
+            space_id=uuid4(),
+            completion_model=None,
+            name="Assistant",
+            prompt=None,
+            completion_model_kwargs=ModelKwargs(),
+            logging_enabled=False,
+            websites=[],
+            collections=[],
+            attachments=[],
+            published=False,
+        ),
         [],
     )
     return service
@@ -669,6 +682,7 @@ async def test_publish_flow_rejects_mcp_assistant_before_version_creation(user):
     flow_repo.get.return_value = flow
     flow_repo.allocate_next_version.return_value = 1
     flow_repo.update.return_value = flow.model_copy(update={"published_version": 1})
+    service.assistant_service.get_assistant.side_effect = None
     service.assistant_service.get_assistant.return_value = (
         SimpleNamespace(
             id=step.assistant_id,

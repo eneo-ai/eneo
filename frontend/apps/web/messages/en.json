@@ -5226,6 +5226,7 @@
   "flow_error_flow_evidence_audit_logging_failed": "Evidence access could not be audited. Try again later.",
   "flow_error_flow_evidence_export_reason_required": "Enter a specific reason before exporting raw evidence.",
   "flow_error_flow_assistant_snapshot_resource_invalid": "A resource used by the published flow is unavailable or has changed. Restore it or republish the flow and start a new run.",
+  "flow_error_flow_assistant_snapshot_republish_required": "The flow needs to be republished before it can run. Publish the flow again and start a new run.",
   "flow_error_flow_assistant_snapshot_drift": "The flow changed while the run was executing. Republish the flow and start a new run.",
   "flow_error_flow_definition_checksum_mismatch": "The published flow snapshot failed integrity verification. Ask a flow editor to publish a valid version, then start a new run.",
   "flow_error_flow_definition_invalid": "This published flow definition is invalid. Ask a flow editor to fix and republish the flow.",

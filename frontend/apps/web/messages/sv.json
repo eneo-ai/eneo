@@ -5226,6 +5226,7 @@
   "flow_error_flow_evidence_audit_logging_failed": "Åtkomst till evidens kunde inte loggas. Försök igen senare.",
   "flow_error_flow_evidence_export_reason_required": "Ange en tydlig orsak innan du exporterar rå evidens.",
   "flow_error_flow_assistant_snapshot_resource_invalid": "En resurs som det publicerade flödet använder är inte tillgänglig eller har ändrats. Återställ resursen eller publicera flödet på nytt och starta en ny körning.",
+  "flow_error_flow_assistant_snapshot_republish_required": "Flödet behöver publiceras på nytt innan det kan köras. Publicera flödet och starta en ny körning.",
   "flow_error_flow_assistant_snapshot_drift": "Flödet ändrades medan körningen pågick. Publicera flödet på nytt och starta en ny körning.",
   "flow_error_flow_definition_checksum_mismatch": "Den publicerade flödessnapshoten klarade inte integritetskontrollen. Be en flödesredigerare publicera en giltig version och starta sedan en ny körning.",
   "flow_error_flow_definition_invalid": "Den publicerade flödesdefinitionen är ogiltig. Be en flödesredigerare rätta och publicera flödet igen.",

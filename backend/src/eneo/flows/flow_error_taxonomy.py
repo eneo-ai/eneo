@@ -546,6 +546,13 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Restore the pinned resource or republish the flow before starting another run.",
         user_action="Restore the resource or republish the flow and start a new run.",
     ),
+    FlowApiErrorCode.ASSISTANT_SNAPSHOT_REPUBLISH_REQUIRED: _entry(
+        category="Published definition",
+        surfaced_through="API response and run error payload",
+        cause="The published flow has a missing or unsupported assistant snapshot.",
+        consumer_action="Republish the flow before starting another run.",
+        user_action="Publish the flow again and start a new run.",
+    ),
     FlowApiErrorCode.ASSISTANT_SNAPSHOT_DRIFT: _entry(
         category="Published definition",
         surfaced_through="Run error payload",

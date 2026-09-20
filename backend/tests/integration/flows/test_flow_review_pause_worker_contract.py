@@ -11,6 +11,7 @@ from dependency_injector import providers
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.assistants.assistant import AssistantOrigin
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     SupportedModelKwargs,
 )
@@ -64,9 +65,11 @@ pytestmark = pytest.mark.usefixtures("object_content_runtime_ready")
 
 
 class _RuntimeAssistant:
-    def __init__(self, *, assistant_id: UUID, model_id: UUID, model_name: str):
+    def __init__(
+        self, *, assistant_id: UUID, model_id: UUID, provider_id: UUID, model_name: str
+    ):
         self.id = assistant_id
-        self.origin = "flow_managed"
+        self.origin = AssistantOrigin.FLOW_MANAGED
         self.prompt = SimpleNamespace(text="Answer the submitted question.")
         self.completion_model = SimpleNamespace(
             id=model_id,
@@ -74,6 +77,8 @@ class _RuntimeAssistant:
             nickname=model_name,
             litellm_model_name=model_name,
             provider_type="openai",
+            provider_id=provider_id,
+            get_model_route=lambda: f"openai/{model_name}",
             supported_model_kwargs=SupportedModelKwargs(),
         )
         self.completion_model_kwargs = ModelKwargs(temperature=0.2)
@@ -81,6 +86,8 @@ class _RuntimeAssistant:
         self.websites = []
         self.integration_knowledge_list = []
         self.mcp_servers = []
+        self.attachments = []
+        self.inline_file_text = False
 
     def get_prompt_text(self) -> str:
         return self.prompt.text
@@ -275,6 +282,7 @@ async def _create_review_pause_runtime_context(
     runtime_assistant = _RuntimeAssistant(
         assistant_id=assistant.id,
         model_id=model.id,
+        provider_id=model.provider_id,
         model_name="gpt-4o-mini",
     )
     assistant_snapshot = build_assistant_execution_snapshot(
@@ -341,7 +349,15 @@ async def _create_review_pause_runtime_context(
             http_allow_private_networks=False,
         ),
     )
-    executor._load_assistant = AsyncMock(return_value=runtime_assistant)
+
+    async def _load_assistant(assistant_id, state, *, snapshot=None):
+        if state.flow_space is None:
+            state.flow_space = await executor.space_repo.get_execution_space(
+                flow.space_id
+            )
+        return runtime_assistant
+
+    executor._load_assistant = AsyncMock(side_effect=_load_assistant)
     return _ReviewPauseRuntimeContext(
         container=setup_container,
         executor=executor,

@@ -30,7 +30,6 @@ from eneo.flows.application.flow_run_terminalization import (
 )
 from eneo.flows.assistant_execution_snapshot import (
     AssistantExecutionSnapshotV2,
-    build_assistant_execution_snapshot,
     validate_assistant_execution_snapshot,
 )
 from eneo.flows.domain.flow import (
@@ -471,7 +470,7 @@ def _pre_attempt_start_model_from_state_cache(
 ) -> tuple[str | None, str | None]:
     # Preparation can fail after the assistant is loaded but before
     # attempt_start is persisted; preserve model triage data in that window.
-    if state is None:
+    if state is None or step.assistant_snapshot is None:
         return None, None
     assistant = state.assistant_cache.get(
         assistant_cache_key(step.assistant_id, step.assistant_snapshot)
@@ -757,9 +756,6 @@ class FlowRunExecutor:
                 steps=steps,
                 state=state,
                 run_id=run_id,
-                require_snapshots=self._requires_assistant_snapshots(
-                    version.definition_json
-                ),
             )
         except BadRequestException as exc:
             source = FlowRunLifecycleSource.ASSISTANT_SNAPSHOT_DRIFT
@@ -2367,49 +2363,39 @@ class FlowRunExecutor:
         *,
         snapshot: dict[str, Any] | None = None,
     ) -> RuntimeAssistantProtocol:
-        key = assistant_cache_key(assistant_id, snapshot)
+        validated = validate_assistant_execution_snapshot(
+            snapshot=snapshot, assistant_id=assistant_id
+        )
+        key = assistant_cache_key(assistant_id, validated)
         if state and key in state.assistant_cache:
             assistant = state.assistant_cache[key]
             self._reject_flow_mcp_assistant(assistant)
             return assistant
-        if snapshot is not None and snapshot.get("schema_version") == 2:
-            validated = validate_assistant_execution_snapshot(
-                snapshot=snapshot, assistant_id=assistant_id
+        if state is None or state.flow_id is None:
+            raise FlowRuntimeInvariantError("Frozen assistants require run context.")
+        if state.flow_space is None:
+            flow = await self.flow_repo.get(
+                flow_id=state.flow_id, tenant_id=self.runtime_actor.tenant_id
             )
-            if state is None or state.flow_id is None:
-                raise FlowRuntimeInvariantError(
-                    "Frozen assistants require run context."
-                )
-            if state.flow_space is None:
-                flow = await self.flow_repo.get(
-                    flow_id=state.flow_id, tenant_id=self.runtime_actor.tenant_id
-                )
-                space = await self.space_repo.get_execution_space(flow.space_id)
-                if space.tenant_id != self.runtime_actor.tenant_id:
-                    raise NotFoundException()
-                state.flow_space = space
-            space = state.flow_space
-            if space.id is None:
+            space = await self.space_repo.get_execution_space(flow.space_id)
+            if space.tenant_id != self.runtime_actor.tenant_id:
                 raise NotFoundException()
-            live = await self.space_repo.get_execution_assistant(
-                space_id=space.id, assistant_id=assistant_id
-            )
-            if live is not None:
-                self._reject_flow_mcp_assistant(live)
-            assistant = await self._load_frozen_assistant(
-                space=space,
-                live=live,
-                snapshot=AssistantExecutionSnapshotV2.model_validate(validated),
-                state=state,
-            )
-        else:
-            space = await self._load_space_for_assistant(
-                assistant_id=assistant_id, state=state
-            )
-            assistant = space.get_assistant(assistant_id=assistant_id)
-            self._reject_flow_mcp_assistant(assistant)
-        if state:
-            state.assistant_cache[key] = assistant
+            state.flow_space = space
+        space = state.flow_space
+        if space.id is None:
+            raise NotFoundException()
+        live = await self.space_repo.get_execution_assistant(
+            space_id=space.id, assistant_id=assistant_id
+        )
+        if live is not None:
+            self._reject_flow_mcp_assistant(live)
+        assistant = await self._load_frozen_assistant(
+            space=space,
+            live=live,
+            snapshot=AssistantExecutionSnapshotV2.model_validate(validated),
+            state=state,
+        )
+        state.assistant_cache[key] = assistant
         return assistant
 
     async def _load_frozen_assistant(
@@ -2538,85 +2524,33 @@ class FlowRunExecutor:
                 "Flow MCP is unsupported. Remove MCP servers and tools from the step assistant before running the flow."
             )
 
-    async def _load_space_for_assistant(
-        self, *, assistant_id: UUID, state: RunExecutionState | None = None
-    ) -> Space:
-        if state and assistant_id in state.space_cache:
-            return state.space_cache[assistant_id]
-
-        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
-        if state:
-            # Pin Space for this run pass; assistant snapshots are already pass-scoped.
-            state.space_cache[assistant_id] = space
-            if space.default_assistant is not None:
-                state.space_cache[space.default_assistant.id] = space
-            for assistant in space.assistants:
-                state.space_cache[assistant.id] = space
-        return space
-
     async def _validate_assistant_snapshots(
         self,
         *,
         steps: list[RuntimeStep],
         state: RunExecutionState,
         run_id: UUID,
-        require_snapshots: bool = False,
     ) -> None:
         for step in steps:
-            if step.assistant_snapshot is None:
-                if require_snapshots:
-                    raise BadRequestException(
-                        f"Step {step.step_order}: assistant snapshot is missing from the published flow definition. Republish the flow before running it."
-                    )
-                continue
-
             validated_snapshot = validate_assistant_execution_snapshot(
                 snapshot=step.assistant_snapshot,
                 assistant_id=step.assistant_id,
             )
-            if validated_snapshot["schema_version"] == 2:
-                try:
-                    await self._load_assistant(
-                        step.assistant_id, state, snapshot=validated_snapshot
-                    )
-                except (
-                    NotFoundException,
-                    ProviderNotFoundException,
-                    ProviderInactiveException,
-                    ObjectContentIntegrityError,
-                ) as exc:
-                    raise BadRequestException(
-                        "Assistant snapshot resource is missing, inaccessible, or inactive.",
-                        code=FlowApiErrorCode.ASSISTANT_SNAPSHOT_RESOURCE_INVALID.value,
-                        context={"step_order": step.step_order},
-                    ) from exc
-                continue
-            current_assistant = await self._load_assistant(step.assistant_id, state)
-            self._reject_flow_mcp_assistant(current_assistant)
-            current_snapshot = build_assistant_execution_snapshot(
-                assistant=current_assistant,
-            )
-            if current_snapshot is None:
-                raise BadRequestException(
-                    f"Step {step.step_order}: assistant snapshot could not be validated."
+            try:
+                await self._load_assistant(
+                    step.assistant_id, state, snapshot=validated_snapshot
                 )
-
-            expected_hash = cast(str, validated_snapshot["execution_surface_hash"])
-            current_hash = current_snapshot.get("execution_surface_hash")
-            if expected_hash == current_hash:
-                continue
-
-            logger.warning(
-                "flow_executor.assistant_snapshot_drift run_id=%s step_order=%d assistant_id=%s expected_hash=%s current_hash=%s",
-                run_id,
-                step.step_order,
-                step.assistant_id,
-                expected_hash,
-                current_hash,
-            )
-            raise BadRequestException(
-                f"Step {step.step_order}: assistant configuration changed after publish. Republish the flow before running it."
-            )
+            except (
+                NotFoundException,
+                ProviderNotFoundException,
+                ProviderInactiveException,
+                ObjectContentIntegrityError,
+            ) as exc:
+                raise BadRequestException(
+                    "Assistant snapshot resource is missing, inaccessible, or inactive.",
+                    code=FlowApiErrorCode.ASSISTANT_SNAPSHOT_RESOURCE_INVALID.value,
+                    context={"step_order": step.step_order},
+                ) from exc
 
     async def _resolve_step_output_levels(
         self, *, steps: list[RuntimeStep], state: RunExecutionState
@@ -2642,23 +2576,12 @@ class FlowRunExecutor:
         state: RunExecutionState,
         prior_output_levels_by_order: dict[int, int | None],
     ) -> int | None:
-        if (
-            step.assistant_snapshot is not None
-            and step.assistant_snapshot.get("schema_version") == 2
-        ):
-            assistant = await self._load_assistant(
-                step.assistant_id, state, snapshot=step.assistant_snapshot
-            )
-            if state.flow_space is None:
-                raise FlowRuntimeInvariantError(
-                    "Frozen assistants require a flow space."
-                )
-            space = state.flow_space
-        else:
-            space = await self._load_space_for_assistant(
-                assistant_id=step.assistant_id, state=state
-            )
-            assistant = await self._load_assistant(step.assistant_id, state)
+        assistant = await self._load_assistant(
+            step.assistant_id, state, snapshot=step.assistant_snapshot
+        )
+        if state.flow_space is None:
+            raise FlowRuntimeInvariantError("Frozen assistants require a flow space.")
+        space = state.flow_space
         evaluation = evaluate_step_security_classification(
             step_order=step.step_order,
             # Preflight runs before any step completes, so the definition
@@ -2763,11 +2686,6 @@ class FlowRunExecutor:
             file_type=FileType.TEXT,
         )
         return utf8_prefix(text, max_bytes=self.max_inline_text_bytes), [file_row.id]
-
-    @staticmethod
-    def _requires_assistant_snapshots(definition_json: dict[str, Any]) -> bool:
-        schema_version = definition_json.get("schema_version")
-        return isinstance(schema_version, int) and schema_version >= 1
 
     @staticmethod
     def _run_error_from_bad_request(

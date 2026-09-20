@@ -375,3 +375,8 @@ def test_flow_run_error_from_source_truncates_unbounded_messages() -> None:
 
     assert len(error.message) == 4096
     assert error.message.endswith("... [truncated]")
+
+
+def test_republish_refusal_is_not_retryable() -> None:
+    code = FlowApiErrorCode("flow_assistant_snapshot_republish_required")
+    assert not FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[code]
