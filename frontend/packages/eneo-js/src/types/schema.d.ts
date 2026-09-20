@@ -16640,6 +16640,35 @@ export interface components {
        */
       status?: string;
     };
+    /**
+     * FileBackedStepText
+     * @description A bounded preview and the identity of its complete text artifact.
+     */
+    FileBackedStepText: {
+      /** Checksum */
+      checksum?: string | null;
+      /**
+       * File Id
+       * Format: uuid
+       */
+      file_id: string;
+      /** Full Text Bytes */
+      full_text_bytes: number;
+      /** Inline Text Bytes */
+      inline_text_bytes: number;
+      /**
+       * Kind
+       * @default file_backed_step_text
+       * @constant
+       */
+      kind?: "file_backed_step_text";
+      /** Preview */
+      preview: string;
+      /** Source Attempt No */
+      source_attempt_no?: number | null;
+      /** Source Step Id */
+      source_step_id?: string | null;
+    };
     /** FileDeletionPreview */
     FileDeletionPreview: {
       /** Affected File Count */
@@ -20244,6 +20273,7 @@ export interface components {
      *                 "severity": "info"
      *               }
      *             ],
+     *             "effective_prompt_truncated": false,
      *             "finished_at": "2026-03-17T10:05:30Z",
      *             "flow_id": "00000000-0000-0000-0000-000000000001",
      *             "flow_run_id": "00000000-0000-0000-0000-000000000301",
@@ -20257,6 +20287,7 @@ export interface components {
      *                 }
      *               ]
      *             },
+     *             "input_text_aliases": [],
      *             "num_tokens_input": 0,
      *             "num_tokens_output": 0,
      *             "output_payload_json": {
@@ -20288,7 +20319,7 @@ export interface components {
      *           }
      *         ]
      *       },
-     *       "content_hash": "3717efc96f8b796387a55c11e0273b15898cdd32c68ddd3b70af8ce19999b36e",
+     *       "content_hash": "a8ba11aba45e0bbf0ace7e29e739d8dcd7f4ccd071b5746df358e5f57646ecad",
      *       "generated_at": "2026-03-31T12:00:00Z",
      *       "manifest": {
      *         "actor": {
@@ -20324,7 +20355,7 @@ export interface components {
      *           "total_size_bytes": 14012,
      *           "tracking_state": "tracked"
      *         },
-     *         "content_hash": "3717efc96f8b796387a55c11e0273b15898cdd32c68ddd3b70af8ce19999b36e",
+     *         "content_hash": "a8ba11aba45e0bbf0ace7e29e739d8dcd7f4ccd071b5746df358e5f57646ecad",
      *         "content_hash_input": "redacted",
      *         "detail_mode": "redacted",
      *         "export_reason": "support_debug",
@@ -20939,6 +20970,7 @@ export interface components {
      *               "severity": "info"
      *             }
      *           ],
+     *           "effective_prompt_truncated": false,
      *           "finished_at": "2026-03-17T10:05:30Z",
      *           "flow_id": "00000000-0000-0000-0000-000000000001",
      *           "flow_run_id": "00000000-0000-0000-0000-000000000301",
@@ -20952,6 +20984,7 @@ export interface components {
      *               }
      *             ]
      *           },
+     *           "input_text_aliases": [],
      *           "num_tokens_input": 0,
      *           "num_tokens_output": 0,
      *           "output_payload_json": {
@@ -22449,6 +22482,7 @@ export interface components {
      *           "severity": "info"
      *         }
      *       ],
+     *       "effective_prompt_truncated": false,
      *       "finished_at": "2026-03-17T10:05:30Z",
      *       "flow_id": "00000000-0000-0000-0000-000000000001",
      *       "flow_run_id": "00000000-0000-0000-0000-000000000301",
@@ -22462,6 +22496,7 @@ export interface components {
      *           }
      *         ]
      *       },
+     *       "input_text_aliases": [],
      *       "num_tokens_input": 0,
      *       "num_tokens_output": 0,
      *       "output_payload_json": {
@@ -22494,6 +22529,12 @@ export interface components {
       diagnostics?: components["schemas"]["FlowStepDiagnosticPublic"][];
       /** Effective Prompt */
       effective_prompt?: string | null;
+      /**
+       * Effective Prompt Truncated
+       * @description When true, only a UTF-8 prefix is stored. The complete prompt is not persisted: the flow revision holds the template and the input aliases hold the material identities.
+       * @default false
+       */
+      effective_prompt_truncated?: boolean;
       /** @description Stable machine-readable step failure code. Clients should branch on this code when present and treat error_message as technical detail. */
       error_code?:
         | (
@@ -22607,6 +22648,8 @@ export interface components {
       input_payload_json?: {
         [key: string]: unknown;
       } | null;
+      /** Input Text Aliases */
+      readonly input_text_aliases: components["schemas"]["FileBackedStepText"][];
       /** Model Parameters Json */
       model_parameters_json?: {
         [key: string]: unknown;
@@ -23576,6 +23619,83 @@ export interface components {
       /** Updated At */
       updated_at?: string | null;
     };
+    /** FlowStepAttemptCompletionConfiguration */
+    FlowStepAttemptCompletionConfiguration: {
+      /** Capability Fallback Model Parameters */
+      capability_fallback_model_parameters?: {
+        [key: string]: components["schemas"]["JsonValue"];
+      } | null;
+      /** Preferred Model Parameters */
+      preferred_model_parameters: {
+        [key: string]: components["schemas"]["JsonValue"];
+      };
+    };
+    /** FlowStepAttemptExecutionInput */
+    FlowStepAttemptExecutionInput: {
+      /** Assistant Context Version */
+      assistant_context_version: number;
+      /** Effective Prompt */
+      effective_prompt: string;
+      /**
+       * Effective Prompt Truncated
+       * @description When true, only a UTF-8 prefix is stored. The complete prompt is not persisted: the flow revision holds the template and the input aliases hold the material identities.
+       * @default false
+       */
+      effective_prompt_truncated?: boolean;
+      /** Question */
+      question: string | components["schemas"]["FileBackedStepText"][];
+    };
+    /** FlowStepAttemptInput */
+    FlowStepAttemptInput: {
+      completion_configuration?:
+        components["schemas"]["FlowStepAttemptCompletionConfiguration"] | null;
+      /** Execution Inputs */
+      execution_inputs?: components["schemas"]["FlowStepAttemptExecutionInput"][] | null;
+      /** Resolved Input */
+      resolved_input?: {
+        [key: string]: components["schemas"]["JsonValue"];
+      } | null;
+      /**
+       * Schema Version
+       * @default flow-step-attempt-input.v1
+       * @constant
+       */
+      schema_version?: "flow-step-attempt-input.v1";
+      start?: components["schemas"]["FlowStepAttemptStart"] | null;
+    };
+    /** FlowStepAttemptMappedAdmission */
+    FlowStepAttemptMappedAdmission: {
+      /** Estimated Input Tokens */
+      estimated_input_tokens: number;
+      /**
+       * Execution Mode
+       * @enum {string}
+       */
+      execution_mode: "per_item" | "per_source_reader";
+      /**
+       * Knowledge Included
+       * @default false
+       * @constant
+       */
+      knowledge_included?: false;
+      /** Max Estimated Input Tokens */
+      max_estimated_input_tokens?: number | null;
+      /** Per Call Estimated Input Tokens */
+      per_call_estimated_input_tokens: number[];
+      /**
+       * Policy Source
+       * @enum {string}
+       */
+      policy_source: "configured" | "unset";
+      /** Prospective Provider Calls */
+      prospective_provider_calls: number;
+      /**
+       * Version
+       * @default 1
+       * @constant
+       */
+      version?: 1;
+    };
     /** FlowStepAttemptPublic */
     FlowStepAttemptPublic: {
       /** Attempt No */
@@ -23699,6 +23819,9 @@ export interface components {
        * Format: uuid
        */
       id: string;
+      input_payload_json?: components["schemas"]["FlowStepAttemptInput"] | null;
+      /** Input Text Aliases */
+      readonly input_text_aliases: components["schemas"]["FileBackedStepText"][];
       /** Num Tokens Input */
       num_tokens_input?: number | null;
       /** Num Tokens Output */
@@ -23743,6 +23866,20 @@ export interface components {
        * Format: date-time
        */
       updated_at: string;
+    };
+    /** FlowStepAttemptStart */
+    FlowStepAttemptStart: {
+      /** Input Text Length */
+      input_text_length: number;
+      /** Input Tokens Estimate */
+      input_tokens_estimate?: number | null;
+      mapped_admission?: components["schemas"]["FlowStepAttemptMappedAdmission"] | null;
+      /** Provider */
+      provider?: string | null;
+      /** Requested Model */
+      requested_model?: string | null;
+      /** Resolved Timeout Seconds */
+      resolved_timeout_seconds: number;
     };
     /**
      * FlowStepAttemptStatus

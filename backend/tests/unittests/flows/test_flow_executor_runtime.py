@@ -121,6 +121,84 @@ _DEFAULT_SNAPSHOT_MODEL_ID = UUID("00000000-0000-0000-0000-000000000001")
 _DEFAULT_SNAPSHOT_PROMPT = "Execute this flow step."
 
 
+@pytest.mark.parametrize(
+    "prompt_template,truncated",
+    [("Read: {{step_1.output.text}}", True), ("Read the question.", False)],
+)
+@pytest.mark.asyncio
+async def test_complete_material_reaches_provider_and_all_persisted_aliases_are_bounded(
+    user,
+    prompt_template,
+    truncated,
+):
+    from eneo.ai_models.completion_models.completion_model import ModelKwargs
+    from eneo.flows.domain.step_output import (
+        FileBackedStepText,
+        parse_step_text_aliases,
+    )
+    from eneo.flows.runtime.step_result_builder import (
+        build_completed_step_input_payload,
+    )
+    from tests.unittests.flows.test_resolved_input_runtime import _file_backed_material
+    from tests.unittests.flows.test_step_execution_runtime import _completion_model
+
+    executor, _, run_repo, _ = _build_executor(user)
+    executor.max_inline_text_bytes = 2048
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    text = "Full source document with åäö.\n" * 200
+    prior, file, reference = _file_backed_material(text)
+    executor.file_service.get_owned_file_infos.side_effect = None
+    executor.file_service.get_owned_file_infos.return_value = [file]
+    executor.file_service.repo.get_content_references.return_value = [reference]
+    executor.file_service.get_file_content.return_value = file
+    assistant = MagicMock()
+    assistant.get_prompt_text.return_value = prompt_template
+    assistant.completion_model = _completion_model(
+        supported_model_kwargs=SupportedModelKwargs()
+    )
+    assistant.completion_model_kwargs = ModelKwargs()
+    assistant.get_response = AsyncMock(
+        return_value=SimpleNamespace(
+            completion="answer",
+            total_token_count=5,
+            model=SimpleNamespace(name="gpt-test", provider_type="openai"),
+        )
+    )
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    executor._retrieve_rag_chunks = AsyncMock(return_value=([], None, []))
+    executor._run_is_cancelled = AsyncMock(return_value=False)
+    step = _runtime_step(step_order=2, input_source="previous_step")
+    state = _empty_execution_state()
+    state.prior_results = [prior]
+    state.completed_by_order = {1: prior}
+
+    result = await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+
+    sent = assistant.get_response.await_args.kwargs
+    assert sent["question"] == text
+    assert (text in sent["prompt_override"]) is truncated
+    attempt_input = run_repo.activate_step_attempt.await_args.kwargs["attempt_input"]
+    question = attempt_input.execution_inputs[0].question[0]
+    prompt = attempt_input.execution_inputs[0].effective_prompt
+    assert isinstance(question, FileBackedStepText)
+    assert isinstance(prompt, str)
+    assert prompt == sent["prompt_override"].encode("utf-8")[:2048].decode(
+        "utf-8", errors="ignore"
+    )
+    assert attempt_input.execution_inputs[0].effective_prompt_truncated is truncated
+    assert question.source_step_id == prior.step_id
+    assert question.source_attempt_no == prior.current_attempt_no
+    assert question.file_id == file.id
+    assert question.checksum == file.checksum
+    completed_input = build_completed_step_input_payload(result.output)
+    assert completed_input["text"] == attempt_input.resolved_input["text"]
+    assert parse_step_text_aliases(completed_input["text"]) == (question,)
+    assert text not in str(completed_input)
+    assert text not in attempt_input.model_dump_json()
+    assert len(question.model_dump_json().encode()) <= executor.max_inline_text_bytes
+    executor.file_service.get_file_content.assert_awaited_once_with(file.id)
+
+
 @pytest.fixture(autouse=True)
 def active_snapshot_provider(monkeypatch):
     monkeypatch.setattr(
@@ -779,6 +857,7 @@ async def test_webhook_enqueue_keeps_completed_step_evidence(user):
         "source_text": "hello",
         "input_source": "flow_input",
         "used_question_binding": False,
+        "effective_prompt_truncated": False,
         "transcription": {
             "model": "kb-whisper-large",
             "language": "sv",

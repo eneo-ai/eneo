@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from difflib import get_close_matches
@@ -118,6 +119,7 @@ class FlowVariableResolver:
         step_names_by_order: dict[int, str] | None = None,
         step_ref_mapping: dict[str, int] | None = None,
         current_step_input: dict[str, Any] | None = None,
+        resolved_step_text: Mapping[UUID, str] | None = None,
     ) -> dict[str, Any]:
         return dict(
             self.build_context_with_evidence(
@@ -127,6 +129,7 @@ class FlowVariableResolver:
                 step_names_by_order=step_names_by_order,
                 step_ref_mapping=step_ref_mapping,
                 current_step_input=current_step_input,
+                resolved_step_text=resolved_step_text,
             )
         )
 
@@ -139,6 +142,7 @@ class FlowVariableResolver:
         step_names_by_order: dict[int, str] | None = None,
         step_ref_mapping: dict[str, int] | None = None,
         current_step_input: dict[str, Any] | None = None,
+        resolved_step_text: Mapping[UUID, str] | None = None,
     ) -> FlowVariableContext:
         normalized_flow_input = flow_input or {}
         context = FlowVariableContext()
@@ -211,7 +215,7 @@ class FlowVariableResolver:
         for result in prior_results:
             runtime_input = self._extract_runtime_input(result)
             output = dict(result.output_payload_json or {})
-            step_text = self._extract_step_text(result)
+            step_text = self._extract_step_text(result, resolved_step_text)
             step_text_by_order[result.step_order] = step_text
             if "text" in output or OUTPUT_TEXT_OVERFLOW_KEY in output:
                 output.pop(OUTPUT_TEXT_OVERFLOW_KEY, None)
@@ -476,6 +480,7 @@ class FlowVariableResolver:
     @staticmethod
     def _extract_step_text(
         result: FlowStepResult,
+        resolved_step_text: Mapping[UUID, str] | None = None,
     ) -> str | _UnavailableStepText:
         payload = result.output_payload_json or {}
         if "text" in payload or OUTPUT_TEXT_OVERFLOW_KEY in payload:
@@ -490,6 +495,11 @@ class FlowVariableResolver:
                     code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION,
                 )
             if isinstance(text, FileBackedStepText):
+                if (
+                    resolved_step_text is not None
+                    and result.step_id in resolved_step_text
+                ):
+                    return resolved_step_text[result.step_id]
                 return _UnavailableStepText(
                     message=(
                         "Complete step text is unavailable to templates because it "

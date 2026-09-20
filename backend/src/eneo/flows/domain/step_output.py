@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Final, TypeAlias, cast
+from typing import Final, Literal, TypeAlias, cast
 from uuid import UUID
 
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.main.exceptions import TypedIOValidationException
 
 OUTPUT_TEXT_OVERFLOW_KEY: Final = "text_overflow"
@@ -77,12 +81,100 @@ class InlineStepText:
     text: str
 
 
-@dataclass(frozen=True)
-class FileBackedStepText:
+class FileBackedStepText(BaseModel):
+    """A bounded preview and the identity of its complete text artifact."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["file_backed_step_text"] = "file_backed_step_text"
     preview: str
     file_id: UUID
-    inline_text_bytes: int
-    full_text_bytes: int
+    inline_text_bytes: int = Field(strict=True, ge=0)
+    full_text_bytes: int = Field(strict=True, ge=1)
+    checksum: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    source_step_id: UUID | None = None
+    source_attempt_no: int | None = Field(default=None, strict=True, ge=1)
+
+    @model_validator(mode="after")
+    def _coherent_reference(self) -> FileBackedStepText:
+        if self.inline_text_bytes != len(self.preview.encode("utf-8")):
+            raise ValueError("Step text preview size does not match its bytes.")
+        if self.inline_text_bytes >= self.full_text_bytes:
+            raise ValueError("A file-backed preview must be smaller than the material.")
+        if (self.source_step_id is None) != (self.source_attempt_no is None):
+            raise ValueError(
+                "Step text source identity requires both step and attempt."
+            )
+        return self
+
+
+@dataclass(frozen=True)
+class ResolvedStepMaterial:
+    source_step_id: UUID
+    source_attempt_no: int
+    file_id: UUID
+    checksum: str
+    byte_size: int
+    text: str
+
+
+def build_step_text_alias(
+    text: str,
+    *,
+    materials: Sequence[ResolvedStepMaterial],
+    max_inline_bytes: int,
+) -> str | tuple[FileBackedStepText, ...]:
+    if not materials:
+        return text
+    aliases = tuple(
+        FileBackedStepText(
+            preview=(
+                preview := utf8_prefix(
+                    material.text, max_bytes=min(256, material.byte_size - 1)
+                )
+            ),
+            inline_text_bytes=len(preview.encode("utf-8")),
+            file_id=material.file_id,
+            checksum=material.checksum,
+            full_text_bytes=material.byte_size,
+            source_step_id=material.source_step_id,
+            source_attempt_no=material.source_attempt_no,
+        )
+        for material in materials
+    )
+    if (
+        len(
+            json.dumps(step_text_alias_payload(aliases), ensure_ascii=False).encode(
+                "utf-8"
+            )
+        )
+        > max_inline_bytes
+    ):
+        raise _alias_too_large()
+    return aliases
+
+
+def step_text_alias_payload(
+    value: str | tuple[FileBackedStepText, ...],
+) -> str | list[dict[str, object]]:
+    if isinstance(value, tuple):
+        return [alias.model_dump(mode="json") for alias in value]
+    return value
+
+
+def parse_step_text_aliases(value: object) -> tuple[FileBackedStepText, ...]:
+    if not isinstance(value, list):
+        return ()
+    return tuple(
+        FileBackedStepText.model_validate(item) for item in cast(list[object], value)
+    )
+
+
+def _alias_too_large() -> TypedIOValidationException:
+    return TypedIOValidationException(
+        "The bounded material reference exceeds the inline storage ceiling.",
+        code=FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value,
+    )
 
 
 StepText: TypeAlias = InlineStepText | FileBackedStepText

@@ -172,6 +172,60 @@ async def test_replay_returns_same_child_without_new_creation_or_audit(context):
     context.service.audit_service.log.assert_not_awaited()
 
 
+async def test_retry_import_copies_bounded_consumed_material_alias(context):
+    import hashlib
+    import json
+
+    from sqlalchemy.dialects import postgresql
+
+    from eneo.flows.domain.step_output import ResolvedStepMaterial
+    from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
+    from eneo.flows.runtime.step_result_builder import build_step_input_payload
+
+    text = "Complete consumed material.\n" * 200
+    material = ResolvedStepMaterial(
+        source_step_id=uuid4(),
+        source_attempt_no=3,
+        file_id=uuid4(),
+        checksum=hashlib.sha256(text.encode()).hexdigest(),
+        byte_size=len(text.encode()),
+        text=text,
+    )
+    payload = build_step_input_payload(
+        text=text,
+        source_text=text,
+        input_source="previous_step",
+        used_question_binding=False,
+        materials=(material,),
+        max_inline_text_bytes=2048,
+    )
+    context.results[1].input_payload_json = payload
+    await context.service.retry_from_failed_step(**context.request)
+    seed = context.service.run_service.create_run.await_args.kwargs["prefix_seed"]
+    assert seed.results[1].input_payload_json == payload
+
+    session = AsyncMock()
+    session.execute.return_value = Mock()
+    await FlowRunRepository(session=session).seed_validated_prefix(
+        run=SimpleNamespace(
+            id=context.child.id,
+            flow_id=context.source.flow_id,
+            tenant_id=context.source.tenant_id,
+        ),
+        seed=seed,
+    )
+    copied_inputs = [
+        call.args[0].compile(dialect=postgresql.dialect()).params["input_payload_json"]
+        for call in session.execute.await_args_list[-2:]
+    ]
+    assert copied_inputs == [payload, payload]
+    assert payload["text"][0]["source_step_id"] == str(material.source_step_id)
+    assert payload["text"][0]["source_attempt_no"] == 3
+    assert payload["text"][0]["checksum"] == material.checksum
+    assert text not in json.dumps(copied_inputs)
+    assert len(json.dumps(payload["text"]).encode()) <= 2048
+
+
 @pytest.mark.parametrize(
     "failure,code,expected_context",
     [

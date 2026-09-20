@@ -11,6 +11,7 @@ from uuid import uuid4
 import pytest
 
 from eneo.authentication.principal_types import PrincipalType
+from eneo.files.file_models import FileContentVariant, FileType
 from eneo.files.file_service import FileService
 from eneo.flows.ai_builder.ai_builder_new_step_compiler import compile_new_step_draft
 from eneo.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
@@ -23,6 +24,7 @@ from eneo.flows.domain.flow import (
     FlowStepResultStatus,
 )
 from eneo.flows.domain.runtime import RunExecutionState, RuntimeStep, StepInputValue
+from eneo.flows.domain.step_output import build_text_overflow_metadata
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_input_limits import (
     DEFAULT_MAX_AUDIO_FILES_PER_RUN,
@@ -40,8 +42,260 @@ from eneo.flows.runtime.step_input_resolution import (
     resolve_step_input,
 )
 from eneo.flows.variable_resolver import FlowVariableResolver
-from eneo.main.exceptions import TypedIOValidationException
+from eneo.main.exceptions import (
+    NotFoundException,
+    TypedIOValidationException,
+    UnauthorizedException,
+)
 from tests.flow_snapshot_fixtures import assistant_snapshot
+
+
+def _file_backed_material(text: str, *, step_order: int = 1):
+    payload = text.encode("utf-8")
+    file_id = uuid4()
+    checksum = hashlib.sha256(payload).hexdigest()
+    file = SimpleNamespace(
+        id=file_id,
+        file_type=FileType.TEXT,
+        mimetype="text/plain",
+        size=len(payload),
+        checksum=checksum,
+        text=text,
+    )
+    reference = SimpleNamespace(
+        file_id=file_id,
+        variant=FileContentVariant.GENERATED_ARTIFACT,
+        ordinal=0,
+        size_bytes=len(payload),
+        sha256=bytes.fromhex(checksum),
+    )
+    result = _result(
+        step_order=step_order,
+        output_payload={
+            "text": "preview",
+            "text_overflow": build_text_overflow_metadata(
+                file_ids=[file_id], preview="preview", full_text=text
+            ),
+        },
+    )
+    return result, file, reference
+
+
+@pytest.mark.asyncio
+async def test_file_backed_previous_text_is_complete_with_source_identity():
+    text = "Hela dokumentet med åäö.\n" * 100
+    result, file, reference = _file_backed_material(text)
+    deps = replace(_resolution_deps(files=[file]), max_inline_text_bytes=1024)
+    deps.file_service.repo.get_content_references.return_value = [reference]
+    deps.file_service.get_file_content.return_value = file
+
+    resolved = await resolve_step_input(
+        step=_step(step_order=2, input_source="previous_step"),
+        context={},
+        run=_run(),
+        prior_results=[result],
+        deps=deps,
+    )
+
+    assert resolved.text.encode("utf-8") == text.encode("utf-8")
+    assert resolved.source_text == text
+    assert resolved.text != "preview"
+    material = resolved.materials[0]
+    assert material.source_step_id == result.step_id
+    assert material.source_attempt_no == result.current_attempt_no
+    assert material.file_id == file.id
+    assert material.checksum == file.checksum
+    assert material.byte_size == len(text.encode("utf-8"))
+    assert resolved.edges[0].selection.sha256 == file.checksum
+    deps.file_service.get_file_content.assert_awaited_once_with(file.id)
+
+
+@pytest.mark.parametrize("input_source", ["all_previous_steps", "previous_step"])
+@pytest.mark.asyncio
+async def test_file_backed_text_is_read_once_per_resolution(input_source):
+    text = "Complete material.\n" * 100
+    result, file, reference = _file_backed_material(text)
+    deps = replace(_resolution_deps(files=[file]), max_inline_text_bytes=1024)
+    deps.file_service.repo.get_content_references.return_value = [reference]
+    deps.file_service.get_file_content.return_value = file
+    bindings = (
+        {"question": "{{step_1.output.text}}\n{{step_1.output.text}}"}
+        if input_source == "previous_step"
+        else None
+    )
+    state = RunExecutionState(
+        completed_by_order={1: result},
+        prior_results=[result],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    for attempt in range(2):
+        resolved = await resolve_step_input(
+            step=_step(
+                step_order=2, input_source=input_source, input_bindings=bindings
+            ),
+            context={},
+            run=_run(),
+            prior_results=[result],
+            state=state,
+            deps=deps,
+        )
+        expected = (
+            f"{text}\n{text}"
+            if bindings
+            else f"<step_1_output>\n{text}\n</step_1_output>\n"
+        )
+        assert resolved.text == expected
+        assert deps.file_service.get_file_content.await_count == attempt + 1
+        assert len(resolved.materials) == 1
+        assert result.output_payload_json["text"] == "preview"
+        assert state.completed_by_order[1] is result
+
+
+@pytest.mark.parametrize("missing_at", ["metadata", "read", "unauthorized"])
+@pytest.mark.asyncio
+async def test_file_backed_text_unavailable_is_typed(missing_at):
+    result, file, reference = _file_backed_material("Complete material.\n" * 100)
+    deps = _resolution_deps(files=[] if missing_at == "metadata" else [file])
+    deps.file_service.repo.get_content_references.return_value = [reference]
+    deps.file_service.get_file_content.side_effect = (
+        UnauthorizedException("Not owned")
+        if missing_at == "unauthorized"
+        else NotFoundException("Missing artifact")
+    )
+    with pytest.raises(TypedIOValidationException) as exc:
+        await resolve_step_input(
+            step=_step(step_order=2, input_source="previous_step"),
+            context={},
+            run=_run(),
+            prior_results=[result],
+            deps=deps,
+        )
+    assert exc.value.code == FlowApiErrorCode.TYPED_IO_FILE_NOT_FOUND.value
+    if missing_at == "metadata":
+        deps.file_service.get_file_content.assert_not_awaited()
+
+
+@pytest.mark.parametrize("corruption", ["size", "checksum", "reference_size"])
+@pytest.mark.asyncio
+async def test_file_backed_text_integrity_is_verified(corruption):
+    result, file, reference = _file_backed_material("Complete material.\n" * 100)
+    deps = _resolution_deps(files=[file])
+    if corruption == "size":
+        file.text = file.text[:-1]
+    elif corruption == "checksum":
+        file.text = "X" + file.text[1:]
+    else:
+        reference.size_bytes += 1
+    deps.file_service.repo.get_content_references.return_value = [reference]
+    deps.file_service.get_file_content.return_value = file
+    with pytest.raises(TypedIOValidationException) as exc:
+        await resolve_step_input(
+            step=_step(step_order=2, input_source="previous_step"),
+            context={},
+            run=_run(),
+            prior_results=[result],
+            deps=deps,
+        )
+    assert exc.value.code == FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value
+    if corruption == "reference_size":
+        deps.file_service.get_file_content.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_aggregate_material_admission_precedes_any_content_read():
+    first = _file_backed_material("A" * 600, step_order=1)
+    second = _file_backed_material("B" * 600, step_order=2)
+    deps = replace(
+        _resolution_deps(files=[first[1], second[1]]),
+        input_limits=FlowInputLimits(
+            file_max_size_bytes=1000, audio_max_size_bytes=1000
+        ),
+    )
+    deps.file_service.repo.get_content_references.return_value = [first[2], second[2]]
+    with pytest.raises(TypedIOValidationException) as exc:
+        await resolve_step_input(
+            step=_step(step_order=3, input_source="all_previous_steps"),
+            context={},
+            run=_run(),
+            prior_results=[first[0], second[0]],
+            deps=deps,
+        )
+    assert exc.value.code == FlowApiErrorCode.RUN_INPUT_EXCEEDS_LIMIT.value
+    deps.file_service.get_file_content.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_material_and_runtime_files_share_processing_admission():
+    prior, artifact, reference = _file_backed_material("A" * 600)
+    binary = SimpleNamespace(
+        id=uuid4(), file_type=FileType.IMAGE, mimetype="image/png", size=600
+    )
+    deps = replace(
+        _resolution_deps(files=[artifact, binary]),
+        input_limits=FlowInputLimits(
+            file_max_size_bytes=1000, audio_max_size_bytes=1000
+        ),
+    )
+    deps.file_service.repo.get_content_references.return_value = [reference]
+    deps.file_service.get_file_content.side_effect = AssertionError(
+        "content hydrated before aggregate admission"
+    )
+    with pytest.raises(TypedIOValidationException) as exc:
+        await resolve_step_input(
+            step=_step(
+                step_order=2,
+                input_source="previous_step",
+                input_config={
+                    "runtime_input": {"enabled": True, "input_format": "document"}
+                },
+            ),
+            context={},
+            run=_run(),
+            prior_results=[prior],
+            requested_file_ids=[binary.id],
+            deps=deps,
+        )
+    assert exc.value.code == FlowApiErrorCode.RUN_INPUT_EXCEEDS_LIMIT.value
+    deps.file_service.get_file_content.assert_not_awaited()
+    deps.file_service.get_files_by_ids.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "inline_ceiling,expected_code",
+    [
+        (2000, FlowApiErrorCode.RUN_INPUT_EXCEEDS_LIMIT),
+        (400, FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE),
+    ],
+)
+async def test_material_admission_counts_inline_prompt_before_hydration(
+    inline_ceiling, expected_code
+):
+    prior, artifact, reference = _file_backed_material("A" * 600)
+    deps = replace(
+        _resolution_deps(files=[artifact]),
+        input_limits=FlowInputLimits(
+            file_max_size_bytes=1000, audio_max_size_bytes=1000
+        ),
+        max_inline_text_bytes=inline_ceiling,
+    )
+    deps.file_service.repo.get_content_references.return_value = [reference]
+    deps.file_service.get_file_content.side_effect = AssertionError(
+        "content hydrated before aggregate admission"
+    )
+    with pytest.raises(TypedIOValidationException) as exc:
+        await resolve_step_input(
+            step=_step(step_order=2, input_source="previous_step"),
+            prompt_template="P" * 500,
+            context={},
+            run=_run(),
+            prior_results=[prior],
+            deps=deps,
+        )
+    assert exc.value.code == expected_code.value
+    deps.file_service.get_file_content.assert_not_awaited()
 
 
 def _result(

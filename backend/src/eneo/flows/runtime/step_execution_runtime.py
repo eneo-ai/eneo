@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Any, Awaitable, Final, Literal, Protocol, Sequence, cast
 from uuid import UUID
@@ -91,6 +92,7 @@ from eneo.flows.runtime.step_input_validation import (
     validate_input_contract,
     validate_runtime_input_policy,
 )
+from eneo.flows.runtime.step_result_builder import build_step_input_payload
 from eneo.flows.runtime.structured_output_budget import ensure_structured_output_allowed
 from eneo.flows.variable_resolver import (
     FlowVariableContext,
@@ -212,6 +214,7 @@ class VariableResolverProtocol(Protocol):
         step_names_by_order: dict[int, str] | None = None,
         step_ref_mapping: dict[str, int] | None = None,
         current_step_input: dict[str, Any] | None = None,
+        resolved_step_text: Mapping[UUID, str] | None = None,
     ) -> FlowVariableContext: ...
 
     def interpolate_with_evidence(
@@ -245,6 +248,7 @@ class ResolveStepInputFn(Protocol):
         version_metadata: dict[str, Any] | None,
         requested_file_ids: Sequence[UUID],
         transcription_call_observer: ProviderCallObserver | None,
+        prompt_template: str = "",
     ) -> Awaitable[StepInputValue]: ...
 
 
@@ -1182,6 +1186,7 @@ async def prepare_step_execution(
                     state=state,
                     version_metadata=version_metadata,
                     requested_file_ids=requested_file_ids,
+                    prompt_template=prompt_text,
                     transcription_call_observer=(
                         deps.build_transcription_call_observer()
                         if deps.build_transcription_call_observer is not None
@@ -1199,12 +1204,14 @@ async def prepare_step_execution(
 
     record_step_phase(FlowStepPhase.INPUT_RESOLUTION)
     input_payload_for_result.update(
-        {
-            "text": step_input.text,
-            "source_text": step_input.source_text,
-            "input_source": step_input.input_source,
-            "used_question_binding": step_input.used_question_binding,
-        }
+        build_step_input_payload(
+            text=step_input.text,
+            source_text=step_input.source_text,
+            input_source=step_input.input_source,
+            used_question_binding=step_input.used_question_binding,
+            materials=step_input.materials,
+            max_inline_text_bytes=deps.max_inline_text_bytes,
+        )
     )
     if step_input.transcription_metadata is not None:
         input_payload_for_result["transcription"] = step_input.transcription_metadata
@@ -1243,6 +1250,9 @@ async def prepare_step_execution(
         step_names_by_order=state.step_names_by_order,
         step_ref_mapping=state.step_ref_mapping,
         current_step_input=step_input.runtime_input_metadata,
+        resolved_step_text={
+            material.source_step_id: material.text for material in step_input.materials
+        },
     )
     prompt_interpolation = (
         deps.variable_resolver.interpolate_with_evidence(
@@ -1266,7 +1276,8 @@ async def prepare_step_execution(
             step_order=step.step_order,
             input_source=step_input.input_source,
             text=effective_prompt + step_input.text,
-            max_inline_text_bytes=deps.max_inline_text_bytes,
+            max_inline_text_bytes=step_input.processing_ceiling_bytes
+            or deps.max_inline_text_bytes,
         )
         contract_validation = validate_input_contract(
             step_order=step.step_order,
@@ -1978,6 +1989,8 @@ async def _complete_step_execution(
         step=step,
     )
     return StepExecutionOutput(
+        materials=prepared.step_input.materials,
+        max_inline_text_bytes=deps.max_inline_text_bytes,
         input_text=prepared.step_input.text,
         source_text=prepared.step_input.source_text,
         input_source=prepared.step_input.input_source,

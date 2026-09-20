@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
+import pytest
+
 from eneo.flows.api.flow_assembler import FlowAssembler
 from eneo.flows.domain.flow import FlowStepResult, FlowStepResultStatus
 from eneo.flows.domain.runtime import RuntimeStep, StepDiagnostic, StepExecutionOutput
@@ -17,6 +19,117 @@ from eneo.flows.runtime.step_result_builder import (
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+@pytest.mark.parametrize(
+    "prompt,expected,truncated",
+    [("Short prompt", "Short prompt", False), ("å" * 900, "å" * 512, True)],
+    ids=["inline", "truncated"],
+)
+def test_public_step_exposes_prompt_prefix_and_truncation_fact(
+    prompt, expected, truncated
+):
+    import hashlib
+
+    from eneo.flows.domain.runtime import ResolvedStepMaterial
+
+    text = "Complete document.\n" * 200
+    material = ResolvedStepMaterial(
+        source_step_id=uuid4(),
+        source_attempt_no=2,
+        file_id=uuid4(),
+        checksum=hashlib.sha256(text.encode()).hexdigest(),
+        byte_size=len(text.encode()),
+        text=text,
+    )
+    claimed = _step_result(2, status=FlowStepResultStatus.RUNNING, text="")
+    output = StepExecutionOutput(
+        input_text=text,
+        source_text=text,
+        input_source="previous_step",
+        used_question_binding=False,
+        full_text="answer",
+        persisted_text="answer",
+        generated_file_ids=[],
+        tool_calls_metadata=None,
+        num_tokens_input=1,
+        num_tokens_output=1,
+        effective_prompt=prompt,
+        model_parameters_json={},
+        materials=(material,),
+        max_inline_text_bytes=1025,
+    )
+    result = build_completed_step_result(
+        claimed=claimed,
+        run_id=claimed.flow_run_id,
+        flow_id=claimed.flow_id,
+        tenant_id=claimed.tenant_id,
+        step=_runtime_step(2),
+        output=output,
+        output_payload_json={"text": "answer"},
+        execution_hash="hash",
+    )
+    public = FlowAssembler().to_step_public(result)
+
+    assert result.effective_prompt == expected
+    assert result.input_payload_json["effective_prompt_truncated"] is truncated
+    assert public.effective_prompt == expected
+    assert public.effective_prompt_truncated is truncated
+    assert public.input_text_aliases[0].source_step_id == material.source_step_id
+    assert public.model_dump()["effective_prompt_truncated"] is truncated
+    assert text not in public.model_dump_json()
+
+
+@pytest.mark.parametrize("prompt_only", [False, True])
+def test_public_input_lineage_contains_flat_references_for_each_material(prompt_only):
+    import hashlib
+
+    from eneo.flows.domain.runtime import ResolvedStepMaterial
+    from eneo.flows.runtime.step_result_builder import build_step_input_payload
+
+    text = "Complete material.\n" * 200
+    materials = tuple(
+        ResolvedStepMaterial(
+            source_step_id=uuid4(),
+            source_attempt_no=2,
+            file_id=uuid4(),
+            checksum=hashlib.sha256(text.encode()).hexdigest(),
+            byte_size=len(text.encode()),
+            text=text,
+        )
+        for _ in range(2)
+    )
+    result = _step_result(3, status=FlowStepResultStatus.COMPLETED, text="answer")
+    result.input_payload_json = build_step_input_payload(
+        text="" if prompt_only else text + text,
+        source_text="",
+        input_source="all_previous_steps",
+        used_question_binding=False,
+        materials=materials,
+        max_inline_text_bytes=2048,
+    )
+    public = FlowAssembler().to_step_public(result)
+    assert [alias.file_id for alias in public.input_text_aliases] == [
+        m.file_id for m in materials
+    ]
+    assert [alias.source_step_id for alias in public.input_text_aliases] == [
+        m.source_step_id for m in materials
+    ]
+    assert all(
+        set(alias.model_dump())
+        == {
+            "kind",
+            "file_id",
+            "checksum",
+            "full_text_bytes",
+            "inline_text_bytes",
+            "preview",
+            "source_step_id",
+            "source_attempt_no",
+        }
+        for alias in public.input_text_aliases
+    )
+    assert text not in public.model_dump_json()
 
 
 def _runtime_step(step_order: int, *, description: str | None = None) -> RuntimeStep:

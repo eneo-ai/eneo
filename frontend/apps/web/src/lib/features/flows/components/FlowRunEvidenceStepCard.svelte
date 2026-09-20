@@ -250,6 +250,9 @@
               class="bg-hover-dimmer mt-1.5 overflow-hidden rounded-lg p-3 font-sans text-sm leading-relaxed break-words whitespace-pre-wrap {promptExpanded
                 ? ''
                 : 'max-h-80'}">{result.effective_prompt}</pre>
+            {#if result.effective_prompt_truncated}
+              <p class="text-muted mt-1.5 text-xs">{m.flow_run_effective_prompt_truncated()}</p>
+            {/if}
             {#if promptClipped || promptExpanded}
               <Button
                 variant="link"

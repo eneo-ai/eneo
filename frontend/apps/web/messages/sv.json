@@ -5492,6 +5492,7 @@
   "flow_run_effective_prompt": "Slutgiltig prompt",
   "flow_run_effective_prompt_show_all": "Visa hela prompten",
   "flow_run_effective_prompt_show_less": "Visa mindre",
+  "flow_run_effective_prompt_truncated": "Endast början av prompten sparades. Hela prompten byggdes av stegets mall och det fullständiga materialet från tidigare steg.",
   "flow_run_error": "Ett fel uppstod",
   "flow_run_error_affected_step": "Berört steg:",
   "flow_run_error_affected_steps": "Berörda steg:",

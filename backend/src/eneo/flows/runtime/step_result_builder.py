@@ -15,7 +15,13 @@ from eneo.flows.domain.rag_evidence import (
     build_step_result_citation_state,
 )
 from eneo.flows.domain.runtime import RuntimeStep, StepExecutionOutput
-from eneo.flows.domain.step_output import build_rejected_output_payload
+from eneo.flows.domain.step_output import (
+    ResolvedStepMaterial,
+    build_rejected_output_payload,
+    build_step_text_alias,
+    step_text_alias_payload,
+    utf8_prefix,
+)
 from eneo.flows.flow_run_provenance import (
     CitationsProvenance,
     FlowAttemptProvenance,
@@ -159,13 +165,44 @@ def build_failed_step_result(
     return claimed.model_copy(update=updates, deep=True)
 
 
-def build_completed_step_input_payload(output: StepExecutionOutput) -> JsonObject:
-    payload: dict[str, Any] = {
-        "text": output.input_text,
-        "source_text": output.source_text,
-        "input_source": output.input_source,
-        "used_question_binding": output.used_question_binding,
+def build_step_input_payload(
+    *,
+    text: str,
+    source_text: str,
+    input_source: str,
+    used_question_binding: bool,
+    materials: tuple[ResolvedStepMaterial, ...],
+    max_inline_text_bytes: int,
+) -> dict[str, Any]:
+    return {
+        "text": step_text_alias_payload(
+            build_step_text_alias(
+                text, materials=materials, max_inline_bytes=max_inline_text_bytes
+            )
+        ),
+        "source_text": step_text_alias_payload(
+            build_step_text_alias(
+                source_text, materials=materials, max_inline_bytes=max_inline_text_bytes
+            )
+        ),
+        "input_source": input_source,
+        "used_question_binding": used_question_binding,
     }
+
+
+def build_completed_step_input_payload(output: StepExecutionOutput) -> JsonObject:
+    payload = build_step_input_payload(
+        text=output.input_text,
+        source_text=output.source_text,
+        input_source=output.input_source,
+        used_question_binding=output.used_question_binding,
+        materials=output.materials,
+        max_inline_text_bytes=output.max_inline_text_bytes,
+    )
+    payload["effective_prompt_truncated"] = (
+        output.max_inline_text_bytes > 0
+        and len(output.effective_prompt.encode("utf-8")) > output.max_inline_text_bytes
+    )
     if output.transcription_metadata is not None:
         payload["transcription"] = output.transcription_metadata
     if output.runtime_input_metadata is not None:
@@ -213,7 +250,11 @@ def build_completed_step_result(
         step_order=step.step_order,
         assistant_id=step.assistant_id,
         input_payload_json=build_completed_step_input_payload(output),
-        effective_prompt=output.effective_prompt,
+        effective_prompt=(
+            utf8_prefix(output.effective_prompt, max_bytes=output.max_inline_text_bytes)
+            if output.max_inline_text_bytes > 0
+            else output.effective_prompt
+        ),
         output_payload_json=output_payload_json,
         model_parameters_json=output.model_parameters_json,
         num_tokens_input=output.num_tokens_input,

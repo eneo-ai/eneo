@@ -17,6 +17,9 @@ from eneo.flows.domain.step_output import (
     StepOutputMetadataError,
     interpret_step_text,
 )
+from eneo.flows.domain.step_output import (
+    ResolvedStepMaterial as ResolvedStepMaterial,
+)
 from eneo.flows.enums import flow_output_mode_uses_completion_model
 from eneo.flows.flow_review_policy import FlowStepReviewPolicy
 from eneo.flows.flow_run_provenance import (
@@ -142,6 +145,8 @@ class StepExecutionOutput:
     # output inherits them as well.
     inherited_citation_sources: list[dict[str, Any]] | None = None
     raw_completion_text: str | None = None
+    materials: tuple[ResolvedStepMaterial, ...] = ()
+    max_inline_text_bytes: int = 0
 
 
 @dataclass
@@ -157,6 +162,8 @@ class StepInputValue:
     transcription_metadata: dict[str, Any] | None = None
     runtime_input_metadata: dict[str, Any] | None = None
     edges: tuple[FlowResolvedInputEdge, ...] = ()
+    materials: tuple[ResolvedStepMaterial, ...] = ()
+    processing_ceiling_bytes: int | None = None
 
 
 @dataclass(frozen=True)
@@ -181,6 +188,8 @@ class RunExecutionState:
     json_mode_supported: dict[str, bool]
     file_cache: dict[frozenset[UUID], list[File]]
     input_file_admission: InputFileAdmission | None = None
+    material_cache: dict[tuple[UUID, str], str] | None = None
+    resolved_materials: tuple[ResolvedStepMaterial, ...] = ()
     json_schema_rejected_models: set[str] = field(default_factory=set[str])
     flow_id: UUID | None = None
     flow_space: Space | None = None

@@ -431,6 +431,90 @@ def test_evidence_bundle_projects_exact_resolved_input_lineage_per_attempt() -> 
     }
 
 
+def test_evidence_and_public_attempt_keep_consumed_material_aliases():
+    from eneo.flows.api.flow_models import FlowStepAttemptPublic
+    from eneo.flows.domain.step_output import (
+        FileBackedStepText,
+        ResolvedStepMaterial,
+        build_step_text_alias,
+    )
+    from eneo.flows.runtime.step_result_builder import build_step_input_payload
+
+    run, version = _evidence_run_and_version()
+    text = "Complete private material.\n" * 200
+    material = ResolvedStepMaterial(
+        source_step_id=uuid4(),
+        source_attempt_no=2,
+        file_id=uuid4(),
+        checksum=hashlib.sha256(text.encode()).hexdigest(),
+        byte_size=len(text.encode()),
+        text=text,
+    )
+    alias = build_step_text_alias(text, materials=(material,), max_inline_bytes=2048)
+    assert isinstance(alias, tuple)
+    assert isinstance(alias[0], FileBackedStepText)
+    payload = build_step_input_payload(
+        text=text,
+        source_text=text,
+        input_source="previous_step",
+        used_question_binding=False,
+        materials=(material,),
+        max_inline_text_bytes=2048,
+    )
+    attempt_input = FlowStepAttemptInput(
+        resolved_input=payload,
+        completion_configuration=FlowStepAttemptCompletionConfiguration(
+            preferred_model_parameters={}
+        ),
+        execution_inputs=(
+            FlowStepAttemptExecutionInput(
+                question=alias,
+                effective_prompt="Complete private material.",
+                effective_prompt_truncated=True,
+                assistant_context_version=1,
+            ),
+        ),
+    )
+    attempt = _attempt_with_provenance(run, None).model_copy(
+        update={
+            "input_payload_json": attempt_input.to_payload(),
+        }
+    )
+    payload["effective_prompt_truncated"] = True
+    result = _step_result_for_run(run, step_id=attempt.step_id).model_copy(
+        update={
+            "input_payload_json": payload,
+            "effective_prompt": "Complete private material.",
+        }
+    )
+    public = FlowStepAttemptPublic.model_validate(
+        {
+            **attempt.model_dump(),
+            "resolved_input_lineage": {"status": "not_tracked"},
+        }
+    )
+    assert public.input_text_aliases == alias
+    assert public.input_payload_json == attempt_input
+
+    evidence = build_evidence_bundle(
+        run=run,
+        version=version,
+        step_results=[result],
+        step_attempts=[attempt],
+    ).to_dict()
+    exported_attempt = evidence["step_attempts"][0]["input_payload_json"]
+    assert (
+        FlowStepAttemptInput.model_validate_json(json.dumps(exported_attempt))
+        == attempt_input
+    )
+    assert (
+        evidence["step_results"][0]["effective_prompt"] == "Complete private material."
+    )
+    assert evidence["step_results"][0]["effective_prompt_truncated"] is True
+    assert evidence["step_results"][0]["input_payload_json"] == payload
+    assert text not in json.dumps(evidence)
+
+
 def test_evidence_bundle_requires_lineage_for_exactly_admitted_attempts() -> None:
     run, version = _evidence_run_and_version()
     attempt = _attempt_with_provenance(run, None)

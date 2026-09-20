@@ -528,6 +528,9 @@ def _dump_result_record(
     citation_summary: FlowCitationSummaryPublic | None = None,
 ) -> dict[str, Any]:
     dumped = item.model_dump(mode="json")
+    dumped["effective_prompt_truncated"] = (item.input_payload_json or {}).get(
+        "effective_prompt_truncated", False
+    )
     dumped["citation_summary"] = (
         citation_summary.model_dump(mode="json")
         if citation_summary is not None

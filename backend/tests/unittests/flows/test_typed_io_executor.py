@@ -703,7 +703,7 @@ async def test_resolve_step_input_json_question_binding_overrides_previous_struc
 
 
 @pytest.mark.asyncio
-async def test_resolve_step_input_question_binding_rejects_capped_text_ref(user):
+async def test_resolve_step_input_question_binding_rejects_missing_text_artifact(user):
     executor, _, _, _ = _build_executor(user)
     run = _run(status=FlowRunStatus.RUNNING, user=user)
     prior = [
@@ -736,9 +736,7 @@ async def test_resolve_step_input_question_binding_rejects_capped_text_ref(user)
             prior_results=prior,
         )
 
-    assert exc.value.code == "typed_io_input_too_large"
-    assert "input_bindings.question" in str(exc.value)
-    assert "step 1 text" in str(exc.value)
+    assert exc.value.code == "typed_io_file_not_found"
 
 
 @pytest.mark.asyncio
@@ -984,7 +982,9 @@ async def test_resolve_step_input_compose_source_refs_serialize_typed_values(use
 
 
 @pytest.mark.asyncio
-async def test_resolve_step_input_compose_source_ref_rejects_file_backed_text(user):
+async def test_resolve_step_input_compose_source_ref_rejects_missing_text_artifact(
+    user,
+):
     executor, _, _, _ = _build_executor(user)
     run = _run(status=FlowRunStatus.RUNNING, user=user)
     prior = [
@@ -1025,9 +1025,7 @@ async def test_resolve_step_input_compose_source_ref_rejects_file_backed_text(us
             prior_results=prior,
         )
 
-    assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value
-    assert "input_bindings.source_refs" in str(exc_info.value)
-    assert "generated output file" in str(exc_info.value)
+    assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_FILE_NOT_FOUND.value
 
 
 @pytest.mark.asyncio
@@ -1983,7 +1981,7 @@ async def test_resolve_step_input_previous_step_with_content_emits_underlag_summ
 
 
 @pytest.mark.asyncio
-async def test_resolve_step_input_previous_step_rejects_capped_output_stub(user):
+async def test_resolve_step_input_previous_step_rejects_missing_text_artifact(user):
     executor, _, _, _ = _build_executor(user)
     run = _run(status=FlowRunStatus.RUNNING, user=user)
     prior = [
@@ -2011,9 +2009,7 @@ async def test_resolve_step_input_previous_step_rejects_capped_output_stub(user)
             prior_results=prior,
         )
 
-    assert exc.value.code == "typed_io_input_too_large"
-    assert "step 1 text" in str(exc.value)
-    assert "generated output file" in str(exc.value)
+    assert exc.value.code == "typed_io_file_not_found"
 
 
 @pytest.mark.asyncio
@@ -2067,7 +2063,9 @@ async def test_resolve_step_input_all_previous_steps_prefers_state_accumulator(u
 
 
 @pytest.mark.asyncio
-async def test_resolve_step_input_all_previous_steps_rejects_capped_state_output(user):
+async def test_resolve_step_input_all_previous_steps_rejects_missing_state_artifact(
+    user,
+):
     executor, _, _, _ = _build_executor(user)
     run = _run(status=FlowRunStatus.RUNNING, user=user)
     cached = _completed_step_result(
@@ -2103,9 +2101,7 @@ async def test_resolve_step_input_all_previous_steps_rejects_capped_state_output
             state=state,
         )
 
-    assert exc.value.code == "typed_io_input_too_large"
-    assert "all_previous_steps" in str(exc.value)
-    assert "step 1 text" in str(exc.value)
+    assert exc.value.code == "typed_io_file_not_found"
 
 
 @pytest.mark.asyncio

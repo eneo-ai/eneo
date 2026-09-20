@@ -6,11 +6,14 @@ from typing import Annotated, Any, Literal, Self, TypeAlias, cast
 from uuid import UUID
 
 from pydantic import (
+    AliasChoices,
+    AliasPath,
     BaseModel,
     BeforeValidator,
     ConfigDict,
     Field,
     WithJsonSchema,
+    computed_field,
     field_validator,
     model_validator,
 )
@@ -78,6 +81,10 @@ from eneo.flows.domain.flow import (
     parse_flow_step_retrieval_policy,
 )
 from eneo.flows.domain.flow_run_retention_policy import FlowRunRetentionProjection
+from eneo.flows.domain.flow_step_attempt_input import (
+    FlowStepAttemptInput,
+    parse_flow_step_attempt_input,
+)
 from eneo.flows.domain.provider_call import (
     PROVIDER_CALL_EVIDENCE_PAGE_EXAMPLE,
     ProviderCallEvidencePage,
@@ -86,6 +93,7 @@ from eneo.flows.domain.rag_evidence import (
     RecordedPassageContent,
     RetrievedSource,
 )
+from eneo.flows.domain.step_output import FileBackedStepText, parse_step_text_aliases
 from eneo.flows.domain.transcript_corrections import FlowTranscriptCorrectionRevision
 from eneo.flows.enums import (
     FlowInputSource,
@@ -395,6 +403,8 @@ FLOW_RUN_STEP_PUBLIC_EXAMPLE: dict[str, Any] = {
             }
         ]
     },
+    "input_text_aliases": [],
+    "effective_prompt_truncated": False,
     "runtime_input_file_ids": ["00000000-0000-0000-0000-000000000701"],
     "output_payload_json": {"text": "Hello and welcome to the annual review..."},
     "result_files": [],
@@ -1487,6 +1497,17 @@ class FlowRunStepPublic(BaseModel):
         default_factory=lambda: cast(list[FlowRunStepResultFile], [])
     )
     effective_prompt: str | None = None
+    effective_prompt_truncated: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "effective_prompt_truncated",
+            AliasPath("input_payload_json", "effective_prompt_truncated"),
+        ),
+        description=(
+            "When true, only a UTF-8 prefix is stored. The complete prompt is not persisted: "
+            "the flow revision holds the template and the input aliases hold the material identities."
+        ),
+    )
     model_parameters_json: dict[str, Any] | None = None
     num_tokens_input: int | None = None
     num_tokens_output: int | None = None
@@ -1506,6 +1527,11 @@ class FlowRunStepPublic(BaseModel):
     finished_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+
+    @computed_field
+    @property
+    def input_text_aliases(self) -> tuple[FileBackedStepText, ...]:
+        return parse_step_text_aliases((self.input_payload_json or {}).get("text"))
 
 
 class FlowRunRedispatchRequest(BaseModel):
@@ -2030,11 +2056,27 @@ class FlowStepAttemptPublic(BaseModel):
     num_tokens_input: int | None = None
     num_tokens_output: int | None = None
     provenance_json: dict[str, Any] | None = None
+    input_payload_json: FlowStepAttemptInput | None = None
     resolved_input_lineage: FlowResolvedInputLineage
     started_at: datetime
     finished_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("input_payload_json", mode="before")
+    @classmethod
+    def _read_attempt_input(cls, value: object) -> FlowStepAttemptInput | None:
+        if isinstance(value, FlowStepAttemptInput):
+            return value
+        return parse_flow_step_attempt_input(value).attempt_input
+
+    @computed_field
+    @property
+    def input_text_aliases(self) -> tuple[FileBackedStepText, ...]:
+        resolved = (
+            self.input_payload_json.resolved_input if self.input_payload_json else None
+        )
+        return parse_step_text_aliases((resolved or {}).get("text"))
 
 
 class FlowRunReviewCheckpointEditPublic(FlowRunReviewCheckpointEdit):
@@ -2268,7 +2310,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
             "example": {
                 "schema_version": "flow-evidence-export.v17",
                 "generated_at": "2026-03-31T12:00:00Z",
-                "content_hash": "3717efc96f8b796387a55c11e0273b15898cdd32c68ddd3b70af8ce19999b36e",
+                "content_hash": "a8ba11aba45e0bbf0ace7e29e739d8dcd7f4ccd071b5746df358e5f57646ecad",
                 "manifest": {
                     "schema_version": "flow-evidence-export.v17",
                     "app_version": "DEV",
@@ -2280,7 +2322,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
                     "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
                     "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8",
                     "flow_version": 3,
-                    "content_hash": "3717efc96f8b796387a55c11e0273b15898cdd32c68ddd3b70af8ce19999b36e",
+                    "content_hash": "a8ba11aba45e0bbf0ace7e29e739d8dcd7f4ccd071b5746df358e5f57646ecad",
                     "content_hash_input": "redacted",
                     "exported_at": "2026-03-31T12:00:00Z",
                     "actor": {

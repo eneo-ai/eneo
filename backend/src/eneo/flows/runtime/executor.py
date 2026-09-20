@@ -67,7 +67,11 @@ from eneo.flows.domain.runtime import (
 )
 from eneo.flows.domain.runtime_input import build_runtime_input_config
 from eneo.flows.domain.runtime_invariant_exceptions import FlowRuntimeInvariantError
-from eneo.flows.domain.step_output import StepOutputValidationException, utf8_prefix
+from eneo.flows.domain.step_output import (
+    StepOutputValidationException,
+    build_step_text_alias,
+    utf8_prefix,
+)
 from eneo.flows.enums import (
     FlowOutputMode,
     FlowOutputType,
@@ -457,11 +461,20 @@ def _attempt_completion_evidence(
         ),
         tuple(
             FlowStepAttemptExecutionInput(
-                question=call.question,
-                effective_prompt=call.effective_prompt,
+                question=build_step_text_alias(
+                    call.question,
+                    materials=prepared.prepared.step_input.materials,
+                    max_inline_bytes=prepared.deps.max_inline_text_bytes,
+                ),
+                effective_prompt=utf8_prefix(
+                    call.effective_prompt,
+                    max_bytes=prepared.deps.max_inline_text_bytes,
+                ),
+                effective_prompt_truncated=len(call.effective_prompt.encode("utf-8"))
+                > prepared.deps.max_inline_text_bytes,
                 assistant_context_version=call.assistant_context_version,
             )
-            for call in frozen_calls
+            for call, prepared in zip(frozen_calls, prepared_steps, strict=True)
         ),
     )
 
@@ -1176,6 +1189,8 @@ class FlowRunExecutor:
         )
 
         handler = self._build_step_handler(resolve_handler_mode(step.output_mode))
+        state.material_cache = {}
+        state.resolved_materials = ()
         deadline = self._start_step_deadline(step)
         self._active_step_deadline = deadline
         try:
@@ -1215,6 +1230,24 @@ class FlowRunExecutor:
                                 version_metadata=version_metadata,
                                 attempt_no=attempt_no,
                             )
+                            result.output.materials = state.resolved_materials
+                            result.output.max_inline_text_bytes = (
+                                self.max_inline_text_bytes
+                            )
+                    except TypedIOValidationException as exc:
+                        prompt = getattr(exc, "effective_prompt", None)
+                        if isinstance(prompt, str):
+                            exc.effective_prompt = utf8_prefix(
+                                prompt, max_bytes=self.max_inline_text_bytes
+                            )
+                            exc.input_payload_json = {
+                                **(exc.input_payload_json or {}),
+                                "effective_prompt_truncated": len(
+                                    prompt.encode("utf-8")
+                                )
+                                > self.max_inline_text_bytes,
+                            }
+                        raise
                     except TimeoutError as exc:
                         if backstop is None or not backstop.expired():
                             # Some inner wait timed out on its own; only the
@@ -1252,6 +1285,8 @@ class FlowRunExecutor:
                 return result
         finally:
             self._active_step_deadline = None
+            state.material_cache = None
+            state.resolved_materials = ()
 
     def _start_step_deadline(self, step: RuntimeStep) -> StepDeadline:
         try:
@@ -2340,6 +2375,7 @@ class FlowRunExecutor:
         version_metadata: dict[str, Any] | None = None,
         requested_file_ids: Sequence[UUID] = (),
         transcription_call_observer: "ProviderCallObserver | None" = None,
+        prompt_template: str = "",
     ) -> StepInputValue:
         deps = self._build_step_input_resolution_deps(transcription_call_observer)
         return await resolve_step_input_runtime(
@@ -2350,6 +2386,7 @@ class FlowRunExecutor:
             state=state,
             version_metadata=version_metadata,
             requested_file_ids=requested_file_ids,
+            prompt_template=prompt_template,
             deps=deps,
         )
 

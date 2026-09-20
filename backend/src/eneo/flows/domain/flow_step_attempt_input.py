@@ -7,6 +7,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from eneo.flows.domain.step_output import FileBackedStepText
 from eneo.json_types import JsonObject
 
 FLOW_STEP_ATTEMPT_INPUT_SCHEMA_VERSION: Literal["flow-step-attempt-input.v1"] = (
@@ -64,8 +65,15 @@ class FlowStepAttemptCompletionConfiguration(_FlowStepAttemptInputModel):
 
 
 class FlowStepAttemptExecutionInput(_FlowStepAttemptInputModel):
-    question: str
+    question: str | tuple[FileBackedStepText, ...]
     effective_prompt: str
+    effective_prompt_truncated: bool = Field(
+        default=False,
+        description=(
+            "When true, only a UTF-8 prefix is stored. The complete prompt is not persisted: "
+            "the flow revision holds the template and the input aliases hold the material identities."
+        ),
+    )
     assistant_context_version: int = Field(ge=1)
 
 
