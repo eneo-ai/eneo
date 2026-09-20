@@ -75,7 +75,10 @@ from eneo.completion_models.infrastructure.tenant_model_capabilities import (
 from eneo.completion_models.infrastructure.tenant_model_capabilities import (
     get_supported_openai_params as get_model_supported_openai_params,
 )
-from eneo.flows.runtime.step_deadline import StepDeadlineExceeded
+from eneo.flows.runtime.step_deadline import (
+    StepDeadlineExceeded,
+    settle_provider_request,
+)
 from eneo.logging.logging import LoggingDetails
 from eneo.main.exceptions import (
     APIKeyNotConfiguredException,
@@ -414,6 +417,19 @@ def _get_supported_openai_params(model: str) -> list[str] | None:
 
 async def _acompletion_call(**kwargs: Any) -> Any:
     return await litellm_transport.acompletion(**kwargs)
+
+
+async def _settled_provider_stream(
+    stream: AsyncIterator[_LiteLLMStreamChunk],
+) -> AsyncIterator[_LiteLLMStreamChunk]:
+    try:
+        async for chunk in stream:
+            yield chunk
+    except (asyncio.CancelledError, GeneratorExit, Exception):
+        settle_provider_request(known=False)
+        raise
+    else:
+        settle_provider_request(known=True)
 
 
 def _is_provider_unavailable_error(exc: BaseException) -> bool:
@@ -1621,6 +1637,41 @@ class TenantModelAdapter(CompletionModelAdapter):
                 retry_without_capability_safe=completed_provider_calls == 0,
             )
 
+    async def _request_completion(
+        self,
+        *,
+        phase: str,
+        retry_without_capability_safe: bool = False,
+        **kwargs: Any,
+    ) -> Any:
+        try:
+            response = await _acompletion_call(**kwargs)
+        except TypedIOValidationException:
+            raise
+        except asyncio.CancelledError:
+            settle_provider_request(known=False)
+            raise
+        except Exception as exc:
+            try:
+                litellm_transport.raise_public_litellm_error(
+                    exc,
+                    provider_type=self.provider_type,
+                    is_unavailable=_is_provider_unavailable_error,
+                    raise_unavailable=lambda error: self._raise_provider_unavailable(
+                        phase=phase, exc=error
+                    ),
+                    retry_without_capability_safe=retry_without_capability_safe,
+                )
+            except ProviderRejectedRequestException:
+                settle_provider_request(known=True)
+                raise
+            except Exception:
+                settle_provider_request(known=False)
+                raise
+        if not kwargs.get("stream"):
+            settle_provider_request(known=True)
+        return response
+
     async def _observed_provider_call(
         self,
         *,
@@ -1645,7 +1696,9 @@ class TenantModelAdapter(CompletionModelAdapter):
         try:
             response = cast(
                 _LiteLLMResponse,
-                await _acompletion_call(
+                await self._request_completion(
+                    phase="completion",
+                    retry_without_capability_safe=retry_without_capability_safe,
                     model=self.litellm_model,
                     messages=messages,
                     stream=False,
@@ -1663,30 +1716,18 @@ class TenantModelAdapter(CompletionModelAdapter):
             raise
         except TypedIOValidationException:
             raise
-        except Exception as exc:
-            try:
-                litellm_transport.raise_public_litellm_error(
-                    exc,
-                    provider_type=self.provider_type,
-                    is_unavailable=_is_provider_unavailable_error,
-                    raise_unavailable=lambda error: self._raise_provider_unavailable(
-                        phase="completion", exc=error
-                    ),
-                    retry_without_capability_safe=retry_without_capability_safe,
-                )
-            except ProviderCapabilityRejectedException:
-                if observer is not None and call_id is not None:
-                    await observer.rejected(call_id, "response_format_rejected")
-                raise
-            except ProviderRejectedRequestException:
-                if observer is not None and call_id is not None:
-                    await observer.rejected(call_id, "provider_rejected")
-                raise
-            except Exception:
-                if observer is not None and call_id is not None:
-                    await observer.outcome_unknown(call_id, "provider_error")
-                raise
-            raise AssertionError("Provider error mapping unexpectedly returned.")
+        except ProviderCapabilityRejectedException:
+            if observer is not None and call_id is not None:
+                await observer.rejected(call_id, "response_format_rejected")
+            raise
+        except ProviderRejectedRequestException:
+            if observer is not None and call_id is not None:
+                await observer.rejected(call_id, "provider_rejected")
+            raise
+        except Exception:
+            if observer is not None and call_id is not None:
+                await observer.outcome_unknown(call_id, "provider_error")
+            raise
 
         if observer is not None and call_id is not None:
             usage = self._extract_usage(response)
@@ -1766,7 +1807,8 @@ class TenantModelAdapter(CompletionModelAdapter):
             # Request usage info on the final chunk when the provider returns it.
             stream = cast(
                 AsyncIterator[_LiteLLMStreamChunk],
-                await _acompletion_call(
+                await self._request_completion(
+                    phase="stream_preparation",
                     model=self.litellm_model,
                     messages=messages,
                     stream=True,
@@ -1937,7 +1979,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                         }
                     )
 
-                async for chunk in s:
+                async for chunk in _settled_provider_stream(s):
                     # Capture usage from final chunk (when stream_options include_usage is set)
                     chunk_usage_obj = getattr(chunk, "usage", None)
                     if chunk_usage_obj:
@@ -2230,7 +2272,8 @@ class TenantModelAdapter(CompletionModelAdapter):
                             )
                         follow_up = cast(
                             AsyncIterator[_LiteLLMStreamChunk],
-                            await _acompletion_call(
+                            await self._request_completion(
+                                phase="stream_iteration",
                                 model=self.litellm_model,
                                 messages=messages,
                                 stream=True,
@@ -2628,7 +2671,8 @@ class TenantModelAdapter(CompletionModelAdapter):
                     # Follow-up streaming request (keep tools for next round)
                     follow_up = cast(
                         AsyncIterator[_LiteLLMStreamChunk],
-                        await _acompletion_call(
+                        await self._request_completion(
+                            phase="stream_iteration",
                             model=self.litellm_model,
                             messages=messages,
                             stream=True,
@@ -2708,7 +2752,8 @@ class TenantModelAdapter(CompletionModelAdapter):
                     litellm_kwargs = {**litellm_kwargs, "tool_choice": "none"}
                     follow_up = cast(
                         AsyncIterator[_LiteLLMStreamChunk],
-                        await _acompletion_call(
+                        await self._request_completion(
+                            phase="stream_iteration",
                             model=self.litellm_model,
                             messages=messages,
                             stream=True,

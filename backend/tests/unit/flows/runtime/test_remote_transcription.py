@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import io
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import httpx
@@ -21,7 +20,11 @@ from eneo.flows.runtime.run_cancellation import (
     FlowStepCancelledError,
     run_cancel_probe_scope,
 )
-from eneo.flows.runtime.step_deadline import StepDeadline, step_deadline_scope
+from eneo.flows.runtime.step_deadline import (
+    StepDeadline,
+    require_step_budget,
+    step_deadline_scope,
+)
 from eneo.main.config import Settings
 from eneo.main.exceptions import (
     APIKeyNotConfiguredException,
@@ -419,20 +422,57 @@ async def test_failed_job_is_rejected_and_recorded() -> None:
     assert service.submit_count == 1
 
 
+async def test_successful_job_does_not_resolve_an_unknown_submission(monkeypatch):
+    clock = {"now": 0.0}
+    monkeypatch.setattr(step_deadline_module, "_now", lambda: clock["now"])
+    service = ScriptedService(
+        submit_responses=[httpx.Response(500), accepted()],
+        status_responses=[status("completed")],
+        result_responses=[httpx.Response(200, json=RESULT_BODY)],
+    )
+    transcriber = RemoteFlowTranscriber(make_client(service))
+    observer = RecordingObserver()
+    with step_deadline_scope(StepDeadline.start(30), step_order=1):
+        await transcriber.transcribe(audio_file(), SimpleNamespace(), observer=observer)
+        clock["now"] = 30.0
+        with pytest.raises(TypedIOValidationException) as exc_info:
+            require_step_budget(phase="next transcription")
+
+    assert service.submit_count == 2
+    assert [reason for _, reason in observer.unknown_calls] == ["provider_error"]
+    assert len(observer.completed_calls) == 1
+    assert exc_info.value.provider_work_may_have_completed is True
+
+
 async def test_cancelled_submission_is_not_resubmitted() -> None:
     """The step's budget ran out while the job was being submitted: the
     cancellation propagates without the retry policy sending the job again."""
     service = ScriptedService()
     transcriber = RemoteFlowTranscriber(make_client(service))
-    transcriber.client.submit = AsyncMock(side_effect=asyncio.CancelledError())  # type: ignore[method-assign]
+
+    async def cancelled_request(request):
+        service.requests.append(request)
+        raise asyncio.CancelledError()
+
+    transcriber.client._transport = httpx.MockTransport(cancelled_request)
     observer = RecordingObserver()
 
-    with pytest.raises(asyncio.CancelledError):
-        await transcriber.transcribe(audio_file(), SimpleNamespace(), observer=observer)
+    with step_deadline_scope(StepDeadline.start(30), step_order=1) as scope:
+        with pytest.raises(asyncio.CancelledError):
+            await transcriber.transcribe(
+                audio_file(), SimpleNamespace(), observer=observer
+            )
+        assert scope.provider_request_in_flight is False
+        assert scope.provider_outcome_unresolved is True
+        assert (
+            scope.deadline.timeout_error(
+                step_order=1, phase="transcription"
+            ).provider_work_may_have_completed
+            is True
+        )
 
-    assert transcriber.client.submit.await_count == 1
     assert [reason for _, reason in observer.unknown_calls] == ["request_cancelled"]
-    assert service.submit_count == 0
+    assert service.submit_count == 1
 
 
 async def test_no_job_is_submitted_after_the_step_budget_expires(monkeypatch) -> None:
@@ -500,7 +540,14 @@ async def test_cancelled_poll_keeps_the_in_flight_fact_and_stops_the_job() -> No
                 await transcriber.transcribe(
                     audio_file(), SimpleNamespace(), observer=observer
                 )
-        assert scope.provider_request_in_flight is True
+        assert scope.provider_request_in_flight is False
+        assert scope.provider_outcome_unresolved is True
+        assert (
+            scope.deadline.timeout_error(
+                step_order=2, phase="transcription"
+            ).provider_work_may_have_completed
+            is True
+        )
 
     assert service.submit_count == 1
     assert service.cancel_count == 1

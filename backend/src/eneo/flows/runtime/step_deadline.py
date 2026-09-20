@@ -85,7 +85,11 @@ class StepDeadline:
         if completed is None and scope is not None:
             completed = scope.progress
         provider_work_may_have_completed = (
-            bool(provider_request_in_flight or scope.provider_request_in_flight)
+            bool(
+                provider_request_in_flight
+                or scope.provider_request_in_flight
+                or scope.provider_outcome_unresolved
+            )
             if scope is not None
             else provider_request_in_flight
         )
@@ -115,7 +119,7 @@ class StepDeadlineScope:
     Published by the executor around the handler so work it cannot reach by
     parameter (transcription chunks, remote job submission) can refuse to
     start once the budget is spent, and so the timeout message can name the
-    mapped progress and the in-flight provider request the executor's
+    mapped progress and the provider activity or unresolved outcome the executor's
     backstop would otherwise not know about.
     """
 
@@ -126,6 +130,7 @@ class StepDeadlineScope:
     completed_items: int | None = None
     total_items: int | None = None
     provider_request_in_flight: bool = False
+    provider_outcome_unresolved: bool = False
 
 
 _scope: ContextVar[StepDeadlineScope | None] = ContextVar(
@@ -170,6 +175,15 @@ def mark_provider_request_in_flight(in_flight: bool) -> None:
     scope = _scope.get()
     if scope is not None:
         scope.provider_request_in_flight = in_flight
+
+
+def settle_provider_request(*, known: bool) -> None:
+    """A settled request cannot resolve an earlier request's unknown outcome."""
+    scope = _scope.get()
+    if scope is not None:
+        if not known and scope.provider_request_in_flight:
+            scope.provider_outcome_unresolved = True
+        scope.provider_request_in_flight = False
 
 
 def budget_refusal(*, phase: str) -> TypedIOValidationException | None:

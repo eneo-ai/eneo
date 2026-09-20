@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 from types import SimpleNamespace
@@ -20,7 +21,11 @@ from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import 
     _build_tool_result_with_references,
     _ToolResultBudget,
 )
-from eneo.flows.runtime.step_deadline import StepDeadline, step_deadline_scope
+from eneo.flows.runtime.step_deadline import (
+    StepDeadline,
+    current_step_deadline_scope,
+    step_deadline_scope,
+)
 from eneo.main.exceptions import OpenAIException, TypedIOValidationException
 from eneo.mcp_servers.infrastructure.tool_approval import (
     ToolApprovalDecision,
@@ -415,6 +420,41 @@ async def test_streaming_budget_refusal_does_not_send_or_become_an_error_event(
                 )
     assert exc_info.value.code == "flow_step_timeout"
     request.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["completed", "cancelled", "failed"])
+async def test_stream_dispatch_and_settlement_publish_provider_facts(outcome):
+    adapter = _make_completion_adapter()
+
+    async def chunks():
+        assert current_step_deadline_scope().provider_request_in_flight
+        if outcome == "cancelled":
+            raise asyncio.CancelledError()
+        if outcome == "failed":
+            raise httpx.ReadError("Connection lost after dispatch")
+        yield _text_chunk("done", finish_reason="stop")
+
+    with (
+        patch(
+            "eneo.model_providers.infrastructure.litellm_transport.litellm.acompletion",
+            AsyncMock(return_value=chunks()),
+        ),
+        step_deadline_scope(StepDeadline.start(30), step_order=1) as scope,
+    ):
+        stream = await adapter.prepare_streaming(
+            context=SimpleNamespace(), model_kwargs={}
+        )
+        assert scope.provider_request_in_flight is True
+        if outcome == "cancelled":
+            with pytest.raises(asyncio.CancelledError):
+                await _collect(adapter, stream)
+        else:
+            completions = await _collect(adapter, stream)
+            if outcome == "failed":
+                assert completions[-1].response_type is ResponseType.ERROR
+        assert scope.provider_request_in_flight is False
+        assert scope.provider_outcome_unresolved is (outcome != "completed")
 
 
 @pytest.mark.asyncio

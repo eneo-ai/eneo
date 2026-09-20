@@ -3668,12 +3668,18 @@ async def test_per_item_map_timeout_inside_a_request_reports_completed_items(
     calls = {"n": 0}
 
     async def _respond(**_kwargs):
+        step_deadline_module.mark_provider_request_in_flight(True)
         calls["n"] += 1
         clock["now"] += 1.0
         if calls["n"] == timeout_item:
             clock["now"] = 2.0
             # Keep the request pending until the real wait timer cancels it.
-            await asyncio.Event().wait()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                step_deadline_module.settle_provider_request(known=False)
+                raise
+        step_deadline_module.settle_provider_request(known=True)
         return SimpleNamespace(
             completion='{"sections":[{"heading":"h","body":"b"}]}',
             total_token_count=3,
@@ -4832,12 +4838,20 @@ async def test_backstop_preserves_the_observed_phase_and_provider_outcome(
     async def stalled(*args, **kwargs):
         await asyncio.Event().wait()
 
+    async def dispatched_request(**kwargs):
+        step_deadline.mark_provider_request_in_flight(True)
+        try:
+            await stalled()
+        except asyncio.CancelledError:
+            step_deadline.settle_provider_request(known=False)
+            raise
+
     if phase == "input_resolution":
         executor._load_assistant = AsyncMock(side_effect=stalled)
     elif phase == "retrieval":
         executor._retrieve_rag_chunks = AsyncMock(side_effect=stalled)
     elif phase == "provider_request":
-        assistant.get_response = AsyncMock(side_effect=stalled)
+        assistant.get_response = AsyncMock(side_effect=dispatched_request)
     else:
         executor._process_typed_output = AsyncMock(side_effect=stalled)
     run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={"text": "hello"})
@@ -4847,3 +4861,101 @@ async def test_backstop_preserves_the_observed_phase_and_provider_outcome(
     assert exc_info.value.provider_work_may_have_completed is (
         phase == "provider_request"
     )
+
+
+@pytest.mark.asyncio
+async def test_receipt_exhausting_budget_has_no_provider_work_in_terminal_error(
+    user, monkeypatch
+):
+    import litellm
+
+    from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
+        TenantModelAdapter,
+    )
+    from eneo.flows.api.flow_models import FlowRunPublic
+    from eneo.flows.runtime import step_deadline
+
+    clock = {"now": 0.0}
+    monkeypatch.setattr(step_deadline, "_now", lambda: clock["now"])
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    executor._step_deadline_seconds = lambda step: 1.0
+    call_id = uuid4()
+
+    async def prepare_receipt(request):
+        clock["now"] = 1.0
+        return call_id
+
+    observer = SimpleNamespace(
+        started=AsyncMock(side_effect=prepare_receipt),
+        completed=AsyncMock(),
+        rejected=AsyncMock(),
+        outcome_unknown=AsyncMock(),
+    )
+    monkeypatch.setattr(
+        executor_module, "FlowProviderCallRecorder", lambda **kwargs: observer
+    )
+    request = AsyncMock()
+    monkeypatch.setattr(litellm, "acompletion", request)
+    adapter = object.__new__(TenantModelAdapter)
+    adapter.litellm_model = "openai/test-model"
+    adapter.provider_type = "openai"
+    adapter.model = SimpleNamespace(token_limit=8000, max_output_tokens=4000)
+
+    async def respond(**kwargs):
+        return await adapter._observed_provider_call(
+            messages=[],
+            litellm_kwargs={},
+            observer=kwargs["provider_call_observer"],
+            reason="initial",
+            retry_without_capability_safe=True,
+        )
+
+    assistant = _mock_assistant_for_execute_step()
+    assistant.get_response = AsyncMock(side_effect=respond)
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = _runtime_step()
+    state = RunExecutionState(
+        completed_by_order={},
+        prior_results=[],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+
+    request.assert_not_awaited()
+    observer.started.assert_awaited_once()
+    observer.rejected.assert_awaited_once_with(call_id, "budget_exhausted")
+    observer.outcome_unknown.assert_not_awaited()
+    observer.completed.assert_not_awaited()
+    executor._terminalize_run = AsyncMock()
+    claimed = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=1,
+        text="",
+    )
+    await executor._handle_typed_step_failure(
+        run_id=run.id,
+        tenant_id=run.tenant_id,
+        step=step,
+        attempt_no=1,
+        claimed=claimed,
+        typed_exc=exc_info.value,
+        failed_input_payload=None,
+        state=state,
+    )
+    assert (
+        flow_run_repo.finish_attempt.await_args.kwargs["error_code"]
+        == "flow_step_timeout"
+    )
+    error = executor._terminalize_run.await_args.kwargs["error"]
+    public = FlowRunPublic.model_validate(
+        run.model_copy(update={"status": FlowRunStatus.FAILED, "error": error}),
+        from_attributes=True,
+    )
+    assert error.details.provider_work_may_have_completed is False
+    assert public.error.details.provider_work_may_have_completed is False

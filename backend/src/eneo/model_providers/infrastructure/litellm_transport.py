@@ -22,6 +22,7 @@ from litellm.exceptions import (
 
 from eneo.flows.runtime.step_deadline import (
     current_step_deadline_scope,
+    mark_provider_request_in_flight,
     require_step_budget,
 )
 from eneo.main.exceptions import (
@@ -97,6 +98,7 @@ async def acompletion(**kwargs: Any) -> Any:
         require_step_budget(phase="provider request (not sent)")
         kwargs["timeout"] = scope.deadline.remaining()
     call = cast(Callable[..., Any], getattr(litellm, "acompletion"))
+    mark_provider_request_in_flight(True)
     return await call(**kwargs)
 
 

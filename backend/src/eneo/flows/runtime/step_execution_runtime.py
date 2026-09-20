@@ -73,8 +73,8 @@ from eneo.flows.runtime.run_cancellation import (
 )
 from eneo.flows.runtime.step_deadline import (
     StepDeadline,
-    mark_provider_request_in_flight,
     record_step_phase,
+    settle_provider_request,
 )
 from eneo.flows.runtime.step_input_resolution import (
     RUNTIME_INPUT_SOURCE_EMPTY_TEXT_DIAGNOSTIC_CODE,
@@ -630,7 +630,6 @@ async def call_assistant_with_timeout(
         )
     )
     state.in_flight_llm_task = llm_task
-    mark_provider_request_in_flight(True)
 
     def _consume_abandoned_llm_task(task: asyncio.Task[Any]) -> None:
         try:
@@ -646,17 +645,13 @@ async def call_assistant_with_timeout(
                     exc_info=True,
                 )
 
-    provider_outcome_unknown = False
-
     async def _cancel_llm_task_with_grace() -> None:
-        nonlocal provider_outcome_unknown
         if llm_task.done():
-            provider_outcome_unknown = provider_outcome_unknown or llm_task.cancelled()
             return
-        provider_outcome_unknown = True
         llm_task.cancel()
         grace_seconds = max(0.0, deps.llm_task_cancellation_grace_seconds)
         if grace_seconds <= 0:
+            settle_provider_request(known=False)
             llm_task.add_done_callback(_consume_abandoned_llm_task)
             return
         try:
@@ -664,6 +659,7 @@ async def call_assistant_with_timeout(
         except asyncio.CancelledError:
             return
         except TimeoutError:
+            settle_provider_request(known=False)
             llm_task.add_done_callback(_consume_abandoned_llm_task)
         except Exception:
             if deps.logger is not None:
@@ -736,7 +732,6 @@ async def call_assistant_with_timeout(
                     deadline.timeout_error(
                         step_order=step.step_order,
                         phase="provider request",
-                        provider_request_in_flight=True,
                     ),
                     input_payload_for_result=prepared.input_payload_for_result,
                     effective_prompt=prompt_override,
@@ -764,7 +759,6 @@ async def call_assistant_with_timeout(
                     deadline.timeout_error(
                         step_order=step.step_order,
                         phase="provider request",
-                        provider_request_in_flight=True,
                     ),
                     input_payload_for_result=prepared.input_payload_for_result,
                     effective_prompt=prompt_override,
@@ -822,8 +816,6 @@ async def call_assistant_with_timeout(
                 await cancel_watcher
         if state.in_flight_llm_task is llm_task:
             state.in_flight_llm_task = None
-            if not provider_outcome_unknown:
-                mark_provider_request_in_flight(False)
 
 
 def build_output_payload(output: StepExecutionOutput) -> dict[str, Any]:

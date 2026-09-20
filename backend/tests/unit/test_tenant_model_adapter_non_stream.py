@@ -465,6 +465,51 @@ async def test_budget_refusal_preserves_typed_error_and_rejects_unsent_receipt(
 
 
 @pytest.mark.asyncio
+async def test_completed_request_preserves_an_earlier_unknown_outcome(monkeypatch):
+    adapter = _make_adapter()
+    observer = SimpleNamespace(
+        started=AsyncMock(side_effect=[uuid4(), uuid4()]),
+        completed=AsyncMock(),
+        rejected=AsyncMock(),
+        outcome_unknown=AsyncMock(),
+    )
+    request_count = 0
+
+    async def request(**kwargs):
+        nonlocal request_count
+        request_count += 1
+        assert step_deadline.current_step_deadline_scope().provider_request_in_flight
+        if request_count == 1:
+            raise TimeoutError("Request timed out after dispatch")
+        return _response(response_id="success", content="done")
+
+    monkeypatch.setattr(
+        "eneo.model_providers.infrastructure.litellm_transport.litellm.acompletion",
+        request,
+    )
+    with step_deadline_scope(StepDeadline.start(30), step_order=1) as scope:
+        with pytest.raises(OpenAIException):
+            await adapter.get_response(
+                context=SimpleNamespace(),
+                model_kwargs={},
+                provider_call_observer=observer,
+            )
+        await adapter.get_response(
+            context=SimpleNamespace(), model_kwargs={}, provider_call_observer=observer
+        )
+        assert scope.provider_request_in_flight is False
+        assert (
+            scope.deadline.timeout_error(
+                step_order=1, phase="finalization"
+            ).provider_work_may_have_completed
+            is True
+        )
+    observer.outcome_unknown.assert_awaited_once()
+    observer.completed.assert_awaited_once()
+    assert request_count == 2
+
+
+@pytest.mark.asyncio
 async def test_provider_call_observer_records_known_capability_rejection():
     adapter = _make_adapter()
     call_id = uuid4()

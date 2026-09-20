@@ -25,6 +25,7 @@ from eneo.flows.runtime.step_deadline import (
     mark_provider_request_in_flight,
     record_step_phase,
     require_step_budget,
+    settle_provider_request,
 )
 from eneo.main.exceptions import (
     ProviderRejectedRequestException,
@@ -288,17 +289,16 @@ class LiteLLMTranscriptionAdapter:
         scope = current_step_deadline_scope()
         if scope is not None:
             kwargs["timeout"] = scope.deadline.remaining()
-        mark_provider_request_in_flight(True)
         try:
             with open(file_path, "rb") as audio_file:
+                mark_provider_request_in_flight(True)
                 response = await litellm_transport.atranscription(
                     model=self.litellm_model,
                     file=audio_file,
                     **kwargs,
                 )
         except asyncio.CancelledError:
-            # The request may have reached the provider: the in-flight fact
-            # stays published so the step's timeout message can say so.
+            settle_provider_request(known=False)
             if observer is not None and call_id is not None:
                 await observer.outcome_unknown(call_id, "request_cancelled")
             raise
@@ -312,19 +312,20 @@ class LiteLLMTranscriptionAdapter:
                     raise_unavailable=litellm_transport.raise_provider_unavailable,
                 )
             except ProviderRejectedRequestException:
-                mark_provider_request_in_flight(False)
+                settle_provider_request(known=True)
                 # The provider answered and refused. That is a known outcome, so
                 # it must not leave the run's audio total marked incomplete.
                 if observer is not None and call_id is not None:
                     await observer.rejected(call_id, "provider_rejected")
                 raise
             except Exception:
+                settle_provider_request(known=False)
                 if observer is not None and call_id is not None:
                     await observer.outcome_unknown(call_id, "provider_error")
                 raise
             raise AssertionError("Provider error mapping unexpectedly returned.")
 
-        mark_provider_request_in_flight(False)
+        settle_provider_request(known=True)
         logger.debug(f"[LiteLLM] {self.litellm_model}: Transcription successful")
         if observer is not None and call_id is not None:
             await observer.completed(

@@ -216,7 +216,14 @@ async def test_cancelled_request_keeps_the_in_flight_fact_for_the_timeout_messag
         with pytest.raises(TimeoutError):
             async with asyncio.timeout(0.05):
                 await _adapter().get_text_from_file(audio, observer=observer)  # type: ignore[arg-type]
-        assert scope.provider_request_in_flight is True
+        assert scope.provider_request_in_flight is False
+        assert scope.provider_outcome_unresolved is True
+        assert (
+            scope.deadline.timeout_error(
+                step_order=1, phase="transcription"
+            ).provider_work_may_have_completed
+            is True
+        )
 
 
 async def test_settled_request_clears_the_in_flight_fact(monkeypatch, tmp_path) -> None:
@@ -253,6 +260,42 @@ async def test_timed_out_request_keeps_unknown_outcome_on_budget_refusal(
     assert len(observer.started_requests) == 1
     assert observer.unknown_reasons == ["provider_error"]
     assert observer.completed_calls == []
+    assert observer.rejected_reasons == []
+    assert exc_info.value.code == "flow_step_timeout"
+    assert exc_info.value.provider_work_may_have_completed is True
+
+
+async def test_successful_retry_does_not_resolve_an_earlier_unknown_request(
+    monkeypatch, tmp_path
+) -> None:
+    clock = {"now": 0.0}
+    monkeypatch.setattr(step_deadline_module, "_now", lambda: clock["now"])
+    monkeypatch.setattr(
+        LiteLLMTranscriptionAdapter._transcribe_chunk.retry, "sleep", AsyncMock()
+    )
+    attempts = 0
+
+    async def transcribe(**kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            clock["now"] = 1.0
+            raise TimeoutError("Request timed out after dispatch")
+        clock["now"] = 30.0
+        return SimpleNamespace(text="ord")
+
+    transport = AsyncMock(side_effect=transcribe)
+    monkeypatch.setattr(TRANSPORT, transport)
+    audio = _audio(tmp_path, [300.0, 300.0], monkeypatch)
+    observer = _Observer()
+    with step_deadline_scope(StepDeadline.start(30), step_order=1):
+        with pytest.raises(TypedIOValidationException) as exc_info:
+            await _adapter().get_text_from_file(audio, observer=observer)
+
+    assert transport.await_count == 2
+    assert len(observer.started_requests) == 2
+    assert observer.unknown_reasons == ["provider_error"]
+    assert len(observer.completed_calls) == 1
     assert observer.rejected_reasons == []
     assert exc_info.value.code == "flow_step_timeout"
     assert exc_info.value.provider_work_may_have_completed is True

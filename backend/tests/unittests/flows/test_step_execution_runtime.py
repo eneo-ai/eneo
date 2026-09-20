@@ -1487,6 +1487,8 @@ async def test_complete_step_execution_shares_deadline_across_json_mode_retry(
     shared deadline keeps a step bounded by the configured timeout
     regardless of how the json-mode retry path branches.
     """
+    from eneo.flows.runtime import step_deadline
+
     monkeypatch.setattr(
         "eneo.flows.runtime.step_execution_runtime.detect_native_json_output_support",
         lambda assistant: None,
@@ -1505,16 +1507,23 @@ async def test_complete_step_execution_shares_deadline_across_json_mode_retry(
     counter = {"n": 0}
 
     async def fake_get_response(**_kwargs: object):
+        step_deadline.mark_provider_request_in_flight(True)
         counter["n"] += 1
         if counter["n"] == 1:
             await asyncio.sleep(0.25)
+            step_deadline.settle_provider_request(known=True)
             raise ProviderCapabilityRejectedException(
                 "The provider rejected JSON mode.",
                 capability="response_format",
                 retry_without_capability_safe=True,
                 code="provider_capability_rejected",
             )
-        await asyncio.sleep(0.2)
+        try:
+            await asyncio.sleep(0.2)
+        except asyncio.CancelledError:
+            step_deadline.settle_provider_request(known=False)
+            raise
+        step_deadline.settle_provider_request(known=True)
         return SimpleNamespace(total_token_count=4, completion='{"ok": true}')
 
     assistant.get_response = AsyncMock(side_effect=fake_get_response)
@@ -1549,7 +1558,12 @@ async def test_complete_step_execution_shares_deadline_across_json_mode_retry(
         llm_request_timeout_seconds=0.3,
     )
 
-    with pytest.raises(TypedIOValidationException) as exc_info:
+    with (
+        step_deadline.step_deadline_scope(
+            step_deadline.StepDeadline.start(0.3), step_order=1
+        ),
+        pytest.raises(TypedIOValidationException) as exc_info,
+    ):
         await complete_step_execution(
             step=step,
             run=run,

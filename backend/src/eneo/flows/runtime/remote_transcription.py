@@ -52,6 +52,7 @@ from eneo.flows.runtime.step_deadline import (
     mark_provider_request_in_flight,
     record_step_phase,
     require_step_budget,
+    settle_provider_request,
 )
 from eneo.main.exceptions import (
     APIKeyNotConfiguredException,
@@ -256,6 +257,7 @@ class RemoteTranscriptionClient:
         )
         try:
             async with self._http_client(timeout=self.submit_timeout_seconds) as client:
+                mark_provider_request_in_flight(True)
                 response = await client.post(
                     f"{self.base_url}/v1/jobs",
                     headers=self._headers,
@@ -753,30 +755,29 @@ class RemoteFlowTranscriber:
             # The worker is going away; tell the service to stop the job so it
             # does not finish work nobody will collect. Shielded so the cancel
             # already delivered to this task cannot interrupt the request. The
-            # stop is best effort, so the in-flight fact stays published.
+            # stop is best effort, so the provider outcome remains unresolved.
+            settle_provider_request(known=False)
             await asyncio.shield(self.client.cancel(job_id))
             if observer is not None and call_id is not None:
                 await observer.outcome_unknown(call_id, "request_cancelled")
             raise
         except (FlowStepCancelledError, RemoteTranscriptionCancelledException):
-            # The job was stopped, by eneo or by the service; the audio was not
-            # transcribed and nothing was billed.
-            mark_provider_request_in_flight(False)
+            settle_provider_request(known=False)
             if observer is not None and call_id is not None:
                 await observer.outcome_unknown(call_id, "request_cancelled")
             raise
         except ProviderRejectedRequestException:
-            mark_provider_request_in_flight(False)
+            settle_provider_request(known=True)
             if observer is not None and call_id is not None:
                 await observer.rejected(call_id, "provider_rejected")
             raise
         except Exception:
-            mark_provider_request_in_flight(False)
+            settle_provider_request(known=False)
             if observer is not None and call_id is not None:
                 await observer.outcome_unknown(call_id, "provider_error")
             raise
 
-        mark_provider_request_in_flight(False)
+        settle_provider_request(known=True)
         if observer is not None and call_id is not None:
             await observer.completed(
                 call_id,
@@ -857,7 +858,6 @@ class RemoteFlowTranscriber:
             if observer is not None and call_id is not None:
                 await observer.rejected(call_id, "budget_exhausted")
             raise refusal
-        mark_provider_request_in_flight(True)
         try:
             with open(file_path, "rb") as payload:
                 job_id = await self.client.submit(
@@ -874,20 +874,19 @@ class RemoteFlowTranscriber:
                 )
                 return job_id, call_id
         except asyncio.CancelledError:
-            # The job may have been accepted: the in-flight fact stays
-            # published so the step's timeout message can say so.
+            settle_provider_request(known=False)
             if observer is not None and call_id is not None:
                 await observer.outcome_unknown(call_id, "request_cancelled")
             raise
         except ProviderRejectedRequestException:
             # The service answered and refused. That is a known outcome, so it
             # must not leave the run's audio total marked incomplete.
-            mark_provider_request_in_flight(False)
+            settle_provider_request(known=True)
             if observer is not None and call_id is not None:
                 await observer.rejected(call_id, "provider_rejected")
             raise
         except Exception:
-            mark_provider_request_in_flight(False)
+            settle_provider_request(known=False)
             if observer is not None and call_id is not None:
                 await observer.outcome_unknown(call_id, "provider_error")
             raise
