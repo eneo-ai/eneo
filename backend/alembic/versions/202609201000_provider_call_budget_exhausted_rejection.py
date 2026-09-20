@@ -5,9 +5,18 @@ settled as a known refusal (nothing was sent, nothing billed) instead of
 being left open. The lifecycle constraint enumerates rejection reasons, so
 the new reason needs the constraint recreated.
 
+The widened check is installed NOT VALID inside the DDL transaction (a short
+exclusive lock, no row scan) and validated afterwards in its own autocommit
+statement, so receipt reads and writes are not blocked for the duration of
+the scan. The downgrade refuses to run while budget_exhausted receipts
+exist: rewriting them to a provider-side reason would misattribute evidence.
+
 Revision ID: 202609201000
 Revises: 202609181000
 """
+
+import sqlalchemy as sa
+from sqlalchemy.engine import Connection
 
 from alembic import op
 
@@ -53,19 +62,52 @@ _OLD_REASONS = "'response_format_rejected','provider_rejected'"
 _NEW_REASONS = "'response_format_rejected','provider_rejected','budget_exhausted'"
 
 
-def upgrade() -> None:
+def _install_constraint(reasons: str) -> None:
+    """Drop and re-add the lifecycle check without scanning existing rows;
+    validation runs separately, outside the DDL transaction."""
     op.execute("SET LOCAL lock_timeout = '5s'")
     op.drop_constraint(_CONSTRAINT, _TABLE, type_="check")
-    op.create_check_constraint(_CONSTRAINT, _TABLE, _lifecycle_shape(_NEW_REASONS))
+    op.execute(
+        f"ALTER TABLE {_TABLE} ADD CONSTRAINT {_CONSTRAINT} "
+        f"CHECK ({_lifecycle_shape(reasons)}) NOT VALID"
+    )
+
+
+def _validate_constraint() -> None:
+    with op.get_context().autocommit_block():
+        op.execute(f"ALTER TABLE {_TABLE} VALIDATE CONSTRAINT {_CONSTRAINT}")
+
+
+def count_budget_exhausted_receipts(connection: Connection) -> int:
+    """Receipts that only the widened constraint admits; the downgrade refuses
+    while any exist (shared with the integration test that proves it)."""
+    return int(
+        connection.execute(
+            sa.text(
+                f"SELECT count(*) FROM {_TABLE} "
+                "WHERE status = 'rejected' AND outcome_reason = 'budget_exhausted'"
+            )
+        ).scalar_one()
+    )
+
+
+def refuse_downgrade_if_budget_exhausted_receipts(connection: Connection) -> None:
+    settled = count_budget_exhausted_receipts(connection)
+    if settled:
+        raise RuntimeError(
+            f"Refusing to downgrade 202609201000: {settled} provider-call receipt(s) "
+            "are settled as budget_exhausted and the previous constraint cannot "
+            "hold them without misattributing the outcome. Keep this revision."
+        )
+
+
+def upgrade() -> None:
+    _install_constraint(_NEW_REASONS)
+    _validate_constraint()
 
 
 def downgrade() -> None:
     op.execute("SET LOCAL lock_timeout = '5s'")
-    # Rows settled with the new reason would violate the old shape; there are
-    # none before this revision, and a downgrade after use must clear them.
-    op.execute(
-        f"UPDATE {_TABLE} SET outcome_reason = 'provider_rejected' "
-        "WHERE status = 'rejected' AND outcome_reason = 'budget_exhausted'"
-    )
-    op.drop_constraint(_CONSTRAINT, _TABLE, type_="check")
-    op.create_check_constraint(_CONSTRAINT, _TABLE, _lifecycle_shape(_OLD_REASONS))
+    refuse_downgrade_if_budget_exhausted_receipts(op.get_bind())
+    _install_constraint(_OLD_REASONS)
+    _validate_constraint()

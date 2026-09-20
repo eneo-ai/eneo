@@ -770,6 +770,73 @@ async def test_budget_exhausted_rejection_persists_on_the_migrated_schema(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_downgrade_is_refused_while_budget_exhausted_receipts_exist(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    """Rolling back 202609201000 must not rewrite an unsent refusal into a
+    provider rejection: the migration's guard refuses on a populated table and
+    the receipt keeps its reason."""
+    import importlib.util
+    from pathlib import Path as _Path
+
+    spec = importlib.util.spec_from_file_location(
+        "budget_exhausted_migration",
+        _Path(__file__).parents[3]
+        / "alembic"
+        / "versions"
+        / "202609201000_provider_call_budget_exhausted_rejection.py",
+    )
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    async with db_container() as container:
+        session = container.session()
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        calls = FlowProviderCallRepository(session)
+        started = await _start_provider_call(
+            repo=calls,
+            context=context,
+            request=CompletionProviderCallRequest(
+                provider_request_hash="c" * 64,
+                requested_model="configured-model",
+                provider="hosted_vllm",
+                requested_capabilities=(),
+            ),
+        )
+        await calls.reject_call(
+            call_id=started.id, reason=ProviderCallRejectionReason.BUDGET_EXHAUSTED
+        )
+        await session.flush()
+
+        def _refuse(sync_session):
+            migration.refuse_downgrade_if_budget_exhausted_receipts(
+                sync_session.connection()
+            )
+
+        with pytest.raises(RuntimeError, match="Refusing to downgrade 202609201000"):
+            await session.run_sync(_refuse)
+        reason = await session.scalar(
+            sa.select(FlowProviderCalls.outcome_reason).where(
+                FlowProviderCalls.id == started.id
+            )
+        )
+
+    assert reason == "budget_exhausted"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 @pytest.mark.parametrize("unresolved", [False, True])
 async def test_rejected_completion_does_not_invent_missing_receipts(
     db_container,

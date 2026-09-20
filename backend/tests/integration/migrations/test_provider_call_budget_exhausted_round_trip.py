@@ -68,8 +68,21 @@ def _constraint_definition(conn) -> str:
         return row[0]
 
 
+def _constraint_validated(conn) -> bool:
+    with conn.cursor() as cursor:
+        cursor.execute(
+            "SELECT convalidated FROM pg_constraint WHERE conname = %s", (CONSTRAINT,)
+        )
+        row = cursor.fetchone()
+        assert row is not None
+        return bool(row[0])
+
+
 def test_upgrade_admits_budget_exhausted_and_keeps_the_other_reasons(round_trip_db):
     definition = _constraint_definition(round_trip_db["conn"])
+    # Installed NOT VALID, then validated in its own statement: the final state
+    # is a fully validated check, not a NOT VALID leftover.
+    assert _constraint_validated(round_trip_db["conn"])
 
     assert "budget_exhausted" in definition
     assert "response_format_rejected" in definition
@@ -86,6 +99,8 @@ def test_downgrade_restores_the_previous_shape(round_trip_db):
     assert "budget_exhausted" not in definition
     assert "response_format_rejected" in definition
     assert "provider_rejected" in definition
+
+    assert _constraint_validated(conn)
 
     command.upgrade(cfg, REVISION)
     assert "budget_exhausted" in _constraint_definition(conn)
