@@ -3146,3 +3146,144 @@ async def test_flow_run_label_validation_uses_existing_error_response(
         )
         assert response.status_code == 201, response.text
         assert response.json()["run_label"] is None
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("resume_review", [False, True])
+async def test_retry_requires_durable_review_of_current_attempt(
+    client, admin_token, admin_user, db_container, monkeypatch, resume_review
+):
+    from eneo.flows.api import flow_run_retry_router
+    from eneo.flows.domain.flow import FlowRunStatus
+    from eneo.flows.enums import FlowOutputType, FlowRunLifecycleSource
+    from eneo.flows.flow_api_error_code import FlowApiErrorCode
+    from eneo.flows.flow_review_policy import FlowStepReviewMode
+    from eneo.flows.flow_run_error import FlowRunError
+    from eneo.flows.principal import FlowPrincipal
+
+    for router in (
+        flow_run_lifecycle_router,
+        flow_run_review_router,
+        flow_run_retry_router,
+    ):
+        monkeypatch.setattr(
+            router,
+            "dispatch_flow_run_recoverably_after_commit",
+            _noop_dispatch_flow_run_recoverably_after_commit,
+        )
+    contract = {
+        "type": "object",
+        "required": ["summary"],
+        "properties": {"summary": {"type": "string"}},
+        "additionalProperties": False,
+    }
+    space_id = await _create_space(client, token=admin_token)
+    flow = await _create_published_flow(
+        client,
+        token=admin_token,
+        space_id=space_id,
+        review_output_contract=contract,
+        two_steps=True,
+    )
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    response = await client.post(
+        f"/api/v1/flows/{flow['id']}/runs/",
+        json={"input_payload_json": {"text": "Review then retry"}},
+        headers=headers,
+    )
+    assert response.status_code == 201, response.text
+    run = response.json()
+    await _mark_first_step_completed(
+        db_container=db_container,
+        run_id=run["id"],
+        flow_id=flow["id"],
+        tenant_id=run["tenant_id"],
+    )
+    async with db_container() as container:
+        await container.session().execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == UUID(run["id"]))
+            .values(status="running")
+        )
+        await container.session().execute(
+            sa.update(FlowStepResults)
+            .where(
+                FlowStepResults.flow_run_id == UUID(run["id"]),
+                FlowStepResults.step_order == 1,
+            )
+            .values(
+                output_payload_json={
+                    "text": '{"summary":"Original"}',
+                    "structured": {"summary": "Original"},
+                }
+            )
+        )
+        if resume_review:
+            opened = await container.flow_run_review_checkpoint_repo().open_review_checkpoint_for_completed_step(
+                tenant_id=admin_user.tenant_id,
+                flow_id=UUID(flow["id"]),
+                flow_run_id=UUID(run["id"]),
+                step_id=UUID(flow["steps"][0]["id"]),
+                step_order=1,
+                attempt_no=1,
+                requester_principal=FlowPrincipal.from_user(admin_user),
+                next_step_ids=[UUID(flow["steps"][1]["id"])],
+                review_mode=FlowStepReviewMode.EDIT,
+                output_type=FlowOutputType.JSON,
+                output_contract_json=contract,
+            )
+            checkpoint = opened.checkpoint
+    if resume_review:
+        review_url = f"/api/v1/flows/{flow['id']}/runs/{run['id']}/review-checkpoints/{checkpoint.id}"
+        edited = await client.patch(
+            f"{review_url}/",
+            headers=headers,
+            json={
+                "expected_checkpoint_revision": checkpoint.revision,
+                "edited_value": {"summary": "Approved correction"},
+            },
+        )
+        assert edited.status_code == 200, edited.text
+        approved = await client.post(
+            f"{review_url}/approve/",
+            headers=headers,
+            json={"expected_checkpoint_revision": edited.json()["revision"]},
+        )
+        assert approved.status_code == 200, approved.text
+        resumed = await client.post(
+            f"{review_url}/resume/",
+            headers={**headers, "Idempotency-Key": "resume-before-retry"},
+            json={"expected_checkpoint_revision": approved.json()["revision"]},
+        )
+        assert resumed.status_code == 202, resumed.text
+        assert resumed.json()["checkpoint"]["state"] == "resumed"
+    async with db_container() as container:
+        await container.flow_run_terminalizer().terminalize_run(
+            run_id=UUID(run["id"]),
+            tenant_id=admin_user.tenant_id,
+            target_status=FlowRunStatus.FAILED,
+            source=FlowRunLifecycleSource.EXECUTOR_FAILED,
+            error=FlowRunError(
+                code=FlowApiErrorCode.STEP_EXECUTION_FAILED,
+                message="Downstream failure",
+            ),
+        )
+    retried = await client.post(
+        f"/api/v1/flows/{flow['id']}/runs/{run['id']}/retry/",
+        headers={**headers, "Idempotency-Key": "retry-reviewed-prefix"},
+    )
+    if not resume_review:
+        assert retried.status_code == 409, retried.text
+        assert retried.json()["context"] == {
+            "step_order": 1,
+            "reason": "review_not_established",
+        }
+        return
+    assert retried.status_code == 201, retried.text
+    async with db_container() as container:
+        results = await container.flow_run_repo().list_step_results(
+            run_id=UUID(retried.json()["run"]["id"]),
+            tenant_id=admin_user.tenant_id,
+        )
+        assert results[0].output_payload_json == edited.json()["current_payload_json"]

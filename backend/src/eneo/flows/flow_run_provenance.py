@@ -495,6 +495,15 @@ class FlowAttemptProvenance(BaseModel):
         return self.model_dump(mode="json", exclude_none=True)
 
 
+class FlowImportedAttemptProvenance(FlowAttemptProvenance):
+    kind: Literal["reviewed_transcript_snapshot", "reused_prefix"]
+    source_run_id: UUID
+    source_step_result_id: UUID
+    source_step_id: UUID
+    source_attempt_no: int = Field(ge=1)
+    request_hash: str = Field(min_length=1)
+
+
 class FlowAttemptProvenanceCorruptionMarker(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -701,7 +710,12 @@ def parse_attempt_provenance(raw: Any) -> FlowAttemptProvenanceParseResult:
             )
         )
 
-    allowed_keys = set(FlowAttemptProvenance.model_fields)
+    provenance_model = (
+        FlowImportedAttemptProvenance
+        if "kind" in raw_payload
+        else FlowAttemptProvenance
+    )
+    allowed_keys = set(provenance_model.model_fields)
     unknown_keys = tuple(sorted(set(raw_payload) - allowed_keys))
     if unknown_keys:
         return FlowAttemptProvenanceParseResult.corrupt(
@@ -718,7 +732,7 @@ def parse_attempt_provenance(raw: Any) -> FlowAttemptProvenanceParseResult:
         (
             key
             for key in raw_payload
-            if key != "schema_version"
+            if key in {"llm", "rag", "citations"}
             and raw_payload.get(key) is not None
             and not isinstance(raw_payload.get(key), dict)
         ),
@@ -736,7 +750,9 @@ def parse_attempt_provenance(raw: Any) -> FlowAttemptProvenanceParseResult:
 
     try:
         return FlowAttemptProvenanceParseResult.tracked(
-            _normalize_attempt_provenance_v3(raw_payload)
+            FlowImportedAttemptProvenance.model_validate(raw_payload)
+            if provenance_model is FlowImportedAttemptProvenance
+            else _normalize_attempt_provenance_v3(raw_payload)
         )
     except (TypeError, ValueError, ValidationError):
         return FlowAttemptProvenanceParseResult.corrupt(

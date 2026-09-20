@@ -17,7 +17,7 @@ from eneo.flows.application.flow_run_service import (
     find_prefix_seed_replay,
 )
 from eneo.flows.application.flow_trace_audit import raise_flow_trace_audit_unavailable
-from eneo.flows.domain.flow import FlowRunStatus, FlowStepResult, FlowStepResultStatus
+from eneo.flows.domain.flow import FlowRunStatus, FlowStepResultStatus
 from eneo.flows.domain.step_output import (
     OUTPUT_TEXT_OVERFLOW_KEY,
 )
@@ -32,11 +32,16 @@ from eneo.flows.flow_run_input_envelope import (
 from eneo.flows.flow_run_payload_validation import ensure_inline_payload_size_allowed
 from eneo.flows.flow_run_step_inputs import FlowRunStepInputFiles
 from eneo.flows.infrastructure.flow_repo import FlowRepository
-from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
+from eneo.flows.infrastructure.flow_run_repo import (
+    FlowRunRepository,
+    FlowStepResultIdentity,
+)
 from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
 )
 from eneo.flows.principal import FlowPrincipal
+from eneo.flows.published_runtime import load_published_definition
+from eneo.main.config import get_settings
 from eneo.main.exceptions import ConflictException
 from eneo.users.user import UserInDB
 
@@ -47,6 +52,21 @@ class FlowRunRetryResult:
     source_run_id: UUID
     first_executed_step_order: int
     reused_step_orders: tuple[int, ...]
+
+
+def _replay_result(
+    existing: CreateRunResult, source_run_id: UUID
+) -> FlowRunRetryResult:
+    provenance = cast(
+        dict[str, Any],
+        (existing.run.input_payload_json or {})[TRANSCRIPT_REGENERATION_KEY],
+    )
+    return FlowRunRetryResult(
+        run_result=existing,
+        source_run_id=source_run_id,
+        first_executed_step_order=provenance["first_executed_step_order"],
+        reused_step_orders=tuple(provenance["reused_step_orders"]),
+    )
 
 
 def _unsupported(*, step_order: int, reason: str) -> NoReturn:
@@ -104,18 +124,10 @@ class FlowRunRetryService:
             principal=principal,
             idempotency_key=key,
             request_hash=request_hash,
+            lock_creation=False,
         )
         if existing is not None:
-            provenance = cast(
-                dict[str, Any],
-                (existing.run.input_payload_json or {})[TRANSCRIPT_REGENERATION_KEY],
-            )
-            return FlowRunRetryResult(
-                run_result=existing,
-                source_run_id=source.id,
-                first_executed_step_order=provenance["first_executed_step_order"],
-                reused_step_orders=tuple(provenance["reused_step_orders"]),
-            )
+            return _replay_result(existing, source.id)
         if source.status != FlowRunStatus.FAILED:
             raise ConflictException(
                 "Only failed runs can be retried from their first unfinished step.",
@@ -133,12 +145,12 @@ class FlowRunRetryService:
                 },
             )
         steps = sorted(
-            await self.run_repo.list_step_results(
+            await self.run_repo.list_step_result_identities(
                 run_id=source.id, tenant_id=self.user.tenant_id
             ),
             key=lambda step: step.step_order,
         )
-        prefix: list[FlowStepResult] = []
+        prefix: list[FlowStepResultIdentity] = []
         for step in steps:
             if step.status != FlowStepResultStatus.COMPLETED:
                 break
@@ -162,32 +174,73 @@ class FlowRunRetryService:
         file_orders = await self.run_repo.list_step_orders_with_result_files(
             run_id=source.id, tenant_id=self.user.tenant_id
         )
-        checkpoints = await self.checkpoint_repo.list_review_checkpoints_for_run(
-            run_id=source.id, tenant_id=self.user.tenant_id
+        reused_step_orders = tuple(step.step_order for step in prefix)
+        definition = await load_published_definition(
+            flow_version_repo=self.run_service.flow_version_repo,
+            flow_id=flow_id,
+            version=source.flow_version,
+            tenant_id=self.user.tenant_id,
         )
-        unapproved_orders = {
-            checkpoint.step_order
+        review_required = {
+            step.step_id
+            for step in definition.runtime_steps()
+            if step.review_policy is not None
+        }
+        checkpoints = await self.checkpoint_repo.list_review_checkpoint_identities(
+            run_id=source.id,
+            tenant_id=self.user.tenant_id,
+            step_orders=reused_step_orders,
+        )
+        checkpoint_states = {
+            (checkpoint.step_id, checkpoint.attempt_no): checkpoint.state
             for checkpoint in checkpoints
-            if checkpoint.state != FlowRunReviewCheckpointState.APPROVED
         }
         for step in prefix:
-            if step.step_order in file_orders or OUTPUT_TEXT_OVERFLOW_KEY in (
-                step.output_payload_json or {}
+            if step.step_order in file_orders:
+                _unsupported(
+                    step_order=step.step_order, reason="file_backed_prefix_unsupported"
+                )
+            if step.current_attempt_no is None:
+                _unsupported(step_order=step.step_order, reason="prefix_changed")
+            state = checkpoint_states.get((step.step_id, step.current_attempt_no))
+            if (step.step_id in review_required or state is not None) and state not in (
+                FlowRunReviewCheckpointState.APPROVED,
+                FlowRunReviewCheckpointState.RESUMED,
             ):
                 _unsupported(
-                    step_order=step.step_order,
-                    reason="file_backed_prefix_unsupported",
+                    step_order=step.step_order, reason="review_not_established"
                 )
-            if step.step_order in unapproved_orders:
+        measurement = await self.run_repo.measure_prefix_outputs(
+            run_id=source.id,
+            tenant_id=self.user.tenant_id,
+            step_orders=reused_step_orders,
+        )
+        if measurement.step_count != len(prefix):
+            _unsupported(
+                step_order=prefix[0].step_order, reason="non_contiguous_prefix"
+            )
+        if measurement.output_bytes > get_settings().flow_max_inline_text_bytes:
+            _unsupported(step_order=prefix[0].step_order, reason="prefix_too_large")
+        results = await self.run_repo.list_step_results_by_orders(
+            run_id=source.id,
+            tenant_id=self.user.tenant_id,
+            step_orders=reused_step_orders,
+        )
+        if len(results) != len(prefix) or any(
+            result.id != identity.id
+            or result.current_attempt_no != identity.current_attempt_no
+            or result.status != FlowStepResultStatus.COMPLETED
+            for result, identity in zip(results, prefix, strict=True)
+        ):
+            _unsupported(step_order=prefix[0].step_order, reason="prefix_changed")
+        for step in results:
+            if OUTPUT_TEXT_OVERFLOW_KEY in (step.output_payload_json or {}):
                 _unsupported(
-                    step_order=step.step_order,
-                    reason="review_checkpoint_not_approved",
+                    step_order=step.step_order, reason="file_backed_prefix_unsupported"
                 )
-        for step in prefix:
             ensure_inline_payload_size_allowed(
                 flow_id=flow_id, input_payload_json=step.output_payload_json
             )
-        reused_step_orders = tuple(step.step_order for step in prefix)
         provenance = {
             "version": 1,
             "kind": "reused_prefix",
@@ -201,6 +254,16 @@ class FlowRunRetryService:
         files = await self.run_repo.list_current_step_input_file_ids_by_step_result_id(
             run_id=source.id, tenant_id=self.user.tenant_id, step_results=steps
         )
+        existing = await find_prefix_seed_replay(
+            run_repo=self.run_repo,
+            tenant_id=self.user.tenant_id,
+            flow_id=flow_id,
+            principal=principal,
+            idempotency_key=key,
+            request_hash=request_hash,
+        )
+        if existing is not None:
+            return _replay_result(existing, source.id)
         transcript = (source.input_payload_json or {}).get(FLOW_INPUT_TRANSCRIPTION_KEY)
         created = await self.run_service.create_run(
             flow_id=flow_id,
@@ -212,13 +275,13 @@ class FlowRunRetryService:
             step_inputs={
                 step.step_id: FlowRunStepInputFiles(file_ids=tuple(files[step.id]))
                 for step in steps
-                if step.id is not None and files.get(step.id)
+                if files.get(step.id)
             },
             idempotency_key=key,
             purpose=source.purpose,
             prefix_seed=FlowRunPrefixSeed(
                 source_run_id=source.id,
-                results=tuple(prefix),
+                results=tuple(results),
                 provenance=provenance,
                 kind="reused_prefix",
                 transcript=transcript if isinstance(transcript, str) else None,

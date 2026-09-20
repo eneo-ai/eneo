@@ -125,6 +125,7 @@ async def find_prefix_seed_replay(
     principal: FlowPrincipal,
     idempotency_key: str,
     request_hash: str,
+    lock_creation: bool = True,
 ) -> CreateRunResult | None:
     if not idempotency_key or len(idempotency_key) > 255:
         raise FlowBadRequestException(
@@ -132,7 +133,8 @@ async def find_prefix_seed_replay(
             code=FlowApiErrorCode.RUN_INVALID_IDEMPOTENCY_KEY,
         )
     # All creation paths acquire the tenant lock before the flow publication lock.
-    await run_repo.acquire_tenant_run_creation_lock(tenant_id=tenant_id)
+    if lock_creation:
+        await run_repo.acquire_tenant_run_creation_lock(tenant_id=tenant_id)
     existing = await run_repo.get_idempotent_run(
         tenant_id=tenant_id,
         flow_id=flow_id,

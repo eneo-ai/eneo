@@ -81,6 +81,15 @@ from eneo.flows.principal import FlowAuditActorFields, FlowPrincipal
 
 
 @dataclass(frozen=True, slots=True)
+class FlowRunReviewCheckpointIdentity:
+    id: UUID
+    step_id: UUID
+    step_order: int
+    attempt_no: int
+    state: FlowRunReviewCheckpointState
+
+
+@dataclass(frozen=True, slots=True)
 class FlowRunReviewCheckpointHistoryBaseline:
     revision: int
     payload_json: FlowPersistedJsonObject | None
@@ -1649,6 +1658,35 @@ class FlowRunReviewCheckpointRepository:
             payload_sha256_before=payload_sha256_before,
             payload_sha256_after=payload_sha256_after,
         )
+
+    async def list_review_checkpoint_identities(
+        self, *, run_id: UUID, tenant_id: UUID, step_orders: Sequence[int]
+    ) -> list[FlowRunReviewCheckpointIdentity]:
+        rows = (
+            await self.session.execute(
+                sa.select(
+                    FlowRunReviewCheckpoints.id,
+                    FlowRunReviewCheckpoints.step_id,
+                    FlowRunReviewCheckpoints.step_order,
+                    FlowRunReviewCheckpoints.attempt_no,
+                    FlowRunReviewCheckpoints.state,
+                ).where(
+                    FlowRunReviewCheckpoints.flow_run_id == run_id,
+                    FlowRunReviewCheckpoints.tenant_id == tenant_id,
+                    FlowRunReviewCheckpoints.step_order.in_(tuple(step_orders)),
+                )
+            )
+        ).all()
+        return [
+            FlowRunReviewCheckpointIdentity(
+                id=row.id,
+                step_id=row.step_id,
+                step_order=row.step_order,
+                attempt_no=row.attempt_no,
+                state=FlowRunReviewCheckpointState(row.state),
+            )
+            for row in rows
+        ]
 
     async def list_review_checkpoints_for_run(
         self,

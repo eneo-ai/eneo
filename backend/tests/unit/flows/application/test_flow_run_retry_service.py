@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
@@ -15,7 +15,7 @@ from eneo.main.exceptions import ConflictException, UnauthorizedException
 
 
 @pytest.fixture
-def context():
+def context(monkeypatch):
     tenant_id, user_id, flow_id, run_id = (uuid4() for _ in range(4))
     user = SimpleNamespace(id=user_id, tenant_id=tenant_id)
     source = SimpleNamespace(
@@ -55,6 +55,11 @@ def context():
     run_repo = AsyncMock()
     run_repo.get_idempotent_run.return_value = None
     run_repo.list_step_results.return_value = results
+    run_repo.list_step_result_identities.return_value = results
+    run_repo.list_step_results_by_orders.return_value = results[:2]
+    run_repo.measure_prefix_outputs.return_value = SimpleNamespace(
+        step_count=2, output_bytes=42
+    )
     run_repo.list_step_orders_with_result_files.return_value = set()
     run_repo.list_current_step_input_file_ids_by_step_result_id.return_value = files
     flow_repo = AsyncMock()
@@ -63,6 +68,18 @@ def context():
     access.load_run.return_value = source
     checkpoints = AsyncMock()
     checkpoints.list_review_checkpoints_for_run.return_value = []
+    checkpoints.list_review_checkpoint_identities.return_value = []
+    runtime_steps = [
+        SimpleNamespace(
+            step_id=step.step_id, step_order=step.step_order, review_policy=None
+        )
+        for step in results
+    ]
+    definition = SimpleNamespace(runtime_steps=Mock(return_value=runtime_steps))
+    monkeypatch.setattr(
+        "eneo.flows.application.flow_run_retry_service.load_published_definition",
+        AsyncMock(return_value=definition),
+    )
     run_service = AsyncMock()
     child = SimpleNamespace(id=uuid4(), revision=1, input_payload_json={})
     run_service.create_run.return_value = SimpleNamespace(run=child, created=True)
@@ -79,6 +96,7 @@ def context():
         service=service,
         source=source,
         results=results,
+        runtime_steps=runtime_steps,
         files=files,
         child=child,
         request=dict(flow_id=flow_id, run_id=run_id, idempotency_key=" retry-1 "),
@@ -159,7 +177,7 @@ async def test_replay_returns_same_child_without_new_creation_or_audit(context):
         (
             "review",
             "flow_run_retry_prefix_unsupported",
-            {"step_order": 1, "reason": "review_checkpoint_not_approved"},
+            {"step_order": 1, "reason": "review_not_established"},
         ),
     ],
 )
@@ -173,9 +191,8 @@ async def test_refusal_does_not_persist(context, failure, code, expected_context
     elif failure == "files":
         context.service.run_repo.list_step_orders_with_result_files.return_value = {2}
     elif failure == "review":
-        context.service.checkpoint_repo.list_review_checkpoints_for_run.return_value = [
-            SimpleNamespace(step_order=1, state=FlowRunReviewCheckpointState.REJECTED)
-        ]
+        context.runtime_steps[0].review_policy = object()
+        _set_checkpoints(context, FlowRunReviewCheckpointState.REJECTED)
     with pytest.raises(ConflictException) as exc:
         await context.service.retry_from_failed_step(**context.request)
     assert exc.value.code == code
@@ -186,9 +203,8 @@ async def test_refusal_does_not_persist(context, failure, code, expected_context
 
 async def test_approved_prefix_uses_effective_reviewed_payload(context):
     context.results[0].output_payload_json = {"text": "Approved correction"}
-    context.service.checkpoint_repo.list_review_checkpoints_for_run.return_value = [
-        SimpleNamespace(step_order=1, state=FlowRunReviewCheckpointState.APPROVED)
-    ]
+    context.runtime_steps[0].review_policy = object()
+    _set_checkpoints(context, FlowRunReviewCheckpointState.APPROVED)
     await context.service.retry_from_failed_step(**context.request)
     seed = context.service.run_service.create_run.await_args.kwargs["prefix_seed"]
     assert seed.results[0].output_payload_json == {"text": "Approved correction"}
@@ -231,3 +247,124 @@ async def test_oversized_prefix_uses_existing_inline_bound(context, monkeypatch)
         await context.service.retry_from_failed_step(**context.request)
     assert exc.value.code == "flow_run_input_payload_too_large"
     context.service.run_service.create_run.assert_not_awaited()
+
+
+def _set_checkpoints(context, state, *, attempt_no=1):
+    checkpoints = [
+        SimpleNamespace(
+            step_id=context.results[0].step_id,
+            step_order=1,
+            attempt_no=attempt_no,
+            state=state,
+        )
+    ]
+    context.service.checkpoint_repo.list_review_checkpoints_for_run.return_value = (
+        checkpoints
+    )
+    context.service.checkpoint_repo.list_review_checkpoint_identities.return_value = (
+        checkpoints
+    )
+
+
+@pytest.mark.parametrize(
+    "state,attempt_no",
+    [(None, 1)]
+    + [
+        (state, 1)
+        for state in FlowRunReviewCheckpointState
+        if state
+        not in (
+            FlowRunReviewCheckpointState.APPROVED,
+            FlowRunReviewCheckpointState.RESUMED,
+        )
+    ]
+    + [(FlowRunReviewCheckpointState.APPROVED, 2)],
+)
+async def test_required_review_must_be_established_for_imported_attempt(
+    context, state, attempt_no
+):
+    context.runtime_steps[0].review_policy = object()
+    if state is not None:
+        _set_checkpoints(context, state, attempt_no=attempt_no)
+    with pytest.raises(ConflictException) as exc:
+        await context.service.retry_from_failed_step(**context.request)
+    assert exc.value.code == "flow_run_retry_prefix_unsupported"
+    assert exc.value.context == {"step_order": 1, "reason": "review_not_established"}
+    context.service.run_service.create_run.assert_not_awaited()
+    context.service.run_repo.list_step_results_by_orders.assert_not_awaited()
+
+
+async def test_resumed_review_reuses_approved_payload(context):
+    context.runtime_steps[0].review_policy = object()
+    _set_checkpoints(context, FlowRunReviewCheckpointState.RESUMED)
+    context.results[0].output_payload_json = {"text": "Approved correction"}
+    await context.service.retry_from_failed_step(**context.request)
+    seed = context.service.run_service.create_run.await_args.kwargs["prefix_seed"]
+    assert seed.results[0].output_payload_json == {"text": "Approved correction"}
+
+
+async def test_prefix_byte_admission_precedes_payload_reads_and_creation_lock(context):
+    from eneo.main.config import get_settings
+
+    context.service.run_repo.measure_prefix_outputs.return_value.output_bytes = (
+        get_settings().flow_max_inline_text_bytes + 1
+    )
+    with pytest.raises(ConflictException) as exc:
+        await context.service.retry_from_failed_step(**context.request)
+    assert exc.value.code == "flow_run_retry_prefix_unsupported"
+    assert exc.value.context == {"step_order": 1, "reason": "prefix_too_large"}
+    context.service.run_repo.list_step_results.assert_not_awaited()
+    context.service.run_repo.list_step_results_by_orders.assert_not_awaited()
+    context.service.checkpoint_repo.list_review_checkpoints_for_run.assert_not_awaited()
+    context.service.run_repo.acquire_tenant_run_creation_lock.assert_not_awaited()
+    context.service.run_service.create_run.assert_not_awaited()
+
+
+async def test_only_admitted_prefix_is_hydrated_before_creation_lock(context):
+    repo = context.service.run_repo
+
+    async def load_prefix(**kwargs):
+        repo.acquire_tenant_run_creation_lock.assert_not_awaited()
+        repo.measure_prefix_outputs.assert_awaited_once_with(
+            run_id=context.source.id,
+            tenant_id=context.source.tenant_id,
+            step_orders=(1, 2),
+        )
+        assert kwargs["step_orders"] == (1, 2)
+        return context.results[:2]
+
+    repo.list_step_results_by_orders.side_effect = load_prefix
+    await context.service.retry_from_failed_step(**context.request)
+    repo.list_step_results_by_orders.assert_awaited_once()
+    repo.list_step_results.assert_not_awaited()
+    repo.acquire_tenant_run_creation_lock.assert_awaited_once()
+
+
+async def test_prefix_disappearing_after_admission_cannot_create_child(context):
+    context.service.run_repo.list_step_results_by_orders.return_value = []
+    with pytest.raises(ConflictException) as exc:
+        await context.service.retry_from_failed_step(**context.request)
+    assert exc.value.context == {"step_order": 1, "reason": "prefix_changed"}
+    context.service.run_service.create_run.assert_not_awaited()
+
+
+async def test_concurrent_acceptance_is_replayed_under_creation_lock(context):
+    await context.service.retry_from_failed_step(**context.request)
+    seed = context.service.run_service.create_run.await_args.kwargs["prefix_seed"]
+    context.child.input_payload_json = {TRANSCRIPT_REGENERATION_KEY: seed.provenance}
+    context.service.run_repo.reset_mock()
+    context.service.run_service.create_run.reset_mock()
+    context.service.audit_service.log.reset_mock()
+
+    async def find_existing(**kwargs):
+        if context.service.run_repo.get_idempotent_run.await_count == 1:
+            return None
+        context.service.run_repo.acquire_tenant_run_creation_lock.assert_awaited_once()
+        return context.child, "fp"
+
+    context.service.run_repo.get_idempotent_run.side_effect = find_existing
+    replay = await context.service.retry_from_failed_step(**context.request)
+    assert replay.run_result.run is context.child
+    assert replay.run_result.created is False
+    context.service.run_service.create_run.assert_not_awaited()
+    context.service.audit_service.log.assert_not_awaited()

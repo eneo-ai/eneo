@@ -75,6 +75,7 @@ from eneo.flows.flow_run_input_envelope import (
     FlowRunInputEnvelopePatch,
 )
 from eneo.flows.flow_run_provenance import (
+    FlowImportedAttemptProvenance,
     FlowResolvedInputEdges,
     FlowResolvedInputEdgesConflictError,
     FlowResolvedInputEdgesParseResult,
@@ -379,8 +380,23 @@ class FlowRunDispatchRedriveGenerationConflict:
     current_dispatch_exhausted_at: datetime | None
 
 
+@dataclass(frozen=True, slots=True)
+class FlowStepResultIdentity:
+    id: UUID
+    step_id: UUID
+    step_order: int
+    status: FlowStepResultStatus
+    current_attempt_no: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunPrefixMeasurement:
+    step_count: int
+    output_bytes: int
+
+
 def _current_step_attempt_pairs_by_result_id(
-    step_results: Sequence[FlowStepResult],
+    step_results: Sequence[FlowStepResult | FlowStepResultIdentity],
 ) -> tuple[dict[tuple[UUID, int], UUID], list[tuple[UUID, int]]]:
     step_result_id_by_step_attempt: dict[tuple[UUID, int], UUID] = {}
     current_attempt_pairs: list[tuple[UUID, int]] = []
@@ -541,13 +557,16 @@ class FlowRunRepository:
         """Import a validated prefix; the caller commits its required creation audit."""
         now = datetime.now(timezone.utc)
         for source in seed.results:
-            provenance = {
-                **seed.provenance,
-                "kind": seed.kind,
-                "source_step_result_id": str(source.id),
-                "source_step_id": str(source.step_id),
-                "source_attempt_no": source.current_attempt_no,
-            }
+            if source.id is None or source.current_attempt_no is None:
+                raise ValueError("Imported step results require a persisted attempt.")
+            provenance = FlowImportedAttemptProvenance(
+                kind=seed.kind,
+                source_run_id=seed.source_run_id,
+                source_step_result_id=source.id,
+                source_step_id=source.step_id,
+                source_attempt_no=source.current_attempt_no,
+                request_hash=seed.provenance["request_hash"],
+            ).to_payload()
             values = dict(
                 status=FlowStepResultStatus.COMPLETED.value,
                 current_attempt_no=1,
@@ -1233,6 +1252,62 @@ class FlowRunRepository:
             )
             for run_id, step_id, raw_edges in rows
         ]
+
+    async def list_step_result_identities(
+        self, *, run_id: UUID, tenant_id: UUID
+    ) -> list[FlowStepResultIdentity]:
+        rows = (
+            await self.session.execute(
+                sa.select(
+                    FlowStepResults.id,
+                    FlowStepResults.step_id,
+                    FlowStepResults.step_order,
+                    FlowStepResults.status,
+                    FlowStepResults.current_attempt_no,
+                )
+                .where(
+                    FlowStepResults.flow_run_id == run_id,
+                    FlowStepResults.tenant_id == tenant_id,
+                )
+                .order_by(FlowStepResults.step_order.asc())
+            )
+        ).all()
+        return [
+            FlowStepResultIdentity(
+                id=row.id,
+                step_id=row.step_id,
+                step_order=row.step_order,
+                status=FlowStepResultStatus(row.status),
+                current_attempt_no=row.current_attempt_no,
+            )
+            for row in rows
+        ]
+
+    async def measure_prefix_outputs(
+        self, *, run_id: UUID, tenant_id: UUID, step_orders: Sequence[int]
+    ) -> FlowRunPrefixMeasurement:
+        row = (
+            await self.session.execute(
+                sa.select(
+                    sa.func.count(),
+                    sa.func.coalesce(
+                        sa.func.sum(
+                            sa.func.octet_length(
+                                sa.cast(FlowStepResults.output_payload_json, sa.Text)
+                            )
+                        ),
+                        0,
+                    ),
+                ).where(
+                    FlowStepResults.flow_run_id == run_id,
+                    FlowStepResults.tenant_id == tenant_id,
+                    FlowStepResults.step_order.in_(tuple(step_orders)),
+                )
+            )
+        ).one()
+        return FlowRunPrefixMeasurement(
+            step_count=int(row[0]), output_bytes=int(row[1])
+        )
 
     async def list_step_results(
         self,
@@ -1936,7 +2011,7 @@ class FlowRunRepository:
         *,
         run_id: UUID,
         tenant_id: UUID,
-        step_results: Sequence[FlowStepResult],
+        step_results: Sequence[FlowStepResult | FlowStepResultIdentity],
     ) -> dict[UUID, Sequence[UUID]]:
         step_result_id_by_step_attempt, current_attempt_pairs = (
             _current_step_attempt_pairs_by_result_id(step_results)
