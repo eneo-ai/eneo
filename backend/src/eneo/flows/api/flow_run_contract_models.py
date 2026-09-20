@@ -6,6 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from eneo.flows.domain.text_processing import TextProcessingMode
 from eneo.flows.enums import (
     FlowOutputMode,
     FlowOutputType,
@@ -454,6 +455,16 @@ class FlowRunCapacityPublic(BaseModel):
     )
 
 
+class FlowTextProcessingStepPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    step_id: UUID
+    step_order: int = Field(ge=1)
+    mode: TextProcessingMode
+    output_array_key: str
+    item_schema: dict[str, Any]
+
+
 class FlowRunContractPublic(BaseModel):
     model_config = ConfigDict(
         extra="forbid", json_schema_extra={"example": FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE}
@@ -461,6 +472,10 @@ class FlowRunContractPublic(BaseModel):
 
     flow_id: UUID
     published_flow_version: int
+    text_processing_steps: list[FlowTextProcessingStepPublic] = Field(
+        default_factory=lambda: cast(list[FlowTextProcessingStepPublic], []),
+        description="Steps that emit one ordered record per text section, with a persisted section manifest.",
+    )
     final_output: FlowFinalOutputContractPublic | None = Field(
         default=None,
         description=(

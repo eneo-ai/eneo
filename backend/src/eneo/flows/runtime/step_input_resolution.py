@@ -39,6 +39,7 @@ from eneo.flows.domain.step_output import (
     StepOutputMetadataError,
     interpret_step_text,
 )
+from eneo.flows.domain.text_processing import text_processing_config
 from eneo.flows.enums import FlowStepPhase
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
@@ -1247,12 +1248,14 @@ async def _resolve_step_materials(
             ]
         )
     artifacts: list[tuple[FlowStepResult, FileBackedStepText]] = []
+    selected_material_ids: set[UUID] = set()
     for result in selected:
         payload = result.output_payload_json
         if not isinstance(payload, dict) or (
             "text" not in payload and OUTPUT_TEXT_OVERFLOW_KEY not in payload
         ):
             continue
+        selected_material_ids.add(result.step_id)
         try:
             text = interpret_step_text(payload)
         except StepOutputMetadataError as exc:
@@ -1262,6 +1265,14 @@ async def _resolve_step_materials(
             ) from exc
         if isinstance(text, FileBackedStepText):
             artifacts.append((result, text))
+    if text_processing_config(step.input_config) is not None and (
+        len(selected_material_ids) + len(set(runtime_file_ids)) != 1
+        or not (artifacts or runtime_file_ids)
+    ):
+        raise TypedIOValidationException(
+            "Section processing requires exactly one file-backed material.",
+            code=FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION.value,
+        )
     if not artifacts:
         return ()
     if deps.input_limits is None:

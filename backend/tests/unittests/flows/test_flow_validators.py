@@ -53,6 +53,53 @@ def _audio_metadata() -> dict:
     }
 
 
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {"output_mode": "compose_text", "output_type": "text"},
+        {"output_mode": "http_post", "output_config": {"url": "https://example.com"}},
+        {
+            "step_order": 2,
+            "input_source": "previous_step",
+            "input_type": "json",
+            "input_config": {"item_map": {"enabled": True, "max_items": 2}},
+        },
+        {
+            "input_type": "document",
+            "input_config": {
+                "runtime_input": {
+                    "enabled": True,
+                    "execution_mode": "per_source",
+                    "max_files": 2,
+                }
+            },
+        },
+    ],
+)
+def test_text_processing_rejects_incompatible_step_or_nested_mapping(updates):
+    step = _step(**updates)
+    step.input_config = {
+        **(step.input_config or {}),
+        "text_processing": {"mode": "process_each_section"},
+    }
+    view = flow_step_validation_view_from_flow_step(step)
+
+    with pytest.raises(FlowStepValidationError) as exc_info:
+        _validate_step_mapped_execution(step=view)
+
+    assert exc_info.value.code == FlowGraphIssueCode.FLOW_STEP_INVALID.value
+    if "input_config" in updates:
+        assert "cannot be nested" in str(exc_info.value)
+
+
+def test_text_processing_requires_an_authored_array_of_records():
+    step = _step(input_config={"text_processing": {"mode": "process_each_section"}})
+    with pytest.raises(FlowStepValidationError, match="array"):
+        _validate_step_mapped_execution(
+            step=flow_step_validation_view_from_flow_step(step)
+        )
+
+
 def _form_metadata(*field_names: str) -> dict:
     return {
         "form_schema": {

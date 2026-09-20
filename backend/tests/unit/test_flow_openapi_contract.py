@@ -50,6 +50,43 @@ from tests.unit.api_key_test_utils import flatten_routes
 FLOW_SETTINGS_PATH_PREFIX = "/api/v1/settings/flow-"
 
 
+def test_text_processing_contract_fields_are_typed(openapi_spec):
+    schemas = openapi_spec["components"]["schemas"]
+    for name in ("FlowStepCreateRequest", "FlowStepUpdateRequest"):
+        config = schemas[name]["properties"]["input_config"]["anyOf"][0]
+        config_schema = schemas[config["$ref"].split("/")[-1]]
+        processing = config_schema["properties"]["text_processing"]["anyOf"][0]
+        processing_schema = schemas[processing["$ref"].split("/")[-1]]
+        mode = processing_schema["properties"]["mode"]
+        assert schemas[mode["$ref"].split("/")[-1]]["enum"] == ["process_each_section"]
+    projection = schemas["FlowRunContractPublic"]["properties"]["text_processing_steps"]
+    assert projection["type"] == "array"
+    item = schemas[projection["items"]["$ref"].split("/")[-1]]
+    assert {"step_id", "step_order", "mode", "output_array_key", "item_schema"} <= item[
+        "properties"
+    ].keys()
+
+
+def test_text_processing_request_preserves_other_input_configuration():
+    values = {
+        "assistant_id": "00000000-0000-0000-0000-000000000001",
+        "step_order": 1,
+        "input_source": "flow_input",
+        "input_type": "text",
+        "output_mode": "pass_through",
+        "output_type": "json",
+        "input_config": {
+            "text_processing": {"mode": "process_each_section"},
+            "runtime_input": {"enabled": False},
+        },
+    }
+    request = FlowStepCreateRequest.model_validate(values)
+    assert request.model_dump(mode="json")["input_config"] == values["input_config"]
+    values["input_config"]["text_processing"]["mode"] = "summarize"
+    with pytest.raises(ValidationError):
+        FlowStepCreateRequest.model_validate(values)
+
+
 def test_retry_failed_run_contract(openapi_spec):
     operation = openapi_spec["paths"]["/api/v1/flows/{id}/runs/{run_id}/retry/"]["post"]
     assert operation["operationId"] == "retry_flow_run_from_failed_step"

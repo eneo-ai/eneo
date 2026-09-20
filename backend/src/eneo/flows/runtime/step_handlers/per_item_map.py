@@ -21,6 +21,7 @@ from eneo.flows.domain.runtime import (
     StepInputValue,
 )
 from eneo.flows.domain.step_item_map import build_step_item_map_config
+from eneo.flows.domain.step_mapped_execution import single_mapped_array_key
 from eneo.flows.enums import FlowStepPhase
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_provenance import (
@@ -92,7 +93,7 @@ async def execute_per_item_map(
     mapped_execution_policy: FlowMappedExecutionPolicy,
     rag_evidence_policy: FlowRagEvidencePolicy,
 ) -> StepExecutionResult:
-    output_array_key = _single_output_array_key(step.output_contract)
+    output_array_key = single_mapped_array_key(step.output_contract)
     if output_array_key is None:
         raise TypedIOValidationException(
             "Per-item map execution requires a JSON output contract shaped as "
@@ -105,7 +106,7 @@ async def execute_per_item_map(
             "explicit input_bindings are not supported on a mapped step.",
             code=FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION.value,
         )
-    input_array_key = _single_array_key(step.input_contract)
+    input_array_key = single_mapped_array_key(step.input_contract)
     if input_array_key is None:
         raise TypedIOValidationException(
             "Per-item map execution requires a JSON input contract shaped as "
@@ -541,36 +542,6 @@ def _previous_items(
             )
         result.append(dict(cast(dict[str, Any], raw_item)))
     return previous_result.step_id, previous_result.current_attempt_no, result
-
-
-def _single_output_array_key(output_contract: dict[str, Any] | None) -> str | None:
-    return _single_array_key(output_contract)
-
-
-def _single_array_key(contract: dict[str, Any] | None) -> str | None:
-    if not isinstance(contract, Mapping):
-        return None
-    properties = contract.get("properties")
-    if not isinstance(properties, Mapping):
-        return None
-    typed_properties = cast(Mapping[str, object], properties)
-    keys = tuple(typed_properties.keys())
-    if len(keys) != 1:
-        return None
-    array_key = keys[0]
-    array_schema = typed_properties[array_key]
-    if not isinstance(array_schema, Mapping):
-        return None
-    typed_array_schema = cast(Mapping[str, object], array_schema)
-    if typed_array_schema.get("type") != "array":
-        return None
-    item_schema = typed_array_schema.get("items")
-    if not isinstance(item_schema, Mapping):
-        return None
-    typed_item_schema = cast(Mapping[str, object], item_schema)
-    if typed_item_schema.get("type") != "object":
-        return None
-    return array_key
 
 
 def _raise_if_item_output_is_not_object(

@@ -66,6 +66,57 @@ def _limits() -> FlowInputLimits:
     )
 
 
+async def test_run_contract_projects_published_section_processing_steps():
+    step = _step(step_order=1, input_type="text")
+    flow = _flow(step=step).model_copy(update={"published_version": 1})
+    schema = {
+        "type": "object",
+        "properties": {"records": {"type": "array", "items": {"type": "object"}}},
+        "required": ["records"],
+    }
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = flow
+    settings_service = AsyncMock()
+    settings_service.get_flow_input_limits_resolved.return_value = _limits()
+    versions = AsyncMock()
+    versions.get.return_value = _published_version(
+        version=1,
+        definition_json={
+            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+            "flow_id": str(flow.id),
+            "steps": [
+                {
+                    "step_id": str(step.id),
+                    "step_order": 1,
+                    "assistant_id": str(step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(step.assistant_id),
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "input_config": {
+                        "text_processing": {"mode": "process_each_section"}
+                    },
+                    "output_mode": "pass_through",
+                    "output_type": "json",
+                    "output_contract": schema,
+                }
+            ],
+        },
+    )
+    contract = await _service(
+        flow_service=flow_service,
+        settings_service=settings_service,
+        flow_version_repo=versions,
+    ).get_run_contract(flow_id=flow.id)
+
+    assert len(contract.text_processing_steps) == 1
+    processing = contract.text_processing_steps[0]
+    assert processing.step_id == step.id
+    assert processing.step_order == 1
+    assert processing.mode == "process_each_section"
+    assert processing.output_array_key == "records"
+    assert processing.item_schema == {"type": "object"}
+
+
 def _published_version(
     *,
     version: int | None,

@@ -94,6 +94,7 @@ from eneo.flows.domain.rag_evidence import (
     RetrievedSource,
 )
 from eneo.flows.domain.step_output import FileBackedStepText, parse_step_text_aliases
+from eneo.flows.domain.text_processing import TextProcessingConfig
 from eneo.flows.domain.transcript_corrections import FlowTranscriptCorrectionRevision
 from eneo.flows.enums import (
     FlowInputSource,
@@ -573,6 +574,26 @@ PAGINATED_FLOW_RUN_RESPONSE_EXAMPLE: dict[str, Any] = {
 }
 
 
+class FlowStepInputConfig(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    text_processing: TextProcessingConfig | None = None
+
+
+def _validate_step_input_config(value: object) -> dict[str, Any]:
+    return FlowStepInputConfig.model_validate(value).model_dump(
+        mode="json", exclude_unset=True
+    )
+
+
+FlowStepInputConfigValue = Annotated[
+    dict[str, Any],
+    BeforeValidator(
+        _validate_step_input_config, json_schema_input_type=FlowStepInputConfig
+    ),
+]
+
+
 class FlowStepCreateRequest(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -614,7 +635,7 @@ class FlowStepCreateRequest(BaseModel):
     output_contract: dict[str, Any] | None = None
     input_bindings: dict[str, Any] | None = None
     output_classification_override: int | None = None
-    input_config: dict[str, Any] | None = None
+    input_config: FlowStepInputConfigValue | None = None
     output_config: FlowStepOutputConfigRequest | None = None
     review_policy: FlowStepReviewPolicy | None = Field(
         default=None,

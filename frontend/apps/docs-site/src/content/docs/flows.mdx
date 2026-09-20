@@ -203,6 +203,41 @@ Publish errors identify the exact location: question errors point to
 | `render_verbatim` | Zero-LLM PDF/DOCX rendering from resolved text    | Requires `input_type=text` and `output_type=pdf` or `output_type=docx`               |
 | `template_fill`   | DOCX document assembly                            | Requires `output_type=docx`                                                          |
 
+### Process long material section by section
+
+A `pass_through` completion step can process material that exceeds its model's
+context window by setting:
+
+```json
+{ "input_config": { "text_processing": { "mode": "process_each_section" } } }
+```
+
+Set `output_type` to `json` and author an output contract containing one array of
+objects, such as `records`. Each section produces exactly one object using that
+array's item schema. The combined array preserves section order. This mode cannot
+be combined with `item_map` or `per_source` mapping.
+
+Select exactly one file-backed previous-step material or one runtime file. A step
+that resolves multiple materials is refused before model calls; processing multiple
+materials in one step is planned for a later release. Sections cover the material's
+complete text, preserving whitespace and Unicode characters. Each reference to the
+material in the prompt or input template receives the current section, including
+when the material is referenced only in the prompt.
+
+Section sizes depend on the measured model request, including the rendered prompt,
+schema and output reserve, starting from the empty-section package. Calls run
+sequentially under the step's shared deadline, without passing earlier section
+responses into later calls. The existing mapped-call policy and structured-output
+size limit still apply. A failed section fails the step, with completed and total
+section counts in the error details.
+
+The run contract lists these steps in `text_processing_steps`, including their
+array key and item schema. The step result's `section_manifest` records the full
+material hash, character and UTF-8 lengths, source material identity, and each
+section's core character range and output record index. Core ranges cover the
+complete material without overlap; optional context ranges do not own material
+characters.
+
 ### `compose_text`
 
 `compose_text` assembles final text from resolved input bindings without calling an LLM, RAG retrieval, or MCP tools. AI Builder uses it for source-section document reports after semantic steps have already produced the section body, source label, source file id, and optional overview fields.

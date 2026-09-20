@@ -19119,6 +19119,11 @@ export interface components {
       steps_requiring_review?: components["schemas"]["FlowReviewStepContractPublic"][];
       /** Template Readiness */
       template_readiness?: components["schemas"]["FlowTemplateReadinessPublic"][];
+      /**
+       * Text Processing Steps
+       * @description Steps that emit one ordered record per text section, with a persisted section manifest.
+       */
+      text_processing_steps?: components["schemas"]["FlowTextProcessingStepPublic"][];
     };
     /**
      * FlowRunCreateRequest
@@ -23950,9 +23955,7 @@ export interface components {
         [key: string]: unknown;
       } | null;
       /** Input Config */
-      input_config?: {
-        [key: string]: unknown;
-      } | null;
+      input_config?: components["schemas"]["FlowStepInputConfig"] | null;
       /** Input Contract */
       input_contract?: {
         [key: string]: unknown;
@@ -24028,6 +24031,12 @@ export interface components {
        * @enum {string}
        */
       severity?: "info" | "warning" | "error";
+    };
+    /** FlowStepInputConfig */
+    FlowStepInputConfig: {
+      text_processing?: components["schemas"]["TextProcessingConfig"] | null;
+    } & {
+      [key: string]: unknown;
     };
     /**
      * FlowStepPhase
@@ -24151,9 +24160,7 @@ export interface components {
         [key: string]: unknown;
       } | null;
       /** Input Config */
-      input_config?: {
-        [key: string]: unknown;
-      } | null;
+      input_config?: components["schemas"]["FlowStepInputConfig"] | null;
       /** Input Contract */
       input_contract?: {
         [key: string]: unknown;
@@ -24380,6 +24387,23 @@ export interface components {
       template_file_id?: string | null;
       /** Template Name */
       template_name?: string | null;
+    };
+    /** FlowTextProcessingStepPublic */
+    FlowTextProcessingStepPublic: {
+      /** Item Schema */
+      item_schema: {
+        [key: string]: unknown;
+      };
+      mode: components["schemas"]["TextProcessingMode"];
+      /** Output Array Key */
+      output_array_key: string;
+      /**
+       * Step Id
+       * Format: uuid
+       */
+      step_id: string;
+      /** Step Order */
+      step_order: number;
     };
     /** FlowTranscriptCorrectionRevisionBaselinePublic */
     FlowTranscriptCorrectionRevisionBaselinePublic: {
@@ -34315,6 +34339,15 @@ export interface components {
       /** Zitadel Org Id */
       zitadel_org_id?: string | null;
     };
+    /** TextProcessingConfig */
+    TextProcessingConfig: {
+      mode: components["schemas"]["TextProcessingMode"];
+    };
+    /**
+     * TextProcessingMode
+     * @enum {string}
+     */
+    TextProcessingMode: "process_each_section";
     /** ToggleRequest */
     ToggleRequest: {
       /** Value */

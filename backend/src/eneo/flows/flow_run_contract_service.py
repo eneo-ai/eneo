@@ -13,11 +13,14 @@ from eneo.flows.api.flow_run_contract_models import (
     FlowRunContractPublic,
     FlowRuntimeInputContractPublic,
     FlowTemplateReadinessPublic,
+    FlowTextProcessingStepPublic,
     FormFieldPublic,
     default_runtime_upload_policy_public,
 )
 from eneo.flows.domain.flow import Flow, FlowTemplateAsset
 from eneo.flows.domain.runtime import RuntimeStep
+from eneo.flows.domain.step_mapped_execution import single_mapped_array_key
+from eneo.flows.domain.text_processing import text_processing_config
 from eneo.flows.enums import (
     FlowOutputMode,
     FlowOutputType,
@@ -69,6 +72,7 @@ class FlowRunContractService:
         return FlowRunContractPublic(
             flow_id=published.flow_id,
             published_flow_version=published.published_version,
+            text_processing_steps=_text_processing_contracts(runtime_inputs.steps),
             final_output=build_final_output_contract(runtime_inputs.steps),
             form_fields=_published_form_fields(runtime_inputs.definition),
             steps_requiring_input=_runtime_input_contracts(runtime_inputs.input_specs),
@@ -244,6 +248,31 @@ def _runtime_input_contracts(
             key=lambda item: (item.step.step_order, str(item.step.step_id)),
         )
     ]
+
+
+def _text_processing_contracts(
+    steps: Sequence[RuntimeStep],
+) -> list[FlowTextProcessingStepPublic]:
+    result: list[FlowTextProcessingStepPublic] = []
+    for step in sorted(steps, key=lambda item: item.step_order):
+        processing = text_processing_config(step.input_config)
+        if processing is None:
+            continue
+        array_key = single_mapped_array_key(step.output_contract)
+        if array_key is None or step.output_contract is None:
+            raise ValueError(
+                "Published section processing step lacks an array contract."
+            )
+        result.append(
+            FlowTextProcessingStepPublic(
+                step_id=step.step_id,
+                step_order=step.step_order,
+                mode=processing.mode,
+                output_array_key=array_key,
+                item_schema=step.output_contract["properties"][array_key]["items"],
+            )
+        )
+    return result
 
 
 def _review_step_contracts(

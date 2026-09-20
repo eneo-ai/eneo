@@ -2040,6 +2040,16 @@ class FlowRunExecutor:
         evidence_persistence_error = (
             exc if isinstance(exc, ProviderCallEvidencePersistenceError) else None
         )
+        run_error_details = FlowRunErrorDetails.from_budget_context(
+            {
+                "completed_items": getattr(exc, "completed_items", None),
+                "total_items": getattr(exc, "total_items", None),
+            }
+        )
+        if evidence_persistence_error is not None:
+            run_error_details = (run_error_details or FlowRunErrorDetails()).model_copy(
+                update={"provider_call_evidence_gap": evidence_persistence_error.facts}
+            )
         late_capability_rejection = (
             isinstance(exc, ProviderCapabilityRejectedException)
             and not exc.retry_without_capability_safe
@@ -2153,13 +2163,7 @@ class FlowRunExecutor:
                 code=failure_plan.error_code,
                 message=failure_plan.run_error_message,
                 step_order=step.step_order,
-                details=(
-                    FlowRunErrorDetails(
-                        provider_call_evidence_gap=evidence_persistence_error.facts
-                    )
-                    if evidence_persistence_error is not None
-                    else None
-                ),
+                details=run_error_details,
             ),
         )
         await self._commit()

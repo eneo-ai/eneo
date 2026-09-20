@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, cast
+
+from pydantic import ValidationError
 
 from eneo.flows.domain.runtime_input import build_runtime_input_config
 from eneo.flows.domain.step_item_map import build_step_item_map_config
+from eneo.flows.domain.text_processing import text_processing_config
 
 FlowStepMappedExecutionMode = Literal["per_source", "per_item"]
 
@@ -37,6 +41,22 @@ def resolve_step_mapped_execution(
         runtime_input.enabled and runtime_input.execution_mode == "per_source"
     )
     per_item_configured = item_map.enabled
+
+    try:
+        processing = text_processing_config(input_config)
+    except ValidationError as exc:
+        raise FlowStepMappedExecutionConfigurationError(
+            "Step input_config.text_processing must select process_each_section."
+        ) from exc
+    if processing is not None:
+        if per_source_configured or per_item_configured:
+            raise FlowStepMappedExecutionConfigurationError(
+                "Section processing cannot be nested with item_map or per_source."
+            )
+        if output_mode != "pass_through" or output_type != "json":
+            raise FlowStepMappedExecutionConfigurationError(
+                "Section processing requires a pass_through completion step with JSON output."
+            )
 
     if per_source_configured and per_item_configured:
         raise FlowStepMappedExecutionConfigurationError(
@@ -79,9 +99,36 @@ def resolve_step_mapped_execution(
     return None
 
 
+def single_mapped_array_key(contract: dict[str, Any] | None) -> str | None:
+    if not isinstance(contract, Mapping):
+        return None
+    properties = contract.get("properties")
+    if not isinstance(properties, Mapping):
+        return None
+    typed_properties = cast(Mapping[str, object], properties)
+    keys = tuple(typed_properties.keys())
+    if len(keys) != 1:
+        return None
+    array_key = keys[0]
+    array_schema = typed_properties[array_key]
+    if not isinstance(array_schema, Mapping):
+        return None
+    typed_array_schema = cast(Mapping[str, object], array_schema)
+    if typed_array_schema.get("type") != "array":
+        return None
+    item_schema = typed_array_schema.get("items")
+    if not isinstance(item_schema, Mapping):
+        return None
+    typed_item_schema = cast(Mapping[str, object], item_schema)
+    if typed_item_schema.get("type") != "object":
+        return None
+    return array_key
+
+
 __all__ = [
     "FlowStepMappedExecution",
     "FlowStepMappedExecutionConfigurationError",
     "FlowStepMappedExecutionMode",
     "resolve_step_mapped_execution",
+    "single_mapped_array_key",
 ]

@@ -39,7 +39,9 @@ from eneo.flows.domain.speaker_mapping_config import (
 from eneo.flows.domain.step_mapped_execution import (
     FlowStepMappedExecutionConfigurationError,
     resolve_step_mapped_execution,
+    single_mapped_array_key,
 )
+from eneo.flows.domain.text_processing import text_processing_config
 from eneo.flows.flow_authoring_transcription import requires_audio_transcription
 from eneo.flows.flow_capability_manifest import (
     FlowOutputMode,
@@ -1780,8 +1782,16 @@ def _validate_step_mapped_execution(*, step: FlowStepValidationView) -> None:
         raise FlowStepValidationError(
             f"Step {step.step_order}: {exc}",
             step_order=step.step_order,
+            code=FlowGraphIssueCode.FLOW_STEP_INVALID.value,
         ) from exc
 
+    if text_processing_config(step.input_config) is not None:
+        if single_mapped_array_key(step.output_contract) is None:
+            raise FlowStepValidationError(
+                f"Step {step.step_order}: section processing requires exactly one authored array of objects.",
+                step_order=step.step_order,
+                code=FlowGraphIssueCode.FLOW_STEP_INVALID.value,
+            )
     if mapped_execution is None:
         return
     if mapped_execution.execution_mode == "per_item" and has_explicit_underlag(
