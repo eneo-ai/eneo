@@ -304,7 +304,7 @@ def test_upload_default_migration_preserves_policy_on_downgrade(
     migration = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(migration)
     assert migration.revision == "202609201300"
-    assert migration.down_revision == "202609201000"
+    assert migration.down_revision == "202609201200"
     engine = sa.create_engine("sqlite://")
     metadata = sa.MetaData()
     table = sa.Table(
