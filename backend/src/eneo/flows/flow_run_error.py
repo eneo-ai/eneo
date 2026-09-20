@@ -186,6 +186,8 @@ class TranscriptionFailureKind(StrEnum):
     PROVIDER = "provider"
     INTERNAL = "internal"
     CANCELLED = "cancelled"
+
+
 class FlowRunRecoveryFacts(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -349,6 +351,10 @@ class FlowRunError(BaseModel):
                         "transcription_failure_kind": "capacity",
                         "transcription_service_reason": "Transcription capacity is unavailable.",
                         "transcription_stage": "transcribing",
+                    },
+                },
+                {
+                    "schema_version": 1,
                     "code": FlowApiErrorCode.RUN_WORKER_STALLED.value,
                     "message": "Flow execution heartbeat expired.",
                     "source": "stale_running_reconciler",
@@ -360,7 +366,7 @@ class FlowRunError(BaseModel):
                             "expires_at": "2026-09-20T18:03:00Z",
                         }
                     },
-                }
+                },
             ],
         },
     )

@@ -158,7 +158,7 @@ def test_heartbeat_migration_backfills_running_rows_and_reverses_schema() -> Non
         Path(__file__).parents[2]
         / "alembic"
         / "versions"
-        / "202609202000_flow_execution_heartbeat.py"
+        / "202609201200_flow_execution_heartbeat.py"
     )
     spec = importlib.util.spec_from_file_location("heartbeat_migration", migration_path)
     assert spec is not None and spec.loader is not None

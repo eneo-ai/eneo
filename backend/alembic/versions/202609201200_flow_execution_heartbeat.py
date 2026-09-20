@@ -1,15 +1,15 @@
 """Fence execution ownership with a renewable heartbeat.
 
-Revision ID: 202609202000
-Revises: 202609201000
+Revision ID: 202609201200
+Revises: 202609201100
 """
 
 import sqlalchemy as sa
 
 from alembic import op
 
-revision = "202609202000"
-down_revision = "202609201000"
+revision = "202609201200"
+down_revision = "202609201100"
 branch_labels = None
 depends_on = None
 

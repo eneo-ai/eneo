@@ -1182,7 +1182,7 @@ async def test_heartbeat_migration_cutover_preserves_existing_running_history(
     sa.event.listen(Engine, "before_cursor_execute", fail_committed_phase)
     try:
         with pytest.raises((DBAPIError, psycopg2.Error)):
-            await asyncio.to_thread(command.upgrade, config, "202609202000")
+            await asyncio.to_thread(command.upgrade, config, "202609201200")
         assert failed
     finally:
         sa.event.remove(Engine, "before_cursor_execute", fail_committed_phase)
@@ -1221,11 +1221,11 @@ async def test_heartbeat_migration_cutover_preserves_existing_running_history(
                 )
                 .returning(FlowRuns.execution_heartbeat_at)
             )
-    await asyncio.to_thread(command.upgrade, config, "202609202000")
+    await asyncio.to_thread(command.upgrade, config, "202609201200")
     async with sessionmanager.session() as session, session.begin():
         assert (
             await session.scalar(sa.text("SELECT version_num FROM alembic_version"))
-            == "202609202000"
+            == "202609201200"
         )
         assert (
             await session.scalar(

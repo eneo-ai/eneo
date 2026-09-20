@@ -19909,6 +19909,20 @@ export interface components {
      *       "source": "executor_failed",
      *       "step_order": 1
      *     }
+     * @example {
+     *       "code": "flow_worker_stalled",
+     *       "details": {
+     *         "recovery": {
+     *           "expires_at": "2026-09-20T18:03:00Z",
+     *           "heartbeat_at": "2026-09-20T18:00:00Z",
+     *           "reason": "execution_heartbeat_expired"
+     *         }
+     *       },
+     *       "message": "Flow execution heartbeat expired.",
+     *       "retryable": false,
+     *       "schema_version": 1,
+     *       "source": "stale_running_reconciler"
+     *     }
      */
     FlowRunError: {
       /**
@@ -20054,6 +20068,8 @@ export interface components {
        * @description Whether an interrupted provider request had an unknown outcome. This does not replace retryable.
        */
       provider_work_may_have_completed?: boolean | null;
+      /** @description Execution heartbeat facts used to recover a stalled worker. */
+      recovery?: components["schemas"]["FlowRunRecoveryFacts"] | null;
       /**
        * Step Description
        * @description Human label for the affected step, truncated to a small public diagnostic budget.
@@ -21385,6 +21401,24 @@ export interface components {
        * @description When the run row last changed. It moves on every status change.
        */
       updated_at: string;
+    };
+    /** FlowRunRecoveryFacts */
+    FlowRunRecoveryFacts: {
+      /**
+       * Expires At
+       * Format: date-time
+       */
+      expires_at: string;
+      /**
+       * Heartbeat At
+       * Format: date-time
+       */
+      heartbeat_at: string;
+      /**
+       * Reason
+       * @constant
+       */
+      reason: "execution_heartbeat_expired";
     };
     /**
      * FlowRunRedispatchRequest
