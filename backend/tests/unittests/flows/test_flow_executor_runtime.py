@@ -4671,24 +4671,69 @@ async def test_execute_step_backstop_fails_typed_with_completed_call_evidence(
 
 
 @pytest.mark.asyncio
-async def test_execute_step_leaves_an_inner_timeout_alone_when_the_budget_holds(user):
-    """Only the backstop's own expiry means the budget ran out; another
-    wait's TimeoutError keeps its identity."""
+async def test_execute_step_leaves_an_inner_timeout_alone_inside_the_grace(
+    user, monkeypatch
+):
+    """Only the backstop's own expiry means the budget ran out: an inner
+    wait that times out after the budget but before the backstop keeps its
+    identity and its evidence."""
+    clock = {"now": 0.0}
+    monkeypatch.setattr(step_deadline_module, "_now", lambda: clock["now"])
+    monkeypatch.setattr(
+        step_deadline_module, "STEP_DEADLINE_BACKSTOP_GRACE_SECONDS", 30.0
+    )
     executor, _, _, _ = _build_executor(user)
-    executor._step_deadline_seconds = lambda step: 30.0
+    executor._step_deadline_seconds = lambda step: 1.0
     run = _run(status=FlowRunStatus.RUNNING, user=user)
     step = _step_for_execute_step()
 
     class _Handler:
         async def execute(self, **_kwargs):
-            raise TimeoutError("some inner wait")
+            clock["now"] = 5.0  # past the budget, inside the backstop grace
+            inner = TimeoutError("some inner wait")
+            setattr(inner, "rag_metadata", {"status": "retrieved"})
+            raise inner
 
     executor._build_step_handler = MagicMock(return_value=_Handler())
 
-    with pytest.raises(TimeoutError, match="some inner wait"):
+    with pytest.raises(TimeoutError, match="some inner wait") as exc_info:
         await executor._execute_step(
             step=step, run=run, state=_empty_execution_state(), attempt_no=1
         )
+
+    assert getattr(exc_info.value, "rag_metadata") == {"status": "retrieved"}
+
+
+@pytest.mark.asyncio
+async def test_execute_step_backstop_message_reads_the_scope_before_it_closes(
+    user, monkeypatch
+):
+    """Progress and in-flight facts recorded by the phases reach the backstop's
+    message: the scope is still published when the timeout is converted."""
+    monkeypatch.setattr(
+        step_deadline_module, "STEP_DEADLINE_BACKSTOP_GRACE_SECONDS", 0.0
+    )
+    executor, _, _, _ = _build_executor(user)
+    executor._step_deadline_seconds = lambda step: 0.05
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = _step_for_execute_step()
+
+    class _Handler:
+        async def execute(self, **_kwargs):
+            step_deadline_module.record_step_progress("2 of 5 items completed")
+            step_deadline_module.mark_provider_request_in_flight(True)
+            await asyncio.sleep(5)
+
+    executor._build_step_handler = MagicMock(return_value=_Handler())
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(
+            step=step, run=run, state=_empty_execution_state(), attempt_no=1
+        )
+
+    message = str(exc_info.value)
+    assert "2 of 5 items completed" in message
+    assert "may still complete" in message
 
 
 @pytest.mark.asyncio
@@ -4708,7 +4753,12 @@ async def test_execute_step_refuses_a_result_that_completed_after_the_budget(
     class _Handler:
         async def execute(self, **_kwargs):
             await asyncio.sleep(0.15)
-            return _step_result(_minimal_step_execution_output())
+            return _step_result(
+                replace(
+                    _minimal_step_execution_output(),
+                    rag_metadata={"status": "retrieved", "chunk_count": 3},
+                )
+            )
 
     executor._build_step_handler = MagicMock(return_value=_Handler())
 
@@ -4719,6 +4769,11 @@ async def test_execute_step_refuses_a_result_that_completed_after_the_budget(
 
     assert exc_info.value.code == "flow_step_timeout"
     assert "during finalization" in str(exc_info.value)
+    # What the late result retrieved is still the failed attempt's evidence.
+    assert getattr(exc_info.value, "rag_metadata") == {
+        "status": "retrieved",
+        "chunk_count": 3,
+    }
 
 
 @pytest.mark.asyncio

@@ -10,6 +10,7 @@ ProviderCallPersistenceOutcome = Literal[
     "completed",
     "response_format_rejected",
     "provider_rejected",
+    "budget_exhausted",
     "request_timeout",
     "run_cancelled",
     "worker_interrupted",

@@ -166,6 +166,35 @@ async def test_no_chunk_is_sent_after_the_step_budget_expires(
     assert transport.await_count == 2
 
 
+async def test_receipt_written_as_the_budget_runs_out_is_settled_not_sent(
+    monkeypatch, tmp_path
+) -> None:
+    """Writing the receipt can consume the last of the budget; the request is
+    then refused, and the receipt is settled as a known refusal instead of
+    lingering as an open call."""
+    clock = {"now": 0.0}
+    monkeypatch.setattr(step_deadline_module, "_now", lambda: clock["now"])
+    transport = AsyncMock(return_value=SimpleNamespace(text="ord"))
+    monkeypatch.setattr(TRANSPORT, transport)
+    audio = _audio(tmp_path, [300.0], monkeypatch)
+
+    class _SlowReceipt(_Observer):
+        async def started(self, request: object) -> UUID:
+            clock["now"] = 2.0  # the receipt transaction ate the budget
+            return await super().started(request)
+
+    observer = _SlowReceipt()
+    with step_deadline_scope(StepDeadline.start(1.0), step_order=1):
+        with pytest.raises(TypedIOValidationException) as exc_info:
+            await _adapter().get_text_from_file(audio, observer=observer)  # type: ignore[arg-type]
+
+    assert exc_info.value.code == "flow_step_timeout"
+    assert "(not sent)" in str(exc_info.value)
+    assert transport.await_count == 0
+    assert len(observer.started_requests) == 1
+    assert observer.rejected_reasons == ["budget_exhausted"]
+
+
 async def test_cancelled_chunk_request_is_not_retried(monkeypatch, tmp_path) -> None:
     """A cancellation (the step's budget ran out) must propagate without the
     retry policy sending another request."""

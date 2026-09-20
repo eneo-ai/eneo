@@ -45,7 +45,11 @@ from eneo.flows.runtime.run_cancellation import (
     RunCancelProbe,
     current_run_cancel_probe,
 )
-from eneo.flows.runtime.step_deadline import require_step_budget
+from eneo.flows.runtime.step_deadline import (
+    budget_refusal,
+    mark_provider_request_in_flight,
+    require_step_budget,
+)
 from eneo.main.exceptions import (
     APIKeyNotConfiguredException,
     OpenAIException,
@@ -713,6 +717,8 @@ class RemoteFlowTranscriber:
                 with suppress(FileNotFoundError):
                     temp_file_path.unlink()
 
+        # The job is provider work in flight until the service answers.
+        mark_provider_request_in_flight(True)
         try:
             result = await self.client.wait_for_result(
                 job_id, run_cancelled=current_run_cancel_probe()
@@ -739,6 +745,8 @@ class RemoteFlowTranscriber:
             if observer is not None and call_id is not None:
                 await observer.outcome_unknown(call_id, "provider_error")
             raise
+        finally:
+            mark_provider_request_in_flight(False)
 
         if observer is not None and call_id is not None:
             await observer.completed(
@@ -811,6 +819,15 @@ class RemoteFlowTranscriber:
                 )
             )
 
+        # Writing the receipt may itself have consumed the budget; the job is
+        # admitted only against the clock as it is now, and a receipt that then
+        # cannot be honoured is settled as the refusal it is.
+        refusal = budget_refusal(phase="transcription job submission (not sent)")
+        if refusal is not None:
+            if observer is not None and call_id is not None:
+                await observer.rejected(call_id, "budget_exhausted")
+            raise refusal
+        mark_provider_request_in_flight(True)
         try:
             with open(file_path, "rb") as payload:
                 job_id = await self.client.submit(
@@ -840,6 +857,8 @@ class RemoteFlowTranscriber:
             if observer is not None and call_id is not None:
                 await observer.outcome_unknown(call_id, "provider_error")
             raise
+        finally:
+            mark_provider_request_in_flight(False)
 
 
 def build_remote_flow_transcriber(settings: "Settings") -> RemoteFlowTranscriber:

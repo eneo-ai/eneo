@@ -137,6 +137,19 @@ def mark_provider_request_in_flight(in_flight: bool) -> None:
         scope.provider_request_in_flight = in_flight
 
 
+def budget_refusal(*, phase: str) -> TypedIOValidationException | None:
+    """The refusal for ``phase`` when the published budget is spent, or None.
+
+    For callers that must settle a receipt before raising.
+    """
+    scope = _scope.get()
+    if scope is None or not scope.deadline.expired():
+        return None
+    return scope.deadline.timeout_error(
+        step_order=scope.step_order, phase=phase, provider_request_in_flight=False
+    )
+
+
 def require_step_budget(
     deadline: StepDeadline | None = None,
     *,

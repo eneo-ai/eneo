@@ -18,7 +18,11 @@ from eneo.files.audio import AudioFile
 
 # The flow attempt's budget, when a flow step is what runs this adapter; the
 # scope is ambient (like the run-cancel probe) so no caller threads it.
-from eneo.flows.runtime.step_deadline import require_step_budget
+from eneo.flows.runtime.step_deadline import (
+    budget_refusal,
+    mark_provider_request_in_flight,
+    require_step_budget,
+)
 from eneo.main.exceptions import (
     ProviderRejectedRequestException,
     TypedIOValidationException,
@@ -248,6 +252,9 @@ class LiteLLMTranscriptionAdapter:
             f"[LiteLLM] {self.litellm_model}: Making transcription request for chunk"
         )
 
+        # Guards every retry: no receipt and no request once the step's
+        # budget ran out.
+        require_step_budget(phase="transcription request")
         call_id: UUID | None = None
         if observer is not None:
             effective_language = kwargs.get("language")
@@ -265,9 +272,15 @@ class LiteLLMTranscriptionAdapter:
                 )
             )
 
-        # Also guards every retry: a request is never started after the
-        # step's budget ran out.
-        require_step_budget(phase="transcription request")
+        # Writing the receipt may itself have consumed the budget; the request
+        # is admitted only against the clock as it is now, and a receipt that
+        # then cannot be honoured is settled as the refusal it is.
+        refusal = budget_refusal(phase="transcription request (not sent)")
+        if refusal is not None:
+            if observer is not None and call_id is not None:
+                await observer.rejected(call_id, "budget_exhausted")
+            raise refusal
+        mark_provider_request_in_flight(True)
         try:
             with open(file_path, "rb") as audio_file:
                 response = await litellm_transport.atranscription(
@@ -299,6 +312,8 @@ class LiteLLMTranscriptionAdapter:
                     await observer.outcome_unknown(call_id, "provider_error")
                 raise
             raise AssertionError("Provider error mapping unexpectedly returned.")
+        finally:
+            mark_provider_request_in_flight(False)
 
         logger.debug(f"[LiteLLM] {self.litellm_model}: Transcription successful")
         if observer is not None and call_id is not None:

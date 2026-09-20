@@ -455,6 +455,32 @@ async def test_no_job_is_submitted_after_the_step_budget_expires(monkeypatch) ->
     assert observer.started_facts == []
 
 
+async def test_receipt_written_as_the_budget_runs_out_is_settled_not_submitted(
+    monkeypatch,
+) -> None:
+    clock = {"now": 0.0}
+    monkeypatch.setattr(step_deadline_module, "_now", lambda: clock["now"])
+    service = ScriptedService(submit_responses=[accepted()])
+    transcriber = RemoteFlowTranscriber(make_client(service))
+
+    class _SlowReceipt(RecordingObserver):
+        async def started(self, request: object) -> UUID:
+            clock["now"] = 2.0
+            return await super().started(request)
+
+    observer = _SlowReceipt()
+    with step_deadline_scope(StepDeadline.start(1.0), step_order=3):
+        with pytest.raises(TypedIOValidationException) as exc_info:
+            await transcriber.transcribe(
+                audio_file(), SimpleNamespace(), observer=observer
+            )
+
+    assert "(not sent)" in str(exc_info.value)
+    assert service.submit_count == 0
+    assert len(observer.started_facts) == 1
+    assert [reason for _, reason in observer.rejected_calls] == ["budget_exhausted"]
+
+
 async def test_poll_deadline_cancels_job_and_is_unknown_outcome() -> None:
     service = ScriptedService(
         submit_responses=[accepted()],

@@ -121,6 +121,7 @@ class ProviderCallReason(str, Enum):
 class ProviderCallRejectionReason(str, Enum):
     RESPONSE_FORMAT_REJECTED = "response_format_rejected"
     PROVIDER_REJECTED = "provider_rejected"
+    BUDGET_EXHAUSTED = "budget_exhausted"
 
 
 class ProviderCallUnknownReason(str, Enum):

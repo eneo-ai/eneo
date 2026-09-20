@@ -11,7 +11,13 @@ ProviderCallRequestedCapability = Literal[
 ]
 ProviderCallResponseFormat = Literal["none", "json_object", "json_schema", "other"]
 ProviderCallReason = Literal["initial", "capability_fallback", "tool_round"]
-ProviderCallRejectionReason = Literal["response_format_rejected", "provider_rejected"]
+ProviderCallRejectionReason = Literal[
+    "response_format_rejected",
+    "provider_rejected",
+    # The step's budget ran out after the receipt was written and before
+    # the request was sent: a known refusal, nothing billed.
+    "budget_exhausted",
+]
 ProviderCallUnknownReason = Literal["provider_error", "request_cancelled"]
 
 _REQUEST_CONTROL_ALLOWLIST = frozenset(
